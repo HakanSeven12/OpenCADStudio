@@ -6,7 +6,7 @@ use crate::t;
 use crate::command::EntityTransform;
 use crate::entities::common::{
     edit_prop as edit, edit_scalar_prop as edit_scalar, format_area, format_length, parse_f64,
-    rectangle_grip, ro_prop as ro, square_grip, stepper_prop as stepper,
+    rectangle_grip, ro_prop as ro, square_grip, stepper_prop as stepper, VARIES_LABEL,
 };
 use crate::entities::traits::RenderConvertible;
 use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
@@ -18,12 +18,36 @@ const REVCLOUD_BULGE: f64 = 0.5;
 const MAX_REVCLOUD_VERTICES: usize = 100_000;
 const WIDTH_EPSILON: f64 = 1.0e-9;
 
-fn effective_width(width: f64, constant_width: f64) -> f64 {
-    if width > WIDTH_EPSILON {
-        width
+pub(crate) fn vertex_segment_widths(vertex: &LwVertex, constant_width: f64) -> (f64, f64) {
+    if vertex.start_width > WIDTH_EPSILON || vertex.end_width > WIDTH_EPSILON {
+        (vertex.start_width, vertex.end_width)
     } else {
-        constant_width
+        (constant_width, constant_width)
     }
+}
+
+pub(crate) fn lwpolyline_global_width(pline: &LwPolyline) -> Option<f64> {
+    let count = pline.vertices.len();
+    let seg_count = if pline.is_closed {
+        count
+    } else {
+        count.saturating_sub(1)
+    };
+    if seg_count == 0 {
+        return Some(pline.constant_width);
+    }
+    let (w0_start, w0_end) = vertex_segment_widths(&pline.vertices[0], pline.constant_width);
+    if (w0_start - w0_end).abs() > 1e-6 {
+        return None;
+    }
+    let w0 = w0_start;
+    for i in 1..seg_count {
+        let (sw, ew) = vertex_segment_widths(&pline.vertices[i], pline.constant_width);
+        if (sw - ew).abs() > 1e-6 || (sw - w0).abs() > 1e-6 {
+            return None;
+        }
+    }
+    Some(w0)
 }
 
 /// Midpoint position on an arc segment defined by its bulge.
@@ -504,8 +528,7 @@ fn band_verts(pline: &LwPolyline) -> Vec<([f64; 2], f64, f64, f64)> {
         .vertices
         .iter()
         .map(|v| {
-            let sw = effective_width(v.start_width, c);
-            let ew = effective_width(v.end_width, c);
+            let (sw, ew) = vertex_segment_widths(v, c);
             ([v.location.x, v.location.y], v.bulge, sw, ew)
         })
         .collect()
@@ -899,11 +922,8 @@ fn properties(pline: &LwPolyline) -> Vec<PropSection> {
     let v = pline.vertices.get(vi);
     let vx = v.map_or(0.0, |v| v.location.x);
     let vy = v.map_or(0.0, |v| v.location.y);
-    let start_w = v.map_or(0.0, |v| {
-        effective_width(v.start_width, pline.constant_width)
-    });
-    let end_w = v.map_or(0.0, |v| {
-        effective_width(v.end_width, pline.constant_width)
+    let (start_w, end_w) = v.map_or((0.0, 0.0), |v| {
+        vertex_segment_widths(v, pline.constant_width)
     });
     let mp = <LwPolyline as crate::entities::traits::MassPropsCalc>::mass_props(pline);
     let cloud_arc_length = revision_cloud_arc_length(pline);
@@ -937,6 +957,14 @@ fn properties(pline: &LwPolyline) -> Vec<PropSection> {
             arc_length,
         ));
     }
+    let global_width_prop = match lwpolyline_global_width(pline) {
+        Some(gw) => edit(t!("Global width").as_ref(), "global_width", gw),
+        None => Property {
+            label: t!("Global width").into_owned(),
+            field: "global_width",
+            value: PropValue::EditText(VARIES_LABEL.to_string()),
+        },
+    };
     let mut geometry_props = vec![
         stepper(t!("Current Vertex").as_ref(), "current_vertex", vertex_label),
         edit(t!("Vertex X").as_ref(), "vertex_x", vx),
@@ -948,7 +976,7 @@ fn properties(pline: &LwPolyline) -> Vec<PropSection> {
         geometry_props.push(edit(t!("End segment width").as_ref(), "end_width", end_w));
     }
     geometry_props.extend([
-        edit(t!("Global width").as_ref(), "global_width", pline.constant_width),
+        global_width_prop,
         edit(t!("Elevation").as_ref(), "elevation", pline.elevation),
         ro(t!("Area").as_ref(), "area", format_area(mp.area)),
         ro(t!("Length").as_ref(), "length", format_length(mp.perimeter)),
@@ -1015,7 +1043,13 @@ fn apply_geom_prop(pline: &mut LwPolyline, field: &str, value: &str) {
     };
     match field {
         "elevation" => pline.elevation = v,
-        "global_width" if v.is_finite() && v >= 0.0 => pline.constant_width = v,
+        "global_width" if v.is_finite() && v >= 0.0 => {
+            pline.constant_width = v;
+            for vtx in &mut pline.vertices {
+                vtx.start_width = v;
+                vtx.end_width = v;
+            }
+        }
         "vertex_x" => {
             if let Some(vtx) = pline.vertices.get_mut(vi) {
                 vtx.location.x = v;
@@ -1027,11 +1061,31 @@ fn apply_geom_prop(pline: &mut LwPolyline, field: &str, value: &str) {
             }
         }
         "start_width" if v.is_finite() && v >= 0.0 => {
+            if pline.constant_width > WIDTH_EPSILON {
+                let c = pline.constant_width;
+                for vtx in &mut pline.vertices {
+                    if vtx.start_width <= WIDTH_EPSILON && vtx.end_width <= WIDTH_EPSILON {
+                        vtx.start_width = c;
+                        vtx.end_width = c;
+                    }
+                }
+                pline.constant_width = 0.0;
+            }
             if let Some(vtx) = pline.vertices.get_mut(vi) {
                 vtx.start_width = v;
             }
         }
         "end_width" if v.is_finite() && v >= 0.0 => {
+            if pline.constant_width > WIDTH_EPSILON {
+                let c = pline.constant_width;
+                for vtx in &mut pline.vertices {
+                    if vtx.start_width <= WIDTH_EPSILON && vtx.end_width <= WIDTH_EPSILON {
+                        vtx.start_width = c;
+                        vtx.end_width = c;
+                    }
+                }
+                pline.constant_width = 0.0;
+            }
             if let Some(vtx) = pline.vertices.get_mut(vi) {
                 vtx.end_width = v;
             }
@@ -1252,8 +1306,8 @@ impl crate::entities::traits::Grippable for LwPolyline {
                 new_v.location.x = midpoint[0];
                 new_v.location.y = midpoint[1];
                 new_v.vertex_id = 0;
-                let effective_start = effective_width(v0.start_width, self.constant_width);
-                let effective_end = effective_width(v0.end_width, self.constant_width);
+                let (effective_start, effective_end) =
+                    vertex_segment_widths(&v0, self.constant_width);
                 let middle_width = (effective_start + effective_end) * 0.5;
                 self.vertices[i0].end_width = middle_width;
                 new_v.start_width = middle_width;
@@ -1325,8 +1379,9 @@ pub(crate) fn wide_fills(pl: &acadrust::entities::LwPolyline) -> ([f64; 2], Vec<
     for i in 0..seg_count {
         let v0 = &verts[i];
         let v1 = &verts[(i + 1) % n];
-        let hw0 = effective_width(v0.start_width, pl.constant_width) as f32 * 0.5;
-        let hw1 = effective_width(v0.end_width, pl.constant_width) as f32 * 0.5;
+        let (sw, ew) = vertex_segment_widths(v0, pl.constant_width);
+        let hw0 = sw as f32 * 0.5;
+        let hw1 = ew as f32 * 0.5;
         if hw0 < 1e-6 && hw1 < 1e-6 {
             continue;
         }
@@ -1379,5 +1434,90 @@ impl crate::entities::traits::MassPropsCalc for acadrust::entities::LwPolyline {
             cx,
             cy,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entities::traits::PropertyEditable;
+    use acadrust::entities::{LwPolyline, LwVertex};
+    use acadrust::Vector2;
+
+    fn make_test_lwpolyline(count: usize, constant_width: f64) -> LwPolyline {
+        let mut pl = LwPolyline::default();
+        pl.constant_width = constant_width;
+        for i in 0..count {
+            pl.vertices.push(LwVertex::new(Vector2::new(i as f64 * 10.0, 0.0)));
+        }
+        pl
+    }
+
+    #[test]
+    fn test_lwpolyline_uniform_width_shows_global_width() {
+        let pl = make_test_lwpolyline(3, 5.0);
+        assert_eq!(lwpolyline_global_width(&pl), Some(5.0));
+
+        let props = pl.geometry_properties(&[]);
+        let geom_props = &props[0].props;
+        let gw = geom_props.iter().find(|p| p.field == "global_width").unwrap();
+        match &gw.value {
+            PropValue::EditText(val) => assert_eq!(parse_f64(val), Some(5.0)),
+            _ => panic!("expected EditText"),
+        }
+    }
+
+    #[test]
+    fn test_lwpolyline_varying_vertex_width_shows_varies() {
+        let mut pl = make_test_lwpolyline(3, 5.0);
+        pl.vertices[0].start_width = 2.0;
+        pl.vertices[0].end_width = 3.0;
+
+        assert_eq!(lwpolyline_global_width(&pl), None);
+
+        let props = pl.geometry_properties(&[]);
+        let geom_props = &props[0].props;
+        let gw = geom_props.iter().find(|p| p.field == "global_width").unwrap();
+        match &gw.value {
+            PropValue::EditText(val) => assert_eq!(val, VARIES_LABEL),
+            _ => panic!("expected EditText with VARIES_LABEL"),
+        }
+    }
+
+    #[test]
+    fn test_lwpolyline_modifying_global_width_sets_all_vertex_widths() {
+        let mut pl = make_test_lwpolyline(3, 5.0);
+        pl.vertices[0].start_width = 2.0;
+        pl.vertices[0].end_width = 3.0;
+
+        pl.apply_geom_prop("global_width", "10.0");
+
+        assert_eq!(pl.constant_width, 10.0);
+        for v in &pl.vertices {
+            assert_eq!(v.start_width, 10.0);
+            assert_eq!(v.end_width, 10.0);
+        }
+        assert_eq!(lwpolyline_global_width(&pl), Some(10.0));
+    }
+
+    #[test]
+    fn test_lwpolyline_modifying_segment_width_materializes_constant_width() {
+        let mut pl = make_test_lwpolyline(3, 5.0);
+        // Initially constant_width is 5.0, vertices start/end are 0.0
+        assert_eq!(pl.vertices[0].start_width, 0.0);
+
+        // Edit start width of current vertex (vertex 0) to 2.0
+        pl.apply_geom_prop("start_width", "2.0");
+
+        // Vertex 0 start width should be 2.0, end width materialized to 5.0
+        assert_eq!(pl.vertices[0].start_width, 2.0);
+        assert_eq!(pl.vertices[0].end_width, 5.0);
+
+        // Vertex 1 and 2 should have materialized 5.0 instead of collapsing to 0.0
+        assert_eq!(pl.vertices[1].start_width, 5.0);
+        assert_eq!(pl.vertices[1].end_width, 5.0);
+
+        // Global width must now be VARIES
+        assert_eq!(lwpolyline_global_width(&pl), None);
     }
 }

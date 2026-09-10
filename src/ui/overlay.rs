@@ -790,7 +790,7 @@ fn draw_grip_marker(
             b.close();
         }),
         GripShape::Circle => canvas::Path::circle(Point::new(sp.x, sp.y), h),
-        GripShape::Dropdown => canvas::Path::new(|b| {
+        GripShape::Dropdown | GripShape::DropdownAdjacent => canvas::Path::new(|b| {
             b.move_to(Point::new(sp.x - h, sp.y - h * 0.5));
             b.line_to(Point::new(sp.x + h, sp.y - h * 0.5));
             b.line_to(Point::new(sp.x, sp.y + h));
@@ -840,7 +840,10 @@ fn draw_grip_marker(
         } else {
             palette.primary.base.color
         };
-        let fill = if grip.shape == GripShape::Dropdown {
+        let fill = if matches!(
+            grip.shape,
+            GripShape::Dropdown | GripShape::DropdownAdjacent
+        ) {
             color
         } else {
             palette.background.base.color.scale_alpha(0.7)
@@ -3844,4 +3847,3 @@ mod selection_visual_color_tests {
         assert!((selection_fill_alpha(100.0, true) - 0.45).abs() < 1e-5);
     }
 }
-

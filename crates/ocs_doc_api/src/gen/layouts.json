@@ -29,7 +29,15 @@
       "CreateDimensionAngular(DimensionAngularSpec)",
       "CreateAttributeDefinition(AttributeDefinitionSpec)",
       "CreateTable(TableSpec)",
-      "CreateDimensionAngular2Ln(DimensionAngularSpec)"
+      "CreateDimensionAngular2Ln(DimensionAngularSpec)",
+      "SetXData { id: ObjectId, application_name: String, record: Option<XDataRecord> }",
+      "CreateXRecord(XRecordSpec)",
+      "SetXRecord { id: ObjectId, spec: XRecordSpec }",
+      "CreateLayer(LayerInfo)",
+      "UpdateLayer { name: String, info: LayerInfo }",
+      "DeleteLayer { name: String }",
+      "SetEntityLayer { id: ObjectId, layer: String }",
+      "SetXDataMany(Vec<(ObjectId, String, Option<XDataRecord)>)"
     ]
   },
   "Query": {
@@ -45,7 +53,11 @@
       "GetDimensionMeasurement { id: ObjectId }",
       "GetAttributes { id: ObjectId }",
       "GetBlockEntities { block_name: String }",
-      "GetViewportView { id: ObjectId }"
+      "GetViewportView { id: ObjectId }",
+      "GetXData { id: ObjectId, application_name: String }",
+      "GetXRecord { id: ObjectId }",
+      "ListLayers",
+      "GetEntityLayer { id: ObjectId }"
     ]
   }
 }

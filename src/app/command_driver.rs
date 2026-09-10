@@ -671,6 +671,29 @@ impl OpenCADStudio {
             }
             return Task::none();
         }
+        let is_mtp = token.trim_start_matches('_').eq_ignore_ascii_case("MTP")
+            || token.trim_start_matches('_').eq_ignore_ascii_case("M2P");
+        if is_mtp {
+            let is_point_step = !self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.input_kind().wants_text())
+                .unwrap_or(true)
+                || self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .map(|c| c.point_step_accepts_keywords())
+                    .unwrap_or(false);
+            let not_entity_pick = !self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.needs_entity_pick())
+                .unwrap_or(false);
+            if is_point_step && not_entity_pick {
+                self.start_mtp_modifier(i);
+                return Task::none();
+            }
+        }
         if let Some((coord, kind)) = super::helpers::parse_coord(token) {
             // Match the GUI command line: typed coordinates are in the active
             // UCS (relative offsets are rotated by the UCS axes), so a multi-
@@ -712,7 +735,22 @@ impl OpenCADStudio {
     /// pick-first selector relaunching MOVE on the picked set works this way).
     /// Pure-selection commands (SELECTALL, QSELECT, …) run without an active
     /// command, so `was_active` is false and their selection is preserved.
-    pub(super) fn apply_cmd_result(&mut self, result: CmdResult) -> Task<Message> {
+    pub(super) fn apply_cmd_result(&mut self, mut result: CmdResult) -> Task<Message> {
+        let i = self.active_tab;
+        if let CmdResult::ReturnPoint(pt) = result {
+            self.tabs[i].scene.clear_preview_wire();
+            if let Some(mut suspended) = self.tabs[i].suspended_cmd.take() {
+                self.last_point = Some(pt);
+                let next_res = suspended.on_point(pt);
+                self.tabs[i].active_cmd = Some(suspended);
+                result = next_res;
+            } else {
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.restore_pre_cmd_tangent();
+                return Task::none();
+            }
+        }
         let settings = self.tabs[self.active_tab]
             .active_cmd
             .as_ref()
@@ -1190,6 +1228,18 @@ impl OpenCADStudio {
         let _ = self.tabs[i].scene.named_parameters_mut().set(&name, "1");
         self.refresh_properties();
         Task::none()
+    }
+
+    pub(in crate::app) fn start_mtp_modifier(&mut self, i: usize) {
+        let parent = self.tabs[i].active_cmd.take();
+        self.tabs[i].suspended_cmd = parent;
+        self.tabs[i].scene.clear_preview_wire();
+        let cmd = crate::command::Mid2PointCommand::new();
+        let prompt = crate::command::CadCommand::prompt(&cmd);
+        self.tabs[i].active_cmd = Some(Box::new(cmd));
+        self.command_line.push_info(&prompt);
+        self.command_line.set_step_options(Vec::new());
+        self.refresh_active_cmd_preview(i);
     }
 
     fn apply_cmd_result_inner(&mut self, result: CmdResult) -> Task<Message> {
@@ -2108,7 +2158,7 @@ impl OpenCADStudio {
             } => {
                 let label = self.history_label_from_active_cmd(i, "SOLID");
                 let erase_source = erase_source.filter(|handle| {
-                    self.tabs[i].scene.document.header.delete_objects
+                    self.delete_objects != 0
                         && !self.tabs[i].scene.is_layer_locked(*handle)
                 });
                 let pending = self.begin_undo(
@@ -2876,14 +2926,30 @@ impl OpenCADStudio {
             cancel @ (CmdResult::Cancel | CmdResult::CancelForSpaceChange) => {
                 let space_changed = matches!(cancel, CmdResult::CancelForSpaceChange);
                 self.tabs[i].scene.clear_preview_wire();
-                self.tabs[i].active_cmd = None;
-                self.tabs[i].snap_result = None;
-                self.restore_pre_cmd_tangent();
-                self.command_line.push_info(crate::t!(if space_changed {
-                    "Command cancelled because the active drawing space changed."
+                if !space_changed && self.tabs[i].suspended_cmd.is_some() {
+                    self.tabs[i].active_cmd = self.tabs[i].suspended_cmd.take();
+                    let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                    if let Some(p) = prompt {
+                        self.command_line.push_info(&p);
+                    }
+                    let opts = self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .map(|c| c.options())
+                        .unwrap_or_default();
+                    self.command_line.set_step_options(opts);
+                    self.refresh_active_cmd_preview(i);
                 } else {
-                    "Command cancelled."
-                }).as_ref());
+                    self.tabs[i].suspended_cmd = None;
+                    self.tabs[i].active_cmd = None;
+                    self.tabs[i].snap_result = None;
+                    self.restore_pre_cmd_tangent();
+                    self.command_line.push_info(crate::t!(if space_changed {
+                        "Command cancelled because the active drawing space changed."
+                    } else {
+                        "Command cancelled."
+                    }).as_ref());
+                }
             }
             CmdResult::SelectByPath {
                 path,
@@ -2971,7 +3037,7 @@ impl OpenCADStudio {
             CmdResult::EditTableCell { handle, point } => {
                 // TABLEDIT's pick: end the pick phase and hand (table, point)
                 // to the shared cell-edit launcher. A miss or a locked cell
-                // re-prompts, matching AutoCAD's select-until-valid loop.
+                // re-prompts until a valid table cell is selected.
                 use crate::modules::annotate::table_cmd::{table_cell_at, TableCellEditStart};
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
@@ -4098,7 +4164,7 @@ impl OpenCADStudio {
                 taper_angle,
                 color: _,
             } => {
-                let delete_sources = self.tabs[i].scene.document.header.delete_objects;
+                let delete_sources = self.delete_objects != 0;
                 if handles.is_empty()
                     || handles
                         .iter()
@@ -4193,10 +4259,36 @@ impl OpenCADStudio {
                         let direction = direction
                             .or(path_direction)
                             .unwrap_or(glam::DVec3::ZERO);
-                        self.add_surface_model(
-                            empty_extruded_surface(direction, taper_angle),
-                            body,
-                        )
+                        let history = path
+                            .is_none()
+                            .then(|| {
+                                sweep_model::extrusion_history(
+                                    &entity,
+                                    None,
+                                    direction.to_array(),
+                                    taper_angle,
+                                    profile.plane.origin,
+                                )
+                            })
+                            .flatten();
+                        let mut surface = empty_extruded_surface(direction, taper_angle);
+                        if let (
+                            Some(acadrust::objects::SolidHistoryOperation::Extrusion(value)),
+                            acadrust::EntityType::Surface(entity),
+                        ) = (&history, &mut surface)
+                        {
+                            if let Some(data) =
+                                crate::scene::model::solid_history::extrusion_surface_data(value)
+                            {
+                                entity.surface_data = data;
+                            }
+                        }
+                        match history {
+                            Some(history) => {
+                                self.add_surface_model_with_history(surface, body, history)
+                            }
+                            None => self.add_surface_model(surface, body),
+                        }
                     } else {
                             let direction = direction.unwrap_or(glam::DVec3::ZERO);
                             let history = path
@@ -4385,7 +4477,7 @@ impl OpenCADStudio {
                     self.restore_pre_cmd_tangent();
                     return Task::none();
                 }
-                let delete_sources = self.tabs[i].scene.document.header.delete_objects;
+                let delete_sources = self.delete_objects != 0;
                 use crate::command::ExtrudeMode;
                 use crate::modules::insert::solid3d_cmds::{
                     empty_revolved_surface, empty_solid3d,
@@ -4519,7 +4611,8 @@ impl OpenCADStudio {
                 use crate::command::ExtrudeMode;
                 use crate::modules::insert::solid3d_cmds::empty_solid3d;
                 use crate::scene::model::sweep_model;
-                let delete_sources = self.tabs[i].scene.document.header.delete_objects;
+                let delete_objects = self.delete_objects;
+                let delete_profiles = delete_objects != 0;
                 let path = self.tabs[i].scene.document.get_entity(path_handle).cloned();
                 let mut profiles = Vec::new();
                 let mut failed = 0usize;
@@ -4557,6 +4650,14 @@ impl OpenCADStudio {
                         failed += 1;
                         continue;
                     };
+                    let deletes_path = crate::app::delobj_deletes_auxiliary(
+                        delete_objects,
+                        surface,
+                    );
+                    if deletes_path && self.tabs[i].scene.is_layer_locked(path_handle) {
+                        failed += 1;
+                        continue;
+                    }
                     let created = if surface {
                         self.add_surface_model(sweep_model::swept_surface_entity(&record), body)
                     } else {
@@ -4569,8 +4670,11 @@ impl OpenCADStudio {
                         failed += 1;
                     } else {
                         created_handles.push(created);
-                        if delete_sources {
+                        if delete_profiles {
                             consumed.push(handle);
+                        }
+                        if deletes_path {
+                            consumed.push(path_handle);
                         }
                     }
                 }
@@ -4612,12 +4716,14 @@ impl OpenCADStudio {
                 }).collect::<Vec<_>>();
                 sources.sort_unstable_by_key(|handle| handle.value());
                 sources.dedup();
-                let delete_sources = self.tabs[i].scene.document.header.delete_objects;
-                let locked = delete_sources && sources.iter().any(|handle| self.tabs[i].scene.is_layer_locked(*handle));
+                let delete_objects = self.delete_objects;
+                let delete_sections = delete_objects != 0;
+                let section_locked = delete_sections
+                    && sources.iter().any(|handle| self.tabs[i].scene.is_layer_locked(*handle));
                 let available = sources.iter().chain(guides.iter()).copied().chain(path)
                     .filter_map(|handle| self.tabs[i].scene.document.get_entity(handle)
                         .cloned().map(|entity| (handle, entity))).collect::<Vec<_>>();
-                let result = if locked {
+                let result = if section_locked {
                     Err("LOFT: a source is on a locked layer; disable source deletion or unlock it.".to_string())
                 } else {
                     loft_command_model::record(&sections, &guides, path, &available, mode, options)
@@ -4626,6 +4732,19 @@ impl OpenCADStudio {
                 match result {
                     Ok((body, record)) => {
                         let surface = record.parameters.as_ref().is_some_and(|settings| settings.surface);
+                        let delete_auxiliary = crate::app::delobj_deletes_auxiliary(
+                            delete_objects,
+                            surface,
+                        );
+                        if delete_auxiliary
+                            && guides.iter().copied().chain(path)
+                                .any(|handle| self.tabs[i].scene.is_layer_locked(handle))
+                        {
+                            self.command_line.push_error(
+                                "LOFT: a source is on a locked layer; disable source deletion or unlock it.",
+                            );
+                            return Task::none();
+                        }
                         let dirty_before = self.tabs[i].dirty;
                         let pending = self.begin_undo(i, "LOFT", 1, true);
                         let created = if surface {
@@ -4647,7 +4766,18 @@ impl OpenCADStudio {
                             self.command_line.push_error(crate::t!("LOFT could not create a complete display. The source sections were preserved.").as_ref());
                             return Task::none();
                         } else {
-                            if delete_sources { self.tabs[i].scene.erase_entities(&sources); }
+                            let mut consumed = if delete_sections {
+                                sources.clone()
+                            } else {
+                                Vec::new()
+                            };
+                            if delete_auxiliary {
+                                consumed.extend(guides.iter().copied());
+                                consumed.extend(path);
+                            }
+                            consumed.sort_unstable_by_key(|handle| handle.value());
+                            consumed.dedup();
+                            self.tabs[i].scene.erase_entities(&consumed);
                             self.tabs[i].scene.deselect_all();
                             self.tabs[i].scene.select_entity(created, true);
                             self.tabs[i].dirty = true;
@@ -5119,6 +5249,12 @@ impl OpenCADStudio {
                     self.command_line
                         .push_error(crate::t!("DDEDIT: entity type not supported.").as_ref());
                 }
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+            }
+            CmdResult::ReturnPoint(_) => {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();
@@ -6678,6 +6814,71 @@ mod sketch_constraint_undo_tests {
                 .unwrap_or(0),
             0,
             "a missed pick must not add a constraint"
+        );
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod delobj_tests {
+    use super::*;
+    use acadrust::types::Vector3;
+
+    fn sweep_source_presence(value: i16, mode: crate::command::ExtrudeMode) -> (bool, bool) {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut circle = acadrust::Circle::new();
+        circle.radius = 2.0;
+        let profile = app.tabs[i]
+            .scene
+            .add_entity(acadrust::EntityType::Circle(circle));
+        let path = app.tabs[i].scene.add_entity(acadrust::EntityType::Line(
+            acadrust::Line::from_points(
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(0.0, 0.0, 5.0),
+            ),
+        ));
+        app.delete_objects = value;
+
+        let _ = app.apply_cmd_result(CmdResult::SweepEntities {
+            handles: vec![profile],
+            path_handle: path,
+            mode,
+            options: crate::command::SweepOptions::default(),
+            color: [1.0; 4],
+        });
+
+        let created = app.tabs[i].scene.document.entities().any(|entity| match mode {
+            crate::command::ExtrudeMode::Solid => {
+                matches!(entity, acadrust::EntityType::Solid3D(_))
+            }
+            crate::command::ExtrudeMode::Surface => {
+                matches!(entity, acadrust::EntityType::Surface(_))
+            }
+        });
+        assert!(created, "SWEEP must produce the requested result");
+        (
+            app.tabs[i].scene.document.get_entity(profile).is_some(),
+            app.tabs[i].scene.document.get_entity(path).is_some(),
+        )
+    }
+
+    #[test]
+    fn sweep_applies_all_four_source_deletion_modes() {
+        let solid_expectations = [(true, true), (false, true), (false, false), (false, false)];
+        for (value, expected) in solid_expectations.into_iter().enumerate() {
+            assert_eq!(
+                sweep_source_presence(value as i16, crate::command::ExtrudeMode::Solid),
+                expected,
+            );
+        }
+        assert_eq!(
+            sweep_source_presence(2, crate::command::ExtrudeMode::Surface),
+            (false, false),
+        );
+        assert_eq!(
+            sweep_source_presence(3, crate::command::ExtrudeMode::Surface),
+            (false, true),
         );
     }
 }

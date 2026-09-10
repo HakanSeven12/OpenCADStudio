@@ -258,7 +258,7 @@ pub fn extract_circle_instance_from_geom_indexed(
 
     let (start_width, end_width) = if !wire.taper_widths.is_empty() {
         if wire.taper_widths.len() >= 2 && wire.tangent_geoms.len() == 1 {
-            (wire.taper_widths[0], wire.taper_widths[1])
+            (wire.taper_widths[0], *wire.taper_widths.last().unwrap())
         } else if wire.taper_widths.len() > geom_index {
             let sw = wire.taper_widths[geom_index];
             let ew = wire.taper_widths.get(geom_index + 1).copied().unwrap_or(sw);

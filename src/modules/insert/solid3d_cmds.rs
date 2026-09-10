@@ -2778,6 +2778,8 @@ pub fn empty_extruded_surface(direction: DVec3, taper_angle: f64) -> EntityType 
     use acadrust::types::Vector3;
 
     let mut surface = Surface::new(SurfaceKind::Extruded);
+    surface.u_isolines = 6;
+    surface.v_isolines = 6;
     if let SurfaceData::Extruded {
         options,
         sweep_vector,

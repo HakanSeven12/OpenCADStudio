@@ -402,6 +402,24 @@ impl super::OpenCADStudio {
         self.add_surface_model_inner(entity, surface, true)
     }
 
+    pub(super) fn add_surface_model_with_history(
+        &mut self,
+        entity: EntityType,
+        surface: Body,
+        history: SolidHistoryOperation,
+    ) -> Handle {
+        let i = self.active_tab;
+        let handle = self.add_surface_model_inner(entity, surface, true);
+        if handle.is_null() {
+            return handle;
+        }
+        if !self.tabs[i].scene.create_solid_history(handle, history) {
+            self.tabs[i].scene.rollback_new_entities(&[handle]);
+            return Handle::NULL;
+        }
+        handle
+    }
+
     fn add_surface_model_preserving_style(
         &mut self,
         entity: EntityType,
@@ -2293,7 +2311,9 @@ impl super::OpenCADStudio {
             surfaces.push(surf);
         }
         self.push_undo_snapshot(i, "CONVTOSURFACE");
-        self.tabs[i].scene.erase_entities(&handles);
+        if self.delete_objects != 0 {
+            self.tabs[i].scene.erase_entities(&handles);
+        }
         let n = surfaces.len();
         for surf in surfaces {
             self.tabs[i].scene.add_entity(EntityType::Surface(surf));

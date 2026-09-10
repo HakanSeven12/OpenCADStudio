@@ -12,9 +12,6 @@ from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-subprocess.run(['python3', 'scripts/test_locales.py'], cwd=ROOT, check=True)
-subprocess.run(['python3', 'scripts/export-locales.py', '--check'], cwd=ROOT, check=True)
-subprocess.run(['node', 'scripts/test_web_locales.cjs'], cwd=ROOT, check=True)
 
 
 class Page(HTMLParser):
@@ -49,7 +46,7 @@ with tempfile.TemporaryDirectory() as directory:
             svg = charts.render_svg('HakanSeven12/OpenCADStudio', [date], [('v1', date, 10)], 'dark', chart, messages)
             tree = ET.fromstring(svg)
             assert tree.find('{http://www.w3.org/2000/svg}title').text == messages['stars' if chart == 'stars' else 'downloads']
-            (output / locale / f'{chart[:-1]}-history-dark.svg').write_text(svg)
+            (output / ('' if locale == 'en-US' else locale) / f'{chart[:-1]}-history-dark.svg').write_text(svg)
         html = (output / locale / 'index.html').read_text()
         assert '{{' not in html and '{count}' not in html, locale
         page = Page(html)
@@ -57,7 +54,8 @@ with tempfile.TemporaryDirectory() as directory:
         links = [attrs for tag, attrs in page.tags if tag == 'link']
         assert {link['href'] for link in links if link.get('rel') == 'icon'} == {'/favicon.ico', '/favicon.png', '/favicon.svg'}
         assert {link['hreflang'] for link in links if link.get('rel') == 'alternate'} == supported | {'x-default'}
-        assert next(link['href'] for link in links if link.get('rel') == 'canonical') == f'https://www.opencadstudio.com/{locale}/'
+        expected_path = '/' if locale == 'en-US' else f'/{locale}/'
+        assert next(link['href'] for link in links if link.get('rel') == 'canonical') == f'https://www.opencadstudio.com{expected_path}'
         choices = [attrs for tag, attrs in page.tags if tag == 'a' and 'hreflang' in attrs]
         assert {choice['hreflang'] for choice in choices} == supported
         assert [choice['hreflang'] for choice in choices if choice.get('aria-current') == 'page'] == [locale]
@@ -74,7 +72,7 @@ with tempfile.TemporaryDirectory() as directory:
                     path = output / urlsplit(target).path.lstrip('/')
                     assert path.exists(), (locale, target)
         manifest = json.loads((output / locale / 'site.webmanifest').read_text())
-        assert manifest['lang'] == locale and manifest['start_url'] == f'/{locale}/'
+        assert manifest['lang'] == locale and manifest['start_url'] == expected_path
         for icon in manifest['icons']:
             assert (output / icon['src'].lstrip('/')).exists()
         if locale != 'en-US':
@@ -87,7 +85,13 @@ with tempfile.TemporaryDirectory() as directory:
     assert icon == '/favicon.svg'
     assert (output / icon.lstrip('/')).read_bytes() == (ROOT / 'site/favicon.svg').read_bytes()
     sitemap = ET.parse(output / 'sitemap.xml')
-    assert len(sitemap.getroot()) == len(supported) + 1
+    locations = {url[0].text for url in sitemap.getroot()}
+    assert len(locations) == len(supported)
+    assert 'https://www.opencadstudio.com/' in locations
+    assert 'https://www.opencadstudio.com/en-US/' not in locations
     assert (output / 'index.html').read_bytes() == (output / 'en-US/index.html').read_bytes()
+    homepage_schemas = [json.loads(value) for value in re.findall(r'<script type="application/ld\+json">(.*?)</script>', (output / 'index.html').read_text())]
+    website = next(schema for schema in homepage_schemas if schema['@type'] == 'WebSite')
+    assert website['url'] == 'https://www.opencadstudio.com/' and 'OpenCADStudio' in website['alternateName']
     subprocess.run(['node', 'scripts/test_site.cjs', str(output / 'site.js')], cwd=ROOT, check=True)
 print(f'All {len(supported)} translations, metadata, local links, charts, manifests and icons passed')

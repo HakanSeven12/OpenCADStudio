@@ -62,7 +62,7 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::ImagePick));
             }
 
-            "REVCLOUD" => {
+            "REVCLOUD" | "REVCLOUD_RECTANGULAR" | "REVCLOUD_POLYGONAL" | "REVCLOUD_FREEHAND" => {
                 use crate::modules::draw::draw::revcloud::RevCloudCommand;
                 let view_height = self.tabs[i].scene.camera.borrow().ortho_size() as f64 * 2.0;
                 let default_arc_length = (view_height * 0.0125).max(1.0e-6);
@@ -72,9 +72,12 @@ impl OpenCADStudio {
                     .entities()
                     .map(|entity| (entity.common().handle, entity.clone()))
                     .collect();
-                let cmd = RevCloudCommand::new(default_arc_length, sources);
-                self.command_line.push_info(&cmd.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(cmd));
+                let mut command = RevCloudCommand::new(default_arc_length, sources);
+                if let Some(mode) = cmd.strip_prefix("REVCLOUD_") {
+                    command.on_text_input(mode);
+                }
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
             "ATTDEF" => {
@@ -872,9 +875,13 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "SPLINE" => {
+            "SPLINE" | "SPLINECV" => {
                 use crate::modules::draw::draw::spline::SplineCommand;
-                let new_cmd = SplineCommand::new();
+                let new_cmd = if cmd == "SPLINECV" {
+                    SplineCommand::control_vertices()
+                } else {
+                    SplineCommand::new()
+                };
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
@@ -1299,10 +1306,18 @@ impl OpenCADStudio {
             // REGION — convert selected closed boundaries (closed polylines /
             // circles) into Region entities (one wire loop each).
             "REGION" | "REG" => {
+                if self.tabs[i].scene.selected_entities().is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let command = SelectObjectsCommand::new("REGION");
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                    return Some(iced::Task::none());
+                }
                 use acadrust::entities::Region;
                 use acadrust::types::Vector3;
                 let mut regions = Vec::new();
-                for (_, e) in self.tabs[i].scene.selected_entities().iter() {
+                let mut sources = Vec::new();
+                for (handle, e) in self.tabs[i].scene.selected_entities().iter() {
                     let supported = matches!(
                         e,
                         acadrust::EntityType::LwPolyline(pl)
@@ -1325,6 +1340,7 @@ impl OpenCADStudio {
                         );
                         region.common.layer = self.tabs[i].active_layer.clone();
                         regions.push((region, body));
+                        sources.push(*handle);
                     }
                 }
                 if regions.is_empty() {
@@ -1342,6 +1358,10 @@ impl OpenCADStudio {
                             return Some(iced::Task::none());
                         }
                         created.push(handle);
+                    }
+                    if self.delete_objects != 0 {
+                        self.tabs[i].scene.erase_entities(&sources);
+                        self.refresh_properties();
                     }
                     self.tabs[i].dirty = true;
                     self.command_line
@@ -1717,5 +1737,49 @@ impl OpenCADStudio {
             _ => return None,
         }
         Some(self.finish_dispatch(cmd))
+    }
+}
+
+#[cfg(test)]
+mod region_tests {
+    use crate::app::OpenCADStudio;
+
+    #[test]
+    fn region_respects_delobj_and_preserves_unconverted_sources() {
+        for delete_sources in [false, true] {
+            let mut app = OpenCADStudio::new_for_test();
+            app.automation_op(r#"{"op":"new"}"#);
+            app.automation_op(r#"{"op":"run","cmd":"CIRCLE 5,5 3"}"#);
+            app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,10"}"#);
+            let i = app.active_tab;
+            let sources: Vec<_> = app.tabs[i].scene.document.entities()
+                .map(|entity| {
+                    (entity.common().handle, matches!(entity, acadrust::EntityType::Circle(_)))
+                })
+                .collect();
+            assert_eq!(sources.len(), 2);
+            let handles: Vec<_> = sources.iter().map(|(handle, _)| *handle).collect();
+            app.tabs[i].scene.select_entities(&handles);
+            app.delete_objects = i16::from(delete_sources);
+
+            let _ = app.dispatch_command("REGION");
+
+            for (handle, is_circle) in &sources {
+                assert_eq!(
+                    app.tabs[i].scene.document.get_entity(*handle).is_some(),
+                    !delete_sources || !is_circle,
+                );
+            }
+            let region_count = app.tabs[i].scene.document.entities()
+                .filter(|entity| matches!(entity, acadrust::EntityType::Region(_)))
+                .count();
+            assert_eq!(region_count, 1);
+
+            app.automation_op(r#"{"op":"undo"}"#);
+            for (handle, _) in &sources {
+                assert!(app.tabs[i].scene.document.get_entity(*handle).is_some());
+            }
+            assert_eq!(app.tabs[i].scene.document.entities().count(), 2);
+        }
     }
 }

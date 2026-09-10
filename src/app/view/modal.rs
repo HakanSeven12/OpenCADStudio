@@ -191,8 +191,8 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::Options => sized_flow(
                 ex,
-                540,
-                560,
+                880,
+                620,
                 |flow| {
                     crate::ui::window::options::view_window(
                         &self.default_save_format,
@@ -209,6 +209,55 @@ impl OpenCADStudio {
                             pick_add: self.pick_add,
                             pick_drag_rect: self.pick_drag_rect,
                             grip_object_limit: self.grip_object_limit,
+                            selection_cycling: self.selection_cycling,
+                        },
+                        crate::ui::window::options::AppPrefs {
+                            savetime_min: self.savetime_min,
+                            backup_on_save: self.backup_on_save,
+                            textfill: crate::scene::text::sdf_atlas::textfill(),
+                            cliprompt_lines: self.cliprompt_lines,
+                            commandline_fade_ms: self.commandline_fade_ms,
+                            zoom_wheel_reversed: self.zoom_wheel_reversed,
+                            zoom_factor: self.zoom_factor,
+                            texteditmode: self.texteditmode,
+                            dimension_continue_mode: self.dimension_continue_mode,
+                            qdim_snap_priority: self.quick_dimension_snap_priority,
+                            annotation_auto_scale: self.annotation_auto_scale,
+                            polar_increment_deg: self.polar_increment_deg,
+                            show_viewcube: self.show_viewcube,
+                            show_ucs_icon: self.show_ucs_icon,
+                            ucs_icon_at_origin: self.ucs_icon_at_origin,
+                        },
+                        &self.snap_angle_input,
+                        {
+                            let header = self
+                                .tabs
+                                .get(self.active_tab)
+                                .map(|tab| &tab.scene.document.header);
+                            crate::ui::window::options::DrawingPrefs {
+                                available: header.is_some(),
+                                isolines: header.map_or(4, |h| h.isolines),
+                                display_silhouette: header
+                                    .is_some_and(|h| h.display_silhouette),
+                                surface_u: header.map_or(6, |h| h.surface_u_density),
+                                surface_v: header.map_or(6, |h| h.surface_v_density),
+                                surface_type: header.map_or(6, |h| h.surface_type),
+                                record_solid_history: header
+                                    .is_some_and(|h| h.record_solid_history),
+                                show_solid_history: header
+                                    .map_or(1, |h| h.show_solid_history),
+                            }
+                        },
+                        crate::ui::window::options::Folders {
+                            config: crate::config::config_dir()
+                                .map(|p| p.display().to_string()),
+                            plot_styles: crate::io::plot_style::plot_styles_dir()
+                                .ok()
+                                .map(|p| p.display().to_string()),
+                            plugins: crate::plugin::external::plugins_dir()
+                                .map(|p| p.display().to_string()),
+                            autosave: crate::config::config_dir()
+                                .map(|_| std::env::temp_dir().display().to_string()),
                         },
                         self.double_click_block_refedit,
                         self.double_click_block_attedit,

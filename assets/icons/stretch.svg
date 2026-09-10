@@ -6,7 +6,7 @@
    version="1.1"
    id="svg5"
    sodipodi:docname="stretch.svg"
-   inkscape:version="1.4.3 (0d15f75042, 2025-12-25)"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -22,9 +22,9 @@
      inkscape:pageopacity="0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#505050"
-     inkscape:zoom="12.762909"
-     inkscape:cx="33.926435"
-     inkscape:cy="28.010856"
+     inkscape:zoom="11.968488"
+     inkscape:cx="25.984903"
+     inkscape:cy="32.794451"
      inkscape:window-width="1920"
      inkscape:window-height="939"
      inkscape:window-x="0"
@@ -48,12 +48,12 @@
        visible="true" />
   </sodipodi:namedview>
   <rect
-     style="fill:none;stroke:#B4B6B9;stroke-width:2.25;stroke-dasharray:none"
+     style="fill:none;stroke:#b4b6b9;stroke-width:2.70159;stroke-dasharray:none"
      id="rect5"
-     width="12.75"
-     height="14.25"
-     x="1.125"
-     y="4.875"
+     width="12.298418"
+     height="21.298416"
+     x="1.3507915"
+     y="1.3507915"
      ry="0" />
   <!-- Original right edge (ghost, dashed) -->
   <!-- Left/top/bottom of rect (static part, solid gray) -->
@@ -61,8 +61,8 @@
   <!-- Top line extension (stretched, blue) -->
   <!-- Stretch arrow -->
   <path
-     style="fill:none;stroke:#6DB7ED;stroke-width:2.25;stroke-dasharray:none;stroke-opacity:1"
-     d="m 15,4.875 h 7.875 v 14.25 H 15"
+     style="fill:none;stroke:#6db7ed;stroke-width:2.7102;stroke-dasharray:none;stroke-opacity:1"
+     d="m 14.999617,1.3549399 h 7.647048 V 22.646516 h -7.647048"
      id="path8"
      sodipodi:nodetypes="cccc" />
 </svg>

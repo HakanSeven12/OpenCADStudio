@@ -3,6 +3,7 @@
 // Shared grips and properties for modeler entities.
 
 use acadrust::entities::{Body, Region, Solid3D, Surface};
+use acadrust::xdata::{ExtendedDataRecord, XDataValue};
 use cadkernel::space::polygon;
 use crate::t;
 use crate::command::EntityTransform;
@@ -47,6 +48,71 @@ fn translate_acis_entity<T: acadrust::Entity>(entity: &mut T, d: glam::DVec3) {
 
 fn yes_no(value: bool) -> &'static str {
     if value { "Yes" } else { "No" }
+}
+
+pub(crate) const SURFACE_PROPERTIES_APP: &str = "OCS_SURFACE_PROPERTIES";
+
+#[derive(Clone, Copy)]
+pub(crate) struct SurfacePropertyState {
+    pub isolines: bool,
+    pub maintain_associativity: bool,
+    pub show_associativity: bool,
+}
+
+pub(crate) fn surface_property_state(surface: &Surface) -> SurfacePropertyState {
+    let defaults = SurfacePropertyState {
+        isolines: true,
+        maintain_associativity: surface.history_handle.is_some(),
+        show_associativity: false,
+    };
+    let Some(record) = surface
+        .common
+        .extended_data
+        .get_record(SURFACE_PROPERTIES_APP)
+    else {
+        return defaults;
+    };
+    let mut values = record.values.iter().filter_map(|value| match value {
+        XDataValue::Integer16(value) => Some(*value),
+        _ => None,
+    });
+    let Some(version) = values.next() else {
+        return defaults;
+    };
+    if version != 1 {
+        return defaults;
+    }
+    SurfacePropertyState {
+        isolines: values.next().map_or(defaults.isolines, |value| value == 0),
+        maintain_associativity: values
+            .next()
+            .map_or(defaults.maintain_associativity, |value| value != 0),
+        show_associativity: values
+            .next()
+            .map_or(defaults.show_associativity, |value| value != 0),
+    }
+}
+
+pub(crate) fn surface_property_xdata_values(state: SurfacePropertyState) -> Vec<XDataValue> {
+    vec![
+        XDataValue::Integer16(1),
+        XDataValue::Integer16(if state.isolines { 0 } else { 1 }),
+        XDataValue::Integer16(state.maintain_associativity as i16),
+        XDataValue::Integer16(state.show_associativity as i16),
+    ]
+}
+
+fn write_surface_property_state(surface: &mut Surface, state: SurfacePropertyState) {
+    let mut record = ExtendedDataRecord::new(SURFACE_PROPERTIES_APP);
+    record.values = surface_property_xdata_values(state);
+    surface.common.extended_data.upsert_record(record);
+}
+
+pub(crate) fn surface_isoline_counts(surface: &Surface) -> [usize; 2] {
+    [
+        surface.u_isolines.max(0) as usize,
+        surface.v_isolines.max(0) as usize,
+    ]
 }
 
 fn handle_text(handle: Option<acadrust::Handle>) -> String {
@@ -700,6 +766,21 @@ impl PropertyEditable for Surface {
 
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
         match field {
+            "srf_wireframe_type" => {
+                let mut state = surface_property_state(self);
+                state.isolines = !value.eq_ignore_ascii_case("Isoparms");
+                write_surface_property_state(self, state);
+            }
+            "srf_maintain_associativity" => {
+                let mut state = surface_property_state(self);
+                state.maintain_associativity = value.eq_ignore_ascii_case("Yes");
+                write_surface_property_state(self, state);
+            }
+            "srf_show_associativity" => {
+                let mut state = surface_property_state(self);
+                state.show_associativity = value.eq_ignore_ascii_case("Yes");
+                write_surface_property_state(self, state);
+            }
             "srf_u_isolines" => {
                 if let Some(value) = parse_f64(value) {
                     self.u_isolines = (value.round() as i16).max(0);
@@ -822,7 +903,8 @@ pub fn tessellate_volume(
             color,
             facet_res,
             chordal_deflection,
-            isolines,
+            surface_isoline_counts(s),
+            surface_property_state(s).isolines,
         ),
         EntityType::Mesh(_) | EntityType::PolygonMesh(_) | EntityType::PolyfaceMesh(_) => {
             crate::entities::mesh::tessellate_shaded_mesh(e, color)

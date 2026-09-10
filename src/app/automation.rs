@@ -1516,4 +1516,101 @@ mod tests {
         // Finish
         let _ = app.update(Message::CommandOptionPick(String::new()));
     }
+
+    #[test]
+    fn test_mtp_in_line_command() {
+        use crate::app::Message;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        {
+            app.tabs[0].scene.selection.borrow_mut().vp_size = (1920.0, 1080.0);
+            app.tabs[0].scene.sync_tiles_from_panes(1920.0, 1080.0);
+        }
+
+        // Start LINE
+        let _ = app.update(Message::CommandInput("LINE".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        assert_eq!(app.tabs[0].active_cmd.as_ref().map(|c| c.name()), Some("LINE"));
+
+        // Type M2P
+        let _ = app.update(Message::CommandInput("M2P".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        assert_eq!(app.tabs[0].active_cmd.as_ref().map(|c| c.name()), Some("MTP"));
+        assert!(app.tabs[0].suspended_cmd.is_some());
+        assert_eq!(app.tabs[0].suspended_cmd.as_ref().map(|c| c.name()), Some("LINE"));
+
+        // Point 1: 0,0
+        let _ = app.update(Message::CommandInput("0,0".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        assert_eq!(app.tabs[0].active_cmd.as_ref().map(|c| c.name()), Some("MTP"));
+
+        // Point 2: 10,20
+        let _ = app.update(Message::CommandInput("10,20".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+
+        // MTP should have finished and restored LINE, with midpoint (5, 10, 0)
+        assert_eq!(app.tabs[0].active_cmd.as_ref().map(|c| c.name()), Some("LINE"));
+        assert!(app.tabs[0].suspended_cmd.is_none());
+        assert_eq!(app.last_point, Some(glam::DVec3::new(5.0, 10.0, 0.0)));
+
+        // Cancel LINE
+        let _ = app.update(Message::CommandEscape);
+        assert!(app.tabs[0].active_cmd.is_none());
+    }
+
+    #[test]
+    fn test_mtp_escape_restores_parent() {
+        use crate::app::Message;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+
+        // Start LINE
+        let _ = app.update(Message::CommandInput("LINE".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        assert_eq!(app.tabs[0].active_cmd.as_ref().map(|c| c.name()), Some("LINE"));
+
+        // Type MTP
+        let _ = app.update(Message::CommandInput("MTP".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        assert_eq!(app.tabs[0].active_cmd.as_ref().map(|c| c.name()), Some("MTP"));
+
+        // Escape during MTP
+        let _ = app.update(Message::CommandEscape);
+        // Parent LINE must be restored, not cancelled!
+        assert_eq!(app.tabs[0].active_cmd.as_ref().map(|c| c.name()), Some("LINE"));
+        assert!(app.tabs[0].suspended_cmd.is_none());
+
+        // Escape again cancels LINE
+        let _ = app.update(Message::CommandEscape);
+        assert!(app.tabs[0].active_cmd.is_none());
+    }
+
+    #[test]
+    fn test_mtp_typing_routing_with_dyn_input() {
+        use crate::app::Message;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.dyn_input = true;
+
+        // Start LINE
+        let _ = app.update(Message::CommandInput("LINE".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        assert_eq!(app.tabs[0].active_cmd.as_ref().map(|c| c.name()), Some("LINE"));
+
+        // Simulate typing 'm', '2', 'p' character by character
+        let _ = app.update(Message::CommandAppendChar("m".to_string()));
+        assert_eq!(app.command_line.input, "M");
+
+        // The digit '2' must stay in command_line.input instead of routing to dyn fields!
+        let _ = app.update(Message::CommandAppendChar("2".to_string()));
+        assert_eq!(app.command_line.input, "M2");
+
+        let _ = app.update(Message::CommandAppendChar("p".to_string()));
+        assert_eq!(app.command_line.input, "M2P");
+
+        // Submit triggers MTP
+        let _ = app.update(Message::CommandSubmit);
+        assert_eq!(app.tabs[0].active_cmd.as_ref().map(|c| c.name()), Some("MTP"));
+    }
 }
+

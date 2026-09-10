@@ -55,4 +55,35 @@ pub enum Query {
     GetViewportView {
         id: ObjectId,
     },
+    /// The XDATA record for `application_name` attached to an entity (`None` if absent).
+    GetXData {
+        id: ObjectId,
+        application_name: String,
+    },
+    /// The XRECORD object payload by id.
+    GetXRecord {
+        id: ObjectId,
+    },
+    /// List all layers in the document.
+    ListLayers,
+    /// The layer name of an entity.
+    GetEntityLayer {
+        id: ObjectId,
+    },
+    /// Enumerate first-class entities, optionally filtered by kind and/or layer.
+    /// `include_bounds` populates `EntityView::bounds`; leave it false for a
+    /// lightweight list view.
+    EnumerateEntities {
+        kind: Option<String>,
+        layer: Option<String>,
+        include_bounds: bool,
+    },
+    /// The WCS location of a Point entity.
+    GetPointPosition {
+        id: ObjectId,
+    },
+    /// The start and end WCS points of a Line entity.
+    GetLineGeometry {
+        id: ObjectId,
+    },
 }

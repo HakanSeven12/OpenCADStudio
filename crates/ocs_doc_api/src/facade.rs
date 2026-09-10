@@ -13,7 +13,7 @@ use crate::envelope::{DocApiEnvelope, Receipt};
 use crate::error::{ApiError, ApiResult};
 use crate::gen::{Operation, Query};
 use crate::id::ObjectId;
-use crate::ops::{BoolOp, Curve2Spec, PlacementSpec, SolidPrimitive};
+use crate::ops::{BoolOp, Curve2Spec, PlacementSpec, SolidPrimitive, XDataRecord, XRecordSpec};
 use crate::query::{Aabb, EntityView, QueryResult};
 use crate::revision::GeometryRevision;
 use crate::transport::Transport;
@@ -170,6 +170,74 @@ impl Document {
         }
     }
 
+    /// List all layers in the document.
+    pub fn layers(&self) -> ApiResult<Vec<crate::ops::LayerInfo>> {
+        match self.session.one_query(Query::ListLayers)? {
+            QueryResult::Layers(v) => Ok(v),
+            _ => Err(ApiError::Transport("unexpected layers result".into())),
+        }
+    }
+
+    /// Create a new layer. One undo step; fails if the normalized name already
+    /// exists or is empty.
+    pub fn create_layer(&self, info: &crate::ops::LayerInfo) -> ApiResult<()> {
+        if !crate::layer::is_valid_layer_name(&info.name) {
+            return Err(ApiError::validation(
+                "CreateLayer",
+                "empty layer name",
+            ));
+        }
+        self.session
+            .apply_op(Operation::CreateLayer(info.clone()))?;
+        Ok(())
+    }
+
+    /// Update an existing layer's properties by name. One undo step; `info.name`
+    /// becomes the new display name (case-insensitive key unchanged).
+    pub fn update_layer(&self, name: &str, info: &crate::ops::LayerInfo) -> ApiResult<()> {
+        if !crate::layer::is_valid_layer_name(&info.name) {
+            return Err(ApiError::validation(
+                "UpdateLayer",
+                "empty layer name",
+            ));
+        }
+        self.session.apply_op(Operation::UpdateLayer {
+            name: name.to_string(),
+            info: info.clone(),
+        })?;
+        Ok(())
+    }
+
+    /// Delete a layer by name. One undo step; fails for layer "0", the current
+    /// layer, or any layer still referenced by entities.
+    pub fn delete_layer(&self, name: &str) -> ApiResult<()> {
+        self.session.apply_op(Operation::DeleteLayer {
+            name: name.to_string(),
+        })?;
+        Ok(())
+    }
+
+    /// Set XDATA on many entities in a single atomic operation.
+    ///
+    /// Each tuple is `(entity_id, application_name, record)`. Pass `None` for
+    /// `record` to delete the application's data. Fails up-front if any id is
+    /// invalid; the whole batch is one undo step.
+    pub fn set_xdata_many<I, S>(&self, items: I) -> ApiResult<()>
+    where
+        I: IntoIterator<Item = (ObjectId, S, Option<XDataRecord>)>,
+        S: Into<String>,
+    {
+        let updates: Vec<_> = items
+            .into_iter()
+            .map(|(id, app, record)| (id, app.into(), record))
+            .collect();
+        if updates.is_empty() {
+            return Ok(());
+        }
+        self.session.apply_op(Operation::SetXDataMany(updates))?;
+        Ok(())
+    }
+
     /// Batch of read-only queries in ONE round-trip (safe: no mutation/undo).
     /// The closure records queries on a [`QueryBatch`]; the results are returned
     /// in the same order as a [`QueryResults`] view the caller destructures.
@@ -318,6 +386,12 @@ macro_rules! handle {
                 self.id
             }
         }
+    };
+}
+
+macro_rules! entity_handle {
+    ($name:ident) => {
+        handle!($name);
         impl $name {
             pub fn bounds(&self) -> ApiResult<Aabb> {
                 match self.session.one_query(Query::GetBounds { id: self.id })? {
@@ -336,24 +410,62 @@ macro_rules! handle {
                 })?;
                 Ok(())
             }
+            /// Return the entity's current layer name (normalized uppercase).
+            pub fn layer(&self) -> ApiResult<String> {
+                match self
+                    .session
+                    .one_query(Query::GetEntityLayer { id: self.id })?
+                {
+                    QueryResult::EntityLayer(name) => Ok(name),
+                    _ => Err(ApiError::Transport("unexpected entity layer result".into())),
+                }
+            }
+            /// Move the entity to a different layer. One undo step; fails if the
+            /// target layer does not exist or is locked.
+            pub fn set_layer(&self, layer: &str) -> ApiResult<()> {
+                self.session.apply_op(Operation::SetEntityLayer {
+                    id: self.id,
+                    layer: layer.to_string(),
+                })?;
+                Ok(())
+            }
         }
     };
 }
 
-handle!(Entity);
-handle!(Solid);
-handle!(Line);
-handle!(Circle);
-handle!(Polyline);
-handle!(Point);
-handle!(ArcCurve);
-handle!(Ellipse);
-handle!(Spline);
-handle!(Ray);
-handle!(XLine);
-handle!(Text);
-handle!(MText);
-handle!(Dimension);
+entity_handle!(Entity);
+entity_handle!(Solid);
+entity_handle!(Line);
+entity_handle!(Circle);
+entity_handle!(Polyline);
+entity_handle!(Point);
+entity_handle!(ArcCurve);
+entity_handle!(Ellipse);
+entity_handle!(Spline);
+entity_handle!(Ray);
+entity_handle!(XLine);
+entity_handle!(Text);
+entity_handle!(MText);
+entity_handle!(Dimension);
+handle!(XRecord);
+
+impl XRecord {
+    /// Read the XRECORD payload.
+    pub fn payload(&self) -> ApiResult<XRecordSpec> {
+        match self.session.one_query(Query::GetXRecord { id: self.id })? {
+            QueryResult::XRecord(spec) => Ok(spec),
+            _ => Err(ApiError::Transport("unexpected xrecord result".into())),
+        }
+    }
+    /// Replace the XRECORD payload in place (one undo step).
+    pub fn set_payload(&self, spec: &XRecordSpec) -> ApiResult<()> {
+        self.session.apply_op(Operation::SetXRecord {
+            id: self.id,
+            spec: spec.clone(),
+        })?;
+        Ok(())
+    }
+}
 
 impl Dimension {
     /// The measured value of this dimension (distance for linear/radius, degrees
@@ -413,6 +525,26 @@ impl Entity {
             id: self.id,
             view_target,
             view_height,
+        })?;
+        Ok(())
+    }
+    /// The XDATA record for `application_name` on this entity (`None` if absent).
+    pub fn xdata(&self, application_name: &str) -> ApiResult<Option<XDataRecord>> {
+        match self.session.one_query(Query::GetXData {
+            id: self.id,
+            application_name: application_name.to_string(),
+        })? {
+            QueryResult::XData(v) => Ok(v),
+            _ => Err(ApiError::Transport("unexpected xdata result".into())),
+        }
+    }
+    /// Attach or replace an XDATA record for `application_name` on this entity.
+    /// Pass `None` to remove the record (one undo step).
+    pub fn set_xdata(&self, application_name: &str, record: Option<XDataRecord>) -> ApiResult<()> {
+        self.session.apply_op(Operation::SetXData {
+            id: self.id,
+            application_name: application_name.to_string(),
+            record,
         })?;
         Ok(())
     }
@@ -621,22 +753,80 @@ impl CurveCollection {
         Ok((self.session.clone(), id))
     }
     pub fn create_line(&self, start: [f64; 3], end: [f64; 3]) -> ApiResult<Line> {
-        let (s, id) = self.create_curve(Curve2Spec::Line { start, end })?;
+        let (s, id) = self.create_curve(Curve2Spec::Line {
+            start,
+            end,
+            layer: None,
+        })?;
+        Ok(Line::new(s, id))
+    }
+    pub fn create_line_on_layer(
+        &self,
+        start: [f64; 3],
+        end: [f64; 3],
+        layer: &str,
+    ) -> ApiResult<Line> {
+        let (s, id) = self.create_curve(Curve2Spec::Line {
+            start,
+            end,
+            layer: Some(layer.to_string()),
+        })?;
         Ok(Line::new(s, id))
     }
     pub fn create_circle(&self, centre: [f64; 3], radius: f64) -> ApiResult<Circle> {
-        let (s, id) = self.create_curve(Curve2Spec::Circle { centre, radius })?;
+        let (s, id) = self.create_curve(Curve2Spec::Circle {
+            centre,
+            radius,
+            layer: None,
+        })?;
+        Ok(Circle::new(s, id))
+    }
+    pub fn create_circle_on_layer(
+        &self,
+        centre: [f64; 3],
+        radius: f64,
+        layer: &str,
+    ) -> ApiResult<Circle> {
+        let (s, id) = self.create_curve(Curve2Spec::Circle {
+            centre,
+            radius,
+            layer: Some(layer.to_string()),
+        })?;
         Ok(Circle::new(s, id))
     }
     pub fn create_polyline(&self, points: &[[f64; 3]], closed: bool) -> ApiResult<Polyline> {
         let (s, id) = self.create_curve(Curve2Spec::Polyline {
             points: points.to_vec(),
             closed,
+            layer: None,
+        })?;
+        Ok(Polyline::new(s, id))
+    }
+    pub fn create_polyline_on_layer(
+        &self,
+        points: &[[f64; 3]],
+        closed: bool,
+        layer: &str,
+    ) -> ApiResult<Polyline> {
+        let (s, id) = self.create_curve(Curve2Spec::Polyline {
+            points: points.to_vec(),
+            closed,
+            layer: Some(layer.to_string()),
         })?;
         Ok(Polyline::new(s, id))
     }
     pub fn create_point(&self, position: [f64; 3]) -> ApiResult<Point> {
-        let (s, id) = self.create_curve(Curve2Spec::Point { position })?;
+        let (s, id) = self.create_curve(Curve2Spec::Point {
+            position,
+            layer: None,
+        })?;
+        Ok(Point::new(s, id))
+    }
+    pub fn create_point_on_layer(&self, position: [f64; 3], layer: &str) -> ApiResult<Point> {
+        let (s, id) = self.create_curve(Curve2Spec::Point {
+            position,
+            layer: Some(layer.to_string()),
+        })?;
         Ok(Point::new(s, id))
     }
     pub fn create_arc(
@@ -651,6 +841,24 @@ impl CurveCollection {
             radius,
             start_angle,
             end_angle,
+            layer: None,
+        })?;
+        Ok(ArcCurve::new(s, id))
+    }
+    pub fn create_arc_on_layer(
+        &self,
+        centre: [f64; 3],
+        radius: f64,
+        start_angle: f64,
+        end_angle: f64,
+        layer: &str,
+    ) -> ApiResult<ArcCurve> {
+        let (s, id) = self.create_curve(Curve2Spec::Arc {
+            centre,
+            radius,
+            start_angle,
+            end_angle,
+            layer: Some(layer.to_string()),
         })?;
         Ok(ArcCurve::new(s, id))
     }
@@ -668,6 +876,26 @@ impl CurveCollection {
             ratio,
             start,
             end,
+            layer: None,
+        })?;
+        Ok(Ellipse::new(s, id))
+    }
+    pub fn create_ellipse_on_layer(
+        &self,
+        centre: [f64; 3],
+        major_axis: [f64; 3],
+        ratio: f64,
+        start: f64,
+        end: f64,
+        layer: &str,
+    ) -> ApiResult<Ellipse> {
+        let (s, id) = self.create_curve(Curve2Spec::Ellipse {
+            centre,
+            major_axis,
+            ratio,
+            start,
+            end,
+            layer: Some(layer.to_string()),
         })?;
         Ok(Ellipse::new(s, id))
     }
@@ -683,15 +911,67 @@ impl CurveCollection {
             control_points: control_points.to_vec(),
             knots: knots.to_vec(),
             weights: weights.to_vec(),
+            layer: None,
+        })?;
+        Ok(Spline::new(s, id))
+    }
+    pub fn create_spline_on_layer(
+        &self,
+        degree: i32,
+        control_points: &[[f64; 3]],
+        knots: &[f64],
+        weights: &[f64],
+        layer: &str,
+    ) -> ApiResult<Spline> {
+        let (s, id) = self.create_curve(Curve2Spec::Spline {
+            degree,
+            control_points: control_points.to_vec(),
+            knots: knots.to_vec(),
+            weights: weights.to_vec(),
+            layer: Some(layer.to_string()),
         })?;
         Ok(Spline::new(s, id))
     }
     pub fn create_ray(&self, origin: [f64; 3], direction: [f64; 3]) -> ApiResult<Ray> {
-        let (s, id) = self.create_curve(Curve2Spec::Ray { origin, direction })?;
+        let (s, id) = self.create_curve(Curve2Spec::Ray {
+            origin,
+            direction,
+            layer: None,
+        })?;
+        Ok(Ray::new(s, id))
+    }
+    pub fn create_ray_on_layer(
+        &self,
+        origin: [f64; 3],
+        direction: [f64; 3],
+        layer: &str,
+    ) -> ApiResult<Ray> {
+        let (s, id) = self.create_curve(Curve2Spec::Ray {
+            origin,
+            direction,
+            layer: Some(layer.to_string()),
+        })?;
         Ok(Ray::new(s, id))
     }
     pub fn create_xline(&self, origin: [f64; 3], direction: [f64; 3]) -> ApiResult<XLine> {
-        let (s, id) = self.create_curve(Curve2Spec::XLine { origin, direction })?;
+        let (s, id) = self.create_curve(Curve2Spec::XLine {
+            origin,
+            direction,
+            layer: None,
+        })?;
+        Ok(XLine::new(s, id))
+    }
+    pub fn create_xline_on_layer(
+        &self,
+        origin: [f64; 3],
+        direction: [f64; 3],
+        layer: &str,
+    ) -> ApiResult<XLine> {
+        let (s, id) = self.create_curve(Curve2Spec::XLine {
+            origin,
+            direction,
+            layer: Some(layer.to_string()),
+        })?;
         Ok(XLine::new(s, id))
     }
     /// A RASTER_IMAGE placed at `insertion_point` (host auto-registers the image definition).
@@ -874,10 +1154,42 @@ impl CurveCollection {
         Ok(MText::new(self.session.clone(), id))
     }
     /// Bulk-create many points in ONE op: all-or-nothing, one undo step.
+    /// Places points on the current layer (`layer: None`).
     pub fn create_points(&self, positions: &[[f64; 3]]) -> ApiResult<Vec<Point>> {
         let specs: Vec<crate::ops::EntitySpec> = positions
             .iter()
-            .map(|&p| crate::ops::EntitySpec::Curve(Curve2Spec::Point { position: p }))
+            .map(|&p| {
+                crate::ops::EntitySpec::Curve(crate::ops::Curve2Spec::Point {
+                    position: p,
+                    layer: None,
+                })
+            })
+            .collect();
+        let receipt = self.session.apply_op(Operation::CreateMany(specs))?;
+        let outcome = receipt
+            .outcome
+            .ok_or_else(|| ApiError::Transport("create_many returned no outcome".into()))?;
+        Ok(outcome
+            .new_ids()
+            .iter()
+            .map(|&id| Point::new(self.session.clone(), id))
+            .collect())
+    }
+
+    /// Bulk-create many points on a specific layer in ONE op.
+    pub fn create_points_on_layer(
+        &self,
+        positions: &[[f64; 3]],
+        layer: &str,
+    ) -> ApiResult<Vec<Point>> {
+        let specs: Vec<crate::ops::EntitySpec> = positions
+            .iter()
+            .map(|&p| {
+                crate::ops::EntitySpec::Curve(crate::ops::Curve2Spec::Point {
+                    position: p,
+                    layer: Some(layer.to_string()),
+                })
+            })
             .collect();
         let receipt = self.session.apply_op(Operation::CreateMany(specs))?;
         let outcome = receipt
@@ -1001,6 +1313,41 @@ impl EntityCollection {
         self.session.apply_op(Operation::Delete { id })?;
         Ok(())
     }
+
+    /// Create a standalone `XRECORD` object.
+    pub fn create_xrecord(&self, spec: &XRecordSpec) -> ApiResult<XRecord> {
+        let receipt = self
+            .session
+            .apply_op(Operation::CreateXRecord(spec.clone()))?;
+        let id = receipt
+            .outcome
+            .and_then(|o| o.new_id())
+            .ok_or_else(|| ApiError::Transport("create_xrecord returned no id".into()))?;
+        Ok(XRecord::new(self.session.clone(), id))
+    }
+
+    /// Lookup an `XRECORD` object by id and return a typed accessor handle.
+    pub fn get_xrecord(&self, id: ObjectId) -> ApiResult<XRecord> {
+        // Validate existence + that the payload is readable as an XRecord.
+        match self.session.one_query(Query::GetXRecord { id })? {
+            QueryResult::XRecord(_) => Ok(XRecord::new(self.session.clone(), id)),
+            _ => Err(ApiError::Transport("unexpected xrecord result".into())),
+        }
+    }
+
+    /// Bulk-create many entities in ONE op (all-or-nothing, one undo step).
+    pub fn create_many(&self, specs: &[crate::ops::EntitySpec]) -> ApiResult<Vec<Entity>> {
+        let receipt = self.session.apply_op(Operation::CreateMany(specs.to_vec()))?;
+        let outcome = receipt
+            .outcome
+            .ok_or_else(|| ApiError::Transport("create_many returned no outcome".into()))?;
+        Ok(outcome
+            .new_ids()
+            .iter()
+            .map(|&id| Entity::new(self.session.clone(), id))
+            .collect())
+    }
+
     /// Bulk transform (one op, all-or-nothing).
     pub fn transform_many(&self, ids: &[ObjectId], placement: PlacementSpec) -> ApiResult<()> {
         self.session.apply_op(Operation::TransformMany {

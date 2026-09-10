@@ -4,7 +4,7 @@ use crate::t;
 use crate::command::EntityTransform;
 use crate::entities::common::{
     edit_prop as edit, format_length, parse_f64, ro_prop as ro, square_grip,
-    stepper_prop as stepper,
+    stepper_prop as stepper, VARIES_LABEL,
 };
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
 use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
@@ -609,6 +609,51 @@ impl Grippable for Polyline2D {
     }
 }
 
+pub(crate) fn polyline2d_vertex_segment_widths(
+    vertex: &acadrust::entities::Vertex2D,
+    default_start: f64,
+    default_end: f64,
+) -> (f64, f64) {
+    if vertex.start_width > 1e-9 || vertex.end_width > 1e-9 {
+        (vertex.start_width, vertex.end_width)
+    } else {
+        (default_start, default_end)
+    }
+}
+
+pub(crate) fn polyline2d_global_width(pline: &Polyline2D) -> Option<f64> {
+    let filtered = drawn_vertices2d(pline);
+    let verts: &[acadrust::entities::Vertex2D] =
+        filtered.as_deref().unwrap_or(&pline.vertices);
+    let count = verts.len();
+    let seg_count = if pline.is_closed() {
+        count
+    } else {
+        count.saturating_sub(1)
+    };
+    if seg_count == 0 {
+        if (pline.start_width - pline.end_width).abs() < 1e-6 {
+            return Some(pline.start_width);
+        } else {
+            return None;
+        }
+    }
+    let (w0_start, w0_end) =
+        polyline2d_vertex_segment_widths(&verts[0], pline.start_width, pline.end_width);
+    if (w0_start - w0_end).abs() > 1e-6 {
+        return None;
+    }
+    let w0 = w0_start;
+    for i in 1..seg_count {
+        let (sw, ew) =
+            polyline2d_vertex_segment_widths(&verts[i], pline.start_width, pline.end_width);
+        if (sw - ew).abs() > 1e-6 || (sw - w0).abs() > 1e-6 {
+            return None;
+        }
+    }
+    Some(w0)
+}
+
 impl PropertyEditable for Polyline2D {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
         let n = self.vertices.len();
@@ -631,12 +676,22 @@ impl PropertyEditable for Polyline2D {
         let v = self.vertices.get(vi);
         let vertex_x = v.map(|v| v.location.x).unwrap_or_default();
         let vertex_y = v.map(|v| v.location.y).unwrap_or_default();
-        let seg_start_w = v.map(|v| v.start_width).unwrap_or_default();
-        let seg_end_w = v.map(|v| v.end_width).unwrap_or_default();
+        let (seg_start_w, seg_end_w) = v.map_or((0.0, 0.0), |v| {
+            polyline2d_vertex_segment_widths(v, self.start_width, self.end_width)
+        });
         let vertex_label = if n == 0 {
             "—".to_string()
         } else {
             format!("{} / {}", vi + 1, n)
+        };
+
+        let global_width_prop = match polyline2d_global_width(self) {
+            Some(gw) => edit(t!("Global width").as_ref(), "pl2_start_w", gw),
+            None => Property {
+                label: t!("Global width").into_owned(),
+                field: "pl2_start_w",
+                value: PropValue::EditText(VARIES_LABEL.to_string()),
+            },
         };
 
         vec![
@@ -648,7 +703,7 @@ impl PropertyEditable for Polyline2D {
                     edit(t!("Vertex Y").as_ref(), "pl2_vertex_y", vertex_y),
                     edit(t!("Start segment width").as_ref(), "pl2_seg_start_w", seg_start_w),
                     edit(t!("End segment width").as_ref(), "pl2_seg_end_w", seg_end_w),
-                    edit(t!("Global width").as_ref(), "pl2_start_w", self.start_width),
+                    global_width_prop,
                     edit(t!("Elevation").as_ref(), "pl2_elevation", self.elevation),
                     ro(t!("Area").as_ref(), "pl2_area", format!("{area:.4}")),
                     ro(t!("Length").as_ref(), "pl2_length", format!("{length:.4}")),
@@ -706,9 +761,13 @@ impl PropertyEditable for Polyline2D {
             }
             "pl2_start_w" => {
                 if let Some(v) = parse_f64(value) {
-                    if v >= 0.0 {
+                    if v.is_finite() && v >= 0.0 {
                         self.start_width = v;
                         self.end_width = v;
+                        for vtx in &mut self.vertices {
+                            vtx.start_width = v;
+                            vtx.end_width = v;
+                        }
                     }
                 }
             }
@@ -723,16 +782,44 @@ impl PropertyEditable for Polyline2D {
                 }
             }
             "pl2_seg_start_w" => {
-                if let (Some(v), Some(vert)) = (parse_f64(value), self.vertices.get_mut(vi)) {
-                    if v >= 0.0 {
-                        vert.start_width = v;
+                if let Some(v) = parse_f64(value) {
+                    if v.is_finite() && v >= 0.0 {
+                        if self.start_width > 1e-9 || self.end_width > 1e-9 {
+                            let def_s = self.start_width;
+                            let def_e = self.end_width;
+                            for vtx in &mut self.vertices {
+                                if vtx.start_width <= 1e-9 && vtx.end_width <= 1e-9 {
+                                    vtx.start_width = def_s;
+                                    vtx.end_width = def_e;
+                                }
+                            }
+                            self.start_width = 0.0;
+                            self.end_width = 0.0;
+                        }
+                        if let Some(vert) = self.vertices.get_mut(vi) {
+                            vert.start_width = v;
+                        }
                     }
                 }
             }
             "pl2_seg_end_w" => {
-                if let (Some(v), Some(vert)) = (parse_f64(value), self.vertices.get_mut(vi)) {
-                    if v >= 0.0 {
-                        vert.end_width = v;
+                if let Some(v) = parse_f64(value) {
+                    if v.is_finite() && v >= 0.0 {
+                        if self.start_width > 1e-9 || self.end_width > 1e-9 {
+                            let def_s = self.start_width;
+                            let def_e = self.end_width;
+                            for vtx in &mut self.vertices {
+                                if vtx.start_width <= 1e-9 && vtx.end_width <= 1e-9 {
+                                    vtx.start_width = def_s;
+                                    vtx.end_width = def_e;
+                                }
+                            }
+                            self.start_width = 0.0;
+                            self.end_width = 0.0;
+                        }
+                        if let Some(vert) = self.vertices.get_mut(vi) {
+                            vert.end_width = v;
+                        }
                     }
                 }
             }
@@ -1330,4 +1417,85 @@ pub(crate) fn wide_fills(pl: &acadrust::entities::Polyline2D) -> ([f64; 2], Vec<
         }
     }
     (origin, out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entities::traits::PropertyEditable;
+    use acadrust::entities::{Polyline2D, Vertex2D};
+    use acadrust::Vector3;
+
+    fn make_test_polyline2d(count: usize, start_w: f64, end_w: f64) -> Polyline2D {
+        let mut pl = Polyline2D::default();
+        pl.start_width = start_w;
+        pl.end_width = end_w;
+        for i in 0..count {
+            pl.vertices.push(Vertex2D::new(Vector3::new(i as f64 * 10.0, 0.0, 0.0)));
+        }
+        pl
+    }
+
+    #[test]
+    fn test_polyline2d_uniform_width_shows_global_width() {
+        let pl = make_test_polyline2d(3, 4.0, 4.0);
+        assert_eq!(polyline2d_global_width(&pl), Some(4.0));
+
+        let props = pl.geometry_properties(&[]);
+        let geom_props = &props[0].props;
+        let gw = geom_props.iter().find(|p| p.field == "pl2_start_w").unwrap();
+        match &gw.value {
+            PropValue::EditText(val) => assert_eq!(parse_f64(val), Some(4.0)),
+            _ => panic!("expected EditText"),
+        }
+    }
+
+    #[test]
+    fn test_polyline2d_varying_vertex_width_shows_varies() {
+        let mut pl = make_test_polyline2d(3, 4.0, 4.0);
+        pl.vertices[0].start_width = 1.0;
+        pl.vertices[0].end_width = 2.0;
+
+        assert_eq!(polyline2d_global_width(&pl), None);
+
+        let props = pl.geometry_properties(&[]);
+        let geom_props = &props[0].props;
+        let gw = geom_props.iter().find(|p| p.field == "pl2_start_w").unwrap();
+        match &gw.value {
+            PropValue::EditText(val) => assert_eq!(val, VARIES_LABEL),
+            _ => panic!("expected EditText with VARIES_LABEL"),
+        }
+    }
+
+    #[test]
+    fn test_polyline2d_modifying_global_width_sets_all_vertex_widths() {
+        let mut pl = make_test_polyline2d(3, 4.0, 4.0);
+        pl.vertices[0].start_width = 1.0;
+        pl.vertices[0].end_width = 2.0;
+
+        pl.apply_geom_prop("pl2_start_w", "8.0");
+
+        assert_eq!(pl.start_width, 8.0);
+        assert_eq!(pl.end_width, 8.0);
+        for v in &pl.vertices {
+            assert_eq!(v.start_width, 8.0);
+            assert_eq!(v.end_width, 8.0);
+        }
+        assert_eq!(polyline2d_global_width(&pl), Some(8.0));
+    }
+
+    #[test]
+    fn test_polyline2d_modifying_segment_width_materializes_default_width() {
+        let mut pl = make_test_polyline2d(3, 4.0, 4.0);
+        assert_eq!(pl.vertices[0].start_width, 0.0);
+
+        pl.apply_geom_prop("pl2_seg_start_w", "1.5");
+
+        assert_eq!(pl.vertices[0].start_width, 1.5);
+        assert_eq!(pl.vertices[0].end_width, 4.0);
+        assert_eq!(pl.vertices[1].start_width, 4.0);
+        assert_eq!(pl.vertices[1].end_width, 4.0);
+
+        assert_eq!(polyline2d_global_width(&pl), None);
+    }
 }

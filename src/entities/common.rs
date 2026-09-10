@@ -4,6 +4,8 @@ use std::collections::HashSet;
 use crate::scene::model::object::{GripDef, GripShape, PropValue, Property};
 use crate::scene::model::wire_model::PatternStationPiece;
 
+pub const VARIES_LABEL: &str = "*VARIES*";
+
 /// Linear / angular unit format pulled from the document header so the
 /// per-thread properties pipeline can format values consistently without
 /// passing the document through every callsite.

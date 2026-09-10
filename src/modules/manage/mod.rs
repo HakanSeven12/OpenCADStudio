@@ -79,7 +79,13 @@ impl CadModule for ManageModule {
                 // ── Application ───────────────────────────────────────────────────
                 RibbonGroup {
                     title: "Application",
-                    tools: vec![RibbonItem::LargeTool(about::tool())],
+                    tools: vec![
+                        // The tool and its icon already existed but were never
+                        // added to a group, so the dialog could only be reached
+                        // by typing OPTIONS or from the start page.
+                        RibbonItem::LargeTool(options::tool()),
+                        RibbonItem::LargeTool(about::tool()),
+                    ],
                 },
             ]
         })

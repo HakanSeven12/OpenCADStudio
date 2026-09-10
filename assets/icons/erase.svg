@@ -1,4 +1,58 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Erase">
-  <polygon points="5,16 13,6 19,12 11,21" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="4" y1="21" x2="20" y2="21" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 24 24"
+   role="img"
+   aria-label="Erase"
+   version="1.1"
+   id="svg1"
+   sodipodi:docname="erase.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1" />
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#505050"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:showpageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#505050"
+     inkscape:zoom="28.051892"
+     inkscape:cx="6.0958454"
+     inkscape:cy="10.926179"
+     inkscape:window-width="1920"
+     inkscape:window-height="939"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg1" />
+  <line
+     x1="3.8424129"
+     y1="19.83783"
+     x2="20.157587"
+     y2="4.1621704"
+     stroke="#6db7ed"
+     stroke-width="3.01569"
+     stroke-linecap="round"
+     stroke-linejoin="round"
+     fill="none"
+     id="line1"
+     style="fill:none;stroke:#ff0000;stroke-width:3;stroke-dasharray:none;stroke-opacity:1" />
+  <line
+     x1="3.8149595"
+     y1="4.1357937"
+     x2="20.185041"
+     y2="19.864206"
+     stroke="#6db7ed"
+     stroke-width="3.03332"
+     stroke-linecap="round"
+     stroke-linejoin="round"
+     fill="none"
+     id="line1-5"
+     style="stroke:#ff0000;stroke-width:3;stroke-dasharray:none;stroke-opacity:1" />
 </svg>

@@ -145,6 +145,39 @@ pub(crate) fn snaps_from_osmode(osmode: i32) -> (Vec<SnapType>, bool) {
     (modes, osmode & OSMODE_SUPPRESS == 0)
 }
 
+fn deserialize_options_tab<'de, D>(
+    deserializer: D,
+) -> Result<crate::ui::window::options::OptionsTab, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use crate::ui::window::options::OptionsTab;
+    use serde::Deserialize;
+    let name = String::deserialize(deserializer).unwrap_or_default();
+    Ok(match name.as_str() {
+        "files" => OptionsTab::Files,
+        "open-and-save" => OptionsTab::OpenAndSave,
+        "display" => OptionsTab::Display,
+        "drafting" => OptionsTab::Drafting,
+        "modeling" => OptionsTab::Modeling,
+        "selection" => OptionsTab::Selection,
+        "user-preferences" => OptionsTab::UserPreferences,
+        _ => OptionsTab::General,
+    })
+}
+
+/// Render a drafting angle without a trailing `.0`, so `22.5` but `30`.
+///
+/// The polar pop-up formats its presets the same way; both are showing the
+/// same kind of number to the same person.
+pub fn format_snap_angle(deg: f32) -> String {
+    if (deg - deg.round()).abs() < 1e-4 {
+        format!("{}", deg.round() as i32)
+    } else {
+        format!("{deg}")
+    }
+}
+
 /// GRIPOBJLIMIT default: past this many selected objects, no grips are drawn.
 pub const DEFAULT_GRIP_OBJECT_LIMIT: i32 = 100;
 
@@ -170,6 +203,18 @@ pub struct UserSettings {
     /// GRIPOBJLIMIT: past this many selected objects, no grips are drawn at
     /// all. 0 means no limit. The drawing header carries no slot for it.
     pub grip_object_limit: i32,
+    /// Last Options page; unknown saved names fall back without rejecting the config.
+    #[serde(default, deserialize_with = "deserialize_options_tab")]
+    pub options_tab: crate::ui::window::options::OptionsTab,
+    /// Show the navigation cube (NAVVCUBE).
+    pub show_viewcube: bool,
+    /// Show the UCS icon (UCSICON).
+    pub show_ucs_icon: bool,
+    /// Draw the UCS icon at the origin rather than in the corner
+    /// (UCSICON ORigin / NOorigin).
+    pub ucs_icon_at_origin: bool,
+    /// Selection cycling: a click where objects overlap opens a picker.
+    pub selection_cycling: bool,
     /// CURSORTYPE: crosshair or the platform pointer over the drawing.
     pub cursor_type: CursorType,
     /// Explicit crosshair RGB. `None` keeps automatic background contrast.
@@ -227,6 +272,10 @@ pub struct UserSettings {
     /// the current creation layer/style. Registry-style, app-level preference.
     #[serde(default = "default_dimension_continue_mode")]
     pub dimension_continue_mode: i16,
+    /// DELOBJ: source-geometry deletion policy (0–3). Registry-style,
+    /// app-level preference; first-run default is 1.
+    #[serde(default = "default_delete_objects")]
+    pub delete_objects: i16,
     /// TEXTFILL: fill TrueType glyphs (true) or draw them hollow (false).
     pub textfill: bool,
     /// When true, saving over an existing file first copies it to a sibling
@@ -265,12 +314,6 @@ pub struct UserSettings {
     pub pick_drag_rect: bool,
     /// Show the floating Quick Properties panel when objects are selected.
     pub quick_properties: bool,
-    /// Persisted viewport background colours (0–255 RGB); `None` = app default
-    /// (dark grey model / off-white paper). Applied to every drawing tab on
-    /// launch and to tabs opened later, so a chosen background survives restarts
-    /// (#188).
-    pub bg_color: Option<[u8; 3]>,
-    pub paper_bg_color: Option<[u8; 3]>,
     /// Interface language preference. `System` negotiates against the
     /// platform locale on every launch.
     pub language: crate::i18n::Language,
@@ -296,6 +339,10 @@ pub struct UserSettings {
 
 fn default_clipromptlines() -> i32 {
     3
+}
+
+fn default_delete_objects() -> i16 {
+    1
 }
 
 fn default_commandline_fade_ms() -> i32 {
@@ -344,6 +391,11 @@ impl Default for UserSettings {
             zoom_factor: 60,
             cursor_size: 5,
             pick_box: 3,
+            options_tab: crate::ui::window::options::OptionsTab::General,
+            show_viewcube: true,
+            show_ucs_icon: true,
+            ucs_icon_at_origin: true,
+            selection_cycling: false,
             double_click_block_refedit: false,
             double_click_block_attedit: true,
             grip_object_limit: DEFAULT_GRIP_OBJECT_LIMIT,
@@ -367,6 +419,7 @@ impl Default for UserSettings {
             texteditmode: false,
             quick_dimension_snap_priority: 0,
             dimension_continue_mode: 1,
+            delete_objects: 1,
             textfill: true,
             backup_on_save: true,
             file_assoc_enabled: true,
@@ -377,8 +430,6 @@ impl Default for UserSettings {
             pick_add: true,
             pick_drag_rect: false,
             quick_properties: false,
-            bg_color: None,
-            paper_bg_color: None,
             language: crate::i18n::Language::default(),
             cliprompt_lines: 3,
             commandline_fade_ms: 3000,
@@ -427,5 +478,24 @@ mod tests {
         let a: std::collections::HashSet<_> = all.into_iter().collect();
         let b: std::collections::HashSet<_> = back.into_iter().collect();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn a_page_name_that_no_longer_exists_does_not_cost_the_other_settings() {
+        let json = r#"{
+            "settings": {
+                "options_tab": "drawing",
+                "pick_add": false,
+                "savetime_min": 42
+            }
+        }"#;
+        let cfg: crate::app::config::AppConfig =
+            serde_json::from_str(json).expect("an unknown page name must not fail the parse");
+        assert_eq!(
+            cfg.settings.options_tab,
+            crate::ui::window::options::OptionsTab::General,
+        );
+        assert!(!cfg.settings.pick_add, "the rest of the file must survive");
+        assert_eq!(cfg.settings.savetime_min, 42);
     }
 }

@@ -54,10 +54,7 @@ fn main() -> ocs_doc_api::ApiResult<()> {
     }
 
     // A totally unknown id also surfaces a structured error.
-    assert!(matches!(
-        doc.entities().get(ObjectId::from_u64(0xDEAD)),
-        Err(_)
-    ));
+    assert!(doc.entities().get(ObjectId::from_u64(0xDEAD)).is_err());
     println!("failure semantics verified");
     Ok(())
 }

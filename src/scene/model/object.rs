@@ -120,6 +120,8 @@ pub enum GripShape {
     Circle,
     /// Screen-offset menu selector.
     Dropdown,
+    /// Menu selector placed immediately beside its anchor grip.
+    DropdownAdjacent,
 }
 
 /// Describes one grip point for an entity.
@@ -202,6 +204,10 @@ pub enum GripMenuAction {
     RefineVertices,
     ShowFit,
     ShowControlVertices,
+    SectionPlane,
+    SectionSlice,
+    SectionBoundary,
+    SectionVolume,
     MoveWithText,
     StackText,
     UnstackText,

@@ -6,7 +6,7 @@
    version="1.1"
    id="svg6"
    sodipodi:docname="trim.svg"
-   inkscape:version="1.4.3 (0d15f75042, 2025-12-25)"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -22,9 +22,9 @@
      inkscape:pageopacity="0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#505050"
-     inkscape:zoom="11.265625"
-     inkscape:cx="31.955617"
-     inkscape:cy="32"
+     inkscape:zoom="6.1823588"
+     inkscape:cx="16.498557"
+     inkscape:cy="24.181709"
      inkscape:window-width="1920"
      inkscape:window-height="939"
      inkscape:window-x="0"
@@ -32,32 +32,32 @@
      inkscape:window-maximized="1"
      inkscape:current-layer="svg6" />
   <path
-     style="fill:#ff0000;fill-opacity:1;stroke:#ff0000;stroke-width:2.25;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;stroke-linecap:round"
-     d="M 12,12 V 2.0305132"
+     style="fill:#ff0000;fill-opacity:1;stroke:#ff0000;stroke-width:2.62057;stroke-linecap:round;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+     d="M 12.000002,12.696386 V 1.3102848"
      id="path6" />
   <!-- Cutting boundary (horizontal line) -->
   <line
-     x1="3"
-     y1="11.75"
-     x2="21"
-     y2="11.75"
-     stroke="#B4B6B9"
+     x1="1.3102847"
+     y1="12.410862"
+     x2="22.689716"
+     y2="12.410862"
+     stroke="#b4b6b9"
      stroke-width="1.5"
      stroke-linecap="round"
      id="line1"
-     style="stroke-width:2.25;stroke-dasharray:none" />
+     style="stroke-width:2.62057;stroke-dasharray:none" />
   <!-- Left vertical line (full, not trimmed) -->
   <!-- Right vertical line: lower portion kept -->
   <line
-     x1="12"
-     y1="11.75"
-     x2="12"
-     y2="20.75"
-     stroke="#B4B6B9"
+     x1="12.000001"
+     y1="12.410862"
+     x2="12.000001"
+     y2="22.689716"
+     stroke="#b4b6b9"
      stroke-width="1.5"
      stroke-linecap="round"
      id="line3"
-     style="stroke-width:2.25;stroke-dasharray:none" />
+     style="stroke-width:2.62057;stroke-dasharray:none" />
   <!-- Right vertical line: upper portion being trimmed (dashed = removed) -->
   <!-- Trim cut indicator (X mark on trimmed segment) -->
 </svg>

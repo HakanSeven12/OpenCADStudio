@@ -1159,27 +1159,45 @@ impl OpenCADStudio {
                         "0" | "OFF" | "FALSE" => Some(false),
                         _ => None,
                     };
+                    let current_delete_objects = self.delete_objects;
+                    let requested_delete_objects = (name == "DELOBJ")
+                        .then(|| value.as_deref()?.parse::<i16>().ok())
+                        .flatten()
+                        .filter(|value| (0..=3).contains(value));
                     let outcome: Result<(String, bool), String> = {
                         let h = &mut self.tabs[i].scene.document.header;
                         match name.as_str() {
+                            // The standalone LTSCALE and CELTSCALE commands
+                            // require a positive value; reaching the same
+                            // variable through SETVAR used to accept zero or a
+                            // negative one, which degenerates every dash
+                            // pattern in the drawing.
                             "LTSCALE" => match &value {
                                 Some(v) => v
                                     .parse::<f64>()
+                                    .ok()
+                                    .filter(|x| x.is_finite() && *x > 0.0)
                                     .map(|x| {
                                         h.linetype_scale = x;
                                         (format!("LTSCALE = {x}"), true)
                                     })
-                                    .map_err(|_| "SETVAR: numeric value required.".into()),
+                                    .ok_or_else(|| {
+                                        "SETVAR: positive numeric value required.".into()
+                                    }),
                                 None => Ok((format!("LTSCALE = {}", h.linetype_scale), false)),
                             },
                             "CELTSCALE" => match &value {
                                 Some(v) => v
                                     .parse::<f64>()
+                                    .ok()
+                                    .filter(|x| x.is_finite() && *x > 0.0)
                                     .map(|x| {
                                         h.current_entity_linetype_scale = x;
                                         (format!("CELTSCALE = {x}"), true)
                                     })
-                                    .map_err(|_| "SETVAR: numeric value required.".into()),
+                                    .ok_or_else(|| {
+                                        "SETVAR: positive numeric value required.".into()
+                                    }),
                                 None => Ok((
                                     format!("CELTSCALE = {}", h.current_entity_linetype_scale),
                                     false,
@@ -1633,15 +1651,18 @@ impl OpenCADStudio {
                                 }
                             },
                             "DELOBJ" => match &value {
-                                Some(v) => parse_bool(v)
-                                    .map(|b| {
-                                        h.delete_objects = b;
-                                        (format!("DELOBJ = {}", b as i32), true)
+                                Some(v) => v
+                                    .parse::<i16>()
+                                    .ok()
+                                    .filter(|value| (0..=3).contains(value))
+                                    .map(|value| {
+                                        (format!("DELOBJ = {value}"), true)
                                     })
-                                    .ok_or_else(|| "SETVAR: 0 or 1 required.".into()),
-                                None => {
-                                    Ok((format!("DELOBJ = {}", h.delete_objects as i32), false))
-                                }
+                                    .ok_or_else(|| "SETVAR: integer from 0 to 3 required.".into()),
+                                None => Ok((
+                                    format!("DELOBJ = {current_delete_objects}"),
+                                    false,
+                                )),
                             },
                             "PLINEGEN" => match &value {
                                 Some(v) => parse_bool(v)
@@ -2119,6 +2140,9 @@ impl OpenCADStudio {
                     };
                     match outcome {
                         Ok((msg, changed)) => {
+                            if let Some(value) = requested_delete_objects {
+                                self.delete_objects = value;
+                            }
                             if changed {
                                 if matches!(
                                     name.as_str(),
@@ -2144,6 +2168,13 @@ impl OpenCADStudio {
                                         | "GRIPHOT"
                                         | "GRIPHOVER"
                                         | "GRIPOBJLIMIT"
+                                        | "DELOBJ"
+                                        // App-level, not part of the drawing:
+                                        // it lives in a process global and is
+                                        // snapshotted into the settings file.
+                                        // Without this it marked the drawing
+                                        // modified instead of persisting.
+                                        | "TEXTFILL"
                                 ) {
                                     self.persist_settings_if_changed();
                                 } else {
@@ -2172,9 +2203,7 @@ impl OpenCADStudio {
                     // TEXTFILL reset the glyph atlas; re-tessellate so text picks
                     // up the re-baked filled / hollow tiles.
                     if name == "TEXTFILL" {
-                        self.tabs[i]
-                            .scene
-                            .invalidate_text_geometry_dependencies();
+                        self.invalidate_text_everywhere();
                     }
                     // LTSCALE scales the dash pattern baked into every wire, and
                     // PDMODE / PDSIZE decide the point glyph built at tessellation
@@ -3120,4 +3149,50 @@ mod tests {
         assert!(app.tabs[app.active_tab].active_cmd.is_none());
         assert_eq!(app.commandline_fade_ms, 5000);
     }
+
+    #[test]
+    fn delobj_accepts_values_zero_through_three() {
+        let mut app = fresh_app();
+
+        for value in 0..=3 {
+            let _ = app.run_command_line(&format!("SETVAR DELOBJ {value}"));
+            assert_eq!(app.delete_objects, value);
+        }
+
+        let _ = app.run_command_line("SETVAR DELOBJ 4");
+        assert_eq!(app.delete_objects, 3);
+    }
 }
+
+#[cfg(test)]
+mod scale_validation_tests {
+    use crate::app::OpenCADStudio;
+
+    /// A linetype scale of zero or less degenerates every dash pattern in the
+    /// drawing, which is why the standalone commands reject it. Reaching the
+    /// same variable through SETVAR used to accept it, so which door you came
+    /// through decided whether the drawing could be broken.
+    #[test]
+    fn both_doors_to_ltscale_refuse_a_non_positive_value() {
+        for name in ["LTSCALE", "CELTSCALE"] {
+            for entry in [format!("{name} -5"), format!("SETVAR {name} -5")] {
+                let mut app = OpenCADStudio::new_for_test();
+                app.automation_op(r#"{"op":"new"}"#);
+                let i = app.active_tab;
+                let before = if name == "LTSCALE" {
+                    app.tabs[i].scene.document.header.linetype_scale
+                } else {
+                    app.tabs[i].scene.document.header.current_entity_linetype_scale
+                };
+                let _ = app.run_command_line(&entry);
+                let after = if name == "LTSCALE" {
+                    app.tabs[i].scene.document.header.linetype_scale
+                } else {
+                    app.tabs[i].scene.document.header.current_entity_linetype_scale
+                };
+                assert_eq!(before, after, "{entry} must be refused");
+            }
+        }
+    }
+}
+

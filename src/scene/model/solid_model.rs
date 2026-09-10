@@ -22,7 +22,8 @@ fn display_tessellation(
     body: &Body,
     facet_resolution: f64,
     chordal_deflection: Option<f64>,
-    isolines: usize,
+    isolines: [usize; 2],
+    planar_isolines: bool,
 ) -> brep::mesh::BodyMesh {
     let resolution = if facet_resolution.is_finite() && facet_resolution > 0.0 {
         facet_resolution.clamp(0.01, 10.0)
@@ -34,7 +35,8 @@ fn display_tessellation(
         |_| cadkernel::tessellation::display_angle_for_resolution(resolution),
     );
     let mut tolerance = brep::mesh::TessellationTolerance::new(max_angle, TOL)
-        .with_isolines(isolines);
+        .with_uv_isolines(isolines[0], isolines[1])
+        .with_planar_isolines(planar_isolines);
     if let Some(deflection) = chordal_deflection {
         tolerance = tolerance.with_chordal_deflection(deflection);
     }
@@ -267,20 +269,42 @@ pub fn edge_wires(body: &Body) -> Vec<acadrust::entities::Wire> {
         .collect()
 }
 
-/// White wireframe used while a solid-history grip is hot.
+/// White wireframe used while a solid-history grip is hot. Surface previews
+/// include the requested construction isolines so their cage follows the edit.
 ///
 /// This deliberately does not touch the resident solid mesh or its entity
 /// wires: the selected source stays visible in blue while the candidate body
 /// is presented as a separate, non-pickable outline until placement.
-pub fn grip_preview_wires(body: &Body, handle: acadrust::Handle) -> Vec<WireModel> {
-    tessellation(body)
+pub fn grip_preview_wires(
+    body: &Body,
+    handle: acadrust::Handle,
+    isolines: [usize; 2],
+    planar_isolines: bool,
+) -> Vec<WireModel> {
+    let tessellation = brep::mesh::tessellate(
+        body,
+        brep::mesh::TessellationTolerance::new(
+            cadkernel::tessellation::DEFAULT_ANGLE,
+            TOL,
+        )
+        .with_uv_isolines(isolines[0], isolines[1])
+        .with_planar_isolines(planar_isolines),
+    );
+    tessellation
         .edges
         .into_iter()
-        .filter(|edge| edge.positions.len() >= 2)
-        .map(|edge| {
+        .map(|edge| edge.positions)
+        .chain(
+            tessellation
+                .isolines
+                .into_iter()
+                .map(|isoline| isoline.positions),
+        )
+        .filter(|positions| positions.len() >= 2)
+        .map(|positions| {
             WireModel::solid_f64(
                 format!("{}-GRIP-PREVIEW", handle.value()),
-                edge.positions,
+                positions,
                 WireModel::WHITE,
                 false,
             )
@@ -453,7 +477,8 @@ pub fn display_from_solid(
     color: [f32; 4],
     facet_resolution: f64,
     chordal_deflection: Option<f64>,
-    isolines: usize,
+    isolines: [usize; 2],
+    planar_isolines: bool,
 ) -> Option<(MeshLodSet, Vec<acadrust::entities::Wire>, [f64; 3])> {
     use acadrust::types::Vector3;
     let tessellation = display_tessellation(
@@ -461,6 +486,7 @@ pub fn display_from_solid(
         facet_resolution,
         chordal_deflection,
         isolines,
+        planar_isolines,
     );
     let center = mesh_center(&tessellation.mesh)?;
     let wires = tessellation
@@ -541,7 +567,7 @@ mod tests {
     use super::*;
 
     fn tri_count(body: &Body) -> usize {
-        display_from_solid(body, [0.7, 0.7, 0.7, 1.0], 1.0, None, 0)
+        display_from_solid(body, [0.7, 0.7, 0.7, 1.0], 1.0, None, [0; 2], false)
             .map(|(m, _, _)| m.lods[0].indices.len() / 3)
             .unwrap_or(0)
     }
@@ -556,6 +582,23 @@ mod tests {
         assert!(tri_count(&sphere_solid(c, 5.0).unwrap()) > 50, "sphere");
         assert!(tri_count(&torus_solid(c, 8.0, 2.0).unwrap()) > 50, "torus");
         assert!(tri_count(&pyramid_solid(c, 5.0, 9.0, 6).unwrap()) >= 8, "pyramid");
+    }
+
+    #[test]
+    fn planar_display_uses_independent_isoline_counts() {
+        let body = box_solid([0.0; 3], 10.0, 10.0, 10.0).unwrap();
+        let display = |counts, planar| {
+            display_from_solid(&body, [0.7, 0.7, 0.7, 1.0], 1.0, None, counts, planar)
+                .unwrap()
+                .0
+                .edge_verts
+                .len()
+        };
+        let boundaries = display([0, 0], false);
+
+        assert_eq!(display([1, 0], true) - boundaries, 12);
+        assert_eq!(display([0, 2], true) - boundaries, 24);
+        assert_eq!(display([2, 2], false), boundaries);
     }
 
     #[test]

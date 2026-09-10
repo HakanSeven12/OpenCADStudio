@@ -36,6 +36,12 @@ class Entity:
 
     def delete(self):
         self._doc._apply_op({"Delete": {"id": self.id}})
+
+    def layer(self):
+        return self._doc._apply_query({"GetEntityLayer": {"id": self.id}})
+
+    def set_layer(self, layer):
+        self._doc._apply_op({"SetEntityLayer": {"id": self.id, "layer": layer}})
 '''
 
 DOCUMENT = '''
@@ -78,6 +84,18 @@ class Document:
     def solids(self): return Solids(self)
     def curves(self): return Curves(self)
     def entities(self): return Entities(self)
+
+    def layers(self):
+        return self._apply_query({"ListLayers": {}})
+
+    def create_layer(self, info):
+        self._apply_op({"CreateLayer": info})
+
+    def update_layer(self, name, info):
+        self._apply_op({"UpdateLayer": {"name": name, "info": info}})
+
+    def delete_layer(self, name):
+        self._apply_op({"DeleteLayer": {"name": name}})
 
 @dataclass
 class DocApi:

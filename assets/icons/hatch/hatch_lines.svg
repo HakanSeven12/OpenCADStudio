@@ -1,18 +1,92 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <defs>
-    <clipPath id="sq">
-      <rect x="4" y="4" width="16" height="16"/>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 24 24"
+   width="64"
+   height="64"
+   version="1.1"
+   id="svg6"
+   sodipodi:docname="hatch_lines.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview6"
+     pagecolor="#505050"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:showpageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#505050"
+     inkscape:zoom="6.3152247"
+     inkscape:cx="34.044711"
+     inkscape:cy="32.698757"
+     inkscape:window-width="1920"
+     inkscape:window-height="939"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg6" />
+  <defs
+     id="defs1">
+    <clipPath
+       id="sq">
+      <rect
+         x="4"
+         y="4"
+         width="16"
+         height="16"
+         id="rect1" />
     </clipPath>
   </defs>
   <!-- ANSI31: 45° diagonal hatch lines clipped to square -->
-  <g clip-path="url(#sq)">
-    <line x1="-2" y1="22" x2="22" y2="-2" stroke="#6DB7ED" stroke-width="1.2"/>
-    <line x1="2"  y1="26" x2="26" y2="2"  stroke="#6DB7ED" stroke-width="1.2"/>
-    <line x1="-6" y1="18" x2="18" y2="-6" stroke="#6DB7ED" stroke-width="1.2"/>
-    <line x1="-10" y1="14" x2="14" y2="-10" stroke="#6DB7ED" stroke-width="1.2"/>
-    <line x1="6"  y1="30" x2="30" y2="6"  stroke="#6DB7ED" stroke-width="1.2"/>
-    <line x1="10" y1="34" x2="34" y2="10" stroke="#6DB7ED" stroke-width="1.2"/>
+  <g
+     clip-path="url(#sq)"
+     id="g6"
+     transform="matrix(1.4946751,0,0,1.5,-5.8935028,-5.999999)">
+    <line
+       x1="-2"
+       y1="22"
+       x2="22"
+       y2="-2"
+       stroke="#6db7ed"
+       stroke-width="1.2"
+       id="line1" />
+    <line
+       x1="2"
+       y1="26"
+       x2="26"
+       y2="2"
+       stroke="#6db7ed"
+       stroke-width="1.2"
+       id="line2" />
+    <line
+       x1="-6"
+       y1="18"
+       x2="18"
+       y2="-6"
+       stroke="#6db7ed"
+       stroke-width="1.2"
+       id="line3" />
+    <line
+       x1="6"
+       y1="30"
+       x2="30"
+       y2="6"
+       stroke="#6db7ed"
+       stroke-width="1.2"
+       id="line5" />
   </g>
   <!-- Square boundary -->
-  <rect x="4" y="4" width="16" height="16" stroke="#B4B6B9" stroke-width="1.5" fill="none"/>
+  <rect
+     x="0.87927544"
+     y="0.87927294"
+     width="22.241451"
+     height="22.241451"
+     stroke="#b4b6b9"
+     stroke-width="1.75855"
+     fill="none"
+     id="rect6" />
 </svg>

@@ -17,6 +17,7 @@ mod validation;
 
 pub mod envelope;
 pub mod facade;
+pub mod layer;
 pub mod ops;
 pub mod query;
 pub mod transport;
@@ -41,9 +42,14 @@ pub use envelope::{DocApiEnvelope, EnvelopeBody, OpOutcome, Receipt};
 pub use facade::{
     ArcCurve, Circle, CurveCollection, Dimension, DocApi, Document, Ellipse, Entity,
     EntityCollection, HasId, Line, MText, OpGroup, Point, Polyline, QueryBatch, QueryResults, Ray,
-    Solid, SolidCollection, Spline, Text, XLine,
+    Solid, SolidCollection, Spline, Text, XLine, XRecord,
 };
-pub use ops::{BoolOp, Curve2Spec, EntitySpec, Operation, PlacementSpec, SolidPrimitive};
+pub use layer::{is_valid_layer_name, normalize_layer_name};
+pub use ops::{
+    BoolOp, Color, Curve2Spec, EntitySpec, LayerFlags, LayerInfo, LineWeight, Operation,
+    PlacementSpec, SolidPrimitive, XDataRecord, XDataValue, XRecordCloningFlags, XRecordEntry,
+    XRecordSpec, XRecordValue,
+};
 pub use query::{Aabb, EntityView, Query, QueryResult};
 
 #[cfg(feature = "host")]
@@ -51,6 +57,9 @@ pub use convert::{
     bulge_arc_segment, curve_spec_to_entity, entity_bounds, entity_kind_name,
     entity_to_profile_curves, transform_entity_geometry,
 };
+#[cfg(feature = "doc_api_host")]
+pub use transport::ipc::doc_api_for_host;
+
 pub use transport::Transport;
 
 /// The crate's own wire-envelope protocol version (`DocApiEnvelope::version`).

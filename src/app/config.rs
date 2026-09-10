@@ -475,7 +475,16 @@ impl AppConfig {
 
     /// Persist the config as JSON. Best-effort; silent on unavailable or
     /// read-only storage.
+    ///
+    /// Does nothing under `cfg(test)`. The path is the developer's own
+    /// settings file, and the suite builds whole applications and changes
+    /// preferences on them — without this, running `cargo test` rewrites the
+    /// settings of whoever ran it.
     pub fn save(&self) {
+        if cfg!(test) {
+            return;
+        }
+
         #[cfg(not(target_arch = "wasm32"))]
         {
             let Some(path) = config_path() else { return };

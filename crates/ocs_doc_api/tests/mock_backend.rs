@@ -986,6 +986,39 @@ fn set_xdata_many_with_unknown_id_fails_atomically() {
 }
 
 #[test]
+fn xdata_rejects_a_mismatched_record_name() {
+    let (api, _tp) = api();
+    let doc = api.document(api.active_tab());
+    let line = doc.curves().create_line([0.0; 3], [1.0; 3]).unwrap();
+    let entity = doc.entities().get(line.id()).unwrap();
+    let result = entity.set_xdata(
+        "EXPECTED",
+        Some(XDataRecord {
+            application_name: "OTHER".into(),
+            values: vec![],
+        }),
+    );
+    assert!(matches!(result, Err(ApiError::Validation { .. })));
+    assert!(entity.xdata("EXPECTED").unwrap().is_none());
+}
+
+#[test]
+fn create_xrecord_returns_the_typed_handle() {
+    let (api, _tp) = api();
+    let doc = api.document(api.active_tab());
+    let spec = ocs_doc_api::XRecordSpec {
+        name: "PLUGIN_DATA".into(),
+        cloning_flags: ocs_doc_api::XRecordCloningFlags::NotApplicable,
+        entries: vec![ocs_doc_api::XRecordEntry {
+            code: 1,
+            value: ocs_doc_api::XRecordValue::String("value".into()),
+        }],
+    };
+    let record = doc.entities().create_xrecord(&spec).unwrap();
+    assert_eq!(record.payload().unwrap(), spec);
+}
+
+#[test]
 fn create_many_applies_per_curve_layer() {
     let (api, _tp) = api();
     let doc = api.document(api.active_tab());

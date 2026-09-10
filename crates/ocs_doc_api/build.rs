@@ -172,8 +172,9 @@ Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `ArcCurve`,
 - **`set_layer(layer)`** — move the entity to an existing layer (one undo step;
   blocked if the entity or target layer is locked).
 
-`Entity` additionally has `view()` (id + kind + bounds) and `as_solid()` (typed
-downcast when `kind == "Solid3D"`).
+`Entity` additionally has `view()` (id + kind + bounds), `as_solid()` (typed
+downcast when `kind == "Solid3D"`), and XDATA access through
+`xdata(application_name)` / `set_xdata(application_name, record)`.
 
 ## Layer table
 

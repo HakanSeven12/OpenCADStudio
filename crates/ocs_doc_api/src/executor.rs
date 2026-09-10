@@ -411,12 +411,15 @@ fn apply_op_inner<B: DocApiBackend>(b: &mut B, op: Operation) -> ApiResult<Recei
             OpOutcome::Updated(*id)
         }
         Operation::SetXDataMany(records) => {
-            // Pre-validate every entity id before any mutation.
-            for (id, app, _) in records {
-                require_exists(b, *id, name)?;
-                if app.is_empty() {
-                    return Err(ApiError::validation(name, "empty application_name"));
-                }
+            // A later locked entity must not leave earlier records changed.
+            for (i, (id, _, _)) in records.iter().enumerate() {
+                b.can_modify(*id).map_err(|e| match e {
+                    ApiError::UnknownId(_) => stale_index(name, i, *id),
+                    ApiError::Unsupported(reason) => {
+                        ApiError::validation(name, format!("index {i}: {reason}"))
+                    }
+                    other => other,
+                })?;
             }
             b.push_undo(name);
             for (id, application_name, record) in records {

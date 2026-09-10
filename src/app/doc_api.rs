@@ -48,6 +48,28 @@ fn xrecord_dictionary_handle(doc: &mut acadrust::CadDocument) -> Handle {
     }
 }
 
+fn xrecord_owner_dictionary(
+    doc: &acadrust::CadDocument,
+    record_handle: Handle,
+    owner: Handle,
+) -> Option<Handle> {
+    let owns_record = |handle: Handle| {
+        matches!(doc.objects.get(&handle), Some(ObjectType::Dictionary(dict)) if
+            dict.entries.iter().any(|(_, child)| *child == record_handle))
+    };
+    if owns_record(owner) {
+        return Some(owner);
+    }
+    doc.objects.iter().find_map(|(handle, object)| match object {
+        ObjectType::Dictionary(dict)
+            if dict.entries.iter().any(|(_, child)| *child == record_handle) =>
+        {
+            Some(*handle)
+        }
+        _ => None,
+    })
+}
+
 /// Entry point called by the `HostApi::doc_api_dispatch` override (below) and by
 // the in-process path. Deserializes the envelope, runs the crate executor,
 // serializes the `Receipt` (or `ApiError`) back to bytes.
@@ -771,7 +793,17 @@ impl DocApiBackend for HostSession<'_> {
 
     fn add_xrecord(&mut self, spec: &ocs_doc_api::XRecordSpec) -> ApiResult<ObjectId> {
         use acadrust::objects::{ObjectType, XRecord};
+        let dict_h = xrecord_dictionary_handle(self.document_mut());
+        if matches!(self.document().objects.get(&dict_h), Some(ObjectType::Dictionary(dict)) if
+            dict.entries.iter().any(|(name, _)| name.eq_ignore_ascii_case(&spec.name)))
+        {
+            return Err(ApiError::validation(
+                "CreateXRecord",
+                format!("XRecord '{}' already exists", spec.name),
+            ));
+        }
         let mut record = XRecord::named(spec.name.clone());
+        record.owner = dict_h;
         record.cloning_flags = cloning_flags_to_acadrust(spec.cloning_flags);
         record.entries = spec
             .entries
@@ -789,9 +821,7 @@ impl DocApiBackend for HostSession<'_> {
         };
         // Attach the new XRecord to the stable named-object dictionary so it is
         // reachable as a standalone named object.
-        let dict_h = xrecord_dictionary_handle(self.document_mut());
         if let Some(ObjectType::Dictionary(dict)) = self.document_mut().objects.get_mut(&dict_h) {
-            dict.entries.retain(|(name, _)| !name.eq_ignore_ascii_case(&spec.name));
             dict.add_entry(spec.name.clone(), record_handle);
         }
         Ok(handle_to_obj(record_handle))
@@ -808,9 +838,21 @@ impl DocApiBackend for HostSession<'_> {
         let Some(ObjectType::XRecord(record)) = self.document().objects.get(&handle) else {
             return Err(ApiError::Unsupported(format!("ObjectId {id:?} is not an XRecord")));
         };
-        let old_name = record.name.clone();
         let mut updated = record.clone();
+        let dict_h = xrecord_owner_dictionary(self.document(), handle, record.owner)
+            .unwrap_or_else(|| xrecord_dictionary_handle(self.document_mut()));
+        if matches!(self.document().objects.get(&dict_h), Some(ObjectType::Dictionary(dict)) if
+            dict.entries.iter().any(|(name, child)| {
+                *child != handle && name.eq_ignore_ascii_case(&spec.name)
+            }))
+        {
+            return Err(ApiError::validation(
+                "SetXRecord",
+                format!("XRecord '{}' already exists", spec.name),
+            ));
+        }
         updated.name = spec.name.clone();
+        updated.owner = dict_h;
         updated.cloning_flags = cloning_flags_to_acadrust(spec.cloning_flags);
         updated.entries = spec
             .entries
@@ -821,16 +863,9 @@ impl DocApiBackend for HostSession<'_> {
         self.document_mut()
             .objects
             .insert(handle, acadrust::objects::ObjectType::XRecord(updated));
-        // If the name changed, rename the dictionary entry so the XRecord remains
-        // reachable under its new name.
-        if !old_name.eq_ignore_ascii_case(&spec.name) {
-            let dict_h = xrecord_dictionary_handle(self.document_mut());
-            if let Some(ObjectType::Dictionary(dict)) =
-                self.document_mut().objects.get_mut(&dict_h)
-            {
-                dict.entries.retain(|(name, _)| !name.eq_ignore_ascii_case(&old_name));
-                dict.add_entry(spec.name.clone(), handle);
-            }
+        if let Some(ObjectType::Dictionary(dict)) = self.document_mut().objects.get_mut(&dict_h) {
+            dict.entries.retain(|(_, child)| *child != handle);
+            dict.add_entry(spec.name.clone(), handle);
         }
         Ok(())
     }
@@ -906,7 +941,7 @@ impl DocApiBackend for HostSession<'_> {
         Ok(())
     }
     fn delete_layer(&mut self, name: &str) -> ApiResult<()> {
-        let name_upper = acadrust::tables::normalize_name(name);
+        let name_upper = acadrust::tables::normalize_name(name.trim());
         if name_upper == "0" {
             return Err(ApiError::validation("DeleteLayer", "cannot delete layer 0"));
         }
@@ -1008,7 +1043,9 @@ impl DocApiBackend for HostSession<'_> {
                 }
             }
             if let Some(l) = layer {
-                if !entity.common().layer.eq_ignore_ascii_case(l) {
+                if acadrust::tables::normalize_name(&entity.common().layer)
+                    != acadrust::tables::normalize_name(l.trim())
+                {
                     continue;
                 }
             }
@@ -1648,8 +1685,14 @@ mod tests {
     use super::*;
     use crate::app::plugin_host::HostSession;
     use crate::app::OpenCADStudio;
-    use ocs_doc_api::ops::{BoolOp, Color, LayerFlags, LayerInfo, LineWeight, SolidPrimitive};
-    use ocs_doc_api::{DocApiEnvelope, HasId, ObjectId, Operation, Query, QueryResult, Receipt};
+    use ocs_doc_api::ops::{
+        BoolOp, Color, LayerFlags, LayerInfo, LineWeight, SolidPrimitive, XDataRecord,
+        XDataValue, XRecordEntry, XRecordSpec, XRecordValue,
+    };
+    use ocs_doc_api::{
+        DocApiEnvelope, HasId, ObjectId, Operation, Query, QueryResult, Receipt,
+        XRecordCloningFlags,
+    };
 
     fn dispatch(host: &mut HostSession<'_>, env: DocApiEnvelope) -> ApiResult<Receipt> {
         let bytes = bincode::serialize(&env).unwrap();
@@ -4166,7 +4209,7 @@ mod tests {
         dispatch(
             &mut host,
             DocApiEnvelope::op(Operation::UpdateLayer {
-                name: "Walls".into(),
+                name: " Walls ".into(),
                 info: updated.clone(),
             }),
         )
@@ -4210,7 +4253,7 @@ mod tests {
         dispatch(
             &mut host,
             DocApiEnvelope::op(Operation::DeleteLayer {
-                name: "Walls".into(),
+                name: " Walls ".into(),
             }),
         )
         .unwrap();
@@ -4219,6 +4262,124 @@ mod tests {
             panic!("expected Layers result");
         };
         assert!(!list.iter().any(|l| l.name == "Walls"));
+    }
+
+    #[test]
+    fn doc_api_xdata_batch_rejects_a_locked_entity_before_mutating() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let line = |host: &mut HostSession<'_>| {
+            new_id(&dispatch(
+                host,
+                DocApiEnvelope::op(Operation::CreateCurve(ocs_doc_api::Curve2Spec::Line {
+                    start: [0.0; 3],
+                    end: [1.0; 3],
+                    layer: None,
+                })),
+            ).unwrap())
+        };
+        let first = line(&mut host);
+        let locked = line(&mut host);
+
+        let mut layer = LayerInfo::new("Locked");
+        dispatch(&mut host, DocApiEnvelope::op(Operation::CreateLayer(layer.clone()))).unwrap();
+        dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::SetEntityLayer {
+                id: locked,
+                layer: layer.name.clone(),
+            }),
+        )
+        .unwrap();
+        layer.flags.locked = true;
+        dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::UpdateLayer {
+                name: layer.name.clone(),
+                info: layer,
+            }),
+        )
+        .unwrap();
+
+        let record = |application_name: &str| XDataRecord {
+            application_name: application_name.into(),
+            values: vec![XDataValue::Integer32(42)],
+        };
+        let result = dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::SetXDataMany(vec![
+                (first, "FIRST".into(), Some(record("FIRST"))),
+                (locked, "LOCKED".into(), Some(record("LOCKED"))),
+            ])),
+        );
+        assert!(matches!(result, Err(ApiError::Validation { .. })));
+        assert!(host.xdata(first, "FIRST").unwrap().is_none());
+    }
+
+    #[test]
+    fn doc_api_xrecords_keep_one_named_owner() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut host = HostSession::new(&mut app, 0);
+        let spec = |name: &str| XRecordSpec {
+            name: name.into(),
+            cloning_flags: XRecordCloningFlags::NotApplicable,
+            entries: vec![XRecordEntry {
+                code: 1,
+                value: XRecordValue::String("value".into()),
+            }],
+        };
+
+        let first = new_id(&dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::CreateXRecord(spec("FIRST"))),
+        ).unwrap());
+        let first_handle = obj_to_handle(first);
+        let ObjectType::XRecord(first_record) = host.document().objects.get(&first_handle).unwrap()
+        else {
+            panic!("expected XRecord")
+        };
+        let owner = first_record.owner;
+        assert!(matches!(host.document().objects.get(&owner), Some(ObjectType::Dictionary(dict)) if
+            dict.entries.iter().any(|(name, child)| name == "FIRST" && *child == first_handle)));
+
+        let object_count = host.document().objects.len();
+        assert!(matches!(
+            dispatch(
+                &mut host,
+                DocApiEnvelope::op(Operation::CreateXRecord(spec("first"))),
+            ),
+            Err(ApiError::Validation { .. })
+        ));
+        assert_eq!(host.document().objects.len(), object_count);
+
+        let second = new_id(&dispatch(
+            &mut host,
+            DocApiEnvelope::op(Operation::CreateXRecord(spec("SECOND"))),
+        ).unwrap());
+        assert!(matches!(
+            dispatch(
+                &mut host,
+                DocApiEnvelope::op(Operation::SetXRecord {
+                    id: second,
+                    spec: spec("FIRST"),
+                }),
+            ),
+            Err(ApiError::Validation { .. })
+        ));
+        assert_eq!(host.xrecord(second).unwrap().unwrap().name, "SECOND");
+
+        let mut invalid = spec("INVALID");
+        invalid.entries[0] = XRecordEntry {
+            code: 1,
+            value: XRecordValue::Int32(7),
+        };
+        assert!(matches!(
+            dispatch(
+                &mut host,
+                DocApiEnvelope::op(Operation::CreateXRecord(invalid)),
+            ),
+            Err(ApiError::Validation { .. })
+        ));
     }
 
     #[test]
@@ -4297,7 +4458,7 @@ mod tests {
             &mut host,
             DocApiEnvelope::queries(vec![Query::EnumerateEntities {
                 kind: None,
-                layer: Some("Markers".into()),
+                layer: Some(" Markers ".into()),
                 include_bounds: true,
             }]),
         )

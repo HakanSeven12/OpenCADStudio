@@ -386,6 +386,12 @@ macro_rules! handle {
                 self.id
             }
         }
+    };
+}
+
+macro_rules! entity_handle {
+    ($name:ident) => {
+        handle!($name);
         impl $name {
             pub fn bounds(&self) -> ApiResult<Aabb> {
                 match self.session.one_query(Query::GetBounds { id: self.id })? {
@@ -427,20 +433,20 @@ macro_rules! handle {
     };
 }
 
-handle!(Entity);
-handle!(Solid);
-handle!(Line);
-handle!(Circle);
-handle!(Polyline);
-handle!(Point);
-handle!(ArcCurve);
-handle!(Ellipse);
-handle!(Spline);
-handle!(Ray);
-handle!(XLine);
-handle!(Text);
-handle!(MText);
-handle!(Dimension);
+entity_handle!(Entity);
+entity_handle!(Solid);
+entity_handle!(Line);
+entity_handle!(Circle);
+entity_handle!(Polyline);
+entity_handle!(Point);
+entity_handle!(ArcCurve);
+entity_handle!(Ellipse);
+entity_handle!(Spline);
+entity_handle!(Ray);
+entity_handle!(XLine);
+entity_handle!(Text);
+entity_handle!(MText);
+entity_handle!(Dimension);
 handle!(XRecord);
 
 impl XRecord {
@@ -1308,8 +1314,8 @@ impl EntityCollection {
         Ok(())
     }
 
-    /// Create a standalone `XRECORD` object (returns an `Entity` handle).
-    pub fn create_xrecord(&self, spec: &XRecordSpec) -> ApiResult<Entity> {
+    /// Create a standalone `XRECORD` object.
+    pub fn create_xrecord(&self, spec: &XRecordSpec) -> ApiResult<XRecord> {
         let receipt = self
             .session
             .apply_op(Operation::CreateXRecord(spec.clone()))?;
@@ -1317,7 +1323,7 @@ impl EntityCollection {
             .outcome
             .and_then(|o| o.new_id())
             .ok_or_else(|| ApiError::Transport("create_xrecord returned no id".into()))?;
-        Ok(Entity::new(self.session.clone(), id))
+        Ok(XRecord::new(self.session.clone(), id))
     }
 
     /// Lookup an `XRECORD` object by id and return a typed accessor handle.

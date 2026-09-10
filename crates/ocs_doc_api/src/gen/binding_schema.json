@@ -1140,7 +1140,7 @@
           "fixed": null,
           "name": "create_xrecord",
           "op": "CreateXRecord",
-          "returns": "Entity"
+          "returns": "XRecord"
         }
       ],
       "handle": "XRecord",
@@ -1168,42 +1168,6 @@
           "kind": "op",
           "name": "set_payload",
           "op": "SetXRecord",
-          "query": null,
-          "read_only": false,
-          "returns": "()"
-        },
-        {
-          "args": [
-            {
-              "name": "application_name",
-              "ty": "&str"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "kind": "query",
-          "name": "xdata",
-          "op": null,
-          "query": "GetXData",
-          "read_only": true,
-          "returns": "Option<XDataRecord>"
-        },
-        {
-          "args": [
-            {
-              "name": "application_name",
-              "ty": "&str"
-            },
-            {
-              "name": "record",
-              "ty": "Option<XDataRecord>"
-            }
-          ],
-          "bulk": false,
-          "fixed": null,
-          "kind": "op",
-          "name": "set_xdata",
-          "op": "SetXData",
           "query": null,
           "read_only": false,
           "returns": "()"

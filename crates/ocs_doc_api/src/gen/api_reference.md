@@ -198,14 +198,12 @@ Extended record (XRecord): arbitrary DXF group-code/value pairs. Roundtripped ve
 
 ### Constructors (`doc.entities()`)
 
-- **create_xrecord**(spec: XRecordSpec) -> `Entity` — `CreateXRecord`
+- **create_xrecord**(spec: XRecordSpec) -> `XRecord` — `CreateXRecord`
 
 ### Methods
 
 - **payload**() -> `XRecordSpec` — query `GetXRecord`
 - **set_payload**(spec: XRecordSpec) -> `()` — op `SetXRecord`
-- **xdata**(application_name: &str) -> `Option<XDataRecord>` — query `GetXData`
-- **set_xdata**(application_name: &str, record: Option<XDataRecord>) -> `()` — op `SetXData`
 
 ## `Layer` (acadrust `-`, collection `layers`)
 
@@ -234,8 +232,9 @@ Every typed handle (`Solid`, `Line`, `Circle`, `Polyline`, `Point`, `ArcCurve`,
 - **`set_layer(layer)`** — move the entity to an existing layer (one undo step;
   blocked if the entity or target layer is locked).
 
-`Entity` additionally has `view()` (id + kind + bounds) and `as_solid()` (typed
-downcast when `kind == "Solid3D"`).
+`Entity` additionally has `view()` (id + kind + bounds), `as_solid()` (typed
+downcast when `kind == "Solid3D"`), and XDATA access through
+`xdata(application_name)` / `set_xdata(application_name, record)`.
 
 ## Layer table
 

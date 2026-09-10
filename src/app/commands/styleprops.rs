@@ -2184,9 +2184,7 @@ impl OpenCADStudio {
                     // TEXTFILL reset the glyph atlas; re-tessellate so text picks
                     // up the re-baked filled / hollow tiles.
                     if name == "TEXTFILL" {
-                        self.tabs[i]
-                            .scene
-                            .invalidate_text_geometry_dependencies();
+                        self.invalidate_text_everywhere();
                     }
                     // LTSCALE scales the dash pattern baked into every wire, and
                     // PDMODE / PDSIZE decide the point glyph built at tessellation

@@ -355,6 +355,17 @@ impl OpenCADStudio {
         }
     }
 
+    /// Rebuild text geometry in every open drawing.
+    ///
+    /// `TEXTFILL` is a process-global, so a change to it invalidates the text
+    /// in every tab. Doing only the active one leaves the others rendering the
+    /// previous setting until some unrelated edit happens to rebuild them.
+    pub(in crate::app) fn invalidate_text_everywhere(&mut self) {
+        for tab in &mut self.tabs {
+            tab.scene.invalidate_text_geometry_dependencies();
+        }
+    }
+
     /// Snapshot the persisted UI preferences from live state.
     pub(in crate::app) fn current_settings(&self) -> crate::app::settings::UserSettings {
         crate::app::settings::UserSettings {

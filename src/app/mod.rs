@@ -2011,6 +2011,12 @@ pub enum Message {
     SaveTimeChanged(i32),
     /// Toggle keeping a `.bak` copy when overwriting a drawing (ISAVEBAK).
     BackupOnSaveChanged(bool),
+    /// Toggle filled TrueType glyphs (TEXTFILL).
+    TextFillChanged(bool),
+    /// Change how many prompt lines sit above the command window (CLIPROMPTLINES).
+    ClipromptLinesChanged(i32),
+    /// Change how long command-line history lines stay visible (COMMANDLINEFADETIME).
+    CommandLineFadeChanged(i32),
     /// Restore Model Space display/canvas appearance to defaults.
     RestoreModelSpaceDisplayDefaults,
     /// Restore Selection visual effect settings to defaults.

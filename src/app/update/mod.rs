@@ -6200,6 +6200,29 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::TextFillChanged(filled) => {
+                crate::scene::text::sdf_atlas::set_textfill(filled);
+                self.invalidate_text_everywhere();
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::ClipromptLinesChanged(lines) => {
+                let lines = crate::app::settings::clamp_clipromptlines(lines);
+                self.cliprompt_lines = lines;
+                self.command_line.set_cliprompt_lines(lines.clamp(0, 50) as u8);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::CommandLineFadeChanged(ms) => {
+                let ms = crate::app::settings::clamp_commandline_fade_ms(ms);
+                self.commandline_fade_ms = ms;
+                self.command_line.set_commandline_fade_ms(ms.max(0) as u32);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
             Message::PickDragRectToggled(rectangle) => {
                 self.pick_drag_rect = rectangle;
                 self.persist_settings_if_changed();

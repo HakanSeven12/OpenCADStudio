@@ -42,6 +42,12 @@ pub struct AppPrefs {
     pub savetime_min: i32,
     /// ISAVEBAK: keep a `.bak` when overwriting.
     pub backup_on_save: bool,
+    /// TEXTFILL: fill TrueType glyphs rather than drawing them hollow.
+    pub textfill: bool,
+    /// CLIPROMPTLINES: prompt lines shown above the command window.
+    pub cliprompt_lines: i32,
+    /// COMMANDLINEFADETIME: how long overlay history lines stay visible, in ms.
+    pub commandline_fade_ms: i32,
 }
 
 /// The Selection-card settings that live on `UserSettings` rather than on the
@@ -642,6 +648,75 @@ pub fn view_window<'a>(
             text(crate::t!("Changes the on-screen width in Model without affecting plotted output."))
                 .size(11)
                 .width(sizing.width),
+        )
+        .push(Space::new().height(14))
+        .push(
+            row![
+                iced::widget::checkbox(prefs.textfill)
+                    .on_toggle(Message::TextFillChanged)
+                    .size(15),
+                text(crate::t!("Fill TrueType glyphs (TEXTFILL)")).size(12),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(24))
+        .push(text(crate::t!("Command Line")).size(15))
+        .push(Space::new().height(10))
+        .push(
+            row![
+                text(crate::t!("Prompt lines")).size(12).width(140),
+                slider(
+                    0..=50,
+                    prefs.cliprompt_lines.clamp(0, 50),
+                    Message::ClipromptLinesChanged,
+                )
+                .step(1)
+                .width(Fill),
+                text(prefs.cliprompt_lines.clamp(0, 50).to_string())
+                    .size(11)
+                    .width(44),
+            ]
+            .spacing(10)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(6))
+        .push(
+            text(crate::t!(
+                "Temporary prompt lines shown above the command window (CLIPROMPTLINES)."
+            ))
+            .size(11)
+            .width(sizing.width),
+        )
+        .push(Space::new().height(12))
+        .push(
+            row![
+                text(crate::t!("History fade time")).size(12).width(140),
+                slider(
+                    0..=60000,
+                    prefs.commandline_fade_ms.clamp(0, 60000),
+                    Message::CommandLineFadeChanged,
+                )
+                .step(250)
+                .width(Fill),
+                text(if prefs.commandline_fade_ms <= 0 {
+                    crate::t!("Off").into_owned()
+                } else {
+                    format!("{:.1} s", prefs.commandline_fade_ms as f32 / 1000.0)
+                })
+                .size(11)
+                .width(44),
+            ]
+            .spacing(10)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(6))
+        .push(
+            text(crate::t!(
+                "How long overlay history lines stay visible; 0 skips them (COMMANDLINEFADETIME)."
+            ))
+            .size(11)
+            .width(sizing.width),
         );
 
     let display_element = display.spacing(0).width(sizing.width);

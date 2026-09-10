@@ -13,11 +13,18 @@ pub const GRIP_HALF_PX: f32 = 5.0;
 /// Screen offset for dropdown selectors anchored to a vertex.
 pub const GRIP_DROPDOWN_OFFSET_X_PX: f32 = 24.0;
 pub const GRIP_DROPDOWN_OFFSET_Y_PX: f32 = 27.0;
+pub const GRIP_ADJACENT_DROPDOWN_OFFSET_X_PX: f32 = 12.0;
 
 fn marker_screen_position(mut point: Point, shape: GripShape) -> Point {
-    if shape == GripShape::Dropdown {
-        point.x += GRIP_DROPDOWN_OFFSET_X_PX;
-        point.y += GRIP_DROPDOWN_OFFSET_Y_PX;
+    match shape {
+        GripShape::Dropdown => {
+            point.x += GRIP_DROPDOWN_OFFSET_X_PX;
+            point.y += GRIP_DROPDOWN_OFFSET_Y_PX;
+        }
+        GripShape::DropdownAdjacent => {
+            point.x += GRIP_ADJACENT_DROPDOWN_OFFSET_X_PX;
+        }
+        _ => {}
     }
     point
 }

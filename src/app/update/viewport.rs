@@ -3049,7 +3049,11 @@ impl OpenCADStudio {
                         return Task::none();
                     };
                     let grip_shape = self.tabs[i].selected_grips[grip_index].shape;
-                    if grip_shape == crate::scene::model::object::GripShape::Dropdown {
+                    if matches!(
+                        grip_shape,
+                        crate::scene::model::object::GripShape::Dropdown
+                            | crate::scene::model::object::GripShape::DropdownAdjacent
+                    ) {
                         use crate::entities::traits::EntityTypeOps;
                         let items = self.tabs[i]
                             .scene

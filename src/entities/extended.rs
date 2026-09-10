@@ -13,13 +13,19 @@ use crate::entities::common::{
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{
-    GripApply, GripDef, PropSection, PropValue, Property,
+    GripApply, GripDef, GripMenuAction, GripMenuItem, PropSection, PropValue, Property,
 };
 use crate::scene::model::wire_model::SnapHint;
 
 const NAN: [f64; 3] = [f64::NAN; 3];
 const SECTION_SLICE_APP: &str = "IsSlice";
 const SECTION_THICKNESS_APP: &str = "ThicknessDepth";
+const SECTION_GRIP_LEFT: usize = 100_000;
+const SECTION_GRIP_RIGHT: usize = 100_001;
+const SECTION_GRIP_TOP: usize = 100_002;
+const SECTION_GRIP_BOTTOM: usize = 100_003;
+const SECTION_GRIP_NORMAL: usize = 100_004;
+const SECTION_GRIP_STATE: usize = 100_005;
 
 pub(crate) fn section_is_slice(entity: &ExtendedEntity) -> bool {
     entity
@@ -1563,15 +1569,56 @@ fn move_extents(
 
 fn grips(entity: &ExtendedEntity) -> Vec<GripDef> {
     match &entity.data {
-        ExtendedEntityData::SectionObject(data) => data
-            .vertices
-            .iter()
-            .chain(data.back_line_vertices.iter())
-            .enumerate()
-            .map(|(index, point)| {
-                square_grip(index, glam::DVec3::new(point.x, point.y, point.z))
-            })
-            .collect(),
+        ExtendedEntityData::SectionObject(data) => {
+            let mut grips: Vec<GripDef> = if section_kind(entity, data) == "Plane"
+                && data.vertices.len() == 2
+                && data.back_line_vertices.is_empty()
+            {
+                section_plane_edge_grips(data)
+            } else {
+                data.vertices
+                    .iter()
+                    .chain(data.back_line_vertices.iter())
+                    .enumerate()
+                    .map(|(index, point)| {
+                        square_grip(index, glam::DVec3::new(point.x, point.y, point.z))
+                    })
+                    .collect()
+            };
+            if let Some(right) = data.vertices.last() {
+                let vertical = normalized(data.vertical_direction, Vector3::UNIT_Z);
+                let edge_center_offset = (data.top_height - data.bottom_height) * 0.5;
+                let anchor = *right + vertical * edge_center_offset;
+                grips.push(GripDef {
+                    id: SECTION_GRIP_STATE,
+                    world: glam::DVec3::new(anchor.x, anchor.y, anchor.z),
+                    is_midpoint: false,
+                    shape: crate::scene::model::object::GripShape::DropdownAdjacent,
+                    dir: None,
+                    axis: None,
+                });
+            }
+            if let Some(center) = section_center(data) {
+                let normal = section_viewing_direction(data);
+                let span = data
+                    .vertices
+                    .first()
+                    .zip(data.vertices.last())
+                    .map_or(1.0, |(first, last)| (*last - *first).length());
+                let offset = (span * 0.08).max(1.0e-6);
+                let normal_world = glam::DVec3::new(normal.x, normal.y, normal.z);
+                grips.push(GripDef {
+                    id: SECTION_GRIP_NORMAL,
+                    world: glam::DVec3::new(center.x, center.y, center.z)
+                        - normal_world * offset,
+                    is_midpoint: false,
+                    shape: crate::scene::model::object::GripShape::Triangle,
+                    dir: Some(-normal_world),
+                    axis: Some(normal_world),
+                });
+            }
+            grips
+        }
         ExtendedEntityData::ArcAlignedText(data) => vec![center_grip(
             0,
             glam::DVec3::new(data.center.x, data.center.y, data.center.z),
@@ -1643,7 +1690,41 @@ fn grips(entity: &ExtendedEntity) -> Vec<GripDef> {
 fn apply_grip(entity: &mut ExtendedEntity, grip_id: usize, apply: GripApply) {
     match &mut entity.data {
         ExtendedEntityData::SectionObject(data) => {
-            if grip_id < data.vertices.len() {
+            if matches!(
+                grip_id,
+                SECTION_GRIP_LEFT
+                    | SECTION_GRIP_RIGHT
+                    | SECTION_GRIP_TOP
+                    | SECTION_GRIP_BOTTOM
+            ) {
+                apply_section_plane_edge_grip(data, grip_id, apply);
+            } else if grip_id == SECTION_GRIP_NORMAL {
+                let Some(center) = section_center(data) else {
+                    return;
+                };
+                let normal = section_viewing_direction(data);
+                let span = data
+                    .vertices
+                    .first()
+                    .zip(data.vertices.last())
+                    .map_or(1.0, |(first, last)| (*last - *first).length());
+                let offset = (span * 0.08).max(1.0e-6);
+                let current = center - normal * offset;
+                let delta = match apply {
+                    GripApply::Translate(delta) => Vector3::new(delta.x, delta.y, delta.z),
+                    GripApply::Absolute(position) => {
+                        Vector3::new(position.x, position.y, position.z) - current
+                    }
+                };
+                let constrained = normal * delta.dot(&normal);
+                for point in data
+                    .vertices
+                    .iter_mut()
+                    .chain(data.back_line_vertices.iter_mut())
+                {
+                    *point = *point + constrained;
+                }
+            } else if grip_id < data.vertices.len() {
                 apply_point(&mut data.vertices[grip_id], apply);
             } else if let Some(point) = data
                 .back_line_vertices
@@ -1699,6 +1780,115 @@ fn apply_grip(entity: &mut ExtendedEntity, grip_id: usize, apply: GripApply) {
                     }
                 }
             }
+        }
+        _ => {}
+    }
+}
+
+fn section_center(data: &SectionObjectData) -> Option<Vector3> {
+    let (first, last) = data.vertices.first().zip(data.vertices.last())?;
+    Some((*first + *last) * 0.5)
+}
+
+fn section_plane_edge_grips(data: &SectionObjectData) -> Vec<GripDef> {
+    let Some((first, last)) = data.vertices.first().zip(data.vertices.last()) else {
+        return Vec::new();
+    };
+    let center = (*first + *last) * 0.5;
+    let tangent = section_tangent(data);
+    let vertical = normalized(data.vertical_direction, Vector3::UNIT_Z);
+    let edge_center_offset = (data.top_height - data.bottom_height) * 0.5;
+    let definitions = [
+        (
+            SECTION_GRIP_LEFT,
+            *first + vertical * edge_center_offset,
+            vertical,
+            None,
+        ),
+        (
+            SECTION_GRIP_RIGHT,
+            *last + vertical * edge_center_offset,
+            vertical,
+            None,
+        ),
+        (
+            SECTION_GRIP_TOP,
+            center + vertical * data.top_height,
+            tangent,
+            Some(vertical),
+        ),
+        (
+            SECTION_GRIP_BOTTOM,
+            center - vertical * data.bottom_height,
+            tangent,
+            Some(vertical),
+        ),
+    ];
+    definitions
+        .into_iter()
+        .map(|(id, world, edge, axis)| GripDef {
+            id,
+            world: glam::DVec3::new(world.x, world.y, world.z),
+            is_midpoint: false,
+            shape: crate::scene::model::object::GripShape::Rectangle,
+            dir: Some(glam::DVec3::new(edge.x, edge.y, edge.z)),
+            axis: axis.map(|axis| glam::DVec3::new(axis.x, axis.y, axis.z)),
+        })
+        .collect()
+}
+
+fn apply_section_plane_edge_grip(
+    data: &mut SectionObjectData,
+    grip_id: usize,
+    apply: GripApply,
+) {
+    let Some((first, last)) = data.vertices.first().zip(data.vertices.last()) else {
+        return;
+    };
+    let center = (*first + *last) * 0.5;
+    let tangent = section_tangent(data);
+    let vertical = normalized(data.vertical_direction, Vector3::UNIT_Z);
+    let edge_center_offset = (data.top_height - data.bottom_height) * 0.5;
+    let current = match grip_id {
+        SECTION_GRIP_LEFT => *first + vertical * edge_center_offset,
+        SECTION_GRIP_RIGHT => *last + vertical * edge_center_offset,
+        SECTION_GRIP_TOP => center + vertical * data.top_height,
+        SECTION_GRIP_BOTTOM => center - vertical * data.bottom_height,
+        _ => return,
+    };
+    let delta = match apply {
+        GripApply::Translate(delta) => Vector3::new(delta.x, delta.y, delta.z),
+        GripApply::Absolute(position) => {
+            Vector3::new(position.x, position.y, position.z) - current
+        }
+    };
+    let span = (*last - *first).length();
+    let minimum_span = 1.0e-6;
+    let in_plane_vertical = normalized(
+        vertical - tangent * vertical.dot(&tangent),
+        vertical,
+    );
+    let vertical_change = in_plane_vertical * delta.dot(&in_plane_vertical);
+    match grip_id {
+        SECTION_GRIP_LEFT => {
+            let tangent_change = delta
+                .dot(&tangent)
+                .min((span - minimum_span).max(0.0));
+            data.vertices[0] = data.vertices[0] + tangent * tangent_change + vertical_change;
+        }
+        SECTION_GRIP_RIGHT => {
+            let last = data.vertices.len() - 1;
+            let tangent_change = delta
+                .dot(&tangent)
+                .max((-span + minimum_span).min(0.0));
+            data.vertices[last] =
+                data.vertices[last] + tangent * tangent_change + vertical_change;
+        }
+        SECTION_GRIP_TOP => {
+            data.top_height = (data.top_height + delta.dot(&vertical)).max(0.0);
+        }
+        SECTION_GRIP_BOTTOM => {
+            data.bottom_height = (data.bottom_height - delta.dot(&vertical)).max(0.0);
         }
         _ => {}
     }
@@ -1942,6 +2132,54 @@ impl Grippable for ExtendedEntity {
 
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
         apply_grip(self, grip_id, apply);
+    }
+
+    fn grip_menu(&self, grip_id: usize) -> Vec<GripMenuItem> {
+        if grip_id != SECTION_GRIP_STATE {
+            return Vec::new();
+        }
+        let ExtendedEntityData::SectionObject(data) = &self.data else {
+            return Vec::new();
+        };
+        let current = section_kind(self, data);
+        vec![
+            GripMenuItem {
+                label: if current == "Plane" { "✓ Plane" } else { "Plane" },
+                action: GripMenuAction::SectionPlane,
+            },
+            GripMenuItem {
+                label: if current == "Slice" { "✓ Slice" } else { "Slice" },
+                action: GripMenuAction::SectionSlice,
+            },
+            GripMenuItem {
+                label: if current == "Boundary" {
+                    "✓ Boundary"
+                } else {
+                    "Boundary"
+                },
+                action: GripMenuAction::SectionBoundary,
+            },
+            GripMenuItem {
+                label: if current == "Volume" { "✓ Volume" } else { "Volume" },
+                action: GripMenuAction::SectionVolume,
+            },
+        ]
+    }
+
+    fn apply_grip_menu(&mut self, grip_id: usize, action: GripMenuAction) {
+        if grip_id != SECTION_GRIP_STATE
+            || !matches!(self.data, ExtendedEntityData::SectionObject(_))
+        {
+            return;
+        }
+        let value = match action {
+            GripMenuAction::SectionPlane => "Plane",
+            GripMenuAction::SectionSlice => "Slice",
+            GripMenuAction::SectionBoundary => "Boundary",
+            GripMenuAction::SectionVolume => "Volume",
+            _ => return,
+        };
+        apply_section_prop(self, "ext_section_state", value);
     }
 }
 

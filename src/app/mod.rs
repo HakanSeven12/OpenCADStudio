@@ -3856,7 +3856,16 @@ impl OpenCADStudio {
 
     #[cfg(test)]
     pub(crate) fn new_for_test() -> Self {
-        Self::new()
+        let mut app = Self::new();
+        // `new` loads the real settings file, so without this every test runs
+        // against whatever the developer last set in the application — a suite
+        // that passes on a clean machine and fails on a used one. It surfaced
+        // when a persisted `GRIPOBJLIMIT` made the grip-limit test see 32767
+        // where it expected the default, and the number of persisted settings
+        // only grows.
+        app.apply_config(crate::app::config::AppConfig::default());
+        app.last_saved_config = Some(app.current_config());
+        app
     }
 
     /// Install `cmd` as the active interactive command for tab `tab`.

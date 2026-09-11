@@ -646,6 +646,13 @@ impl OpenCADStudio {
             // Resets the selected entities' direct property overrides back to
             // ByLayer so they follow their layer again.
             "SETBYLAYER" => {
+                if self.tabs[i].scene.selected.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let selection = SelectObjectsCommand::new("SETBYLAYER");
+                    self.command_line.push_info(&selection.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(selection));
+                    return Some(self.finish_dispatch(cmd));
+                }
                 let handles: Vec<_> = self.tabs[i]
                     .scene
                     .selected_entities()

@@ -329,7 +329,17 @@ impl OpenCADStudio {
 
             "SPLINEDIT" => {
                 use crate::modules::draw::modify::splinedit::SplineditCommand;
-                let cmd_obj = SplineditCommand::new();
+                let mut cmd_obj = SplineditCommand::new();
+                let selected: Vec<_> = self.tabs[i].scene.selected.iter().copied().collect();
+                if let [handle] = selected.as_slice() {
+                    if let Some(entity @ acadrust::EntityType::Spline(_)) =
+                        self.tabs[i].scene.document.get_entity(*handle).cloned()
+                    {
+                        if self.reject_locked_edit(i, *handle) { return Some(Task::none()); }
+                        cmd_obj.inject_picked_entity(entity);
+                        cmd_obj.on_entity_pick(*handle, glam::DVec3::ZERO);
+                    }
+                }
                 self.command_line.push_info(&cmd_obj.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }

@@ -1114,8 +1114,7 @@ impl OpenCADStudio {
                 return Some(self.fit_spline());
             }
 
-            // REGION — convert selected closed boundaries (closed polylines /
-            // circles) into Region entities (one wire loop each).
+            // REGION — convert exact closed planar profiles into regions.
             "REGION" | "REG" => {
                 if self.tabs[i].scene.selected_entities().is_empty() {
                     use crate::modules::draw::select::SelectObjectsCommand;
@@ -1129,12 +1128,7 @@ impl OpenCADStudio {
                 let mut regions = Vec::new();
                 let mut sources = Vec::new();
                 for (handle, e) in self.tabs[i].scene.selected_entities().iter() {
-                    let supported = matches!(
-                        e,
-                        acadrust::EntityType::LwPolyline(pl)
-                            if pl.is_closed && pl.vertices.len() >= 3
-                    ) || matches!(e, acadrust::EntityType::Circle(_));
-                    if supported {
+                    if !matches!(e, acadrust::EntityType::Region(_)) {
                         let Some((plane, loops, true)) =
                             crate::scene::model::presspull_model::profile_geometry(e)
                         else {
@@ -1153,6 +1147,40 @@ impl OpenCADStudio {
                         regions.push((region, body));
                         sources.push(*handle);
                     }
+                }
+                // Assemble remaining selected open edges on the active plane.
+                // Face discovery and exact curve reconstruction reuse the
+                // same kernel-backed boundary path used by area selection.
+                let working_plane = self.tabs[i].ucs_xform().working_plane();
+                let selected_handles: rustc_hash::FxHashSet<_> = self.tabs[i].scene
+                    .selected_entities().iter().map(|(handle, _)| *handle).collect();
+                let mut boundary_sources = self.tabs[i].scene
+                    .boundary_sources_on_plane(working_plane, 1.0e-6);
+                boundary_sources.retain(|handle, _| {
+                    selected_handles.contains(handle) && !sources.contains(handle)
+                });
+                let plane = cadkernel::space::Plane::from_axes(
+                    working_plane.origin.to_array(),
+                    working_plane.x.to_array(),
+                    working_plane.y.to_array(),
+                );
+                for ring in crate::scene::boundary_faces(&boundary_sources, 1.0e-6) {
+                    let paths = crate::scene::exact_hatch_paths(
+                        std::slice::from_ref(&ring), &[true], &boundary_sources, 1.0e-6,
+                    );
+                    let Some(path) = paths.first() else { continue; };
+                    let Some(curves) = path.edges.iter()
+                        .map(crate::entities::hatch::edge_curve).collect::<Option<Vec<_>>>()
+                    else { continue; };
+                    let Some(body) = cadkernel::brep::planar_region(plane, &[curves])
+                    else { continue; };
+                    let mut region = Region::new();
+                    region.point_of_reference = Vector3::new(
+                        plane.origin[0], plane.origin[1], plane.origin[2],
+                    );
+                    region.common.layer = self.tabs[i].active_layer.clone();
+                    regions.push((region, body));
+                    sources.extend(crate::scene::ring_source_handles(&ring, &boundary_sources));
                 }
                 if regions.is_empty() {
                     self.command_line

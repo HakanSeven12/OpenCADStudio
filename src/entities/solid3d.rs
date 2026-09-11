@@ -260,17 +260,26 @@ fn position_section(prefix: &str, p: &acadrust::types::Vector3) -> PropSection {
     }
 }
 
-/// Approximate a region's enclosed area and boundary perimeter from its
-/// wireframe loops. Perimeter is the total edge length across every wire.
-/// Area accumulates the Newell area vector of each loop (opposite-wound
-/// holes subtract) and halves its magnitude — exact for a single planar
-/// loop, approximate for multi-loop or curved regions. Returns zeros when
-/// there is nothing to measure.
-/// The area and perimeter of a region's boundary wires.
-///
-/// Measured in space rather than in projection: a region need not lie in a
-/// coordinate plane, and flattening it to XY first would report its shadow.
-fn region_area_perimeter(wires: &[acadrust::entities::Wire]) -> (f64, f64) {
+/// Measure decoded planar curves in a unit frame, retaining legacy wire-only input.
+fn region_area_perimeter(region: &Region) -> (f64, f64) {
+    let exact = (|| {
+        let (plane, loops, true) = crate::scene::model::presspull_model::profile_geometry(
+            &EntityType::Region(region.clone()),
+        )? else { return None; };
+        let unit = cadkernel::space::Plane::orthonormal(plane.origin, plane.x_axis, plane.normal()?)?;
+        let transform = cadkernel::geom2d::Transform {
+            origin: unit.project(plane.origin)?.into(),
+            x_axis: unit.project_vector(plane.x_axis)?.into(),
+            y_axis: unit.project_vector(plane.y_axis)?.into(),
+        };
+        let curves = loops.iter().flatten().map(|curve| curve.transformed(&transform))
+            .collect::<Option<Vec<_>>>()?;
+        let area = curves.iter().map(|curve| curve.enclosed_area()).sum::<f64>().abs();
+        let perimeter = curves.iter().map(|curve| curve.length()).sum::<f64>();
+        (area.is_finite() && perimeter.is_finite()).then_some((area, perimeter))
+    })();
+    if let Some(measurements) = exact { return measurements; }
+    let wires = &region.wires;
     let mut area_vector = [0.0f64; 3];
     let mut perimeter = 0.0;
     for wire in wires {
@@ -351,7 +360,7 @@ impl Grippable for Region {
 
 impl PropertyEditable for Region {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
-        let (area, perimeter) = region_area_perimeter(&self.wires);
+        let (area, perimeter) = region_area_perimeter(self);
         let mut sections =
             acis_sections(&self.acis_data, &self.wires, &self.silhouettes, self.history_handle);
         sections[0]

@@ -1244,11 +1244,14 @@ impl DocApiBackend for HostSession<'_> {
 
     fn bounds(&mut self, id: ObjectId) -> ApiResult<Aabb> {
         let handle = obj_to_handle(id);
-        // Lift-on-miss for solids (consistent with volume/centroid); borrow the cache
+        // Lift-on-miss for modeler geometry (consistent with volume/centroid); borrow the cache
         // read-only via with_body (O(1), no B-rep deep clone).
         if matches!(
             self.document().get_entity(handle),
             Some(EntityType::Solid3D(_))
+        ) || matches!(
+            self.document().get_entity(handle),
+            Some(EntityType::Region(region)) if region.acis_data.has_data()
         ) {
             let mut f = |body: &KernelBody| -> ApiResult<Aabb> {
                 let bb = cadkernel::brep::body_bounds(body)

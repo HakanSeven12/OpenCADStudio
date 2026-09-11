@@ -217,7 +217,7 @@ impl CadCommand for SplineditCommand {
                 let weights = if source.weights.is_empty() { vec![1.0; source.control_points.len()] }
                     else { source.weights.clone() };
                 let curve = cadkernel::space::NurbsCurve3::new_strict(source.degree as usize, controls,
-                    source.knots.clone(), weights).map(|curve| curve.with_periodicity(source.flags.periodic));
+                    source.knots.clone(), weights).map(|curve| curve.with_periodicity(source.flags.periodic || source.flags.closed));
                 let Some(curve) = curve.and_then(|curve| curve.without_control_vertex(index)) else { return CmdResult::NeedPoint; };
                 let mut spline = source.clone();
                 spline.degree = curve.degree() as i32;

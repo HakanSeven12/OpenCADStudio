@@ -26,6 +26,8 @@ pub struct SplineCommand {
     pts: Vec<DVec3>,
     control_vertices: bool,
     choosing_method: bool,
+    choosing_degree: bool,
+    degree: usize,
 }
 
 impl SplineCommand {
@@ -34,6 +36,8 @@ impl SplineCommand {
             pts: Vec::new(),
             control_vertices: false,
             choosing_method: false,
+            choosing_degree: false,
+            degree: 3,
         }
     }
 
@@ -48,11 +52,17 @@ impl SplineCommand {
         if self.pts.len() < 2 {
             return None;
         }
-        Some(EntityType::Spline(make_spline(
-            &self.pts,
-            closed,
-            self.control_vertices,
-        )))
+        let mut spline = make_spline(&self.pts, closed, self.control_vertices);
+        if self.control_vertices {
+            let count = spline.control_points.len();
+            let degree = self.degree.min(count - 1);
+            spline.degree = degree as i32;
+            spline.knots = (0..count + degree + 1).map(|index| {
+                if index <= degree { 0.0 } else if index >= count { 1.0 }
+                else { (index - degree) as f64 / (count - degree) as f64 }
+            }).collect();
+        }
+        Some(EntityType::Spline(spline))
     }
 }
 
@@ -97,6 +107,7 @@ fn make_spline(pts: &[DVec3], closed: bool, control_vertices: bool) -> Spline {
 }
 
 /// Preview the exact representation that `build()` commits.
+#[cfg(test)]
 fn sample_curve(pts: &[DVec3], closed: bool, control_vertices: bool) -> Vec<[f32; 3]> {
     if pts.len() < 2 {
         return pts
@@ -123,7 +134,9 @@ impl CadCommand for SplineCommand {
     }
 
     fn prompt(&self) -> String {
-        if self.choosing_method {
+        if self.choosing_degree {
+            format!("SPLINE  Enter degree of spline <{}>:", self.degree)
+        } else if self.choosing_method {
             "SPLINE  Choose creation method [Fit/Control vertices]:".into()
         } else if self.pts.is_empty() && self.control_vertices {
             t!("SPLINE  Specify first control point:").into_owned()
@@ -143,8 +156,11 @@ impl CadCommand for SplineCommand {
                 CmdOption::new("Control vertices", "CV"),
             ];
         }
+        if self.choosing_degree { return vec![]; }
         if self.pts.is_empty() {
-            return vec![CmdOption::new(t!("Method").as_ref(), "M")];
+            let mut options = vec![CmdOption::new(t!("Method").as_ref(), "M")];
+            if self.control_vertices { options.push(CmdOption::new("Degree", "D")); }
+            return options;
         }
         let mut opts = vec![CmdOption::new(t!("Close").as_ref(), "C")];
         // Undo only makes sense once a control point exists.
@@ -154,7 +170,7 @@ impl CadCommand for SplineCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
-        if self.choosing_method || !pt.is_finite() {
+        if self.choosing_method || self.choosing_degree || !pt.is_finite() {
             return CmdResult::NeedPoint;
         }
         self.pts.push(pt);
@@ -162,7 +178,8 @@ impl CadCommand for SplineCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        if self.choosing_method {
+        if self.choosing_method || self.choosing_degree {
+            self.choosing_degree = false;
             self.choosing_method = false;
             return CmdResult::NeedPoint;
         }
@@ -189,7 +206,16 @@ impl CadCommand for SplineCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if self.choosing_degree {
+            self.degree = text.trim().parse::<usize>().ok().filter(|d| (1..=10).contains(d))?;
+            self.choosing_degree = false;
+            return Some(CmdResult::NeedPoint);
+        }
         match text.trim().to_uppercase().as_str() {
+            "D" | "DEGREE" if self.pts.is_empty() && self.control_vertices => {
+                self.choosing_degree = true;
+                Some(CmdResult::NeedPoint)
+            }
             "M" | "METHOD" if self.pts.is_empty() => {
                 self.choosing_method = true;
                 Some(CmdResult::NeedPoint)
@@ -217,15 +243,20 @@ impl CadCommand for SplineCommand {
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
-        if self.pts.is_empty() {
+        if self.pts.is_empty() || self.choosing_method || self.choosing_degree {
             return None;
         }
         // Preview the committed construction method.
-        let mut ctrl = self.pts.clone();
-        ctrl.push(pt);
+        self.pts.push(pt);
+        let entity = self.build(false);
+        self.pts.pop();
+        let Some(EntityType::Spline(spline)) = entity else { return None; };
+        let points = crate::entities::curve::spline_curve(&spline)
+            .map(|curve| crate::entities::curve::curve_points(&curve))
+            .unwrap_or_else(|| crate::entities::spline::measurement_polyline(&spline));
         Some(WireModel::solid(
             "rubber_band".into(),
-            sample_curve(&ctrl, false, self.control_vertices),
+            points.into_iter().map(|p| [p[0] as f32, p[1] as f32, p[2] as f32]).collect(),
             WireModel::CYAN,
             false,
         ))

@@ -22,13 +22,20 @@ cd "$(dirname "$0")/.."
 TARGET=aarch64-apple-darwin
 DIST=dist
 VERSION="${VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}"
+# Bundle display name (CFBundleName/CFBundleDisplayName, what Finder/Dock/the
+# menu bar show) is "OCS-<this>" rather than the fixed "Open CAD Studio", so
+# a rebuilt-and-reinstalled dev build is visibly distinct from whatever was
+# running before it — same idea as `OCS_BUILD_STAMP` in build.rs (the window
+# title), computed independently here since this script doesn't invoke cargo
+# until after this point.
+BUILD_STAMP="${BUILD_STAMP:-$(date +%Y%m%d_%H%M%S)}"
 
 if [ -z "${DEVELOPER_ID:-}" ]; then
     DEVELOPER_ID="$(security find-identity -v -p codesigning \
         | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)"
 fi
 [ -n "$DEVELOPER_ID" ] || { echo "No Developer ID identity found; set DEVELOPER_ID (or '-' for ad-hoc)." >&2; exit 1; }
-echo "==> Version $VERSION, signing as: $DEVELOPER_ID"
+echo "==> Version $VERSION (OCS-$BUILD_STAMP), signing as: $DEVELOPER_ID"
 
 echo "==> cargo build (app + thumbnailer staticlib + launcher)"
 cargo build --release --target "$TARGET"
@@ -89,7 +96,7 @@ cp "target/$TARGET/release/OpenCADStudio" "$APP/Contents/MacOS/OpenCADStudio-App
 chmod +x "$APP/Contents/MacOS/OpenCADStudio" "$APP/Contents/MacOS/OpenCADStudio-App"
 cp "$DIST/AppIcon.icns" "$DIST/DWG.icns" "$DIST/DXF.icns" "$APP/Contents/Resources/"
 cp -R "$EXT" "$APP/Contents/PlugIns/"
-sed "s/__VERSION__/$VERSION/g" packaging/Info.plist > "$APP/Contents/Info.plist"
+sed -e "s/__VERSION__/$VERSION/g" -e "s/__BUILD_STAMP__/$BUILD_STAMP/g" packaging/Info.plist > "$APP/Contents/Info.plist"
 
 echo "==> codesign"
 if [ "$DEVELOPER_ID" = "-" ]; then

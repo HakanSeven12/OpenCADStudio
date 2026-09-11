@@ -221,6 +221,14 @@ pub struct UserSettings {
     pub crosshair_color: Option<[u8; 3]>,
     /// Model-space lineweight preview scale as a percentage.
     pub lineweight_display_scale: i32,
+    /// Whole-interface scale, as a percentage — every panel, dialog, the
+    /// ribbon, and their text, not just one widget's font size. Wired
+    /// straight into iced's own per-window `scale_factor` hook
+    /// (`OpenCADStudio::run`), so a change takes effect immediately with no
+    /// per-panel plumbing needed. Relies on the struct-level `#[serde(default)]`
+    /// (via `impl Default` below) to backfill this field for a config file
+    /// saved before this setting existed, same as every other field here.
+    pub ui_scale: i32,
     /// Isometric drafting changes the grid and crosshair to the active axis pair.
     pub isometric_drafting: bool,
     pub iso_plane: IsoPlane,
@@ -276,6 +284,21 @@ pub struct UserSettings {
     /// When true (default), the app (re)registers itself as a .dwg/.dxf/.bak
     /// handler on every launch. Toggle with the FILEASSOC command.
     pub file_assoc_enabled: bool,
+    /// When true, saving a drawing also writes its sketch constraints as
+    /// AutoCAD's own native object graph (`scene::dwg_native_constraints`),
+    /// not just the app's own XRecord format. Off by default — opt-in, since
+    /// it adds file weight every save whether or not AutoCAD/BricsCAD
+    /// interop is needed. See `write_dwg_native_constraints` on the app
+    /// struct for the full contract (a drawing that already has this native
+    /// graph keeps it synced regardless of this setting).
+    #[serde(default)]
+    pub write_dwg_native_constraints: bool,
+    /// When true (default), a sketch constraint's viewport pill shows its
+    /// glyph plus a driven value or named-parameter name. When false, every
+    /// pill shows just the bare glyph, so the value/name text doesn't cover
+    /// canvas detail on a dense sketch.
+    #[serde(default = "default_show_constraint_values")]
+    pub show_constraint_values: bool,
     /// Minutes between autosaves to a `.sv$` recovery file (SAVETIME command).
     /// 0 disables autosave.
     pub savetime_min: i32,
@@ -342,6 +365,10 @@ fn default_dimension_continue_mode() -> i16 {
     1
 }
 
+fn default_show_constraint_values() -> bool {
+    true
+}
+
 fn deserialize_clipromptlines<'de, D>(de: D) -> Result<i32, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -375,6 +402,7 @@ impl Default for UserSettings {
             cursor_type: CursorType::Crosshair,
             crosshair_color: None,
             lineweight_display_scale: 100,
+            ui_scale: 100,
             isometric_drafting: false,
             iso_plane: IsoPlane::Left,
             snap_angle_deg: 0.0,
@@ -395,6 +423,8 @@ impl Default for UserSettings {
             textfill: true,
             backup_on_save: true,
             file_assoc_enabled: true,
+            write_dwg_native_constraints: false,
+            show_constraint_values: true,
             savetime_min: 10,
             default_save_format: crate::io::DEFAULT_SAVE_FORMAT.to_string(),
             pick_add: true,

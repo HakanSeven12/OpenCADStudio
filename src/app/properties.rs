@@ -406,6 +406,38 @@ impl OpenCADStudio {
                                 read_only(t!("Visual Style").as_ref(), tab.visual_style.clone()),
                             ],
                         },
+                        // Document-wide named-parameter table (AutoCAD
+                        // Parameters Manager equivalent), embedded here
+                        // instead of a separate modal — see `PropValue::
+                        // ParamRow`'s doc comment. Belongs on the no-
+                        // selection (drawing-level) page, not a per-entity
+                        // one: a parameter isn't owned by any one entity.
+                        PropSection {
+                            title: t!("Parameters").into_owned(),
+                            props: {
+                                let mut props: Vec<Property> = scene
+                                    .named_parameters()
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(index, p)| Property {
+                                        label: String::new(),
+                                        field: "named_parameter",
+                                        value: PropValue::ParamRow {
+                                            index,
+                                            name: p.name.clone(),
+                                            formula: p.source.clone(),
+                                            resolved: scene.named_parameters().resolve(&p.name).map_err(|e| e.to_string()),
+                                        },
+                                    })
+                                    .collect();
+                                props.push(Property {
+                                    label: String::new(),
+                                    field: "named_parameter_add",
+                                    value: PropValue::ParamAddRow,
+                                });
+                                props
+                            },
+                        },
                     ];
                     ui::PropertiesPanel {
                         title: t!("No selection").into_owned(),
@@ -2126,6 +2158,53 @@ impl OpenCADStudio {
                     if compact_solid {
                         retain_compact_solid_sections(&mut sections);
                     }
+                    // Persistent sketch-constraint list for this entity —
+                    // the Properties-panel analogue of the viewport's
+                    // constraint glyph pills: one row per constraint
+                    // touching `handle`, clickable to select every entity
+                    // it relates (PropConstraintLinkClick). Omitted
+                    // entirely when the entity has none — an unconstrained
+                    // entity (the common case) shouldn't gain empty
+                    // bookkeeping.
+                    {
+                        let scope = self.tabs[i].current_sketch_scope();
+                        let scene = &self.tabs[i].scene;
+                        if let Some(set) = scene.sketch_constraint_set(scope) {
+                            let props: Vec<crate::scene::model::object::Property> = set
+                                .constraints_touching(handle)
+                                .map(|c| {
+                                    let conflicting = set.conflicts.iter().any(|(id, _)| *id == c.id);
+                                    let value_suffix = match &c.driving_param {
+                                        Some(crate::scene::named_parameters::DrivingValue::Literal(v)) => {
+                                            format!(" = {v:.2}")
+                                        }
+                                        Some(crate::scene::named_parameters::DrivingValue::Named(name)) => {
+                                            match scene.named_parameters().resolve(name) {
+                                                Ok(v) => format!(" = {name} ({v:.2})"),
+                                                Err(_) => format!(" = {name} (?)"),
+                                            }
+                                        }
+                                        None => String::new(),
+                                    };
+                                    let label = format!("{} {:?}{}", c.kind.glyph_symbol(), c.kind, value_suffix);
+                                    let mut handles: Vec<acadrust::Handle> = c.refs.iter().map(|r| r.entity).collect();
+                                    handles.sort_by_key(|h| h.value());
+                                    handles.dedup();
+                                    crate::scene::model::object::Property {
+                                        label,
+                                        field: "sketch_constraint",
+                                        value: crate::scene::model::object::PropValue::EntityLink { handles, conflicting },
+                                    }
+                                })
+                                .collect();
+                            if !props.is_empty() {
+                                sections.push(crate::scene::model::object::PropSection {
+                                    title: t!("Constraints").into_owned(),
+                                    props,
+                                });
+                            }
+                        }
+                    }
                     let title = match entity {
                         acadrust::EntityType::Insert(ins) => {
                             let is_xref = self.tabs[i]
@@ -3112,6 +3191,15 @@ fn make_sections_read_only(
             }
             PropValue::Stepper { display, .. } => display.clone(),
             PropValue::AttrText { value, .. } => value.clone(),
+            // The Constraints/Parameters sections aren't per-entity editable
+            // fields to begin with (a constraint link is a navigation
+            // action, not a value; a parameter belongs to the whole
+            // document, not the locked entity) — locking the entity doesn't
+            // change either, so just carry through readable text instead of
+            // collapsing them to a value that was never editable anyway.
+            PropValue::EntityLink { handles, .. } => format!("{} entity link(s)", handles.len()),
+            PropValue::ParamRow { name, formula, .. } => format!("{name} = {formula}"),
+            PropValue::ParamAddRow => String::new(),
         };
         property.field = "locked_read_only";
         property.value = PropValue::ReadOnly(text);

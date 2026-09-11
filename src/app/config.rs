@@ -435,10 +435,25 @@ pub struct StartConfig {
     pub section: super::StartSection,
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RibbonConfig {
     pub collapse: CollapseMode,
+    /// Font size (px) of the caption under a large ribbon button's icon.
+    pub label_font_size: i32,
+    /// Font size (px) of a panel's own title ("Draw", "Modify", "Layers", …)
+    /// shown beneath its tools.
+    pub group_title_font_size: i32,
+}
+
+impl Default for RibbonConfig {
+    fn default() -> Self {
+        Self {
+            collapse: CollapseMode::default(),
+            label_font_size: 10,
+            group_title_font_size: 9,
+        }
+    }
 }
 
 impl AppConfig {

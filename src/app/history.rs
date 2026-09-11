@@ -1,11 +1,12 @@
 use super::{
     document::{
         DeltaSnapshot, HistorySnapshot, ObjectEntryDelta, ObjectVisibilitySnapshot,
-        PendingHistorySnapshot, StructureSnapshot, TableEntryDelta,
+        PendingHistorySnapshot, SketchConstraintsEntryDelta, SketchConstraintsSnapshot,
+        StructureSnapshot, TableEntryDelta,
     },
     OpenCADStudio,
 };
-use crate::scene::ObjectIsolationState;
+use crate::scene::{ChangeKind, ObjectIsolationState};
 use acadrust::{EntityType, Handle};
 use rustc_hash::{FxHashMap, FxHashSet as HashSet};
 use std::sync::Arc;
@@ -184,6 +185,40 @@ impl OpenCADStudio {
         );
     }
 
+    /// Design doc §5.1/§9: makes a persistent-constraint add/remove
+    /// undoable. `before` is the scope's constraint set captured *before*
+    /// the caller's edit (by the caller, since this fn only sees "now");
+    /// `after` is read fresh here, so call this once the edit is done.
+    pub(super) fn push_sketch_constraints_history(
+        &mut self,
+        i: usize,
+        label: impl Into<String>,
+        scope: crate::scene::sketch_constraints::SketchScope,
+        before: Option<crate::scene::sketch_constraints::SketchConstraintSet>,
+    ) {
+        self.finish_pending_history(i);
+        let after = self.tabs[i].scene.sketch_constraint_set(scope).cloned();
+        self.push_undo_entry(
+            i,
+            HistorySnapshot::SketchConstraints(SketchConstraintsSnapshot { scope, before, after, label: label.into() }),
+        );
+    }
+
+    fn apply_sketch_constraints_state(&mut self, i: usize, snapshot: &SketchConstraintsSnapshot, undo: bool) {
+        let state = if undo { snapshot.before.clone() } else { snapshot.after.clone() };
+        let scene = &mut self.tabs[i].scene;
+        let set = state.unwrap_or_else(|| crate::scene::sketch_constraints::SketchConstraintSet::new(snapshot.scope));
+        // The restored set's geometry may be stale (e.g. redo re-adds a
+        // constraint whose entities moved via other edits since) — resolve
+        // every entity it references, same as a fresh add would.
+        let touched: Vec<Handle> = set.constraints.iter().flat_map(|c| c.refs.iter().map(|r| r.entity)).collect();
+        *scene.sketch_constraint_set_mut(snapshot.scope) = set;
+        if !touched.is_empty() {
+            let changes: Vec<(Handle, ChangeKind)> = touched.into_iter().map(|h| (h, ChangeKind::Modified)).collect();
+            scene.bump_entities(&changes);
+        }
+    }
+
     pub(super) fn push_entity_group_history(
         &mut self,
         i: usize,
@@ -225,9 +260,10 @@ impl OpenCADStudio {
             dirty_after: true,
             active_layer: None,
             structure: (!objects.is_empty()).then_some(StructureSnapshot::Objects(objects)),
+            sketch_constraints: Vec::new(),
             label: label.into(),
         };
-        self.push_undo_entry(i, HistorySnapshot::Delta(delta));
+        self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
     }
 
     pub(super) fn defer_live_entity_history_after(&mut self, i: usize, handle: Handle) {
@@ -334,9 +370,10 @@ impl OpenCADStudio {
             active_layer: (pending.active_layer != active_layer_after)
                 .then_some((pending.active_layer, active_layer_after)),
             structure: structure_changed.then_some(StructureSnapshot::Full(pending.structure_before)),
+            sketch_constraints: Vec::new(),
             label: pending.label,
         };
-        self.push_undo_entry(i, HistorySnapshot::Delta(delta));
+        self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
     }
 
     pub(super) fn finish_all_pending_history(&mut self) {
@@ -441,9 +478,10 @@ impl OpenCADStudio {
             dirty_after: self.tabs[i].dirty,
             active_layer: None,
             structure: Some(StructureSnapshot::Layers(entries)),
+            sketch_constraints: Vec::new(),
             label: pending.label,
         };
-        self.push_undo_entry(i, HistorySnapshot::Delta(delta));
+        self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
     }
 
     pub(super) fn begin_text_style_undo(
@@ -496,9 +534,10 @@ impl OpenCADStudio {
             dirty_after: self.tabs[i].dirty,
             active_layer: None,
             structure: Some(StructureSnapshot::TextStyles(entries)),
+            sketch_constraints: Vec::new(),
             label: pending.label,
         };
-        self.push_undo_entry(i, HistorySnapshot::Delta(delta));
+        self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
     }
 
     pub(super) fn begin_dim_style_undo(
@@ -551,9 +590,10 @@ impl OpenCADStudio {
             dirty_after: self.tabs[i].dirty,
             active_layer: None,
             structure: Some(StructureSnapshot::DimStyles(entries)),
+            sketch_constraints: Vec::new(),
             label: pending.label,
         };
-        self.push_undo_entry(i, HistorySnapshot::Delta(delta));
+        self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
     }
 
     fn group_object_state(&self, i: usize) -> FxHashMap<Handle, acadrust::objects::ObjectType> {
@@ -614,9 +654,10 @@ impl OpenCADStudio {
             dirty_after: self.tabs[i].dirty,
             active_layer: None,
             structure: Some(StructureSnapshot::Objects(entries)),
+            sketch_constraints: Vec::new(),
             label: pending.label,
         };
-        self.push_undo_entry(i, HistorySnapshot::Delta(delta));
+        self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
     }
 
     pub(super) fn commit_style_undo(
@@ -647,9 +688,10 @@ impl OpenCADStudio {
                 dim_names,
                 object_handles,
             }),
+            sketch_constraints: Vec::new(),
             label: "STYLE".to_string(),
         };
-        self.push_undo_entry(i, HistorySnapshot::Delta(delta));
+        self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
     }
 
     /// Dimension copies still need a full snapshot because they clone a fresh
@@ -727,7 +769,7 @@ impl OpenCADStudio {
                 pending.label
             );
         }
-        let (entity_before, object_before) = rec.into_recorded_images();
+        let (entity_before, object_before, sketch_constraints_before) = rec.into_recorded_images();
         let entities: Vec<(Handle, Option<Arc<EntityType>>, Option<Arc<EntityType>>)> = entity_before
             .into_iter()
             .map(|(h, before)| {
@@ -741,6 +783,21 @@ impl OpenCADStudio {
                 let after = self.tabs[i].scene.document.objects.get(&handle).cloned();
                 (before != after).then_some(ObjectEntryDelta {
                     handle,
+                    before,
+                    after,
+                })
+            })
+            .collect();
+        let sketch_constraints: Vec<SketchConstraintsEntryDelta> = sketch_constraints_before
+            .into_iter()
+            .filter_map(|(scope, before)| {
+                let after = self.tabs[i]
+                    .scene
+                    .sketch_constraint_set(scope)
+                    .cloned()
+                    .unwrap_or_else(|| crate::scene::sketch_constraints::SketchConstraintSet::new(scope));
+                (before.constraints != after.constraints).then_some(SketchConstraintsEntryDelta {
+                    scope,
                     before,
                     after,
                 })
@@ -781,9 +838,10 @@ impl OpenCADStudio {
             dirty_after,
             active_layer: None,
             structure,
+            sketch_constraints,
             label: pending.label,
         };
-        self.push_undo_entry(i, HistorySnapshot::Delta(delta));
+        self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
     }
 
     /// Apply one side of a delta entry in place: `undo` restores each entity's
@@ -909,6 +967,10 @@ impl OpenCADStudio {
         }
         let changes = self.tabs[i].scene.apply_entity_delta(&d.entities, undo);
         let scene = &mut self.tabs[i].scene;
+        for entry in &d.sketch_constraints {
+            let value = if undo { &entry.before } else { &entry.after };
+            *scene.sketch_constraint_set_mut(entry.scope) = value.clone();
+        }
         let (sel, dirty) = if undo {
             (&d.selected_before, d.dirty_before)
         } else {
@@ -1106,6 +1168,13 @@ impl OpenCADStudio {
                         .redo_stack
                         .push(HistorySnapshot::ObjectVisibility(v));
                 }
+                HistorySnapshot::SketchConstraints(s) => {
+                    self.apply_sketch_constraints_state(i, &s, true);
+                    self.tabs[i]
+                        .history
+                        .redo_stack
+                        .push(HistorySnapshot::SketchConstraints(s));
+                }
             }
         }
         self.finish_history_apply(i, had_full, layer_panel_changed, &changes);
@@ -1160,6 +1229,13 @@ impl OpenCADStudio {
                         .history
                         .undo_stack
                         .push(HistorySnapshot::ObjectVisibility(v));
+                }
+                HistorySnapshot::SketchConstraints(s) => {
+                    self.apply_sketch_constraints_state(i, &s, false);
+                    self.tabs[i]
+                        .history
+                        .undo_stack
+                        .push(HistorySnapshot::SketchConstraints(s));
                 }
             }
         }

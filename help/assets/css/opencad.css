@@ -1,0 +1,24 @@
+.hero {
+    margin: 0 0 38px;
+    padding: clamp(25px, 6vw, 56px);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+    border-radius: 18px;
+    background:
+        linear-gradient(115deg, color-mix(in srgb, var(--accent-soft) 82%, var(--canvas)), var(--canvas));
+}
+.hero .eyebrow { margin: 0; color: var(--accent-strong); font-size: 12px; font-weight: 760; letter-spacing: .1em; text-transform: uppercase; }
+.hero h2 { margin: 8px 0 14px; padding: 0; border: 0; font-size: clamp(28px, 5vw, 44px); line-height: 1.08; letter-spacing: -.03em; }
+.hero p:last-child { max-width: 720px; margin-bottom: 0; font-size: 17px; }
+.chapter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.chapter-card { min-height: 130px; display: flex; flex-direction: column; gap: 7px; padding: 18px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); text-decoration: none; }
+.chapter-card:hover { border-color: var(--accent); background: var(--accent-soft); text-decoration: none; }
+.chapter-card strong { color: var(--accent-strong); font-size: 18px; }
+.chapter-card span { color: var(--muted); }
+.quick-paths { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 18px 0 28px; }
+.quick-paths a { padding: 12px; border: 1px solid var(--line); border-radius: 9px; text-align: center; text-decoration: none; }
+.quick-paths a:hover { background: var(--accent-soft); }
+@media (max-width: 640px) {
+    .chapter-grid, .quick-paths { grid-template-columns: 1fr; }
+    .chapter-card { min-height: 0; }
+}
+

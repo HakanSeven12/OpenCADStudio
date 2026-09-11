@@ -422,9 +422,19 @@ pub fn entity_with_lwpolyline_world_xy(entity: &EntityType) -> EntityType {
     }
 }
 
+/// Fixed world-space tessellation angle used for on-screen wire points.
+///
+/// Finer than the kernel's own `DEFAULT_ANGLE` (7.5°, 48 segments per turn):
+/// 3° gives 120 segments per full turn, so a typical circle at typical zoom
+/// no longer shows its polygon joints. Still a fixed world-space angle rather
+/// than one adaptive to view scale, so an aggressively zoomed-in view can
+/// still reveal facets — it raises the zoom threshold rather than removing
+/// the ceiling.
+const DISPLAY_ANGLE: f64 = std::f64::consts::PI / 60.0;
+
 /// World-space wire points sampled by the kernel's angular policy.
 pub fn curve_points(curve: &PlanarCurve) -> Vec<[f64; 3]> {
-    curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
+    curve.tessellate_angle(DISPLAY_ANGLE)
 }
 
 /// The snap candidates an entity's curve offers, in the two channels the

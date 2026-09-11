@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "fallback": "index.html",
+  "commands": {
+    "NEW": "files-drawings.html#create-and-open-drawings",
+    "OPEN": "files-drawings.html#create-and-open-drawings",
+    "SAVE": "files-drawings.html#save-and-save-as",
+    "SAVEAS": "files-drawings.html#save-and-save-as",
+    "RECOVER": "files-drawings.html#recovery-and-backups",
+    "LINE": "create-edit-geometry.html#basic-drawing-commands",
+    "CIRCLE": "create-edit-geometry.html#basic-drawing-commands",
+    "PLINE": "create-edit-geometry.html#basic-drawing-commands",
+    "ERASE": "create-edit-geometry.html#modify-geometry",
+    "UNDO": "create-edit-geometry.html#undo-redo-and-oops",
+    "REDO": "create-edit-geometry.html#undo-redo-and-oops",
+    "OOPS": "create-edit-geometry.html#undo-redo-and-oops",
+    "LAYER": "layers-properties.html#layers",
+    "CHPROP": "layers-properties.html#object-properties",
+    "BLOCK": "blocks-references.html#create-and-insert-blocks",
+    "INSERT": "blocks-references.html#create-and-insert-blocks",
+    "MINSERT": "blocks-references.html#array-inserts",
+    "DIM": "annotation-dimensions.html#dimensions",
+    "PLOT": "layouts-plotting.html#page-setup-and-plot-preview",
+    "EXTRUDE": "3d-modeling.html#solids-and-surfaces",
+    "REVOLVE": "3d-modeling.html#solids-and-surfaces",
+    "HCONSTRAINT": "parametric-constraints.html#geometric-constraints",
+    "VCONSTRAINT": "parametric-constraints.html#geometric-constraints",
+    "PCONSTRAINT": "parametric-constraints.html#geometric-constraints",
+    "QCONSTRAINT": "parametric-constraints.html#geometric-constraints",
+    "ECONSTRAINT": "parametric-constraints.html#geometric-constraints",
+    "CCONSTRAINT": "parametric-constraints.html#geometric-constraints",
+    "TCONSTRAINT": "parametric-constraints.html#geometric-constraints"
+  },
+  "surfaces": {
+    "file-open": "files-drawings.html#create-and-open-drawings",
+    "file-save": "files-drawings.html#save-and-save-as",
+    "layers": "layers-properties.html#layers",
+    "properties": "layers-properties.html#object-properties",
+    "plot": "layouts-plotting.html#page-setup-and-plot-preview",
+    "plugin-manager": "automation-plugins.html#plugins",
+    "constraint-conflicts": "parametric-constraints.html#editing-constrained-geometry",
+    "recovery": "troubleshooting-recovery.html#a-drawing-opens-incorrectly"
+  }
+}
+

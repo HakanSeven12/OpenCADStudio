@@ -1246,7 +1246,7 @@ impl OpenCADStudio {
             };
 
             let mut seen_handles = rustc_hash::FxHashSet::default();
-            let edited_handles: Vec<_> = grip
+            let mut edited_handles: Vec<_> = grip
                 .targets
                 .iter()
                 .map(|target| target.handle)
@@ -1704,6 +1704,37 @@ impl OpenCADStudio {
                         vertex_id,
                         original_bulge,
                     );
+                }
+            }
+            // Live sketch-constraint re-solve (design doc §7 open question
+            // 6): previously constrained neighbors only snapped into place
+            // on grip release — this runs the same rebuild-and-solve every
+            // frame so they track the drag live. First touch this gesture
+            // captures the neighbor's original state into the grip's own
+            // undo tracking (mirroring how `edited_handles` itself is
+            // captured above) and hides it from the resident tessellation;
+            // every frame folds it into this frame's `edited_handles` so the
+            // existing mesh/hatch/wire-preview refresh below already covers
+            // it for free.
+            let solved_by_constraints = self.tabs[i].scene.solve_sketch_constraints_preview(&edited_handles);
+            for (handle, _) in &solved_by_constraints {
+                let handle = *handle;
+                if !self.grip_preview_handles.contains(&handle) {
+                    if let Some(original) = self.tabs[i].scene.document.get_entity(handle).cloned() {
+                        self.grip_originals.push((handle, original));
+                    }
+                    self.grip_preview_handles.push(handle);
+                    if !self.tabs[i].scene.meshes.contains_key(&handle) {
+                        self.tabs[i].scene.preview_hidden.insert(handle);
+                    }
+                }
+                if !edited_handles.contains(&handle) {
+                    edited_handles.push(handle);
+                }
+            }
+            for (handle, new_entity) in solved_by_constraints {
+                if let Some(slot) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                    *slot = new_entity;
                 }
             }
             let mesh_changes: Vec<_> = edited_handles

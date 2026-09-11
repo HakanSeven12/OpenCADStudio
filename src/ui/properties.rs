@@ -267,6 +267,10 @@ pub enum FieldKey {
     Geom(&'static str),
     /// A block attribute value field, keyed by its tag.
     Attr(String),
+    /// One column of one named-parameter row, keyed by its stable
+    /// `ParameterTable::iter()` position (see `PropValue::ParamRow`'s doc
+    /// comment for why index rather than name).
+    Param(usize, crate::ui::window::named_parameters::ParamField),
 }
 
 impl FieldKey {
@@ -277,8 +281,19 @@ impl FieldKey {
         match self {
             FieldKey::Geom(field) => prop_geom_field_id(field),
             FieldKey::Attr(tag) => prop_attr_field_id(tag),
+            FieldKey::Param(index, field) => prop_param_field_id(*index, *field),
         }
     }
+}
+
+/// Text-input widget id for one column of a named-parameter row.
+pub fn prop_param_field_id(index: usize, field: crate::ui::window::named_parameters::ParamField) -> iced::widget::Id {
+    use crate::ui::window::named_parameters::ParamField;
+    let suffix = match field {
+        ParamField::Name => "name",
+        ParamField::Formula => "formula",
+    };
+    iced::widget::Id::from(format!("props-param-field-{index}-{suffix}"))
 }
 
 /// Edit-buffer / active-field key for a block attribute value, keyed by its
@@ -337,6 +352,13 @@ pub fn build_field_key_map(
             };
             if let Some(key) = key {
                 map.insert(key.widget_id(), key);
+            }
+            if let PropValue::ParamRow { index, .. } = &prop.value {
+                use crate::ui::window::named_parameters::ParamField;
+                for field in [ParamField::Name, ParamField::Formula] {
+                    let key = FieldKey::Param(*index, field);
+                    map.insert(key.widget_id(), key);
+                }
             }
         }
     }
@@ -842,6 +864,13 @@ impl PropertiesPanel {
                 self.render_hatch_pattern_row(label, current)
             }
             PropValue::AttrText { tag, value } => self.render_attr_row(tag, value),
+            PropValue::EntityLink { handles, conflicting } => {
+                render_entity_link_row(label, handles.clone(), *conflicting)
+            }
+            PropValue::ParamRow { index, name, formula, resolved } => {
+                self.render_param_row(*index, name, formula, resolved)
+            }
+            PropValue::ParamAddRow => render_param_add_row(),
         }
     }
 
@@ -1367,6 +1396,96 @@ impl PropertiesPanel {
         prop_row_with_active(tag, ti.into(), active)
     }
 
+    /// One named-parameter row: editable name + formula, with the live-
+    /// resolved value (or error) shown alongside — the "AutoCAD style" the
+    /// Parameters section is modeled on, embedded in the panel instead of
+    /// the old separate modal. Each field commits on submit (Enter / losing
+    /// focus), not per keystroke — `ParameterTable::set` validates
+    /// immediately and would otherwise reject a formula mid-type (the same
+    /// reasoning the old modal's buffered-Apply design used, just applied
+    /// per-field instead of per-whole-table).
+    fn render_param_row<'a>(
+        &'a self,
+        index: usize,
+        name: &'a str,
+        formula: &'a str,
+        resolved: &'a Result<f64, String>,
+    ) -> Element<'a, Message> {
+        use crate::ui::window::named_parameters::ParamField;
+
+        let name_key = FieldKey::Param(index, ParamField::Name);
+        let name_display = self.edit_buf.get(&name_key).map(|s| s.as_str()).unwrap_or(name);
+        let name_active = self.active_field.as_ref() == Some(&name_key);
+        let name_input = text_input("name", name_display)
+            .id(name_key.widget_id())
+            .on_input(move |v| Message::PropParamInput { index, field: ParamField::Name, value: v })
+            .on_submit(Message::PropParamCommit { index, field: ParamField::Name })
+            .size(FONT_SZ)
+            .style(text_input_style)
+            .padding([3, 6])
+            .width(Length::FillPortion(3));
+
+        let formula_key = FieldKey::Param(index, ParamField::Formula);
+        let formula_display = self.edit_buf.get(&formula_key).map(|s| s.as_str()).unwrap_or(formula);
+        let formula_active = self.active_field.as_ref() == Some(&formula_key);
+        let formula_input = text_input("formula", formula_display)
+            .id(formula_key.widget_id())
+            .on_input(move |v| Message::PropParamInput { index, field: ParamField::Formula, value: v })
+            .on_submit(Message::PropParamCommit { index, field: ParamField::Formula })
+            .size(FONT_SZ)
+            .style(text_input_style)
+            .padding([3, 6])
+            .width(Length::FillPortion(3));
+
+        let (value_text, is_error) = match resolved {
+            Ok(v) => (format!("{v:.4}"), false),
+            Err(_) => ("—".to_string(), true),
+        };
+        let value_label = container(
+            text(value_text).size(FONT_SZ).style(move |theme: &Theme| iced::widget::text::Style {
+                color: is_error.then_some(theme.palette().danger.base.color),
+            }),
+        )
+        .width(Length::FillPortion(2))
+        .align_x(iced::Right);
+
+        let delete_btn = button(text("\u{2715}").size(FONT_SZ))
+            .on_press(Message::PropParamDelete(index))
+            .style(button::text)
+            .padding([2, 6]);
+
+        let active = name_active || formula_active;
+        let bg = move |theme: &Theme| {
+            if active {
+                Background::Color(theme.palette().primary.weak.color)
+            } else {
+                Background::Color(theme.palette().background.base.color)
+            }
+        };
+        let content = container(row![name_input, formula_input, value_label, delete_btn].spacing(4).align_y(iced::Center))
+            .style(move |theme: &Theme| container::Style { background: Some(bg(theme)), ..Default::default() })
+            .padding([2, 6])
+            .width(Length::Fill);
+
+        if let Err(err) = resolved {
+            tooltip(content, text(err.as_str()).size(FONT_SZ), tooltip::Position::Top)
+                .gap(4.0)
+                .padding(6.0)
+                .style(|theme: &Theme| {
+                    let palette = theme.palette();
+                    container::Style {
+                        background: Some(Background::Color(palette.danger.weak.color)),
+                        text_color: Some(palette.danger.weak.text),
+                        border: Border { color: palette.danger.base.color, width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }
+                })
+                .into()
+        } else {
+            content.into()
+        }
+    }
+
     fn render_hatch_pattern_row<'a>(
         &'a self,
         label: &'a str,
@@ -1803,6 +1922,55 @@ fn render_ro_with_tooltip_row<'a>(
             }
         });
     prop_row_widget(label, wrapped.into())
+}
+
+// ── Constraints section row (clickable entity link) ───────────────────────
+
+/// One persistent-constraint row in the Constraints properties section:
+/// `label` is the glyph + kind name + resolved value (e.g. "↔ Distance:
+/// hole_dia = 12.00"), rendered as the row's own clickable surface — there's
+/// no natural separate "value" for a constraint row, unlike a Layer/Color
+/// field, so this doesn't use the usual `prop_row_widget` label|value split.
+/// Clicking it selects every entity in `handles`; a conflicting/redundant
+/// constraint (mirrors the viewport glyph pill's own color cue) tints red.
+fn render_entity_link_row<'a>(label: &'a str, handles: Vec<Handle>, conflicting: bool) -> Element<'a, Message> {
+    let btn = button(text(label).size(FONT_SZ).width(Length::Fill))
+        .on_press(Message::PropConstraintLinkClick(handles))
+        .style(move |theme: &Theme, status| {
+            let palette = theme.palette();
+            let pair = if conflicting {
+                palette.danger.weak
+            } else {
+                match status {
+                    button::Status::Hovered | button::Status::Pressed => palette.background.weak,
+                    _ => palette.background.base,
+                }
+            };
+            button::Style {
+                background: Some(Background::Color(pair.color)),
+                border: Border { color: palette.background.neutral.color, width: 1.0, radius: 2.0.into() },
+                text_color: pair.text,
+                ..Default::default()
+            }
+        })
+        .padding([3, 8])
+        .width(Length::Fill);
+    container(btn).width(Length::Fill).into()
+}
+
+// ── Parameters section: "+ Add parameter" row ──────────────────────────────
+
+/// The trailing "+ Add parameter" row: appends a fresh, uniquely-named
+/// parameter (`param1`, `param2`, …) the user then renames/redefines inline
+/// — avoids a separate "pending new row" concept, since every row always
+/// reflects a real committed table entry.
+fn render_param_add_row<'a>() -> Element<'a, Message> {
+    let btn = button(row![text("+").size(FONT_SZ), text(t!("Add parameter").into_owned()).size(FONT_SZ)].spacing(6).align_y(iced::Center))
+        .on_press(Message::PropParamAddNew)
+        .style(button::text)
+        .padding([4, 8])
+        .width(Length::Fill);
+    container(btn).width(Length::Fill).into()
 }
 
 /// Build a label | widget property row.

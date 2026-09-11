@@ -298,12 +298,10 @@ pub fn start_allowed(cmd: &str) -> bool {
             | "PERF"
             | "CUI"
             | "ALIASEDIT"
-            | "CUILOAD"
-            | "CUIIMPORT"
-            // The start page already offers Options as a button, so the
-            // command that opens the same dialog belongs here too.
             | "OPTIONS"
             | "OP"
+            | "CUILOAD"
+            | "CUIIMPORT"
     )
 }
 
@@ -322,6 +320,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "CLEANSCREEN",
         "CUI",
         "DSETTINGS",
+        "PARAMETERS",
         "GRID",
         "ISODRAFT",
         "ISOPLANE",

@@ -323,6 +323,8 @@ impl OpenCADStudio {
                         let i = self.active_tab;
                         self.tabs[i].scene.clear();
                         self.tabs[i].scene.document = doc;
+                        self.tabs[i].scene.load_sketch_constraints_from_document();
+                        self.tabs[i].scene.load_named_parameters_from_document();
                         self.tabs[i].scene.material_base_dir = path_buf.parent().map(PathBuf::from);
                         crate::app::style_ops::ensure_standard_styles(
                             &mut self.tabs[i].scene.document,
@@ -1055,6 +1057,7 @@ mod tests {
             "CHANGELOG",
             "CUI",
             "ALIASEDIT",
+            "OPTIONS",
         ];
         for cmd in standalone {
             assert!(

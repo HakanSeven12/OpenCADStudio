@@ -56,15 +56,40 @@ pub(super) const LARGE_W: f32 = ROW_H * 2.2;
 const LARGE_LABEL_HPAD: f32 = 8.0;
 /// Large ribbon labels use at most two lines before their button grows.
 const LARGE_LABEL_LINES: f32 = 2.0;
-const LARGE_LABEL_SIZE: f32 = 10.0;
 /// Width of a 1-row (small) button.
 pub(super) const SMALL_W: f32 = ROW_H;
 /// Width of the ▾ strip on a small dropdown.
 pub(super) const ARROW_W: f32 = ROW_H * 0.4;
 /// Height of the ▾ strip at the bottom of a large dropdown.
 pub(super) const LARGE_ARR: f32 = ROW_H * 0.55;
-/// Total ribbon tool-area height = 3 × ROW_H + 6 px v-padding + 12 px group-label.
+/// Total ribbon tool-area height = 3 × ROW_H + 6 px v-padding + 12 px group-label,
+/// at the default 9px group-title font size. Use [`tool_bar_h`] once the live
+/// `group_title_font_size` setting is in scope — this constant is only the
+/// floor `tool_bar_h` never drops below, kept as its own name for the few
+/// call sites that predate the size becoming user-configurable.
 pub(super) const TOOL_BAR_H: f32 = 3.0 * ROW_H + 18.0;
+
+/// The group-title label's rendered height (`group_title_font_size == 9`)
+/// baked into [`TOOL_BAR_H`]'s fixed 18px allowance (6px padding + this).
+const GROUP_TITLE_LABEL_H_AT_DEFAULT: f32 = 12.0;
+const GROUP_TITLE_FONT_SIZE_DEFAULT: f32 = 9.0;
+
+/// Ribbon tool-area height for a given group-title font size.
+///
+/// The panel column that holds a group's icons above its title label is a
+/// fixed height (`TOOL_BAR_H`, sized for the *default* title font). Raising
+/// the "Section title size" option (`RibbonConfig::group_title_font_size`,
+/// `src/app/config.rs`) grows the title text without growing that fixed
+/// column, so the icon row above it — which fills whatever space is left —
+/// gets squeezed and its icons visibly shrink. Scaling the label's share of
+/// the height with the font size (proportionally to the default 12px
+/// allowance at the default 9px size) keeps the icon row's share constant
+/// instead. Clamped to never go *below* `TOOL_BAR_H`, so the default and
+/// smaller settings render pixel-identically to before this existed.
+pub(super) fn tool_bar_h(group_title_font_size: f32) -> f32 {
+    let label_h = GROUP_TITLE_LABEL_H_AT_DEFAULT * (group_title_font_size / GROUP_TITLE_FONT_SIZE_DEFAULT);
+    (3.0 * ROW_H + 6.0 + label_h).max(TOOL_BAR_H)
+}
 /// Height of a collapsed panel button's large representative face (big icon +
 /// its label). A collapsed button is this face plus the title opener, so it is
 /// shorter than a full 3-row panel — the ribbon height follows it down.
@@ -86,8 +111,11 @@ const COMBO_PANEL_PAD: Padding = Padding {
 
 thread_local! {
     /// Ribbon layout runs on every pointer-driven view update. Cache the font-
-    /// measured width per translated label so the automatic sizing stays cheap.
-    static LARGE_WIDTH_CACHE: RefCell<HashMap<String, f32>> =
+    /// measured width per (translated label, font size) so the automatic
+    /// sizing stays cheap — keyed on both since the same label text is
+    /// measured at more than one size (a full-density button's own caption
+    /// vs. a collapsed panel's smaller opener title).
+    static LARGE_WIDTH_CACHE: RefCell<HashMap<(String, u32), f32>> =
         RefCell::new(HashMap::default());
 }
 
@@ -96,6 +124,7 @@ fn ribbon_label_bounds(
     label: &str,
     width: f32,
     wrapping: advanced_text::Wrapping,
+    label_size: f32,
 ) -> Size {
     use advanced_text::{Paragraph as _, Renderer as _};
 
@@ -103,7 +132,7 @@ fn ribbon_label_bounds(
         advanced_text::Text {
             content: label,
             bounds: Size::new(width, f32::INFINITY),
-            size: Pixels(LARGE_LABEL_SIZE),
+            size: Pixels(label_size),
             line_height: advanced_text::LineHeight::default(),
             font: renderer.default_font(),
             align_x: advanced_text::Alignment::Center,
@@ -117,27 +146,41 @@ fn ribbon_label_bounds(
     paragraph.min_bounds()
 }
 
-/// Measure the translated label at the normal button width. It wraps first;
-/// only labels that would need more than two lines widen their button. The
-/// binary search uses the renderer's real font metrics, so locale and UI scale
+/// Widest a large button will grow to keep its label on one line before
+/// falling back to two-line wrapping instead. A label pre-broken with an
+/// explicit `\n` (long labels get hand-wrapped at the source, e.g. "Viewport
+/// Configuration") measures its own natural per-line width regardless, so
+/// this only ever engages for a plain label with no manual break.
+const LARGE_LABEL_MAX_SINGLE_LINE_W: f32 = LARGE_W * 2.0;
+
+/// Measure the translated label at the normal button width. Prefers widening
+/// the button to keep the label on one line — most labels are short enough
+/// for this to be a small, one-time bump — falling back to two-line wrapping
+/// only once even a single line would need excessive width. The binary
+/// search uses the renderer's real font metrics, so locale and UI scale
 /// changes do not rely on character-count estimates.
-fn measure_large_width(renderer: &iced::Renderer, label: &str) -> f32 {
+fn measure_large_width(renderer: &iced::Renderer, label: &str, label_size: f32) -> f32 {
     let base_inner = (LARGE_W - LARGE_LABEL_HPAD).max(1.0);
     let line_height = advanced_text::LineHeight::default()
-        .to_absolute(Pixels(LARGE_LABEL_SIZE))
+        .to_absolute(Pixels(label_size))
         .0;
-    let max_label_height = line_height * LARGE_LABEL_LINES + 0.5;
-    let fits = |width: f32| {
+
+    // `Wrapping::Word` (not `WordOrGlyph`): a label that doesn't fit at this
+    // width wraps at the next word boundary instead of splitting mid-word.
+    // The width check catches the rare case Word-wrapping can't help — a
+    // single unbreakable "word" wider than the box — so that case correctly
+    // falls through to the wider stage below instead of reporting a false fit.
+    let fits_one_line = |width: f32| {
         let bounds = ribbon_label_bounds(
             renderer,
             label,
             width,
             advanced_text::Wrapping::Word,
+            label_size,
         );
-        bounds.width <= width + 0.5 && bounds.height <= max_label_height
+        bounds.width <= width + 0.5 && bounds.height <= line_height + 0.5
     };
-
-    if fits(base_inner) {
+    if fits_one_line(base_inner) {
         return LARGE_W;
     }
 
@@ -146,18 +189,33 @@ fn measure_large_width(renderer: &iced::Renderer, label: &str) -> f32 {
         label,
         f32::INFINITY,
         advanced_text::Wrapping::None,
+        label_size,
     )
     .width
     .max(base_inner);
-    if !fits(natural) {
+    if natural <= LARGE_LABEL_MAX_SINGLE_LINE_W {
         return (natural + LARGE_LABEL_HPAD).ceil();
     }
 
+    // Long enough that a single line would make the button unreasonably
+    // wide — wrap to two lines instead, at the narrowest width (up to the
+    // same cap) that fits.
+    let max_label_height = line_height * LARGE_LABEL_LINES + 0.5;
+    let fits_two_lines = |width: f32| {
+        let bounds = ribbon_label_bounds(
+            renderer,
+            label,
+            width,
+            advanced_text::Wrapping::Word,
+            label_size,
+        );
+        bounds.width <= width + 0.5 && bounds.height <= max_label_height
+    };
     let mut low = base_inner;
-    let mut high = natural;
+    let mut high = LARGE_LABEL_MAX_SINGLE_LINE_W;
     for _ in 0..10 {
         let mid = (low + high) * 0.5;
-        if fits(mid) {
+        if fits_two_lines(mid) {
             high = mid;
         } else {
             low = mid;
@@ -166,14 +224,15 @@ fn measure_large_width(renderer: &iced::Renderer, label: &str) -> f32 {
     (high + LARGE_LABEL_HPAD).ceil().max(LARGE_W)
 }
 
-fn automatic_large_width(renderer: &iced::Renderer, label: &str) -> f32 {
-    if let Some(width) = LARGE_WIDTH_CACHE.with(|cache| cache.borrow().get(label).copied()) {
+fn automatic_large_width(renderer: &iced::Renderer, label: &str, label_size: f32) -> f32 {
+    let key = (label.to_string(), label_size.to_bits());
+    if let Some(width) = LARGE_WIDTH_CACHE.with(|cache| cache.borrow().get(&key).copied()) {
         return width;
     }
 
-    let width = measure_large_width(renderer, label);
+    let width = measure_large_width(renderer, label, label_size);
     LARGE_WIDTH_CACHE.with(|cache| {
-        cache.borrow_mut().insert(label.to_string(), width);
+        cache.borrow_mut().insert(key, width);
     });
     width
 }
@@ -181,6 +240,7 @@ fn automatic_large_width(renderer: &iced::Renderer, label: &str) -> f32 {
 struct AutomaticLargeWidth<'a> {
     label: String,
     content: Element<'a, Message>,
+    label_size: f32,
 }
 
 impl Widget<Message, Theme, iced::Renderer> for AutomaticLargeWidth<'_> {
@@ -206,7 +266,7 @@ impl Widget<Message, Theme, iced::Renderer> for AutomaticLargeWidth<'_> {
         renderer: &iced::Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let width = automatic_large_width(renderer, &self.label);
+        let width = automatic_large_width(renderer, &self.label, self.label_size);
         self.content.as_widget_mut().layout(
             tree,
             renderer,
@@ -286,8 +346,9 @@ impl Widget<Message, Theme, iced::Renderer> for AutomaticLargeWidth<'_> {
 pub(super) fn automatic_large_button<'a>(
     label: String,
     content: Element<'a, Message>,
+    label_size: f32,
 ) -> Element<'a, Message> {
-    Element::new(AutomaticLargeWidth { label, content })
+    Element::new(AutomaticLargeWidth { label, content, label_size })
 }
 
 // ── Tab-bar constants ──────────────────────────────────────────────────────
@@ -632,6 +693,9 @@ pub(super) struct RenderCtx<'a> {
     pub style_ctx: &'a StyleContext<'a>,
     /// When compact, the Properties panel's Match button shrinks to a small icon.
     pub compact: bool,
+    /// Font size (px) of the caption under a large button's icon (Options →
+    /// Display → "Ribbon label size").
+    pub label_font_size: f32,
 }
 
 /// A large dropdown button: the current icon on top, its ▾ directly beneath the
@@ -681,7 +745,7 @@ pub(super) fn render_large_dropdown<'a>(
                 .align_x(iced::Center)
                 .align_y(iced::Center),
             text(label.clone())
-                .size(10)
+                .size(ctx.label_font_size)
                 .width(Fill)
                 .align_x(iced::Center)
                 .wrapping(advanced_text::Wrapping::Word),
@@ -734,7 +798,7 @@ pub(super) fn render_large_dropdown<'a>(
         .width(Fill)
         .height(Fill);
 
-    PosReport::new(id, automatic_large_button(label, content.into()))
+    PosReport::new(id, automatic_large_button(label, content.into(), ctx.label_font_size))
     .into()
 }
 
@@ -814,7 +878,7 @@ pub(super) fn render_large<'a>(
                         .align_x(iced::Center)
                         .align_y(iced::Center),
                     text(label.clone())
-                        .size(10)
+                        .size(ctx.label_font_size)
                         .width(Fill)
                         .align_x(iced::Center)
                         .wrapping(advanced_text::Wrapping::Word),
@@ -835,7 +899,7 @@ pub(super) fn render_large<'a>(
                 left: 4.0,
             });
             tooltip(
-                automatic_large_button(label, btn.into()),
+                automatic_large_button(label, btn.into(), ctx.label_font_size),
                 make_tip(tip_text),
                 TipPos::Right,
             )

@@ -524,6 +524,12 @@ pub(super) struct OpenCADStudio {
     snap_angle_input: String,
     /// Model-space lineweight preview scale, in percent (25..=200).
     lineweight_display_scale: i32,
+    /// Whole-interface scale, in percent (50..=200) — drives iced's own
+    /// per-window `scale_factor` (`run`'s `.scale_factor(...)` hook), so it
+    /// resizes every panel, dialog, the ribbon, and their text uniformly
+    /// rather than needing a separate font-size knob threaded through each
+    /// panel's own view code.
+    ui_scale: i32,
     /// Isometric drafting state and active axis pair.
     isometric_drafting: bool,
     iso_plane: settings::IsoPlane,
@@ -547,6 +553,26 @@ pub(super) struct OpenCADStudio {
     /// When true (default), the app registers itself as a .dwg/.dxf/.bak file
     /// handler on each launch. Toggle with the FILEASSOC command.
     pub file_assoc_enabled: bool,
+    /// When true, saving a drawing with sketch constraints also materializes
+    /// them as AutoCAD's own native `AssocNetwork`/`Assoc2dConstraintGroup`
+    /// object graph (`scene::dwg_native_constraints`), so AutoCAD/BricsCAD
+    /// recognize them as real constraints rather than an opaque OCS-only
+    /// XRecord. Off by default (#opt-in — adds objects/file weight every
+    /// user pays for save-after-save, whether or not they need AutoCAD
+    /// interop). A drawing that already carries this native graph (from a
+    /// prior save with this on, or from real AutoCAD) keeps it synced on
+    /// every save regardless of this setting — see
+    /// `Scene::materialize_dwg_native_constraints_for_save`'s doc comment;
+    /// this only governs whether the graph is *created* in a scope that
+    /// doesn't have one yet.
+    pub write_dwg_native_constraints: bool,
+    /// When true (default), a sketch constraint's viewport pill shows its
+    /// glyph plus a driven value or named-parameter name (e.g. "⌀ 5.000" or
+    /// "⌀ hole_dia"). When false, every pill shows just the bare glyph — the
+    /// value/name text can cover important canvas detail on a dense sketch,
+    /// and the glyph alone is already enough to see *that* a constraint is
+    /// present (`docs/parametric_system_design.md` §6.3/§7).
+    pub show_constraint_values: bool,
     /// Minutes between autosaves to a `.sv$` recovery file (SAVETIME command);
     /// 0 disables autosave.
     pub savetime_min: i32,
@@ -1039,6 +1065,15 @@ pub(super) struct OpenCADStudio {
     /// Working buffer for the ALIASEDIT modal: `(alias, command)` rows being
     /// edited. Seeded from `command_aliases` on open, committed back on close.
     alias_editor_rows: Vec<(String, String)>,
+
+    // ── Named Parameters (docs/named_parameters_design.md, stage 4) ────────
+    /// Working buffer for the PARAMETERS modal. Unlike `alias_editor_rows`,
+    /// this isn't a copy of a separate app-level store — the real state
+    /// lives per-document at `Scene::named_parameters`; this buffer is
+    /// seeded from the active tab's table on open and only written back to
+    /// it on Apply (`apply_named_parameter_editor_rows`,
+    /// `src/app/named_parameters.rs`).
+    named_parameter_editor_rows: Vec<crate::ui::window::named_parameters::ParamEditorRow>,
 
     // ── Layout Manager Panel ──────────────────────────────────────────────
     layout_manager_selected: String,
@@ -1717,6 +1752,7 @@ pub enum ModalKind {
     AttributeEditor,
     LayerDeleteWarning,
     Aliases,
+    NamedParameters,
     ScaleManager,
     /// Add / remove the annotation scales a single selected object has a
     /// per-object representation for.
@@ -1963,6 +1999,12 @@ pub enum Message {
     CursorTypeChanged(settings::CursorType),
     /// Set the model-space lineweight preview scale from Options.
     LineweightDisplayScaleChanged(i32),
+    /// Set the whole-interface scale (`ui_scale`) from Options.
+    UiScaleChanged(i32),
+    /// Set the ribbon's large-button icon-label font size from Options.
+    RibbonLabelFontSizeChanged(i32),
+    /// Set the ribbon's panel-title ("Draw", "Modify", …) font size from Options.
+    RibbonGroupTitleFontSizeChanged(i32),
     /// Edit the optional crosshair RGB value; blank restores automatic contrast.
     CrosshairColorChanged(String),
     /// Set the default type/version used when first saving a new drawing.
@@ -2071,6 +2113,12 @@ pub enum Message {
     /// Register or unregister as the .dwg/.dxf handler, from Options. Same
     /// setting the FILEASSOC command carries.
     FileAssocChanged(bool),
+    /// Toggle writing AutoCAD-native constraint objects on save, from
+    /// Options. See `write_dwg_native_constraints`'s doc comment.
+    WriteDwgNativeConstraintsChanged(bool),
+    /// Toggle showing driven values/named-parameter names on constraint
+    /// pills, from Options. See `show_constraint_values`'s doc comment.
+    ShowConstraintValuesChanged(bool),
     /// Switch the interface language and redraw localized views.
     LanguageChanged(crate::i18n::Language),
     /// Drop every entity from the active drawing.
@@ -2494,6 +2542,14 @@ pub enum Message {
     CloseLayoutList,
     /// Cycle the coordinate readout mode ($COORDS): static → live → polar.
     CycleCoordsMode,
+    /// Design doc §6.4, stage 11: removes one flagged redundant/conflicting
+    /// constraint from the current sketch scope (a bounded v1 of the
+    /// "SketchXpert-style" resolver — one guided removal per click rather
+    /// than a candidate-list panel with a cyclable preview; see the status
+    /// bar's `ResolveOneSketchConflict` pill and
+    /// `OpenCADStudio::resolve_one_sketch_conflict` for the full rationale).
+    /// No-op if the scope currently has no flagged conflict.
+    ResolveOneSketchConflict,
     /// Toggle the status-bar customization menu open/closed.
     ToggleStatusBarMenu,
     /// Close the status-bar customization menu.
@@ -2789,6 +2845,49 @@ pub enum Message {
     AliasEditorRemove(usize),
     /// Commit the edited rows to the alias table (Apply button); stays open.
     AliasEditorApply,
+    // ── Named Parameters (PARAMETERS) ───────────────────────────────────
+    /// Open the named-parameter editor, seeding rows from the active tab's
+    /// `Scene::named_parameters`.
+    NamedParametersOpen,
+    /// Live edit of the name or formula in row `idx`.
+    NamedParametersInput {
+        idx: usize,
+        field: crate::ui::window::named_parameters::ParamField,
+        value: String,
+    },
+    /// Append a blank parameter row.
+    NamedParametersAdd,
+    /// Remove parameter row `idx`.
+    NamedParametersRemove(usize),
+    /// Commit the edited rows to `Scene::named_parameters` (Apply button)
+    /// and re-solve every constraint that reads a named parameter; stays
+    /// open.
+    NamedParametersApply,
+    // ── Parameters / Constraints sections embedded in the Properties panel
+    // (AutoCAD-style: a live section instead of the modal above, per-row
+    // commit-on-submit instead of a whole-table Apply) ─────────────────────
+    /// Live text of one column of parameter row `index`, keyed by its
+    /// `ParameterTable::iter()` position — see `PropValue::ParamRow`.
+    PropParamInput {
+        index: usize,
+        field: crate::ui::window::named_parameters::ParamField,
+        value: String,
+    },
+    /// Commit row `index`'s buffered edit for `field` to `Scene::
+    /// named_parameters` (Enter / losing focus) and re-solve whatever it
+    /// drives.
+    PropParamCommit {
+        index: usize,
+        field: crate::ui::window::named_parameters::ParamField,
+    },
+    /// Remove parameter row `index` immediately (no confirmation, matching
+    /// AutoCAD's own Parameters Manager delete button).
+    PropParamDelete(usize),
+    /// Append a fresh, uniquely-named parameter to `Scene::named_parameters`.
+    PropParamAddNew,
+    /// A Constraints-section row was clicked: select every entity in the
+    /// list (replacing the current selection) in the viewport.
+    PropConstraintLinkClick(Vec<acadrust::Handle>),
     // ── About window ────────────────────────────────────────────────────
     AboutOpen,
     /// Close whatever in-canvas modal dialog is open (Plan B).
@@ -3467,6 +3566,7 @@ impl OpenCADStudio {
             isolines_awaiting_regen: false,
             snap_angle_input: "0".to_string(),
             lineweight_display_scale: 100,
+            ui_scale: 100,
             isometric_drafting: false,
             iso_plane: settings::IsoPlane::Left,
             snap_angle_deg: 0.0,
@@ -3478,6 +3578,8 @@ impl OpenCADStudio {
             dimension_continue_mode: 1,
             backup_on_save: true,
             file_assoc_enabled: true,
+            write_dwg_native_constraints: false,
+            show_constraint_values: true,
             savetime_min: 10,
             default_bg_color: None,
             default_paper_bg_color: None,
@@ -3669,6 +3771,7 @@ impl OpenCADStudio {
             // Command aliases (populated from ocad.pgp just after construction)
             command_aliases: rustc_hash::FxHashMap::default(),
             alias_editor_rows: Vec::new(),
+            named_parameter_editor_rows: Vec::new(),
             // Layout Manager
             layout_manager_selected: "Model".to_string(),
             layer_state_selected: None,
@@ -4077,6 +4180,7 @@ pub fn run() -> iced::Result {
         ..iced::Settings::default()
     })
     .subscription(OpenCADStudio::subscription)
+    .scale_factor(|state: &OpenCADStudio, _window: window::Id| state.ui_scale as f32 / 100.0)
     .title(|state: &OpenCADStudio, window_id: window::Id| {
         let _ = window_id; // all dialogs are in-canvas modals now
         if let Some(tab) = state.tabs.get(state.active_tab) {
@@ -4121,6 +4225,7 @@ pub fn run_web() -> iced::Result {
         OpenCADStudio::view_main,
     )
     .subscription(OpenCADStudio::subscription)
+    .scale_factor(|state: &OpenCADStudio| state.ui_scale as f32 / 100.0)
     .title(|_state: &OpenCADStudio| {
         concat!("Open CAD Studio ", env!("OCS_APP_VERSION")).to_string()
     })

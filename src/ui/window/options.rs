@@ -145,6 +145,8 @@ impl<T> fmt::Display for Labelled<T> {
 pub fn view_window<'a>(
     default_save_format: &'a str,
     file_assoc_enabled: bool,
+    write_dwg_native_constraints: bool,
+    show_constraint_values: bool,
     ui_theme: &'a UiThemeConfig,
     theme_color_inputs: &'a [String; 6],
     language: crate::i18n::Language,
@@ -161,6 +163,9 @@ pub fn view_window<'a>(
     crosshair_color: Option<[u8; 3]>,
     crosshair_color_input: &'a str,
     lineweight_display_scale: i32,
+    ui_scale: i32,
+    ribbon_label_font_size: i32,
+    ribbon_group_title_font_size: i32,
     model_space: &'a crate::app::config::ModelSpaceThemeConfig,
     model_bg_input: &'a str,
     paper_bg_input: &'a str,
@@ -346,6 +351,41 @@ pub fn view_window<'a>(
         Space::new().height(6),
         text(crate::t!(
             "Also installs the application and file-type icons the desktop shows."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(14),
+        row![
+            iced::widget::checkbox(write_dwg_native_constraints)
+                .on_toggle(Message::WriteDwgNativeConstraintsChanged)
+                .size(15),
+            text(crate::t!("Write AutoCAD-compatible constraint objects on save")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "Saves sketch constraints as AutoCAD/BricsCAD's own native objects too, alongside \
+             this app's own format, so other CAD software recognizes them. Off by default — \
+             adds some file size on every save. A drawing that already has these objects keeps \
+             them up to date regardless of this setting."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(14),
+        row![
+            iced::widget::checkbox(show_constraint_values)
+                .on_toggle(Message::ShowConstraintValuesChanged)
+                .size(15),
+            text(crate::t!("Show values and parameter names on constraint markers")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "On by default. Turn off to show just the constraint glyph in the viewport — \
+             enough to see that a constraint is present — without the driven value or named \
+             parameter text covering nearby geometry."
         ))
         .size(11)
         .width(sizing.width),
@@ -556,6 +596,24 @@ pub fn view_window<'a>(
         });
 
     let mut display = column![
+        text(crate::t!("UI Scale")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Overall size")).size(12).width(150),
+            slider(50..=200, ui_scale.clamp(50, 200), Message::UiScaleChanged)
+                .step(5)
+                .width(Fill),
+            text(format!("{}%", ui_scale.clamp(50, 200))).size(11).width(44),
+        ]
+        .spacing(12)
+        .align_y(iced::Center),
+        Space::new().height(8),
+        text(crate::t!(
+            "Scales the whole interface at once — every panel, dialog, the ribbon, and their text — rather than one widget's font size. Takes effect immediately."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(24),
         text(crate::tr!("options", "theme-section")).size(15),
         Space::new().height(10),
         row![
@@ -813,6 +871,56 @@ pub fn view_window<'a>(
             ))
             .size(11)
             .width(sizing.width),
+        )
+        .push(Space::new().height(24))
+        .push(text(crate::t!("Ribbon")).size(15))
+        .push(Space::new().height(10))
+        .push(
+            row![
+                text(crate::t!("Icon label size")).size(12).width(140),
+                slider(
+                    8..=16,
+                    ribbon_label_font_size.clamp(8, 16),
+                    Message::RibbonLabelFontSizeChanged,
+                )
+                .step(1)
+                .width(Fill),
+                text(format!("{}px", ribbon_label_font_size.clamp(8, 16)))
+                    .size(11)
+                    .width(44),
+            ]
+            .spacing(10)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(6))
+        .push(
+            text(crate::t!("Font size of the caption under each ribbon button's icon."))
+                .size(11)
+                .width(sizing.width),
+        )
+        .push(Space::new().height(10))
+        .push(
+            row![
+                text(crate::t!("Section title size")).size(12).width(140),
+                slider(
+                    7..=14,
+                    ribbon_group_title_font_size.clamp(7, 14),
+                    Message::RibbonGroupTitleFontSizeChanged,
+                )
+                .step(1)
+                .width(Fill),
+                text(format!("{}px", ribbon_group_title_font_size.clamp(7, 14)))
+                    .size(11)
+                    .width(44),
+            ]
+            .spacing(10)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(6))
+        .push(
+            text(crate::t!("Font size of each panel's own title (Draw, Modify, Layers, …)."))
+                .size(11)
+                .width(sizing.width),
         );
 
     let display_element = display.spacing(0).width(sizing.width);

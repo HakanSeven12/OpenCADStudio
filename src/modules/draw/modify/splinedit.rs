@@ -105,6 +105,29 @@ impl SplineditCommand {
 
     fn refined(&self, point: Option<DVec3>, degree: Option<usize>) -> Option<acadrust::entities::Spline> {
         let source = self.spline.as_ref()?;
+        if let Some(degree) = degree {
+            let current = usize::try_from(source.degree).ok()?;
+            if degree <= current || degree > 25 { return None; }
+            let weights = if source.weights.is_empty() { vec![1.0; source.control_points.len()] } else { source.weights.clone() };
+            let curve = cadkernel::space::NurbsCurve3::new_strict(current,
+                source.control_points.iter().map(|point| [point.x, point.y, point.z]).collect(),
+                source.knots.clone(), weights)?
+                .with_periodicity(source.flags.closed || source.flags.periodic)
+                .elevated(degree - current)?;
+            let mut result = source.clone();
+            result.degree = curve.degree() as i32;
+            result.control_points = curve.control_points().iter().map(|point| Vector3::new(point[0], point[1], point[2])).collect();
+            result.knots = curve.knots().to_vec();
+            result.weights = curve.weights().to_vec();
+            result.fit_points.clear();
+            result.begin_tangent = Vector3::ZERO;
+            result.end_tangent = Vector3::ZERO;
+            result.dwg_flags1 &= !1;
+            result.dxf_flags &= !(32 | 1024);
+            result.flags.rational = curve.is_rational();
+            result.flags.planar = crate::entities::curve::spline_is_planar(&result);
+            return Some(result);
+        }
         let planar = crate::entities::curve::entity_curve(&EntityType::Spline(source.clone()))?;
         let cadkernel::geom2d::Curve::Nurbs(mut curve) = planar.curve else { return None; };
         if let Some(point) = point {
@@ -114,10 +137,6 @@ impl SplineditCommand {
             let parameter = start + nearest.t * (end - start);
             if parameter <= start || parameter >= end { return None; }
             curve.insert_knot(parameter);
-        }
-        if let Some(degree) = degree {
-            if degree <= curve.degree() || degree > 25 { return None; }
-            curve = curve.elevated(degree - curve.degree())?;
         }
         let mut result = crate::modules::draw::modify::spline_ops::nurbs_to_spline(&curve, source);
         result.control_points = curve.control_points().iter().map(|point| {

@@ -199,6 +199,12 @@ impl RevCloudCommand {
                 entity.common_mut().handle = Handle::NULL;
             }
         }
+        if replacement.is_none()
+            && matches!(self.creation, CreationMode::Rectangular | CreationMode::Polygonal)
+        {
+            self.message = None;
+            return CmdResult::CommitAndExit(entity);
+        }
         self.stage = Stage::Reverse(PendingCloud {
             entity,
             replacement,

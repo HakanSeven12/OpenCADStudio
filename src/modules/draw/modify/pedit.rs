@@ -29,10 +29,16 @@ pub struct PeditTarget {
 
 enum Mode {
     PickTarget,
+    MultipleGather,
+    MultipleConvert,
     Options,
     /// Picked a Line/Arc: asking "Turn it into one? [Yes/No]".
     ConvertPrompt(Handle),
     AwaitWidth,
+    AwaitLinetype,
+    PolyVertex(usize),
+    PolyMove(usize),
+    PolyInsert(usize),
     /// Join: gathering additional segments; Enter merges.
     JoinGather(Vec<Handle>),
     /// Polygon-mesh vertex navigation uses the mesh's row-major control net.
@@ -43,6 +49,10 @@ enum Mode {
 
 pub struct PeditCommand {
     target: Option<Handle>,
+    entities: HashMap<u64, EntityType>,
+    multiple: Vec<Handle>,
+    multiple_history: Vec<Vec<Handle>>,
+    pending_multiple: Option<Vec<Handle>>,
     info: HashMap<u64, PeditTarget>,
     mode: Mode,
     undo_count: usize,
@@ -69,6 +79,10 @@ impl PeditCommand {
         };
         Self {
             target: None,
+            entities: HashMap::default(),
+            multiple: Vec::new(),
+            multiple_history: Vec::new(),
+            pending_multiple: None,
             info,
             mode: Mode::PickTarget,
             undo_count: 0,
@@ -86,6 +100,17 @@ impl PeditCommand {
     /// Adopt a pre-selected entity (pickfirst): a selected polyline skips the
     /// pick step, a selected line/arc goes straight to the convert prompt.
     pub fn with_preselection(mut self, handles: &[Handle]) -> Self {
+        let multiple: Vec<_> = handles.iter().copied().filter(|handle| {
+            self.info.get(&handle.value()).is_some_and(|info| info.mesh_size.is_none())
+        }).collect();
+        if multiple.len() > 1 {
+            self.target = multiple.first().copied();
+            self.mode = if multiple.iter().any(|handle| self.info.get(&handle.value()).is_some_and(|info| info.convertible)) {
+                Mode::MultipleConvert
+            } else { Mode::Options };
+            self.multiple = multiple;
+            return self;
+        }
         for &h in handles {
             let Some(info) = self.info.get(&h.value()).copied() else {
                 continue;
@@ -103,6 +128,26 @@ impl PeditCommand {
         self
     }
 
+    pub fn with_entities(mut self, entities: impl IntoIterator<Item = EntityType>) -> Self {
+        self.entities = entities.into_iter().map(|entity| (entity.common().handle.value(), entity)).collect();
+        self
+    }
+
+    fn multiple_result(&self, result: Option<CmdResult>) -> Option<CmdResult> {
+        match result {
+            Some(CmdResult::PeditOp { handle, op }) if !self.multiple.is_empty() =>
+                Some(CmdResult::PeditOp { handle, op: PeditOp::Multiple(self.multiple.clone(), Box::new(op)) }),
+            other => other,
+        }
+    }
+
+    fn vertex_count(&self) -> usize {
+        self.target.and_then(|handle| self.entities.get(&handle.value())).map_or(0, |entity| match entity {
+            EntityType::LwPolyline(polyline) => polyline.vertices.len(),
+            EntityType::Polyline2D(polyline) => polyline.vertices.len(),
+            _ => 0,
+        })
+    }
     fn mesh_size(&self) -> Option<(usize, usize)> {
         let handle = self.target?;
         self.info.get(&handle.value())?.mesh_size
@@ -148,13 +193,16 @@ impl CadCommand for PeditCommand {
     fn prompt(&self) -> String {
         match &self.mode {
             Mode::PickTarget => {
-                t!("PEDIT  Select polyline (or a line/arc to convert):").into_owned()
+                t!("PEDIT  Select polyline (or a line/arc to convert) or [Multiple]:").into_owned()
             }
+            Mode::MultipleGather => format!("PEDIT  Select objects ({} selected, Enter when done):", self.multiple.len()),
+            Mode::MultipleConvert => t!("PEDIT  Convert lines and arcs to polylines [Yes/No] <Yes>:").into_owned(),
             Mode::ConvertPrompt(_) => t!(
                 "PEDIT  Object is not a polyline. Turn it into one?  [Yes/No] <Y>:"
             )
             .into_owned(),
             Mode::AwaitWidth => t!("PEDIT  Specify new width:").into_owned(),
+            Mode::AwaitLinetype => t!("PEDIT  Enter polyline linetype generation option [ON/OFF]:").into_owned(),
             Mode::JoinGather(list) => t!(
                 "PEDIT Join  Select objects to join (%{count} picked), Enter to merge:",
                 count = list.len().saturating_sub(1)
@@ -170,6 +218,9 @@ impl CadCommand for PeditCommand {
                 vertex = index + 1
             )
             .into_owned(),
+            Mode::PolyVertex(index) => format!("PEDIT  Vertex {} [Next/Previous/Insert/Move/eXit] <Next>:", index + 1),
+            Mode::PolyMove(index) => format!("PEDIT  Specify new location for vertex {}:", index + 1),
+            Mode::PolyInsert(index) => format!("PEDIT  Specify location after vertex {}:", index + 1),
             Mode::Options => t!("PEDIT  Enter option:").into_owned(),
         }
     }
@@ -177,6 +228,8 @@ impl CadCommand for PeditCommand {
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
         match &self.mode {
+            Mode::PickTarget => vec![CmdOption::new("Multiple", "M")],
+            Mode::MultipleConvert => vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")],
             Mode::Options if self.mesh_size().is_some() => {
                 let (closed_m, closed_n) = self.mesh_closed().unwrap_or((false, false));
                 vec![
@@ -205,8 +258,12 @@ impl CadCommand for PeditCommand {
                 CmdOption::new(t!("Fit").as_ref(), "F"),
                 CmdOption::new(t!("Spline").as_ref(), "S"),
                 CmdOption::new(t!("Decurve").as_ref(), "D"),
+                CmdOption::new(t!("Edit vertex").as_ref(), "E"),
+                CmdOption::new(t!("Ltype gen").as_ref(), "L"),
+                CmdOption::new(t!("Reverse").as_ref(), "R"),
+                CmdOption::new(t!("Undo").as_ref(), "U"),
                 CmdOption::new(t!("eXit").as_ref(), "X"),
-            ],
+            ].into_iter().filter(|option| self.multiple.is_empty() || option.keyword != "E").collect(),
             Mode::MeshVertex(_) => vec![
                 CmdOption::new(t!("Next").as_ref(), "N"),
                 CmdOption::new(t!("Previous").as_ref(), "P"),
@@ -222,6 +279,8 @@ impl CadCommand for PeditCommand {
                 vec![CmdOption::new(t!("Yes").as_ref(), "Y"), CmdOption::new(t!("No").as_ref(), "N")]
             }
             Mode::JoinGather(_) => vec![CmdOption::enter(t!("Join").as_ref())],
+            Mode::PolyVertex(_) => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Insert", "I"), CmdOption::new("Move", "M"), CmdOption::new("Exit", "X")],
+            Mode::AwaitLinetype => vec![CmdOption::new("On", "ON"), CmdOption::new("Off", "OFF")],
             Mode::MeshVertexMove(_) => vec![],
             _ => vec![],
         }
@@ -234,10 +293,14 @@ impl CadCommand for PeditCommand {
     fn is_selection_gathering(&self) -> bool {
         // Join uses the normal selection system, so single picks AND
         // window/crossing boxes both gather objects.
-        matches!(self.mode, Mode::JoinGather(_))
+        matches!(self.mode, Mode::JoinGather(_) | Mode::MultipleGather)
     }
 
     fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
+        if matches!(self.mode, Mode::MultipleGather) {
+            self.multiple = handles.into_iter().filter(|handle| self.info.get(&handle.value()).is_some_and(|info| info.mesh_size.is_none())).collect();
+            return CmdResult::NeedPoint;
+        }
         if let (Some(target), Mode::JoinGather(list)) = (self.target, &mut self.mode) {
             list.clear();
             list.push(target);
@@ -275,7 +338,8 @@ impl CadCommand for PeditCommand {
         // A Yes-conversion (or Break) replaced the entity — adopt the first
         // piece as the live target and carry its bookkeeping over.
         if let Some(&nh) = new_handles.first() {
-            self.info.remove(&old.value());
+            if self.multiple.is_empty() { self.info.remove(&old.value()); }
+            for handle in &mut self.multiple { if *handle == old { *handle = nh; } }
             self.info.insert(
                 nh.value(),
                 PeditTarget {
@@ -290,8 +354,13 @@ impl CadCommand for PeditCommand {
         }
     }
 
+    fn inject_picked_entity(&mut self, entity: EntityType) {
+        self.entities.insert(entity.common().handle.value(), entity);
+    }
+
     fn on_pedit_applied(&mut self) {
         self.undo_count = self.undo_count.saturating_add(1);
+        self.multiple_history.push(self.pending_multiple.take().unwrap_or_else(|| self.multiple.clone()));
         if let Some((m_direction, closed)) = self.pending_mesh_closed.take() {
             let previous = self.mesh_closed();
             self.mesh_closed_history.push(previous);
@@ -302,15 +371,35 @@ impl CadCommand for PeditCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        !matches!(self.mode, Mode::PickTarget | Mode::MeshVertexMove(_))
+        !matches!(self.mode, Mode::PickTarget | Mode::MeshVertexMove(_) | Mode::PolyMove(_) | Mode::PolyInsert(_))
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         self.pending_mesh_closed = None;
         let up = text.trim().to_uppercase();
         let mesh_size = self.mesh_size();
-        match &mut self.mode {
-            Mode::PickTarget => None,
+        let vertex_count = self.vertex_count();
+        let result = match &mut self.mode {
+            Mode::PickTarget => {
+                if matches!(up.as_str(), "M" | "MULTIPLE") { self.mode = Mode::MultipleGather; Some(CmdResult::NeedPoint) } else { None }
+            }
+            Mode::MultipleGather => None,
+            Mode::MultipleConvert => {
+                match up.as_str() {
+                    "Y" | "YES" | "" => {
+                        self.pending_multiple = Some(self.multiple.clone());
+                        self.mode = Mode::Options;
+                        Some(CmdResult::PeditOp { handle: *self.multiple.first()?, op: PeditOp::ConvertToPolyline })
+                    }
+                    "N" | "NO" => {
+                        self.multiple.retain(|handle| self.info.get(&handle.value()).is_some_and(|info| info.is_poly));
+                        self.target = self.multiple.first().copied();
+                        self.mode = Mode::Options;
+                        Some(if self.target.is_some() { CmdResult::NeedPoint } else { CmdResult::Cancel })
+                    }
+                    _ => Some(CmdResult::NeedPoint),
+                }
+            }
             Mode::ConvertPrompt(handle) => {
                 let handle = *handle;
                 match up.as_str() {
@@ -331,14 +420,31 @@ impl CadCommand for PeditCommand {
                     .replace(',', ".")
                     .parse()
                     .ok()
-                    .filter(|&v: &f64| v >= 0.0)?;
+                    .filter(|&v: &f64| v.is_finite() && v >= 0.0)?;
                 self.mode = Mode::Options;
                 Some(CmdResult::PeditOp {
                     handle,
                     op: PeditOp::SetWidth(w),
                 })
             }
+            Mode::AwaitLinetype => {
+                let enabled = match up.as_str() { "ON" => true, "OFF" => false, _ => return Some(CmdResult::NeedPoint) };
+                self.mode = Mode::Options;
+                Some(CmdResult::PeditOp { handle: self.target?, op: PeditOp::SetLinetypeGeneration(enabled) })
+            }
             Mode::JoinGather(_) => None,
+            Mode::PolyMove(_) | Mode::PolyInsert(_) => None,
+            Mode::PolyVertex(index) => {
+                match up.as_str() {
+                    "N" | "NEXT" => { if *index + 1 < vertex_count { *index += 1; } }
+                    "P" | "PREVIOUS" => { *index = index.saturating_sub(1); }
+                    "I" | "INSERT" => self.mode = Mode::PolyInsert(*index),
+                    "M" | "MOVE" => self.mode = Mode::PolyMove(*index),
+                    "X" | "EXIT" => self.mode = Mode::Options,
+                    _ => {}
+                }
+                Some(CmdResult::NeedPoint)
+            }
             Mode::MeshVertexMove(_) => None,
             Mode::MeshVertex(index) => {
                 let (m, n) = mesh_size?;
@@ -442,6 +548,19 @@ impl CadCommand for PeditCommand {
                     };
                 }
                 match up.as_str() {
+                    "E" | "EDIT" if self.multiple.is_empty() => { self.mode = Mode::PolyVertex(0); Some(CmdResult::NeedPoint) }
+                    "R" | "REVERSE" => Some(CmdResult::PeditOp { handle, op: PeditOp::Reverse }),
+                    "L" | "LTYPE" | "LTYPEGEN" => { self.mode = Mode::AwaitLinetype; Some(CmdResult::NeedPoint) }
+                    "U" | "UNDO" if self.undo_count > 0 => {
+                        self.undo_count -= 1;
+                        self.mesh_closed_history.pop();
+                        if let Some(previous) = self.multiple_history.pop() {
+                            self.multiple = previous;
+                            if !self.multiple.is_empty() { self.target = self.multiple.first().copied(); }
+                        }
+                        Some(CmdResult::UndoDocument)
+                    }
+                    "U" | "UNDO" => Some(CmdResult::NeedPoint),
                     "X" | "EXIT" => Some(CmdResult::Cancel),
                     "C" | "CLOSE" => Some(CmdResult::PeditOp {
                         handle,
@@ -475,21 +594,29 @@ impl CadCommand for PeditCommand {
                         // Inline shorthand `W <value>`.
                         if let Some(rest) = up.strip_prefix("W ") {
                             let w: f64 = rest.trim().replace(',', ".").parse().ok()?;
-                            if w >= 0.0 {
-                                return Some(CmdResult::PeditOp {
+                            if w.is_finite() && w >= 0.0 {
+                                return self.multiple_result(Some(CmdResult::PeditOp {
                                     handle,
                                     op: PeditOp::SetWidth(w),
-                                });
+                                }));
                             }
                         }
                         None
                     }
                 }
             }
-        }
+        };
+        self.multiple_result(result)
     }
 
     fn on_point(&mut self, point: DVec3) -> CmdResult {
+        if let Mode::PolyMove(index) | Mode::PolyInsert(index) = self.mode {
+            if !point.is_finite() { return CmdResult::NeedPoint; }
+            let Some(handle) = self.target else { return CmdResult::Cancel; };
+            let insert = matches!(self.mode, Mode::PolyInsert(_));
+            self.mode = Mode::PolyVertex(index);
+            return CmdResult::PeditOp { handle, op: PeditOp::EditVertex { index, point, insert } };
+        }
         if let Mode::MeshVertexMove(index) = self.mode {
             let Some(handle) = self.target else {
                 return CmdResult::Cancel;
@@ -507,6 +634,18 @@ impl CadCommand for PeditCommand {
         let mesh_size = self.mesh_size();
         let vertex_default = self.mesh_vertex_default;
         match &mut self.mode {
+            Mode::MultipleGather => {
+                self.target = self.multiple.first().copied();
+                if self.target.is_none() { return CmdResult::Cancel; }
+                self.mode = if self.multiple.iter().any(|handle| self.info.get(&handle.value()).is_some_and(|info| info.convertible)) {
+                    Mode::MultipleConvert
+                } else { Mode::Options };
+                CmdResult::NeedPoint
+            }
+            Mode::MultipleConvert => self.on_text_input("Y").unwrap_or(CmdResult::NeedPoint),
+            Mode::PolyVertex(_) => self.on_text_input("N").unwrap_or(CmdResult::NeedPoint),
+            Mode::PolyMove(_) | Mode::PolyInsert(_) => { self.mode = Mode::Options; CmdResult::NeedPoint }
+            Mode::AwaitLinetype => { self.mode = Mode::Options; CmdResult::NeedPoint }
             Mode::JoinGather(list) if list.len() >= 2 => CmdResult::JoinEntities(list.clone()),
             Mode::JoinGather(_) => {
                 self.mode = Mode::Options;
@@ -539,8 +678,12 @@ impl CadCommand for PeditCommand {
 
 #[derive(Clone)]
 pub enum PeditOp {
+    Multiple(Vec<Handle>, Box<PeditOp>),
     SetClosed(bool),
     SetWidth(f64),
+    SetLinetypeGeneration(bool),
+    EditVertex { index: usize, point: DVec3, insert: bool },
+    Reverse,
     /// Replace the picked Line/Arc with an equivalent LwPolyline (#263).
     ConvertToPolyline,
     Fit,
@@ -560,6 +703,54 @@ pub enum PeditOp {
 
 pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
     match op {
+        PeditOp::Multiple(_, _) => false,
+        PeditOp::EditVertex { index, point, insert } => {
+            if !point.is_finite() { return false; }
+            match entity {
+                EntityType::LwPolyline(polyline) => {
+                    let plane = crate::entities::curve::ocs_plane(polyline.normal, polyline.elevation);
+                    let Some(local) = plane.project([point.x, point.y, point.z]) else { return false; };
+                    if *index >= polyline.vertices.len() { return false; }
+                    if *insert {
+                        polyline.vertices.insert(index + 1, LwVertex::new(Vector2::new(local[0], local[1])));
+                    } else { polyline.vertices[*index].location = Vector2::new(local[0], local[1]); }
+                    true
+                }
+                EntityType::Polyline2D(polyline) => {
+                    let plane = crate::entities::curve::ocs_plane(polyline.normal, polyline.elevation);
+                    let Some(local) = plane.project([point.x, point.y, point.z]) else { return false; };
+                    if *index >= polyline.vertices.len() { return false; }
+                    let location = Vector3::new(local[0], local[1], polyline.elevation);
+                    if *insert {
+                        polyline.vertices.insert(index + 1, acadrust::entities::polyline::Vertex2D::new(location));
+                    } else { polyline.vertices[*index].location = location; }
+                    true
+                }
+                _ => false,
+            }
+        }
+        PeditOp::Reverse => {
+            let Some(reversed) = super::reverse::ReverseCommand::reversed(entity) else { return false; };
+            *entity = reversed;
+            true
+        }
+        PeditOp::SetLinetypeGeneration(enabled) => match entity {
+            EntityType::LwPolyline(polyline) => {
+                if polyline.plinegen == *enabled { return false; }
+                polyline.plinegen = *enabled;
+                true
+            }
+            EntityType::Polyline2D(polyline) => {
+                let flag = acadrust::entities::polyline::PolylineFlags::LINETYPE_CONTINUOUS;
+                let bits = polyline.flags.bits();
+                if (bits & flag.bits() != 0) == *enabled { return false; }
+                polyline.flags = acadrust::entities::polyline::PolylineFlags::from_bits(
+                    if *enabled { bits | flag.bits() } else { bits & !flag.bits() }
+                );
+                true
+            }
+            _ => false,
+        },
         PeditOp::SetClosed(closed) => match entity {
             EntityType::LwPolyline(p) => {
                 p.is_closed = *closed;

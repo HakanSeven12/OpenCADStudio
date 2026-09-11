@@ -54,7 +54,7 @@ impl ReverseCommand {
     }
 
     /// Build a reversed copy of `entity`, or `None` for an unsupported type.
-    fn reversed(entity: &EntityType) -> Option<EntityType> {
+    pub fn reversed(entity: &EntityType) -> Option<EntityType> {
         match entity {
             EntityType::Line(line) => {
                 let mut out = line.clone();

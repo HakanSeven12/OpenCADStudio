@@ -4689,36 +4689,59 @@ impl OpenCADStudio {
                                     glam::DVec3::from_array(storage.x_axis),
                                     glam::DVec3::from_array(storage.y_axis),
                                 );
-                                let entities = if region {
-                                    let entities = source.paths.iter().map(|path| {
-                                        let curves = path.edges.iter().map(crate::entities::hatch::edge_curve).collect::<Option<Vec<_>>>()?;
-                                        crate::scene::model::presspull_model::region_from_loops(&[curves], plane)
+                                let (entities, path_groups) = if region {
+                                    let loops = source.paths.iter().map(|path| {
+                                        path.edges.iter().map(crate::entities::hatch::edge_curve).collect::<Option<Vec<_>>>()
                                     }).collect::<Option<Vec<_>>>();
-                                    let Some(entities) = entities else {
+                                    let Some(loops) = loops.filter(|loops| !loops.is_empty() && loops.iter().all(|ring| !ring.is_empty())) else {
+                                        self.discard_last_undo_entry(i);
                                         self.command_line.push_error("HATCHEDIT: boundary cannot form a region.");
                                         return Task::none();
                                     };
-                                    entities
+                                    let contained = loops.iter().enumerate().map(|(inner, ring)| {
+                                        let seed = ring[0].point_at(0.0);
+                                        loops.iter().enumerate().map(|(outer, boundary)| {
+                                            inner != outer && cadkernel::geom2d::contains(boundary, seed, cadkernel::geom2d::Tolerance::new(1e-6))
+                                        }).collect::<Vec<_>>()
+                                    }).collect::<Vec<_>>();
+                                    let depths = contained.iter().map(|row| row.iter().filter(|inside| **inside).count()).collect::<Vec<_>>();
+                                    let groups = depths.iter().enumerate().filter(|(_, depth)| **depth % 2 == 0).map(|(outer, depth)| {
+                                        let mut indices = vec![outer];
+                                        indices.extend((0..loops.len()).filter(|inner| depths[*inner] == *depth + 1 && contained[*inner][outer]));
+                                        indices
+                                    }).collect::<Vec<_>>();
+                                    let entities = groups.iter().map(|indices| {
+                                        let profiles = indices.iter().map(|index| loops[*index].clone()).collect::<Vec<_>>();
+                                        crate::scene::model::presspull_model::region_from_loops(&profiles, plane)
+                                    }).collect::<Option<Vec<_>>>();
+                                    let Some(entities) = entities else {
+                                        self.discard_last_undo_entry(i);
+                                        self.command_line.push_error("HATCHEDIT: boundary cannot form a region.");
+                                        return Task::none();
+                                    };
+                                    (entities, groups)
                                 } else {
                                     let rings = crate::scene::hatch_boundary_rings(&source);
-                                    crate::scene::boundary_entities(&rings, plane)
+                                    let entities = crate::scene::boundary_entities(&rings, plane);
+                                    let groups = (0..entities.len()).map(|index| vec![index]).collect();
+                                    (entities, groups)
                                 };
-                                let mut handles = Vec::new();
-                                for entity in entities {
+                                let mut path_handles = vec![None; source.paths.len()];
+                                for (entity, paths) in entities.into_iter().zip(path_groups) {
                                     if let Some(boundary) = self.commit_entity_handle(entity) {
-                                        handles.push(boundary);
+                                        for path in paths { if let Some(slot) = path_handles.get_mut(path) { *slot = Some(boundary); } }
                                     }
                                 }
                                 if associate { if let Some(acadrust::EntityType::Hatch(hatch)) =
                                     self.tabs[i].scene.document.get_entity_mut(handle)
                                 {
-                                    for (path, boundary) in
-                                        hatch.paths.iter_mut().zip(handles.iter().copied())
-                                    {
-                                        path.boundary_handles = vec![boundary];
-                                        path.flags.set_external(true);
+                                    for (path, boundary) in hatch.paths.iter_mut().zip(path_handles.iter().copied()) {
+                                        if let Some(boundary) = boundary {
+                                            path.boundary_handles = vec![boundary];
+                                            path.flags.set_external(true);
+                                        }
                                     }
-                                    hatch.is_associative = !handles.is_empty();
+                                    hatch.is_associative = path_handles.iter().all(Option::is_some);
                                 } }
                                 self.tabs[i].scene.bump_entities(&[(
                                     handle,

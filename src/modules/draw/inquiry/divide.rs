@@ -219,6 +219,7 @@ pub fn measure_entity(entity: &EntityType, segment_length: f64) -> Vec<EntityTyp
         return vec![];
     };
     let total = curve.length();
+    if !total.is_finite() || total <= 1e-10 { return vec![]; }
     let mut pts = Vec::new();
     let mut walked = segment_length;
     while walked < total - 1e-6 {

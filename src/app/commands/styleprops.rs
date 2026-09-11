@@ -659,7 +659,7 @@ impl OpenCADStudio {
                     crate::modules::draw::modify::setbylayer::set_mode(mode);
                 } else { self.command_line.push_error("SETBYLAYERMODE requires an integer from 0 to 255."); }
             }
-            "SETBYLAYER" => {
+            "SETBYLAYER" | "-SETBYLAYER" => {
                 let command = crate::modules::draw::modify::setbylayer::SetByLayerCommand::new(
                     self.tabs[i].scene.selected.iter().copied().collect(),
                 );

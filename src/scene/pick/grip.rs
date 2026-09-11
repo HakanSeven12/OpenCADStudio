@@ -48,6 +48,8 @@ pub struct GripEdit {
     pub axis: Option<DVec3>,
     /// Every hot grip moved by this edit. A normal grip edit contains one target.
     pub targets: Vec<GripTarget>,
+    /// Opposite corner and local width/height axes for rectangle corner resize.
+    pub rectangle_frame: Option<(DVec3, DVec3, DVec3)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,6 +60,7 @@ pub enum GripEditMode {
     ArcLength,
     RectangleWidth,
     RectangleHeight,
+    RectangleResize,
 }
 
 #[derive(Clone, Debug)]
@@ -88,6 +91,7 @@ impl GripEdit {
                 is_translate,
                 last_world: world,
             }],
+            rectangle_frame: None,
         }
     }
 
@@ -118,6 +122,20 @@ impl GripEdit {
     pub fn rectangle_height(handle: Handle, grip_id: usize, world: DVec3) -> Self {
         let mut edit = Self::single(handle, grip_id, false, world);
         edit.mode = GripEditMode::RectangleHeight;
+        edit
+    }
+
+    pub fn rectangle_resize(
+        handle: Handle,
+        grip_id: usize,
+        world: DVec3,
+        opposite: DVec3,
+        width_axis: DVec3,
+        height_axis: DVec3,
+    ) -> Self {
+        let mut edit = Self::single(handle, grip_id, false, world);
+        edit.mode = GripEditMode::RectangleResize;
+        edit.rectangle_frame = Some((opposite, width_axis, height_axis));
         edit
     }
 }

@@ -649,6 +649,7 @@ impl OpenCADStudio {
             mode: GripEditMode::Stretch,
             axis,
             targets,
+            rectangle_frame: None,
         }
     }
 
@@ -1579,6 +1580,30 @@ impl OpenCADStudio {
             ));
 
             let apply_started = Instant::now();
+            if let Some((opposite, width_axis, height_axis)) = grip.rectangle_frame {
+                let delta = snapped - opposite;
+                let mut width = delta.dot(width_axis);
+                let mut height = delta.dot(height_axis);
+                for field in &self.tabs[i].dyn_fields {
+                    let Some(buffer) = field.buffer.as_ref() else {
+                        continue;
+                    };
+                    let Some(value) = crate::app::expr_eval::eval_number(buffer) else {
+                        continue;
+                    };
+                    match field.role {
+                        crate::command::DynRole::Width => {
+                            width = value.abs().copysign(width);
+                        }
+                        crate::command::DynRole::Height => {
+                            height = value.abs().copysign(height);
+                        }
+                        _ => {}
+                    }
+                }
+                snapped = opposite + width_axis * width + height_axis * height;
+                self.tabs[i].last_cursor_world = snapped;
+            }
             let delta = snapped - grip.last_world;
             let menu_action = match grip.mode {
                 GripEditMode::Lengthen => {
@@ -1596,9 +1621,41 @@ impl OpenCADStudio {
                 GripEditMode::RectangleHeight => {
                     Some(crate::scene::model::object::GripMenuAction::RectangleHeight)
                 }
+                GripEditMode::RectangleResize => None,
                 GripEditMode::Stretch => None,
             };
-            let actions: Vec<_> = if menu_action.is_some() {
+            let actions: Vec<_> = if matches!(grip.mode, GripEditMode::RectangleResize) {
+                let Some((opposite, width_axis, height_axis)) = grip.rectangle_frame else {
+                    return Task::none();
+                };
+                let opposite_id = (grip.grip_id + 2) % 4;
+                let adjacent_ids = [(opposite_id + 1) % 4, (opposite_id + 3) % 4];
+                let mut edits = Vec::with_capacity(3);
+                for adjacent_id in adjacent_ids {
+                    let original = self.tabs[i]
+                        .selected_grip_handles
+                        .iter()
+                        .zip(self.tabs[i].selected_grips.iter())
+                        .find(|(owner, candidate)| {
+                            **owner == grip.handle && candidate.id == adjacent_id
+                        })
+                        .map(|(_, candidate)| candidate.world);
+                    if let Some(original) = original {
+                        let original_delta = original - opposite;
+                        let axis = if original_delta.dot(width_axis).abs()
+                            >= original_delta.dot(height_axis).abs()
+                        {
+                            width_axis
+                        } else {
+                            height_axis
+                        };
+                        let point = opposite + axis * (snapped - opposite).dot(axis);
+                        edits.push((grip.handle, adjacent_id, GripApply::Absolute(point)));
+                    }
+                }
+                edits.push((grip.handle, grip.grip_id, GripApply::Absolute(snapped)));
+                edits
+            } else if menu_action.is_some() {
                 Vec::new()
             } else {
                 grip.targets

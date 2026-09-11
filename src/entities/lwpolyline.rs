@@ -885,16 +885,6 @@ fn set_revision_cloud_arc_length(pline: &mut LwPolyline, requested: f64) {
 }
 
 pub(crate) fn is_rectangle(pline: &LwPolyline) -> bool {
-    if pline.common.extended_data.get_record("OCS_RECTANGLE").is_some() {
-        return true;
-    }
-    is_resizable_rectangle(pline)
-}
-
-/// Geometry check used for constrained rectangle grips. Unlike the semantic
-/// marker, this must stop matching as soon as an unrestricted vertex edit has
-/// distorted the four-corner rectangle.
-fn is_resizable_rectangle(pline: &LwPolyline) -> bool {
     if !pline.is_closed
         || pline.vertices.len() != 4
         || pline.vertices.iter().any(|vertex| vertex.bulge.abs() > 1.0e-9)
@@ -916,6 +906,11 @@ fn is_resizable_rectangle(pline: &LwPolyline) -> bool {
     edges[0].dot(edges[1]).abs() <= tolerance * lengths[0] * lengths[1]
         && edges[0].cross(edges[2]).abs() <= tolerance * lengths[0] * lengths[2]
         && edges[1].cross(edges[3]).abs() <= tolerance * lengths[1] * lengths[3]
+}
+
+fn is_rectangle_command_entity(pline: &LwPolyline) -> bool {
+    pline.common.extended_data.get_record("OCS_RECTANGLE").is_some()
+        || is_rectangle(pline)
 }
 
 fn properties(pline: &LwPolyline) -> Vec<PropSection> {
@@ -978,7 +973,7 @@ fn properties(pline: &LwPolyline) -> Vec<PropSection> {
         edit(t!("Vertex Y").as_ref(), "vertex_y", vy),
         edit_scalar(t!("Bulge").as_ref(), "bulge", v.map_or(0.0, |vertex| vertex.bulge)),
     ];
-    if !is_rectangle(pline) {
+    if !is_rectangle_command_entity(pline) {
         geometry_props.push(edit(t!("Start segment width").as_ref(), "start_width", start_w));
         geometry_props.push(edit(t!("End segment width").as_ref(), "end_width", end_w));
     }
@@ -1210,7 +1205,14 @@ impl crate::entities::traits::Grippable for LwPolyline {
             // Vertex grip. Break only where a split is possible: any vertex
             // of a closed polyline, interior vertices of an open one.
             let breakable = n >= 3 && (self.is_closed || (grip_id > 0 && grip_id < n - 1));
-            let mut items = vec![
+            let mut items = Vec::new();
+            if is_rectangle(self) {
+                items.push(GripMenuItem {
+                    label: "Resize",
+                    action: GripMenuAction::RectangleResize,
+                });
+            }
+            items.extend([
                 GripMenuItem {
                     label: "Stretch",
                     action: GripMenuAction::Stretch,
@@ -1223,7 +1225,7 @@ impl crate::entities::traits::Grippable for LwPolyline {
                     label: "Remove Vertex",
                     action: GripMenuAction::RemoveVertex,
                 },
-            ];
+            ]);
             if breakable {
                 items.push(GripMenuItem {
                     label: "Break",
@@ -1250,7 +1252,7 @@ impl crate::entities::traits::Grippable for LwPolyline {
             }
         };
         let mut items = Vec::new();
-        if is_resizable_rectangle(self) && seg < 4 {
+        if is_rectangle(self) && seg < 4 {
             // Moving an edge changes the dimension perpendicular to it.
             items.push(GripMenuItem {
                 label: if seg % 2 == 0 { "Height" } else { "Width" },
@@ -1282,7 +1284,7 @@ impl crate::entities::traits::Grippable for LwPolyline {
     ) -> Option<&'static str> {
         use crate::scene::model::object::GripMenuAction as A;
         let n = self.vertices.len();
-        (is_resizable_rectangle(self)
+        (is_rectangle(self)
             && n == 4
             && (n..n + 4).contains(&grip_id)
             && matches!(action, A::RectangleWidth | A::RectangleHeight))
@@ -1299,7 +1301,7 @@ impl crate::entities::traits::Grippable for LwPolyline {
         point: glam::DVec3,
     ) -> Option<f64> {
         use crate::scene::model::object::GripMenuAction as A;
-        if !is_resizable_rectangle(self)
+        if !is_rectangle(self)
             || !matches!(action, A::RectangleWidth | A::RectangleHeight)
         {
             return None;
@@ -1334,7 +1336,7 @@ impl crate::entities::traits::Grippable for LwPolyline {
         value: f64,
     ) {
         use crate::scene::model::object::GripMenuAction as A;
-        if !is_resizable_rectangle(self) || value <= 1.0e-9
+        if !is_rectangle(self) || value <= 1.0e-9
             || !matches!(action, A::RectangleWidth | A::RectangleHeight)
         {
             return;
@@ -1583,6 +1585,14 @@ mod tests {
     }
 
     #[test]
+    fn rectangle_corner_offers_resize_before_stretch() {
+        let pl = make_test_rectangle();
+        let corner = pl.grip_menu(0);
+        assert_eq!(corner[0].action, GripMenuAction::RectangleResize);
+        assert_eq!(corner[1].action, GripMenuAction::Stretch);
+    }
+
+    #[test]
     fn rectangle_dimension_edit_keeps_opposite_edge_fixed() {
         let mut pl = make_test_rectangle();
         pl.apply_grip_menu_value(6, GripMenuAction::RectangleHeight, 8.0);
@@ -1590,7 +1600,7 @@ mod tests {
         assert_eq!(pl.vertices[1].location, Vector2::new(10.0, 0.0));
         assert_eq!(pl.vertices[2].location, Vector2::new(10.0, 8.0));
         assert_eq!(pl.vertices[3].location, Vector2::new(0.0, 8.0));
-        assert!(is_resizable_rectangle(&pl));
+        assert!(is_rectangle(&pl));
     }
 
     #[test]

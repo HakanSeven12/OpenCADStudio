@@ -71,6 +71,10 @@ impl OpenCADStudio {
         //
         // Grip editing is not an `active_cmd`, so handle it before the normal
         // command-only path below.
+        let rectangle_frame = self.tabs[i]
+            .active_grip
+            .as_ref()
+            .and_then(|grip| grip.rectangle_frame);
         let grip_input = self.tabs[i]
             .active_grip
             .as_ref()
@@ -93,13 +97,20 @@ impl OpenCADStudio {
                 crate::scene::pick::grip::GripEditMode::RectangleHeight => {
                     (grip.origin_world, Some(crate::command::DynRole::Height))
                 }
+                crate::scene::pick::grip::GripEditMode::RectangleResize => {
+                    (grip.origin_world, None)
+                }
             });
 
         if let Some((origin, scalar_role)) = grip_input {
-            let wanted_roles: Vec<crate::command::DynRole> = scalar_role.map_or_else(
-                || vec![crate::command::DynRole::Distance, crate::command::DynRole::Angle],
-                |role| vec![role],
-            );
+            let wanted_roles: Vec<crate::command::DynRole> = if rectangle_frame.is_some() {
+                vec![crate::command::DynRole::Width, crate::command::DynRole::Height]
+            } else {
+                scalar_role.map_or_else(
+                    || vec![crate::command::DynRole::Distance, crate::command::DynRole::Angle],
+                    |role| vec![role],
+                )
+            };
             let current: Vec<crate::command::DynRole> = self.tabs[i]
                 .dyn_fields
                 .iter()
@@ -115,12 +126,14 @@ impl OpenCADStudio {
                 self.tabs[i].dyn_active = 0;
             }
 
-            self.tabs[i].dyn_guide = if scalar_role.is_some() {
+            self.tabs[i].dyn_guide = if rectangle_frame.is_some() {
+                crate::command::DynGuide::RectSides
+            } else if scalar_role.is_some() {
                 crate::command::DynGuide::Radius
             } else {
                 crate::command::DynGuide::Polar
             };
-            self.tabs[i].dyn_anchor = Some(origin);
+            self.tabs[i].dyn_anchor = rectangle_frame.map(|frame| frame.0).or(Some(origin));
             self.tabs[i].dyn_ref = None;
             return;
         }

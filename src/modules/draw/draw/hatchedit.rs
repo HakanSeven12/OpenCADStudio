@@ -150,11 +150,26 @@ impl HatcheditCommand {
             self.origin_bounds = hatch.paths.iter().flat_map(|path| &path.edges)
                 .map(crate::entities::hatch::edge_curve).collect::<Option<Vec<_>>>()
                 .and_then(|curves| {
-                    // The origin command's elliptic boundary extents differ from
-                    // geometric extrema; leave that case unavailable until its
-                    // placement convention is represented by the kernel.
-                    if curves.iter().any(|curve| matches!(curve, cadkernel::geom2d::Curve::Ellipse(_) | cadkernel::geom2d::Curve::Nurbs(_))) { return None; }
-                    cadkernel::geom2d::analytic_curve_bounds(&curves)
+                    // Full ellipses use the four axis endpoints as origin anchors,
+                    // not their geometric extrema. Keep the general bounds contract
+                    // unchanged and aggregate these command-specific anchor segments.
+                    let mut anchors = Vec::new();
+                    for curve in curves {
+                        match curve {
+                            cadkernel::geom2d::Curve::Ellipse(arc) => {
+                                if (arc.end_parameter - arc.start_parameter).abs() < std::f64::consts::TAU { return None; }
+                                for angle in [0.0, std::f64::consts::FRAC_PI_2] {
+                                    anchors.push(cadkernel::geom2d::Curve::Line(cadkernel::geom2d::Line {
+                                        start: arc.ellipse.point_at(angle),
+                                        end: arc.ellipse.point_at(angle + std::f64::consts::PI),
+                                    }));
+                                }
+                            }
+                            cadkernel::geom2d::Curve::Nurbs(_) => return None,
+                            other => anchors.push(other),
+                        }
+                    }
+                    cadkernel::geom2d::analytic_curve_bounds(&anchors)
                 });
         }
         self.source_appearance=entity.map(|e|{let c=e.common();(c.color,c.layer.clone(),c.transparency)});

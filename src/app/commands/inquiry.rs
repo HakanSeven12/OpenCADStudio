@@ -297,6 +297,7 @@ impl OpenCADStudio {
                     header.surface_u_density,
                     header.surface_v_density,
                 )
+                .with_entities(self.tabs[i].scene.document.entities().cloned())
                 .with_preselection(&preselected);
                 self.command_line.push_info(&cmd_obj.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));

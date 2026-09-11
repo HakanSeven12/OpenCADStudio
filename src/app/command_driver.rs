@@ -1303,6 +1303,211 @@ impl OpenCADStudio {
         handles
     }
 
+    fn apply_pedit_result(
+        &mut self,
+        tab: usize,
+        handle: Handle,
+        op: crate::modules::draw::modify::pedit::PeditOp,
+    ) -> Task<Message> {
+        use crate::modules::draw::modify::pedit::{apply_pedit, convert_to_polyline, PeditOp};
+
+        if !matches!(&op, PeditOp::Multiple(_, _) | PeditOp::JoinSelection(_))
+            && self.reject_locked_edit(tab, handle)
+        {
+            return Task::none();
+        }
+        match &op {
+            PeditOp::JoinSelection(handles) => {
+                let mut available = handles
+                    .iter()
+                    .filter_map(|handle| {
+                        if self.tabs[tab].scene.is_layer_locked(*handle) {
+                            return None;
+                        }
+                        self.tabs[tab]
+                            .scene
+                            .document
+                            .get_entity(*handle)
+                            .cloned()
+                            .map(|entity| (*handle, entity))
+                    })
+                    .collect::<Vec<_>>();
+                let mut changes = Vec::new();
+                while !available.is_empty() {
+                    let (source_handle, source) = available.remove(0);
+                    let candidates = available
+                        .iter()
+                        .map(|(handle, entity)| (*handle, entity))
+                        .collect::<Vec<_>>();
+                    if let Some((mut result, consumed)) =
+                        crate::modules::draw::modify::join::join_to_source(&source, &candidates)
+                    {
+                        *result.common_mut() = source.common().clone();
+                        available.retain(|(handle, _)| !consumed.contains(handle));
+                        changes.push((source_handle, result, consumed));
+                    }
+                }
+                if !changes.is_empty() {
+                    self.push_undo_snapshot(tab, "PEDIT");
+                    for (source, replacement, consumed) in changes {
+                        self.tabs[tab].scene.erase_entities(&consumed);
+                        self.tabs[tab].scene.update_entity(replacement.clone());
+                        if let Some(command) = self.tabs[tab].active_cmd.as_mut() {
+                            for old in consumed {
+                                command.on_entity_replaced(old, &[source]);
+                            }
+                            command.inject_picked_entity(replacement);
+                        }
+                    }
+                    if let Some(command) = self.tabs[tab].active_cmd.as_mut() {
+                        command.on_pedit_applied();
+                    }
+                    self.tabs[tab].dirty = true;
+                    self.refresh_properties();
+                }
+            }
+            PeditOp::Multiple(handles, operation) => {
+                let replacements: Vec<_> = handles
+                    .iter()
+                    .filter(|handle| !self.tabs[tab].scene.is_layer_locked(**handle))
+                    .filter_map(|handle| {
+                        let original = self.tabs[tab].scene.document.get_entity(*handle)?;
+                        if matches!(operation.as_ref(), PeditOp::ConvertToPolyline) {
+                            convert_to_polyline(original)
+                                .map(|replacement| (*handle, replacement, true))
+                        } else {
+                            let mut replacement = original.clone();
+                            apply_pedit(&mut replacement, operation)
+                                .then_some((*handle, replacement, false))
+                        }
+                    })
+                    .collect();
+                if replacements.is_empty() {
+                    return Task::none();
+                }
+                self.push_undo_snapshot(tab, "PEDIT");
+                for (handle, replacement, converted) in replacements {
+                    let updated_handle = if converted {
+                        self.tabs[tab].scene.erase_entities(&[handle]);
+                        let new_handle = self.tabs[tab].scene.add_entity(replacement);
+                        if let Some(command) = self.tabs[tab].active_cmd.as_mut() {
+                            command.on_entity_replaced(handle, &[new_handle]);
+                        }
+                        new_handle
+                    } else {
+                        if let Some(entity) = self.tabs[tab].scene.document.get_entity_mut(handle) {
+                            *entity = replacement;
+                        }
+                        self.tabs[tab].scene.refresh_fill_model(handle);
+                        self.tabs[tab]
+                            .scene
+                            .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
+                        handle
+                    };
+                    let updated = self.tabs[tab]
+                        .scene
+                        .document
+                        .get_entity(updated_handle)
+                        .cloned();
+                    if let (Some(command), Some(entity)) =
+                        (self.tabs[tab].active_cmd.as_mut(), updated)
+                    {
+                        command.inject_picked_entity(entity);
+                    }
+                }
+                if let Some(command) = self.tabs[tab].active_cmd.as_mut() {
+                    command.on_pedit_applied();
+                }
+                self.tabs[tab].dirty = true;
+                self.refresh_properties();
+            }
+            PeditOp::VertexRange { first, last, split } => {
+                let pieces = self.tabs[tab]
+                    .scene
+                    .document
+                    .get_entity(handle)
+                    .and_then(|entity| {
+                        crate::modules::draw::modify::pedit::edit_vertex_range(
+                            entity, *first, *last, *split,
+                        )
+                    });
+                if let Some(mut pieces) = pieces {
+                    self.push_undo_snapshot(tab, "PEDIT");
+                    let source = pieces.remove(0);
+                    self.tabs[tab].scene.update_entity(source);
+                    for mut piece in pieces {
+                        piece.common_mut().handle = Handle::NULL;
+                        self.tabs[tab].scene.add_entity(piece);
+                    }
+                    let updated = self.tabs[tab].scene.document.get_entity(handle).cloned();
+                    if let Some(command) = self.tabs[tab].active_cmd.as_mut() {
+                        if let Some(entity) = updated {
+                            command.inject_picked_entity(entity);
+                        }
+                        command.on_pedit_applied();
+                    }
+                    self.tabs[tab].dirty = true;
+                    self.refresh_properties();
+                } else {
+                    self.command_line.push_error("PEDIT: invalid vertex range.");
+                }
+            }
+            PeditOp::ConvertToPolyline => {
+                let converted = self.tabs[tab]
+                    .scene
+                    .document
+                    .get_entity(handle)
+                    .and_then(convert_to_polyline);
+                match converted {
+                    Some(polyline) => {
+                        return self.apply_cmd_result(CmdResult::ReplaceEntity(
+                            handle,
+                            vec![polyline],
+                        ));
+                    }
+                    None => self.command_line.push_error(
+                        crate::t!("PEDIT: cannot convert this entity.").as_ref(),
+                    ),
+                }
+            }
+            _ => {
+                self.push_undo_snapshot(tab, "PEDIT");
+                let changed = self.tabs[tab]
+                    .scene
+                    .document
+                    .get_entity_mut(handle)
+                    .map(|entity| apply_pedit(entity, &op))
+                    .unwrap_or(false);
+                if changed {
+                    let updated = self.tabs[tab].scene.document.get_entity(handle).cloned();
+                    if let Some(command) = self.tabs[tab].active_cmd.as_mut() {
+                        if let Some(entity) = updated {
+                            command.inject_picked_entity(entity);
+                        }
+                        command.on_pedit_applied();
+                    }
+                    self.tabs[tab].dirty = true;
+                    self.tabs[tab].scene.refresh_fill_model(handle);
+                    self.tabs[tab]
+                        .scene
+                        .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
+                    self.command_line
+                        .push_output(crate::t!("PEDIT: applied.").as_ref());
+                    self.refresh_properties();
+                } else {
+                    self.discard_last_undo_entry(tab);
+                    self.command_line.push_error(
+                        crate::t!("PEDIT: operation not applicable to this entity.").as_ref(),
+                    );
+                }
+            }
+        }
+        if let Some(prompt) = self.tabs[tab].active_cmd.as_ref().map(|command| command.prompt()) {
+            self.command_line.push_info(&prompt);
+        }
+        Task::none()
+    }
+
     fn apply_cmd_result_inner(&mut self, result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
         if let Some(bind) = self.tabs[i].active_cmd.as_ref().and_then(|command| command.nested_copy_bind_setting()) {
@@ -2844,8 +3049,12 @@ impl OpenCADStudio {
                         self.tabs[i].scene.invalidate_dim_block_recorded(nh);
                     }
                 }
+                let pedit_entities = if self.tabs[i].active_cmd.as_ref().is_some_and(|command| command.name() == "PEDIT") {
+                    new_handles.iter().filter_map(|new| self.tabs[i].scene.document.get_entity(*new).cloned()).collect::<Vec<_>>()
+                } else { Vec::new() };
                 if let Some(cmd) = &mut self.tabs[i].active_cmd {
                     cmd.on_entity_replaced(handle, &new_handles);
+                    for entity in pedit_entities { cmd.inject_picked_entity(entity); }
                 }
                 self.tabs[i].dirty = true;
                 let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
@@ -3736,65 +3945,7 @@ impl OpenCADStudio {
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
             }
-            CmdResult::PeditOp { handle, op } => {
-                if self.reject_locked_edit(i, handle) {
-                    return Task::none();
-                }
-                use crate::modules::draw::modify::pedit::{
-                    apply_pedit, convert_to_polyline, PeditOp,
-                };
-                match &op {
-                    // The convert replaces the entity (new handle).
-                    PeditOp::ConvertToPolyline => {
-                        let converted = self.tabs[i]
-                            .scene
-                            .document
-                            .get_entity(handle)
-                            .and_then(convert_to_polyline);
-                        match converted {
-                            Some(pl) => {
-                                return self
-                                    .apply_cmd_result(CmdResult::ReplaceEntity(handle, vec![pl]));
-                            }
-                            None => self
-                                .command_line
-                                .push_error(crate::t!("PEDIT: cannot convert this entity.").as_ref()),
-                        }
-                    }
-                    _ => {
-                        // Snapshot BEFORE the mutation — an after-the-fact
-                        // snapshot records the changed state and undo no-ops.
-                        self.push_undo_snapshot(i, "PEDIT");
-                        let changed = self.tabs[i]
-                            .scene
-                            .document
-                            .get_entity_mut(handle)
-                            .map(|e| apply_pedit(e, &op))
-                            .unwrap_or(false);
-                        if changed {
-                            if let Some(command) = self.tabs[i].active_cmd.as_mut() {
-                                command.on_pedit_applied();
-                            }
-                            self.tabs[i].dirty = true;
-                            // Repaint immediately (wide-band fill included).
-                            self.tabs[i].scene.refresh_fill_model(handle);
-                            self.tabs[i]
-                                .scene
-                                .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
-                            self.command_line.push_output(crate::t!("PEDIT: applied.").as_ref());
-                            self.refresh_properties();
-                        } else {
-                            self.discard_last_undo_entry(i);
-                            self.command_line
-                                .push_error(crate::t!("PEDIT: operation not applicable to this entity.").as_ref());
-                        }
-                    }
-                }
-                let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
-                if let Some(p) = prompt {
-                    self.command_line.push_info(&p);
-                }
-            }
+            CmdResult::PeditOp { handle, op } => return self.apply_pedit_result(i, handle, op),
             CmdResult::JoinToSource { source, handles } => {
                 if self.reject_locked_edit(i, source) { return Task::none(); }
                 let joined = self.tabs[i].scene.document.get_entity(source).and_then(|entity| {
@@ -5301,6 +5452,12 @@ impl OpenCADStudio {
                 let active = self.tabs[i].active_cmd.take();
                 self.undo_active_tab();
                 self.tabs[i].active_cmd = active;
+                if self.tabs[i].active_cmd.as_ref().is_some_and(|command| command.name() == "PEDIT") {
+                    let entities: Vec<_> = self.tabs[i].scene.document.entities().cloned().collect();
+                    if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+                        for entity in entities { command.inject_picked_entity(entity); }
+                    }
+                }
                 let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
                 if let Some(p) = prompt {
                     self.command_line.push_info(&p);

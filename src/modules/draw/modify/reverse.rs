@@ -20,10 +20,10 @@
 // Any other entity type is left untouched: the command returns
 // `CmdResult::NeedPoint` and keeps prompting so nothing is corrupted.
 
+use crate::t;
 use acadrust::entities::Spline;
 use acadrust::{EntityType, Handle};
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -62,9 +62,7 @@ impl ReverseCommand {
                 Some(EntityType::Line(out))
             }
             EntityType::LwPolyline(pl) => Some(EntityType::LwPolyline(reverse_lwpolyline(pl))),
-            EntityType::Polyline2D(pl) => {
-                Some(EntityType::Polyline2D(reverse_polyline2d(pl)))
-            }
+            EntityType::Polyline2D(pl) => Some(EntityType::Polyline2D(reverse_polyline2d(pl))),
             EntityType::Polyline(pl) => {
                 let mut out = pl.clone();
                 out.vertices.reverse();
@@ -76,7 +74,9 @@ impl ReverseCommand {
                 Some(EntityType::Polyline3D(out))
             }
             EntityType::Spline(sp) => Some(EntityType::Spline(reverse_spline(sp))),
-            EntityType::Helix(helix) => crate::entities::helix::reversed(helix).map(EntityType::Helix),
+            EntityType::Helix(helix) => {
+                crate::entities::helix::reversed(helix).map(EntityType::Helix)
+            }
             _ => None,
         }
     }
@@ -154,8 +154,8 @@ fn reverse_polyline2d(pl: &acadrust::entities::Polyline2D) -> acadrust::entities
     for vertex in &mut out.vertices {
         let tangent_flag = acadrust::entities::VertexFlags::CURVE_FIT_TANGENT.bits();
         if vertex.flags.bits() & tangent_flag != 0 {
-            vertex.curve_tangent = (vertex.curve_tangent + std::f64::consts::PI)
-                .rem_euclid(std::f64::consts::TAU);
+            vertex.curve_tangent =
+                (vertex.curve_tangent + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
         }
     }
     if pl.is_closed() {
@@ -189,8 +189,13 @@ pub(super) fn reverse_spline(sp: &Spline) -> Spline {
     if let Some(curve) = super::spline_ops::spline_to_nurbs(sp) {
         out.knots = curve.reversed().knots().to_vec();
     }
-    out.begin_tangent = acadrust::types::Vector3::new(-sp.end_tangent.x, -sp.end_tangent.y, -sp.end_tangent.z);
-    out.end_tangent = acadrust::types::Vector3::new(-sp.begin_tangent.x, -sp.begin_tangent.y, -sp.begin_tangent.z);
+    out.begin_tangent =
+        acadrust::types::Vector3::new(-sp.end_tangent.x, -sp.end_tangent.y, -sp.end_tangent.z);
+    out.end_tangent = acadrust::types::Vector3::new(
+        -sp.begin_tangent.x,
+        -sp.begin_tangent.y,
+        -sp.begin_tangent.z,
+    );
     out
 }
 
@@ -265,7 +270,15 @@ mod tests {
         spline.end_tangent = Vector3::new(4.0, 5.0, 6.0);
 
         let reversed = reverse_spline(&spline);
-        assert_eq!(reversed.control_points, spline.control_points.iter().rev().cloned().collect::<Vec<_>>());
+        assert_eq!(
+            reversed.control_points,
+            spline
+                .control_points
+                .iter()
+                .rev()
+                .cloned()
+                .collect::<Vec<_>>()
+        );
         assert_eq!(reversed.weights, vec![4.0, 3.0, 2.0, 1.0]);
         assert_eq!(reversed.knots, vec![0.0, 0.0, 0.0, 0.75, 1.0, 1.0, 1.0]);
         assert_eq!(reversed.begin_tangent, Vector3::new(-4.0, -5.0, -6.0));

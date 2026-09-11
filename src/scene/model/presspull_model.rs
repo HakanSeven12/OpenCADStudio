@@ -141,7 +141,7 @@ fn boundary_sources(scene: &Scene, plane: WorkingPlane) -> FxHashMap<Handle, Bou
     }).collect()
 }
 
-fn selected_rings(sources: &FxHashMap<Handle, BoundarySource>, point: [f64; 2]) -> Option<Vec<Vec<[f64; 2]>>> {
+pub(crate) fn selected_rings(sources: &FxHashMap<Handle, BoundarySource>, point: [f64; 2]) -> Option<Vec<Vec<[f64; 2]>>> {
     let rings = boundary_faces(sources, BOUNDARY_TOLERANCE);
     let loops = boundary_loops(sources, &rings)?;
     let tolerance = Tolerance::new(BOUNDARY_TOLERANCE);

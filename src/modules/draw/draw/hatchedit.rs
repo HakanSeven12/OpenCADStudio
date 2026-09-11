@@ -37,6 +37,9 @@ pub struct HatcheditCommand {
     current_color: acadrust::types::Color,
     current_transparency: acadrust::types::Transparency,
     boundary_region: bool,
+    association_sources: Option<(crate::command::WorkingPlane,rustc_hash::FxHashMap<Handle,crate::scene::BoundarySource>)>,
+    association_paths: Vec<acadrust::entities::BoundaryPath>,
+    association_missed: bool,
 }
 
 impl HatcheditCommand {
@@ -54,6 +57,9 @@ impl HatcheditCommand {
             current_color: acadrust::types::Color::ByLayer,
             current_transparency: acadrust::types::Transparency::ByLayer,
             boundary_region: false,
+            association_sources: None,
+            association_paths: Vec::new(),
+            association_missed: false,
         }
     }
 
@@ -82,6 +88,9 @@ impl HatcheditCommand {
             current_color: acadrust::types::Color::ByLayer,
             current_transparency: acadrust::types::Transparency::ByLayer,
             boundary_region: false,
+            association_sources: None,
+            association_paths: Vec::new(),
+            association_missed: false,
         }
     }
 
@@ -104,9 +113,17 @@ impl HatcheditCommand {
         })
     }
 
-    pub fn for_association(handle:Handle,name:String,scale:f32,angle:f32)->Self {
+    pub fn for_association(handle:Handle,name:String,scale:f32,angle:f32,plane:crate::command::WorkingPlane,sources:rustc_hash::FxHashMap<Handle,crate::scene::BoundarySource>)->Self {
         let mut command=Self::with_handle(handle,name,scale,angle,false);
-        command.input=Some("associate-select");command
+        command.input=Some("associate-point");command.association_sources=Some((plane,sources));command
+    }
+    fn add_association_rings(&mut self,rings:Vec<Vec<[f64;2]>>,sources:&rustc_hash::FxHashMap<Handle,crate::scene::BoundarySource>) {
+        let exterior=cadkernel::geom2d::ring_nesting_depths(&rings).into_iter().map(|depth|depth==0).collect::<Vec<_>>();
+        let paths=crate::scene::exact_hatch_paths(&rings,&exterior,sources,1e-6);
+        self.association_missed=paths.is_empty()||paths.len()!=rings.len()||paths.iter().any(|path|path.boundary_handles.is_empty());
+        if !self.association_missed {
+            for path in paths {if !self.association_paths.contains(&path){self.association_paths.push(path);}}
+        }
     }
     pub fn with_appearance(mut self,entity:Option<&acadrust::EntityType>,current_color:acadrust::types::Color,current_transparency:acadrust::types::Transparency)->Self {
         self.source_appearance=entity.map(|e|{let c=e.common();(c.color,c.layer.clone(),c.transparency)});
@@ -162,6 +179,8 @@ impl CadCommand for HatcheditCommand {
                 "boundary-type"=>"Enter type of boundary object [Region/Polyline] <Polyline>:",
                 "boundary-associate"=>"Reassociate hatch with new boundary? [Yes/No] <No>:",
                 "associate-select"=>"Select boundary objects:",
+                "associate-point" if self.association_missed=>"No closed boundary found. Specify internal point or [Select objects]:",
+                "associate-point"=>"Specify internal point or [Select objects]:",
                 _=>"Specify value:",
             }.into();
         }
@@ -188,7 +207,13 @@ impl CadCommand for HatcheditCommand {
     }
     fn is_selection_gathering(&self)->bool {self.input==Some("associate-select")}
     fn on_selection_complete(&mut self,handles:Vec<Handle>)->CmdResult {
-        self.boundary_selection=handles;CmdResult::NeedPoint
+        self.boundary_selection=handles.clone();
+        if let Some((_,sources))=&self.association_sources {
+            let sources=sources.iter().filter(|(handle,_)|handles.contains(handle)).map(|(handle,source)|(*handle,source.clone())).collect();
+            let rings=crate::scene::boundary_faces(&sources,1e-6);
+            self.add_association_rings(rings,&sources);
+        }
+        self.input=Some("associate-point");CmdResult::NeedPoint
     }
 
     fn on_entity_pick(&mut self, handle: Handle, _pt: DVec3) -> CmdResult {
@@ -211,6 +236,7 @@ impl CadCommand for HatcheditCommand {
     }
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
+        if self.input==Some("associate-point") {return vec![crate::command::CmdOption::new("Select objects","S")];}
         if self.input.is_some() {return Vec::new();}
         if !matches!(self.step, HatcheditStep::EditOptions { .. }) {
             return Vec::new();
@@ -238,6 +264,10 @@ impl CadCommand for HatcheditCommand {
             use acadrust::types::{Color,Transparency};
             let appearance=|color,layer,transparency|HatchEditOperation::Appearance{color,layer,transparency};
             match input {
+                "associate-point"=>{
+                    if matches!(keyword.as_str(),"S"|"SELECT"|"SELECT OBJECTS") {self.input=Some("associate-select");}
+                    return Some(CmdResult::NeedPoint);
+                },
                 "color"=>{
                     if matches!(keyword.as_str(),"T"|"TRUECOLOR") {self.input=Some("truecolor");return Some(CmdResult::NeedPoint);}
                     let color=match keyword.as_str(){"."=>Some(self.current_color),"BYLAYER"=>Some(Color::ByLayer),"BYBLOCK"=>Some(Color::ByBlock),
@@ -403,7 +433,16 @@ impl CadCommand for HatcheditCommand {
         Some(CmdResult::NeedPoint)
     }
 
-    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        if self.input==Some("associate-point") {
+            if let Some((plane,sources))=&self.association_sources {
+                let point=plane.to_local(pt);
+                let sources=sources.clone();
+                if let Some(rings)=crate::scene::model::presspull_model::selected_rings(&sources,[point.x,point.y]) {
+                    self.add_association_rings(rings,&sources);
+                }else{self.association_missed=true;}
+            }
+        }
         CmdResult::NeedPoint
     }
     fn on_enter(&mut self) -> CmdResult {
@@ -420,8 +459,9 @@ impl CadCommand for HatcheditCommand {
             Some("angle")=>self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel),
             Some("boundary-type")=>{self.boundary_region=false;self.input=Some("boundary-associate");CmdResult::NeedPoint},
             Some("boundary-associate")=>self.apply_result(HatchEditOperation::RecreateBoundary{associate:false,region:self.boundary_region}).unwrap_or(CmdResult::Cancel),
-            Some("associate-select")=>if self.boundary_selection.is_empty(){CmdResult::Cancel}else{
-                self.apply_result(HatchEditOperation::AssociateBoundaries(self.boundary_selection.clone())).unwrap_or(CmdResult::Cancel)
+            Some("associate-select")=>{self.input=Some("associate-point");CmdResult::NeedPoint},
+            Some("associate-point")=>if self.association_paths.is_empty(){CmdResult::Cancel}else{
+                self.apply_result(HatchEditOperation::AssociatePaths(self.association_paths.clone())).unwrap_or(CmdResult::Cancel)
             },
             _=>CmdResult::Cancel,
         }

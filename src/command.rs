@@ -27,6 +27,7 @@ pub enum HatchEditOperation {
     RecreateBoundary { associate: bool, region: bool },
     BeginAssociate,
     AssociateBoundaries(Vec<Handle>),
+    AssociatePaths(Vec<acadrust::entities::BoundaryPath>),
     DrawOrderBoundary { above: bool },
     Separate,
     AddBoundaries(Vec<Handle>),

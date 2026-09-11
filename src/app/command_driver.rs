@@ -4462,7 +4462,16 @@ impl OpenCADStudio {
                             self.command_line.push_info("HATCHEDIT: hatch is already associative.");
                             self.tabs[i].active_cmd=None;
                         }else{
-                            let command=crate::modules::draw::draw::hatchedit::HatcheditCommand::for_association(handle,name,scale,angle);
+                            let plane=match self.tabs[i].scene.document.get_entity(handle) {
+                                Some(acadrust::EntityType::Hatch(h))=>{
+                                    let storage=crate::entities::curve::ocs_plane(h.normal,h.elevation);
+                                    crate::command::WorkingPlane::new(glam::DVec3::from_array(storage.origin),glam::DVec3::from_array(storage.x_axis),glam::DVec3::from_array(storage.y_axis))
+                                },
+                                _=>self.tabs[i].ucs_xform().working_plane(),
+                            };
+                            let mut sources=self.tabs[i].scene.boundary_sources_on_plane(plane,1e-6);
+                            sources.remove(&handle);
+                            let command=crate::modules::draw::draw::hatchedit::HatcheditCommand::for_association(handle,name,scale,angle,plane,sources);
                             self.tabs[i].scene.deselect_all();
                             self.command_line.push_info(&command.prompt());
                             self.tabs[i].active_cmd=Some(Box::new(command));
@@ -4631,6 +4640,14 @@ impl OpenCADStudio {
                             self.tabs[i]
                                 .scene
                                 .edit_hatch_boundary_handles(handle, &handles, false);
+                        }
+                        HatchEditOperation::AssociatePaths(paths) => {
+                            if paths.is_empty()||paths.iter().any(|path|path.boundary_handles.is_empty()||path.boundary_handles.iter().any(|source|self.tabs[i].scene.document.get_entity(*source).is_none())) {
+                                self.discard_last_undo_entry(i);
+                                self.command_line.push_error("HATCHEDIT: associated boundary is no longer available.");
+                                return Task::none();
+                            }
+                            self.tabs[i].scene.replace_hatch_association(handle,paths);
                         }
                         HatchEditOperation::AssociateBoundaries(handles) => {
                             let plane=match self.tabs[i].scene.document.get_entity(handle) {

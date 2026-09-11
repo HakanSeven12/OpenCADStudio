@@ -179,8 +179,12 @@ fn boundary_region(
     sources: &FxHashMap<Handle, BoundarySource>, rings: &[Vec<[f64; 2]>], plane: WorkingPlane,
 ) -> Option<EntityType> {
     let loops = boundary_loops(sources, rings)?;
+    region_from_loops(&loops, plane)
+}
+
+pub(crate) fn region_from_loops(loops: &[Vec<Curve>], plane: WorkingPlane) -> Option<EntityType> {
     let kernel_plane = Plane::from_axes(plane.origin.to_array(), plane.x.to_array(), plane.y.to_array());
-    let sheet = brep::planar_region(kernel_plane, &loops)?;
+    let sheet = brep::planar_region(kernel_plane, loops)?;
     let document = crate::scene::convert::acis_export::solid_to_sat(&sheet)?;
     let mut region = Region::new();
     region.acis_data = AcisData::from_sat(&document.to_sat_string());

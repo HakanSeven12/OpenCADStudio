@@ -4650,7 +4650,7 @@ impl OpenCADStudio {
                             let valid_handles:Vec<_>=sources.keys().copied().collect();
                             self.tabs[i].scene.edit_hatch_boundary_handles(handle,&valid_handles,true);
                         }
-                        HatchEditOperation::RecreateBoundary { associate } => {
+                        HatchEditOperation::RecreateBoundary { associate, region } => {
                             let source = self.tabs[i].scene.document.get_entity(handle).cloned();
                             if let Some(acadrust::EntityType::Hatch(source)) = source {
                                 let storage = crate::entities::curve::ocs_plane(
@@ -4662,8 +4662,20 @@ impl OpenCADStudio {
                                     glam::DVec3::from_array(storage.x_axis),
                                     glam::DVec3::from_array(storage.y_axis),
                                 );
-                                let rings = crate::scene::hatch_boundary_rings(&source);
-                                let entities = crate::scene::boundary_entities(&rings, plane);
+                                let entities = if region {
+                                    let entities = source.paths.iter().map(|path| {
+                                        let curves = path.edges.iter().map(crate::entities::hatch::edge_curve).collect::<Option<Vec<_>>>()?;
+                                        crate::scene::model::presspull_model::region_from_loops(&[curves], plane)
+                                    }).collect::<Option<Vec<_>>>();
+                                    let Some(entities) = entities else {
+                                        self.command_line.push_error("HATCHEDIT: boundary cannot form a region.");
+                                        return Task::none();
+                                    };
+                                    entities
+                                } else {
+                                    let rings = crate::scene::hatch_boundary_rings(&source);
+                                    crate::scene::boundary_entities(&rings, plane)
+                                };
                                 let mut handles = Vec::new();
                                 for entity in entities {
                                     if let Some(boundary) = self.commit_entity_handle(entity) {

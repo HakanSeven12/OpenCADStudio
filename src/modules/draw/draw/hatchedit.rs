@@ -35,6 +35,7 @@ pub struct HatcheditCommand {
     boundary_selection: Vec<Handle>,
     source_appearance: Option<(acadrust::types::Color,String,acadrust::types::Transparency)>,
     current_color: acadrust::types::Color,
+    boundary_region: bool,
 }
 
 impl HatcheditCommand {
@@ -50,6 +51,7 @@ impl HatcheditCommand {
             boundary_selection: Vec::new(),
             source_appearance: None,
             current_color: acadrust::types::Color::ByLayer,
+            boundary_region: false,
         }
     }
 
@@ -76,6 +78,7 @@ impl HatcheditCommand {
             boundary_selection: Vec::new(),
             source_appearance: None,
             current_color: acadrust::types::Color::ByLayer,
+            boundary_region: false,
         }
     }
 
@@ -153,7 +156,7 @@ impl CadCommand for HatcheditCommand {
                 "layer"=>"Specify layer or [. (for use current)]:",
                 "transparency"=>"Specify transparency value (0-90) or ByLayer/ByBlock:",
                 "draworder"=>"Enter draw order [do Not change/send to Back/bring to Front/send beHind boundary/bring in front of bounDary] <do Not change>:",
-                "boundary-type"=>"Enter type of boundary object [Polyline] <Polyline>:",
+                "boundary-type"=>"Enter type of boundary object [Region/Polyline] <Polyline>:",
                 "boundary-associate"=>"Reassociate hatch with new boundary? [Yes/No] <No>:",
                 "associate-select"=>"Select boundary objects:",
                 _=>"Specify value:",
@@ -254,10 +257,14 @@ impl CadCommand for HatcheditCommand {
                     "H"|"BEHIND"=>self.apply_result(HatchEditOperation::DrawOrderBoundary{above:false}),
                     "D"=>self.apply_result(HatchEditOperation::DrawOrderBoundary{above:true}),
                     "B"|"BACK"=>self.apply_result(HatchEditOperation::DrawOrderBack),"N"|"NOT"=>Some(CmdResult::Cancel),_=>Some(CmdResult::NeedPoint)},
-                "boundary-type"=>if matches!(keyword.as_str(),"P"|"POLYLINE"){self.input=Some("boundary-associate");},
+                "boundary-type"=>match keyword.as_str(){
+                    "P"|"POLYLINE"=>{self.boundary_region=false;self.input=Some("boundary-associate");},
+                    "R"|"REGION"=>{self.boundary_region=true;self.input=Some("boundary-associate");},
+                    _=>{},
+                },
                 "boundary-associate"=>return match keyword.as_str(){
-                    "Y"|"YES"=>self.apply_result(HatchEditOperation::RecreateBoundary{associate:true}),
-                    "N"|"NO"=>self.apply_result(HatchEditOperation::RecreateBoundary{associate:false}),
+                    "Y"|"YES"=>self.apply_result(HatchEditOperation::RecreateBoundary{associate:true,region:self.boundary_region}),
+                    "N"|"NO"=>self.apply_result(HatchEditOperation::RecreateBoundary{associate:false,region:self.boundary_region}),
                     _=>Some(CmdResult::NeedPoint),
                 },
                 "pattern"=>{
@@ -408,8 +415,8 @@ impl CadCommand for HatcheditCommand {
             }
             Some("scale")=>{self.input=Some("angle");CmdResult::NeedPoint}
             Some("angle")=>self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel),
-            Some("boundary-type")=>{self.input=Some("boundary-associate");CmdResult::NeedPoint},
-            Some("boundary-associate")=>self.apply_result(HatchEditOperation::RecreateBoundary{associate:false}).unwrap_or(CmdResult::Cancel),
+            Some("boundary-type")=>{self.boundary_region=false;self.input=Some("boundary-associate");CmdResult::NeedPoint},
+            Some("boundary-associate")=>self.apply_result(HatchEditOperation::RecreateBoundary{associate:false,region:self.boundary_region}).unwrap_or(CmdResult::Cancel),
             Some("associate-select")=>if self.boundary_selection.is_empty(){CmdResult::Cancel}else{
                 self.apply_result(HatchEditOperation::AssociateBoundaries(self.boundary_selection.clone())).unwrap_or(CmdResult::Cancel)
             },

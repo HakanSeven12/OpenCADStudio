@@ -24,7 +24,7 @@ pub enum HatchEditOperation {
         style: Option<acadrust::entities::HatchStyleType>,
         annotative: Option<bool>,
     },
-    RecreateBoundary { associate: bool },
+    RecreateBoundary { associate: bool, region: bool },
     BeginAssociate,
     AssociateBoundaries(Vec<Handle>),
     DrawOrderBoundary { above: bool },

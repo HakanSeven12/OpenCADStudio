@@ -12,62 +12,138 @@
 use acadrust::types::{Vector2, Vector3};
 use acadrust::{EntityType, Handle};
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
 
 // ── Command ────────────────────────────────────────────────────────────────
 
 pub struct JoinCommand {
+    source: Option<(Handle, EntityType)>,
+    picked: Option<EntityType>,
     handles: Vec<Handle>,
-    gathering: bool,
 }
-
 impl JoinCommand {
-    pub fn new() -> Self {
-        Self {
-            handles: vec![],
-            gathering: true,
-        }
+    pub fn new() -> Self { Self { source: None, picked: None, handles: Vec::new() } }
+    pub fn with_source(mut self, handle: Handle, entity: EntityType) -> Self {
+        self.picked = Some(entity); self.on_entity_pick(handle, DVec3::ZERO); self
     }
 }
-
 impl CadCommand for JoinCommand {
-    fn name(&self) -> &'static str {
-        "JOIN"
-    }
-
+    fn name(&self) -> &'static str { "JOIN" }
     fn prompt(&self) -> String {
-        t!(
-            "JOIN  Select objects to join (%{count} selected, Enter to apply):",
-            count = self.handles.len()
-        )
-        .into_owned()
-    }
-
-    fn is_selection_gathering(&self) -> bool {
-        self.gathering
-    }
-
-    fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
-        self.handles = handles;
-        CmdResult::NeedPoint
-    }
-
-    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
-        CmdResult::NeedPoint
-    }
-
-    fn on_enter(&mut self) -> CmdResult {
-        if self.handles.len() < 2 {
-            return CmdResult::Cancel;
+        match self.source.as_ref().map(|(_, entity)| entity) {
+            None => "JOIN  Select source object:".into(),
+            Some(EntityType::Line(_)) => "JOIN  Select lines to join to source (Enter to apply):".into(),
+            Some(EntityType::Arc(_)) => "JOIN  Select arcs to join to source or [cLose] (Enter to apply):".into(),
+            Some(EntityType::Spline(_)) => "JOIN  Select open curves to join to source (Enter to apply):".into(),
+            _ => "JOIN  Select objects to join to source (Enter to apply):".into(),
         }
-        self.gathering = false;
-        CmdResult::JoinEntities(self.handles.clone())
+    }
+    fn options(&self) -> Vec<crate::command::CmdOption> {
+        if matches!(&self.source,Some((_,EntityType::Arc(_)))) { vec![crate::command::CmdOption::new("Close","L")] } else {Vec::new()}
+    }
+    fn on_text_input(&mut self,text:&str) -> Option<CmdResult> {
+        if matches!(text.trim().to_ascii_uppercase().as_str(),"L"|"CLOSE") {
+            if let Some((handle,EntityType::Arc(arc)))=&self.source {
+                let mut circle=acadrust::entities::Circle::new();
+                circle.common=arc.common.clone();circle.common.handle=Handle::NULL;
+                circle.center=arc.center.clone();circle.normal=arc.normal.clone();circle.radius=arc.radius;circle.thickness=arc.thickness;
+                return Some(CmdResult::ReplaceMany(vec![(*handle,vec![EntityType::Circle(circle)])],Vec::new()));
+            }
+        }
+        None
+    }
+    fn needs_entity_pick(&self) -> bool { self.source.is_none() }
+    fn inject_before_entity_pick(&self) -> bool { true }
+    fn inject_picked_entity(&mut self, entity: EntityType) { self.picked = Some(entity); }
+    fn on_entity_pick(&mut self, handle: Handle, _: DVec3) -> CmdResult {
+        if handle.is_null() { return CmdResult::NeedPoint; }
+        if let Some(entity) = self.picked.take() {
+            let supported = match &entity {
+                EntityType::Line(_) | EntityType::Arc(_) => true,
+                EntityType::LwPolyline(p) => !p.is_closed,
+                EntityType::Polyline2D(p) => !p.is_closed(),
+                EntityType::Spline(p) => !p.flags.closed && !p.flags.periodic,
+                _ => false,
+            };
+            if supported { self.source = Some((handle, entity)); }
+        }
+        CmdResult::NeedPoint
+    }
+    fn is_selection_gathering(&self) -> bool { self.source.is_some() }
+    fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
+        self.handles = handles.into_iter().filter(|handle| self.source.as_ref().is_none_or(|(source,_)| handle != source)).collect(); CmdResult::NeedPoint
+    }
+    fn on_point(&mut self, _: DVec3) -> CmdResult { CmdResult::NeedPoint }
+    fn on_enter(&mut self) -> CmdResult {
+        let Some((source, _)) = self.source.as_ref() else { return CmdResult::Cancel; };
+        if self.handles.is_empty() { return CmdResult::Cancel; }
+        CmdResult::JoinToSource { source: *source, handles: self.handles.clone() }
     }
 }
 
-// ── Geometry ───────────────────────────────────────────────────────────────
+/// Join compatible candidates while preserving the source identity and style.
+pub fn join_to_source(source: &EntityType, candidates: &[(Handle, &EntityType)]) -> Option<(EntityType, Vec<Handle>)> {
+    let mut result = source.clone(); let mut consumed = Vec::new();
+    loop {
+        let mut progress = false;
+        for (handle, candidate) in candidates {
+            if consumed.contains(handle) { continue; }
+            let next = match (&result, *candidate) {
+                (EntityType::Line(a), EntityType::Line(b)) => {
+                    let point = |p: &Vector3| [p.x,p.y,p.z];
+                    cadkernel::space::source_join::join_collinear_lines([point(&a.start),point(&a.end)],[point(&b.start),point(&b.end)],JOIN_EPS).map(|span| {
+                        let mut line = a.clone(); line.start = Vector3::new(span[0][0],span[0][1],span[0][2]); line.end = Vector3::new(span[1][0],span[1][1],span[1][2]); EntityType::Line(line)
+                    })
+                }
+                (EntityType::Arc(a), EntityType::Arc(b)) => {
+                    let data = |a: &acadrust::entities::Arc| ([a.center.x,a.center.y,a.center.z],[a.normal.x,a.normal.y,a.normal.z],a.radius,[a.start_angle,a.end_angle]);
+                    cadkernel::space::source_join::join_cocircular_arcs(data(a),data(b),JOIN_EPS).map(|span| {
+                        if span[1]-span[0] >= std::f64::consts::TAU {
+                            let mut circle = acadrust::entities::Circle::new(); circle.common = a.common.clone(); circle.center = a.center.clone(); circle.normal = a.normal.clone(); circle.radius = a.radius; circle.thickness = a.thickness; EntityType::Circle(circle)
+                        } else { let mut arc = a.clone(); arc.start_angle = span[0]; arc.end_angle = span[1].rem_euclid(std::f64::consts::TAU); EntityType::Arc(arc) }
+                    })
+                }
+                (EntityType::Spline(source), candidate) => {
+                    let curve = |s:&acadrust::entities::Spline| {
+                        if s.flags.closed || s.flags.periodic {return None;}
+                        let weights=if s.weights.is_empty(){vec![1.0;s.control_points.len()]}else{s.weights.clone()};
+                        cadkernel::space::NurbsCurve3::new_strict(s.degree as usize,s.control_points.iter().map(|p|[p.x,p.y,p.z]).collect(),s.knots.clone(),weights)
+                    };
+                    curve(source).and_then(|a| {
+                        let b=match candidate {
+                            EntityType::Spline(s)=>curve(s),
+                            EntityType::Line(line)=>cadkernel::space::source_join::line_as_nurbs([[line.start.x,line.start.y,line.start.z],[line.end.x,line.end.y,line.end.z]],a.degree()),
+                            _=>None,
+                        }?;
+                        let joined=cadkernel::space::source_join::join_nurbs_curves(&a,&b,JOIN_EPS)?;
+                        let mut spline=source.clone();
+                        spline.degree=joined.degree() as i32;
+                        spline.control_points=joined.control_points().iter().map(|p|Vector3::new(p[0],p[1],p[2])).collect();
+                        spline.knots=joined.knots().to_vec();spline.weights=joined.weights().to_vec();
+                        spline.fit_points.clear();spline.flags.rational=joined.is_rational();
+                        spline.dwg_flags1 &= !1;spline.dxf_flags &= !32;
+                        spline.flags.planar=cadkernel::space::are_coplanar(joined.control_points(),&[]);
+                        spline.begin_tangent=Vector3::new(0.0,0.0,0.0);spline.end_tangent=Vector3::new(0.0,0.0,0.0);
+                        Some(EntityType::Spline(spline))
+                    })
+                }
+                (EntityType::LwPolyline(_) | EntityType::Polyline2D(_), _) => {
+                    join_entities(&[(result.common().handle,&result),(*handle,*candidate)]).and_then(|(_,mut entities)| {
+                        let entity = entities.pop()?;
+                        if matches!(&entity,EntityType::Line(_)) { super::pedit::convert_to_polyline(&entity) } else { Some(entity) }
+                    })
+                }
+                _ => None,
+            };
+            if let Some(mut entity) = next {
+                *entity.common_mut() = source.common().clone(); result = entity; consumed.push(*handle); progress = true;
+            }
+        }
+        if !progress { break; }
+    }
+    (!consumed.is_empty()).then_some((result,consumed))
+}
 
 /// Endpoint-match tolerance (model units). Segments split from a shared
 /// vertex meet exactly, so this only absorbs float noise.
@@ -81,12 +157,14 @@ struct Seg {
     a: DVec3,
     b: DVec3,
     bulge: f64,
+    widths: Option<(f64, f64)>,
 }
 
 impl Seg {
     fn flip(&mut self) {
         std::mem::swap(&mut self.a, &mut self.b);
         self.bulge = -self.bulge;
+        self.widths = self.widths.map(|(start,end)| (end,start));
     }
 }
 
@@ -124,6 +202,7 @@ fn segs_of(e: &EntityType) -> Option<Vec<Seg>> {
             a: DVec3::new(l.start.x, l.start.y, l.start.z),
             b: DVec3::new(l.end.x, l.end.y, l.end.z),
             bulge: 0.0,
+            widths: None,
         }]),
         EntityType::Arc(arc) => {
             // The bulge below assumes the arc lies in a +Z plane; a tilted
@@ -139,6 +218,7 @@ fn segs_of(e: &EntityType) -> Option<Vec<Seg>> {
                 a: DVec3::new(cx + r * sa.cos(), cy + r * sa.sin(), cz),
                 b: DVec3::new(cx + r * ea.cos(), cy + r * ea.sin(), cz),
                 bulge: (swept / 4.0).tan(),
+                widths: None,
             }])
         }
         EntityType::LwPolyline(p) => {
@@ -154,6 +234,7 @@ fn segs_of(e: &EntityType) -> Option<Vec<Seg>> {
                         a: DVec3::new(w[0].location.x, w[0].location.y, z),
                         b: DVec3::new(w[1].location.x, w[1].location.y, z),
                         bulge: w[0].bulge,
+                        widths: Some(if p.constant_width != 0.0 { (p.constant_width,p.constant_width) } else { (w[0].start_width,w[0].end_width) }),
                     })
                     .collect(),
             )
@@ -176,10 +257,12 @@ fn segs_of(e: &EntityType) -> Option<Vec<Seg>> {
                 curve
                     .vertices
                     .windows(2)
-                    .map(|w| Seg {
+                    .enumerate()
+                    .map(|(index,w)| Seg {
                         a: DVec3::new(w[0].position[0], w[0].position[1], z),
                         b: DVec3::new(w[1].position[0], w[1].position[1], z),
                         bulge: w[0].bulge,
+                        widths: Some((if p.vertices[index].start_width == 0.0 {p.start_width} else {p.vertices[index].start_width}, if p.vertices[index].end_width == 0.0 {p.end_width} else {p.vertices[index].end_width})),
                     })
                     .collect(),
             )
@@ -208,7 +291,13 @@ pub fn join_entities(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>,
     let common = entities[0].1.common().clone();
     let (thickness, normal) = extrusion(entities[0].1)?;
 
-    let (chain, closed) = stitch(segs)?;
+    let (mut chain, closed) = stitch(segs)?;
+    // Newly appended line/arc spans inherit the adjoining polyline width.
+    let mut width = chain.iter().find_map(|segment| segment.widths.map(|pair| pair.0)).unwrap_or(0.0);
+    for segment in &mut chain {
+        if let Some((_,end)) = segment.widths { width = end; }
+        else { segment.widths = Some((width,width)); }
+    }
 
     // Ordered vertices, each tagged with the bulge of the segment that
     // starts there. A closed chain reuses the first vertex as the wrap
@@ -223,7 +312,7 @@ pub fn join_entities(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>,
     let planar = verts.iter().all(|(p, _)| (p.z - z0).abs() <= JOIN_EPS);
 
     // An open run of collinear straight segments collapses back to one Line.
-    if !closed && !has_arc && is_collinear(&verts) {
+    if !closed && !has_arc && chain.iter().all(|segment| segment.widths == Some((0.0,0.0))) && !matches!(entities[0].1, EntityType::LwPolyline(_) | EntityType::Polyline2D(_)) && is_collinear(&verts) {
         let mut line = acadrust::entities::Line::new();
         line.common = common;
         line.common.handle = Handle::NULL;
@@ -240,13 +329,16 @@ pub fn join_entities(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>,
         }
         let flipped = thickness != 0.0 && normal.z < 0.0;
         let lw_verts: Vec<acadrust::entities::LwVertex> = verts
-            .iter()
-            .map(|(p, bulge)| {
+            .iter().enumerate()
+            .map(|(index,(p, bulge))| {
                 let mut v = acadrust::entities::LwVertex::new(Vector2::new(
                     if flipped { -p.x } else { p.x },
                     p.y,
                 ));
                 v.bulge = if flipped { -*bulge } else { *bulge };
+                let (start,end) = chain.get(index).and_then(|segment| segment.widths)
+                    .unwrap_or_else(|| {let width=chain.last().and_then(|segment| segment.widths).map_or(0.0,|pair|pair.1);(width,width)});
+                v.start_width = start; v.end_width = end;
                 v
             })
             .collect();
@@ -259,6 +351,26 @@ pub fn join_entities(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>,
         pl.thickness = thickness;
         if flipped {
             pl.normal = Vector3::new(0.0, 0.0, -1.0);
+        }
+        if let EntityType::Polyline2D(source) = entities[0].1 {
+            let mut polyline = source.clone();
+            let input = crate::entities::curve::ocs_plane(pl.normal.clone(),pl.elevation);
+            let output = crate::entities::curve::ocs_plane(source.normal.clone(),source.elevation);
+            polyline.vertices = pl.vertices.iter().map(|vertex| {
+                let point = output.project(input.point_at([vertex.location.x,vertex.location.y]))?;
+                let mut result = acadrust::entities::polyline::Vertex2D::new(Vector3::new(point[0],point[1],source.elevation));
+                result.bulge = if cadkernel::space::Vec3::from(input.normal()?).dot(cadkernel::space::Vec3::from(output.normal()?)) < 0.0 {-vertex.bulge} else {vertex.bulge}; result.start_width = vertex.start_width; result.end_width = vertex.end_width;
+                Some(result)
+            }).collect::<Option<Vec<_>>>()?;
+            polyline.start_width = 0.0; polyline.end_width = 0.0;
+            polyline.flags.set_closed(pl.is_closed);
+            return Some((handles,vec![EntityType::Polyline2D(polyline)]));
+        }
+        if let EntityType::LwPolyline(source) = entities[0].1 {
+            pl.plinegen = source.plinegen;
+            if source.constant_width != 0.0 && pl.vertices.iter().all(|vertex| vertex.start_width == source.constant_width && vertex.end_width == source.constant_width) {
+                pl.constant_width = source.constant_width;
+            }
         }
         return Some((handles, vec![EntityType::LwPolyline(pl)]));
     }

@@ -1529,6 +1529,8 @@ pub enum CmdResult {
     BreakEntity { handle: Handle, p1: DVec3, p2: DVec3 },
     /// Attempt to join the given entities into fewer merged entities.
     JoinEntities(Vec<Handle>),
+    /// Join candidates into an explicitly selected source.
+    JoinToSource { source: Handle, handles: Vec<Handle> },
     /// Apply a polyline-edit operation to one entity; keep command active.
     PeditOp {
         handle: Handle,

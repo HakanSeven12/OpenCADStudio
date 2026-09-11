@@ -218,7 +218,10 @@ impl OpenCADStudio {
                         self.apply_cmd_result(crate::command::CmdResult::JoinEntities(selected));
                     return Some(task);
                 }
-                let cmd = JoinCommand::new();
+                let mut cmd = JoinCommand::new();
+                if let Some(handle) = selected.first() {
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity(*handle).cloned() { cmd = cmd.with_source(*handle, entity); }
+                }
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }

@@ -125,6 +125,16 @@ impl StatusBar {
         // Which pills the user has chosen to show on the bar.
         config: &'a StatusBarConfig,
         menu_data: StatusMenuData<'a>,
+        // Remaining degrees of freedom for the current sketch scope.
+        // `None` when the scope
+        // has no `SketchConstraintSet` yet (nothing constrained), so the
+        // badge stays invisible until it's actually relevant.
+        sketch_dof: Option<usize>,
+        // Number of redundant/conflicting constraints in the current scope.
+        // Zero hides
+        // the pill entirely, so an ordinarily/fully-constrained drawing sees
+        // no new clutter.
+        sketch_conflicts: usize,
     ) -> Element<'a, Message> {
         let StatusMenuData {
             layout_names,
@@ -239,6 +249,40 @@ impl StatusBar {
                 tip(
                     action_pill(&coords_label, Message::CycleCoordsMode),
                     t!("Cursor coordinates ($COORDS)\nClick to cycle: static / live / polar"),
+                )
+                .into(),
+            );
+        }
+        // Not a `StatusPill` (so not user-hideable yet): invisible until the
+        // current scope actually has a SketchConstraintSet, so a drawing
+        // that never uses parametric constraints sees no new clutter.
+        if let Some(dof) = sketch_dof {
+            let pill = if dof == 0 {
+                success_pill(crate::tf!("DOF: {dof}").into_owned())
+            } else {
+                status_pill(crate::tf!("DOF: {dof}").into_owned())
+            };
+            pills.push(
+                tip(
+                    pill,
+                    if dof == 0 {
+                        t!("Fully constrained — no remaining degrees of freedom")
+                    } else {
+                        t!("Remaining degrees of freedom in the current sketch's persistent constraints")
+                    },
+                )
+                .into(),
+            );
+        }
+        // Each click removes one flagged constraint.
+        if sketch_conflicts > 0 {
+            pills.push(
+                tip(
+                    action_pill(
+                        crate::tf!("⚠ {sketch_conflicts} conflicting").into_owned(),
+                        Message::ResolveOneSketchConflict,
+                    ),
+                    t!("One or more constraints in this sketch conflict or are redundant\nClick to remove one and re-solve"),
                 )
                 .into(),
             );
@@ -1032,6 +1076,22 @@ fn status_pill(label: impl Into<String>) -> Element<'static, Message> {
     .style(container::bordered_box)
     .padding([4, 8])
     .into()
+}
+
+/// A success-colored status pill used when no degrees of freedom remain.
+fn success_pill(label: impl Into<String>) -> Element<'static, Message> {
+    container(text(label.into()).size(12))
+        .style(|theme: &Theme| {
+            let palette = theme.palette();
+            container::Style {
+                background: Some(Background::Color(palette.success.weak.color)),
+                text_color: Some(palette.success.weak.text),
+                border: Border { color: palette.success.base.color, width: 1.0, radius: 4.0.into() },
+                ..Default::default()
+            }
+        })
+        .padding([4, 8])
+        .into()
 }
 
 // ── Scale popup button ────────────────────────────────────────────────────

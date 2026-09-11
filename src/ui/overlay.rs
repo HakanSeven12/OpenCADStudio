@@ -645,6 +645,7 @@ pub fn selection_overlay<'a>(
     crosshair_bg: [f32; 4],
     crosshair: CrosshairOptions,
     selection_visual: SelectionVisualOptions,
+    constraint_glyphs: Vec<(Point, String, bool)>,
 ) -> Element<'a, Message> {
     canvas(SelectionCanvas {
         selection,
@@ -668,6 +669,7 @@ pub fn selection_overlay<'a>(
         crosshair_bg,
         crosshair,
         selection_visual,
+        constraint_glyphs,
     })
     .width(Length::Fill)
     .height(Length::Fill)
@@ -726,6 +728,8 @@ struct SelectionCanvas {
     crosshair_bg: [f32; 4],
     crosshair: CrosshairOptions,
     selection_visual: SelectionVisualOptions,
+    /// Constraint glyph anchor, label, and conflict state for the current scope.
+    constraint_glyphs: Vec<(Point, String, bool)>,
 }
 
 fn draw_grip_marker(
@@ -1620,6 +1624,41 @@ impl canvas::Program<Message> for SelectionCanvas {
             });
             frame.stroke(&b1, stroke.clone());
             frame.stroke(&b2, stroke);
+        }
+        // Constraint glyphs are visual-only and have no hit testing.
+        if !self.constraint_glyphs.is_empty() {
+            const GLYPH_SIZE: f32 = 11.0;
+            const GLYPH_PAD_X: f32 = 5.0;
+            const GLYPH_PAD_Y: f32 = 2.0;
+            let normal_bg = theme.palette().primary.base.color;
+            let normal_fg = theme.palette().primary.base.text;
+            // A redundant or conflicting constraint gets the danger palette
+            // instead of the
+            // ordinary primary one — same information a resolver panel
+            // would show, surfaced right on the geometry.
+            let conflict_bg = theme.palette().danger.base.color;
+            let conflict_fg = theme.palette().danger.base.text;
+            for (anchor, label, is_conflicting) in &self.constraint_glyphs {
+                if !anchor.x.is_finite() || !anchor.y.is_finite() {
+                    continue;
+                }
+                let (bg, fg) = if *is_conflicting { (conflict_bg, conflict_fg) } else { (normal_bg, normal_fg) };
+                // Rough width estimate (monospace-ish glyph set, short labels)
+                // avoids a text-measurement pass just to size the background pill.
+                let w = label.chars().count() as f32 * GLYPH_SIZE * 0.62 + GLYPH_PAD_X * 2.0;
+                let h = GLYPH_SIZE + GLYPH_PAD_Y * 2.0;
+                let top_left = Point::new(anchor.x - w * 0.5, anchor.y - h * 0.5);
+                let pill = canvas::Path::rounded_rectangle(top_left, iced::Size::new(w, h), (h * 0.5).into());
+                frame.fill(&pill, bg);
+                frame.fill_text(canvas::Text {
+                    content: label.clone(),
+                    position: Point::new(top_left.x + GLYPH_PAD_X, top_left.y + GLYPH_PAD_Y),
+                    color: fg,
+                    size: iced::Pixels(GLYPH_SIZE),
+                    shaping: iced::advanced::text::Shaping::Advanced,
+                    ..Default::default()
+                });
+            }
         }
         // Small cross at each acquired tracking point.
         for ost in &self.ost_points {

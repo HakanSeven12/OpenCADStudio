@@ -433,7 +433,7 @@ impl CadCommand for PeditCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        !matches!(self.mode, Mode::PickTarget | Mode::MeshVertexMove(_) | Mode::PolyMove(_) | Mode::PolyInsert(_) | Mode::PolyTangent(_))
+        !matches!(self.mode, Mode::PickTarget | Mode::MeshVertexMove(_) | Mode::PolyMove(_) | Mode::PolyInsert(_))
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
@@ -973,7 +973,7 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
             }
             _ => false,
         },
-        PeditOp::SetWidth(w) => match entity {
+        PeditOp::SetWidth(w) if w.is_finite() && *w >= 0.0 => match entity {
             EntityType::LwPolyline(p) => {
                 p.constant_width = *w;
                 for v in &mut p.vertices {
@@ -982,8 +982,18 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
                 }
                 true
             }
+            EntityType::Polyline2D(p) => {
+                p.start_width = *w;
+                p.end_width = *w;
+                for vertex in &mut p.vertices {
+                    vertex.start_width = *w;
+                    vertex.end_width = *w;
+                }
+                true
+            }
             _ => false,
         },
+        PeditOp::SetWidth(_) => false,
         PeditOp::Fit | PeditOp::FitWithTangents(_) => {
             let overrides = match op { PeditOp::FitWithTangents(values) => values.as_slice(), _ => &[] };
             let Some(fitted) = fit_entity(entity, overrides) else { return false; };
@@ -1335,6 +1345,228 @@ fn spline_smooth(p: &mut acadrust::LwPolyline) -> bool {
         })
         .collect();
     true
+}
+
+#[cfg(test)]
+mod editing_tests {
+    use super::*;
+    use acadrust::entities::{Polyline2D, Vertex2D};
+
+    fn lightweight(handle: u64, points: &[[f64; 2]]) -> EntityType {
+        let mut polyline = acadrust::LwPolyline::new();
+        polyline.common.handle = Handle::new(handle);
+        polyline.vertices = points
+            .iter()
+            .map(|point| LwVertex::new(Vector2::new(point[0], point[1])))
+            .collect();
+        EntityType::LwPolyline(polyline)
+    }
+
+    fn command(entities: Vec<EntityType>, preselected: &[Handle]) -> PeditCommand {
+        let info = entities
+            .iter()
+            .map(|entity| {
+                (
+                    entity.common().handle.value(),
+                    PeditTarget {
+                        is_poly: matches!(entity, EntityType::LwPolyline(_) | EntityType::Polyline2D(_)),
+                        convertible: matches!(entity, EntityType::Line(_) | EntityType::Arc(_)),
+                        mesh_size: None,
+                        mesh_closed: None,
+                    },
+                )
+            })
+            .collect();
+        PeditCommand::new(info, 0, 6, 6)
+            .with_preselection(preselected)
+            .with_entities(entities)
+    }
+
+    #[test]
+    fn tangent_accepts_a_typed_angle_and_forwards_it_to_fit() {
+        let handle = Handle::new(1);
+        let mut command = command(
+            vec![lightweight(1, &[[0.0, 0.0], [1.0, 1.0], [2.0, 0.0]])],
+            &[handle],
+        );
+        assert!(matches!(command.on_text_input("E"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(command.on_text_input("T"), Some(CmdResult::NeedPoint)));
+        assert!(command.input_kind().wants_text());
+        assert!(matches!(command.on_text_input("90"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(command.on_text_input("X"), Some(CmdResult::NeedPoint)));
+
+        let Some(CmdResult::PeditOp { op: PeditOp::FitWithTangents(values), .. }) =
+            command.on_text_input("F")
+        else {
+            panic!("expected the tangent constraint to be forwarded to Fit");
+        };
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].0, 0);
+        assert!((values[0].1 - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn global_width_applies_to_both_polyline_representations() {
+        let mut heavy = Polyline2D::new();
+        heavy.start_width = 1.0;
+        heavy.end_width = 2.0;
+        heavy.vertices = vec![
+            Vertex2D::new(Vector3::new(0.0, 0.0, 0.0)),
+            Vertex2D::new(Vector3::new(1.0, 0.0, 0.0)),
+        ];
+        let mut entity = EntityType::Polyline2D(heavy);
+        assert!(apply_pedit(&mut entity, &PeditOp::SetWidth(3.5)));
+        let EntityType::Polyline2D(polyline) = &entity else { unreachable!() };
+        assert_eq!((polyline.start_width, polyline.end_width), (3.5, 3.5));
+        assert!(polyline
+            .vertices
+            .iter()
+            .all(|vertex| vertex.start_width == 3.5 && vertex.end_width == 3.5));
+        assert!(!apply_pedit(&mut entity, &PeditOp::SetWidth(f64::NAN)));
+    }
+
+    #[test]
+    fn vertex_ranges_preserve_complete_endpoint_records() {
+        let mut entity = lightweight(
+            7,
+            &[[0.0, 0.0], [1.0, 0.0], [2.0, 1.0], [3.0, 1.0], [4.0, 0.0]],
+        );
+        let EntityType::LwPolyline(polyline) = &mut entity else { unreachable!() };
+        for (index, vertex) in polyline.vertices.iter_mut().enumerate() {
+            vertex.bulge = index as f64 / 10.0;
+            vertex.start_width = index as f64 + 0.25;
+            vertex.end_width = index as f64 + 0.75;
+        }
+
+        let split = edit_vertex_range(&entity, 1, 3, true).unwrap();
+        assert_eq!(split.len(), 2);
+        let EntityType::LwPolyline(first) = &split[0] else { unreachable!() };
+        let EntityType::LwPolyline(second) = &split[1] else { unreachable!() };
+        assert_eq!(first.vertices.len(), 2);
+        assert_eq!(second.vertices.len(), 2);
+        assert_eq!(first.vertices[1].end_width, 1.75);
+        assert_eq!(second.vertices[0].bulge, 0.3);
+        assert_eq!(second.vertices[0].start_width, 3.25);
+
+        let straightened = edit_vertex_range(&entity, 1, 3, false).unwrap();
+        let EntityType::LwPolyline(straightened) = &straightened[0] else { unreachable!() };
+        assert_eq!(straightened.vertices.len(), 4);
+        assert_eq!(straightened.vertices[1].bulge, 0.0);
+        assert_eq!(straightened.vertices[1].start_width, 1.25);
+        assert_eq!(straightened.vertices[1].end_width, 1.75);
+        assert!(edit_vertex_range(&entity, 0, 0, true).is_none());
+    }
+
+    #[test]
+    fn fit_and_decurve_preserve_plane_identity_and_uniform_width() {
+        let mut entity = lightweight(9, &[[0.0, 0.0], [1.0, 1.0], [2.0, 0.0]]);
+        let EntityType::LwPolyline(polyline) = &mut entity else { unreachable!() };
+        polyline.constant_width = 2.0;
+        polyline.elevation = 4.0;
+        polyline.thickness = -1.5;
+        polyline.normal = Vector3::new(0.0, 0.0, 1.0);
+
+        assert!(apply_pedit(
+            &mut entity,
+            &PeditOp::FitWithTangents(vec![(0, 0.0)])
+        ));
+        let EntityType::Polyline2D(fitted) = &entity else { panic!("Fit must use the legacy fitted representation") };
+        assert_eq!(fitted.common.handle, Handle::new(9));
+        assert_eq!(fitted.elevation, 4.0);
+        assert_eq!(fitted.thickness, -1.5);
+        assert!(fitted.vertices.len() > 3);
+        assert!(fitted.vertices[0].flags.bits() & 2 != 0);
+
+        assert!(apply_pedit(&mut entity, &PeditOp::Decurve));
+        let EntityType::LwPolyline(straight) = &entity else { panic!("Decurve must restore a lightweight polyline") };
+        assert_eq!(straight.common.handle, Handle::new(9));
+        assert_eq!(straight.constant_width, 2.0);
+        assert_eq!(straight.vertices.len(), 3);
+        assert!(straight.vertices.iter().all(|vertex| vertex.bulge == 0.0));
+    }
+
+    #[test]
+    fn multiple_decline_and_fuzz_join_keep_the_command_active() {
+        let mut line = acadrust::entities::Line::new();
+        line.common.handle = Handle::new(11);
+        let mut arc = acadrust::entities::Arc::new();
+        arc.common.handle = Handle::new(12);
+        let mut declined = command(
+            vec![EntityType::Line(line), EntityType::Arc(arc)],
+            &[Handle::new(11), Handle::new(12)],
+        );
+        assert!(matches!(declined.on_text_input("N"), Some(CmdResult::NeedPoint)));
+        assert!(declined.needs_entity_pick());
+
+        let handles = [Handle::new(21), Handle::new(22)];
+        let mut joined = command(
+            vec![
+                lightweight(21, &[[0.0, 0.0], [1.0, 0.0]]),
+                lightweight(22, &[[1.0, 0.0], [2.0, 0.0]]),
+            ],
+            &handles,
+        );
+        assert!(matches!(joined.on_text_input("J"), Some(CmdResult::NeedPoint)));
+        let Some(CmdResult::PeditOp {
+            op: PeditOp::JoinSelection(selected, fuzz),
+            ..
+        }) = joined.on_text_input("0.25")
+        else {
+            panic!("expected a source-directed multiple join");
+        };
+        assert_eq!(selected, handles);
+        assert_eq!(fuzz, 0.25);
+
+        let mut remembered = command(
+            vec![
+                lightweight(21, &[[0.0, 0.0], [1.0, 0.0]]),
+                lightweight(22, &[[1.0, 0.0], [2.0, 0.0]]),
+            ],
+            &handles,
+        );
+        assert!(matches!(
+            remembered.on_text_input("J"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(remembered.prompt().contains("<0.25>"));
+        *JOIN_FUZZ.lock().unwrap_or_else(|error| error.into_inner()) = 0.0;
+    }
+
+    #[test]
+    fn join_fuzz_extends_only_supported_straight_terminals_within_the_limit() {
+        let source = lightweight(31, &[[0.0, 0.0], [1.0, 0.0]]);
+        let candidate = lightweight(32, &[[2.0, 2.0], [2.0, 1.0]]);
+        let candidates = [(Handle::new(32), &candidate)];
+
+        assert!(join_selection_extend(&source, &candidates, 0.99).is_none());
+        let (joined, consumed) = join_selection_extend(&source, &candidates, 1.0).unwrap();
+        assert_eq!(consumed, vec![Handle::new(32)]);
+        let EntityType::LwPolyline(joined) = joined else {
+            panic!("expected a lightweight polyline");
+        };
+        assert_eq!(joined.common.handle, Handle::new(31));
+        let points: Vec<_> = joined
+            .vertices
+            .iter()
+            .map(|vertex| [vertex.location.x, vertex.location.y])
+            .collect();
+        assert_eq!(points, vec![[0.0, 0.0], [2.0, 0.0], [2.0, 2.0]]);
+
+        let mut curved = source.clone();
+        let EntityType::LwPolyline(polyline) = &mut curved else {
+            unreachable!()
+        };
+        polyline.vertices[0].bulge = 0.25;
+        assert!(join_selection_extend(&curved, &candidates, 2.0).is_none());
+
+        let parallel = lightweight(33, &[[2.0, 1.0], [1.0, 1.0]]);
+        assert!(join_selection_extend(
+            &source,
+            &[(Handle::new(33), &parallel)],
+            2.0,
+        )
+        .is_none());
+    }
 }
 
 // ── Autocomplete registry ─────────────────────────────────

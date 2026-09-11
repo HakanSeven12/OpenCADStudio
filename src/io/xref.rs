@@ -347,6 +347,7 @@ fn merge_xref_into_block(
         let old = layer.name.clone();
         let new = format!("{}|{}", prefix, old);
         let mut cloned = layer.clone();
+        xref_doc.normalize_imported_layer_defaults(&mut cloned);
         cloned.name = new.clone();
         cloned.set_handle(doc.allocate_handle());
         doc.layers.add_or_replace(cloned);

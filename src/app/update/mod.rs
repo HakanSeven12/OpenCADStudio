@@ -3356,6 +3356,10 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::ResolveOneSketchConflict => {
+                self.resolve_one_sketch_conflict();
+                Task::none()
+            }
             Message::TogglePolar => {
                 self.polar_mode ^= true;
                 if self.polar_mode {
@@ -5926,6 +5930,65 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            // ── Named Parameters (PARAMETERS) ─────────────────────────────────
+            Message::NamedParametersOpen => {
+                let i = self.active_tab;
+                self.named_parameter_editor_rows = self.tabs[i]
+                    .scene
+                    .named_parameters()
+                    .iter()
+                    .map(|p| crate::ui::window::named_parameters::ParamEditorRow { name: p.name.clone(), formula: p.source.clone() })
+                    .collect();
+                self.active_modal = Some(super::ModalKind::NamedParameters);
+                Task::none()
+            }
+            Message::NamedParametersInput { idx, field, value } => {
+                use crate::ui::window::named_parameters::ParamField;
+                if let Some(row) = self.named_parameter_editor_rows.get_mut(idx) {
+                    match field {
+                        ParamField::Name => row.name = value,
+                        ParamField::Formula => row.formula = value,
+                    }
+                }
+                Task::none()
+            }
+            Message::NamedParametersAdd => {
+                self.named_parameter_editor_rows.push(crate::ui::window::named_parameters::ParamEditorRow::default());
+                Task::none()
+            }
+            Message::NamedParametersRemove(idx) => {
+                if idx < self.named_parameter_editor_rows.len() {
+                    self.named_parameter_editor_rows.remove(idx);
+                }
+                Task::none()
+            }
+            Message::NamedParametersApply => {
+                self.apply_named_parameter_editor_rows();
+                Task::none()
+            }
+
+            // ── Parameters / Constraints sections embedded in the
+            // Properties panel ──────────────────────────────────────────────
+            Message::PropParamInput { index, field, value } => {
+                self.tabs[self.active_tab]
+                    .properties
+                    .edit_buf
+                    .insert(crate::ui::properties::FieldKey::Param(index, field), value);
+                Task::none()
+            }
+            Message::PropParamCommit { index, field } => self.on_prop_param_commit(index, field),
+            Message::PropParamDelete(index) => self.on_prop_param_delete(index),
+            Message::PropParamAddNew => self.on_prop_param_add_new(),
+            Message::PropConstraintLinkClick(handles) => {
+                let i = self.active_tab;
+                self.tabs[i].scene.deselect_all();
+                for h in handles {
+                    self.tabs[i].scene.select_entity(h, false);
+                }
+                self.refresh_properties();
+                Task::none()
+            }
+
             // ── Options / About windows ───────────────────────────────────
             Message::OptionsOpen => {
                 self.active_modal = Some(super::ModalKind::Options);
@@ -6446,6 +6509,16 @@ impl OpenCADStudio {
                             .push_error(crate::tf!("File association failed: {why}").as_ref());
                     }
                 }
+                Task::none()
+            }
+            Message::WriteDwgNativeConstraintsChanged(enabled) => {
+                self.write_dwg_native_constraints = enabled;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+            Message::ShowConstraintValuesChanged(enabled) => {
+                self.show_constraint_values = enabled;
+                self.persist_settings_if_changed();
                 Task::none()
             }
             Message::LanguageChanged(language) => {

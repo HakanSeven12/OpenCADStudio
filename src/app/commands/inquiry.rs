@@ -218,7 +218,10 @@ impl OpenCADStudio {
                         self.apply_cmd_result(crate::command::CmdResult::JoinEntities(selected));
                     return Some(task);
                 }
-                let cmd = JoinCommand::new();
+                let mut cmd = JoinCommand::new();
+                if let Some(handle) = selected.first() {
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity(*handle).cloned() { cmd = cmd.with_source(*handle, entity); }
+                }
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
@@ -330,7 +333,17 @@ impl OpenCADStudio {
 
             "SPLINEDIT" => {
                 use crate::modules::draw::modify::splinedit::SplineditCommand;
-                let cmd_obj = SplineditCommand::new();
+                let mut cmd_obj = SplineditCommand::new().with_delete_source(self.delete_objects != 0);
+                let selected: Vec<_> = self.tabs[i].scene.selected.iter().copied().collect();
+                if let [handle] = selected.as_slice() {
+                    if let Some(entity @ acadrust::EntityType::Spline(_)) =
+                        self.tabs[i].scene.document.get_entity(*handle).cloned()
+                    {
+                        if self.reject_locked_edit(i, *handle) { return Some(Task::none()); }
+                        cmd_obj.inject_picked_entity(entity);
+                        cmd_obj.on_entity_pick(*handle, glam::DVec3::ZERO);
+                    }
+                }
                 self.command_line.push_info(&cmd_obj.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }
@@ -1374,6 +1387,7 @@ impl OpenCADStudio {
                 crate::entities::names::dxf_name(e).to_string(),
                 c.layer.clone(),
                 c.color,
+                c.transparency,
                 c.linetype.clone(),
                 c.linetype_scale,
                 c.line_weight,
@@ -1385,7 +1399,7 @@ impl OpenCADStudio {
                 },
             )
         });
-        let Some((verb, kind, layer, color, linetype, lt_scale, lw, template_dimstyle)) = info
+        let Some((verb, kind, layer, color, transparency, linetype, lt_scale, lw, template_dimstyle)) = info
         else {
             self.command_line
                 .push_error(crate::t!("ADDSELECTED: selected object not found.").as_ref());
@@ -1409,6 +1423,7 @@ impl OpenCADStudio {
             layer_name: self.tabs[i].scene.document.header.current_layer_name.clone(),
             layer_handle: self.tabs[i].scene.document.header.current_layer_handle,
             color: self.tabs[i].scene.document.header.current_entity_color,
+            transparency: self.tabs[i].scene.document.current_entity_transparency(),
             linetype_name: self.tabs[i].scene.document.header.current_linetype_name.clone(),
             linetype_handle: self.tabs[i].scene.document.header.current_linetype_handle,
             line_weight: self.tabs[i].scene.document.header.current_line_weight,
@@ -1423,6 +1438,11 @@ impl OpenCADStudio {
             ribbon_lineweight: self.ribbon.active_lineweight,
         };
         self.add_selected_restore = Some(restore);
+        if !self.tabs[i].scene.document.set_current_entity_transparency(transparency) {
+            self.add_selected_restore = None;
+            self.command_line.push_error("ADDSELECTED: template transparency cannot be adopted.");
+            return Task::none();
+        }
 
         // Adopt the template's general properties as the current defaults. The
         // entity-creation path stamps new objects from the tab's active layer
@@ -1504,6 +1524,9 @@ impl OpenCADStudio {
             h.current_entity_linetype_scale = r.lt_scale;
             h.current_dimstyle_name = r.dimstyle_name;
             h.current_dimstyle_handle = r.dimstyle_handle;
+        }
+        if !self.tabs[i].scene.document.set_current_entity_transparency(r.transparency) {
+            self.command_line.push_error("ADDSELECTED: current transparency could not be restored.");
         }
         self.tabs[i].active_layer = r.tab_active_layer;
         self.tabs[i].layers.current_layer = r.tab_layers_current;

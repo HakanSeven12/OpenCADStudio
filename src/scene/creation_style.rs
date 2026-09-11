@@ -252,7 +252,52 @@ fn apply_object_defaults(doc: &CadDocument, entity: &mut EntityType) {
 }
 
 pub fn apply_current_creation_styles(doc: &CadDocument, entity: &mut EntityType) {
+    entity.common_mut().transparency = doc.current_entity_transparency();
     apply_text_defaults(doc, entity);
     apply_dimension_defaults(doc, entity);
     apply_object_defaults(doc, entity);
+}
+
+pub(crate) fn parse_current_transparency(value: &str) -> Option<acadrust::types::Transparency> {
+    use acadrust::types::Transparency;
+    match value.trim().to_ascii_uppercase().as_str() {
+        "BYLAYER" | "-1" => Some(Transparency::ByLayer),
+        "BYBLOCK" | "-2" => Some(Transparency::ByBlock),
+        value => value.parse::<u8>().ok().filter(|value| *value <= 90)
+            .map(|value| Transparency::from_percent(value as f64 / 100.0)),
+    }
+}
+
+pub(crate) fn current_transparency_label(value: acadrust::types::Transparency) -> String {
+    use acadrust::types::Transparency;
+    match value {
+        Transparency::ByLayer => "ByLayer".into(),
+        Transparency::ByBlock => "ByBlock".into(),
+        Transparency::Explicit(_) => format!("{:.0}", value.as_percent() * 100.0),
+    }
+}
+
+#[cfg(test)]
+mod transparency_tests {
+    use super::*;
+    use acadrust::types::Transparency;
+
+    #[test]
+    fn parses_supported_current_transparency_values() {
+        assert_eq!(parse_current_transparency("ByLayer"), Some(Transparency::ByLayer));
+        assert_eq!(parse_current_transparency("-1"), Some(Transparency::ByLayer));
+        assert_eq!(parse_current_transparency("ByBlock"), Some(Transparency::ByBlock));
+        assert_eq!(parse_current_transparency("-2"), Some(Transparency::ByBlock));
+        assert_eq!(parse_current_transparency("25"), Some(Transparency::Explicit(64)));
+        assert!(parse_current_transparency("91").is_none());
+        assert!(parse_current_transparency("25.5").is_none());
+        assert!(parse_current_transparency("invalid").is_none());
+    }
+
+    #[test]
+    fn labels_transparency_for_command_and_properties_inputs() {
+        assert_eq!(current_transparency_label(Transparency::ByLayer), "ByLayer");
+        assert_eq!(current_transparency_label(Transparency::ByBlock), "ByBlock");
+        assert_eq!(current_transparency_label(Transparency::Explicit(64)), "25");
+    }
 }

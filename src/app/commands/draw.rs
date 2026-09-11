@@ -596,9 +596,23 @@ impl OpenCADStudio {
 
             "REVERSE" => {
                 use crate::modules::draw::modify::reverse::ReverseCommand;
-                let new_cmd = ReverseCommand::new();
-                self.command_line.push_info(&new_cmd.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+                if self.tabs[i].scene.selected.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let selection = SelectObjectsCommand::new("REVERSE");
+                    self.command_line.push_info(&selection.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(selection));
+                } else {
+                    let replacements = self.tabs[i].scene.selected_entities().into_iter()
+                        .filter(|(handle, _)| !self.tabs[i].scene.is_layer_locked(*handle))
+                        .filter_map(|(handle, entity)| ReverseCommand::reversed(entity)
+                            .map(|reversed| (handle, vec![reversed])))
+                        .collect::<Vec<_>>();
+                    if !replacements.is_empty() {
+                        return Some(self.apply_cmd_result(crate::command::CmdResult::ReplaceMany(
+                            replacements, Vec::new(),
+                        )));
+                    }
+                }
             }
 
             "MEASUREGEOM" => {
@@ -775,7 +789,7 @@ impl OpenCADStudio {
                     selected,
                     inherited,
                     plane,
-                );
+                ).with_origin(self.tabs[i].scene.document.hatch_origin());
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
                 self.refresh_area_preview(i);
@@ -808,7 +822,7 @@ impl OpenCADStudio {
                             scale,
                             angle,
                             annotative,
-                        );
+                        ).with_appearance(entity,self.tabs[i].scene.document.header.current_entity_color,self.tabs[i].scene.document.current_entity_transparency()).with_origin(self.tabs[i].scene.document.hatch_origin());
                         self.command_line.push_info(&cmd.prompt());
                         self.tabs[i].active_cmd = Some(Box::new(cmd));
                     } else {
@@ -816,7 +830,7 @@ impl OpenCADStudio {
                             .push_error(crate::t!("HATCHEDIT: selected entity is not a hatch.").as_ref());
                     }
                 } else {
-                    let cmd = HatcheditCommand::new();
+                    let cmd = HatcheditCommand::new().with_appearance(None,self.tabs[i].scene.document.header.current_entity_color,self.tabs[i].scene.document.current_entity_transparency()).with_origin(self.tabs[i].scene.document.hatch_origin());
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 }
@@ -881,7 +895,7 @@ impl OpenCADStudio {
                     SplineCommand::control_vertices()
                 } else {
                     SplineCommand::new()
-                };
+                }.with_document(&self.tabs[i].scene.document);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
@@ -959,6 +973,193 @@ impl OpenCADStudio {
                         .push_output(crate::tf!("{n} object(s) erased.").as_ref());
                     if let Some(pd) = pending {
                         self.commit_undo_delta(i, pd);
+                    }
+                }
+            }
+
+            // ── Persistent constraints ────────────────────────────────────
+            "HCONSTRAINT" | "VCONSTRAINT" | "FXCONSTRAINT" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let sel = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&sel.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                } else if handles.len() != 1 {
+                    self.command_line
+                        .push_output("Select exactly one entity, then run this constraint again.");
+                } else {
+                    use crate::command::CmdResult;
+                    use crate::scene::sketch_constraints::{ConstraintKind, SketchRef};
+                    let (kind, label) = match cmd {
+                        "HCONSTRAINT" => (ConstraintKind::Horizontal, "Horizontal constraint"),
+                        "VCONSTRAINT" => (ConstraintKind::Vertical, "Vertical constraint"),
+                        _ => (ConstraintKind::Fixed, "Fixed constraint"),
+                    };
+                    return Some(self.apply_cmd_result(CmdResult::AddSketchConstraint {
+                        kind,
+                        refs: vec![SketchRef::whole(handles[0])],
+                        driving_param: None,
+                        label,
+                    }));
+                }
+            }
+
+            "CCONSTRAINT" => {
+                use crate::modules::draw::constrain::CoincidentConstraintCommand;
+                let new_cmd = CoincidentConstraintCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "EDCONSTRAINT" => {
+                use crate::modules::draw::constrain::EqualDistanceConstraintCommand;
+                let new_cmd = EqualDistanceConstraintCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "PCONSTRAINT" | "QCONSTRAINT" | "ECONSTRAINT" | "TCONSTRAINT" | "LCONSTRAINT" | "NRCONSTRAINT" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let sel = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&sel.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                } else if handles.len() != 2 {
+                    self.command_line.push_output(
+                        "Select exactly two entities (first = reference, second = the one that moves), then run this constraint again.",
+                    );
+                } else {
+                    use crate::command::CmdResult;
+                    use crate::scene::sketch_constraints::{ConstraintKind, SketchRef};
+                    let (kind, label) = match cmd {
+                        "PCONSTRAINT" => (ConstraintKind::Parallel, "Parallel constraint"),
+                        "QCONSTRAINT" => (ConstraintKind::Perpendicular, "Perpendicular constraint"),
+                        "TCONSTRAINT" => (ConstraintKind::Tangent, "Tangent constraint"),
+                        "LCONSTRAINT" => (ConstraintKind::Colinear, "Colinear constraint"),
+                        "NRCONSTRAINT" => (ConstraintKind::Normal, "Normal constraint"),
+                        _ => (ConstraintKind::Equal, "Equal constraint"),
+                    };
+                    return Some(self.apply_cmd_result(CmdResult::AddSketchConstraint {
+                        kind,
+                        refs: vec![SketchRef::whole(handles[0]), SketchRef::whole(handles[1])],
+                        driving_param: None,
+                        label,
+                    }));
+                }
+            }
+
+            "NCONSTRAINT" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let sel = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&sel.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                } else if handles.len() != 2 {
+                    self.command_line.push_output("Select exactly two circles/arcs, then run this constraint again.");
+                } else {
+                    use crate::command::CmdResult;
+                    use crate::scene::sketch_constraints::{ConstraintKind, SketchRef};
+                    return Some(self.apply_cmd_result(CmdResult::AddSketchConstraint {
+                        kind: ConstraintKind::Concentric,
+                        refs: vec![SketchRef::center(handles[0]), SketchRef::center(handles[1])],
+                        driving_param: None,
+                        label: "Concentric constraint",
+                    }));
+                }
+            }
+
+            "SYCONSTRAINT" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let sel = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&sel.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                } else if handles.len() != 3 {
+                    self.command_line.push_output(
+                        "Select exactly three entities (two circles/arcs, then the mirror line), then run this constraint again.",
+                    );
+                } else {
+                    use crate::command::CmdResult;
+                    use crate::scene::sketch_constraints::{ConstraintKind, SketchRef};
+                    return Some(self.apply_cmd_result(CmdResult::AddSketchConstraint {
+                        kind: ConstraintKind::Symmetric,
+                        refs: vec![SketchRef::center(handles[0]), SketchRef::center(handles[1]), SketchRef::whole(handles[2])],
+                        driving_param: None,
+                        label: "Symmetric constraint",
+                    }));
+                }
+            }
+
+            "CPCONSTRAINT" | "MPCONSTRAINT" | "OCCONSTRAINT" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let sel = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&sel.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                } else if handles.len() != 1 {
+                    self.command_line.push_output(
+                        "Select exactly one entity (the circle or line the point should attach to), then run this constraint again.",
+                    );
+                } else {
+                    use crate::modules::draw::constrain::PointOnEntityConstraintCommand;
+                    use crate::scene::sketch_constraints::ConstraintKind;
+                    let (name, kind, label) = match cmd {
+                        "CPCONSTRAINT" => ("CPCONSTRAINT", ConstraintKind::CenterPoint, "Center point constraint"),
+                        "MPCONSTRAINT" => ("MPCONSTRAINT", ConstraintKind::Midpoint, "Midpoint constraint"),
+                        _ => ("OCCONSTRAINT", ConstraintKind::PointOnCurve, "Point on curve constraint"),
+                    };
+                    let new_cmd = PointOnEntityConstraintCommand::new(name, kind, handles[0], label);
+                    self.command_line.push_info(&new_cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+                }
+            }
+
+            "DCONSTRAINT" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let sel = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&sel.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                } else if handles.len() != 1 {
+                    self.command_line
+                        .push_output("Select exactly one line or circle, then run this constraint again.");
+                } else {
+                    use crate::modules::draw::constrain::DistanceConstraintCommand;
+                    match DistanceConstraintCommand::new(&self.tabs[i].scene, handles[0]) {
+                        Some(new_cmd) => {
+                            self.command_line.push_info(&new_cmd.prompt());
+                            self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+                        }
+                        None => self.command_line.push_output("Select a line or a circle for a distance constraint."),
+                    }
+                }
+            }
+
+            "ACONSTRAINT" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let sel = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&sel.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                } else if handles.len() != 2 {
+                    self.command_line.push_output(
+                        "Select exactly two lines (first = reference, second = the one that rotates), then run this constraint again.",
+                    );
+                } else {
+                    use crate::modules::draw::constrain::AngleConstraintCommand;
+                    match AngleConstraintCommand::new(&self.tabs[i].scene, handles[0], handles[1]) {
+                        Some(new_cmd) => {
+                            self.command_line.push_info(&new_cmd.prompt());
+                            self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+                        }
+                        None => self.command_line.push_output("Select two lines for an angle constraint."),
                     }
                 }
             }
@@ -1114,8 +1315,7 @@ impl OpenCADStudio {
                 return Some(self.fit_spline());
             }
 
-            // REGION — convert selected closed boundaries (closed polylines /
-            // circles) into Region entities (one wire loop each).
+            // REGION — convert exact closed planar profiles into regions.
             "REGION" | "REG" => {
                 if self.tabs[i].scene.selected_entities().is_empty() {
                     use crate::modules::draw::select::SelectObjectsCommand;
@@ -1129,12 +1329,7 @@ impl OpenCADStudio {
                 let mut regions = Vec::new();
                 let mut sources = Vec::new();
                 for (handle, e) in self.tabs[i].scene.selected_entities().iter() {
-                    let supported = matches!(
-                        e,
-                        acadrust::EntityType::LwPolyline(pl)
-                            if pl.is_closed && pl.vertices.len() >= 3
-                    ) || matches!(e, acadrust::EntityType::Circle(_));
-                    if supported {
+                    if !matches!(e, acadrust::EntityType::Region(_)) {
                         let Some((plane, loops, true)) =
                             crate::scene::model::presspull_model::profile_geometry(e)
                         else {
@@ -1154,9 +1349,55 @@ impl OpenCADStudio {
                         sources.push(*handle);
                     }
                 }
+                // Open inputs must share one geometric plane, independently of the UCS.
+                let open_curves: Vec<_> = self.tabs[i].scene.selected_entities().iter()
+                    .filter(|(handle, _)| !sources.contains(handle))
+                    .filter_map(|(_, entity)| crate::entities::curve::entity_curve(entity))
+                    .collect();
+                let open_plane = cadkernel::space::common_curve_plane(&open_curves, 1.0e-6);
+                let open_plane_rejected = !open_curves.is_empty() && open_plane.is_none();
+                if let Some(plane) = open_plane {
+                let working_plane = crate::command::WorkingPlane::new(
+                    glam::DVec3::from_array(plane.origin),
+                    glam::DVec3::from_array(plane.x_axis),
+                    glam::DVec3::from_array(plane.y_axis),
+                );
+                let selected_handles: rustc_hash::FxHashSet<_> = self.tabs[i].scene
+                    .selected_entities().iter().map(|(handle, _)| *handle).collect();
+                let mut boundary_sources = self.tabs[i].scene
+                    .boundary_sources_on_plane(working_plane, 1.0e-6);
+                boundary_sources.retain(|handle, _| {
+                    selected_handles.contains(handle) && !sources.contains(handle)
+                });
+                for ring in crate::scene::boundary_faces(&boundary_sources, 1.0e-6) {
+                    let paths = crate::scene::exact_hatch_paths(
+                        std::slice::from_ref(&ring), &[true], &boundary_sources, 1.0e-6,
+                    );
+                    let Some(path) = paths.first() else { continue; };
+                    let Some(curves) = path.edges.iter()
+                        .map(crate::entities::hatch::edge_curve).collect::<Option<Vec<_>>>()
+                    else { continue; };
+                    let Some(body) = cadkernel::brep::planar_region(plane, &[curves])
+                    else { continue; };
+                    let mut region = Region::new();
+                    region.point_of_reference = Vector3::new(
+                        plane.origin[0], plane.origin[1], plane.origin[2],
+                    );
+                    region.common.layer = self.tabs[i].active_layer.clone();
+                    regions.push((region, body));
+                    sources.extend(crate::scene::ring_source_handles(&ring, &boundary_sources));
+                }
+                } else if open_plane_rejected {
+                    self.command_line.push_error(
+                        "REGION: open objects must form coplanar, noncollinear boundaries.",
+                    );
+                }
                 if regions.is_empty() {
-                    self.command_line
-                        .push_error(crate::t!("REGION: select closed polylines or circles.").as_ref());
+                    if !open_plane_rejected {
+                        self.command_line.push_error(
+                            "REGION: select closed planar profiles or connected coplanar edges.",
+                        );
+                    }
                 } else {
                     self.push_undo_snapshot(i, "REGION");
                     let count = regions.len();
@@ -1171,6 +1412,8 @@ impl OpenCADStudio {
                         created.push(handle);
                     }
                     if self.delete_objects != 0 {
+                        sources.sort_by_key(|handle| handle.value());
+                        sources.dedup();
                         self.tabs[i].scene.erase_entities(&sources);
                         self.refresh_properties();
                     }

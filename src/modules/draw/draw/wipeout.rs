@@ -30,6 +30,7 @@ pub struct WipeoutCommand {
     plane: WorkingPlane,
     selected_polyline: Option<Handle>,
     frame_mode: i16,
+    picked_entity: Option<EntityType>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -50,6 +51,7 @@ impl WipeoutCommand {
             plane: WorkingPlane::default(),
             selected_polyline: None,
             frame_mode: frame_mode.clamp(0, 2),
+            picked_entity: None,
         }
     }
 
@@ -61,6 +63,7 @@ impl WipeoutCommand {
             plane: WorkingPlane::default(),
             selected_polyline: None,
             frame_mode: 1,
+            picked_entity: None,
         }
     }
 
@@ -73,6 +76,7 @@ impl WipeoutCommand {
             plane: WorkingPlane::default(),
             selected_polyline: None,
             frame_mode: 1,
+            picked_entity: None,
         }
     }
 
@@ -116,13 +120,14 @@ impl CadCommand for WipeoutCommand {
             WipeoutMode::Draw if self.points.is_empty() => {
                 t!("WIPEOUT  Specify first point or [Frames/Polyline] <Polyline>:").into_owned()
             }
+            WipeoutMode::Draw if self.points.len() == 1 => {
+                t!("WIPEOUT  Specify next point:").into_owned()
+            }
+            WipeoutMode::Draw if self.points.len() == 2 => {
+                t!("WIPEOUT  Specify next point or [Undo]:").into_owned()
+            }
             WipeoutMode::Draw => {
-                let n = self.points.len();
-                t!(
-                    "WIPEOUT  Specify next point or [Undo/Close] (%{n} points):",
-                    n = n
-                )
-                .into_owned()
+                t!("WIPEOUT  Specify next point or [Close/Undo]:").into_owned()
             }
             WipeoutMode::Polyline => {
                 t!("WIPEOUT Polyline  Select a closed planar polyline:").into_owned()
@@ -152,9 +157,13 @@ impl CadCommand for WipeoutCommand {
                     CmdOption::new(t!("Polyline").as_ref(), "P"),
                 ]
             }
-            WipeoutMode::Draw => vec![
+            WipeoutMode::Draw if self.points.len() == 1 => Vec::new(),
+            WipeoutMode::Draw if self.points.len() == 2 => vec![
                 CmdOption::new(t!("Undo").as_ref(), "U"),
+            ],
+            WipeoutMode::Draw => vec![
                 CmdOption::new(t!("Close").as_ref(), "C"),
+                CmdOption::new(t!("Undo").as_ref(), "U"),
             ],
             WipeoutMode::Frames => vec![
                 CmdOption::new(t!("Off").as_ref(), "OFF"),
@@ -215,6 +224,7 @@ impl CadCommand for WipeoutCommand {
                 CmdResult::NeedPoint
             }
             WipeoutMode::Draw if self.points.len() >= 3 => self.finish_draw(),
+            WipeoutMode::Draw => CmdResult::NeedPoint,
             WipeoutMode::Frames => {
                 CmdResult::Dispatch(format!("WIPEOUTFRAME {}", self.frame_mode))
             }
@@ -232,6 +242,15 @@ impl CadCommand for WipeoutCommand {
     }
 
     fn on_entity_pick(&mut self, handle: Handle, _point: DVec3) -> CmdResult {
+        let Some(entity)=self.picked_entity.take().filter(|e|e.common().handle==handle) else {
+            return CmdResult::NeedPoint;
+        };
+        if !matches!(entity,EntityType::LwPolyline(_)|EntityType::Polyline2D(_)) {
+            return CmdResult::NeedPoint;
+        }
+        if wipeout_from_polyline(&entity).is_none() {
+            return CmdResult::Measurement("WIPEOUT: select a closed planar polyline made of zero-width straight segments.".into());
+        }
         if handle.is_null() {
             CmdResult::NeedPoint
         } else {
@@ -240,6 +259,9 @@ impl CadCommand for WipeoutCommand {
             CmdResult::NeedPoint
         }
     }
+
+    fn inject_before_entity_pick(&self)->bool {self.mode==WipeoutMode::Polyline}
+    fn inject_picked_entity(&mut self,entity:EntityType){self.picked_entity=Some(entity);}
 
     fn wants_text_input(&self) -> bool {
         matches!(
@@ -267,7 +289,7 @@ impl CadCommand for WipeoutCommand {
                     self.mode = WipeoutMode::Polyline;
                     Some(CmdResult::NeedPoint)
                 }
-                "U" | "UNDO" if !self.points.is_empty() => Some(self.undo_point()),
+                "U" | "UNDO" if self.points.len() >= 2 => Some(self.undo_point()),
                 "C" | "CLOSE" if self.points.len() >= 3 => Some(self.finish_draw()),
                 _ => None,
             },
@@ -289,7 +311,7 @@ impl CadCommand for WipeoutCommand {
     }
 
     fn on_undo_step(&mut self) -> Option<CmdResult> {
-        if self.mode == WipeoutMode::Draw && !self.points.is_empty() {
+        if self.mode == WipeoutMode::Draw && self.points.len() >= 2 {
             Some(self.undo_point())
         } else {
             None
@@ -424,7 +446,9 @@ pub(crate) fn wipeout_from_polyline(entity: &EntityType) -> Option<EntityType> {
 
     match entity {
         EntityType::LwPolyline(polyline) => {
-            if polyline.vertices.iter().any(|vertex| vertex.bulge != 0.0) {
+            if polyline.constant_width != 0.0 || polyline.vertices.iter().any(|vertex| {
+                vertex.bulge != 0.0 || vertex.start_width != 0.0 || vertex.end_width != 0.0
+            }) {
                 return None;
             }
             let raw: Vec<[f64; 2]> = polyline
@@ -438,7 +462,10 @@ pub(crate) fn wipeout_from_polyline(entity: &EntityType) -> Option<EntityType> {
             from_ocs(&raw, polyline.normal, polyline.elevation)
         }
         EntityType::Polyline2D(polyline) => {
-            if polyline.vertices.iter().any(|vertex| vertex.bulge != 0.0) {
+            if polyline.start_width != 0.0 || polyline.end_width != 0.0
+                || polyline.vertices.iter().any(|vertex| {
+                    vertex.bulge != 0.0 || vertex.start_width != 0.0 || vertex.end_width != 0.0
+                }) {
                 return None;
             }
             let raw: Vec<[f64; 2]> = polyline
@@ -457,3 +484,32 @@ pub(crate) fn wipeout_from_polyline(entity: &EntityType) -> Option<EntityType> {
 
 // ── Autocomplete registry ─────────────────────────────────
 inventory::submit!(crate::command::CommandRegistration { names: &["WIPEOUT"] });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acadrust::entities::LwPolyline;
+
+    #[test]
+    fn command_undo_never_removes_the_first_point() {
+        let mut command = WipeoutCommand::new_polygonal(1);
+        assert!(matches!(command.on_point(DVec3::ZERO), CmdResult::NeedPoint));
+        assert!(command.on_undo_step().is_none());
+
+        assert!(matches!(command.on_point(DVec3::X), CmdResult::NeedPoint));
+        assert!(matches!(command.on_undo_step(), Some(CmdResult::NeedPoint)));
+        assert_eq!(command.points, vec![DVec3::ZERO]);
+    }
+
+    #[test]
+    fn wide_polyline_is_not_accepted_as_a_wipeout_boundary() {
+        let mut polyline = LwPolyline::from_points(vec![
+            Vector2::new(0.0, 0.0),
+            Vector2::new(2.0, 0.0),
+            Vector2::new(0.0, 2.0),
+        ]);
+        polyline.is_closed = true;
+        polyline.constant_width = 1.0;
+        assert!(wipeout_from_polyline(&EntityType::LwPolyline(polyline)).is_none());
+    }
+}

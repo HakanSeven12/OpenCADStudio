@@ -735,7 +735,10 @@ impl Scene {
                                 PropValue::Stepper { .. }
                                 | PropValue::ColorVaries
                                 | PropValue::LwVaries
-                                | PropValue::FieldLwVaries { .. } => continue,
+                                | PropValue::FieldLwVaries { .. }
+                                | PropValue::EntityLink { .. }
+                                | PropValue::ParamRow { .. }
+                                | PropValue::ParamAddRow => continue,
                             }
                         };
                         out.push(choice(prop.field, prop.label, editor));
@@ -883,7 +886,10 @@ impl Scene {
                     PropValue::Stepper { display, .. } => display,
                     PropValue::ColorVaries
                     | PropValue::LwVaries
-                    | PropValue::FieldLwVaries { .. } => return None,
+                    | PropValue::FieldLwVaries { .. }
+                    | PropValue::EntityLink { .. }
+                    | PropValue::ParamRow { .. }
+                    | PropValue::ParamAddRow => return None,
                 })
             }
         }

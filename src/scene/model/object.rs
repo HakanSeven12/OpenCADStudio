@@ -1,6 +1,6 @@
 // Shared value types used by the dispatch and grip systems.
 
-use acadrust::types::{Color as AcadColor, LineWeight};
+use acadrust::types::{Color as AcadColor, Handle, LineWeight};
 use glam::DVec3;
 
 /// The kind of value held by a property row.
@@ -58,6 +58,28 @@ pub enum PropValue {
     /// an editable text_input. Unlike the other rows the routing key is the
     /// tag carried here, not the row's `&'static str` field.
     AttrText { tag: String, value: String },
+    /// A clickable link to one or more entities — the Constraints section's
+    /// row for one persistent sketch constraint. Clicking it selects every
+    /// entity in `handles` in the viewport. `conflicting` mirrors
+    /// `SketchConstraintSet::conflicts`, tinting the row the same danger
+    /// color the constraint's glyph pill already uses.
+    EntityLink { handles: Vec<Handle>, conflicting: bool },
+    /// One row of the document-wide named-parameter table (Parameters
+    /// section, shown when nothing is selected). `index` is the row's
+    /// position in `ParameterTable::iter()` order — stable across edits to
+    /// other rows, used to route `PropParamInput`/`PropParamCommit`/
+    /// `PropParamDelete` back to the right parameter without re-keying on a
+    /// name that might itself be mid-edit. `resolved` is the live value or
+    /// error, recomputed fresh every render (same "cheap enough to rebuild"
+    /// approach the old modal's preview column already used).
+    ParamRow {
+        index: usize,
+        name: String,
+        formula: String,
+        resolved: Result<f64, String>,
+    },
+    /// The trailing "+ Add parameter" row in the Parameters section.
+    ParamAddRow,
 }
 
 /// A single property row in the Properties panel.

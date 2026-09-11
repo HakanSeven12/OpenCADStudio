@@ -20,10 +20,10 @@
 // Any other entity type is left untouched: the command returns
 // `CmdResult::NeedPoint` and keeps prompting so nothing is corrupted.
 
+use crate::t;
 use acadrust::entities::Spline;
 use acadrust::{EntityType, Handle};
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -54,7 +54,7 @@ impl ReverseCommand {
     }
 
     /// Build a reversed copy of `entity`, or `None` for an unsupported type.
-    fn reversed(entity: &EntityType) -> Option<EntityType> {
+    pub(crate) fn reversed(entity: &EntityType) -> Option<EntityType> {
         match entity {
             EntityType::Line(line) => {
                 let mut out = line.clone();
@@ -62,9 +62,7 @@ impl ReverseCommand {
                 Some(EntityType::Line(out))
             }
             EntityType::LwPolyline(pl) => Some(EntityType::LwPolyline(reverse_lwpolyline(pl))),
-            EntityType::Polyline2D(pl) => {
-                Some(EntityType::Polyline2D(reverse_polyline2d(pl)))
-            }
+            EntityType::Polyline2D(pl) => Some(EntityType::Polyline2D(reverse_polyline2d(pl))),
             EntityType::Polyline(pl) => {
                 let mut out = pl.clone();
                 out.vertices.reverse();
@@ -76,6 +74,9 @@ impl ReverseCommand {
                 Some(EntityType::Polyline3D(out))
             }
             EntityType::Spline(sp) => Some(EntityType::Spline(reverse_spline(sp))),
+            EntityType::Helix(helix) => {
+                crate::entities::helix::reversed(helix).map(EntityType::Helix)
+            }
             _ => None,
         }
     }
@@ -153,8 +154,8 @@ fn reverse_polyline2d(pl: &acadrust::entities::Polyline2D) -> acadrust::entities
     for vertex in &mut out.vertices {
         let tangent_flag = acadrust::entities::VertexFlags::CURVE_FIT_TANGENT.bits();
         if vertex.flags.bits() & tangent_flag != 0 {
-            vertex.curve_tangent = (vertex.curve_tangent + std::f64::consts::PI)
-                .rem_euclid(std::f64::consts::TAU);
+            vertex.curve_tangent =
+                (vertex.curve_tangent + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
         }
     }
     if pl.is_closed() {
@@ -176,9 +177,8 @@ fn reverse_polyline2d(pl: &acadrust::entities::Polyline2D) -> acadrust::entities
     out
 }
 
-/// Reverse a Spline: flip control points and fit points, regenerate the
-/// clamped knot vector. Mirrors `splinedit::apply_spline_op`'s REVERSE branch.
-fn reverse_spline(sp: &Spline) -> Spline {
+/// Reverse stored coordinates in 3D and let the kernel mirror the knot domain.
+pub(super) fn reverse_spline(sp: &Spline) -> Spline {
     let mut out = sp.clone();
     out.control_points.reverse();
     out.fit_points.reverse();
@@ -186,8 +186,16 @@ fn reverse_spline(sp: &Spline) -> Spline {
     if out.weights.len() == out.control_points.len() {
         out.weights.reverse();
     }
-    out.knots =
-        Spline::generate_clamped_knots(out.degree as usize, out.control_points.len());
+    if let Some(curve) = super::spline_ops::spline_to_nurbs(sp) {
+        out.knots = curve.reversed().knots().to_vec();
+    }
+    out.begin_tangent =
+        acadrust::types::Vector3::new(-sp.end_tangent.x, -sp.end_tangent.y, -sp.end_tangent.z);
+    out.end_tangent = acadrust::types::Vector3::new(
+        -sp.begin_tangent.x,
+        -sp.begin_tangent.y,
+        -sp.begin_tangent.z,
+    );
     out
 }
 
@@ -197,7 +205,7 @@ impl CadCommand for ReverseCommand {
     }
 
     fn prompt(&self) -> String {
-        t!("REVERSE  Select line, polyline or spline to reverse:").into_owned()
+        t!("REVERSE  Select line, polyline, spline or helix to reverse:").into_owned()
     }
 
     fn needs_entity_pick(&self) -> bool {
@@ -240,3 +248,47 @@ impl CadCommand for ReverseCommand {
 inventory::submit!(crate::command::CommandRegistration {
     names: &["REVERSE"]
 }); // ReverseCommand
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acadrust::types::Vector3;
+
+    #[test]
+    fn spline_reversal_preserves_knot_spacing_weights_and_tangents() {
+        let mut spline = Spline::new();
+        spline.degree = 2;
+        spline.control_points = vec![
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(1.0, 2.0, 0.0),
+            Vector3::new(3.0, 1.0, 1.0),
+            Vector3::new(4.0, 0.0, 2.0),
+        ];
+        spline.knots = vec![0.0, 0.0, 0.0, 0.25, 1.0, 1.0, 1.0];
+        spline.weights = vec![1.0, 2.0, 3.0, 4.0];
+        spline.begin_tangent = Vector3::new(1.0, 2.0, 3.0);
+        spline.end_tangent = Vector3::new(4.0, 5.0, 6.0);
+
+        let reversed = reverse_spline(&spline);
+        assert_eq!(
+            reversed.control_points,
+            spline
+                .control_points
+                .iter()
+                .rev()
+                .cloned()
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(reversed.weights, vec![4.0, 3.0, 2.0, 1.0]);
+        assert_eq!(reversed.knots, vec![0.0, 0.0, 0.0, 0.75, 1.0, 1.0, 1.0]);
+        assert_eq!(reversed.begin_tangent, Vector3::new(-4.0, -5.0, -6.0));
+        assert_eq!(reversed.end_tangent, Vector3::new(-1.0, -2.0, -3.0));
+
+        let restored = reverse_spline(&reversed);
+        assert_eq!(restored.control_points, spline.control_points);
+        assert_eq!(restored.weights, spline.weights);
+        assert_eq!(restored.knots, spline.knots);
+        assert_eq!(restored.begin_tangent, spline.begin_tangent);
+        assert_eq!(restored.end_tangent, spline.end_tangent);
+    }
+}

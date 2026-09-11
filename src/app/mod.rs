@@ -9,8 +9,6 @@ pub(crate) mod config;
 pub use automation::{export_headless, serve};
 mod command_driver;
 pub(crate) mod commands;
-#[cfg(not(target_arch = "wasm32"))]
-mod doc_api;
 mod document;
 pub(crate) mod expr_eval;
 mod find_replace;
@@ -307,6 +305,7 @@ struct AddSelectedRestore {
     layer_name: String,
     layer_handle: acadrust::types::Handle,
     color: AcadColor,
+    transparency: acadrust::types::Transparency,
     linetype_name: String,
     linetype_handle: acadrust::types::Handle,
     line_weight: i16,
@@ -511,6 +510,7 @@ pub(super) struct OpenCADStudio {
     /// Selected-object count past which grips stop being generated
     /// (GRIPOBJLIMIT, 0..=32767; 0 = no limit).
     grip_object_limit: i32,
+    ncopy_bind: bool,
     /// Drawing viewport cursor style (CURSORTYPE).
     cursor_type: settings::CursorType,
     /// Explicit crosshair colour; `None` retains automatic contrast.
@@ -547,6 +547,14 @@ pub(super) struct OpenCADStudio {
     /// When true (default), the app registers itself as a .dwg/.dxf/.bak file
     /// handler on each launch. Toggle with the FILEASSOC command.
     pub file_assoc_enabled: bool,
+    /// When true, saving creates native constraint objects alongside the
+    /// application's own persistence record. Existing native objects remain
+    /// synchronized regardless of this setting.
+    pub write_dwg_native_constraints: bool,
+    /// When true (default), a sketch constraint's viewport pill shows its
+    /// glyph plus a driven value or named-parameter name. When false, every
+    /// pill shows only the glyph.
+    pub show_constraint_values: bool,
     /// Minutes between autosaves to a `.sv$` recovery file (SAVETIME command);
     /// 0 disables autosave.
     pub savetime_min: i32,
@@ -1039,6 +1047,15 @@ pub(super) struct OpenCADStudio {
     /// Working buffer for the ALIASEDIT modal: `(alias, command)` rows being
     /// edited. Seeded from `command_aliases` on open, committed back on close.
     alias_editor_rows: Vec<(String, String)>,
+
+    // ── Named Parameters ──────────────────────────────────────────────────
+    /// Working buffer for the PARAMETERS modal. Unlike `alias_editor_rows`,
+    /// this isn't a copy of a separate app-level store — the real state
+    /// lives per-document at `Scene::named_parameters`; this buffer is
+    /// seeded from the active tab's table on open and only written back to
+    /// it on Apply (`apply_named_parameter_editor_rows`,
+    /// `src/app/named_parameters.rs`).
+    named_parameter_editor_rows: Vec<crate::ui::window::named_parameters::ParamEditorRow>,
 
     // ── Layout Manager Panel ──────────────────────────────────────────────
     layout_manager_selected: String,
@@ -1717,6 +1734,7 @@ pub enum ModalKind {
     AttributeEditor,
     LayerDeleteWarning,
     Aliases,
+    NamedParameters,
     ScaleManager,
     /// Add / remove the annotation scales a single selected object has a
     /// per-object representation for.
@@ -2071,6 +2089,11 @@ pub enum Message {
     /// Register or unregister as the .dwg/.dxf handler, from Options. Same
     /// setting the FILEASSOC command carries.
     FileAssocChanged(bool),
+    /// Toggle writing native constraint objects on save.
+    WriteDwgNativeConstraintsChanged(bool),
+    /// Toggle showing driven values/named-parameter names on constraint
+    /// pills, from Options. See `show_constraint_values`'s doc comment.
+    ShowConstraintValuesChanged(bool),
     /// Switch the interface language and redraw localized views.
     LanguageChanged(crate::i18n::Language),
     /// Drop every entity from the active drawing.
@@ -2494,6 +2517,10 @@ pub enum Message {
     CloseLayoutList,
     /// Cycle the coordinate readout mode ($COORDS): static → live → polar.
     CycleCoordsMode,
+    /// Removes one flagged redundant or conflicting constraint from the
+    /// current sketch scope.
+    /// No-op if the scope currently has no flagged conflict.
+    ResolveOneSketchConflict,
     /// Toggle the status-bar customization menu open/closed.
     ToggleStatusBarMenu,
     /// Close the status-bar customization menu.
@@ -2789,6 +2816,46 @@ pub enum Message {
     AliasEditorRemove(usize),
     /// Commit the edited rows to the alias table (Apply button); stays open.
     AliasEditorApply,
+    // ── Named Parameters (PARAMETERS) ───────────────────────────────────
+    /// Open the named-parameter editor, seeding rows from the active tab's
+    /// `Scene::named_parameters`.
+    NamedParametersOpen,
+    /// Live edit of the name or formula in row `idx`.
+    NamedParametersInput {
+        idx: usize,
+        field: crate::ui::window::named_parameters::ParamField,
+        value: String,
+    },
+    /// Append a blank parameter row.
+    NamedParametersAdd,
+    /// Remove parameter row `idx`.
+    NamedParametersRemove(usize),
+    /// Commit the edited rows to `Scene::named_parameters` (Apply button)
+    /// and re-solve every constraint that reads a named parameter; stays
+    /// open.
+    NamedParametersApply,
+    // ── Parameters / Constraints sections embedded in Properties ──────────
+    /// Live text of one column of parameter row `index`, keyed by its
+    /// `ParameterTable::iter()` position — see `PropValue::ParamRow`.
+    PropParamInput {
+        index: usize,
+        field: crate::ui::window::named_parameters::ParamField,
+        value: String,
+    },
+    /// Commit row `index`'s buffered edit for `field` to `Scene::
+    /// named_parameters` (Enter / losing focus) and re-solve whatever it
+    /// drives.
+    PropParamCommit {
+        index: usize,
+        field: crate::ui::window::named_parameters::ParamField,
+    },
+    /// Remove parameter row `index` immediately.
+    PropParamDelete(usize),
+    /// Append a fresh, uniquely-named parameter to `Scene::named_parameters`.
+    PropParamAddNew,
+    /// A Constraints-section row was clicked: select every entity in the
+    /// list (replacing the current selection) in the viewport.
+    PropConstraintLinkClick(Vec<acadrust::Handle>),
     // ── About window ────────────────────────────────────────────────────
     AboutOpen,
     /// Close whatever in-canvas modal dialog is open (Plan B).
@@ -3461,6 +3528,7 @@ impl OpenCADStudio {
             double_click_block_refedit: false,
             double_click_block_attedit: true,
             grip_object_limit: settings::DEFAULT_GRIP_OBJECT_LIMIT,
+            ncopy_bind: false,
             cursor_type: settings::CursorType::Crosshair,
             crosshair_color: None,
             crosshair_color_input: String::new(),
@@ -3478,6 +3546,8 @@ impl OpenCADStudio {
             dimension_continue_mode: 1,
             backup_on_save: true,
             file_assoc_enabled: true,
+            write_dwg_native_constraints: false,
+            show_constraint_values: true,
             savetime_min: 10,
             default_bg_color: None,
             default_paper_bg_color: None,
@@ -3669,6 +3739,7 @@ impl OpenCADStudio {
             // Command aliases (populated from ocad.pgp just after construction)
             command_aliases: rustc_hash::FxHashMap::default(),
             alias_editor_rows: Vec::new(),
+            named_parameter_editor_rows: Vec::new(),
             // Layout Manager
             layout_manager_selected: "Model".to_string(),
             layer_state_selected: None,

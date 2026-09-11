@@ -752,6 +752,8 @@ impl Scene {
             .map(|&h| (h, ChangeKind::Added))
             .collect();
         self.bump_entities(&changes);
+        // Constraints wholly within the duplicated selection follow it.
+        self.duplicate_sketch_constraints_for(&handle_map);
         self.refresh_meshes_for_handles(&refresh_solid_handles);
         new_handles
     }

@@ -264,7 +264,13 @@ fn polyline_arc_center(entity: &EntityType, segment: usize) -> Option<Vector3> {
     }
 }
 
-fn source_points(entity: &EntityType) -> Vec<Vector3> {
+/// Ordered, named points for an entity (line start/end, polyline vertices,
+/// ...), indexed by the same non-negative GsMarker convention
+/// `AssocDimensionReference::main_gs_marker` uses. Promoted to
+/// `pub(crate)` so `sketch::constraint_set` can address constraint
+/// endpoints the same way associative dimensions already address theirs,
+/// rather than inventing a second sub-element scheme.
+pub(crate) fn source_points(entity: &EntityType) -> Vec<Vector3> {
     match entity {
         EntityType::Line(line) => vec![line.start, line.end],
         EntityType::Arc(arc) => vec![arc.start_point_wcs(), arc.end_point_wcs()],

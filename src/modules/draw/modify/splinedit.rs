@@ -34,6 +34,7 @@ enum Step {
     Options,
     Refine,
     Join,
+    PolylinePrecision,
     Add,
     Delete,
     Elevate,
@@ -50,11 +51,49 @@ pub struct SplineditCommand {
     history: Vec<(acadrust::Handle, acadrust::entities::Spline)>,
     pick_context: Option<crate::command::PointPickContext>,
     join_candidates: Vec<crate::command::SelectionEntity>,
+    delete_source: bool,
 }
 
 impl SplineditCommand {
     pub fn new() -> Self {
-        Self { step: Step::SelectSpline, handle: acadrust::Handle::NULL, spline: None, pending: None, history: Vec::new(), pick_context: None, join_candidates: Vec::new() }
+        Self { step: Step::SelectSpline, handle: acadrust::Handle::NULL, spline: None, pending: None, history: Vec::new(), pick_context: None, join_candidates: Vec::new(), delete_source: true }
+    }
+
+    pub fn with_delete_source(mut self, delete: bool) -> Self { self.delete_source = delete; self }
+
+    fn convert_polyline(&mut self, precision: u8) -> CmdResult {
+        let result = self.spline.as_ref().and_then(|source| {
+            let curve = spatial_spline(source)?;
+            let approximation = curve.to_polyline_precision(precision)?;
+            let mut points = approximation.points;
+            if self.closed() {
+                if points.first() != points.last() { return None; }
+                points.pop();
+            }
+            if points.len() < 2 { return None; }
+            let entity = if let Some(planar) = crate::entities::curve::entity_curve(&EntityType::Spline(source.clone())) {
+                let normal = planar.plane.normal()?;
+                let elevation = cadkernel::space::Vec3::from(points[0]).dot(cadkernel::space::Vec3::from(normal));
+                let normal = Vector3::new(normal[0], normal[1], normal[2]);
+                let plane = crate::entities::curve::ocs_plane(normal.clone(), elevation);
+                let mut polyline = acadrust::LwPolyline::new();
+                polyline.common = source.common.clone();
+                polyline.elevation = elevation; polyline.normal = normal; polyline.is_closed = self.closed();
+                polyline.vertices = points.iter().map(|point| {
+                    let uv = plane.project(*point)?;
+                    Some(acadrust::entities::LwVertex::new(acadrust::types::Vector2::new(uv[0], uv[1])))
+                }).collect::<Option<Vec<_>>>()?;
+                EntityType::LwPolyline(polyline)
+            } else {
+                let mut polyline = acadrust::entities::Polyline3D::from_points(points.iter().map(|p| Vector3::new(p[0],p[1],p[2])).collect());
+                polyline.common = source.common.clone(); polyline.flags.closed = self.closed();
+                EntityType::Polyline3D(polyline)
+            };
+            Some(entity)
+        });
+        let Some(mut entity) = result else { return CmdResult::ReportError(crate::t!("Spline cannot be converted within the requested precision.").into_owned()); };
+        if self.delete_source { CmdResult::ReplaceMany(vec![(self.handle,vec![entity])], Vec::new()) }
+        else { entity.common_mut().handle = acadrust::Handle::NULL; CmdResult::ReplaceMany(Vec::new(), vec![entity]) }
     }
 
     fn picked_vertex(&self, point: DVec3) -> Option<usize> {
@@ -108,24 +147,7 @@ impl SplineditCommand {
         if let Some(degree) = degree {
             let current = usize::try_from(source.degree).ok()?;
             if degree <= current || degree > 25 { return None; }
-            let weights = if source.weights.is_empty() { vec![1.0; source.control_points.len()] } else { source.weights.clone() };
-            let curve = if source.control_points.is_empty() && source.fit_points.len() >= 2 {
-                use cadkernel::space::{NurbsCurve3, Parameterization};
-                let points: Vec<_> = source.fit_points.iter().map(|point| [point.x, point.y, point.z]).collect();
-                let parameterization = match source.knot_parameterization {
-                    1 => Parameterization::Centripetal, 2 => Parameterization::Uniform, _ => Parameterization::Chord,
-                };
-                let tangent = |point: &Vector3| (point.x != 0.0 || point.y != 0.0 || point.z != 0.0).then_some([point.x, point.y, point.z]);
-                if source.flags.closed || source.flags.periodic {
-                    NurbsCurve3::interpolate_periodic(&points, parameterization)?
-                } else {
-                    NurbsCurve3::interpolate_fit(&points, tangent(&source.begin_tangent), tangent(&source.end_tangent), parameterization)?
-                }
-            } else {
-                cadkernel::space::NurbsCurve3::new_strict(current,
-                    source.control_points.iter().map(|point| [point.x, point.y, point.z]).collect(),
-                    source.knots.clone(), weights)?
-            };
+            let curve = spatial_spline(source)?;
             let curve = curve.with_periodicity(source.flags.closed || source.flags.periodic)
                 .elevated(degree - current)?
                 .compact_knots(source.control_tolerance.max(1e-9))?;
@@ -167,8 +189,9 @@ impl CadCommand for SplineditCommand {
     fn prompt(&self) -> String {
         match self.step {
             Step::SelectSpline => crate::t!("SPLINEDIT  Select spline:").into_owned(),
-            Step::Options if self.closed() => crate::t!("SPLINEDIT  [Open/Move vertex/Refine/rEverse/Undo/eXit] <eXit>:").into_owned(),
+            Step::Options if self.closed() => crate::t!("SPLINEDIT  [Open/Move vertex/Refine/rEverse/convert to Polyline/Undo/eXit] <eXit>:").into_owned(),
             Step::Options => crate::t!("SPLINEDIT  [Close/Join/Move vertex/Refine/rEverse/Undo/eXit] <eXit>:").into_owned(),
+            Step::PolylinePrecision => crate::t!("SPLINEDIT  Specify precision 0-99 <10> (straight segments):").into_owned(),
             Step::Join => crate::t!("SPLINEDIT  Select any open curves to join to source:").into_owned(),
             Step::Refine => crate::t!("SPLINEDIT  [Add/Delete/Elevate order/Move/Weight/eXit] <eXit>:").into_owned(),
             Step::Add => crate::t!("SPLINEDIT  Specify a point on the spline <exit>:").into_owned(),
@@ -185,7 +208,7 @@ impl CadCommand for SplineditCommand {
             Step::Options => {
                 let mut options = vec![if self.closed() { CmdOption::new("Open", "O") } else { CmdOption::new("Close", "C") }];
                 if !self.closed() { options.push(CmdOption::new("Join", "J")); }
-                options.extend([CmdOption::new("Move vertex", "M"), CmdOption::new("Refine", "R"), CmdOption::new("Reverse", "E"), CmdOption::new("Undo", "U"), CmdOption::new("Exit", "X")]);
+                options.extend([CmdOption::new("Move vertex", "M"), CmdOption::new("Refine", "R"), CmdOption::new("Reverse", "E"), CmdOption::new("Polyline (lines)", "P"), CmdOption::new("Undo", "U"), CmdOption::new("Exit", "X")]);
                 options
             },
             Step::Refine => vec![CmdOption::new("Add", "A"), CmdOption::new("Delete", "D"), CmdOption::new("Elevate order", "E"), CmdOption::new("Move", "M"), CmdOption::new("Weight", "W"), CmdOption::new("Exit", "X")],
@@ -227,6 +250,7 @@ impl CadCommand for SplineditCommand {
         if upper.is_empty() { return Some(self.on_enter()); }
         match self.step {
             Step::Options => match upper.as_str() {
+                "P" | "POLYLINE" => self.step = Step::PolylinePrecision,
                 "J" | "JOIN" if !self.closed() => { self.join_candidates.clear(); self.step = Step::Join; },
                 "R" | "REFINE" => self.step = Step::Refine,
                 "M" | "MOVE" => self.step = Step::Move { index: 0, refine: false },
@@ -251,6 +275,11 @@ impl CadCommand for SplineditCommand {
                 }
                 _ => {}
             },
+            Step::PolylinePrecision => {
+                let Ok(precision) = upper.parse::<u8>() else { return Some(CmdResult::ReportError(crate::t!("Requires an integer between 0 and 99.").into_owned())); };
+                if precision > 99 { return Some(CmdResult::ReportError(crate::t!("Requires an integer between 0 and 99.").into_owned())); }
+                return Some(self.convert_polyline(precision));
+            }
             Step::Refine => match upper.as_str() {
                 "A" | "ADD" => self.step = Step::Add,
                 "D" | "DELETE" => self.step = Step::Delete,
@@ -348,6 +377,7 @@ impl CadCommand for SplineditCommand {
         match self.step {
             Step::SelectSpline | Step::Options => CmdResult::Cancel,
             Step::Join => self.finish_join(),
+            Step::PolylinePrecision => self.convert_polyline(10),
             Step::Refine => { self.step = Step::Options; CmdResult::NeedPoint }
             Step::Add | Step::Delete | Step::SelectVertex { .. } => { self.step = Step::Refine; CmdResult::NeedPoint }
             Step::Elevate => {
@@ -358,7 +388,7 @@ impl CadCommand for SplineditCommand {
         }
     }
     fn on_escape(&mut self) -> CmdResult {
-        if matches!(self.step, Step::Join) {
+        if matches!(self.step, Step::Join | Step::PolylinePrecision) {
             self.join_candidates.clear();
             self.step = Step::Options;
             CmdResult::NeedPoint
@@ -445,3 +475,26 @@ fn change_closure(source: &acadrust::entities::Spline, closed: bool) -> Option<a
 
 // ── Autocomplete registry ─────────────────────────────────
 inventory::submit!(crate::command::CommandRegistration { names: &["SPLINEDIT"] });  // SplineditCommand
+
+fn spatial_spline(source: &acadrust::entities::Spline) -> Option<cadkernel::space::NurbsCurve3> {
+    let current = usize::try_from(source.degree).ok()?;
+    let weights = if source.weights.is_empty() { vec![1.0; source.control_points.len()] } else { source.weights.clone() };
+    let curve = if source.control_points.is_empty() && source.fit_points.len() >= 2 {
+        use cadkernel::space::{NurbsCurve3, Parameterization};
+        let points: Vec<_> = source.fit_points.iter().map(|point| [point.x, point.y, point.z]).collect();
+        let parameterization = match source.knot_parameterization {
+            1 => Parameterization::Centripetal, 2 => Parameterization::Uniform, _ => Parameterization::Chord,
+        };
+        let tangent = |point: &Vector3| (point.x != 0.0 || point.y != 0.0 || point.z != 0.0).then_some([point.x, point.y, point.z]);
+        if source.flags.closed || source.flags.periodic {
+            NurbsCurve3::interpolate_periodic(&points, parameterization)?
+        } else {
+            NurbsCurve3::interpolate_fit(&points, tangent(&source.begin_tangent), tangent(&source.end_tangent), parameterization)?
+        }
+    } else {
+        cadkernel::space::NurbsCurve3::new_strict(current,
+            source.control_points.iter().map(|point| [point.x, point.y, point.z]).collect(),
+            source.knots.clone(), weights)?
+    };
+    Some(curve.with_periodicity(source.flags.closed || source.flags.periodic))
+}

@@ -329,7 +329,7 @@ impl OpenCADStudio {
 
             "SPLINEDIT" => {
                 use crate::modules::draw::modify::splinedit::SplineditCommand;
-                let mut cmd_obj = SplineditCommand::new();
+                let mut cmd_obj = SplineditCommand::new().with_delete_source(self.delete_objects != 0);
                 let selected: Vec<_> = self.tabs[i].scene.selected.iter().copied().collect();
                 if let [handle] = selected.as_slice() {
                     if let Some(entity @ acadrust::EntityType::Spline(_)) =

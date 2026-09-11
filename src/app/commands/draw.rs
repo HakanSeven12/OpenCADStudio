@@ -1301,8 +1301,7 @@ impl OpenCADStudio {
                 return Some(self.fit_spline());
             }
 
-            // REGION — convert selected closed boundaries (closed polylines /
-            // circles) into Region entities (one wire loop each).
+            // REGION — convert exact closed planar profiles into regions.
             "REGION" | "REG" => {
                 if self.tabs[i].scene.selected_entities().is_empty() {
                     use crate::modules::draw::select::SelectObjectsCommand;
@@ -1316,12 +1315,7 @@ impl OpenCADStudio {
                 let mut regions = Vec::new();
                 let mut sources = Vec::new();
                 for (handle, e) in self.tabs[i].scene.selected_entities().iter() {
-                    let supported = matches!(
-                        e,
-                        acadrust::EntityType::LwPolyline(pl)
-                            if pl.is_closed && pl.vertices.len() >= 3
-                    ) || matches!(e, acadrust::EntityType::Circle(_));
-                    if supported {
+                    if !matches!(e, acadrust::EntityType::Region(_)) {
                         let Some((plane, loops, true)) =
                             crate::scene::model::presspull_model::profile_geometry(e)
                         else {
@@ -1341,9 +1335,48 @@ impl OpenCADStudio {
                         sources.push(*handle);
                     }
                 }
+                // Open inputs must share one geometric plane, independently of the UCS.
+                let open_curves: Vec<_> = self.tabs[i].scene.selected_entities().iter()
+                    .filter(|(handle, _)| !sources.contains(handle))
+                    .filter_map(|(_, entity)| crate::entities::curve::entity_curve(entity))
+                    .collect();
+                if let Some(plane) = cadkernel::space::common_curve_plane(&open_curves, 1.0e-6) {
+                let working_plane = crate::command::WorkingPlane::new(
+                    glam::DVec3::from_array(plane.origin),
+                    glam::DVec3::from_array(plane.x_axis),
+                    glam::DVec3::from_array(plane.y_axis),
+                );
+                let selected_handles: rustc_hash::FxHashSet<_> = self.tabs[i].scene
+                    .selected_entities().iter().map(|(handle, _)| *handle).collect();
+                let mut boundary_sources = self.tabs[i].scene
+                    .boundary_sources_on_plane(working_plane, 1.0e-6);
+                boundary_sources.retain(|handle, _| {
+                    selected_handles.contains(handle) && !sources.contains(handle)
+                });
+                for ring in crate::scene::boundary_faces(&boundary_sources, 1.0e-6) {
+                    let paths = crate::scene::exact_hatch_paths(
+                        std::slice::from_ref(&ring), &[true], &boundary_sources, 1.0e-6,
+                    );
+                    let Some(path) = paths.first() else { continue; };
+                    let Some(curves) = path.edges.iter()
+                        .map(crate::entities::hatch::edge_curve).collect::<Option<Vec<_>>>()
+                    else { continue; };
+                    let Some(body) = cadkernel::brep::planar_region(plane, &[curves])
+                    else { continue; };
+                    let mut region = Region::new();
+                    region.point_of_reference = Vector3::new(
+                        plane.origin[0], plane.origin[1], plane.origin[2],
+                    );
+                    region.common.layer = self.tabs[i].active_layer.clone();
+                    regions.push((region, body));
+                    sources.extend(crate::scene::ring_source_handles(&ring, &boundary_sources));
+                }
+                } else if !open_curves.is_empty() {
+                    self.command_line.push_error("REGION: open objects must form coplanar, noncollinear boundaries.");
+                }
                 if regions.is_empty() {
                     self.command_line
-                        .push_error(crate::t!("REGION: select closed polylines or circles.").as_ref());
+                        .push_error("REGION: select closed planar profiles or connected coplanar edges.");
                 } else {
                     self.push_undo_snapshot(i, "REGION");
                     let count = regions.len();
@@ -1358,6 +1391,8 @@ impl OpenCADStudio {
                         created.push(handle);
                     }
                     if self.delete_objects != 0 {
+                        sources.sort_by_key(|handle| handle.value());
+                        sources.dedup();
                         self.tabs[i].scene.erase_entities(&sources);
                         self.refresh_properties();
                     }

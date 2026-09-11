@@ -654,49 +654,13 @@ impl OpenCADStudio {
                 }
             }
 
-            // NCOPY — copy the nested objects of the selected block reference(s)
-            // into model space, keeping the block (a non-destructive extraction;
-            // every nested object is copied — the block is not exploded).
             "NCOPY" | "NCOPYALL" => {
-                use crate::modules::draw::modify::explode::explode_entity;
-                if cmd == "NCOPY" && self.tabs[i].scene.selected.is_empty() {
-                    use crate::modules::draw::select::SelectObjectsCommand;
-                    let selection = SelectObjectsCommand::new("NCOPY");
-                    self.command_line.push_info(&selection.prompt());
-                    self.tabs[i].active_cmd = Some(Box::new(selection));
-                    return Some(self.finish_dispatch(cmd));
-                }
-                let inserts: Vec<acadrust::Handle> = self.tabs[i]
-                    .scene
-                    .selected_entities()
-                    .iter()
-                    .filter(|(_, e)| matches!(e, acadrust::EntityType::Insert(_)))
-                    .map(|(h, _)| *h)
-                    .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
-                    .collect();
-                if inserts.is_empty() {
-                    self.command_line
-                        .push_error(crate::t!("NCOPY: select a block reference first.").as_ref());
-                    return Some(Task::none());
-                }
-                self.push_undo_snapshot(i, "NCOPY");
-                let mut n = 0usize;
-                for h in &inserts {
-                    let nested = match self.tabs[i].scene.document.get_entity(*h).cloned() {
-                        Some(ins) => explode_entity(&ins, &self.tabs[i].scene.document),
-                        None => Vec::new(),
-                    };
-                    for e in nested {
-                        self.tabs[i].scene.add_entity(e);
-                        n += 1;
-                    }
-                }
-                self.tabs[i].dirty = true;
-                self.command_line.push_output(crate::tf!(
-                    "NCOPY: copied {n} nested object(s) into model space (blocks kept)."
-                ).as_ref());
+                let command = crate::modules::draw::modify::ncopy::NcopyCommand::new(
+                    &self.tabs[i].scene.document,
+                );
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
             }
-
             _ => return None,
         }
         Some(self.finish_dispatch(cmd))
@@ -714,7 +678,7 @@ mod tests {
     }
 
     #[test]
-    fn ncopy_without_preselection_gathers_objects() {
+    fn ncopy_starts_nested_object_selection() {
         let mut app = fresh_app();
         let _ = app.run_command_line("NCOPY");
         assert_eq!(
@@ -722,7 +686,7 @@ mod tests {
                 .active_cmd
                 .as_ref()
                 .map(|active| active.name()),
-            Some("SELECT")
+            Some("NCOPY")
         );
     }
 

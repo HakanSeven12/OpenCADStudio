@@ -61,6 +61,8 @@ pub struct PeditCommand {
     mode: Mode,
     undo_count: usize,
     vertex_tangents: HashMap<usize, f64>,
+    pending_tangents: Option<HashMap<usize, f64>>,
+    tangent_history: Vec<HashMap<usize, f64>>,
     mesh_smooth_type: acadrust::entities::polygon_mesh::SurfaceSmoothType,
     mesh_smooth_density: (i16, i16),
     mesh_vertex_default: isize,
@@ -92,6 +94,8 @@ impl PeditCommand {
             mode: Mode::PickTarget,
             undo_count: 0,
             vertex_tangents: HashMap::default(),
+            pending_tangents: None,
+            tangent_history: Vec::new(),
             mesh_smooth_type,
             mesh_smooth_density: (
                 surface_u_density.clamp(2, 200),
@@ -144,6 +148,25 @@ impl PeditCommand {
             Some(CmdResult::PeditOp { handle, op }) if !self.multiple.is_empty() =>
                 Some(CmdResult::PeditOp { handle, op: PeditOp::Multiple(self.multiple.clone(), Box::new(op)) }),
             other => other,
+        }
+    }
+
+    fn mapped_tangents(&self, op: &PeditOp) -> Option<HashMap<usize, f64>> {
+        let count = self.vertex_count();
+        match op {
+            PeditOp::Reverse => Some(self.vertex_tangents.iter().filter_map(|(&index, &angle)|
+                (index < count).then_some((count.saturating_sub(index + 1), (angle + std::f64::consts::PI).rem_euclid(TAU)))).collect()),
+            PeditOp::EditVertex { index, insert: true, .. } => Some(self.vertex_tangents.iter().map(|(&old, &angle)|
+                (if old > *index { old + 1 } else { old }, angle)).collect()),
+            PeditOp::VertexRange { first, last, split } => Some(self.vertex_tangents.iter().filter_map(|(&index, &angle)| {
+                if *split {
+                    if *first > 0 { (index <= *first).then_some((index, angle)) }
+                    else { (index >= *last).then_some((index.saturating_sub(*last), angle)) }
+                } else if index > *first && index < *last { None }
+                else { Some((if index >= *last { index.saturating_sub(last.saturating_sub(*first + 1)) } else { index }, angle)) }
+            }).collect()),
+            PeditOp::Fit | PeditOp::FitWithTangents(_) | PeditOp::Decurve | PeditOp::Spline => Some(HashMap::default()),
+            _ => None,
         }
     }
 
@@ -381,6 +404,8 @@ impl CadCommand for PeditCommand {
     }
 
     fn on_pedit_applied(&mut self) {
+        self.tangent_history.push(self.vertex_tangents.clone());
+        if let Some(mapped) = self.pending_tangents.take() { self.vertex_tangents = mapped; }
         self.undo_count = self.undo_count.saturating_add(1);
         self.multiple_history.push(self.pending_multiple.take().unwrap_or_else(|| self.multiple.clone()));
         if let Some((m_direction, closed)) = self.pending_mesh_closed.take() {
@@ -398,6 +423,7 @@ impl CadCommand for PeditCommand {
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         self.pending_mesh_closed = None;
+        self.pending_tangents = None;
         let up = text.trim().to_uppercase();
         let mesh_size = self.mesh_size();
         let vertex_count = self.vertex_count();
@@ -485,7 +511,9 @@ impl CadCommand for PeditCommand {
                     "G" | "GO" => {
                         let (first, last, split) = ((*start).min(*end), (*start).max(*end), *split);
                         self.mode = Mode::PolyVertex(first);
-                        return Some(CmdResult::PeditOp { handle: self.target?, op: PeditOp::VertexRange { first, last, split } });
+                        let op = PeditOp::VertexRange { first, last, split };
+                        self.pending_tangents = self.mapped_tangents(&op);
+                        return Some(CmdResult::PeditOp { handle: self.target?, op });
                     }
                     _ => {}
                 }
@@ -615,6 +643,7 @@ impl CadCommand for PeditCommand {
                     "U" | "UNDO" if self.undo_count > 0 => {
                         self.undo_count -= 1;
                         self.mesh_closed_history.pop();
+                        if let Some(tangents) = self.tangent_history.pop() { self.vertex_tangents = tangents; }
                         if let Some(previous) = self.multiple_history.pop() {
                             self.multiple = previous;
                             if !self.multiple.is_empty() { self.target = self.multiple.first().copied(); }
@@ -667,10 +696,12 @@ impl CadCommand for PeditCommand {
                 }
             }
         };
+        if let Some(CmdResult::PeditOp { op, .. }) = &result { self.pending_tangents = self.mapped_tangents(op); }
         self.multiple_result(result)
     }
 
     fn on_point(&mut self, point: DVec3) -> CmdResult {
+        self.pending_tangents = None;
         if let Mode::PolyTangent(index) = self.mode {
             let Some(entity) = self.target.and_then(|handle| self.entities.get(&handle.value())) else { return CmdResult::NeedPoint; };
             let (normal, elevation, location) = match entity {
@@ -690,7 +721,9 @@ impl CadCommand for PeditCommand {
             let Some(handle) = self.target else { return CmdResult::Cancel; };
             let insert = matches!(self.mode, Mode::PolyInsert(_));
             self.mode = Mode::PolyVertex(index);
-            return CmdResult::PeditOp { handle, op: PeditOp::EditVertex { index, point, insert } };
+            let op = PeditOp::EditVertex { index, point, insert };
+            self.pending_tangents = self.mapped_tangents(&op);
+            return CmdResult::PeditOp { handle, op };
         }
         if let Mode::MeshVertexMove(index) = self.mode {
             let Some(handle) = self.target else {

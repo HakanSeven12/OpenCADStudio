@@ -725,6 +725,9 @@ impl CadCommand for RevCloudCommand {
                 return self.on_undo_step();
             }
             Stage::Create => match keyword.as_str() {
+                "C" | "CLOSE" if self.creation == CreationMode::Polygonal => {
+                    return Some(if self.points.len() >= 3 { self.on_enter() } else { CmdResult::NeedPoint });
+                }
                 "A" | "ARC" | "ARCLENGTH" => self.stage = Stage::ArcLength,
                 "O" | "OBJECT" => {
                     self.stage = Stage::Object;

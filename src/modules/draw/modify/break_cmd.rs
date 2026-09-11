@@ -105,8 +105,8 @@ fn break_arc(arc: &ArcEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     spans.into_iter().map(|[from, to]| {
         let mut result = arc.clone();
         result.common.handle = Handle::NULL;
-        result.start_angle = geometry.start_angle + from * geometry.sweep();
-        result.end_angle = geometry.start_angle + to * geometry.sweep();
+        result.start_angle = (geometry.start_angle + from * geometry.sweep()).rem_euclid(std::f64::consts::TAU);
+        result.end_angle = (geometry.start_angle + to * geometry.sweep()).rem_euclid(std::f64::consts::TAU);
         EntityType::Arc(result)
     }).collect()
 }

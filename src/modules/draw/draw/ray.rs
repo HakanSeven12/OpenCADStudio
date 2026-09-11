@@ -128,6 +128,7 @@ pub struct XLineCommand {
     reference: Option<(DVec3, DVec3)>,
     picked: Option<EntityType>,
     offset: Option<f64>,
+    value_origin: Option<DVec3>,
 }
 
 #[derive(Clone, Copy)]
@@ -151,6 +152,7 @@ impl XLineCommand {
             reference: None,
             picked: None,
             offset: None,
+            value_origin: None,
         }
     }
 
@@ -188,6 +190,7 @@ impl CadCommand for XLineCommand {
     }
 
     fn prompt(&self) -> String {
+        if self.value_origin.is_some() { return "XLINE  Specify second point:".into(); }
         match self.mode {
             XLineMode::Points if self.base.is_none() => "XLINE  Specify a point or [Hor/Ver/Ang/Bisect/Offset]:",
             XLineMode::Angle => "XLINE  Enter angle of xline <0> or [Reference]:",
@@ -203,6 +206,7 @@ impl CadCommand for XLineCommand {
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
+        if self.value_origin.is_some() { return vec![]; }
         match self.mode {
             XLineMode::Points if self.base.is_none() => vec![
                 CmdOption::new("Hor", "H"), CmdOption::new("Ver", "V"),
@@ -217,6 +221,13 @@ impl CadCommand for XLineCommand {
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         if !pt.is_finite() { return CmdResult::NeedPoint; }
+        if matches!(self.mode, XLineMode::Angle | XLineMode::OffsetDistance) {
+            if self.value_origin.is_none() { self.value_origin = Some(pt); }
+            else if let Some(value) = self.dyn_live_value(pt) {
+                return self.on_text_input(&value.to_string()).unwrap_or(CmdResult::NeedPoint);
+            }
+            return CmdResult::NeedPoint;
+        }
         if let Some((base, dir)) = self.geometry(pt) {
             let entity = XLineEnt::new(
                 Vector3::new(base.x, base.y, base.z),
@@ -241,6 +252,7 @@ impl CadCommand for XLineCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
+        if self.value_origin.is_some() { return CmdResult::NeedPoint; }
         match self.mode {
             XLineMode::Angle => self.on_text_input("0").unwrap_or(CmdResult::NeedPoint),
             XLineMode::OffsetDistance => {
@@ -263,6 +275,21 @@ impl CadCommand for XLineCommand {
     }
     fn dyn_commit_as_text(&self) -> bool {
         matches!(self.mode, XLineMode::Angle | XLineMode::OffsetDistance)
+    }
+    fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
+        let origin = self.value_origin?;
+        if !cursor.is_finite() { return None; }
+        match self.mode {
+            XLineMode::Angle => {
+                let delta = self.plane.vector_to_local(cursor - origin);
+                (delta.x.hypot(delta.y) > 1e-10).then(|| delta.y.atan2(delta.x).to_degrees())
+            }
+            XLineMode::OffsetDistance => {
+                let distance = cadkernel::space::Vec3::from(cursor.to_array()).distance(origin.to_array().into());
+                (distance.is_finite() && distance > 0.0).then_some(distance)
+            }
+            _ => None,
+        }
     }
     fn dyn_auto_sign_angle(&self) -> bool { false }
     fn needs_entity_pick(&self) -> bool {
@@ -303,6 +330,7 @@ impl CadCommand for XLineCommand {
             }
             XLineMode::Angle => {
                 if key == "R" || key == "REFERENCE" {
+                    if self.value_origin.is_some() { return None; }
                     self.mode = XLineMode::AngleReference;
                 } else {
                     let angle: f64 = key.parse().ok().filter(|v: &f64| v.is_finite())?;
@@ -312,13 +340,17 @@ impl CadCommand for XLineCommand {
                 }
             }
             XLineMode::OffsetDistance => {
-                self.offset = if key == "T" || key == "THROUGH" { None } else {
+                self.offset = if key == "T" || key == "THROUGH" {
+                    if self.value_origin.is_some() { return None; }
+                    None
+                } else {
                     Some(key.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0)?)
                 };
                 self.mode = XLineMode::OffsetPick;
             }
             _ => return None,
         }
+        self.value_origin = None;
         Some(CmdResult::NeedPoint)
     }
 

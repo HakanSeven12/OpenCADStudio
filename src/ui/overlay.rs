@@ -3051,10 +3051,18 @@ impl DynInputCanvas {
                 }),
                 DynRole::X | DynRole::Width => Point {
                     x: (base.x + cursor.x) * 0.5,
-                    y: base.y + 14.0,
+                    y: if self.guide == DynGuide::RectSides {
+                        base.y - (cursor.y - base.y).signum() * 14.0
+                    } else {
+                        base.y + 14.0
+                    },
                 },
                 DynRole::Y | DynRole::Height => Point {
-                    x: corner.x + 18.0,
+                    x: if self.guide == DynGuide::RectSides {
+                        corner.x + (cursor.x - base.x).signum() * 18.0
+                    } else {
+                        corner.x + 18.0
+                    },
                     y: (base.y + cursor.y) * 0.5,
                 },
                 // Perpendicular measure: on the measured segment / dim line.

@@ -1024,6 +1024,9 @@ bg={bg_ms:.1}ms n={view_count}"
                         let height_center = opposite
                             + width_axis * width
                             + height_axis * (height * 0.5);
+                        let rectangle_center = opposite
+                            + width_axis * (width * 0.5)
+                            + height_axis * (height * 0.5);
                         let (vw, vh) = tab.scene.selection.borrow().vp_size;
                         let (camera, bounds) = tab
                             .scene
@@ -1040,7 +1043,24 @@ bg={bg_ms:.1}ms n={view_count}"
                                 bounds.y + screen.y,
                             ))
                         };
-                        Some((project(width_center)?, project(height_center)?))
+                        let center = project(rectangle_center)?;
+                        let offset_from_center = |side: iced::Point, pixels: f32| {
+                            let dx = side.x - center.x;
+                            let dy = side.y - center.y;
+                            let length = dx.hypot(dy);
+                            if length > 1.0e-3 {
+                                iced::Point::new(
+                                    side.x + dx / length * pixels,
+                                    side.y + dy / length * pixels,
+                                )
+                            } else {
+                                side
+                            }
+                        };
+                        Some((
+                            offset_from_center(project(width_center)?, 14.0),
+                            offset_from_center(project(height_center)?, 18.0),
+                        ))
                     });
                 let boxes: Vec<crate::ui::overlay::DynBox> = tab
                     .dyn_fields

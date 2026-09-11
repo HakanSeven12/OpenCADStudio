@@ -15,18 +15,18 @@ use crate::modules::IconKind;
 use crate::t;
 use crate::ui::{icons, wrap_bar::PosReport};
 
-const PANEL_ID: &str = "draw_extension";
-const GROUP_ID: &str = "draw_extension_group";
+pub(super) const PANEL_ID: &str = "draw_extension";
+const TITLE_ID: &str = "draw_extension_title";
 const SCALE: f32 = 0.7;
 const CELL: f32 = 36.0 * SCALE;
 const GAP: f32 = 3.0 * SCALE;
 const OPTION_HEIGHT: f32 = 30.0 * SCALE;
 
-struct Tool {
-    command: &'static str,
-    label: &'static str,
-    icon: &'static [u8],
-    options: &'static [(&'static str, &'static str)],
+pub(super) struct Tool {
+    pub command: &'static str,
+    pub label: &'static str,
+    pub icon: &'static [u8],
+    pub options: &'static [(&'static str, &'static str)],
 }
 
 const TOOLS: &[Tool] = &[
@@ -53,16 +53,6 @@ const TOOLS: &[Tool] = &[
         label: "Ray",
         icon: include_bytes!("../../../assets/icons/ray.svg"),
         options: &[],
-    },
-    Tool {
-        command: "MULTIPOINT",
-        label: "Multiple Points",
-        icon: include_bytes!("../../../assets/icons/multipoint.svg"),
-        options: &[
-            ("POINT", "Single Point"),
-            ("MULTIPOINT", "Multiple Points"),
-            ("DDPTYPE", "Point Style"),
-        ],
     },
     Tool {
         command: "DIVIDE",
@@ -107,6 +97,16 @@ const TOOLS: &[Tool] = &[
         options: &[],
     },
     Tool {
+        command: "MULTIPOINT",
+        label: "Multiple Points",
+        icon: include_bytes!("../../../assets/icons/multipoint.svg"),
+        options: &[
+            ("POINT", "Single Point"),
+            ("MULTIPOINT", "Multiple Points"),
+            ("DDPTYPE", "Point Style"),
+        ],
+    },
+    Tool {
         command: "REVCLOUD",
         label: "Revision Cloud",
         icon: include_bytes!("../../../assets/icons/revcloud.svg"),
@@ -118,51 +118,63 @@ const TOOLS: &[Tool] = &[
     },
 ];
 
-pub(super) fn owns_dropdown(id: &str) -> bool {
-    id == PANEL_ID
-        || TOOLS
-            .iter()
-            .any(|tool| tool.command == id && !tool.options.is_empty())
+#[derive(Clone, Copy)]
+struct Panel {
+    id: &'static str,
+    title_id: &'static str,
+    title: &'static str,
+    tools: &'static [Tool],
 }
 
-pub(super) fn group_anchor<'a>(title: &str, content: Element<'a, Message>) -> Element<'a, Message> {
-    if title == "Draw" {
-        PosReport::new(GROUP_ID, content).into()
-    } else {
-        content
-    }
+const PANELS: &[Panel] = &[
+    Panel { id: PANEL_ID, title_id: TITLE_ID, title: "Draw", tools: TOOLS },
+    Panel { id: "modify_extension", title_id: "modify_extension_title", title: "Modify", tools: super::modify_panel::TOOLS },
+];
+
+fn panel_for_dropdown(id: &str) -> Option<Panel> {
+    PANELS.iter().copied().find(|panel| {
+        panel.id == id || panel.tools.iter().any(|tool| tool.command == id && !tool.options.is_empty())
+    })
+}
+
+pub(super) fn owns_dropdown(id: &str) -> bool {
+    panel_for_dropdown(id).is_some()
+}
+
+pub(super) fn parent_panel(id: &str) -> Option<&'static str> {
+    panel_for_dropdown(id).map(|panel| panel.id)
 }
 
 pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Element<'a, Message> {
-    if title != "Draw" || TOOLS.is_empty() {
+    let Some(panel) = PANELS.iter().find(|panel| panel.title == title && !panel.tools.is_empty()) else {
         return container(text(t!(title)).size(9).style(muted_text_style))
             .padding([1, 4])
             .into();
-    }
-    let expanded = open.as_deref().is_some_and(owns_dropdown);
+    };
+    let expanded = open.as_deref().and_then(parent_panel) == Some(panel.id);
     let arrow = if expanded {
         icons::themed_arrow_up(7.0)
     } else {
         icons::themed_arrow_down(7.0)
     };
     PosReport::new(
-        PANEL_ID,
+        panel.id,
         button(
-            row![text(t!(title)).size(9), arrow]
+            row![PosReport::new(panel.title_id, text(t!(title)).size(9)), arrow]
                 .spacing(4)
                 .align_y(iced::Center),
         )
-        .on_press(Message::ToggleRibbonDropdown(PANEL_ID.to_string()))
+        .on_press(Message::ToggleRibbonDropdown(panel.id.to_string()))
         .style(move |theme: &Theme, status| tool_btn_style(theme, expanded, status))
         .padding([1, 4]),
     )
     .into()
 }
 
-fn tool_button(tool: &Tool, active: bool) -> Element<'static, Message> {
+fn tool_button(tool: &Tool, active: bool, panel_id: &'static str) -> Element<'static, Message> {
     let face = button(make_icon(IconKind::Svg(tool.icon), 23.0 * SCALE))
         .on_press(Message::DropdownSelectItem {
-            dropdown_id: PANEL_ID,
+            dropdown_id: panel_id,
             cmd: tool.command,
         })
         .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
@@ -195,22 +207,26 @@ fn tool_button(tool: &Tool, active: bool) -> Element<'static, Message> {
 }
 
 pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element<'a, Message> {
+    let panel = panel_for_dropdown(id).expect("registered ribbon extension");
+    let tools = panel.tools;
     let width = (7.0 * (CELL + GAP) - GAP + 12.0).min((win.0 - 8.0).max(CELL + 12.0));
-    let (_, x, anchor_top) = ribbon.dd_anchor(PANEL_ID, width, win.0);
-    let anchor = crate::ui::wrap_bar::dropdown_bounds(GROUP_ID);
+    let (_, x, anchor_top) = ribbon.dd_anchor(panel.id, width, win.0);
+    let anchor = crate::ui::wrap_bar::dropdown_bounds(panel.title_id);
     let left = anchor
-        .map_or(x, |b| b.x)
+        .map_or(x, |b| b.x + (b.width - width) / 2.0)
         .clamp(0.0, (win.0 - width).max(0.0));
     let top = anchor_top.min((win.1 - 80.0).max(0.0));
     let available_height = (win.1 - top - 4.0).max(1.0);
     let cols = (((width - 12.0 + GAP) / (CELL + GAP)).floor() as usize).clamp(1, 7);
-    let option_tool = TOOLS
+    let option_tool = tools
         .iter()
         .find(|tool| tool.command == id && !tool.options.is_empty());
     let content_height = option_tool.map_or_else(
-        || TOOLS.len().div_ceil(cols) as f32 * (CELL + GAP) - GAP + 12.0,
+        || tools.len().div_ceil(cols) as f32 * (CELL + GAP) - GAP + 12.0,
         |tool| tool.options.len() as f32 * OPTION_HEIGHT,
     );
+    let ordered: Vec<&Tool> = tools.iter().filter(|tool| tool.options.is_empty())
+        .chain(tools.iter().filter(|tool| !tool.options.is_empty())).collect();
     let contents: Element<'static, Message> = if let Some(tool) = option_tool {
         column(
             tool.options
@@ -232,13 +248,13 @@ pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element
         .into()
     } else {
         column(
-            TOOLS
+            ordered
                 .chunks(cols)
                 .map(|tools| {
                     row(tools
                         .iter()
                         .map(|tool| {
-                            tool_button(tool, ribbon.active_tool.as_deref() == Some(tool.command))
+                            tool_button(tool, ribbon.active_tool.as_deref() == Some(tool.command), panel.id)
                         })
                         .collect::<Vec<_>>())
                     .spacing(GAP)

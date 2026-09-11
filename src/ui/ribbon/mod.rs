@@ -22,6 +22,7 @@ use crate::ui::properties::{linetype_display_name, lw_options, LinetypeItem};
 
 mod widgets;
 mod draw_panel;
+mod modify_panel;
 use widgets::{StyleContext, *};
 mod collapse;
 use collapse::{CollapsePanels, Panel};
@@ -349,6 +350,21 @@ impl Ribbon {
         self.open_dropdown = None;
         self.collapsed_open = None;
         self.layer_filter.clear();
+    }
+
+    pub fn escape_extension(&mut self) -> bool {
+        let Some(id) = self.open_dropdown.as_deref() else {
+            return false;
+        };
+        let Some(parent) = draw_panel::parent_panel(id) else {
+            return false;
+        };
+        if id == parent {
+            self.close_dropdown();
+        } else {
+            self.open_dropdown = Some(parent.to_string());
+        }
+        true
     }
 
     /// Toggle the flyout of a collapsed ribbon panel (identified by its title).
@@ -1370,7 +1386,7 @@ fn render_group<'a>(
             r.push(e)
         });
 
-    draw_panel::group_anchor(group.title, column![
+    column![
         tools_el,
         draw_panel::group_title(group.title, open_dd),
     ]
@@ -1378,7 +1394,7 @@ fn render_group<'a>(
     .spacing(0)
     .padding([3u16, 4])
     .height(Length::Fixed(TOOL_BAR_H))
-    .into())
+    .into()
 }
 
 /// The top-level command id of a ribbon item, if it has one.

@@ -311,7 +311,7 @@ impl CadCommand for WipeoutCommand {
     }
 
     fn on_undo_step(&mut self) -> Option<CmdResult> {
-        if self.mode == WipeoutMode::Draw && !self.points.is_empty() {
+        if self.mode == WipeoutMode::Draw && self.points.len() >= 2 {
             Some(self.undo_point())
         } else {
             None
@@ -484,3 +484,32 @@ pub(crate) fn wipeout_from_polyline(entity: &EntityType) -> Option<EntityType> {
 
 // ── Autocomplete registry ─────────────────────────────────
 inventory::submit!(crate::command::CommandRegistration { names: &["WIPEOUT"] });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acadrust::entities::LwPolyline;
+
+    #[test]
+    fn command_undo_never_removes_the_first_point() {
+        let mut command = WipeoutCommand::new_polygonal(1);
+        assert!(matches!(command.on_point(DVec3::ZERO), CmdResult::NeedPoint));
+        assert!(command.on_undo_step().is_none());
+
+        assert!(matches!(command.on_point(DVec3::X), CmdResult::NeedPoint));
+        assert!(matches!(command.on_undo_step(), Some(CmdResult::NeedPoint)));
+        assert_eq!(command.points, vec![DVec3::ZERO]);
+    }
+
+    #[test]
+    fn wide_polyline_is_not_accepted_as_a_wipeout_boundary() {
+        let mut polyline = LwPolyline::from_points(vec![
+            Vector2::new(0.0, 0.0),
+            Vector2::new(2.0, 0.0),
+            Vector2::new(0.0, 2.0),
+        ]);
+        polyline.is_closed = true;
+        polyline.constant_width = 1.0;
+        assert!(wipeout_from_polyline(&EntityType::LwPolyline(polyline)).is_none());
+    }
+}

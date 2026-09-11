@@ -1629,6 +1629,11 @@ bg={bg_ms:.1}ms n={view_count}"
             };
             if let Some(p) = ctx_pos {
                 let has_cmd = tab.active_cmd.is_some();
+                // Same guard as typed MTP/M2P and SnapOverrideMtp.
+                let has_point_step = tab.active_cmd.as_ref().is_some_and(|c| {
+                    (!c.input_kind().wants_text() || c.point_step_accepts_keywords())
+                        && !c.needs_entity_pick()
+                });
                 let has_selection = !tab.scene.selected.is_empty();
                 let isolation_active = tab.scene.is_isolation_active();
                 let last_cmds: Vec<String> = self
@@ -1647,6 +1652,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     isolation_active,
                     last_cmds,
                     draworder_open,
+                    has_point_step,
                 ));
             }
         }

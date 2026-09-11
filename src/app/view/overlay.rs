@@ -1102,6 +1102,7 @@ pub(super) fn viewport_context_menu_overlay(
     isolation_active: bool,
     last_cmds: Vec<String>,
     draworder_open: bool,
+    has_point_step: bool,
 ) -> Element<'static, Message> {
     let item = |label: String, msg: Message| -> Element<'static, Message> {
         button(text(label).size(12))
@@ -1146,6 +1147,15 @@ pub(super) fn viewport_context_menu_overlay(
     if has_cmd {
         items.push(item(t!("Cancel").into_owned(), Message::CommandEscape));
         items.push(item(t!("Enter").into_owned(), Message::CommandFinalize));
+        // MTP (`_M2P`) goes last, after Parallel: two picks, so not a
+        // `SnapType`, but same icon-only cell with hover tooltip.
+        if has_point_step {
+            items.push(sep());
+            items.push(item(
+                t!("Mid Between 2 Points (M2P)").into_owned(),
+                Message::SnapOverrideMtp,
+            ));
+        }
     } else {
         if !last_cmds.is_empty() {
             let last = last_cmds[0].clone();
@@ -1262,21 +1272,19 @@ pub(super) fn viewport_context_menu_overlay(
 
 /// One-shot snap override menu (Shift+RMB, #337): a cursor-anchored grid of
 /// snap ICONS only — the names show as hover tooltips. Picking one applies
-/// that snap to just the next point pick.
+/// that snap to just the next point pick; the trailing MTP cell instead
+/// suspends the prompt for two picks and returns their midpoint.
 pub(super) fn snap_override_overlay(pos: iced::Point) -> Element<'static, Message> {
     const COLS: usize = 4;
 
-    let cell = |snap_type: crate::snap::SnapType, label: &'static str| -> Element<'static, Message> {
-        let icon = container(crate::ui::icons::themed::<Message>(
-            crate::ui::icons::osnap(snap_type),
-            16.0,
-        ))
+    let cell_icon = |icon: &'static [u8], label: String, msg: Message| -> Element<'static, Message> {
+        let icon = container(crate::ui::icons::themed::<Message>(icon, 16.0))
         .width(26)
         .height(26)
         .align_x(iced::Center)
         .align_y(iced::Center);
         let btn = button(icon)
-            .on_press(Message::SnapOverridePick(snap_type))
+            .on_press(msg)
             .style(|theme: &Theme, status| button::Style {
                 background: matches!(
                     status,
@@ -1312,11 +1320,29 @@ pub(super) fn snap_override_overlay(pos: iced::Point) -> Element<'static, Messag
         .into()
     };
 
+    // MTP (`_M2P`) goes last, after Parallel: two picks, so not a
+    // `SnapType`, but same icon-only cell with hover tooltip.
+    let mut cells: Vec<Element<'static, Message>> = Vec::with_capacity(
+        crate::snap::ALL_SNAP_MODES.len() + 1,
+    );
+    for &(snap_type, _glyph, label) in crate::snap::ALL_SNAP_MODES {
+        cells.push(cell_icon(
+            crate::ui::icons::osnap(snap_type),
+            label.to_string(),
+            Message::SnapOverridePick(snap_type),
+        ));
+    }
+    cells.push(cell_icon(
+        crate::ui::icons::mtp_icon(),
+        t!("Mid Between 2 Points (M2P)").into_owned(),
+        Message::SnapOverrideMtp,
+    ));
     let mut grid = column![].spacing(2);
-    for chunk in crate::snap::ALL_SNAP_MODES.chunks(COLS) {
+    while !cells.is_empty() {
+        let n = cells.len().min(COLS);
         let mut r = row![].spacing(2);
-        for &(snap_type, _glyph, label) in chunk {
-            r = r.push(cell(snap_type, label));
+        for c in cells.drain(..n) {
+            r = r.push(c);
         }
         grid = grid.push(r);
     }

@@ -43,6 +43,7 @@ static OSNAP_NEAREST: &[u8] = include_bytes!("../../assets/icons/osnap/nearest.s
 static OSNAP_APPARENT: &[u8] = include_bytes!("../../assets/icons/osnap/apparent.svg");
 static OSNAP_PARALLEL: &[u8] = include_bytes!("../../assets/icons/osnap/parallel.svg");
 static OSNAP_GRID: &[u8] = include_bytes!("../../assets/icons/osnap/grid.svg");
+static OSNAP_MTP: &[u8] = include_bytes!("../../assets/icons/osnap/mtp.svg");
 
 static LAY_ON: &[u8] = include_bytes!("../../assets/icons/layers/layon.svg");
 static LAY_OFF: &[u8] = include_bytes!("../../assets/icons/layers/layoff.svg");
@@ -593,6 +594,11 @@ pub fn osnap(snap: crate::snap::SnapType) -> &'static [u8] {
         // Not shown in the snap menu; fall back to a neutral marker.
         S::ObjectPick => OSNAP_NEAREST,
     }
+}
+
+/// MTP menu icon: modal 2-pick modifier, not a persistent `SnapType` mode.
+pub fn mtp_icon() -> &'static [u8] {
+    OSNAP_MTP
 }
 
 /// Layer visibility icon bytes (on / off).

@@ -3319,6 +3319,20 @@ impl OpenCADStudio {
                     .and_then(|e| break_entity(e, p1, p2));
                 match replacement {
                     Some(frags) => {
+                        let unchanged = frags.len() == 1 && self.tabs[i].scene.document.get_entity(handle)
+                            .is_some_and(|original| {
+                                let mut fragment = frags[0].clone();
+                                fragment.common_mut().handle = handle;
+                                &fragment == original
+                            });
+                        if unchanged {
+                            self.tabs[i].active_cmd = None;
+                            self.tabs[i].snap_result = None;
+                            self.tabs[i].scene.clear_preview_wire();
+                            self.restore_pre_cmd_tangent();
+                            self.command_line.push_output("BREAK: no geometry changed.");
+                            return Task::none();
+                        }
                         let label = self.history_label_from_active_cmd(i, "BREAK");
                         self.push_undo_snapshot(i, label);
                         let count = frags.len();

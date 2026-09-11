@@ -47,11 +47,31 @@ pub struct SplineditCommand {
     spline: Option<acadrust::entities::Spline>,
     pending: Option<acadrust::entities::Spline>,
     history: Vec<(acadrust::Handle, acadrust::entities::Spline)>,
+    pick_context: Option<crate::command::PointPickContext>,
 }
 
 impl SplineditCommand {
     pub fn new() -> Self {
-        Self { step: Step::SelectSpline, handle: acadrust::Handle::NULL, spline: None, pending: None, history: Vec::new() }
+        Self { step: Step::SelectSpline, handle: acadrust::Handle::NULL, spline: None, pending: None, history: Vec::new(), pick_context: None }
+    }
+
+    fn picked_vertex(&self, point: DVec3) -> Option<usize> {
+        let context = self.pick_context?;
+        let project = |point: DVec3| {
+            let clip = context.view * (point - context.eye).as_vec3().extend(1.0);
+            if !clip.is_finite() || clip.w <= 0.0 { return None; }
+            let screen = crate::scene::pick::hit_test::world_to_screen(
+                point, context.view, context.eye, context.bounds);
+            (screen.x.is_finite() && screen.y.is_finite()
+                && screen.x >= 0.0 && screen.x <= context.bounds.width
+                && screen.y >= 0.0 && screen.y <= context.bounds.height).then_some(screen)
+        };
+        let cursor = project(point)?;
+        self.spline.as_ref()?.control_points.iter().enumerate().filter_map(|(index, vertex)| {
+            let screen = project(DVec3::new(vertex.x, vertex.y, vertex.z))?;
+            let distance = (screen.x - cursor.x).hypot(screen.y - cursor.y);
+            (distance.is_finite() && distance <= context.aperture_px).then_some((index, distance))
+        }).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(index, _)| index)
     }
 
     fn replace(&mut self, spline: acadrust::entities::Spline) -> CmdResult {
@@ -194,25 +214,24 @@ impl CadCommand for SplineditCommand {
         }
         Some(CmdResult::NeedPoint)
     }
+    fn wants_point_pick_context(&self) -> bool {
+        matches!(self.step, Step::Delete | Step::SelectVertex { .. })
+    }
+    fn set_point_pick_context(&mut self, context: Option<crate::command::PointPickContext>) {
+        self.pick_context = context;
+    }
     fn on_point(&mut self, point: DVec3) -> CmdResult {
         if !point.is_finite() { return CmdResult::NeedPoint; }
         match self.step {
             Step::SelectVertex { weight, refine } => {
-                if let Some(index) = self.spline.as_ref().and_then(|spline| spline.control_points.iter().enumerate()
-                    .min_by(|(_, a), (_, b)| {
-                        let distance = |p: &Vector3| point.distance_squared(DVec3::new(p.x, p.y, p.z));
-                        distance(a).total_cmp(&distance(b))
-                    }).map(|(index, _)| index)) {
+                if let Some(index) = self.picked_vertex(point) {
                     self.step = if weight { Step::Weight { index } } else { Step::Move { index, refine } };
                 }
                 CmdResult::NeedPoint
             }
             Step::Delete => {
                 let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
-                let Some(index) = source.control_points.iter().enumerate().min_by(|(_, a), (_, b)| {
-                    let distance = |p: &Vector3| point.distance_squared(DVec3::new(p.x, p.y, p.z));
-                    distance(a).total_cmp(&distance(b))
-                }).map(|(index, _)| index) else { return CmdResult::NeedPoint; };
+                let Some(index) = self.picked_vertex(point) else { return CmdResult::NeedPoint; };
                 let controls = source.control_points.iter().map(|point| [point.x, point.y, point.z]).collect();
                 let weights = if source.weights.is_empty() { vec![1.0; source.control_points.len()] }
                     else { source.weights.clone() };

@@ -312,6 +312,33 @@ impl OpenCADStudio {
         true
     }
 
+    /// Refresh screen-space feature picking immediately before point dispatch.
+    pub(super) fn refresh_command_point_pick_context(&mut self, i: usize) {
+        if self.tabs[i].active_cmd.as_ref()
+            .is_some_and(|command| command.wants_point_pick_context())
+        {
+            let scene = &self.tabs[i].scene;
+            let size = scene.selection.borrow().vp_size;
+            let edit = scene.viewport_edit_frame(size);
+            let tile = edit.as_ref().map(|(_, rect)| *rect)
+                .unwrap_or_else(|| scene.active_model_tile_bounds(size.0, size.1));
+            let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: tile.width, height: tile.height };
+            let context = if bounds.width > 0.0 && bounds.height > 0.0 {
+                let (view, eye) = if let Some((camera, _)) = edit {
+                    (camera.view_proj_rte(bounds), camera.eye())
+                } else {
+                    let camera = scene.camera.borrow();
+                    (camera.view_proj_rte(bounds), camera.eye())
+                };
+                Some(crate::command::PointPickContext { view, eye, bounds,
+                    aperture_px: crate::ui::overlay::pick_box_aperture_px(self.pick_box) })
+            } else { None };
+            if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+                command.set_point_pick_context(context);
+            }
+        }
+    }
+
     /// Drive the active command's step machine with one [`StepInput`], then
     /// apply the result. This is the single entry point every input source
     /// (command line, headless, dynamic input, plugin API, viewport) funnels
@@ -414,6 +441,7 @@ impl OpenCADStudio {
                 command.inject_selection_entities(entities);
             }
         }
+        if matches!(&input, StepInput::Point(_)) { self.refresh_command_point_pick_context(i); }
         let ctrl = self.ctrl_down;
         let shift = self.shift_down;
         let result: Option<CmdResult> = {

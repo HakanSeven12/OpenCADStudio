@@ -1942,6 +1942,9 @@ impl InputKind {
 pub trait CadCommand: Send {
     /// Preserve source appearance for commands that extract existing entities.
     fn preserve_commit_style(&self) -> bool { false }
+    fn nested_copy_bind_setting(&self) -> Option<bool> { None }
+    /// Symbol localization is committed together with the extracted entities.
+    fn nested_copy_symbol_names(&self) -> Option<&acadrust::nested_copy::NestedCopySymbolNames> { None }
     /// Keep the layer already carried by entities committed by this command
     /// instead of replacing it with the current drawing layer.
     fn preserve_commit_layer(&self) -> bool {

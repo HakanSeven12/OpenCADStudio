@@ -929,6 +929,12 @@ impl OpenCADStudio {
 
     fn apply_cmd_result_inner(&mut self, result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
+        if let Some(bind) = self.tabs[i].active_cmd.as_ref().and_then(|command| command.nested_copy_bind_setting()) {
+            if self.ncopy_bind != bind {
+                self.ncopy_bind = bind;
+                self.persist_settings_if_changed();
+            }
+        }
         let preserve_commit_style = self.tabs[i].active_cmd.as_ref()
             .is_some_and(|command| command.preserve_commit_style());
         let preserve_commit_layer = self.tabs[i]
@@ -1054,7 +1060,7 @@ impl OpenCADStudio {
                     self.commit_undo_delta(i, pd);
                 }
             }
-            CmdResult::CommitEntities(entities) => {
+            CmdResult::CommitEntities(mut entities) => {
                 let locked_source = entities.iter().find_map(|entity| {
                     let handle = entity.common().handle;
                     (!handle.is_null()
@@ -1067,10 +1073,19 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 let label = self.history_label_from_active_cmd(i, "ENTITY");
-                let delta_safe = entities
+                let symbol_names = self.tabs[i].active_cmd.as_ref()
+                    .and_then(|command| command.nested_copy_symbol_names()).cloned();
+                let delta_safe = symbol_names.is_none() && entities
                     .iter()
                     .all(|entity| self.delta_add_safe(i, entity));
                 let pending = self.begin_undo(i, label, entities.len(), delta_safe);
+                if let Some(names) = symbol_names {
+                    let retained = self.tabs[i].scene.document.localize_nested_copy_symbols(&mut entities, &names);
+                    if retained > 0 {
+                        self.command_line.push_info(&format!("{} copied object(s) retain imported style references whose dependencies cannot be localized.", retained));
+                    }
+                    self.refresh_layer_panel();
+                }
                 for entity in entities {
                     if preserve_commit_style {
                         let _ = self.commit_entity_handle_preserve_style(entity);
@@ -1090,12 +1105,21 @@ impl OpenCADStudio {
                     self.commit_undo_delta(i, pd);
                 }
             }
-            CmdResult::CommitEntitiesAndExit(entities) => {
+            CmdResult::CommitEntitiesAndExit(mut entities) => {
                 let label = self.history_label_from_active_cmd(i, "ENTITY");
-                let delta_safe = entities
+                let symbol_names = self.tabs[i].active_cmd.as_ref()
+                    .and_then(|command| command.nested_copy_symbol_names()).cloned();
+                let delta_safe = symbol_names.is_none() && entities
                     .iter()
                     .all(|entity| self.delta_add_safe(i, entity));
                 let pending = self.begin_undo(i, label, entities.len(), delta_safe);
+                if let Some(names) = symbol_names {
+                    let retained = self.tabs[i].scene.document.localize_nested_copy_symbols(&mut entities, &names);
+                    if retained > 0 {
+                        self.command_line.push_info(&format!("{} copied object(s) retain imported style references whose dependencies cannot be localized.", retained));
+                    }
+                    self.refresh_layer_panel();
+                }
                 for entity in entities {
                     if preserve_commit_style {
                         let _ = self.commit_entity_handle_preserve_style(entity);

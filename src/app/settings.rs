@@ -203,6 +203,8 @@ pub struct UserSettings {
     /// GRIPOBJLIMIT: past this many selected objects, no grips are drawn at
     /// all. 0 means no limit. The drawing header carries no slot for it.
     pub grip_object_limit: i32,
+    /// Nested-copy symbol handling: false inserts, true binds.
+    pub ncopy_bind: bool,
     /// Last Options page; unknown saved names fall back without rejecting the config.
     #[serde(default, deserialize_with = "deserialize_options_tab")]
     pub options_tab: crate::ui::window::options::OptionsTab,
@@ -372,6 +374,7 @@ impl Default for UserSettings {
             double_click_block_refedit: false,
             double_click_block_attedit: true,
             grip_object_limit: DEFAULT_GRIP_OBJECT_LIMIT,
+            ncopy_bind: false,
             cursor_type: CursorType::Crosshair,
             crosshair_color: None,
             lineweight_display_scale: 100,

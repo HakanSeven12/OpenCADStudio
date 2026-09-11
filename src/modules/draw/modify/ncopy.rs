@@ -1,11 +1,12 @@
 use acadrust::{CadDocument, EntityType, Handle};
 use glam::DVec3;
+use acadrust::nested_copy::{NestedCopyMode, NestedCopySymbolNames};
 use std::collections::{HashMap, HashSet};
 use crate::command::{CadCommand, CmdOption, CmdResult, EntityTransform};
 use crate::entities::traits::EntityTypeOps;
 use crate::scene::convert::acad_to_render::RenderObject;
 
-enum Step { Select, Base, Target(DVec3), ArrayCount(DVec3), ArrayTarget(DVec3, usize, bool) }
+enum Step { Select, Settings, Base, Target(DVec3), ArrayCount(DVec3), ArrayTarget(DVec3, usize, bool) }
 pub struct NcopyCommand {
     nested: HashMap<Handle, Vec<EntityType>>,
     hit_paths: HashMap<Handle, Vec<Vec<[f64; 3]>>>,
@@ -13,9 +14,12 @@ pub struct NcopyCommand {
     step: Step,
     multiple: bool,
     placements: usize,
+    mode: NestedCopyMode,
+    insert_names: NestedCopySymbolNames,
+    bind_names: NestedCopySymbolNames,
 }
 impl NcopyCommand {
-    pub fn new(document: &CadDocument) -> Self {
+    pub fn new(document: &CadDocument, bind: bool) -> Self {
         fn leaves(entity: &EntityType, document: &CadDocument, path: &mut HashSet<String>, output: &mut Vec<EntityType>) {
             let EntityType::Insert(insert) = entity else { output.push(entity.clone()); return; };
             let name = insert.block_name.to_ascii_uppercase();
@@ -43,7 +47,11 @@ impl NcopyCommand {
             }).collect();
             (handle, paths)
         }).collect();
-        Self { nested, hit_paths, selected: Vec::new(), step: Step::Select, multiple: false, placements: 0 }
+        Self { nested, hit_paths, selected: Vec::new(), step: Step::Select, multiple: false, placements: 0,
+            mode: if bind { NestedCopyMode::Bind } else { NestedCopyMode::Insert },
+            insert_names: document.nested_copy_symbol_names(NestedCopyMode::Insert),
+            bind_names: document.nested_copy_symbol_names(NestedCopyMode::Bind),
+        }
     }
     fn place(&self, delta: DVec3) -> CmdResult {
         if !delta.is_finite() { return CmdResult::NeedPoint; }
@@ -61,7 +69,8 @@ impl CadCommand for NcopyCommand {
     fn name(&self) -> &'static str { "NCOPY" }
     fn prompt(&self) -> String {
         match self.step {
-            Step::Select => "Select nested objects:".into(),
+            Step::Select => format!("Current setting: {}. Select nested objects or [Settings]:", if self.mode == NestedCopyMode::Bind { "Bind" } else { "Insert" }),
+            Step::Settings => format!("Enter setting [Insert/Bind] <{}>:", if self.mode == NestedCopyMode::Bind { "Bind" } else { "Insert" }),
             Step::Base => "Specify base point or [Displacement/Multiple] <Displacement>:".into(),
             Step::Target(_) => "Specify second point or [Array] <use first point as displacement>:".into(),
             Step::ArrayCount(_) => "Enter number of items to array:".into(),
@@ -71,12 +80,18 @@ impl CadCommand for NcopyCommand {
     }
     fn options(&self) -> Vec<CmdOption> {
         match self.step {
+            Step::Select => vec![CmdOption::new("Settings", "S")],
+            Step::Settings => vec![CmdOption::new("Insert", "I"), CmdOption::new("Bind", "B")],
             Step::Base => vec![CmdOption::new("Displacement", "D"), CmdOption::new("Multiple", "M")],
             Step::Target(_) if self.multiple && self.placements > 0 => vec![CmdOption::new("Array", "A"), CmdOption::new("Exit", "E"), CmdOption::new("Undo", "U")],
             Step::Target(_) => vec![CmdOption::new("Array", "A")],
             Step::ArrayTarget(_, _, false) => vec![CmdOption::new("Fit", "F")],
             _ => Vec::new(),
         }
+    }
+    fn nested_copy_bind_setting(&self) -> Option<bool> { Some(self.mode == NestedCopyMode::Bind) }
+    fn nested_copy_symbol_names(&self) -> Option<&NestedCopySymbolNames> {
+        Some(if self.mode == NestedCopyMode::Bind { &self.bind_names } else { &self.insert_names })
     }
     fn preserve_commit_style(&self) -> bool { true }
     fn preserve_commit_layer(&self) -> bool { true }
@@ -109,7 +124,7 @@ impl CadCommand for NcopyCommand {
     }
     fn on_point(&mut self, point: DVec3) -> CmdResult {
         match self.step {
-            Step::Select => CmdResult::NeedPoint,
+            Step::Select | Step::Settings => CmdResult::NeedPoint,
             Step::Base => { self.step = Step::Target(point); CmdResult::NeedPoint }
             Step::Target(base) => {
                 if !point.is_finite() { return CmdResult::NeedPoint; }
@@ -132,15 +147,25 @@ impl CadCommand for NcopyCommand {
     }
     fn on_enter(&mut self) -> CmdResult {
         match self.step {
+            Step::Settings => { self.step = Step::Select; CmdResult::NeedPoint }
             Step::Select if !self.selected.is_empty() => { self.step = Step::Base; CmdResult::NeedPoint }
             Step::Base => { self.step = Step::Target(DVec3::ZERO); CmdResult::NeedPoint }
             Step::Target(base) if !self.multiple => self.place(base),
             _ => CmdResult::Cancel,
         }
     }
-    fn point_step_accepts_keywords(&self) -> bool { matches!(self.step, Step::Base | Step::Target(_) | Step::ArrayTarget(..)) }
-    fn wants_text_input(&self) -> bool { !matches!(self.step, Step::Select) }
+    fn point_step_accepts_keywords(&self) -> bool { matches!(self.step, Step::Select | Step::Settings | Step::Base | Step::Target(_) | Step::ArrayTarget(..)) }
+    fn wants_text_input(&self) -> bool { true }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if matches!(self.step, Step::Settings) {
+            match text.trim().to_uppercase().as_str() {
+                "I" | "INSERT" => self.mode = NestedCopyMode::Insert,
+                "B" | "BIND" => self.mode = NestedCopyMode::Bind,
+                _ => return Some(CmdResult::NeedPoint),
+            }
+            self.step = Step::Select;
+            return Some(CmdResult::NeedPoint);
+        }
         if let Step::ArrayCount(base) = self.step {
             if let Ok(count) = text.trim().parse::<usize>() {
                 if (2..=32767).contains(&count) { self.step = Step::ArrayTarget(base, count, false); }
@@ -148,6 +173,7 @@ impl CadCommand for NcopyCommand {
             return Some(CmdResult::NeedPoint);
         }
         match text.trim().to_uppercase().as_str() {
+            "S" | "SETTINGS" if matches!(self.step, Step::Select) => { self.step = Step::Settings; Some(CmdResult::NeedPoint) }
             "A" | "ARRAY" => {
                 if let Step::Target(base) = self.step { self.step = Step::ArrayCount(base); }
                 Some(CmdResult::NeedPoint)

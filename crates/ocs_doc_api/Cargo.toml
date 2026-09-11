@@ -15,7 +15,7 @@ thiserror = "1"
 
 # Host adapters convert ObjectId to acadrust handles; kernel handles stay local.
 acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "93dd713c9c1767690582a4a837918e32b54d1e60", features = ["serde"], optional = true }
-cadkernel = { git = "https://github.com/ramox81/cadkernel.git", rev = "6ca25b9eb08dc90a376272760c57db6e5997100d", features = ["acis", "offset"], optional = true }
+cadkernel = { git = "https://github.com/ramox81/cadkernel.git", rev = "9f9091b7f200eaf501134e08dd61adc90b416ed3", features = ["acis", "offset"], optional = true }
 ocs_plugin_api = { path = "../ocs_plugin_api", optional = true, features = ["host"] }
 
 [build-dependencies]

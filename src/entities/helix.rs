@@ -97,6 +97,36 @@ fn kernel_curve(helix: &Helix, top_radius: f64) -> Option<HelixCurve> {
     })
 }
 
+/// Reverse generating parameters together with the exact stored spline.
+pub(crate) fn reversed(helix: &Helix) -> Option<Helix> {
+    let original_curve = spline_curve(&helix.spline)?;
+    let parameters = kernel_curve(helix, top_radius(helix))?.reversed()?;
+    let mut result = helix.clone();
+    result.axis_base_point = vector(Vec3::from(parameters.base_center));
+    result.axis_vector = vector(Vec3::from(parameters.axis_direction));
+    result.start_point = vector(Vec3::from(original_curve.point_at(1.0)));
+    result.radius = parameters.top_radius;
+    // Reverse the evaluated curve itself instead of fitting it again.
+    let reversed_curve = original_curve.reversed()?;
+    result.spline.control_points = reversed_curve
+        .control_points()
+        .iter()
+        .map(|point| Vector3::new(point[0], point[1], point[2]))
+        .collect();
+    result.spline.fit_points.reverse();
+    result.spline.weights = if helix.spline.weights.is_empty() {
+        Vec::new()
+    } else {
+        reversed_curve.weights().to_vec()
+    };
+    result.spline.knots = reversed_curve.knots().to_vec();
+    let begin = helix.spline.begin_tangent;
+    let end = helix.spline.end_tangent;
+    result.spline.begin_tangent = Vector3::new(-end.x, -end.y, -end.z);
+    result.spline.end_tangent = Vector3::new(-begin.x, -begin.y, -begin.z);
+    Some(result)
+}
+
 fn projected_direction(direction: Vec3, axis: Vec3) -> Option<Vec3> {
     (direction - axis * direction.dot(axis)).normalize()
 }
@@ -325,6 +355,7 @@ fn apply_geom_prop(helix: &mut Helix, field: &str, value: &str) {
 fn apply_grip(helix: &mut Helix, grip_id: usize, apply: GripApply) {
     let original = helix.clone();
     let top = top_radius(helix);
+    let Some(base_radius) = base_radius(helix) else { return; };
     let Some((base, axis, start_direction)) = axis_frame(helix) else {
         return;
     };
@@ -356,7 +387,6 @@ fn apply_grip(helix: &mut Helix, grip_id: usize, apply: GripApply) {
             if radius <= EPSILON {
                 return;
             }
-            helix.radius = radius;
             helix.start_point = vector(base + radial);
         }
         (2, GripApply::Absolute(position)) => {
@@ -384,7 +414,7 @@ fn apply_grip(helix: &mut Helix, grip_id: usize, apply: GripApply) {
                 *helix = original;
                 return;
             };
-            helix.start_point = vector(base + start_direction * helix.radius);
+            helix.start_point = vector(base + start_direction * base_radius);
         }
         (3, GripApply::Absolute(position)) => {
             let position = kernel(position);
@@ -520,5 +550,55 @@ mod tests {
         let original = helix.clone();
         apply_geom_prop(&mut helix, "height", "5");
         assert_eq!(helix, original);
+    }
+
+    #[test]
+    fn reversing_twice_restores_a_conical_helix_and_radius_roles() {
+        let curve = HelixCurve {
+            base_center: [1.0, 2.0, 3.0],
+            axis_direction: [0.0, 1.0, 1.0],
+            start_direction: [1.0, 0.0, 0.0],
+            base_radius: 1.0,
+            top_radius: 2.5,
+            height: 4.0,
+            turns: 1.25,
+            direction: HelixDirection::Clockwise,
+        };
+        let nurbs = curve.nurbs().expect("valid helix");
+        let mut helix = Helix::new();
+        helix.axis_base_point = Vector3::new(1.0, 2.0, 3.0);
+        let axis = Vec3::from(curve.axis_direction).normalize().unwrap();
+        helix.axis_vector = vector(axis);
+        helix.start_point = Vector3::new(2.0, 2.0, 3.0);
+        helix.radius = curve.top_radius;
+        helix.turns = curve.turns;
+        helix.turn_height = curve.height / curve.turns;
+        helix.handedness = false;
+        helix.spline.degree = nurbs.degree() as i32;
+        helix.spline.control_points = nurbs
+            .control_points()
+            .iter()
+            .map(|point| Vector3::new(point[0], point[1], point[2]))
+            .collect();
+        helix.spline.knots = nurbs.knots().to_vec();
+        helix.spline.weights = nurbs.weights().to_vec();
+
+        let once = reversed(&helix).expect("first reversal");
+        assert!((once.radius - curve.base_radius).abs() < 1.0e-12);
+        assert_eq!(once.turns, helix.turns);
+        assert_eq!(once.turn_height, helix.turn_height);
+        assert_eq!(once.handedness, helix.handedness);
+        let original_curve = spline_curve(&helix.spline).unwrap();
+        let once_curve = spline_curve(&once.spline).unwrap();
+        assert!(Vec3::from(once_curve.point_at(0.0))
+            .distance(Vec3::from(original_curve.point_at(1.0))) < 1.0e-9);
+
+        let twice = reversed(&once).expect("second reversal");
+        assert!((twice.radius - helix.radius).abs() < 1.0e-12);
+        let twice_curve = spline_curve(&twice.spline).unwrap();
+        for parameter in [0.0, 0.2, 0.5, 0.8, 1.0] {
+            assert!(Vec3::from(twice_curve.point_at(parameter))
+                .distance(Vec3::from(original_curve.point_at(parameter))) < 1.0e-8);
+        }
     }
 }

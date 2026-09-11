@@ -2000,9 +2000,6 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             if let Some(acadrust::EntityType::Hatch(dxf)) =
                                 self.tabs[i].scene.document.get_entity_mut(handle)
                             {
-                                let old_origin = dxf.pattern.lines.first().map(|line| {
-                                    (line.base_point.x, line.base_point.y)
-                                });
                                 let mut pattern = hatch_patterns::build_dxf_pattern(entry);
                                 // Stored pattern lines are final world-space
                                 // geometry. Preserve the selected hatch's scale,
@@ -2016,17 +2013,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     &mut pattern,
                                     dxf.pattern_angle,
                                 );
-                                if let (Some((old_x, old_y)), Some(new_origin)) =
-                                    (old_origin, pattern.lines.first())
-                                {
-                                    let dx = old_x - new_origin.base_point.x;
-                                    let dy = old_y - new_origin.base_point.y;
-                                    crate::entities::hatch::translate_pattern_geometry(
-                                        &mut pattern,
-                                        dx,
-                                        dy,
-                                    );
-                                }
+                                let origin = dxf.pattern_origin();
+                                crate::entities::hatch::translate_pattern_geometry(&mut pattern, origin.x, origin.y);
                                 dxf.pattern = pattern;
                                 dxf.is_solid = matches!(
                                     entry.gpu,
@@ -2811,7 +2799,28 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 } else {
                     match field {
                         "transparency" => {
-                            self.tabs[i].dirty = true;
+                            let Some(transparency) = crate::scene::creation_style::parse_current_transparency(&value) else {
+                                self.command_line.push_error("Transparency: expected ByLayer, ByBlock, or an integer from 0 to 90.");
+                                self.refresh_properties();
+                                return Task::none();
+                            };
+                            if self.tabs[i].scene.document.current_entity_transparency()
+                                != transparency
+                            {
+                                self.push_undo_snapshot(i, "CETRANSPARENCY");
+                                if self.tabs[i]
+                                    .scene
+                                    .document
+                                    .set_current_entity_transparency(transparency)
+                                {
+                                    self.tabs[i].dirty = true;
+                                } else {
+                                    self.discard_last_undo_entry(i);
+                                    self.command_line.push_error(
+                                        "CETRANSPARENCY: drawing variable dictionary is invalid.",
+                                    );
+                                }
+                            }
                             self.refresh_properties();
                         }
                         "material" => {

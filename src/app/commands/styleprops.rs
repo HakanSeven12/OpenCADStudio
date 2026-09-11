@@ -3,6 +3,10 @@ use super::*;
 impl OpenCADStudio {
     pub(super) fn dispatch_styleprops(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
+            "CETRANSPARENCY" => return self.dispatch_styleprops("SETVAR CETRANSPARENCY", i),
+            cmd if cmd.starts_with("CETRANSPARENCY ") => {
+                return self.dispatch_styleprops(&format!("SETVAR {cmd}"), i);
+            }
             "FRAMES0" => return self.dispatch_styleprops("SETVAR FRAME 0", i),
             "FRAMES1" => return self.dispatch_styleprops("SETVAR FRAME 1", i),
             "FRAMES2" => return self.dispatch_styleprops("SETVAR FRAME 2", i),
@@ -1064,9 +1068,34 @@ impl OpenCADStudio {
                 let value = it.next().map(|s| s.trim().to_string());
                 if name.is_empty() || name == "?" {
                     self.command_line.push_info(
-                        crate::t!("SETVAR: LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES COMMANDLINEFADETIME ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER GRIPOBJLIMIT | CLAYER CELTYPE TEXTSTYLE (read-only)").as_ref(),
+                        crate::t!("SETVAR: CETRANSPARENCY LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES COMMANDLINEFADETIME ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER GRIPOBJLIMIT | CLAYER CELTYPE TEXTSTYLE (read-only)").as_ref(),
                     );
                 } else {
+                    if name == "CETRANSPARENCY" {
+                        let current = self.tabs[i].scene.document.current_entity_transparency();
+                        if let Some(value) = &value {
+                            match crate::scene::creation_style::parse_current_transparency(value) {
+                                Some(transparency) => {
+                                    if current != transparency {
+                                        self.push_undo_snapshot(i, &name);
+                                        if !self.tabs[i].scene.document.set_current_entity_transparency(transparency) {
+                                            self.discard_last_undo_entry(i);
+                                            self.command_line.push_error("CETRANSPARENCY: drawing variable dictionary is invalid.");
+                                            return Some(self.finish_dispatch(cmd));
+                                        }
+                                        self.tabs[i].dirty = true;
+                                        self.refresh_properties();
+                                    }
+                                    self.command_line.push_output(&format!("CETRANSPARENCY = {}", crate::scene::creation_style::current_transparency_label(transparency)));
+                                }
+                                None => self.command_line.push_error("CETRANSPARENCY: expected ByLayer (-1), ByBlock (-2), or an integer from 0 to 90."),
+                            }
+                        } else {
+                            self.command_line.push_output(&format!("Enter new value for CETRANSPARENCY <{}>:", crate::scene::creation_style::current_transparency_label(current)));
+                            self.pending_setvar = Some(name.clone());
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
                     if matches!(name.as_str(), "SHOWHIST" | "SOLIDHIST") {
                         let current = if name == "SHOWHIST" {
                             self.tabs[i].scene.document.header.show_solid_history.clamp(0, 2)

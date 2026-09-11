@@ -369,6 +369,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "COLOR",
         "COLOUR",
         "CECOLOR",
+        "CETRANSPARENCY",
         "DDCOLOR",
         "BYLAYER",
         // Synchronise block attributes.

@@ -306,7 +306,7 @@ impl OpenCADStudio {
                                     label: t!("Transparency").into_owned(),
                                     field: "transparency",
                                     value: PropValue::EditChoice {
-                                        value: "ByLayer".to_string(),
+                                        value: crate::scene::creation_style::current_transparency_label(self.tabs[i].scene.document.current_entity_transparency()),
                                         options: vec!["ByLayer".to_string(), "ByBlock".to_string()],
                                     },
                                 },

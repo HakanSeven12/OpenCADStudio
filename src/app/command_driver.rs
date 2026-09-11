@@ -5165,7 +5165,41 @@ impl OpenCADStudio {
                     self.command_line
                         .push_error(crate::t!("HATCHEDIT: hatch entity not found.").as_ref());
                 } else {
-                    use crate::command::HatchEditOperation;
+                    use crate::command::{CadCommand, HatchEditOperation};
+                    if matches!(&operation,HatchEditOperation::BeginAssociate) {
+                        let associative=matches!(self.tabs[i].scene.document.get_entity(handle),Some(acadrust::EntityType::Hatch(h)) if h.is_associative);
+                        if associative {
+                            self.command_line.push_info("HATCHEDIT: hatch is already associative.");
+                            self.tabs[i].active_cmd=None;
+                        }else{
+                            let plane=match self.tabs[i].scene.document.get_entity(handle) {
+                                Some(acadrust::EntityType::Hatch(h))=>{
+                                    let storage=crate::entities::curve::ocs_plane(h.normal,h.elevation);
+                                    crate::command::WorkingPlane::new(glam::DVec3::from_array(storage.origin),glam::DVec3::from_array(storage.x_axis),glam::DVec3::from_array(storage.y_axis))
+                                },
+                                _=>self.tabs[i].ucs_xform().working_plane(),
+                            };
+                            let mut sources=self.tabs[i].scene.boundary_sources_on_plane(plane,1e-6);
+                            sources.remove(&handle);
+                            let command=crate::modules::draw::draw::hatchedit::HatcheditCommand::for_association(handle,name,scale,angle,plane,sources);
+                            self.tabs[i].scene.deselect_all();
+                            self.command_line.push_info(&command.prompt());
+                            self.tabs[i].active_cmd=Some(Box::new(command));
+                        }
+                        return Task::none();
+                    }
+                    if let HatchEditOperation::DrawOrderBoundary{above}=&operation {
+                        let references:Vec<_>=match self.tabs[i].scene.document.get_entity(handle) {
+                            Some(acadrust::EntityType::Hatch(h))=>h.paths.iter().flat_map(|p|p.boundary_handles.iter())
+                                .filter(|h|self.tabs[i].scene.document.get_entity(**h).is_some()).map(|h|format!("{:X}",h.value())).collect(),
+                            _=>Vec::new(),
+                        };
+                        self.tabs[i].active_cmd=None;
+                        if references.is_empty(){self.command_line.push_info("HATCHEDIT: no associated boundary objects.");return Task::none();}
+                        self.tabs[i].scene.deselect_all();self.tabs[i].scene.select_entity(handle,false);
+                        let command=format!("DRAWORDER {} {}",if *above{"ABOVE"}else{"UNDER"},references.join(" "));
+                        return self.dispatch_view(&command,i).unwrap_or_else(Task::none);
+                    }
                     if matches!(
                         &operation,
                         HatchEditOperation::DrawOrderFront | HatchEditOperation::DrawOrderBack
@@ -5182,12 +5216,38 @@ impl OpenCADStudio {
                     }
                     self.push_undo_snapshot(i, "HATCHEDIT");
                     match operation {
+                        HatchEditOperation::Appearance { color, layer, transparency } => {
+                            let layer=layer.map(|name|if name=="."{self.tabs[i].active_layer.clone()}else{name});
+                            if layer.as_ref().is_some_and(|name|self.tabs[i].scene.document.layers.get(name).is_none()) {
+                                self.discard_last_undo_entry(i);
+                                self.command_line.push_error("HATCHEDIT: layer not found.");
+                                return Task::none();
+                            }
+                            if let Some(entity)=self.tabs[i].scene.document.get_entity_mut(handle) {
+                                let common=entity.common_mut();
+                                if let Some(value)=color {common.color=value;common.color_name=None;common.color_book_handle=None;}
+                                if let Some(value)=layer {common.layer=value;}
+                                if let Some(value)=transparency {common.transparency=value;}
+                            }
+                            self.tabs[i].scene.bump_entities(&[(handle,crate::scene::ChangeKind::Modified)]);
+                            self.refresh_properties();
+                        }
                         HatchEditOperation::Update {
                             origin,
+                            store_origin,
                             disassociate,
                             style,
                             annotative,
                         } => {
+                            if store_origin {
+                                if let Some((x, y)) = origin {
+                                    if !self.tabs[i].scene.document.set_hatch_origin([x, y]) {
+                                        self.discard_last_undo_entry(i);
+                                        self.command_line.push_error("HATCHEDIT: cannot store default origin.");
+                                        return Task::none();
+                                    }
+                                }
+                            }
                             if let Some(acadrust::EntityType::Hatch(hatch)) =
                                 self.tabs[i].scene.document.get_entity_mut(handle)
                             {
@@ -5195,11 +5255,6 @@ impl OpenCADStudio {
                                     if let Some(entry) =
                                         crate::scene::model::hatch_patterns::find(&name)
                                     {
-                                        let old_origin = hatch
-                                            .pattern
-                                            .lines
-                                            .first()
-                                            .map(|line| line.base_point);
                                         let mut pattern = crate::scene::model::hatch_patterns::build_dxf_pattern(entry);
                                         crate::entities::hatch::scale_pattern_geometry(
                                             &mut pattern,
@@ -5209,16 +5264,8 @@ impl OpenCADStudio {
                                             &mut pattern,
                                             (angle as f64).to_radians(),
                                         );
-                                        if let (Some(old), Some(new)) = (
-                                            old_origin,
-                                            pattern.lines.first().map(|line| line.base_point),
-                                        ) {
-                                            crate::entities::hatch::translate_pattern_geometry(
-                                                &mut pattern,
-                                                old.x - new.x,
-                                                old.y - new.y,
-                                            );
-                                        }
+                                        let origin = hatch.pattern_origin();
+                                        crate::entities::hatch::translate_pattern_geometry(&mut pattern, origin.x, origin.y);
                                         hatch.pattern = pattern;
                                         hatch.is_solid = matches!(
                                             entry.gpu,
@@ -5232,30 +5279,16 @@ impl OpenCADStudio {
                                     let requested_scale = scale.max(1.0e-6) as f64;
                                     if hatch.pattern_scale > 1.0e-12 {
                                         let factor = requested_scale / hatch.pattern_scale;
-                                        crate::entities::hatch::scale_pattern_geometry(
-                                            &mut hatch.pattern,
-                                            factor,
-                                        );
+                                        hatch.scale_pattern_about_origin(factor);
                                     }
                                     let requested_angle = (angle as f64).to_radians();
                                     let delta = requested_angle - hatch.pattern_angle;
-                                    crate::entities::hatch::rotate_pattern_geometry(
-                                        &mut hatch.pattern,
-                                        delta,
-                                    );
+                                    hatch.rotate_pattern_about_origin(delta);
                                 }
                                 hatch.pattern_scale = scale.max(1.0e-6) as f64;
                                 hatch.pattern_angle = (angle as f64).to_radians();
                                 if let Some((x, y)) = origin {
-                                    if let Some(current) =
-                                        hatch.pattern.lines.first().map(|line| line.base_point)
-                                    {
-                                        crate::entities::hatch::translate_pattern_geometry(
-                                            &mut hatch.pattern,
-                                            x - current.x,
-                                            y - current.y,
-                                        );
-                                    }
+                                    hatch.set_pattern_origin(acadrust::types::Vector2::new(x, y));
                                 }
                                 if disassociate {
                                     for path in &mut hatch.paths {
@@ -5301,7 +5334,15 @@ impl OpenCADStudio {
                                 .scene
                                 .edit_hatch_boundary_handles(handle, &handles, false);
                         }
-                        HatchEditOperation::RecreateBoundary => {
+                        HatchEditOperation::AssociatePaths(paths) => {
+                            if paths.is_empty()||paths.iter().any(|path|path.boundary_handles.is_empty()||path.boundary_handles.iter().any(|source|self.tabs[i].scene.document.get_entity(*source).is_none())) {
+                                self.discard_last_undo_entry(i);
+                                self.command_line.push_error("HATCHEDIT: associated boundary is no longer available.");
+                                return Task::none();
+                            }
+                            self.tabs[i].scene.replace_hatch_association(handle,paths);
+                        }
+                        HatchEditOperation::RecreateBoundary { associate, region } => {
                             let source = self.tabs[i].scene.document.get_entity(handle).cloned();
                             if let Some(acadrust::EntityType::Hatch(source)) = source {
                                 let storage = crate::entities::curve::ocs_plane(
@@ -5313,25 +5354,74 @@ impl OpenCADStudio {
                                     glam::DVec3::from_array(storage.x_axis),
                                     glam::DVec3::from_array(storage.y_axis),
                                 );
-                                let rings = crate::scene::hatch_boundary_rings(&source);
-                                let entities = crate::scene::boundary_entities(&rings, plane);
-                                let mut handles = Vec::new();
-                                for entity in entities {
+                                let (entities, path_groups) = if region {
+                                    let loops = source.paths.iter().map(|path| {
+                                        path.edges.iter().map(crate::entities::hatch::edge_curve).collect::<Option<Vec<_>>>()
+                                    }).collect::<Option<Vec<_>>>();
+                                    let Some(loops) = loops.filter(|loops| !loops.is_empty() && loops.iter().all(|ring| !ring.is_empty())) else {
+                                        self.discard_last_undo_entry(i);
+                                        self.command_line.push_error("HATCHEDIT: boundary cannot form a region.");
+                                        return Task::none();
+                                    };
+                                    let contained = loops.iter().enumerate().map(|(inner, ring)| {
+                                        let seed = ring[0].point_at(0.0);
+                                        loops.iter().enumerate().map(|(outer, boundary)| {
+                                            inner != outer && cadkernel::geom2d::contains(boundary, seed, cadkernel::geom2d::Tolerance::new(1e-6))
+                                        }).collect::<Vec<_>>()
+                                    }).collect::<Vec<_>>();
+                                    let depths = contained.iter().map(|row| row.iter().filter(|inside| **inside).count()).collect::<Vec<_>>();
+                                    let groups = depths.iter().enumerate().filter(|(_, depth)| **depth % 2 == 0).map(|(outer, depth)| {
+                                        let mut indices = vec![outer];
+                                        indices.extend((0..loops.len()).filter(|inner| depths[*inner] == *depth + 1 && contained[*inner][outer]));
+                                        indices
+                                    }).collect::<Vec<_>>();
+                                    let entities = groups.iter().map(|indices| {
+                                        let profiles = indices.iter().map(|index| loops[*index].clone()).collect::<Vec<_>>();
+                                        crate::scene::model::presspull_model::region_from_loops(&profiles, plane)
+                                    }).collect::<Option<Vec<_>>>();
+                                    let Some(entities) = entities else {
+                                        self.discard_last_undo_entry(i);
+                                        self.command_line.push_error("HATCHEDIT: boundary cannot form a region.");
+                                        return Task::none();
+                                    };
+                                    (entities, groups)
+                                } else {
+                                    let rings = crate::scene::hatch_boundary_rings(&source);
+                                    if rings.len() != source.paths.len() {
+                                        self.discard_last_undo_entry(i);
+                                        self.command_line.push_error(
+                                            "HATCHEDIT: boundary cannot form a polyline.",
+                                        );
+                                        return Task::none();
+                                    }
+                                    let entities = crate::scene::boundary_entities(&rings, plane);
+                                    if entities.len() != source.paths.len() {
+                                        self.discard_last_undo_entry(i);
+                                        self.command_line.push_error(
+                                            "HATCHEDIT: boundary cannot form a polyline.",
+                                        );
+                                        return Task::none();
+                                    }
+                                    let groups = (0..entities.len()).map(|index| vec![index]).collect();
+                                    (entities, groups)
+                                };
+                                let mut path_handles = vec![None; source.paths.len()];
+                                for (entity, paths) in entities.into_iter().zip(path_groups) {
                                     if let Some(boundary) = self.commit_entity_handle(entity) {
-                                        handles.push(boundary);
+                                        for path in paths { if let Some(slot) = path_handles.get_mut(path) { *slot = Some(boundary); } }
                                     }
                                 }
-                                if let Some(acadrust::EntityType::Hatch(hatch)) =
+                                if associate { if let Some(acadrust::EntityType::Hatch(hatch)) =
                                     self.tabs[i].scene.document.get_entity_mut(handle)
                                 {
-                                    for (path, boundary) in
-                                        hatch.paths.iter_mut().zip(handles.iter().copied())
-                                    {
-                                        path.boundary_handles = vec![boundary];
-                                        path.flags.set_external(true);
+                                    for (path, boundary) in hatch.paths.iter_mut().zip(path_handles.iter().copied()) {
+                                        if let Some(boundary) = boundary {
+                                            path.boundary_handles = vec![boundary];
+                                            path.flags.set_external(true);
+                                        }
                                     }
-                                    hatch.is_associative = !handles.is_empty();
-                                }
+                                    hatch.is_associative = path_handles.iter().all(Option::is_some);
+                                } }
                                 self.tabs[i].scene.bump_entities(&[(
                                     handle,
                                     crate::scene::ChangeKind::Modified,
@@ -5360,7 +5450,9 @@ impl OpenCADStudio {
                             }
                         }
                         HatchEditOperation::DrawOrderFront
-                        | HatchEditOperation::DrawOrderBack => unreachable!(),
+                        | HatchEditOperation::DrawOrderBack
+                        | HatchEditOperation::DrawOrderBoundary {..}
+                        | HatchEditOperation::BeginAssociate => unreachable!(),
                     }
                     self.tabs[i].dirty = true;
                     self.command_line

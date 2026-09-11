@@ -3870,13 +3870,22 @@ impl OpenCADStudio {
                             };
                             use crate::command::CadCommand;
                             use crate::modules::draw::draw::hatchedit::HatcheditCommand;
-                            let cmd: Box<dyn CadCommand> = Box::new(HatcheditCommand::with_handle(
-                                handle,
-                                model.name.clone(),
-                                scale,
-                                angle,
-                                annotative,
-                            ));
+                            let current_color =
+                                self.tabs[i].scene.document.header.current_entity_color;
+                            let current_transparency =
+                                self.tabs[i].scene.document.current_entity_transparency();
+                            let current_origin = self.tabs[i].scene.document.hatch_origin();
+                            let cmd: Box<dyn CadCommand> = Box::new(
+                                HatcheditCommand::with_handle(
+                                    handle,
+                                    model.name.clone(),
+                                    scale,
+                                    angle,
+                                    annotative,
+                                )
+                                .with_appearance(entity, current_color, current_transparency)
+                                .with_origin(current_origin),
+                            );
                             self.command_line.push_info(&cmd.prompt());
                             self.tabs[i].active_cmd = Some(cmd);
                         } else {

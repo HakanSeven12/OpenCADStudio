@@ -29,9 +29,10 @@ action =
 
 ribbon-tab =
     .draw = رسم
+    .parametric = بارامتري
     .annotate = تعليقات توضيحية
     .insert = إدراج
-    .model = النمذجة
+    .model = نموذج
     .layout = تخطيط
     .manage = إدارة
     .view = عرض

@@ -29,9 +29,10 @@ action =
 
 ribbon-tab =
     .draw = ड्रॉ
+    .parametric = पैरामीट्रिक
     .annotate = एनोटेट
     .insert = सम्मिलित करें
-    .model = मॉडलिंग
+    .model = मॉडल
     .layout = लेआउट
     .manage = प्रबंधित करें
     .view = देखें

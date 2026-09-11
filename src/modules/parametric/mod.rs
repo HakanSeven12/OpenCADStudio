@@ -36,3 +36,46 @@ pub use tools::{
     tangent, vertical,
 };
 pub use value::{angle_tool, distance_tool, AngleConstraintCommand, DistanceConstraintCommand};
+
+use crate::modules::{CadModule, RibbonGroup};
+
+pub struct ParametricModule;
+
+impl CadModule for ParametricModule {
+    fn id(&self) -> &'static str {
+        "parametric"
+    }
+
+    fn title(&self) -> &'static str {
+        "Parametric"
+    }
+
+    fn ribbon_groups(&self) -> &[RibbonGroup] {
+        static GROUPS: std::sync::OnceLock<Vec<RibbonGroup>> = std::sync::OnceLock::new();
+        GROUPS.get_or_init(|| {
+            vec![RibbonGroup {
+                title: "Constraints",
+                tools: vec![
+                    horizontal::tool().into(),
+                    vertical::tool().into(),
+                    parallel::tool().into(),
+                    perpendicular::tool().into(),
+                    equal::tool().into(),
+                    tangent::tool().into(),
+                    normal::tool().into(),
+                    coincident_tool::tool().into(),
+                    distance_tool::tool().into(),
+                    angle_tool::tool().into(),
+                    concentric::tool().into(),
+                    colinear::tool().into(),
+                    fixed::tool().into(),
+                    symmetric::tool().into(),
+                    center_point_tool::tool().into(),
+                    midpoint_tool::tool().into(),
+                    point_on_curve_tool::tool().into(),
+                    equal_distance_tool::tool().into(),
+                ],
+            }]
+        })
+    }
+}

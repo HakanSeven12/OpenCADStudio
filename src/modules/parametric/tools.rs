@@ -9,7 +9,7 @@ pub mod horizontal {
             id: "HCONSTRAINT",
             label: "Horizontal",
             icon: IconKind::Svg(include_bytes!(
-                "../../../../assets/icons/constrain/horizontal.svg"
+                "../../../assets/icons/constrain/horizontal.svg"
             )),
             event: ModuleEvent::Command("HCONSTRAINT".to_string()),
         }
@@ -23,7 +23,7 @@ pub mod vertical {
             id: "VCONSTRAINT",
             label: "Vertical",
             icon: IconKind::Svg(include_bytes!(
-                "../../../../assets/icons/constrain/vertical.svg"
+                "../../../assets/icons/constrain/vertical.svg"
             )),
             event: ModuleEvent::Command("VCONSTRAINT".to_string()),
         }
@@ -37,7 +37,7 @@ pub mod parallel {
             id: "PCONSTRAINT",
             label: "Parallel",
             icon: IconKind::Svg(include_bytes!(
-                "../../../../assets/icons/constrain/parallel.svg"
+                "../../../assets/icons/constrain/parallel.svg"
             )),
             event: ModuleEvent::Command("PCONSTRAINT".to_string()),
         }
@@ -51,7 +51,7 @@ pub mod perpendicular {
             id: "QCONSTRAINT",
             label: "Perpendicular",
             icon: IconKind::Svg(include_bytes!(
-                "../../../../assets/icons/constrain/perpendicular.svg"
+                "../../../assets/icons/constrain/perpendicular.svg"
             )),
             event: ModuleEvent::Command("QCONSTRAINT".to_string()),
         }
@@ -65,7 +65,7 @@ pub mod equal {
             id: "ECONSTRAINT",
             label: "Equal",
             icon: IconKind::Svg(include_bytes!(
-                "../../../../assets/icons/constrain/equal.svg"
+                "../../../assets/icons/constrain/equal.svg"
             )),
             event: ModuleEvent::Command("ECONSTRAINT".to_string()),
         }
@@ -79,7 +79,7 @@ pub mod tangent {
             id: "TCONSTRAINT",
             label: "Tangent",
             icon: IconKind::Svg(include_bytes!(
-                "../../../../assets/icons/constrain/tangent.svg"
+                "../../../assets/icons/constrain/tangent.svg"
             )),
             event: ModuleEvent::Command("TCONSTRAINT".to_string()),
         }
@@ -93,7 +93,7 @@ pub mod concentric {
             id: "NCONSTRAINT",
             label: "Concentric",
             icon: IconKind::Svg(include_bytes!(
-                "../../../../assets/icons/constrain/concentric.svg"
+                "../../../assets/icons/constrain/concentric.svg"
             )),
             event: ModuleEvent::Command("NCONSTRAINT".to_string()),
         }
@@ -114,7 +114,7 @@ pub mod normal {
             id: "NRCONSTRAINT",
             label: "Normal",
             icon: IconKind::Svg(include_bytes!(
-                "../../../../assets/icons/constrain/normal.svg"
+                "../../../assets/icons/constrain/normal.svg"
             )),
             event: ModuleEvent::Command("NRCONSTRAINT".to_string()),
         }
@@ -128,7 +128,7 @@ pub mod colinear {
             id: "LCONSTRAINT",
             label: "Colinear",
             icon: IconKind::Svg(include_bytes!(
-                "../../../../assets/icons/constrain/colinear.svg"
+                "../../../assets/icons/constrain/colinear.svg"
             )),
             event: ModuleEvent::Command("LCONSTRAINT".to_string()),
         }
@@ -142,7 +142,7 @@ pub mod fixed {
             id: "FXCONSTRAINT",
             label: "Fixed",
             icon: IconKind::Svg(include_bytes!(
-                "../../../../assets/icons/constrain/fixed.svg"
+                "../../../assets/icons/constrain/fixed.svg"
             )),
             event: ModuleEvent::Command("FXCONSTRAINT".to_string()),
         }
@@ -156,7 +156,7 @@ pub mod symmetric {
             id: "SYCONSTRAINT",
             label: "Symmetric",
             icon: IconKind::Svg(include_bytes!(
-                "../../../../assets/icons/constrain/symmetric.svg"
+                "../../../assets/icons/constrain/symmetric.svg"
             )),
             event: ModuleEvent::Command("SYCONSTRAINT".to_string()),
         }

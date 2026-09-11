@@ -14,6 +14,7 @@ use crate::modules::CadModule;
 pub fn all_modules() -> Vec<Box<dyn CadModule>> {
     vec![
         Box::new(super::draw::DrawModule),
+        Box::new(super::parametric::ParametricModule),
         Box::new(super::model::ModelModule),
         Box::new(super::insert::InsertModule),
         Box::new(super::annotate::AnnotateModule),

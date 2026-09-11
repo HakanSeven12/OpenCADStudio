@@ -29,9 +29,10 @@ action =
 
 ribbon-tab =
     .draw = Начертить
+    .parametric = Параметрический
     .annotate = Аннотации
     .insert = Вставка
-    .model = Моделирование
+    .model = Модель
     .layout = Расположение
     .manage = Управление
     .view = Просмотр

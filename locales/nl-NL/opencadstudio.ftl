@@ -29,6 +29,7 @@ action =
 
 ribbon-tab =
     .draw = Tekenen
+    .parametric = Parametrisch
     .annotate = Annoteren
     .insert = Invoegen
     .model = Model

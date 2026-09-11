@@ -29,9 +29,10 @@ action =
 
 ribbon-tab =
     .draw = Çizim
+    .parametric = Parametrik
     .annotate = Açıklama
     .insert = Ekle
-    .model = Modelleme
+    .model = Model
     .layout = Yerleşim
     .manage = Yönet
     .view = Görünüm

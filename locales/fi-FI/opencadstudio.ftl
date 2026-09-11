@@ -29,9 +29,10 @@ action =
 
 ribbon-tab =
     .draw = Piirrä
+    .parametric = Parametrinen
     .annotate = Merkinnät
     .insert = Lisää
-    .model = Mallinnus
+    .model = Malli
     .layout = Asettelu
     .manage = Hallinta
     .view = Näkymä

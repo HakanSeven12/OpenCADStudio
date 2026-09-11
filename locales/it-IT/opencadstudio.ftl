@@ -29,9 +29,10 @@ action =
 
 ribbon-tab =
     .draw = Disegno
+    .parametric = Parametrico
     .annotate = Annotazione
     .insert = Inserisci
-    .model = Modellazione
+    .model = Modello
     .layout = Disposizione
     .manage = Gestisci
     .view = Vista

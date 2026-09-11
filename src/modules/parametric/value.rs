@@ -53,7 +53,7 @@ pub mod distance_tool {
             id: "DCONSTRAINT",
             label: "Distance",
             icon: IconKind::Svg(include_bytes!(
-                "../../../../assets/icons/constrain/distance.svg"
+                "../../../assets/icons/constrain/distance.svg"
             )),
             event: ModuleEvent::Command("DCONSTRAINT".to_string()),
         }
@@ -67,7 +67,7 @@ pub mod angle_tool {
             id: "ACONSTRAINT",
             label: "Angle",
             icon: IconKind::Svg(include_bytes!(
-                "../../../../assets/icons/constrain/angle.svg"
+                "../../../assets/icons/constrain/angle.svg"
             )),
             event: ModuleEvent::Command("ACONSTRAINT".to_string()),
         }

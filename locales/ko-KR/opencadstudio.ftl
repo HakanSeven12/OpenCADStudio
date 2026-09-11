@@ -29,9 +29,10 @@ action =
 
 ribbon-tab =
     .draw = 그리기
+    .parametric = 파라메트릭
     .annotate = 주석
     .insert = 삽입
-    .model = 모델링
+    .model = 모델
     .layout = 배치
     .manage = 관리
     .view = 보기

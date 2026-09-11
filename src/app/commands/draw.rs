@@ -1006,14 +1006,14 @@ impl OpenCADStudio {
             }
 
             "CCONSTRAINT" => {
-                use crate::modules::draw::constrain::CoincidentConstraintCommand;
+                use crate::modules::parametric::CoincidentConstraintCommand;
                 let new_cmd = CoincidentConstraintCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
             "EDCONSTRAINT" => {
-                use crate::modules::draw::constrain::EqualDistanceConstraintCommand;
+                use crate::modules::parametric::EqualDistanceConstraintCommand;
                 let new_cmd = EqualDistanceConstraintCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
@@ -1106,7 +1106,7 @@ impl OpenCADStudio {
                         "Select exactly one entity (the circle or line the point should attach to), then run this constraint again.",
                     );
                 } else {
-                    use crate::modules::draw::constrain::PointOnEntityConstraintCommand;
+                    use crate::modules::parametric::PointOnEntityConstraintCommand;
                     use crate::scene::sketch_constraints::ConstraintKind;
                     let (name, kind, label) = match cmd {
                         "CPCONSTRAINT" => ("CPCONSTRAINT", ConstraintKind::CenterPoint, "Center point constraint"),
@@ -1130,7 +1130,7 @@ impl OpenCADStudio {
                     self.command_line
                         .push_output("Select exactly one line or circle, then run this constraint again.");
                 } else {
-                    use crate::modules::draw::constrain::DistanceConstraintCommand;
+                    use crate::modules::parametric::DistanceConstraintCommand;
                     match DistanceConstraintCommand::new(&self.tabs[i].scene, handles[0]) {
                         Some(new_cmd) => {
                             self.command_line.push_info(&new_cmd.prompt());
@@ -1153,7 +1153,7 @@ impl OpenCADStudio {
                         "Select exactly two lines (first = reference, second = the one that rotates), then run this constraint again.",
                     );
                 } else {
-                    use crate::modules::draw::constrain::AngleConstraintCommand;
+                    use crate::modules::parametric::AngleConstraintCommand;
                     match AngleConstraintCommand::new(&self.tabs[i].scene, handles[0], handles[1]) {
                         Some(new_cmd) => {
                             self.command_line.push_info(&new_cmd.prompt());

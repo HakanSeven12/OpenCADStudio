@@ -29,9 +29,10 @@ action =
 
 ribbon-tab =
     .draw = Rajz
+    .parametric = Parametrikus
     .annotate = Feliratozás
     .insert = Beszúrás
-    .model = Modellezés
+    .model = Modell
     .layout = Elrendezés
     .manage = Kezelés
     .view = Nézet

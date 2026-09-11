@@ -29,9 +29,10 @@ action =
 
 ribbon-tab =
     .draw = Σχεδίαση
+    .parametric = Παραμετρικό
     .annotate = Επισημείωση
     .insert = Εισαγωγή
-    .model = Μοντελοποίηση
+    .model = Μοντέλο
     .layout = Διάταξη
     .manage = Διαχείριση
     .view = Προβολή

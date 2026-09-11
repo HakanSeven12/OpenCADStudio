@@ -29,9 +29,10 @@ action =
 
 ribbon-tab =
     .draw = 繪製
+    .parametric = 參數化
     .annotate = 註解
     .insert = 插入
-    .model = 建模
+    .model = 模型
     .layout = 配置
     .manage = 管理
     .view = 視圖

@@ -47,7 +47,7 @@ impl CadModule for ModelModule {
         "model"
     }
     fn title(&self) -> &'static str {
-        "Modelling"
+        "Model"
     }
 
     fn ribbon_groups(&self) -> &[RibbonGroup] {

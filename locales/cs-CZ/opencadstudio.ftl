@@ -29,9 +29,10 @@ action =
 
 ribbon-tab =
     .draw = Kreslení
+    .parametric = Parametrické
     .annotate = Poznámky
     .insert = Vložit
-    .model = Modelování
+    .model = Model
     .layout = Rozvržení
     .manage = Správa
     .view = Zobrazení

@@ -339,6 +339,7 @@ fn format_values(template: &str, rendered: &str) -> Option<Vec<String>> {
 pub fn ribbon_module_title(id: &str, fallback: &str) -> String {
     match id {
         "draw" => crate::tr!("ribbon-tab", "draw"),
+        "parametric" => crate::tr!("ribbon-tab", "parametric"),
         "annotate" => crate::tr!("ribbon-tab", "annotate"),
         "insert" => crate::tr!("ribbon-tab", "insert"),
         "model" => crate::tr!("ribbon-tab", "model"),

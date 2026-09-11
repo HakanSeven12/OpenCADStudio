@@ -57,7 +57,7 @@ impl SketchRef {
 /// click" vocabulary, one layer above the `cadkernel_constraints` primitives each maps
 /// onto (that mapping is `constraint_map`, a later stage; see the design
 /// doc §2). Named and grouped the same way the existing one-shot ribbon
-/// tools are (`crate::modules::draw::constrain::tools`), plus the
+/// tools are (`crate::modules::parametric::tools`), plus the
 /// endpoint-picking kinds (`Coincident`, `Radius`, `Tangent`) that one-shot
 /// group never needed.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -390,7 +390,7 @@ pub(crate) fn infer_coincident_refs(
 
 impl ConstraintKind {
     /// The short symbol a constraint glyph shows — matches the existing
-    /// ribbon icons (`crate::modules::draw::constrain::{tools,value}`) for
+    /// ribbon icons (`crate::modules::parametric::{tools,value}`) for
     /// the kinds that have a one-click button, so the same glyph means the
     /// same thing in both places.
     pub fn glyph_symbol(&self) -> &'static str {

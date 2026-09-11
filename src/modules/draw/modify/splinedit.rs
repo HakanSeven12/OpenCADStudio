@@ -109,10 +109,24 @@ impl SplineditCommand {
             let current = usize::try_from(source.degree).ok()?;
             if degree <= current || degree > 25 { return None; }
             let weights = if source.weights.is_empty() { vec![1.0; source.control_points.len()] } else { source.weights.clone() };
-            let curve = cadkernel::space::NurbsCurve3::new_strict(current,
-                source.control_points.iter().map(|point| [point.x, point.y, point.z]).collect(),
-                source.knots.clone(), weights)?
-                .with_periodicity(source.flags.closed || source.flags.periodic)
+            let curve = if source.control_points.is_empty() && source.fit_points.len() >= 2 {
+                use cadkernel::space::{NurbsCurve3, Parameterization};
+                let points: Vec<_> = source.fit_points.iter().map(|point| [point.x, point.y, point.z]).collect();
+                let parameterization = match source.knot_parameterization {
+                    1 => Parameterization::Centripetal, 2 => Parameterization::Uniform, _ => Parameterization::Chord,
+                };
+                let tangent = |point: &Vector3| (point.x != 0.0 || point.y != 0.0 || point.z != 0.0).then_some([point.x, point.y, point.z]);
+                if source.flags.closed || source.flags.periodic {
+                    NurbsCurve3::interpolate_periodic(&points, parameterization)?
+                } else {
+                    NurbsCurve3::interpolate_fit(&points, tangent(&source.begin_tangent), tangent(&source.end_tangent), parameterization)?
+                }
+            } else {
+                cadkernel::space::NurbsCurve3::new_strict(current,
+                    source.control_points.iter().map(|point| [point.x, point.y, point.z]).collect(),
+                    source.knots.clone(), weights)?
+            };
+            let curve = curve.with_periodicity(source.flags.closed || source.flags.periodic)
                 .elevated(degree - current)?
                 .compact_knots(source.control_tolerance.max(1e-9))?;
             let mut result = source.clone();

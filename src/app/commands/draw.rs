@@ -1153,7 +1153,9 @@ impl OpenCADStudio {
                     .filter(|(handle, _)| !sources.contains(handle))
                     .filter_map(|(_, entity)| crate::entities::curve::entity_curve(entity))
                     .collect();
-                if let Some(plane) = cadkernel::space::common_curve_plane(&open_curves, 1.0e-6) {
+                let open_plane = cadkernel::space::common_curve_plane(&open_curves, 1.0e-6);
+                let open_plane_rejected = !open_curves.is_empty() && open_plane.is_none();
+                if let Some(plane) = open_plane {
                 let working_plane = crate::command::WorkingPlane::new(
                     glam::DVec3::from_array(plane.origin),
                     glam::DVec3::from_array(plane.x_axis),
@@ -1184,12 +1186,14 @@ impl OpenCADStudio {
                     regions.push((region, body));
                     sources.extend(crate::scene::ring_source_handles(&ring, &boundary_sources));
                 }
-                } else if !open_curves.is_empty() {
-                    self.command_line.push_error("REGION: open objects must form coplanar, noncollinear boundaries.");
+                } else if open_plane_rejected {
+                    self.command_line.push_error("Open objects must be coplanar.");
                 }
                 if regions.is_empty() {
-                    self.command_line
-                        .push_error(crate::t!("REGION: select closed polylines or circles.").as_ref());
+                    if !open_plane_rejected {
+                        self.command_line
+                            .push_error(crate::t!("REGION: select closed polylines or circles.").as_ref());
+                    }
                 } else {
                     self.push_undo_snapshot(i, "REGION");
                     let count = regions.len();

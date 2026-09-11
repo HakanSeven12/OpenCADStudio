@@ -107,6 +107,17 @@ pub fn join_to_source(source: &EntityType, candidates: &[(Handle, &EntityType)])
                 (EntityType::Spline(source), candidate) => {
                     let curve = |s:&acadrust::entities::Spline| {
                         if s.flags.closed || s.flags.periodic {return None;}
+                        if s.control_points.is_empty() && s.fit_points.len() >= 2 {
+                            use cadkernel::space::{NurbsCurve3, Parameterization};
+                            let points: Vec<_> = s.fit_points.iter().map(|point| [point.x,point.y,point.z]).collect();
+                            let parameterization = match s.knot_parameterization {
+                                1 => Parameterization::Centripetal, 2 => Parameterization::Uniform, _ => Parameterization::Chord,
+                            };
+                            let tangent = |point: &Vector3| (point.x != 0.0 || point.y != 0.0 || point.z != 0.0)
+                                .then_some([point.x,point.y,point.z]);
+                            return NurbsCurve3::interpolate_fit(&points,tangent(&s.begin_tangent),tangent(&s.end_tangent),parameterization)?
+                                .compact_knots(s.control_tolerance.max(1e-9));
+                        }
                         let weights=if s.weights.is_empty(){vec![1.0;s.control_points.len()]}else{s.weights.clone()};
                         cadkernel::space::NurbsCurve3::new_strict(s.degree as usize,s.control_points.iter().map(|p|[p.x,p.y,p.z]).collect(),s.knots.clone(),weights)
                     };

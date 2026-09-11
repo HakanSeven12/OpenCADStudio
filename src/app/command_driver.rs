@@ -4455,7 +4455,7 @@ impl OpenCADStudio {
                     self.command_line
                         .push_error(crate::t!("HATCHEDIT: hatch entity not found.").as_ref());
                 } else {
-                    use crate::command::HatchEditOperation;
+                    use crate::command::{CadCommand, HatchEditOperation};
                     if matches!(&operation,HatchEditOperation::BeginAssociate) {
                         let associative=matches!(self.tabs[i].scene.document.get_entity(handle),Some(acadrust::EntityType::Hatch(h)) if h.is_associative);
                         if associative {

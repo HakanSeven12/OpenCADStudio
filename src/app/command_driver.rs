@@ -3263,6 +3263,26 @@ impl OpenCADStudio {
                     self.command_line.push_info(&p);
                 }
             }
+            CmdResult::JoinToSource { source, handles } => {
+                if self.reject_locked_edit(i, source) { return Task::none(); }
+                let joined = self.tabs[i].scene.document.get_entity(source).and_then(|entity| {
+                    let candidates: Vec<_> = handles.iter().filter(|handle| **handle != source && !self.tabs[i].scene.is_layer_locked(**handle))
+                        .filter_map(|handle| self.tabs[i].scene.document.get_entity(*handle).map(|entity| (*handle,entity))).collect();
+                    crate::modules::draw::modify::join::join_to_source(entity,&candidates)
+                });
+                if let Some((replacement, consumed)) = joined {
+                    self.push_undo_snapshot(i,"JOIN");
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(source) { *entity = replacement; }
+                    self.tabs[i].scene.erase_entities(&consumed);
+                    self.tabs[i].scene.refresh_fill_model(source);
+                    self.tabs[i].scene.bump_entities(&[(source,crate::scene::ChangeKind::Modified)]);
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output(&format!("JOIN: {} objects joined to source.",consumed.len()));
+                    self.refresh_properties();
+                } else { self.command_line.push_info("JOIN: no compatible objects joined to source."); }
+                self.tabs[i].active_cmd = None; self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire(); self.restore_pre_cmd_tangent();
+            }
             CmdResult::JoinEntities(handles) => {
                 if let Some(handle) = handles
                     .iter()

@@ -12,62 +12,98 @@
 use acadrust::types::{Vector2, Vector3};
 use acadrust::{EntityType, Handle};
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
 
 // ── Command ────────────────────────────────────────────────────────────────
 
 pub struct JoinCommand {
+    source: Option<(Handle, EntityType)>,
+    picked: Option<EntityType>,
     handles: Vec<Handle>,
-    gathering: bool,
 }
-
 impl JoinCommand {
-    pub fn new() -> Self {
-        Self {
-            handles: vec![],
-            gathering: true,
-        }
+    pub fn new() -> Self { Self { source: None, picked: None, handles: Vec::new() } }
+    pub fn with_source(mut self, handle: Handle, entity: EntityType) -> Self {
+        self.picked = Some(entity); self.on_entity_pick(handle, DVec3::ZERO); self
     }
 }
-
 impl CadCommand for JoinCommand {
-    fn name(&self) -> &'static str {
-        "JOIN"
-    }
-
+    fn name(&self) -> &'static str { "JOIN" }
     fn prompt(&self) -> String {
-        t!(
-            "JOIN  Select objects to join (%{count} selected, Enter to apply):",
-            count = self.handles.len()
-        )
-        .into_owned()
-    }
-
-    fn is_selection_gathering(&self) -> bool {
-        self.gathering
-    }
-
-    fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
-        self.handles = handles;
-        CmdResult::NeedPoint
-    }
-
-    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
-        CmdResult::NeedPoint
-    }
-
-    fn on_enter(&mut self) -> CmdResult {
-        if self.handles.len() < 2 {
-            return CmdResult::Cancel;
+        match self.source.as_ref().map(|(_, entity)| entity) {
+            None => "JOIN  Select source object:".into(),
+            Some(EntityType::Line(_)) => "JOIN  Select lines to join to source (Enter to apply):".into(),
+            Some(EntityType::Arc(_)) => "JOIN  Select arcs to join to source (Enter to apply):".into(),
+            _ => "JOIN  Select objects to join to source (Enter to apply):".into(),
         }
-        self.gathering = false;
-        CmdResult::JoinEntities(self.handles.clone())
+    }
+    fn needs_entity_pick(&self) -> bool { self.source.is_none() }
+    fn inject_before_entity_pick(&self) -> bool { true }
+    fn inject_picked_entity(&mut self, entity: EntityType) { self.picked = Some(entity); }
+    fn on_entity_pick(&mut self, handle: Handle, _: DVec3) -> CmdResult {
+        if handle.is_null() { return CmdResult::NeedPoint; }
+        if let Some(entity) = self.picked.take() {
+            let supported = match &entity {
+                EntityType::Line(_) | EntityType::Arc(_) => true,
+                EntityType::LwPolyline(p) => !p.is_closed,
+                EntityType::Polyline2D(p) => !p.is_closed(),
+                _ => false,
+            };
+            if supported { self.source = Some((handle, entity)); }
+        }
+        CmdResult::NeedPoint
+    }
+    fn is_selection_gathering(&self) -> bool { self.source.is_some() }
+    fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
+        self.handles = handles.into_iter().filter(|handle| self.source.as_ref().is_none_or(|(source,_)| handle != source)).collect(); CmdResult::NeedPoint
+    }
+    fn on_point(&mut self, _: DVec3) -> CmdResult { CmdResult::NeedPoint }
+    fn on_enter(&mut self) -> CmdResult {
+        let Some((source, _)) = self.source.as_ref() else { return CmdResult::Cancel; };
+        if self.handles.is_empty() { return CmdResult::Cancel; }
+        CmdResult::JoinToSource { source: *source, handles: self.handles.clone() }
     }
 }
 
-// ── Geometry ───────────────────────────────────────────────────────────────
+/// Join compatible candidates while preserving the source identity and style.
+pub fn join_to_source(source: &EntityType, candidates: &[(Handle, &EntityType)]) -> Option<(EntityType, Vec<Handle>)> {
+    let mut result = source.clone(); let mut consumed = Vec::new();
+    loop {
+        let mut progress = false;
+        for (handle, candidate) in candidates {
+            if consumed.contains(handle) { continue; }
+            let next = match (&result, *candidate) {
+                (EntityType::Line(a), EntityType::Line(b)) => {
+                    let point = |p: &Vector3| [p.x,p.y,p.z];
+                    cadkernel::space::source_join::join_collinear_lines([point(&a.start),point(&a.end)],[point(&b.start),point(&b.end)],JOIN_EPS).map(|span| {
+                        let mut line = a.clone(); line.start = Vector3::new(span[0][0],span[0][1],span[0][2]); line.end = Vector3::new(span[1][0],span[1][1],span[1][2]); EntityType::Line(line)
+                    })
+                }
+                (EntityType::Arc(a), EntityType::Arc(b)) => {
+                    let data = |a: &acadrust::entities::Arc| ([a.center.x,a.center.y,a.center.z],[a.normal.x,a.normal.y,a.normal.z],a.radius,[a.start_angle,a.end_angle]);
+                    cadkernel::space::source_join::join_cocircular_arcs(data(a),data(b),JOIN_EPS).map(|span| {
+                        if span[1]-span[0] >= std::f64::consts::TAU {
+                            let mut circle = acadrust::entities::Circle::new(); circle.common = a.common.clone(); circle.center = a.center.clone(); circle.normal = a.normal.clone(); circle.radius = a.radius; circle.thickness = a.thickness; EntityType::Circle(circle)
+                        } else { let mut arc = a.clone(); arc.start_angle = span[0]; arc.end_angle = span[1].rem_euclid(std::f64::consts::TAU); EntityType::Arc(arc) }
+                    })
+                }
+                (EntityType::LwPolyline(_) | EntityType::Polyline2D(_), _) => {
+                    join_entities(&[(result.common().handle,&result),(*handle,*candidate)]).and_then(|(_,mut entities)| {
+                        let entity = entities.pop()?;
+                        if matches!(&entity,EntityType::Line(_)) { super::pedit::convert_to_polyline(&entity) } else { Some(entity) }
+                    })
+                }
+                _ => None,
+            };
+            if let Some(mut entity) = next {
+                *entity.common_mut() = source.common().clone(); result = entity; consumed.push(*handle); progress = true;
+            }
+        }
+        if !progress { break; }
+    }
+    (!consumed.is_empty()).then_some((result,consumed))
+}
 
 /// Endpoint-match tolerance (model units). Segments split from a shared
 /// vertex meet exactly, so this only absorbs float noise.

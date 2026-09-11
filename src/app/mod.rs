@@ -307,6 +307,7 @@ struct AddSelectedRestore {
     layer_name: String,
     layer_handle: acadrust::types::Handle,
     color: AcadColor,
+    transparency: acadrust::types::Transparency,
     linetype_name: String,
     linetype_handle: acadrust::types::Handle,
     line_weight: i16,

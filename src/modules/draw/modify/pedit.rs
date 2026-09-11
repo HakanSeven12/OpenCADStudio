@@ -31,6 +31,7 @@ enum Mode {
     PickTarget,
     MultipleGather,
     MultipleConvert,
+    MultipleJoin,
     Options,
     /// Picked a Line/Arc: asking "Turn it into one? [Yes/No]".
     ConvertPrompt(Handle),
@@ -234,6 +235,7 @@ impl CadCommand for PeditCommand {
                 t!("PEDIT  Select polyline (or a line/arc to convert) or [Multiple]:").into_owned()
             }
             Mode::MultipleGather => format!("PEDIT  Select objects ({} selected, Enter when done):", self.multiple.len()),
+            Mode::MultipleJoin => "PEDIT  Enter fuzz distance <0>:".to_string(),
             Mode::MultipleConvert => t!("PEDIT  Convert lines and arcs to polylines [Yes/No] <Yes>:").into_owned(),
             Mode::ConvertPrompt(_) => t!(
                 "PEDIT  Object is not a polyline. Turn it into one?  [Yes/No] <Y>:"
@@ -392,6 +394,8 @@ impl CadCommand for PeditCommand {
                     mesh_closed: None,
                 },
             );
+            let mut seen = std::collections::HashSet::new();
+            self.multiple.retain(|handle| seen.insert(*handle));
             self.target = Some(nh);
             self.mode = Mode::Options;
         }
@@ -433,6 +437,13 @@ impl CadCommand for PeditCommand {
                 if matches!(up.as_str(), "M" | "MULTIPLE") { self.mode = Mode::MultipleGather; Some(CmdResult::NeedPoint) } else { None }
             }
             Mode::MultipleGather => None,
+            Mode::MultipleJoin => {
+                let fuzz = text.trim().parse::<f64>().ok()?;
+                if fuzz != 0.0 { return Some(CmdResult::ReportError("PEDIT: only zero fuzz distance is currently supported.".to_string())); }
+                self.pending_multiple = Some(self.multiple.clone());
+                self.mode = Mode::Options;
+                return Some(CmdResult::PeditOp { handle: self.target?, op: PeditOp::JoinSelection(self.multiple.clone()) });
+            },
             Mode::MultipleConvert => {
                 match up.as_str() {
                     "Y" | "YES" | "" => {
@@ -443,8 +454,8 @@ impl CadCommand for PeditCommand {
                     "N" | "NO" => {
                         self.multiple.retain(|handle| self.info.get(&handle.value()).is_some_and(|info| info.is_poly));
                         self.target = self.multiple.first().copied();
-                        self.mode = Mode::Options;
-                        Some(if self.target.is_some() { CmdResult::NeedPoint } else { CmdResult::Cancel })
+                        self.mode = if self.target.is_some() { Mode::Options } else { Mode::PickTarget };
+                        Some(CmdResult::NeedPoint)
                     }
                     _ => Some(CmdResult::NeedPoint),
                 }
@@ -665,7 +676,7 @@ impl CadCommand for PeditCommand {
                         Some(CmdResult::NeedPoint)
                     }
                     "J" | "JOIN" => {
-                        self.mode = Mode::JoinGather(vec![handle]);
+                        self.mode = if self.multiple.is_empty() { Mode::JoinGather(vec![handle]) } else { Mode::MultipleJoin };
                         Some(CmdResult::NeedPoint)
                     }
                     "F" | "FIT" => Some(CmdResult::PeditOp {
@@ -751,6 +762,7 @@ impl CadCommand for PeditCommand {
                 CmdResult::NeedPoint
             }
             Mode::MultipleConvert => self.on_text_input("Y").unwrap_or(CmdResult::NeedPoint),
+            Mode::MultipleJoin => self.on_text_input("0").unwrap_or(CmdResult::NeedPoint),
             Mode::PolyWidthStart(_, width) | Mode::PolyWidthEnd(_, width) => { let value = width.to_string(); self.on_text_input(&value).unwrap_or(CmdResult::NeedPoint) }
             Mode::PolyVertex(_) | Mode::PolyRange { .. } => self.on_text_input("N").unwrap_or(CmdResult::NeedPoint),
             Mode::PolyMove(_) | Mode::PolyInsert(_) => { self.mode = Mode::Options; CmdResult::NeedPoint }
@@ -788,6 +800,7 @@ impl CadCommand for PeditCommand {
 #[derive(Clone)]
 pub enum PeditOp {
     Multiple(Vec<Handle>, Box<PeditOp>),
+    JoinSelection(Vec<Handle>),
     SetClosed(bool),
     SetWidth(f64),
     SetVertexWidth { index: usize, start: f64, end: f64 },
@@ -853,7 +866,7 @@ pub fn edit_vertex_range(entity: &EntityType, first: usize, last: usize, split: 
 
 pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
     match op {
-        PeditOp::Multiple(_, _) | PeditOp::VertexRange { .. } => false,
+        PeditOp::Multiple(_, _) | PeditOp::JoinSelection(_) | PeditOp::VertexRange { .. } => false,
         PeditOp::SetVertexWidth { index, start, end } => {
             if !start.is_finite() || !end.is_finite() || *start < 0.0 || *end < 0.0 { return false; }
             match entity {

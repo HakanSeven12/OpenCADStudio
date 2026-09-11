@@ -3216,6 +3216,36 @@ impl OpenCADStudio {
                     apply_pedit, convert_to_polyline, PeditOp,
                 };
                 match &op {
+                    PeditOp::JoinSelection(handles) => {
+                        let mut available = handles.iter().filter_map(|handle| {
+                            if self.tabs[i].scene.is_layer_locked(*handle) { return None; }
+                            self.tabs[i].scene.document.get_entity(*handle).cloned().map(|entity| (*handle, entity))
+                        }).collect::<Vec<_>>();
+                        let mut changes = Vec::new();
+                        while !available.is_empty() {
+                            let (source_handle, source) = available.remove(0);
+                            let candidates = available.iter().map(|(handle, entity)| (*handle, entity)).collect::<Vec<_>>();
+                            if let Some((mut result, consumed)) = crate::modules::draw::modify::join::join_to_source(&source, &candidates) {
+                                *result.common_mut() = source.common().clone();
+                                available.retain(|(handle, _)| !consumed.contains(handle));
+                                changes.push((source_handle, result, consumed));
+                            }
+                        }
+                        if !changes.is_empty() {
+                            self.push_undo_snapshot(i, "PEDIT");
+                            for (source, replacement, consumed) in changes {
+                                self.tabs[i].scene.erase_entities(&consumed);
+                                self.tabs[i].scene.update_entity(replacement.clone());
+                                if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+                                    for old in consumed { command.on_entity_replaced(old, &[source]); }
+                                    command.inject_picked_entity(replacement);
+                                }
+                            }
+                            if let Some(command) = self.tabs[i].active_cmd.as_mut() { command.on_pedit_applied(); }
+                            self.tabs[i].dirty = true;
+                            self.refresh_properties();
+                        }
+                    }
                     PeditOp::Multiple(handles, operation) => {
                         let replacements: Vec<_> = handles.iter().filter(|handle| !self.tabs[i].scene.is_layer_locked(**handle)).filter_map(|handle| {
                             let original = self.tabs[i].scene.document.get_entity(*handle)?;

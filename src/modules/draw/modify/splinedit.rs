@@ -36,6 +36,8 @@ enum Step {
     Join,
     PolylinePrecision,
     FitOptions,
+    FitTangentStart,
+    FitTangentEnd { start: DVec3 },
     FitMove { index: usize },
     FitSelectMove,
     FitDelete,
@@ -109,11 +111,17 @@ impl SplineditCommand {
     fn replace_fit_points(&mut self, points: Vec<Vector3>) -> CmdResult {
         let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
         if points == source.fit_points { return CmdResult::NeedPoint; }
+        let mut result = source.clone();
+        result.fit_points = points;
+        self.rebuild_fit(result)
+    }
+
+    fn rebuild_fit(&mut self, mut result: acadrust::entities::Spline) -> CmdResult {
+        let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
         if source.fit_tolerance != 0.0 || source.weights.windows(2).any(|w| w[0] != w[1]) {
             return CmdResult::ReportError(crate::t!("Editing weighted or tolerance-fitted interpolation data is not supported.").into_owned());
         }
-        let mut result = source.clone();
-        result.fit_points = points; result.control_points.clear(); result.knots.clear(); result.weights.clear();
+        result.control_points.clear(); result.knots.clear(); result.weights.clear();
         let Some(curve) = spatial_spline(&result).and_then(|curve| curve.compact_knots(source.control_tolerance.max(1e-9))) else {
             return CmdResult::ReportError(crate::t!("Fit points do not define a valid spline.").into_owned());
         };
@@ -126,6 +134,33 @@ impl SplineditCommand {
         self.replace(result)
     }
 
+    fn purge_fit(&mut self) -> CmdResult {
+        let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
+        let mut result = source.clone();
+        if result.control_points.is_empty() {
+            if result.fit_tolerance != 0.0 { return CmdResult::ReportError(crate::t!("Fit data cannot be purged without a stored control curve.").into_owned()); }
+            let Some(curve) = spatial_spline(source).and_then(|c| c.compact_knots(source.control_tolerance.max(1e-9))) else {
+                return CmdResult::ReportError(crate::t!("Fit data does not define a valid control curve.").into_owned());
+            };
+            result.degree = curve.degree() as i32;
+            result.control_points = curve.control_points().iter().map(|p| Vector3::new(p[0],p[1],p[2])).collect();
+            result.knots = curve.knots().to_vec(); result.weights = curve.weights().to_vec();
+        }
+        result.fit_points.clear(); result.begin_tangent = Vector3::ZERO; result.end_tangent = Vector3::ZERO;
+        result.dwg_flags1 &= !1; result.dxf_flags &= !(32 | 1024);
+        self.step = Step::Options;
+        self.replace(result)
+    }
+
+    fn finish_fit_tangents(&mut self, start: DVec3, end: DVec3) -> CmdResult {
+        let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
+        self.step = Step::FitOptions;
+        let begin = Vector3::new(start.x,start.y,start.z);
+        let end = Vector3::new(end.x,end.y,end.z);
+        if source.begin_tangent == begin && source.end_tangent == end { return CmdResult::NeedPoint; }
+        let mut result = source.clone(); result.begin_tangent = begin; result.end_tangent = end;
+        self.rebuild_fit(result)
+    }
     fn picked_from_points(&self, point: DVec3, points: &[Vector3]) -> Option<usize> {
         let context = self.pick_context?;
         let project = |point: DVec3| {
@@ -218,7 +253,10 @@ impl CadCommand for SplineditCommand {
     fn name(&self) -> &'static str { "SPLINEDIT" }
     fn prompt(&self) -> String {
         match self.step {
-            Step::FitOptions => crate::t!("SPLINEDIT  Fit data [Add/Delete/Move/eXit] <eXit>:").into_owned(),
+            Step::FitOptions if self.closed() => crate::t!("SPLINEDIT  Fit data [Add/Delete/Move/Purge/eXit] <eXit>:").into_owned(),
+            Step::FitOptions => crate::t!("SPLINEDIT  Fit data [Add/Delete/Move/Purge/Tangents/eXit] <eXit>:").into_owned(),
+            Step::FitTangentStart => crate::t!("SPLINEDIT  Specify start tangent or [System default]:").into_owned(),
+            Step::FitTangentEnd { .. } => crate::t!("SPLINEDIT  Specify end tangent or [System default]:").into_owned(),
             Step::FitMove { .. } => crate::t!("SPLINEDIT  Specify new location or [Next/Previous/Select point/eXit] <Next>:").into_owned(),
             Step::FitSelectMove | Step::FitDelete | Step::FitAddPick => crate::t!("SPLINEDIT  Specify existing fit point on spline <exit>:").into_owned(),
             Step::FitAddNew { first: true, .. } => crate::t!("SPLINEDIT  Specify new point or [After/Before] <exit>:").into_owned(),
@@ -242,7 +280,12 @@ impl CadCommand for SplineditCommand {
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
         match self.step {
-            Step::FitOptions => vec![CmdOption::new("Add", "A"), CmdOption::new("Delete", "D"), CmdOption::new("Move", "M"), CmdOption::new("Exit", "X")],
+            Step::FitOptions => {
+                let mut options = vec![CmdOption::new("Add", "A"), CmdOption::new("Delete", "D"), CmdOption::new("Move", "M"), CmdOption::new("Purge", "P")];
+                if !self.closed() { options.push(CmdOption::new("Tangents", "T")); }
+                options.push(CmdOption::new("Exit", "X")); options
+            },
+            Step::FitTangentStart | Step::FitTangentEnd { .. } => vec![CmdOption::new("System default", "S")],
             Step::FitMove { .. } => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Select point", "S"), CmdOption::new("Exit", "X")],
             Step::FitAddNew { first: true, .. } => vec![CmdOption::new("After", "A"), CmdOption::new("Before", "B")],
             Step::Options => {
@@ -285,7 +328,7 @@ impl CadCommand for SplineditCommand {
             }
         }
     }
-    fn wants_text_input(&self) -> bool { !matches!(self.step, Step::SelectSpline | Step::Join | Step::Add | Step::Delete | Step::Move { .. } | Step::SelectVertex { .. } | Step::FitMove { .. } | Step::FitSelectMove | Step::FitDelete | Step::FitAddPick | Step::FitAddNew { .. }) }
+    fn wants_text_input(&self) -> bool { !matches!(self.step, Step::SelectSpline | Step::Join | Step::Add | Step::Delete | Step::FitTangentStart | Step::FitTangentEnd { .. } | Step::Move { .. } | Step::SelectVertex { .. } | Step::FitMove { .. } | Step::FitSelectMove | Step::FitDelete | Step::FitAddPick | Step::FitAddNew { .. }) }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let upper = text.trim().to_uppercase();
         if upper.is_empty() { return Some(self.on_enter()); }
@@ -321,9 +364,13 @@ impl CadCommand for SplineditCommand {
                 "A" | "ADD" => self.step = Step::FitAddPick,
                 "D" | "DELETE" => self.step = Step::FitDelete,
                 "M" | "MOVE" => self.step = Step::FitMove { index: 0 },
+                "P" | "PURGE" => return Some(self.purge_fit()),
+                "T" | "TANGENTS" if !self.closed() => self.step = Step::FitTangentStart,
                 "X" | "EXIT" => self.step = Step::Options,
                 _ => {}
             },
+            Step::FitTangentStart if matches!(upper.as_str(), "S" | "SYSTEM" | "SYSTEM DEFAULT") => self.step = Step::FitTangentEnd { start: DVec3::ZERO },
+            Step::FitTangentEnd { start } if matches!(upper.as_str(), "S" | "SYSTEM" | "SYSTEM DEFAULT") => return Some(self.finish_fit_tangents(start, DVec3::ZERO)),
             Step::FitMove { index } => {
                 let count = self.spline.as_ref()?.fit_points.len();
                 if count == 0 { return Some(CmdResult::NeedPoint); }
@@ -414,7 +461,16 @@ impl CadCommand for SplineditCommand {
                     }
                 }
             }
-            Step::FitMove { index } => {
+            Step::FitTangentStart | Step::FitTangentEnd { .. } => {
+                let source = self.spline.as_ref().unwrap();
+                let first = matches!(self.step, Step::FitTangentStart);
+                let endpoint = if first { source.fit_points.first() } else { source.fit_points.last() }.unwrap();
+                let endpoint = DVec3::new(endpoint.x,endpoint.y,endpoint.z);
+                let direction = if first { endpoint - point } else { point - endpoint };
+                let Some(direction) = direction.try_normalize() else { return CmdResult::ReportError(crate::t!("Tangent point must differ from the fit endpoint.").into_owned()); };
+                if let Step::FitTangentEnd { start } = self.step { self.finish_fit_tangents(start, direction) }
+                else { self.step = Step::FitTangentEnd { start: direction }; CmdResult::NeedPoint }
+            }            Step::FitMove { index } => {
                 let mut points = self.spline.as_ref().unwrap().fit_points.clone();
                 let Some(vertex) = points.get_mut(index) else { return CmdResult::NeedPoint; };
                 *vertex = Vector3::new(point.x,point.y,point.z); self.replace_fit_points(points)
@@ -466,6 +522,14 @@ impl CadCommand for SplineditCommand {
         match self.step {
             Step::SelectSpline | Step::Options => CmdResult::Cancel,
             Step::FitOptions => { self.step = Step::Options; CmdResult::NeedPoint }
+            Step::FitTangentStart => {
+                let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
+                self.step = Step::FitTangentEnd { start: DVec3::new(source.begin_tangent.x,source.begin_tangent.y,source.begin_tangent.z) }; CmdResult::NeedPoint
+            }
+            Step::FitTangentEnd { start } => {
+                let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
+                self.finish_fit_tangents(start,DVec3::new(source.end_tangent.x,source.end_tangent.y,source.end_tangent.z))
+            }
             Step::FitDelete | Step::FitAddPick | Step::FitSelectMove => { self.step = Step::FitOptions; CmdResult::NeedPoint }
             Step::FitAddNew { .. } => { self.step = Step::FitAddPick; CmdResult::NeedPoint }
             Step::FitMove { .. } => self.on_text_input("N").unwrap_or(CmdResult::NeedPoint),

@@ -1313,14 +1313,14 @@ impl OpenCADStudio {
 
         if !matches!(
             &op,
-            PeditOp::Multiple(_, _) | PeditOp::JoinSelection(_, _)
+            PeditOp::Multiple(_, _) | PeditOp::JoinSelection(_, _, _)
         )
             && self.reject_locked_edit(tab, handle)
         {
             return Task::none();
         }
         match &op {
-            PeditOp::JoinSelection(handles, fuzz) => {
+            PeditOp::JoinSelection(handles, fuzz, kind) => {
                 let mut available = handles
                     .iter()
                     .filter_map(|handle| {
@@ -1335,6 +1335,7 @@ impl OpenCADStudio {
                             .map(|entity| (*handle, entity))
                     })
                     .collect::<Vec<_>>();
+                let connector_distance = crate::modules::draw::modify::pedit::selection_connector_distance(&available, *fuzz);
                 let mut changes = Vec::new();
                 while !available.is_empty() {
                     let (source_handle, source) = available.remove(0);
@@ -1347,6 +1348,8 @@ impl OpenCADStudio {
                             &source,
                             &candidates,
                             *fuzz,
+                            *kind,
+                            connector_distance,
                         )
                     {
                         *result.common_mut() = source.common().clone();

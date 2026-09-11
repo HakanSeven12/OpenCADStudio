@@ -12,6 +12,8 @@ use crate::command::{CadCommand, CmdResult};
 use crate::t;
 
 const TAU: f64 = std::f64::consts::TAU;
+pub use cadkernel::space::endpoint_join::JoinType;
+static JOIN_TYPE: std::sync::Mutex<JoinType> = std::sync::Mutex::new(JoinType::Extend);
 static JOIN_FUZZ: std::sync::Mutex<f64> = std::sync::Mutex::new(0.0);
 
 /// What PEDIT knows about a pickable entity, captured at dispatch.
@@ -33,6 +35,7 @@ enum Mode {
     MultipleGather,
     MultipleConvert,
     MultipleJoin,
+    JoinType,
     Options,
     /// Picked a Line/Arc: asking "Turn it into one? [Yes/No]".
     ConvertPrompt(Handle),
@@ -60,6 +63,7 @@ pub struct PeditCommand {
     multiple_history: Vec<Vec<Handle>>,
     pending_multiple: Option<Vec<Handle>>,
     join_fuzz: f64,
+    join_type: JoinType,
     info: HashMap<u64, PeditTarget>,
     mode: Mode,
     undo_count: usize,
@@ -94,6 +98,7 @@ impl PeditCommand {
             multiple_history: Vec::new(),
             pending_multiple: None,
             join_fuzz: *JOIN_FUZZ.lock().unwrap_or_else(|error| error.into_inner()),
+            join_type: *JOIN_TYPE.lock().unwrap_or_else(|error| error.into_inner()),
             info,
             mode: Mode::PickTarget,
             undo_count: 0,
@@ -238,7 +243,8 @@ impl CadCommand for PeditCommand {
                 t!("PEDIT  Select polyline (or a line/arc to convert) or [Multiple]:").into_owned()
             }
             Mode::MultipleGather => format!("PEDIT  Select objects ({} selected, Enter when done):", self.multiple.len()),
-            Mode::MultipleJoin => format!("PEDIT  Join type: Extend. Enter fuzz distance <{}>:", self.join_fuzz),
+            Mode::MultipleJoin => format!("PEDIT  Join type: {:?}. Enter fuzz distance or [Jointype] <{}>:", self.join_type, self.join_fuzz),
+            Mode::JoinType => format!("PEDIT  Enter join type [Extend/Add/Both] <{:?}>:", self.join_type),
             Mode::MultipleConvert => t!("PEDIT  Convert lines and arcs to polylines [Yes/No] <Yes>:").into_owned(),
             Mode::ConvertPrompt(_) => t!(
                 "PEDIT  Object is not a polyline. Turn it into one?  [Yes/No] <Y>:"
@@ -326,6 +332,8 @@ impl CadCommand for PeditCommand {
                 vec![CmdOption::new(t!("Yes").as_ref(), "Y"), CmdOption::new(t!("No").as_ref(), "N")]
             }
             Mode::JoinGather(_) => vec![CmdOption::enter(t!("Join").as_ref())],
+            Mode::MultipleJoin => vec![CmdOption::new("Jointype", "J")],
+            Mode::JoinType => vec![CmdOption::new("Extend", "E"), CmdOption::new("Add", "A"), CmdOption::new("Both", "B")],
             Mode::PolyVertex(_) => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Break", "B"), CmdOption::new("Straighten", "S"), CmdOption::new("Tangent", "T"), CmdOption::new("Insert", "I"), CmdOption::new("Move", "M"), CmdOption::new("Width", "W"), CmdOption::new("Exit", "X")],
             Mode::PolyRange { .. } => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Go", "G"), CmdOption::new("Exit", "X")],
             Mode::AwaitLinetype => vec![CmdOption::new("On", "ON"), CmdOption::new("Off", "OFF")],
@@ -440,14 +448,21 @@ impl CadCommand for PeditCommand {
                 if matches!(up.as_str(), "M" | "MULTIPLE") { self.mode = Mode::MultipleGather; Some(CmdResult::NeedPoint) } else { None }
             }
             Mode::MultipleGather => None,
+            Mode::JoinType => {
+                self.join_type = match up.as_str() { "E" | "EXTEND" => JoinType::Extend, "A" | "ADD" => JoinType::Add, "B" | "BOTH" => JoinType::Both, _ => return None };
+                *JOIN_TYPE.lock().unwrap_or_else(|error| error.into_inner()) = self.join_type;
+                self.mode = Mode::MultipleJoin;
+                Some(CmdResult::NeedPoint)
+            }
             Mode::MultipleJoin => {
+                if matches!(up.as_str(), "J" | "JOINTYPE") { self.mode = Mode::JoinType; return Some(CmdResult::NeedPoint); }
                 let fuzz = text.trim().parse::<f64>().ok()?;
                 if !fuzz.is_finite() || fuzz < 0.0 { return Some(CmdResult::ReportError("PEDIT: fuzz distance must be nonnegative and finite.".to_string())); }
                 self.join_fuzz = fuzz;
                 *JOIN_FUZZ.lock().unwrap_or_else(|error| error.into_inner()) = fuzz;
                 self.pending_multiple = Some(self.multiple.clone());
                 self.mode = Mode::Options;
-                return Some(CmdResult::PeditOp { handle: self.target?, op: PeditOp::JoinSelection(self.multiple.clone(), fuzz) });
+                return Some(CmdResult::PeditOp { handle: self.target?, op: PeditOp::JoinSelection(self.multiple.clone(), fuzz, self.join_type) });
             },
             Mode::MultipleConvert => {
                 match up.as_str() {
@@ -768,6 +783,7 @@ impl CadCommand for PeditCommand {
             }
             Mode::MultipleConvert => self.on_text_input("Y").unwrap_or(CmdResult::NeedPoint),
             Mode::MultipleJoin => self.on_text_input(&self.join_fuzz.to_string()).unwrap_or(CmdResult::NeedPoint),
+            Mode::JoinType => { self.mode = Mode::MultipleJoin; CmdResult::NeedPoint },
             Mode::PolyWidthStart(_, width) | Mode::PolyWidthEnd(_, width) => { let value = width.to_string(); self.on_text_input(&value).unwrap_or(CmdResult::NeedPoint) }
             Mode::PolyVertex(_) | Mode::PolyRange { .. } => self.on_text_input("N").unwrap_or(CmdResult::NeedPoint),
             Mode::PolyMove(_) | Mode::PolyInsert(_) => { self.mode = Mode::Options; CmdResult::NeedPoint }
@@ -805,7 +821,7 @@ impl CadCommand for PeditCommand {
 #[derive(Clone)]
 pub enum PeditOp {
     Multiple(Vec<Handle>, Box<PeditOp>),
-    JoinSelection(Vec<Handle>, f64),
+    JoinSelection(Vec<Handle>, f64, JoinType),
     SetClosed(bool),
     SetWidth(f64),
     SetVertexWidth { index: usize, start: f64, end: f64 },
@@ -871,7 +887,7 @@ pub fn edit_vertex_range(entity: &EntityType, first: usize, last: usize, split: 
 
 pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
     match op {
-        PeditOp::Multiple(_, _) | PeditOp::JoinSelection(_, _) | PeditOp::VertexRange { .. } => false,
+        PeditOp::Multiple(_, _) | PeditOp::JoinSelection(_, _, _) | PeditOp::VertexRange { .. } => false,
         PeditOp::SetVertexWidth { index, start, end } => {
             if !start.is_finite() || !end.is_finite() || *start < 0.0 || *end < 0.0 { return false; }
             match entity {
@@ -1471,6 +1487,7 @@ mod editing_tests {
 
     #[test]
     fn multiple_decline_and_fuzz_join_keep_the_command_active() {
+        *JOIN_TYPE.lock().unwrap_or_else(|error| error.into_inner()) = JoinType::Extend;
         let mut line = acadrust::entities::Line::new();
         line.common.handle = Handle::new(11);
         let mut arc = acadrust::entities::Arc::new();
@@ -1492,7 +1509,7 @@ mod editing_tests {
         );
         assert!(matches!(joined.on_text_input("J"), Some(CmdResult::NeedPoint)));
         let Some(CmdResult::PeditOp {
-            op: PeditOp::JoinSelection(selected, fuzz),
+            op: PeditOp::JoinSelection(selected, fuzz, kind),
             ..
         }) = joined.on_text_input("0.25")
         else {
@@ -1500,6 +1517,7 @@ mod editing_tests {
         };
         assert_eq!(selected, handles);
         assert_eq!(fuzz, 0.25);
+        assert_eq!(kind, JoinType::Extend);
 
         let mut remembered = command(
             vec![
@@ -1522,8 +1540,10 @@ mod editing_tests {
         let candidate = lightweight(32, &[[2.0, 2.0], [2.0, 1.0]]);
         let candidates = [(Handle::new(32), &candidate)];
 
-        assert!(join_selection_extend(&source, &candidates, 0.99).is_none());
-        let (joined, consumed) = join_selection_extend(&source, &candidates, 1.0).unwrap();
+        assert!(join_selection_extend(&source, &candidates, 0.99,
+            JoinType::Extend, None).is_none());
+        let (joined, consumed) = join_selection_extend(&source, &candidates, 1.0,
+            JoinType::Extend, None).unwrap();
         assert_eq!(consumed, vec![Handle::new(32)]);
         let EntityType::LwPolyline(joined) = joined else {
             panic!("expected a lightweight polyline");
@@ -1541,15 +1561,52 @@ mod editing_tests {
             unreachable!()
         };
         polyline.vertices[0].bulge = 0.25;
-        assert!(join_selection_extend(&curved, &candidates, 2.0).is_none());
+        assert!(join_selection_extend(&curved, &candidates, 2.0,
+            JoinType::Extend, None).is_none());
 
         let parallel = lightweight(33, &[[2.0, 1.0], [1.0, 1.0]]);
         assert!(join_selection_extend(
             &source,
             &[(Handle::new(33), &parallel)],
             2.0,
+            JoinType::Extend,
+            None,
         )
         .is_none());
+    }
+
+    #[test]
+    fn add_join_inserts_a_connector_without_moving_endpoints() {
+        let source = lightweight(41, &[[0.0, 0.0], [1.0, 0.0]]);
+        let candidate = lightweight(42, &[[3.0, 0.0], [4.0, 0.0]]);
+        let (joined, consumed) = join_selection_extend(
+            &source,
+            &[(Handle::new(42), &candidate)],
+            0.1,
+            JoinType::Add,
+            Some(2.0),
+        ).unwrap();
+        assert_eq!(consumed, vec![Handle::new(42)]);
+        let EntityType::LwPolyline(joined) = joined else { panic!("expected polyline") };
+        let points: Vec<_> = joined.vertices.iter()
+            .map(|vertex| [vertex.location.x, vertex.location.y]).collect();
+        assert_eq!(points, vec![[0.0, 0.0], [1.0, 0.0], [3.0, 0.0], [4.0, 0.0]]);
+    }
+
+    #[test]
+    fn connector_distance_accepts_a_shared_non_xy_plane() {
+        let mut first = lightweight(51, &[[0.0, 0.0], [1.0, 0.0]]);
+        let mut second = lightweight(52, &[[3.0, 0.0], [4.0, 0.0]]);
+        for entity in [&mut first, &mut second] {
+            let EntityType::LwPolyline(polyline) = entity else { unreachable!() };
+            polyline.normal = Vector3::new(0.0, 1.0, 0.0);
+            polyline.elevation = 5.0;
+        }
+        let distance = selection_connector_distance(
+            &[(Handle::new(51), first), (Handle::new(52), second)],
+            0.1,
+        ).unwrap();
+        assert!((distance - 0.4).abs() < 1e-12, "{distance}");
     }
 }
 
@@ -1559,7 +1616,7 @@ inventory::submit!(crate::command::CommandRegistration { names: &["PEDIT"] });  
 
 /// Extend straight terminal spans before reusing the ordinary source join.
 /// Curved terminal spans and unsupported representations remain unchanged.
-pub fn join_selection_extend(source: &EntityType, candidates: &[(Handle, &EntityType)], fuzz: f64) -> Option<(EntityType, Vec<Handle>)> {
+pub fn join_selection_extend(source: &EntityType, candidates: &[(Handle, &EntityType)], fuzz: f64, kind: JoinType, connector_distance: Option<f64>) -> Option<(EntityType, Vec<Handle>)> {
     fn endpoint(entity: &EntityType, start: bool) -> Option<[[f64; 3]; 2]> {
         let (points, normal, elevation) = match entity {
             EntityType::LwPolyline(p) if !p.is_closed && p.vertices.len() >= 2 => {
@@ -1601,17 +1658,32 @@ pub fn join_selection_extend(source: &EntityType, candidates: &[(Handle, &Entity
         for (handle,candidate) in candidates {
             if consumed.contains(handle) {continue;}
             let mut joined = super::join::join_to_source(&result,&[(*handle,*candidate)]).map(|(entity,_)|entity);
-            if joined.is_none() && fuzz > 0.0 && fuzz.is_finite() {
-                'ends: for a_start in [false,true] { for b_start in [true,false] {
-                    let Some(a) = endpoint(&result,a_start) else {continue;};
-                    let Some(b) = endpoint(candidate,b_start) else {continue;};
-                    let Some(point) = cadkernel::space::endpoint_join::extend_line_ends(a,b,fuzz) else {continue;};
+            if joined.is_none() && fuzz > 0.0 && fuzz.is_finite() && (kind == JoinType::Extend || connector_distance.is_some()) {
+                let a_ends = [false,true].into_iter().filter_map(|start| endpoint(&result,start).map(|points|(start,points))).collect::<Vec<_>>();
+                let b_ends = [true,false].into_iter().filter_map(|start| endpoint(candidate,start).map(|points|(start,points))).collect::<Vec<_>>();
+                let a_points = a_ends.iter().map(|(_,points)|*points).collect::<Vec<_>>();
+                let b_points = b_ends.iter().map(|(_,points)|*points).collect::<Vec<_>>();
+                if let Some((a_index,b_index,joint)) = cadkernel::space::endpoint_join::closest_line_end_join(&a_points,&b_points,fuzz,connector_distance.unwrap_or(0.0),kind) {
+                    let (a_start,a_points) = a_ends[a_index]; let (b_start,b_points) = b_ends[b_index];
                     let mut a = result.clone(); let mut b = (*candidate).clone();
-                    if move_endpoint(&mut a,a_start,point).is_none() || move_endpoint(&mut b,b_start,point).is_none() {continue;}
-                    if let Some((entity,_)) = super::join::join_to_source(&a,&[(*handle,&b)]) {
-                        joined = Some(entity); break 'ends;
-                    }
-                }}
+                    let joined_pair = if let Some(point) = joint {
+                        if move_endpoint(&mut a,a_start,point).is_none() || move_endpoint(&mut b,b_start,point).is_none() {continue;}
+                        super::join::join_to_source(&a,&[(*handle,&b)])
+                    } else {
+                        let mut line = acadrust::entities::Line::new();
+                        line.start = Vector3::new(a_points[1][0],a_points[1][1],a_points[1][2]);
+                        line.end = Vector3::new(b_points[1][0],b_points[1][1],b_points[1][2]);
+                        match &a {
+                            EntityType::LwPolyline(p) => {line.normal=p.normal.clone();line.thickness=p.thickness;},
+                            EntityType::Polyline2D(p) => {line.normal=p.normal.clone();line.thickness=p.thickness;},
+                            _ => continue,
+                        }
+                        let connector = EntityType::Line(line);
+                        super::join::join_to_source(&a,&[(Handle::NULL,&connector),(*handle,&b)])
+                            .filter(|(_,used)|used.contains(handle))
+                    };
+                    if let Some((entity,_)) = joined_pair { joined = Some(entity); }
+                }
             }
             if let Some(mut entity) = joined {
                 *entity.common_mut() = source.common().clone();
@@ -1621,4 +1693,36 @@ pub fn join_selection_extend(source: &EntityType, candidates: &[(Handle, &Entity
         if !progress {break;}
     }
     (!consumed.is_empty()).then_some((result,consumed))
+}
+
+
+/// Compute the connector search distance once from the complete selected set.
+/// Unsupported, curved or noncoplanar paths disable nonzero Add/Both joining.
+pub fn selection_connector_distance(entities: &[(Handle, EntityType)], fuzz: f64) -> Option<f64> {
+    let mut curves = Vec::new();
+    for (_,entity) in entities {
+        let (vertices,normal,z) = match entity {
+            EntityType::LwPolyline(p) if !p.is_closed && p.vertices.len() >= 2 && p.vertices.iter().all(|v| v.bulge == 0.0) =>
+                (p.vertices.iter().map(|v|[v.location.x,v.location.y]).collect::<Vec<_>>(),&p.normal,p.elevation),
+            EntityType::Polyline2D(p) if !p.is_closed() && p.vertices.len() >= 2 && p.vertices.iter().all(|v| v.bulge == 0.0) =>
+                (p.vertices.iter().map(|v|[v.location.x,v.location.y]).collect::<Vec<_>>(),&p.normal,p.elevation),
+            _ => return None,
+        };
+        if !z.is_finite() { return None; }
+        let plane = crate::entities::curve::ocs_plane(*normal, z);
+        let normal = cadkernel::space::Vec3::from(plane.normal()?);
+        let points = vertices.into_iter().map(|point| plane.point_at(point)).collect::<Vec<_>>();
+        curves.push((normal, points));
+    }
+    let (normal, _) = curves.first()?;
+    if curves.iter().any(|(candidate, _)| normal.cross(*candidate).length() > 1e-9) {
+        return None;
+    }
+    let world = curves.iter().flat_map(|(_, points)| points.iter().copied()).collect::<Vec<_>>();
+    let tolerance = cadkernel::space::coplanarity_tolerance(&world);
+    let shared = crate::entities::curve::ocs_plane(Vector3::new(normal.x, normal.y, normal.z),
+        cadkernel::space::Vec3::from(world[0]).dot(*normal));
+    if world.iter().any(|point| !shared.contains(*point, tolerance)) { return None; }
+    let points = world.into_iter().map(|point| shared.project(point)).collect::<Option<Vec<_>>>()?;
+    cadkernel::space::endpoint_join::planar_connector_distance(&points, fuzz)
 }

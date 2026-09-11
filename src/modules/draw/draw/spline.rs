@@ -52,18 +52,27 @@ impl SplineCommand {
         if self.pts.len() < 2 {
             return None;
         }
-        let mut spline = make_spline(&self.pts, closed, self.control_vertices);
-        if self.control_vertices {
-            let count = spline.control_points.len();
-            let degree = self.degree.min(count - 1);
-            spline.degree = degree as i32;
-            spline.knots = (0..count + degree + 1).map(|index| {
-                if index <= degree { 0.0 } else if index >= count { 1.0 }
-                else { (index - degree) as f64 / (count - degree) as f64 }
-            }).collect();
-        }
+        let spline = if self.control_vertices {
+            let points: Vec<_> = self.pts.iter().map(|point| point.to_array()).collect();
+            control_spline(&points, self.degree.min(points.len() - 1), closed)?
+        } else { make_spline(&self.pts, closed, false) };
         Some(EntityType::Spline(spline))
     }
+}
+
+fn control_spline(points: &[[f64; 3]], degree: usize, closed: bool) -> Option<Spline> {
+    let curve = cadkernel::space::NurbsCurve3::from_control_polygon(degree, points, closed)?;
+    let mut spline = Spline {
+        degree: curve.degree() as i32,
+        control_points: curve.control_points().iter().map(|p| Vector3::new(p[0], p[1], p[2])).collect(),
+        knots: curve.knots().to_vec(),
+        weights: curve.weights().to_vec(),
+        ..Default::default()
+    };
+    spline.flags.closed = closed;
+    spline.flags.periodic = closed;
+    spline.flags.planar = crate::entities::curve::spline_is_planar(&spline);
+    Some(spline)
 }
 
 /// Store the chosen construction method directly in the persistent spline.

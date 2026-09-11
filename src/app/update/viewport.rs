@@ -3910,6 +3910,7 @@ impl OpenCADStudio {
                 } else if self.tabs[i].active_cmd.as_ref()
                     .is_some_and(|command| command.entity_pick_accepts_points())
                 {
+                    self.refresh_command_point_pick_context(i);
                     self.tabs[i].active_cmd.as_mut().map(|command| command.on_point(pick_wcs))
                 } else if self.tabs[i]
                     .active_cmd
@@ -3986,6 +3987,7 @@ impl OpenCADStudio {
                 // (LINE tangent to two circles, which needs both). When
                 // it does, sync last_point to the command's resolved
                 // anchor since it replaced the picked coordinate.
+                self.refresh_command_point_pick_context(i);
                 let handled = self.tabs[i]
                     .active_cmd
                     .as_mut()

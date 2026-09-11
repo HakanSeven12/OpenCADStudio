@@ -1993,6 +1993,15 @@ impl InputKind {
     }
 }
 
+/// Current screen projection and configured aperture for point-feature picking.
+#[derive(Clone, Copy)]
+pub struct PointPickContext {
+    pub view: glam::Mat4,
+    pub eye: DVec3,
+    pub bounds: iced::Rectangle,
+    pub aperture_px: f32,
+}
+
 pub trait CadCommand: Send {
     /// Preserve source appearance for commands that extract existing entities.
     fn preserve_commit_style(&self) -> bool { false }
@@ -2064,6 +2073,12 @@ pub trait CadCommand: Send {
 
     /// Called when the user left-clicks in the viewport (point pick).
     fn on_point(&mut self, pt: DVec3) -> CmdResult;
+
+    /// Opt in only while a point input selects an existing point feature.
+    fn wants_point_pick_context(&self) -> bool { false }
+
+    /// Refreshed for each point input so zoom and viewport changes are reflected.
+    fn set_point_pick_context(&mut self, _context: Option<PointPickContext>) {}
 
     /// Called when the user presses Enter (finalize / next option).
     fn on_enter(&mut self) -> CmdResult;
@@ -2344,6 +2359,9 @@ pub trait CadCommand: Send {
     fn on_selection_complete(&mut self, _handles: Vec<Handle>) -> CmdResult {
         CmdResult::Cancel
     }
+
+    /// Exclude locked-layer entities from injected selection geometry.
+    fn selection_entities_exclude_locked(&self) -> bool { false }
 
     fn inject_selection_entities(&mut self, _entities: Vec<SelectionEntity>) {}
 

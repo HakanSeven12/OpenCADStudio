@@ -91,73 +91,47 @@ fn break_line(line: &LineEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     result
 }
 
+fn picked_spans(curve: &cadkernel::space::PlanarCurve, p1: DVec3, p2: DVec3) -> Option<Vec<[f64; 2]>> {
+    let first = curve.plane.project(p1.to_array())?;
+    let second = curve.plane.project(p2.to_array())?;
+    let a = cadkernel::geom2d::closest_point(&curve.curve, first).t;
+    let b = cadkernel::geom2d::closest_point(&curve.curve, second).t;
+    cadkernel::geom2d::break_spans(&curve.curve, a, b, cadkernel::geom2d::Tolerance::new(1e-9))
+}
+
 fn break_arc(arc: &ArcEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
-    let cx = arc.center.x;
-    let cy = arc.center.y;
-    let r = arc.radius;
-
-    let plane = crate::entities::curve::arc_curve(arc).plane;
-    let Some(q1) = plane.project(p1.to_array()) else {
+    let curve = crate::entities::curve::arc_curve(arc);
+    let Some(spans) = picked_spans(&curve, p1, p2) else {
         return vec![EntityType::Arc(arc.clone())];
     };
-    let Some(q2) = plane.project(p2.to_array()) else {
-        return vec![EntityType::Arc(arc.clone())];
-    };
-    let a1 = angle_on_arc(cx, cy, DVec3::new(q1[0], q1[1], 0.0));
-    let a2 = angle_on_arc(cx, cy, DVec3::new(q2[0], q2[1], 0.0));
-
-    let start = arc.start_angle;
-    let end = arc.end_angle;
-
-    // Normalize: clamp a1 to arc range, then remove CCW from a1 to a2
-    let a1_on = clamp_to_arc(a1, start, end);
-    let a2_on = clamp_to_arc(a2, start, end);
-
-    // Keep the span outside the two break points.
-    if (a1_on - a2_on).abs() < 0.01 {
-        // Single-point break: return original unchanged (no gap)
-        return vec![EntityType::Arc(arc.clone())];
-    }
-
-    let _ = r; // radius unchanged
-    let mut result = arc.clone();
-    result.common.handle = Handle::NULL;
-    result.start_angle = a2_on;
-    result.end_angle = a1_on;
-    vec![EntityType::Arc(result)]
+    let cadkernel::geom2d::Curve::Arc(geometry) = &curve.curve else { unreachable!() };
+    spans.into_iter().map(|[from, to]| {
+        let mut result = arc.clone();
+        result.common.handle = Handle::NULL;
+        result.start_angle = geometry.start_angle + from * geometry.sweep();
+        result.end_angle = geometry.start_angle + to * geometry.sweep();
+        EntityType::Arc(result)
+    }).collect()
 }
 
 fn break_circle(circle: &acadrust::entities::Circle, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
-    let cx = circle.center.x;
-    let cy = circle.center.y;
-
-    let plane = crate::entities::curve::circle_curve(circle).plane;
-    let Some(q1) = plane.project(p1.to_array()) else {
+    let curve = crate::entities::curve::circle_curve(circle);
+    let Some(spans) = picked_spans(&curve, p1, p2) else {
         return vec![EntityType::Circle(circle.clone())];
     };
-    let Some(q2) = plane.project(p2.to_array()) else {
-        return vec![EntityType::Circle(circle.clone())];
-    };
-    let a1 = angle_on_arc(cx, cy, DVec3::new(q1[0], q1[1], 0.0));
-    let a2 = angle_on_arc(cx, cy, DVec3::new(q2[0], q2[1], 0.0));
-
-    if (a1 - a2).abs() < 0.01 {
-        return vec![EntityType::Circle(circle.clone())];
-    }
-
-    // Convert circle to arc, removing CCW from a1 to a2
-    let mut arc = ArcEnt::new();
-    arc.common = circle.common.clone();
-    arc.common.handle = Handle::NULL;
-    arc.center = circle.center.clone();
-    arc.radius = circle.radius;
-    arc.thickness = circle.thickness;
-    arc.normal = circle.normal.clone();
-    arc.start_angle = a2;
-    arc.end_angle = a1;
-    vec![EntityType::Arc(arc)]
+    spans.into_iter().map(|[from, to]| {
+        let mut arc = ArcEnt::new();
+        arc.common = circle.common.clone();
+        arc.common.handle = Handle::NULL;
+        arc.center = circle.center;
+        arc.radius = circle.radius;
+        arc.thickness = circle.thickness;
+        arc.normal = circle.normal;
+        arc.start_angle = from * std::f64::consts::TAU;
+        arc.end_angle = (to * std::f64::consts::TAU).rem_euclid(std::f64::consts::TAU);
+        EntityType::Arc(arc)
+    }).collect()
 }
-
 fn break_lwpolyline(p: &LwPolyline, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     // For LwPolyline, find the nearest vertex indices for p1 and p2,
     // then split into two polylines at those vertices.
@@ -202,90 +176,21 @@ fn break_lwpolyline(p: &LwPolyline, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
 }
 
 fn break_ellipse(ell: &EllipseEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
-    // Compute the eccentric-anomaly parameter of a world point relative to ellipse.
-    // World = DXF (XY drawing plane).
-    let cx = ell.center.x;
-    let cy = ell.center.y;
-    let a = (ell.major_axis.x.powi(2) + ell.major_axis.y.powi(2)).sqrt();
-    if a < 1e-9 {
+    let Some(curve) = crate::entities::curve::ellipse_curve(ell) else {
         return vec![EntityType::Ellipse(ell.clone())];
-    }
-    let _b = a * ell.minor_axis_ratio;
-    let nx = ell.major_axis.x / a;
-    let ny = ell.major_axis.y / a;
-
-    // Project a point onto the ellipse parameter (eccentric anomaly)
-    let param_of = |pt: DVec3| -> f64 {
-        let rx = pt.x - cx;
-        let ry = pt.y - cy;
-        let xl = rx * nx + ry * ny;
-        let yl = -rx * ny + ry * nx;
-        yl.atan2(xl) // atan2(yl/b*b, xl/a*a) simplifies to atan2(yl,xl) for ordering
     };
-
-    let t0 = ell.start_parameter;
-    let t1 = ell.end_parameter;
-
-    let pa1 = param_of(p1);
-    let pa2 = param_of(p2);
-
-    // Clamp both params to arc range (same logic as clamp_to_arc for arcs)
-    let span_deg = {
-        let s = t1 - t0;
-        if s <= 0.0 {
-            s + std::f64::consts::TAU
-        } else {
-            s
-        }
-    };
-    let clamp = |a: f64| -> f64 {
-        let rel =
-            ((a - t0) % std::f64::consts::TAU + std::f64::consts::TAU) % std::f64::consts::TAU;
-        if rel <= span_deg {
-            a
-        } else if rel < span_deg + (std::f64::consts::TAU - span_deg) / 2.0 {
-            t1
-        } else {
-            t0
-        }
-    };
-    let a1_on = clamp(pa1);
-    let a2_on = clamp(pa2);
-
-    if (a1_on - a2_on).abs() < 1e-4 {
+    let Some(spans) = picked_spans(&curve, p1, p2) else {
         return vec![EntityType::Ellipse(ell.clone())];
-    }
-
-    // Remove CCW from a1_on to a2_on → result goes from a2_on to a1_on
-    let mut result = ell.clone();
-    result.common.handle = Handle::NULL;
-    result.start_parameter = a2_on;
-    result.end_parameter = a1_on;
-    vec![EntityType::Ellipse(result)]
+    };
+    let cadkernel::geom2d::Curve::Ellipse(geometry) = &curve.curve else { unreachable!() };
+    spans.into_iter().map(|[from, to]| {
+        let mut result = ell.clone();
+        result.common.handle = Handle::NULL;
+        result.start_parameter = geometry.start_parameter + from * geometry.sweep();
+        result.end_parameter = geometry.start_parameter + to * geometry.sweep();
+        EntityType::Ellipse(result)
+    }).collect()
 }
-
-// ── Small utilities ────────────────────────────────────────────────────────
-
-/// Returns the angle (radians, 0-2π) of `pt` viewed from (cx, cy) in the world XY plane.
-fn angle_on_arc(cx: f64, cy: f64, pt: DVec3) -> f64 {
-    let dx = pt.x - cx;
-    let dy = pt.y - cy;
-    dy.atan2(dx).rem_euclid(std::f64::consts::TAU)
-}
-
-/// Clamp angle `a` to within the arc's angular range (CCW from `start` to `end`).
-fn clamp_to_arc(a: f64, start: f64, end: f64) -> f64 {
-    let span = (end - start).rem_euclid(std::f64::consts::TAU);
-    let rel = (a - start).rem_euclid(std::f64::consts::TAU);
-    if rel <= span {
-        a
-    } else if rel < span + (std::f64::consts::TAU - span) / 2.0 {
-        end
-    } else {
-        start
-    }
-}
-
 /// Find the index of the polyline vertex closest to `pt`.
 fn nearest_pline_param(p: &LwPolyline, pt: DVec3) -> usize {
     p.vertices

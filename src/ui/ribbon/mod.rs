@@ -22,6 +22,7 @@ use crate::ui::properties::{linetype_display_name, lw_options, LinetypeItem};
 
 mod widgets;
 mod draw_panel;
+mod modify_panel;
 use widgets::{StyleContext, *};
 mod collapse;
 use collapse::{CollapsePanels, Panel};
@@ -355,13 +356,13 @@ impl Ribbon {
         let Some(id) = self.open_dropdown.as_deref() else {
             return false;
         };
-        if !draw_panel::owns_dropdown(id) {
+        let Some(parent) = draw_panel::parent_panel(id) else {
             return false;
-        }
-        if id == draw_panel::PANEL_ID {
+        };
+        if id == parent {
             self.close_dropdown();
         } else {
-            self.open_dropdown = Some(draw_panel::PANEL_ID.to_string());
+            self.open_dropdown = Some(parent.to_string());
         }
         true
     }

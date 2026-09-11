@@ -4,6 +4,7 @@
 use std::path::Path;
 
 fn main() {
+    generate_modify_tools();
     let version = std::env::var("CARGO_PKG_VERSION").expect("Cargo package version");
     let parts: Vec<&str> = version.split('.').collect();
     let app_version = if parts.len() == 3 && parts[0].len() == 4
@@ -80,4 +81,25 @@ fn main() {
             }
         }
     }
+}
+
+fn generate_modify_tools() {
+    let root = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let directory = root.join("src/ui/ribbon/modify_tools");
+    println!("cargo:rerun-if-changed=src/ui/ribbon/modify_tools");
+    let mut paths: Vec<_> = match std::fs::read_dir(&directory) {
+        Ok(entries) => entries.map(|entry| entry.expect("Modify tool entry").path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "rs")).collect(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => panic!("Cannot read Modify tools: {error}"),
+    };
+    paths.sort();
+    let mut source = String::from("pub(super) const TOOLS: &[Tool] = &[\n");
+    for path in paths {
+        println!("cargo:rerun-if-changed={}", path.display());
+        source.push_str(&format!("include!({:?}),\n", path.to_string_lossy()));
+    }
+    source.push_str("];\n");
+    let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    std::fs::write(output.join("modify_panel_tools.rs"), source).expect("Write Modify tool registry");
 }

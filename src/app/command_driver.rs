@@ -1292,8 +1292,13 @@ impl OpenCADStudio {
             // refreshes dependent render caches without erase notifications.
             if self.tabs[tab].scene.update_entity(entity) { vec![handle] } else { Vec::new() }
         } else {
+            let owner = self.tabs[tab].scene.document.get_entity(handle).map(|entity| entity.common().owner_handle);
             self.tabs[tab].scene.erase_entities(&[handle]);
-            entities.into_iter().map(|entity| self.tabs[tab].scene.add_entity(entity)).collect()
+            entities.into_iter().map(|mut entity| {
+                entity.common_mut().handle = Handle::NULL;
+                if let Some(owner) = owner { entity.common_mut().owner_handle = owner; }
+                self.tabs[tab].scene.add_entity(entity)
+            }).collect()
         };
         for &updated in &handles {
             if matches!(self.tabs[tab].scene.document.get_entity(updated), Some(acadrust::EntityType::Dimension(_))) {

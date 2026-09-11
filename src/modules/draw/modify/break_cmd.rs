@@ -41,10 +41,7 @@ pub fn break_entity(entity: &EntityType, p1: DVec3, p2: DVec3) -> Option<Vec<Ent
         EntityType::Line(line) => Some(break_line(line, p1, p2)),
         EntityType::Arc(arc) => Some(break_arc(arc, p1, p2)),
         EntityType::Circle(c) => Some(break_circle(c, p1, p2)),
-        EntityType::LwPolyline(p) => {
-            let p = crate::entities::curve::lwpolyline_world_xy(p)?;
-            Some(break_lwpolyline(&p, p1, p2))
-        }
+        EntityType::LwPolyline(p) => Some(break_lwpolyline(p, p1, p2)),
         EntityType::Ellipse(e) => Some(break_ellipse(e, p1, p2)),
         EntityType::Spline(s) => Some(break_spline(s, p1, p2)),
         _ => None,
@@ -133,48 +130,41 @@ fn break_circle(circle: &acadrust::entities::Circle, p1: DVec3, p2: DVec3) -> Ve
     }).collect()
 }
 fn break_lwpolyline(p: &LwPolyline, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
-    // For LwPolyline, find the nearest vertex indices for p1 and p2,
-    // then split into two polylines at those vertices.
-    let n = p.vertices.len();
-    if n < 2 {
-        return vec![EntityType::LwPolyline(p.clone())];
+    let unchanged = || vec![EntityType::LwPolyline(p.clone())];
+    let Some(curve) = crate::entities::curve::lwpolyline_curve(p) else { return unchanged(); };
+    let Some(spans) = picked_spans(&curve, p1, p2) else { return unchanged(); };
+    let cadkernel::geom2d::Curve::Polyline(geometry) = &curve.curve else { unreachable!() };
+    let mut result = Vec::with_capacity(spans.len());
+    for [from, to] in spans {
+        let Some(range) = geometry.ranged(from, to) else { return unchanged(); };
+        let mut fragment = p.clone();
+        fragment.common.handle = Handle::NULL;
+        fragment.is_closed = false;
+        fragment.vertices.clear();
+        for (index, vertex) in range.polyline.vertices.iter().enumerate() {
+            // The final vertex has no outgoing segment. Keep its source metadata
+            // when it is an original endpoint, otherwise the preceding segment's.
+            let segment = &range.segments[index.min(range.segments.len() - 1)];
+            let last = index == range.segments.len();
+            let source = if last && segment.to == 1.0 {
+                (segment.source_index + 1) % p.vertices.len()
+            } else { segment.source_index };
+            let mut output = p.vertices[source].clone();
+            output.location.x = vertex.position[0];
+            output.location.y = vertex.position[1];
+            if !last || segment.to != 1.0 {
+                let original = &p.vertices[segment.source_index];
+                let widths = segment.interpolate(original.start_width, original.end_width);
+                output.start_width = widths[0];
+                output.end_width = widths[1];
+                output.bulge = if last { range.polyline.vertices[index - 1].bulge } else { vertex.bulge };
+            }
+            fragment.vertices.push(output);
+        }
+        result.push(EntityType::LwPolyline(fragment));
     }
-
-    let t1 = nearest_pline_param(p, p1);
-    let t2 = nearest_pline_param(p, p2);
-    let (ta, tb) = if t1 <= t2 { (t1, t2) } else { (t2, t1) };
-
-    // Build two polylines: [0..ta] and [tb..end]
-    let idx_a = ta.min(n - 1);
-    let idx_b = tb.min(n - 1);
-
-    let mut result = Vec::new();
-
-    // First piece
-    if idx_a > 0 {
-        let mut first = p.clone();
-        first.common.handle = Handle::NULL;
-        first.vertices = p.vertices[..=idx_a].to_vec();
-        first.is_closed = false;
-        result.push(EntityType::LwPolyline(first));
-    }
-
-    // Second piece
-    if idx_b < n - 1 {
-        let mut second = p.clone();
-        second.common.handle = Handle::NULL;
-        second.vertices = p.vertices[idx_b..].to_vec();
-        second.is_closed = false;
-        result.push(EntityType::LwPolyline(second));
-    }
-
-    if result.is_empty() {
-        vec![EntityType::LwPolyline(p.clone())]
-    } else {
-        result
-    }
+    result
 }
-
 fn break_ellipse(ell: &EllipseEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     let Some(curve) = crate::entities::curve::ellipse_curve(ell) else {
         return vec![EntityType::Ellipse(ell.clone())];
@@ -191,20 +181,6 @@ fn break_ellipse(ell: &EllipseEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
         EntityType::Ellipse(result)
     }).collect()
 }
-/// Find the index of the polyline vertex closest to `pt`.
-fn nearest_pline_param(p: &LwPolyline, pt: DVec3) -> usize {
-    p.vertices
-        .iter()
-        .enumerate()
-        .min_by_key(|(_, v)| {
-            let dx = v.location.x - pt.x;
-            let dy = v.location.y - pt.y;
-            ((dx * dx + dy * dy) * 1e6) as i64
-        })
-        .map(|(i, _)| i)
-        .unwrap_or(0)
-}
-
 fn world_to_dxf(v: DVec3) -> DVec3 {
     // World = DXF (identity).
     DVec3::new(v.x, v.y, v.z)

@@ -9,11 +9,9 @@
 
 use crate::modules::draw::modify::spline_ops::{spline_cut, spline_to_nurbs};
 use acadrust::entities::{
-    Ellipse as EllipseEnt, LwPolyline, Spline as SplineEnt,
+    Spline as SplineEnt,
 };
-use cadkernel::geom2d::{
-    Curve, Ellipse as KernelEllipse, EllipseArc as KernelEllipseArc,
-};
+use cadkernel::geom2d::Curve;
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::{DVec3, Vec3};
@@ -21,7 +19,6 @@ use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
 
-const TAU: f64 = std::f64::consts::TAU;
 
 pub struct LengthenCommand {
     state: LenState,
@@ -98,7 +95,7 @@ impl CadCommand for LengthenCommand {
                 Some(replacement) => CmdResult::ReplaceManyContinue(vec![(handle, vec![replacement])]),
                 None => CmdResult::NeedPoint,
             },
-            LenState::DynamicPick if matches!(entity, EntityType::Line(_) | EntityType::Arc(_)) => {
+            LenState::DynamicPick if matches!(entity, EntityType::Line(_) | EntityType::Arc(_) | EntityType::Ellipse(_)) => {
                 self.state = LenState::DynamicPoint { handle, entity, pick: pt };
                 CmdResult::NeedPoint
             }
@@ -259,85 +256,36 @@ fn lengthen_entity_precise(entity: &EntityType, pick: DVec3, mode: &LenMode) -> 
             result.end_angle = end;
             Some(EntityType::Arc(result))
         }
-        EntityType::Ellipse(e) => lengthen_ellipse(e, pick.as_vec3(), mode),
+        EntityType::Ellipse(ellipse) => {
+            let curve = crate::entities::curve::ellipse_curve(ellipse)?;
+            let (start, end) = cadkernel::space::lengthen::lengthen_ellipse(&curve, pick.to_array(), change)?;
+            let mut result = ellipse.clone();
+            result.start_parameter = start;
+            result.end_parameter = end;
+            Some(EntityType::Ellipse(result))
+        }
         EntityType::Spline(s) => lengthen_spline(s, pick.as_vec3(), mode),
-        EntityType::LwPolyline(p) => {
-            let p = crate::entities::curve::lwpolyline_world_xy(p)?;
-            lengthen_lwpoly(&p, pick.as_vec3(), mode)
+        EntityType::LwPolyline(polyline) => {
+            let curve = crate::entities::curve::lwpolyline_curve(polyline)?;
+            let vertices = cadkernel::space::lengthen::lengthen_polyline(&curve, pick.to_array(), change)?;
+            let mut result = polyline.clone();
+            result.vertices = vertices.into_iter().map(|vertex| {
+                let mut value = polyline.vertices[vertex.source].clone();
+                value.location.x = vertex.position[0];
+                value.location.y = vertex.position[1];
+                value.bulge = vertex.bulge;
+                let width_delta = value.end_width - value.start_width;
+                value.end_width = value.start_width + width_delta * vertex.end_fraction;
+                value.start_width += width_delta * vertex.start_fraction;
+                value
+            }).collect();
+            if result.vertices.iter().any(|v| !v.start_width.is_finite() || !v.end_width.is_finite()
+                || v.start_width < 0.0 || v.end_width < 0.0) { return None; }
+            Some(EntityType::LwPolyline(result))
         }
         _ => None,
     }
 }
-
-fn lengthen_ellipse(ell: &EllipseEnt, pick_pt: Vec3, mode: &LenMode) -> Option<EntityType> {
-    let a = (ell.major_axis.x.powi(2) + ell.major_axis.y.powi(2)).sqrt();
-    if a < 1e-9 {
-        return None;
-    }
-    let b = a * ell.minor_axis_ratio;
-    let nx = ell.major_axis.x / a;
-    let ny = ell.major_axis.y / a;
-
-    let t0 = ell.start_parameter;
-    let mut t1 = ell.end_parameter;
-    if t1 <= t0 {
-        t1 += TAU;
-    }
-
-    // Measured by the kernel rather than by a hundred and twenty-eight
-    // chords: the chord sum reads short, so LENGTHEN's idea of "current" was
-    // already below the true length before a delta was applied to it.
-    let shape = KernelEllipse {
-        centre: [ell.center.x, ell.center.y],
-        major_radius: a,
-        minor_radius: b,
-        major_axis: [nx, ny],
-    };
-    let arc = |from: f64, to: f64| {
-        Curve::Ellipse(KernelEllipseArc {
-            ellipse: shape,
-            start_parameter: from,
-            end_parameter: to,
-        })
-    };
-    let current_len = arc(t0, t1).length();
-    if current_len < 1e-10 {
-        return None;
-    }
-    let new_len = apply_mode(current_len, mode)?;
-    if new_len < 1e-10 {
-        return None;
-    }
-
-    // Which end is closer to the pick, in the DXF XY plane.
-    let point_at = |t: f64| {
-        (
-            ell.center.x + a * t.cos() * nx - b * t.sin() * ny,
-            ell.center.y + a * t.cos() * ny + b * t.sin() * nx,
-        )
-    };
-    let (p_x, p_y) = (pick_pt.x as f64, pick_pt.y as f64);
-    let (sx, sy) = point_at(t0);
-    let (ex, ey) = point_at(t1);
-    let extend_end = (p_x - ex).hypot(p_y - ey) <= (p_x - sx).hypot(p_y - sy);
-
-    let mut result = ell.clone();
-    result.common.handle = Handle::NULL;
-    if extend_end {
-        // Walk `new_len` forward from the fixed start. A whole turn is the
-        // most there is to walk, and the kernel clamps to it.
-        let whole = arc(t0, t0 + TAU);
-        result.end_parameter = t0 + whole.parameter_at_distance(new_len) * TAU;
-    } else {
-        // The same measured backwards from the fixed end: the last `new_len`
-        // of a whole turn ending at t1.
-        let whole = arc(t1 - TAU, t1);
-        let from_start = whole.length() - new_len;
-        result.start_parameter = t1 - TAU + whole.parameter_at_distance(from_start) * TAU;
-    }
-    Some(EntityType::Ellipse(result))
-}
-
 
 fn apply_mode(current: f64, mode: &LenMode) -> Option<f64> {
     match mode {
@@ -346,70 +294,6 @@ fn apply_mode(current: f64, mode: &LenMode) -> Option<f64> {
         LenMode::Percent(p) => Some(current * p / 100.0),
         _ => None,
     }
-}
-
-fn lengthen_lwpoly(poly: &LwPolyline, pick_pt: Vec3, mode: &LenMode) -> Option<EntityType> {
-    let n = poly.vertices.len();
-    if n < 2 {
-        return None;
-    }
-
-    // Determine which end is closer to the pick point (DXF XY: pick_pt.x, pick_pt.z).
-    let px = pick_pt.x as f64;
-    let py = pick_pt.y as f64;
-
-    let first = &poly.vertices[0];
-    let last = &poly.vertices[n - 1];
-    let d_first = (first.location.x - px).hypot(first.location.y - py);
-    let d_last = (last.location.x - px).hypot(last.location.y - py);
-    let at_end = d_last <= d_first;
-
-    // Terminal segment direction and current length.
-    let (sx, sy, ex, ey) = if at_end {
-        (
-            poly.vertices[n - 2].location.x,
-            poly.vertices[n - 2].location.y,
-            last.location.x,
-            last.location.y,
-        )
-    } else {
-        (
-            poly.vertices[1].location.x,
-            poly.vertices[1].location.y,
-            first.location.x,
-            first.location.y,
-        )
-    };
-
-    let dx = ex - sx;
-    let dy = ey - sy;
-    let current_len = (dx * dx + dy * dy).sqrt();
-    if current_len < 1e-10 {
-        return None;
-    }
-
-    let new_len = apply_mode(current_len, mode)?;
-    if new_len < 1e-10 {
-        return None;
-    }
-
-    let ux = dx / current_len;
-    let uy = dy / current_len;
-    let new_x = sx + ux * new_len;
-    let new_y = sy + uy * new_len;
-
-    let mut new_poly = poly.clone();
-    new_poly.common.handle = Handle::NULL;
-    if at_end {
-        let v = new_poly.vertices.last_mut()?;
-        v.location.x = new_x;
-        v.location.y = new_y;
-    } else {
-        let v = new_poly.vertices.first_mut()?;
-        v.location.x = new_x;
-        v.location.y = new_y;
-    }
-    Some(EntityType::LwPolyline(new_poly))
 }
 
 fn lengthen_spline(spl: &SplineEnt, pick_pt: Vec3, mode: &LenMode) -> Option<EntityType> {

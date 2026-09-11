@@ -50,6 +50,9 @@ impl CadCommand for RayCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        if !pt.is_finite() {
+            return CmdResult::NeedPoint;
+        }
         if let Some(base) = self.base {
             let dir = pt - base;
             let len = dir.length();
@@ -408,6 +411,13 @@ impl CadCommand for XLineCommand {
 mod tests {
     use super::*;
 
+    fn direction(entity: EntityType) -> DVec3 {
+        let EntityType::XLine(entity) = entity else {
+            panic!("expected a construction line");
+        };
+        DVec3::new(entity.direction.x, entity.direction.y, entity.direction.z)
+    }
+
     #[test]
     fn repeated_rays_and_xlines_keep_their_first_point() {
         let base = DVec3::new(2.0, 3.0, 4.0);
@@ -427,6 +437,89 @@ mod tests {
             };
             assert_eq!(entity.base_point, Vector3::new(base.x, base.y, base.z));
         }
+    }
+
+    #[test]
+    fn ray_rejects_nonfinite_points_without_losing_its_base() {
+        let mut ray = RayCommand::new();
+        assert!(matches!(ray.on_point(DVec3::splat(f64::NAN)), CmdResult::NeedPoint));
+        let base = DVec3::new(1.0, 2.0, 3.0);
+        assert!(matches!(ray.on_point(base), CmdResult::NeedPoint));
+        assert!(matches!(ray.on_point(DVec3::splat(f64::INFINITY)), CmdResult::NeedPoint));
+
+        let CmdResult::CommitEntity(EntityType::Ray(entity)) = ray.on_point(base + DVec3::X)
+        else {
+            panic!("valid direction must commit a ray");
+        };
+        assert_eq!(entity.base_point, Vector3::new(base.x, base.y, base.z));
+        assert_eq!(entity.direction, Vector3::new(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn xline_horizontal_and_two_point_angle_use_the_working_plane() {
+        let plane = WorkingPlane::new(DVec3::ZERO, DVec3::Y, DVec3::Z);
+        let mut horizontal = XLineCommand::new();
+        horizontal.set_working_plane(plane);
+        assert!(matches!(horizontal.on_text_input("H"), Some(CmdResult::NeedPoint)));
+        let CmdResult::CommitEntity(entity) = horizontal.on_point(DVec3::new(3.0, 4.0, 5.0))
+        else {
+            panic!("horizontal mode must commit immediately");
+        };
+        assert!(direction(entity).abs_diff_eq(plane.x, 1.0e-12));
+
+        let mut angle = XLineCommand::new();
+        angle.set_working_plane(plane);
+        assert!(matches!(angle.on_text_input("A"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(angle.on_point(DVec3::ZERO), CmdResult::NeedPoint));
+        assert!(matches!(angle.on_point(plane.y * 2.0), CmdResult::NeedPoint));
+        let CmdResult::CommitEntity(entity) = angle.on_point(DVec3::new(7.0, 8.0, 9.0))
+        else {
+            panic!("acquired angle must accept a through point");
+        };
+        assert!(direction(entity).abs_diff_eq(plane.y, 1.0e-12));
+    }
+
+    #[test]
+    fn xline_bisector_reuses_its_vertex_and_first_ray() {
+        let mut command = XLineCommand::new();
+        assert!(matches!(command.on_text_input("B"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(command.on_point(DVec3::ZERO), CmdResult::NeedPoint));
+        assert!(matches!(command.on_point(DVec3::X), CmdResult::NeedPoint));
+
+        for end in [DVec3::Y, -DVec3::Y] {
+            let CmdResult::CommitEntity(entity) = command.on_point(end) else {
+                panic!("valid bisector must commit");
+            };
+            let expected = (DVec3::X + end).normalize();
+            assert!(direction(entity).abs_diff_eq(expected, 1.0e-12));
+        }
+    }
+
+    #[test]
+    fn xline_offset_distance_returns_to_source_selection() {
+        let mut command = XLineCommand::new();
+        assert!(matches!(command.on_text_input("O"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(command.on_point(DVec3::ZERO), CmdResult::NeedPoint));
+        assert!(matches!(command.on_point(DVec3::Y * 2.0), CmdResult::NeedPoint));
+        assert!(command.needs_entity_pick());
+
+        let line = acadrust::entities::Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+        );
+        command.inject_picked_entity(EntityType::Line(line));
+        assert!(matches!(
+            command.on_entity_pick(acadrust::Handle::new(1), DVec3::ZERO),
+            CmdResult::NeedPoint
+        ));
+        let CmdResult::CommitEntity(EntityType::XLine(entity)) =
+            command.on_point(DVec3::Y)
+        else {
+            panic!("offset side must commit a construction line");
+        };
+        assert_eq!(entity.base_point, Vector3::new(0.0, 2.0, 0.0));
+        assert_eq!(entity.direction, Vector3::new(1.0, 0.0, 0.0));
+        assert!(command.needs_entity_pick());
     }
 }
 

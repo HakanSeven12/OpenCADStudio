@@ -9,8 +9,6 @@ pub(crate) mod config;
 pub use automation::{export_headless, serve};
 mod command_driver;
 pub(crate) mod commands;
-#[cfg(not(target_arch = "wasm32"))]
-mod doc_api;
 mod document;
 pub(crate) mod expr_eval;
 mod find_replace;

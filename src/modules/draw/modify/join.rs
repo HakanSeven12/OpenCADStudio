@@ -27,6 +27,7 @@ impl JoinCommand {
     pub fn with_source(mut self, handle: Handle, entity: EntityType) -> Self {
         self.picked = Some(entity); self.on_entity_pick(handle, DVec3::ZERO); self
     }
+    fn has_arc_source(&self) -> bool { matches!(&self.source, Some((_, EntityType::Arc(_)))) }
 }
 impl CadCommand for JoinCommand {
     fn name(&self) -> &'static str { "JOIN" }
@@ -42,6 +43,8 @@ impl CadCommand for JoinCommand {
     fn options(&self) -> Vec<crate::command::CmdOption> {
         if matches!(&self.source,Some((_,EntityType::Arc(_)))) { vec![crate::command::CmdOption::new("Close","L")] } else {Vec::new()}
     }
+    fn wants_text_input(&self) -> bool { self.has_arc_source() }
+    fn point_step_accepts_keywords(&self) -> bool { self.has_arc_source() }
     fn on_text_input(&mut self,text:&str) -> Option<CmdResult> {
         if matches!(text.trim().to_ascii_uppercase().as_str(),"L"|"CLOSE") {
             if let Some((handle,EntityType::Arc(arc)))=&self.source {
@@ -122,7 +125,7 @@ pub fn join_to_source(source: &EntityType, candidates: &[(Handle, &EntityType)])
                         spline.control_points=joined.control_points().iter().map(|p|Vector3::new(p[0],p[1],p[2])).collect();
                         spline.knots=joined.knots().to_vec();spline.weights=joined.weights().to_vec();
                         spline.fit_points.clear();spline.flags.rational=joined.is_rational();
-                        spline.dwg_flags1 &= !1;spline.dxf_flags &= !32;
+                        spline.dwg_flags1 &= !1;spline.dxf_flags &= !(32 | 1024);
                         spline.flags.planar=cadkernel::space::are_coplanar(joined.control_points(),&[]);
                         spline.begin_tangent=Vector3::new(0.0,0.0,0.0);spline.end_tangent=Vector3::new(0.0,0.0,0.0);
                         Some(EntityType::Spline(spline))
@@ -510,6 +513,94 @@ mod join_tests {
             "collapsed line must keep source thickness, got {}",
             l.thickness
         );
+    }
+
+    #[test]
+    fn source_join_consumes_only_compatible_lines_and_keeps_direction() {
+        let source_handle = Handle::new(11);
+        let rejected_handle = Handle::new(12);
+        let joined_handle = Handle::new(13);
+        let mut source = line(5.0, 0.0, 1.0, 0.0, 2.0);
+        source.common_mut().handle = source_handle;
+        let rejected = line(1.0, 0.0, 1.0, 2.0, 0.0);
+        let joined = line(8.0, 0.0, 6.0, 0.0, 0.0);
+        let (result, consumed) = join_to_source(
+            &source,
+            &[(rejected_handle, &rejected), (joined_handle, &joined)],
+        )
+        .unwrap();
+        assert_eq!(consumed, vec![joined_handle]);
+        let EntityType::Line(result) = result else {
+            panic!("expected a line");
+        };
+        assert_eq!(result.common.handle, source_handle);
+        assert_eq!(result.start, Vector3::new(8.0, 0.0, 0.0));
+        assert_eq!(result.end, Vector3::new(1.0, 0.0, 0.0));
+        assert_eq!(result.thickness, 2.0);
+    }
+
+    #[test]
+    fn source_join_elevates_splines_and_clears_fit_representation() {
+        let source_handle = Handle::new(21);
+        let candidate_handle = Handle::new(22);
+        let mut source = acadrust::entities::Spline::new();
+        source.common.handle = source_handle;
+        source.degree = 1;
+        source.control_points = vec![
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+        ];
+        source.knots = vec![0.0, 0.0, 1.0, 1.0];
+        source.fit_points = vec![Vector3::new(0.0, 0.0, 0.0)];
+        source.dwg_flags1 = 1;
+        source.dxf_flags = 32 | 1024;
+        let mut candidate = acadrust::entities::Spline::new();
+        candidate.degree = 3;
+        candidate.control_points = vec![
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(1.3, 0.2, 0.0),
+            Vector3::new(1.7, 0.8, 0.0),
+            Vector3::new(2.0, 1.0, 0.0),
+        ];
+        candidate.knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let candidate_entity = EntityType::Spline(candidate);
+        let (result, consumed) = join_to_source(
+            &EntityType::Spline(source),
+            &[(candidate_handle, &candidate_entity)],
+        )
+        .unwrap();
+        assert_eq!(consumed, vec![candidate_handle]);
+        let EntityType::Spline(result) = result else {
+            panic!("expected a spline");
+        };
+        assert_eq!(result.common.handle, source_handle);
+        assert_eq!(result.degree, 3);
+        assert!(result.fit_points.is_empty());
+        assert_eq!(result.dwg_flags1 & 1, 0);
+        assert_eq!(result.dxf_flags & (32 | 1024), 0);
+        assert!(result.flags.planar);
+    }
+
+    #[test]
+    fn arc_source_accepts_the_typed_close_option() {
+        let handle = Handle::new(31);
+        let mut arc = acadrust::entities::Arc::new();
+        arc.common.handle = handle;
+        arc.center = Vector3::new(2.0, 3.0, 4.0);
+        arc.radius = 5.0;
+        arc.thickness = 0.75;
+        let mut command = JoinCommand::new().with_source(handle, EntityType::Arc(arc));
+        assert!(command.input_kind().wants_text());
+        assert!(command.point_step_accepts_keywords());
+        let Some(CmdResult::ReplaceMany(mut replacements, _)) = command.on_text_input("Close") else {
+            panic!("expected the arc to close");
+        };
+        let Some(EntityType::Circle(circle)) = replacements[0].1.pop() else {
+            panic!("expected a circle");
+        };
+        assert_eq!(circle.center, Vector3::new(2.0, 3.0, 4.0));
+        assert_eq!(circle.radius, 5.0);
+        assert_eq!(circle.thickness, 0.75);
     }
 }
 

@@ -3111,12 +3111,11 @@ mod tests {
         for command in ["SETBYLAYER", "OVERKILL"] {
             let mut app = fresh_app();
             let _ = app.run_command_line(command);
-            assert_eq!(
+            assert!(
                 app.tabs[app.active_tab]
                     .active_cmd
                     .as_ref()
-                    .map(|active| active.name()),
-                Some("SELECT"),
+                    .is_some_and(|active| active.is_selection_gathering()),
                 "{command} should gather an explicit selection"
             );
         }

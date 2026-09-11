@@ -52,6 +52,22 @@ pub struct SplineditCommand {
     join_candidates: Vec<crate::command::SelectionEntity>,
 }
 
+fn clear_fit_method(spline: &mut acadrust::entities::Spline) {
+    spline.fit_points.clear();
+    spline.begin_tangent = Vector3::ZERO;
+    spline.end_tangent = Vector3::ZERO;
+    spline.dwg_flags1 &= !1;
+    spline.dxf_flags &= !(32 | 1024);
+}
+
+fn weights_are_rational(weights: &[f64]) -> bool {
+    weights.first().is_some_and(|first| {
+        weights
+            .iter()
+            .any(|weight| (*weight - *first).abs() > 1e-12)
+    })
+}
+
 impl SplineditCommand {
     pub fn new() -> Self {
         Self { step: Step::SelectSpline, handle: acadrust::Handle::NULL, spline: None, pending: None, history: Vec::new(), pick_context: None, join_candidates: Vec::new() }
@@ -126,19 +142,16 @@ impl SplineditCommand {
                     source.control_points.iter().map(|point| [point.x, point.y, point.z]).collect(),
                     source.knots.clone(), weights)?
             };
-            let curve = curve.with_periodicity(source.flags.closed || source.flags.periodic)
-                .elevated(degree - current)?
+            let curve = curve.with_periodicity(source.flags.closed || source.flags.periodic);
+            let elevation = degree.checked_sub(curve.degree())?;
+            let curve = if elevation == 0 { curve } else { curve.elevated(elevation)? }
                 .compact_knots(source.control_tolerance.max(1e-9))?;
             let mut result = source.clone();
             result.degree = curve.degree() as i32;
             result.control_points = curve.control_points().iter().map(|point| Vector3::new(point[0], point[1], point[2])).collect();
             result.knots = curve.knots().to_vec();
             result.weights = curve.weights().to_vec();
-            result.fit_points.clear();
-            result.begin_tangent = Vector3::ZERO;
-            result.end_tangent = Vector3::ZERO;
-            result.dwg_flags1 &= !1;
-            result.dxf_flags &= !(32 | 1024);
+            clear_fit_method(&mut result);
             result.flags.rational = curve.is_rational();
             result.flags.planar = crate::entities::curve::spline_is_planar(&result);
             return Some(result);
@@ -158,6 +171,9 @@ impl SplineditCommand {
             let world = planar.plane.point_at(*point);
             Vector3::new(world[0], world[1], world[2])
         }).collect();
+        clear_fit_method(&mut result);
+        result.flags.rational = curve.is_rational();
+        result.flags.planar = crate::entities::curve::spline_is_planar(&result);
         Some(result)
     }
 }
@@ -262,7 +278,10 @@ impl CadCommand for SplineditCommand {
             },
             Step::Elevate => {
                 let current_order = self.spline.as_ref()?.degree.max(1) as usize + 1;
-                let order = upper.parse::<usize>().ok().filter(|order| *order >= current_order && *order <= 26)?;
+                let Some(order) = upper.parse::<usize>().ok()
+                    .filter(|order| *order >= current_order && *order <= 26) else {
+                        return Some(CmdResult::NeedPoint);
+                    };
                 if order == current_order {
                     self.step = Step::Refine;
                     return Some(CmdResult::NeedPoint);
@@ -290,8 +309,8 @@ impl CadCommand for SplineditCommand {
                         let mut spline = self.spline.clone()?;
                         spline.weights.resize(count, 1.0);
                         spline.weights[index] = weight;
-                        spline.flags.rational = true;
-                        spline.fit_points.clear();
+                        spline.flags.rational = weights_are_rational(&spline.weights);
+                        clear_fit_method(&mut spline);
                         return Some(self.replace(spline));
                     }
                 }
@@ -329,7 +348,8 @@ impl CadCommand for SplineditCommand {
                 spline.control_points = curve.control_points().iter().map(|point| Vector3::new(point[0], point[1], point[2])).collect();
                 spline.weights = curve.weights().to_vec();
                 spline.knots = curve.knots().to_vec();
-                spline.fit_points.clear();
+                clear_fit_method(&mut spline);
+                spline.flags.rational = curve.is_rational();
                 spline.flags.planar = crate::entities::curve::spline_is_planar(&spline);
                 self.replace(spline)
             }
@@ -338,7 +358,8 @@ impl CadCommand for SplineditCommand {
                 let Some(mut spline) = self.spline.clone() else { return CmdResult::NeedPoint; };
                 let Some(vertex) = spline.control_points.get_mut(index) else { return CmdResult::NeedPoint; };
                 *vertex = Vector3::new(point.x, point.y, point.z);
-                spline.fit_points.clear();
+                clear_fit_method(&mut spline);
+                spline.flags.planar = crate::entities::curve::spline_is_planar(&spline);
                 self.replace(spline)
             }
             _ => CmdResult::NeedPoint,
@@ -418,7 +439,7 @@ fn change_closure(source: &acadrust::entities::Spline, closed: bool) -> Option<a
     } else if closed {
         NurbsCurve3::from_weighted_control_polygon(degree, &controls, &weights, true)?
     } else {
-        let curve = stored_curve()?;
+        let curve = stored_curve()?.with_periodicity(false);
         curve.without_control_vertex(controls.len().checked_sub(1)?)?
     };
     let mut result = source.clone();
@@ -429,7 +450,7 @@ fn change_closure(source: &acadrust::entities::Spline, closed: bool) -> Option<a
     result.flags.closed = closed;
     result.flags.periodic = closed;
     if closed { result.dxf_flags |= 2048; } else { result.dxf_flags &= !2048; }
-    result.flags.rational = if fit_method { false } else { source.flags.rational || curve.is_rational() };
+    result.flags.rational = !fit_method && curve.is_rational();
     result.fit_points = if !closed && fit_method {
         fit_points.iter().map(|point| Vector3::new(point[0], point[1], point[2])).collect()
     } else { Vec::new() };
@@ -441,6 +462,189 @@ fn change_closure(source: &acadrust::entities::Spline, closed: bool) -> Option<a
     }
     result.flags.planar = crate::entities::curve::spline_is_planar(&result);
     Some(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acadrust::entities::Spline;
+    use acadrust::Handle;
+    use iced::Rectangle;
+
+    fn control_spline(points: &[[f64; 3]], degree: usize) -> Spline {
+        let mut spline = Spline::new();
+        spline.degree = degree as i32;
+        spline.control_points = points
+            .iter()
+            .map(|point| Vector3::new(point[0], point[1], point[2]))
+            .collect();
+        spline.knots = cadkernel::space::clamped_uniform_knots(degree, points.len());
+        spline
+    }
+
+    fn selected_command(spline: Spline) -> SplineditCommand {
+        let mut command = SplineditCommand::new();
+        command.inject_picked_entity(EntityType::Spline(spline));
+        command.on_entity_pick(Handle::new(7), DVec3::ZERO);
+        command
+    }
+
+    fn replacement(result: CmdResult) -> Spline {
+        let CmdResult::ReplaceManyContinue(mut replacements) = result else {
+            panic!("expected a continuing replacement");
+        };
+        let Some(EntityType::Spline(spline)) = replacements[0].1.pop() else {
+            panic!("expected a spline replacement");
+        };
+        spline
+    }
+
+    #[test]
+    fn moving_a_control_vertex_clears_fit_state_and_recomputes_planarity() {
+        let mut spline = control_spline(
+            &[
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [2.0, 1.0, 0.0],
+                [3.0, 0.0, 0.0],
+            ],
+            3,
+        );
+        spline.fit_points = vec![Vector3::new(0.0, 0.0, 0.0)];
+        spline.begin_tangent = Vector3::new(1.0, 0.0, 0.0);
+        spline.end_tangent = Vector3::new(1.0, 0.0, 0.0);
+        spline.dwg_flags1 = 1;
+        spline.dxf_flags = 32 | 1024;
+        spline.flags.planar = true;
+        let mut command = selected_command(spline);
+        command.on_text_input("MOVE");
+        let moved = replacement(command.on_point(DVec3::new(0.0, 0.0, 1.0)));
+        assert!(moved.fit_points.is_empty());
+        assert_eq!(moved.begin_tangent, Vector3::ZERO);
+        assert_eq!(moved.end_tangent, Vector3::ZERO);
+        assert_eq!(moved.dwg_flags1 & 1, 0);
+        assert_eq!(moved.dxf_flags & (32 | 1024), 0);
+        assert!(!moved.flags.planar);
+    }
+
+    #[test]
+    fn equal_control_weights_are_not_marked_rational() {
+        let spline = control_spline(
+            &[
+                [0.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [2.0, 1.0, 0.0],
+                [3.0, 0.0, 0.0],
+            ],
+            3,
+        );
+        let mut command = selected_command(spline);
+        command.on_text_input("REFINE");
+        command.on_text_input("WEIGHT");
+        let weighted = replacement(command.on_text_input("1").unwrap());
+        assert!(!weighted.flags.rational);
+        assert_eq!(weighted.weights, vec![1.0; 4]);
+    }
+
+    #[test]
+    fn deleting_the_only_weighted_vertex_clears_rational_and_fit_flags() {
+        let mut spline = control_spline(
+            &[
+                [-0.6, 0.0, 0.0],
+                [-0.2, 0.4, 0.0],
+                [0.2, 0.4, 0.0],
+                [0.6, 0.0, 0.0],
+            ],
+            2,
+        );
+        spline.weights = vec![1.0, 2.0, 1.0, 1.0];
+        spline.flags.rational = true;
+        spline.dwg_flags1 = 1;
+        spline.dxf_flags = 32 | 1024;
+        let mut command = selected_command(spline);
+        command.on_text_input("REFINE");
+        command.on_text_input("DELETE");
+        command.pick_context = Some(crate::command::PointPickContext {
+            view: glam::Mat4::IDENTITY,
+            eye: DVec3::ZERO,
+            bounds: Rectangle::new(iced::Point::ORIGIN, iced::Size::new(100.0, 100.0)),
+            aperture_px: 2.0,
+        });
+        let deleted = replacement(command.on_point(DVec3::new(-0.2, 0.4, 0.0)));
+        assert_eq!(deleted.control_points.len(), 3);
+        assert!(!deleted.flags.rational);
+        assert_eq!(deleted.dwg_flags1 & 1, 0);
+        assert_eq!(deleted.dxf_flags & (32 | 1024), 0);
+    }
+
+    #[test]
+    fn fit_only_degree_elevation_uses_the_interpolated_curve_degree() {
+        let mut spline = Spline::new();
+        spline.degree = 1;
+        spline.fit_points = vec![
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(1.0, 2.0, 0.0),
+            Vector3::new(3.0, 0.0, 0.0),
+        ];
+        let mut command = selected_command(spline);
+        command.on_text_input("REFINE");
+        command.on_text_input("ELEVATE");
+        assert!(matches!(command.on_text_input("invalid"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(command.step, Step::Elevate));
+        let elevated = replacement(command.on_text_input("5").unwrap());
+        assert_eq!(elevated.degree, 4);
+        assert!(elevated.fit_points.is_empty());
+    }
+
+    #[test]
+    fn a_closed_weighted_control_curve_can_be_opened() {
+        let curve = cadkernel::space::NurbsCurve3::from_weighted_control_polygon(
+            2,
+            &[
+                [0.0, 0.0, 0.0],
+                [2.0, 0.0, 0.0],
+                [2.0, 2.0, 1.0],
+                [0.0, 2.0, 0.0],
+            ],
+            &[1.0, 2.0, 0.75, 1.5],
+            true,
+        )
+        .unwrap();
+        let mut spline = control_spline(curve.control_points(), curve.degree());
+        spline.knots = curve.knots().to_vec();
+        spline.weights = curve.weights().to_vec();
+        spline.flags.closed = true;
+        spline.flags.periodic = true;
+        spline.flags.rational = true;
+        let opened = change_closure(&spline, false).expect("closed control curve opens");
+        assert!(!opened.flags.closed);
+        assert!(!opened.flags.periodic);
+        assert!(cadkernel::space::NurbsCurve3::new_strict(
+            opened.degree as usize,
+            opened
+                .control_points
+                .iter()
+                .map(|point| [point.x, point.y, point.z])
+                .collect(),
+            opened.knots.clone(),
+            opened.weights.clone(),
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn control_vertex_pick_uses_the_screen_aperture() {
+        let spline = control_spline(&[[-0.5, 0.0, 0.0], [0.5, 0.0, 0.0]], 1);
+        let mut command = selected_command(spline);
+        command.pick_context = Some(crate::command::PointPickContext {
+            view: glam::Mat4::IDENTITY,
+            eye: DVec3::ZERO,
+            bounds: Rectangle::new(iced::Point::ORIGIN, iced::Size::new(100.0, 100.0)),
+            aperture_px: 2.0,
+        });
+        assert_eq!(command.picked_vertex(DVec3::new(-0.49, 0.0, 0.0)), Some(0));
+        assert_eq!(command.picked_vertex(DVec3::new(0.0, 0.5, 0.0)), None);
+    }
 }
 
 // ── Autocomplete registry ─────────────────────────────────

@@ -975,7 +975,7 @@ impl OpenCADStudio {
 
             "DIVIDE" => {
                 use crate::modules::draw::inquiry::divide::DivideCommand;
-                let cmd = DivideCommand::new();
+                let cmd = DivideCommand::new().with_blocks(self.tabs[i].scene.custom_block_names());
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }

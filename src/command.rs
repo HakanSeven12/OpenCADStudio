@@ -1481,7 +1481,7 @@ pub enum CmdResult {
         op: crate::modules::draw::modify::pedit::PeditOp,
     },
     /// Place Point entities at N equal intervals along the entity.
-    DivideEntity { handle: Handle, n: usize },
+    DivideEntity { handle: Handle, n: usize, marker: Option<CurveMarker> },
     /// Place Point entities at `segment_length` intervals along the entity.
     MeasureEntity { handle: Handle, segment_length: f64 },
     /// Extend/trim a Line or Arc by the given mode; end command.
@@ -1938,6 +1938,14 @@ impl InputKind {
         self == InputKind::FreeText
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct CurveMarker {
+    pub block: String,
+    pub align: bool,
+    pub plane: WorkingPlane,
+}
+
 
 pub trait CadCommand: Send {
     /// Keep the layer already carried by entities committed by this command

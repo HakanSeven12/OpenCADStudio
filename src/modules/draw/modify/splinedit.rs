@@ -225,6 +225,7 @@ impl CadCommand for SplineditCommand {
                 spline.weights = curve.weights().to_vec();
                 spline.knots = curve.knots().to_vec();
                 spline.fit_points.clear();
+                spline.flags.planar = crate::entities::curve::spline_is_planar(&spline);
                 self.replace(spline)
             }
             Step::Add => self.refined(Some(point), None).map_or(CmdResult::NeedPoint, |spline| self.replace(spline)),

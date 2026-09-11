@@ -721,6 +721,26 @@ impl OpenCADStudio {
                             if left==right {
                                 removed.insert(candidates[b].0);progress=true;continue;
                             }
+                            if let (acadrust::EntityType::Arc(l),acadrust::EntityType::Arc(r))=(&left,&right) {
+                                use cadkernel::space::arc_union::{CircularArc,ArcUnionKind,circular_arc_union};
+                                if l.common!=r.common || l.thickness!=r.thickness {continue;}
+                                let arc=|v:&acadrust::entities::Arc|CircularArc{center:[v.center.x,v.center.y,v.center.z],normal:[v.normal.x,v.normal.y,v.normal.z],radius:v.radius,start:v.start_angle,end:v.end_angle};
+                                let Some(union)=circular_arc_union(arc(l),arc(r),tolerance) else {continue;};
+                                let allowed=match union.kind {ArcUnionKind::Duplicate=>true,ArcUnionKind::Overlap=>overlap,ArcUnionKind::EndToEnd=>end_to_end};
+                                if !allowed {continue;}
+                                if let acadrust::EntityType::Arc(source)=&candidates[a].1 {
+                                    let replacement=if union.full_circle {
+                                        let mut circle=acadrust::entities::Circle::new();
+                                        circle.common=source.common.clone();circle.center=source.center.clone();circle.normal=source.normal.clone();circle.radius=source.radius;circle.thickness=source.thickness;
+                                        acadrust::EntityType::Circle(circle)
+                                    } else {
+                                        let mut arc=source.clone();arc.start_angle=union.start;arc.end_angle=union.end;acadrust::EntityType::Arc(arc)
+                                    };
+                                    candidates[a].1=replacement;
+                                }
+                                changed.insert(candidates[a].0);removed.insert(candidates[b].0);progress=true;
+                                continue;
+                            }
                             let (acadrust::EntityType::Line(l),acadrust::EntityType::Line(r))=(&left,&right)
                                 else {continue;};
                             if l.common!=r.common||l.thickness!=r.thickness||l.normal!=r.normal {continue;}

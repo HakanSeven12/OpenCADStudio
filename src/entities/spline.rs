@@ -21,6 +21,40 @@ pub(crate) fn shows_fit_points(spline: &Spline) -> bool {
     uses_fit_method(spline) && (!spline.cv_frame_visible || spline.flags.periodic)
 }
 
+pub(crate) fn fit_nurbs3(spline: &Spline) -> Option<NurbsCurve3> {
+    if !uses_fit_method(spline) {
+        return None;
+    }
+    let mut points: Vec<_> = spline.fit_points.iter()
+        .map(|point| [point.x, point.y, point.z]).collect();
+    let parameterization = match spline.knot_parameterization {
+        1 => Parameterization::Centripetal,
+        2 => Parameterization::Uniform,
+        _ => Parameterization::Chord,
+    };
+    if spline.flags.periodic {
+        return NurbsCurve3::interpolate_periodic(&points, parameterization);
+    }
+    if spline.flags.closed && points.first() != points.last() {
+        if let Some(first) = points.first().copied() { points.push(first); }
+    }
+    let tangent = |value: acadrust::types::Vector3| {
+        let value = [value.x, value.y, value.z];
+        (value.iter().map(|component| component * component).sum::<f64>() > 1e-18)
+            .then_some(value)
+    };
+    NurbsCurve3::interpolate_fit(&points, tangent(spline.begin_tangent),
+        tangent(spline.end_tangent), parameterization)
+}
+
+/// Conservative world bounds of a fit-method spline. Fit points are interpolation
+/// constraints, not control-hull vertices, so their box can exclude the curve.
+/// The shared kernel reconstructs the same spatial interpolation used by the
+/// curve consumers, then its control hull bounds every point of that curve.
+pub(crate) fn fit_geometry_bounds(spline: &Spline) -> Option<cadkernel::brep::Aabb> {
+    let curve = fit_nurbs3(spline)?;
+    cadkernel::brep::Aabb::around(curve.control_points().iter().copied())
+}
 fn to_render(spl: &Spline) -> RenderEntity {
     let n = spl.control_points.len();
     if n < 2 {
@@ -1093,5 +1127,35 @@ impl crate::entities::traits::PropertyEditable for Spline {
 impl crate::entities::traits::Transformable for Spline {
     fn apply_transform(&mut self, t: &EntityTransform) {
         apply_transform(self, t);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fit_bounds_accept_closed_curves_with_unset_tangents() {
+        let mut spline = Spline::default();
+        spline.degree = 3;
+        spline.flags.closed = true;
+        spline.control_points.push(acadrust::types::Vector3::ZERO);
+        spline.fit_points = vec![
+            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(4.0, 0.0, 1.0),
+            acadrust::types::Vector3::new(4.0, 3.0, 2.0),
+            acadrust::types::Vector3::new(0.0, 3.0, 1.0),
+        ];
+
+        let bounds = fit_geometry_bounds(&spline).unwrap();
+        for point in &spline.fit_points {
+            for (value, min, max) in [
+                (point.x, bounds.min[0], bounds.max[0]),
+                (point.y, bounds.min[1], bounds.max[1]),
+                (point.z, bounds.min[2], bounds.max[2]),
+            ] {
+                assert!(value >= min - 1e-9 && value <= max + 1e-9);
+            }
+        }
     }
 }

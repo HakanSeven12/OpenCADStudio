@@ -1731,6 +1731,11 @@ fn entity_bounds(e: &acadrust::EntityType) -> ([f64; 3], [f64; 3]) {
             return (bounds.min, bounds.max);
         }
     }
+    if let acadrust::EntityType::Spline(spline) = e {
+        if let Some(bounds) = crate::entities::spline::fit_geometry_bounds(spline) {
+            return (bounds.min, bounds.max);
+        }
+    }
     let bounds = e.as_entity().bounding_box();
     (
         [bounds.min.x, bounds.min.y, bounds.min.z],

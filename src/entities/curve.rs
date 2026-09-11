@@ -110,7 +110,7 @@ pub fn entity_curve(entity: &EntityType) -> Option<PlanarCurve> {
 /// Exact spatial source geometry for commands that traverse nonplanar curves.
 /// Curve construction and arc-length calculations remain in the kernel.
 pub fn entity_spatial_measurement(entity: &EntityType) -> Option<cadkernel::space::ArcLengthCurve3> {
-    use cadkernel::space::{ArcLengthCurve3, NurbsCurve3, Parameterization};
+    use cadkernel::space::{ArcLengthCurve3, NurbsCurve3};
     let curve = match entity {
         EntityType::Polyline3D(polyline) => {
             if polyline.flags.spline_fit {
@@ -132,24 +132,7 @@ pub fn entity_spatial_measurement(entity: &EntityType) -> Option<cadkernel::spac
         }
         EntityType::Spline(spline) => {
             if crate::entities::spline::uses_fit_method(spline) {
-                let mut points: Vec<_> = spline.fit_points.iter().copied().map(xyz).collect();
-                let parameterization = match spline.knot_parameterization {
-                    1 => Parameterization::Centripetal, 2 => Parameterization::Uniform,
-                    _ => Parameterization::Chord,
-                };
-                if spline.flags.periodic {
-                    NurbsCurve3::interpolate_periodic(&points, parameterization)?
-                } else {
-                    if spline.flags.closed && points.first() != points.last() {
-                        if let Some(first) = points.first().copied() { points.push(first); }
-                    }
-                    let tangent = |value: Vector3| {
-                        let value = xyz(value);
-                        (Vec3::from(value).length_squared() > 1e-18).then_some(value)
-                    };
-                    NurbsCurve3::interpolate_fit(&points, tangent(spline.begin_tangent),
-                        tangent(spline.end_tangent), parameterization)?
-                }
+                crate::entities::spline::fit_nurbs3(spline)?
             } else {
                 let controls: Vec<_> = spline.control_points.iter().copied().map(xyz).collect();
                 let weights = if spline.weights.is_empty() { vec![1.0; controls.len()] }

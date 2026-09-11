@@ -2301,6 +2301,9 @@ pub trait CadCommand: Send {
         CmdResult::Cancel
     }
 
+    /// Exclude locked-layer entities from injected selection geometry.
+    fn selection_entities_exclude_locked(&self) -> bool { false }
+
     fn inject_selection_entities(&mut self, _entities: Vec<SelectionEntity>) {}
 
     fn area_preview_regions(&self) -> Option<Vec<AreaPreviewRegion>> {

@@ -33,6 +33,7 @@ enum Step {
     SelectSpline,
     Options,
     Refine,
+    Join,
     Add,
     Delete,
     Elevate,
@@ -48,11 +49,12 @@ pub struct SplineditCommand {
     pending: Option<acadrust::entities::Spline>,
     history: Vec<(acadrust::Handle, acadrust::entities::Spline)>,
     pick_context: Option<crate::command::PointPickContext>,
+    join_candidates: Vec<crate::command::SelectionEntity>,
 }
 
 impl SplineditCommand {
     pub fn new() -> Self {
-        Self { step: Step::SelectSpline, handle: acadrust::Handle::NULL, spline: None, pending: None, history: Vec::new(), pick_context: None }
+        Self { step: Step::SelectSpline, handle: acadrust::Handle::NULL, spline: None, pending: None, history: Vec::new(), pick_context: None, join_candidates: Vec::new() }
     }
 
     fn picked_vertex(&self, point: DVec3) -> Option<usize> {
@@ -81,6 +83,24 @@ impl SplineditCommand {
     fn replace(&mut self, spline: acadrust::entities::Spline) -> CmdResult {
         self.pending = Some(spline.clone());
         CmdResult::ReplaceManyContinue(vec![(self.handle, vec![EntityType::Spline(spline)])])
+    }
+
+    fn finish_join(&mut self) -> CmdResult {
+        self.step = Step::Options;
+        let candidates = std::mem::take(&mut self.join_candidates);
+        let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
+        let selected: Vec<_> = candidates.iter().filter(|item| item.handle != self.handle)
+            .map(|item| (item.handle, &item.entity)).collect();
+        let Some((EntityType::Spline(mut spline), consumed)) = super::join::join_to_source(
+            &EntityType::Spline(source.clone()), &selected) else { return CmdResult::NeedPoint; };
+        spline.dwg_flags1 &= !1;
+        spline.dxf_flags &= !(32 | 1024);
+        self.pending = Some(spline.clone());
+        let mut replacements = vec![(self.handle, vec![EntityType::Spline(spline)])];
+        replacements.extend(consumed.into_iter().map(|handle| (handle, Vec::new())));
+        // The host stores one document snapshot, including every consumed curve.
+        // The existing command-local Undo restores that snapshot and the source cache.
+        CmdResult::ReplaceManyContinue(replacements)
     }
 
     fn refined(&self, point: Option<DVec3>, degree: Option<usize>) -> Option<acadrust::entities::Spline> {
@@ -114,7 +134,8 @@ impl CadCommand for SplineditCommand {
         match self.step {
             Step::SelectSpline => crate::t!("SPLINEDIT  Select spline:").into_owned(),
             Step::Options if self.closed() => crate::t!("SPLINEDIT  [Open/Move vertex/Refine/rEverse/Undo/eXit] <eXit>:").into_owned(),
-            Step::Options => crate::t!("SPLINEDIT  [Close/Move vertex/Refine/rEverse/Undo/eXit] <eXit>:").into_owned(),
+            Step::Options => crate::t!("SPLINEDIT  [Close/Join/Move vertex/Refine/rEverse/Undo/eXit] <eXit>:").into_owned(),
+            Step::Join => crate::t!("SPLINEDIT  Select any open curves to join to source:").into_owned(),
             Step::Refine => crate::t!("SPLINEDIT  [Add/Delete/Elevate order/Move/Weight/eXit] <eXit>:").into_owned(),
             Step::Add => crate::t!("SPLINEDIT  Specify a point on the spline <exit>:").into_owned(),
             Step::Delete => crate::t!("SPLINEDIT  Specify control vertex to delete:").into_owned(),
@@ -127,11 +148,25 @@ impl CadCommand for SplineditCommand {
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
         match self.step {
-            Step::Options => vec![if self.closed() { CmdOption::new("Open", "O") } else { CmdOption::new("Close", "C") }, CmdOption::new("Move vertex", "M"), CmdOption::new("Refine", "R"), CmdOption::new("Reverse", "E"), CmdOption::new("Undo", "U"), CmdOption::new("Exit", "X")],
+            Step::Options => {
+                let mut options = vec![if self.closed() { CmdOption::new("Open", "O") } else { CmdOption::new("Close", "C") }];
+                if !self.closed() { options.push(CmdOption::new("Join", "J")); }
+                options.extend([CmdOption::new("Move vertex", "M"), CmdOption::new("Refine", "R"), CmdOption::new("Reverse", "E"), CmdOption::new("Undo", "U"), CmdOption::new("Exit", "X")]);
+                options
+            },
             Step::Refine => vec![CmdOption::new("Add", "A"), CmdOption::new("Delete", "D"), CmdOption::new("Elevate order", "E"), CmdOption::new("Move", "M"), CmdOption::new("Weight", "W"), CmdOption::new("Exit", "X")],
             Step::Move { .. } | Step::Weight { .. } => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Select point", "S"), CmdOption::new("Exit", "X")],
             _ => Vec::new(),
         }
+    }
+    fn is_selection_gathering(&self) -> bool { matches!(self.step, Step::Join) }
+    fn selection_entities_exclude_locked(&self) -> bool { matches!(self.step, Step::Join) }
+    fn inject_selection_entities(&mut self, entities: Vec<crate::command::SelectionEntity>) {
+        if matches!(self.step, Step::Join) { self.join_candidates = entities; }
+    }
+    fn on_selection_complete(&mut self, handles: Vec<acadrust::Handle>) -> CmdResult {
+        self.join_candidates.retain(|item| handles.contains(&item.handle) && item.handle != self.handle);
+        CmdResult::NeedPoint
     }
     fn needs_entity_pick(&self) -> bool { matches!(self.step, Step::SelectSpline) }
     fn inject_before_entity_pick(&self) -> bool { true }
@@ -152,12 +187,13 @@ impl CadCommand for SplineditCommand {
             }
         }
     }
-    fn wants_text_input(&self) -> bool { !matches!(self.step, Step::SelectSpline | Step::Add | Step::Delete | Step::Move { .. } | Step::SelectVertex { .. }) }
+    fn wants_text_input(&self) -> bool { !matches!(self.step, Step::SelectSpline | Step::Join | Step::Add | Step::Delete | Step::Move { .. } | Step::SelectVertex { .. }) }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let upper = text.trim().to_uppercase();
         if upper.is_empty() { return Some(self.on_enter()); }
         match self.step {
             Step::Options => match upper.as_str() {
+                "J" | "JOIN" if !self.closed() => { self.join_candidates.clear(); self.step = Step::Join; },
                 "R" | "REFINE" => self.step = Step::Refine,
                 "M" | "MOVE" => self.step = Step::Move { index: 0, refine: false },
                 "X" | "EXIT" => return Some(CmdResult::Cancel),
@@ -277,6 +313,7 @@ impl CadCommand for SplineditCommand {
     fn on_enter(&mut self) -> CmdResult {
         match self.step {
             Step::SelectSpline | Step::Options => CmdResult::Cancel,
+            Step::Join => self.finish_join(),
             Step::Refine => { self.step = Step::Options; CmdResult::NeedPoint }
             Step::Add | Step::Delete | Step::SelectVertex { .. } => { self.step = Step::Refine; CmdResult::NeedPoint }
             Step::Elevate => {
@@ -285,6 +322,13 @@ impl CadCommand for SplineditCommand {
             }
             Step::Move { .. } | Step::Weight { .. } => self.on_text_input("N").unwrap_or(CmdResult::NeedPoint),
         }
+    }
+    fn on_escape(&mut self) -> CmdResult {
+        if matches!(self.step, Step::Join) {
+            self.join_candidates.clear();
+            self.step = Step::Options;
+            CmdResult::NeedPoint
+        } else { CmdResult::Cancel }
     }
     fn on_preview_wires(&mut self, _pt: DVec3) -> Vec<WireModel> { vec![] }
 }

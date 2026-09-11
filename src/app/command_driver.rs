@@ -417,10 +417,13 @@ impl OpenCADStudio {
             }
         }
         if let StepInput::SelectionComplete(handles) = &input {
+            let exclude_locked = self.tabs[i].active_cmd.as_ref()
+                .is_some_and(|command| command.selection_entities_exclude_locked());
             let entities = {
                 let scene = &self.tabs[i].scene;
                 handles
                     .iter()
+                    .filter(|handle| !exclude_locked || !scene.is_layer_locked(**handle))
                     .filter_map(|handle| {
                         scene.document.get_entity(*handle).cloned().map(|entity| {
                             let surface_area = scene

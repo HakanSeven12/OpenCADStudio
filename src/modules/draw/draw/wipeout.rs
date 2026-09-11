@@ -344,7 +344,7 @@ impl CadCommand for WipeoutCommand {
                     WireModel::CYAN,
                     false,
                 );
-                wire.line_weight_px = 1.5;
+                wire.set_fixed_screen_width(2.0);
                 Some(wire)
             }
             WipeoutMode::Rectangular => {
@@ -367,7 +367,7 @@ impl CadCommand for WipeoutCommand {
                     WireModel::CYAN,
                     false,
                 );
-                wire.line_weight_px = 1.5;
+                wire.set_fixed_screen_width(2.0);
                 Some(wire)
             }
             WipeoutMode::Polyline | WipeoutMode::Frames | WipeoutMode::ErasePolyline => None,

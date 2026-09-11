@@ -3178,26 +3178,30 @@ impl OpenCADStudio {
             CmdResult::MeasureEntity {
                 handle,
                 segment_length,
+                pick_point,
+                marker,
             } => {
                 use crate::modules::draw::inquiry::divide::measure_entity;
                 let pts = self.tabs[i]
                     .scene
                     .document
                     .get_entity(handle)
-                    .map(|e| measure_entity(e, segment_length))
+                    .map(|e| measure_entity(e, segment_length, pick_point, marker.as_ref()))
                     .unwrap_or_default();
                 let count = pts.len();
                 if count > 0 {
                     self.push_undo_snapshot(i, "MEASURE");
-                    for p in pts {
+                    let layer = self.tabs[i].active_layer.clone();
+                    for mut p in pts {
+                        p.as_entity_mut().set_layer(layer.clone());
                         self.tabs[i].scene.add_entity(p);
                     }
                     self.tabs[i].dirty = true;
                     self.command_line
-                        .push_output(crate::tf!("MEASURE: {count} point(s) placed.").as_ref());
+                        .push_output(crate::tf!("MEASURE: {count} marker(s) placed.").as_ref());
                 } else {
                     self.command_line
-                        .push_error(crate::t!("MEASURE: entity type not supported or distance too large.").as_ref());
+                        .push_output(crate::t!("MEASURE: 0 markers placed.").as_ref());
                 }
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;

@@ -74,6 +74,10 @@ impl SplineditCommand {
         }).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(index, _)| index)
     }
 
+    fn closed(&self) -> bool {
+        self.spline.as_ref().is_some_and(|spline| spline.flags.closed || spline.flags.periodic)
+    }
+
     fn replace(&mut self, spline: acadrust::entities::Spline) -> CmdResult {
         self.pending = Some(spline.clone());
         CmdResult::ReplaceManyContinue(vec![(self.handle, vec![EntityType::Spline(spline)])])
@@ -109,7 +113,8 @@ impl CadCommand for SplineditCommand {
     fn prompt(&self) -> String {
         match self.step {
             Step::SelectSpline => crate::t!("SPLINEDIT  Select spline:").into_owned(),
-            Step::Options => crate::t!("SPLINEDIT  [Close/Open/Move vertex/Refine/rEverse/Undo/eXit] <eXit>:").into_owned(),
+            Step::Options if self.closed() => crate::t!("SPLINEDIT  [Open/Move vertex/Refine/rEverse/Undo/eXit] <eXit>:").into_owned(),
+            Step::Options => crate::t!("SPLINEDIT  [Close/Move vertex/Refine/rEverse/Undo/eXit] <eXit>:").into_owned(),
             Step::Refine => crate::t!("SPLINEDIT  [Add/Delete/Elevate order/Move/Weight/eXit] <eXit>:").into_owned(),
             Step::Add => crate::t!("SPLINEDIT  Specify a point on the spline <exit>:").into_owned(),
             Step::Delete => crate::t!("SPLINEDIT  Specify control vertex to delete:").into_owned(),
@@ -122,7 +127,7 @@ impl CadCommand for SplineditCommand {
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
         match self.step {
-            Step::Options => vec![CmdOption::new("Close", "C"), CmdOption::new("Open", "O"), CmdOption::new("Move vertex", "M"), CmdOption::new("Refine", "R"), CmdOption::new("Reverse", "E"), CmdOption::new("Undo", "U"), CmdOption::new("Exit", "X")],
+            Step::Options => vec![if self.closed() { CmdOption::new("Open", "O") } else { CmdOption::new("Close", "C") }, CmdOption::new("Move vertex", "M"), CmdOption::new("Refine", "R"), CmdOption::new("Reverse", "E"), CmdOption::new("Undo", "U"), CmdOption::new("Exit", "X")],
             Step::Refine => vec![CmdOption::new("Add", "A"), CmdOption::new("Delete", "D"), CmdOption::new("Elevate order", "E"), CmdOption::new("Move", "M"), CmdOption::new("Weight", "W"), CmdOption::new("Exit", "X")],
             Step::Move { .. } | Step::Weight { .. } => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Select point", "S"), CmdOption::new("Exit", "X")],
             _ => Vec::new(),
@@ -164,6 +169,10 @@ impl CadCommand for SplineditCommand {
                     }
                 }
                 "C" | "CLOSE" | "O" | "OPEN" | "E" | "REVERSE" | "REV" => {
+                    if (matches!(upper.as_str(), "C" | "CLOSE") && self.closed())
+                        || (matches!(upper.as_str(), "O" | "OPEN") && !self.closed()) {
+                        return Some(CmdResult::NeedPoint);
+                    }
                     let mut spline = self.spline.clone()?;
                     let op = match upper.as_str() { "C" | "CLOSE" => "__SPLINEDIT_CLOSE__", "O" | "OPEN" => "__SPLINEDIT_OPEN__", _ => "__SPLINEDIT_REVERSE__" };
                     apply_to_spline(&mut spline, op);

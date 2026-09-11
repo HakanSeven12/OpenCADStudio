@@ -736,6 +736,7 @@ impl OpenCADStudio {
                         .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                         .collect();
                     self.tabs[i].scene.bump_entities(&changes);
+                    self.refresh_properties();
                     self.command_line.push_output(crate::tf!(
                         "SETBYLAYER: reset {changed} entity/entities to ByLayer."
                     ).as_ref());

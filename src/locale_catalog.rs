@@ -693,7 +693,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Current MLeader style: {}" => Some(("layers", "current-mleader-style")),
         "Current Vertex" => Some(("properties", "current-vertex-title-case")),
         "Current Control point" => Some(("properties", "current-control-point")),
-        "Current Fit point" => Some(("properties", "current-fit-point")),
+        "Current fit point" => Some(("properties", "current-fit-point")),
         "CV frame" => Some(("properties", "cv-frame")),
         "Current annotation scale: {name}" => Some(("view", "current-annotation-scale-name")),
         "Current dim style set to '{}'." => Some(("common", "current-dim-style-set-to")),

@@ -4,8 +4,8 @@ use cadkernel::space::{NurbsCurve3, Parameterization};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
-    dropdown_grip, edit_prop as edit, edit_scalar_prop as edit_scalar, format_length,
-    parse_f64, ro_prop as ro, round_grip, square_grip,
+    dropdown_grip, edit_prop as edit, edit_scalar_prop as edit_scalar, parse_f64,
+    ro_prop as ro, round_grip, square_grip,
 };
 use crate::entities::traits::RenderConvertible;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
@@ -673,7 +673,7 @@ fn properties(spline: &Spline) -> Vec<PropSection> {
                 count.to_string(),
             ),
             index_prop(
-                t!("Current Fit point").as_ref(),
+                t!("Current fit point").as_ref(),
                 "current_fit_point",
                 index,
                 count,
@@ -824,10 +824,10 @@ fn properties(spline: &Spline) -> Vec<PropSection> {
         ]);
     }
     if show_fit {
-        misc.push(ro(
+        misc.push(edit(
             t!("Fit tolerance").as_ref(),
             "fit_tolerance",
-            format_length(spline.fit_tolerance),
+            spline.fit_tolerance,
         ));
     }
 
@@ -892,9 +892,6 @@ fn apply_geom_prop(spline: &mut Spline, field: &str, value: &str) {
     {
         return;
     }
-    if field == "fit_tolerance" {
-        return;
-    }
     if matches!(field, "ctrl_pt_x" | "ctrl_pt_y" | "ctrl_pt_z" | "weight")
         && uses_fit_method(spline)
         && !convert_to_control_method(spline)
@@ -948,6 +945,11 @@ fn apply_geom_prop(spline: &mut Spline, field: &str, value: &str) {
         "fit_pt_z" => {
             if let Some(fp) = spline.fit_points.get_mut(fit_index) {
                 fp.z = v;
+            }
+        }
+        "fit_tolerance" => {
+            if v.is_finite() && v >= 0.0 {
+                spline.fit_tolerance = v;
             }
         }
         "start_tan_x" | "start_tan_y" | "start_tan_z" => {
@@ -1156,6 +1158,30 @@ mod tests {
             ] {
                 assert!(value >= min - 1e-9 && value <= max + 1e-9);
             }
+        }
+    }
+
+    #[test]
+    fn fit_tolerance_is_editable_and_rejects_invalid_values() {
+        let mut spline = Spline::default();
+        spline.fit_points = vec![
+            acadrust::types::Vector3::ZERO,
+            acadrust::types::Vector3::new(1.0, 0.0, 0.0),
+        ];
+        spline.fit_tolerance = 0.25;
+
+        let tolerance = properties(&spline)
+            .into_iter()
+            .flat_map(|section| section.props)
+            .find(|property| property.field == "fit_tolerance")
+            .unwrap();
+        assert!(matches!(tolerance.value, PropValue::EditText(_)));
+
+        apply_geom_prop(&mut spline, "fit_tolerance", "1.5");
+        assert_eq!(spline.fit_tolerance, 1.5);
+        for invalid in ["-1", "NaN", "inf"] {
+            apply_geom_prop(&mut spline, "fit_tolerance", invalid);
+            assert_eq!(spline.fit_tolerance, 1.5);
         }
     }
 }

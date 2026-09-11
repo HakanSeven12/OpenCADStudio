@@ -968,7 +968,7 @@ impl OpenCADStudio {
             let Some(entity) = tab.scene.document.get_entity(handle) else {
                 continue;
             };
-            let bb = entity.as_entity().bounding_box();
+            let (min, max) = crate::scene::convert::tess::entity_bounds(entity);
             let metrics = tab
                 .scene
                 .meshes
@@ -994,7 +994,7 @@ impl OpenCADStudio {
                     "area":planar.curve.is_closed().then(|| planar.curve.enclosed_area().abs())
                 })
             });
-            out.push(json!({"handle":format!("{:X}",handle.value()),"type":crate::entities::names::ui_name(entity),"bounds":{"min":[bb.min.x,bb.min.y,bb.min.z],"max":[bb.max.x,bb.max.y,bb.max.z]},"curve":curve,"mesh":metrics.map(|m|json!({"vertices":m.metrics.vertices,"triangles":m.metrics.triangles,"surface_area":m.metrics.surface_area,"volume":m.metrics.volume,"centroid":m.metrics.centroid,"moment_of_inertia":m.metrics.moment_of_inertia,"principal_directions":m.metrics.principal_directions,"principal_moments":m.metrics.principal_moments,"product_of_inertia":m.metrics.product_of_inertia,"radii_of_gyration":m.metrics.radii_of_gyration}))}));
+            out.push(json!({"handle":format!("{:X}",handle.value()),"type":crate::entities::names::ui_name(entity),"bounds":{"min":min,"max":max},"curve":curve,"mesh":metrics.map(|m|json!({"vertices":m.metrics.vertices,"triangles":m.metrics.triangles,"surface_area":m.metrics.surface_area,"volume":m.metrics.volume,"centroid":m.metrics.centroid,"moment_of_inertia":m.metrics.moment_of_inertia,"principal_directions":m.metrics.principal_directions,"principal_moments":m.metrics.principal_moments,"product_of_inertia":m.metrics.product_of_inertia,"radii_of_gyration":m.metrics.radii_of_gyration}))}));
         }
         json!({"ok":true,"document_id":tab.id,"geometry_revision":tab.scene.geometry_epoch,"measurements":out})
     }

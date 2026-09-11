@@ -1141,11 +1141,14 @@ pub struct BoundaryCommand {
     gap_tolerance: f64,
     plane: WorkingPlane,
     missed: bool,
+    output_region: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum BoundaryMode {
     PickInside,
+    Advanced,
+    ObjectType,
     SelectObjects,
     GapTolerance { return_to_selection: bool },
 }
@@ -1176,6 +1179,7 @@ impl BoundaryCommand {
             gap_tolerance: 1.0e-6,
             plane,
             missed: false,
+            output_region: false,
         };
         if !selected_objects.is_empty() {
             command.set_boundary_set(selected_objects);
@@ -1281,6 +1285,15 @@ impl BoundaryCommand {
         } else {
             &self.sources
         };
+        if self.output_region {
+            let mut rings=Vec::new();
+            for ring in self.point_regions.iter().flatten() {
+                if !rings.contains(&ring) {rings.push(ring);}
+            }
+            return rings.into_iter().filter_map(|ring| {
+                crate::scene::model::presspull_model::boundary_region(sources,std::slice::from_ref(ring),self.plane)
+            }).collect();
+        }
         crate::scene::boundary_polyline_entities(
             &self.point_regions,
             self.plane,
@@ -1303,8 +1316,10 @@ impl CadCommand for BoundaryCommand {
         };
         match self.mode {
             BoundaryMode::PickInside => {
-                t!("BOUNDARY  Pick internal point:%{miss}", miss = miss).into_owned()
+                format!("BOUNDARY  Specify internal point or [Advanced options]:{miss}")
             }
+            BoundaryMode::Advanced=>"BOUNDARY  Enter an option [Object type]:".into(),
+            BoundaryMode::ObjectType=>format!("BOUNDARY  Enter type of boundary object [Region/Polyline] <{}>:",if self.output_region{"Region"}else{"Polyline"}),
             BoundaryMode::SelectObjects => {
                 t!("%{cmd}  Select objects:", cmd = self.name()).into_owned()
             }
@@ -1318,6 +1333,8 @@ impl CadCommand for BoundaryCommand {
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
+        if self.mode==BoundaryMode::Advanced {return vec![CmdOption::new("Object type","O")];}
+        if self.mode==BoundaryMode::ObjectType {return vec![CmdOption::new("Region","R"),CmdOption::new("Polyline","P")];}
         if matches!(self.mode, BoundaryMode::GapTolerance { .. }) {
             return Vec::new();
         }
@@ -1330,6 +1347,7 @@ impl CadCommand for BoundaryCommand {
             t!(self.island_label())
         );
         let mut options = vec![
+            CmdOption::new("Advanced options", "A"),
             CmdOption::new(t!("Boundary").as_ref(), "O"),
             CmdOption::new(&island, "S"),
             CmdOption::new(t!("Tolerance").as_ref(), "G"),
@@ -1355,6 +1373,8 @@ impl CadCommand for BoundaryCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
+        if self.mode==BoundaryMode::ObjectType {self.mode=BoundaryMode::Advanced;return CmdResult::NeedPoint;}
+        if self.mode==BoundaryMode::Advanced {self.mode=BoundaryMode::PickInside;return CmdResult::NeedPoint;}
         if let BoundaryMode::GapTolerance { return_to_selection } = self.mode {
             self.mode = if return_to_selection {
                 BoundaryMode::SelectObjects
@@ -1396,6 +1416,18 @@ impl CadCommand for BoundaryCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if self.mode==BoundaryMode::Advanced {
+            if matches!(text.trim().to_ascii_uppercase().as_str(),"O"|"OBJECT"|"OBJECT TYPE") {self.mode=BoundaryMode::ObjectType;}
+            return Some(CmdResult::NeedPoint);
+        }
+        if self.mode==BoundaryMode::ObjectType {
+            match text.trim().to_ascii_uppercase().as_str(){
+                "R"|"REGION"=>self.output_region=true,
+                "P"|"POLYLINE"=>self.output_region=false,
+                _=>return Some(CmdResult::NeedPoint),
+            }
+            self.mode=BoundaryMode::Advanced;return Some(CmdResult::NeedPoint);
+        }
         if let BoundaryMode::GapTolerance { return_to_selection } = self.mode {
             if let Ok(value) = text.trim().parse::<f64>() {
                 if value.is_finite() && value > 0.0 {
@@ -1411,6 +1443,7 @@ impl CadCommand for BoundaryCommand {
             return Some(CmdResult::NeedPoint);
         }
         match text.trim().to_ascii_uppercase().as_str() {
+            "A"|"ADVANCED"=>self.mode=BoundaryMode::Advanced,
             "O" | "OBJECT" | "OBJECTS" => {
                 self.mode = BoundaryMode::SelectObjects;
                 self.missed = false;

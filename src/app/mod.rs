@@ -1922,7 +1922,7 @@ pub enum Message {
     #[cfg(target_arch = "wasm32")]
     WebFileOpened(u64, crate::io::WebOpenOutcome),
     #[cfg(target_arch = "wasm32")]
-    WebFileCached(u64, crate::io::WebOpenOutcome, Result<(), String>),
+    WebFileCached(u64, String, Result<(), String>),
     FileOpened(
         u64,
         Result<

@@ -7,8 +7,8 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{ErrorEvent, MessageEvent, Worker, WorkerOptions, WorkerType};
 
 const HASH_MARKER: &str = "\nreport-source-sha256:";
-const PROTOCOL_VERSION: u16 = 4;
-const WORKER_URL: &str = "ocs-parse-worker.js?v=4";
+const PROTOCOL_VERSION: u16 = 5;
+const WORKER_URL: &str = "ocs-parse-worker.js?v=5";
 
 #[derive(serde::Deserialize)]
 struct EntityRuntimeFields {
@@ -26,6 +26,14 @@ struct EntityRuntimeFields {
     has_ds_data: bool,
 }
 
+#[derive(serde::Deserialize)]
+struct RawObjectFields {
+    handle: acadrust::Handle,
+    dxf_codes: Option<Vec<(i32, String)>>,
+    dwg_data: Option<Vec<u8>>,
+    dwg_version: Option<acadrust::types::DxfVersion>,
+}
+
 pub(super) async fn parse_document(
     name: &str,
     bytes: &[u8],
@@ -37,9 +45,8 @@ pub(super) async fn parse_document(
     let worker = Worker::new_with_options(WORKER_URL, &options)
         .map_err(|error| super::OpenLoadError::from(js_error(error)))?;
 
-    let (sender, receiver) = iced::futures::channel::oneshot::channel::<
-        Result<(acadrust::ReadOutcome, Option<String>), super::OpenLoadError>,
-    >();
+    let (sender, receiver) =
+        iced::futures::channel::oneshot::channel::<Result<Uint8Array, super::OpenLoadError>>();
     let sender = Rc::new(RefCell::new(Some(sender)));
     let message_sender = sender.clone();
     let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
@@ -51,41 +58,7 @@ pub(super) async fn parse_document(
         let result = if ok {
             Reflect::get(&data, &JsValue::from_str("data"))
                 .map_err(|error| super::OpenLoadError::from(js_error(error)))
-                .and_then(|value| {
-                    let bytes = Uint8Array::new(&value).to_vec();
-                    let payload: (
-                        u16,
-                        Result<
-                            acadrust::ReadOutcome,
-                            (String, Option<acadrust::ReadStats>),
-                        >,
-                        Option<String>,
-                        bool,
-                        Vec<EntityRuntimeFields>,
-                    ) = bincode::deserialize(&bytes)
-                        .map_err(|error| super::OpenLoadError::from(error.to_string()))?;
-                    if payload.0 != PROTOCOL_VERSION {
-                        return Err(super::OpenLoadError::from(format!(
-                            "parser worker protocol mismatch: expected {}, received {}",
-                            PROTOCOL_VERSION, payload.0
-                        )));
-                    }
-                    match payload.1 {
-                        Ok(mut outcome) => {
-                            restore_entity_runtime_fields(
-                                &mut outcome.document,
-                                payload.4,
-                            );
-                            Ok((outcome, payload.2))
-                        }
-                        Err((message, read_stats)) => Err(super::OpenLoadError {
-                            message,
-                            source_sha256: payload.2,
-                            read_stats,
-                            recovery_available: payload.3,
-                        }),
-                    }
-                })
+                .map(|value| Uint8Array::new(&value))
         } else {
             let message = Reflect::get(&data, &JsValue::from_str("error"))
                 .ok()
@@ -135,11 +108,56 @@ pub(super) async fn parse_document(
         .post_message_with_transfer(&payload, &transfer)
         .map_err(|error| super::OpenLoadError::from(js_error(error)))?;
 
-    let result = receiver
-        .await
-        .map_err(|_| super::OpenLoadError::from("CAD parser worker closed without a result"))?;
+    let result = receiver.await;
+    worker.set_onmessage(None);
+    worker.set_onerror(None);
+    // Release the parser's wasm heap before allocating the UI document.
     worker.terminate();
-    result
+    let data = result
+        .map_err(|_| super::OpenLoadError::from("CAD parser worker closed without a result"))??;
+    crate::scene::yield_to_browser().await;
+    let bytes = data.to_vec();
+    let decoder = flate2::read::ZlibDecoder::new(bytes.as_slice());
+    let payload: (
+        u16,
+        Result<acadrust::ReadOutcome, (String, Option<acadrust::ReadStats>)>,
+        Option<String>,
+        bool,
+        Vec<EntityRuntimeFields>,
+        Vec<RawObjectFields>,
+    ) = bincode::deserialize_from(std::io::BufReader::new(decoder))
+        .map_err(|error| super::OpenLoadError::from(error.to_string()))?;
+    if payload.0 != PROTOCOL_VERSION {
+        return Err(super::OpenLoadError::from(format!(
+            "parser worker protocol mismatch: expected {}, received {}",
+            PROTOCOL_VERSION, payload.0
+        )));
+    }
+    match payload.1 {
+        Ok(mut outcome) => {
+            restore_entity_runtime_fields(&mut outcome.document, payload.4);
+            for fields in payload.5 {
+                if let Some(acadrust::objects::ObjectType::Unknown {
+                    raw_dxf_codes,
+                    raw_dwg_data,
+                    raw_dwg_version,
+                    ..
+                }) = outcome.document.objects.get_mut(&fields.handle)
+                {
+                    *raw_dxf_codes = fields.dxf_codes;
+                    *raw_dwg_data = fields.dwg_data;
+                    *raw_dwg_version = fields.dwg_version;
+                }
+            }
+            Ok((outcome, payload.2))
+        }
+        Err((message, read_stats)) => Err(super::OpenLoadError {
+            message,
+            source_sha256: payload.2,
+            read_stats,
+            recovery_available: payload.3,
+        }),
+    }
 }
 
 fn restore_entity_runtime_fields(
@@ -172,9 +190,8 @@ pub(super) async fn sha256_document(bytes: &[u8]) -> Result<String, super::OpenL
     let worker = Worker::new_with_options(WORKER_URL, &options)
         .map_err(|error| super::OpenLoadError::from(js_error(error)))?;
 
-    let (sender, receiver) = iced::futures::channel::oneshot::channel::<
-        Result<String, super::OpenLoadError>,
-    >();
+    let (sender, receiver) =
+        iced::futures::channel::oneshot::channel::<Result<String, super::OpenLoadError>>();
     let sender = Rc::new(RefCell::new(Some(sender)));
     let message_sender = sender.clone();
     let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {

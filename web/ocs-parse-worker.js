@@ -1,7 +1,7 @@
-import init, { parse_document, sha256_document } from "./worker_pkg/ocs_web_worker.js?v=4";
+import init, { parse_document, sha256_document } from "./worker_pkg/ocs_web_worker.js?v=5";
 
 const ready = init(
-  new URL("./worker_pkg/ocs_web_worker_bg.wasm?v=4", import.meta.url),
+  new URL("./worker_pkg/ocs_web_worker_bg.wasm?v=5", import.meta.url),
 );
 
 self.onmessage = async ({ data }) => {
@@ -22,11 +22,10 @@ self.onmessage = async ({ data }) => {
         stage = next;
       },
     );
-    // wasm-bindgen returns a view into WebAssembly.Memory. Copy to a standalone
-    // ArrayBuffer before transferring it, otherwise the worker's wasm memory
-    // itself would be detached.
-    const transferable = encoded.slice();
-    self.postMessage({ ok: true, data: transferable.buffer }, [transferable.buffer]);
+    // Rust returns Uint8Array::from(slice), which already owns a JS buffer.
+    // Transfer it directly: copying the whole serialized drawing again doubles
+    // the output-buffer peak for large documents.
+    self.postMessage({ ok: true, data: encoded.buffer }, [encoded.buffer]);
   } catch (error) {
     self.postMessage({
       ok: false,

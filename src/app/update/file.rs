@@ -983,7 +983,10 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                         recovery_read_stats: None,
                         recovery_bytes: None,
                     });
-                    Task::perform(crate::io::pick_and_load_web(state), move |outcome| {
+                    let model_bg = self.default_bg_color.unwrap_or_else(|| {
+                        self.model_space.resolve_model_bg(&self.active_theme)
+                    });
+                    Task::perform(crate::io::pick_and_load_web(state, model_bg), move |outcome| {
                         Message::WebFileOpened(open_id, outcome)
                     })
                 }
@@ -1316,12 +1319,36 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 let timings = caches.timings;
                 let entity_count = doc.entities().count();
                 let parser_errors_recovered = caches.read_stats.as_ref().is_some_and(|stats| {
-                    stats.recovered()
-                        || stats.skipped_source_records > 0
-                        || !stats.stream_completed
-                }) || doc.notifications.iter().any(|item| {
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        // Web strict reads can contain non-fatal reader
+                        // diagnostics. The worker already rejected files with
+                        // no usable drawing data; only an explicit failsafe
+                        // pass represents a recovery that should be reported.
+                        stats.recovery_mode
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        stats.recovered()
+                            || stats.skipped_source_records > 0
+                            || !stats.stream_completed
+                    }
+                });
+                #[cfg(not(target_arch = "wasm32"))]
+                let parser_errors_recovered = parser_errors_recovered || doc.notifications.iter().any(|item| {
                     item.notification_type == acadrust::notification::NotificationType::Error
                 });
+                #[cfg(target_arch = "wasm32")]
+                if let Some(stats) = caches.read_stats.as_ref().filter(|stats| {
+                    !stats.recovery_mode && (stats.recovered_errors > 0 || !stats.diagnostics.is_empty())
+                }) {
+                    self.command_line.push_info(crate::tf!(
+                        "Drawing loaded with {} reader warnings.", stats.recovered_errors.max(stats.diagnostics.len())
+                    ).as_ref());
+                    for diagnostic in stats.diagnostics.iter().take(5) {
+                        self.command_line.push_info(&diagnostic.message);
+                    }
+                }
                 let reference_recovered = caches
                     .xrefs
                     .iter()

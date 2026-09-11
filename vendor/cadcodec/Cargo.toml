@@ -1,0 +1,69 @@
+[package]
+name = "acadrust"
+version = "0.5.4"
+edition = "2021"
+authors = ["Hakan AK"]
+description = "A pure Rust library for reading and writing CAD files in DXF format (ASCII and Binary) and DWG format (Binary)."
+license = "MPL-2.0"
+repository = "https://github.com/hakanaktt/acadrust"
+homepage = "https://github.com/hakanaktt/acadrust"
+documentation = "https://docs.rs/acadrust"
+readme = "README.md"
+keywords = ["cad", "dxf", "dwg", "drawing", "vector-graphics"]
+categories = ["parser-implementations", "encoding"]
+
+[features]
+default = []
+serde = ["dep:serde", "bitflags/serde", "indexmap/serde"]
+import = ["dep:quick-xml"]
+
+[dependencies]
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Binary parsing
+nom = "7.1"
+byteorder = "1.5"
+
+# Compression
+flate2 = "1.0"
+
+# Collections
+indexmap = "2.0"
+ahash = { version = "0.8", features = ["serde"] }
+
+# Encoding
+encoding_rs = "0.8"
+
+# Serialization (optional)
+serde = { version = "1", features = ["derive", "rc"], optional = true }
+
+# XML parsing (optional, for COLLADA import)
+quick-xml = { version = "0.36", optional = true }
+
+# Utilities
+bitflags = "2.4"
+once_cell = "1.19"
+web-time = "1"
+
+# Fast number formatting
+itoa = "1"
+ryu = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+memmap2 = "0.9"
+rayon = "1"
+
+[dev-dependencies]
+criterion = "0.5"
+proptest = "1.4"
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"

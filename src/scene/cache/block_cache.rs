@@ -275,6 +275,41 @@ impl BlockCache {
         cache
     }
 
+    /// Browser counterpart: nested INSERTs remain references, so definitions
+    /// can be built independently with event-loop yields between them.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn build_web(
+        doc: &CadDocument,
+        anno_scale: f32,
+        annotation_scale_handle: Option<Handle>,
+        all_visible: bool,
+        bg_color: [f32; 4],
+        viewport: Option<Handle>,
+        depth_map: &HashMap<u64, [f32; 2]>,
+    ) -> Self {
+        let mut cache = Self::new();
+        let referenced = collect_referenced_blocks(doc, anno_scale);
+        let mut counts: HashMap<String, usize> = HashMap::default();
+        let mut budget = crate::scene::WebWorkBudget::new();
+        for entity in doc.entities() {
+            if let EntityType::Insert(insert) = entity {
+                *counts.entry(insert.block_name.clone()).or_default() += insert.instance_count();
+            }
+            budget.checkpoint().await;
+        }
+        cache.prototype_blocks = counts.into_iter()
+            .filter_map(|(name, count)| (count > 1).then_some(name)).collect();
+        for name in &referenced {
+            cache.defns.insert(name.clone(), Arc::new(build_defn(
+                doc, name, anno_scale, annotation_scale_handle, all_visible,
+                bg_color, viewport, depth_map,
+            )));
+            budget.checkpoint().await;
+        }
+        cache.compute_block_metrics(&referenced);
+        cache
+    }
+
     /// Build a small cache rooted at one block. Used only when a synthetic or
     /// newly-added Insert is not present in the resident cache yet.
     pub fn build_for_block(

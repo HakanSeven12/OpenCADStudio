@@ -6,6 +6,7 @@ build = "build.rs"
 default-run = "OpenCADStudio"
 
 [workspace]
+exclude = ["vendor/cadcodec"]
 members = [
     "crates/ocs_plugin_api",
     "crates/ocs_web_worker",
@@ -72,6 +73,9 @@ objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString"
 [patch.crates-io]
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
+
+[patch."https://github.com/HakanSeven12/cadcodec.git"]
+acadrust = { path = "vendor/cadcodec" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = "0.3"

@@ -539,8 +539,11 @@ impl OpenCADStudio {
                         recovery_read_stats: None,
                         recovery_bytes: None,
                     });
+                    let model_bg = self.default_bg_color.unwrap_or_else(|| {
+                        self.model_space.resolve_model_bg(&self.active_theme)
+                    });
                     Task::perform(
-                        crate::io::open_recent_web(path, state),
+                        crate::io::open_recent_web(path, state, model_bg),
                         move |outcome| Message::WebFileOpened(open_id, outcome),
                     )
                 }
@@ -789,44 +792,37 @@ impl OpenCADStudio {
                     }
                     opening.recovery_bytes = outcome.recovery_bytes.take();
                 }
-                if let Some(bytes) = outcome.cache_bytes.take() {
-                    let name = outcome.name.clone();
-                    return Task::perform(
-                        async move {
-                            let result =
-                                crate::io::web_recent::store_open(&name, bytes, open_id).await;
-                            (outcome, result)
-                        },
-                        move |(outcome, result)| {
-                            Message::WebFileCached(open_id, outcome, result)
-                        },
-                    );
-                }
                 let recent_task = if outcome.record_recent && outcome.result.is_ok() {
                     self.push_recent(std::path::PathBuf::from(&outcome.name))
                 } else {
                     Task::none()
                 };
                 let opened_task = self.update(Message::FileOpened(open_id, outcome.result));
+                if let Some(bytes) = outcome.cache_bytes.take() {
+                    let name = outcome.name.clone();
+                    let cache_name = name.clone();
+                    let cache_task = Task::perform(
+                        async move {
+                            crate::io::web_recent::store_open(&cache_name, bytes, open_id).await
+                        },
+                        move |result| Message::WebFileCached(open_id, name, result),
+                    );
+                    return Task::batch([cache_task, recent_task, opened_task]);
+                }
                 Task::batch([recent_task, opened_task])
             }
 
             #[cfg(target_arch = "wasm32")]
-            Message::WebFileCached(open_id, outcome, cache_result) => {
-                if self.opening.as_ref().map(|opening| opening.id) != Some(open_id) {
-                    return Task::none();
-                }
-                let recent_task = match cache_result {
-                    Ok(()) => self.push_recent(std::path::PathBuf::from(&outcome.name)),
+            Message::WebFileCached(_open_id, name, cache_result) => {
+                match cache_result {
+                    Ok(()) => self.push_recent(std::path::PathBuf::from(name)),
                     Err(error) => {
                         self.command_line.push_error(crate::tf!(
-                            "Opened drawing, but recent copy could not be stored: {error}"
+                            "Opened drawing \"{name}\", but recent copy could not be stored: {error}"
                         ).as_ref());
                         Task::none()
                     }
-                };
-                let opened_task = self.update(Message::FileOpened(open_id, outcome.result));
-                Task::batch([recent_task, opened_task])
+                }
             }
 
             Message::FileOpened(open_id, Ok((name, path, doc, caches))) => {
@@ -6572,7 +6568,6 @@ impl OpenCADStudio {
                 }
                 #[cfg(target_arch = "wasm32")]
                 {
-                    let _ = model_bg;
                     let Some(bytes) = recovery_bytes else {
                         self.opening = None;
                         return self.drain_pending_open();
@@ -6584,6 +6579,7 @@ impl OpenCADStudio {
                             progress,
                             initial_error,
                             initial_stats,
+                            model_bg,
                         ),
                         move |outcome| Message::WebFileOpened(open_id, outcome),
                     )

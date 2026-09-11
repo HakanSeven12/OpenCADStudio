@@ -92,7 +92,7 @@ pub fn open_phase_name(phase: u8) -> &'static str {
 
 fn recovery_fingerprint_needed(caches: &DerivedCaches) -> bool {
     let parser_issue = caches.read_stats.as_ref().is_some_and(|stats| {
-        stats.recovered()
+        (if cfg!(target_arch = "wasm32") { stats.recovery_mode } else { stats.recovered() })
             || stats.skipped_source_records > 0
             || !stats.stream_completed
     });
@@ -502,6 +502,7 @@ pub struct WebOpenOutcome {
 #[cfg(target_arch = "wasm32")]
 pub async fn pick_and_load_web(
     progress: Arc<OpenProgressState>,
+    model_bg: [f32; 4],
 ) -> WebOpenOutcome {
     let Some(handle) = crate::sys::file_dialog()
         .set_title(crate::t!("Open CAD file").as_ref())
@@ -523,7 +524,7 @@ pub async fn pick_and_load_web(
     progress.set(crate::app::OPEN_PHASE_READING, 500, 1, 2);
     let bytes: Arc<[u8]> = Arc::from(handle.read().await);
     let size_bytes = bytes.len() as u64;
-    let result = load_web_bytes(&name, &bytes, progress.clone(), false, "", None).await;
+    let result = load_web_bytes(&name, &bytes, progress.clone(), false, "", None, model_bg).await;
     let keep_for_recovery = result
         .as_ref()
         .err()
@@ -544,8 +545,9 @@ pub async fn pick_and_load_web(
 pub async fn open_recent_web(
     path: PathBuf,
     progress: Arc<OpenProgressState>,
+    model_bg: [f32; 4],
 ) -> WebOpenOutcome {
-    open_recent_web_attempt(path, progress, false, String::new()).await
+    open_recent_web_attempt(path, progress, false, String::new(), model_bg).await
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -555,6 +557,7 @@ pub async fn recover_web_bytes(
     progress: Arc<OpenProgressState>,
     initial_error: String,
     initial_stats: Option<acadrust::ReadStats>,
+    model_bg: [f32; 4],
 ) -> WebOpenOutcome {
     let size_bytes = bytes.len() as u64;
     let result = load_web_bytes(
@@ -564,6 +567,7 @@ pub async fn recover_web_bytes(
         true,
         &initial_error,
         initial_stats,
+        model_bg,
     )
     .await;
     WebOpenOutcome {
@@ -582,6 +586,7 @@ async fn open_recent_web_attempt(
     progress: Arc<OpenProgressState>,
     recovery_mode: bool,
     initial_error: String,
+    model_bg: [f32; 4],
 ) -> WebOpenOutcome {
     let name = path
         .file_name()
@@ -615,6 +620,7 @@ async fn open_recent_web_attempt(
         recovery_mode,
         &initial_error,
         None,
+        model_bg,
     )
     .await;
     let keep_for_recovery = result
@@ -640,7 +646,9 @@ async fn load_web_bytes(
     recovery_mode: bool,
     initial_error: &str,
     mut initial_stats: Option<acadrust::ReadStats>,
+    model_bg: [f32; 4],
 ) -> Result<(String, PathBuf, CadDocument, DerivedCaches), OpenLoadError> {
+    let parse_started = iced::time::Instant::now();
     progress.set(crate::app::OPEN_PHASE_PARSING, 1000, 0, 1);
     let (outcome, mut source_sha256) = match web_worker::parse_document(
         name,
@@ -679,6 +687,8 @@ async fn load_web_bytes(
         merge_read_diagnostics(&mut outcome.stats, initial_stats);
     }
     let mut doc = outcome.document;
+    let parse_ms = parse_started.elapsed().as_millis() as u32;
+    let purge_started = iced::time::Instant::now();
     normalize_block_origins(&mut doc);
     if name.to_ascii_lowercase().ends_with(".dxf") {
         fix_dxf_dimension_rotations(&mut doc);
@@ -686,8 +696,9 @@ async fn load_web_bytes(
     }
     fix_viewport_status_flags(&mut doc);
     fix_current_style_names(&mut doc);
-    progress.set(crate::app::OPEN_PHASE_CACHING, 7000, 0, 1);
-    let dropped = purge_corrupt_entities(&mut doc);
+    crate::scene::yield_to_browser().await;
+    progress.set(crate::app::OPEN_PHASE_CACHING, 6000, 0, 1);
+    let dropped = purge_corrupt_entities_web(&mut doc, progress.clone()).await;
     if !recovery_mode && dropped > 0 {
         return Err(OpenLoadError {
             message: format!(
@@ -698,16 +709,64 @@ async fn load_web_bytes(
             recovery_available: true,
         });
     }
-    let mut caches = crate::scene::build_derived_caches(&doc);
+    let purge_ms = purge_started.elapsed().as_millis() as u32;
+    let caches_started = iced::time::Instant::now();
+    let mut caches = crate::scene::build_derived_caches_web(&doc, progress.clone()).await;
+    caches.timings.parse_ms = parse_ms;
+    caches.timings.purge_ms = purge_ms;
+    caches.timings.caches_ms = caches_started.elapsed().as_millis() as u32;
     caches.corrupt_dropped = dropped;
     caches.read_stats = Some(outcome.stats);
     if source_sha256.is_none() && recovery_fingerprint_needed(&caches) {
         source_sha256 = web_worker::sha256_document(bytes).await.ok();
     }
     caches.source_sha256 = source_sha256;
+    progress.set(crate::app::OPEN_PHASE_FINALIZING, 8000, 0, 1);
+    let finalize_started = iced::time::Instant::now();
+    let (doc, prepared) = crate::scene::prepare_open_geometry_web(
+        doc, &caches, model_bg, &progress,
+    ).await;
+    caches.prepared_geometry = Some(prepared);
+    caches.timings.finalize_ms = finalize_started.elapsed().as_millis() as u32;
     progress.set(crate::app::OPEN_PHASE_FINALIZING, 9900, 1, 1);
     let path = PathBuf::from(name);
     Ok((name.to_string(), path, doc, caches))
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn purge_corrupt_entities_web(
+    doc: &mut CadDocument,
+    progress: Arc<OpenProgressState>,
+) -> usize {
+    const BATCH: usize = 256;
+    let handles: Vec<_> = doc.entities().map(|entity| entity.common().handle).collect();
+    let total = handles.len().max(1);
+    let mut bad = Vec::new();
+    let mut budget = crate::scene::WebWorkBudget::new();
+    for (batch_index, batch) in handles.chunks(BATCH).enumerate() {
+        for handle in batch {
+            if doc
+                .get_entity(*handle)
+                .is_some_and(crate::io::is_entity_corrupt)
+            {
+                bad.push(*handle);
+            }
+        }
+        let completed = ((batch_index + 1) * BATCH).min(handles.len());
+        progress.set(
+            crate::app::OPEN_PHASE_CACHING,
+            6000 + (completed as u64 * 1000 / total as u64) as u16,
+            completed,
+            total,
+        );
+        budget.checkpoint().await;
+    }
+    let count = bad.len();
+    for handle in bad {
+        doc.remove_entity(handle);
+        budget.checkpoint().await;
+    }
+    count
 }
 
 /// Parse a drawing from bytes using its name or recovery-file signature.

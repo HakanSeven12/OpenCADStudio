@@ -709,6 +709,274 @@ pub fn build_derived_caches(doc: &CadDocument) -> DerivedCaches {
     build_derived_caches_impl(doc, None, None)
 }
 
+/// Give the browser a chance to paint and dispatch input between expensive
+/// document-cache batches. A resolved Promise alone only yields to the
+/// microtask queue, so use a zero-delay timer to return to the browser task
+/// queue and keep the loading overlay responsive.
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn yield_to_browser() {
+    use js_sys::Promise;
+    use wasm_bindgen::JsValue;
+    use wasm_bindgen_futures::JsFuture;
+
+    let promise = Promise::new(&mut |resolve, _reject| {
+        let scheduled = web_sys::window().is_some_and(|window| {
+            window
+                .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, 0)
+                .is_ok()
+        });
+        if !scheduled {
+            let _ = resolve.call0(&JsValue::UNDEFINED);
+        }
+    });
+    let _ = JsFuture::from(promise).await;
+}
+
+/// Limit consecutive CPU work without paying a browser timer for every small
+/// batch. Call between entities; a single kernel operation is not preemptible.
+#[cfg(target_arch = "wasm32")]
+pub(crate) struct WebWorkBudget(iced::time::Instant);
+
+#[cfg(target_arch = "wasm32")]
+impl WebWorkBudget {
+    pub(crate) fn new() -> Self {
+        Self(iced::time::Instant::now())
+    }
+
+    pub(crate) async fn checkpoint(&mut self) {
+        if self.0.elapsed().as_millis() >= 8 {
+            yield_to_browser().await;
+            self.0 = iced::time::Instant::now();
+        }
+    }
+}
+
+/// WebAssembly has no Rayon worker pool, so the synchronous cache builder would
+/// monopolise the browser task for the whole drawing. Keep the same cache
+/// semantics as `build_derived_caches_impl`, but process bounded batches and
+/// return to the browser after each batch.
+#[cfg(target_arch = "wasm32")]
+pub async fn build_derived_caches_web(
+    doc: &CadDocument,
+    progress: std::sync::Arc<crate::io::OpenProgressState>,
+) -> DerivedCaches {
+    use acadrust::entities::EntityType;
+    use std::sync::atomic::Ordering;
+
+    const ENTITY_BATCH: usize = 256;
+    const DETAIL_BATCH: usize = 32;
+    const LOAD_BG: [f32; 4] = [33.0 / 255.0, 40.0 / 255.0, 48.0 / 255.0, 1.0];
+
+    crate::scene::model::image_model::clear_image_cache();
+    let object_data = crate::entities::object_data::build_cache(doc);
+    yield_to_browser().await;
+    let mut budget = WebWorkBudget::new();
+
+    let model_block = doc
+        .objects
+        .values()
+        .find_map(|obj| {
+            if let acadrust::objects::ObjectType::Layout(layout) = obj {
+                (layout.name == "Model" && !layout.block_record.is_null())
+                    .then_some(layout.block_record)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| {
+            doc.block_records
+                .get("*Model_Space")
+                .map(|record| record.handle)
+                .unwrap_or(Handle::NULL)
+        });
+    let prep = offset_prep(doc, model_block);
+    let handles: Vec<Handle> = doc.entities().map(|entity| entity.common().handle).collect();
+    let entity_total = handles.len().max(1);
+    let mut hatch_handles = Vec::new();
+    let mut image_handles = Vec::new();
+    let mut mesh_handles = Vec::new();
+    let mut centers = Vec::new();
+
+    for (batch_index, batch) in handles.chunks(ENTITY_BATCH).enumerate() {
+        for handle in batch {
+            let Some(entity) = doc.get_entity(*handle) else {
+                continue;
+            };
+            match entity {
+                EntityType::Hatch(_) | EntityType::Solid(_) => hatch_handles.push(*handle),
+                EntityType::RasterImage(_)
+                | EntityType::Ole2Frame(_)
+                | EntityType::Underlay(_) => image_handles.push(*handle),
+                EntityType::Solid3D(_)
+                | EntityType::Region(_)
+                | EntityType::Body(_)
+                | EntityType::Surface(_)
+                | EntityType::Mesh(_)
+                | EntityType::PolygonMesh(_)
+                | EntityType::PolyfaceMesh(_) => mesh_handles.push(*handle),
+                _ => {}
+            }
+            if let Some(center) = offset_centroid(entity, model_block, &prep) {
+                centers.push(center);
+            }
+        }
+        let completed = ((batch_index + 1) * ENTITY_BATCH).min(handles.len());
+        progress.set(
+            crate::app::OPEN_PHASE_CACHING,
+            7000 + (completed as u64 * 400 / entity_total as u64) as u16,
+            completed,
+            entity_total,
+        );
+        budget.checkpoint().await;
+    }
+    let (local_center, local_extent_max) = cluster_extent_from_centers(centers, &doc.header);
+
+    let detail_total = hatch_handles
+        .len()
+        .saturating_add(image_handles.len())
+        .saturating_add(mesh_handles.len())
+        .max(1);
+    let detail_done = std::sync::atomic::AtomicUsize::new(0);
+    let report_detail = |done: usize| {
+        let local = 4000u64 + done as u64 * 6000 / detail_total as u64;
+        let value = 7000u64 + local * 1000 / 10000;
+        progress.set(
+            crate::app::OPEN_PHASE_CACHING,
+            value.min(8000) as u16,
+            done,
+            detail_total,
+        );
+    };
+
+    let mut hatches = HashMap::default();
+    for batch in hatch_handles.chunks(DETAIL_BATCH) {
+        for handle in batch {
+            let Some(source) = doc.get_entity(*handle) else {
+                continue;
+            };
+            let contextual = annotative::entity_for_annotation_context(
+                doc,
+                source,
+                annotative::scale_handle_by_name(doc, &doc.header.current_annotation_scale),
+            );
+            let entity = contextual.as_ref();
+            let (raw, ..) = view::render::render_style_for(doc, entity);
+            let color = view::render::adapt_to_bg(raw, LOAD_BG);
+            let model = match entity {
+                EntityType::Hatch(hatch) => Scene::hatch_model_from_dxf(hatch, color),
+                EntityType::Solid(solid) => Some(Scene::solid_hatch_model(solid, color)),
+                _ => None,
+            };
+            if let Some(model) = model {
+                hatches.insert(*handle, model);
+            }
+            let done = detail_done.fetch_add(1, Ordering::Relaxed) + 1;
+            report_detail(done);
+            budget.checkpoint().await;
+        }
+    }
+
+    let mut images = HashMap::default();
+    for batch in image_handles.chunks(DETAIL_BATCH) {
+        for handle in batch {
+            let Some(entity) = doc.get_entity(*handle) else {
+                continue;
+            };
+            let model = match entity {
+                EntityType::RasterImage(image) => ImageModel::from_raster_image(image),
+                EntityType::Ole2Frame(frame) => ImageModel::from_ole2frame(frame),
+                EntityType::Underlay(underlay) => match doc.objects.get(&underlay.definition_handle) {
+                    Some(acadrust::objects::ObjectType::UnderlayDefinition(definition)) => {
+                        ImageModel::from_underlay(underlay, definition)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(model) = model {
+                images.insert(*handle, model);
+            }
+            let done = detail_done.fetch_add(1, Ordering::Relaxed) + 1;
+            report_detail(done);
+            budget.checkpoint().await;
+        }
+    }
+
+    let facet_res = doc.header.facet_resolution;
+    let chordal_deflection =
+        crate::entities::solid3d::display_deflection(&doc.header, facet_res);
+    let isolines = doc.header.isolines.max(0) as usize;
+    let layout_blocks: std::collections::HashSet<Handle> = doc
+        .objects
+        .values()
+        .filter_map(|object| match object {
+            acadrust::objects::ObjectType::Layout(layout) if !layout.block_record.is_null() => {
+                Some(layout.block_record)
+            }
+            _ => None,
+        })
+        .collect();
+    let mut meshes = HashMap::default();
+    let mut block_meshes = HashMap::default();
+    for batch in mesh_handles.chunks(DETAIL_BATCH) {
+        for handle in batch {
+            let Some(entity) = doc.get_entity(*handle) else {
+                continue;
+            };
+            let (raw, ..) = view::render::render_style_for(doc, entity);
+            let color = view::render::adapt_to_bg(raw, LOAD_BG);
+            let material = crate::scene::model::material_model::resolve_material_with_base(
+                doc, entity, color, None, None,
+            );
+            let top_level = layout_blocks.contains(&entity.common().owner_handle);
+            if let Some(mut mesh) = crate::entities::solid3d::tessellate_volume(
+                entity,
+                color,
+                facet_res,
+                chordal_deflection,
+                isolines,
+            ) {
+                material.apply_to_with_face_overrides(&mut mesh, doc, None);
+                crate::scene::model::visual_style_model::apply_mesh_visual_style(
+                    &mut mesh, doc, entity,
+                );
+                if top_level {
+                    meshes.insert(*handle, offset_mesh_lod_set(mesh));
+                } else {
+                    mesh.prepare_instance_source(*handle);
+                    block_meshes.insert(*handle, mesh);
+                }
+            }
+            let done = detail_done.fetch_add(1, Ordering::Relaxed) + 1;
+            report_detail(done);
+            budget.checkpoint().await;
+        }
+    }
+    progress.set(
+        crate::app::OPEN_PHASE_CACHING,
+        8000,
+        detail_total,
+        detail_total,
+    );
+
+    DerivedCaches {
+        read_stats: None,
+        source_sha256: None,
+        local_extent_max,
+        local_center,
+        hatches,
+        images,
+        meshes,
+        block_meshes,
+        object_data,
+        corrupt_dropped: 0,
+        xref_dropped: 0,
+        xrefs: Vec::new(),
+        prepared_geometry: None,
+        timings: OpenTimings::default(),
+    }
+}
+
 /// Build open-time caches while reporting monotonic progress in 0..=10000.
 ///
 /// The callback is UI-agnostic and may run from Rayon workers. Callers should
@@ -988,6 +1256,10 @@ pub fn prepare_open_geometry(
     caches: &DerivedCaches,
     model_bg: [f32; 4],
 ) -> (CadDocument, PreparedOpenGeometry) {
+    finish_open_geometry(open_geometry_scene(doc, caches, model_bg))
+}
+
+fn open_geometry_scene(doc: CadDocument, caches: &DerivedCaches, model_bg: [f32; 4]) -> Scene {
     let mut scene = Scene::new();
     scene.document = doc;
     scene.local_extent_max = caches.local_extent_max;
@@ -1002,6 +1274,59 @@ pub fn prepare_open_geometry(
         (1.0 / unit_factor) as f32
     };
     scene.current_layout = "Model".to_string();
+    scene
+}
+
+/// Tessellate the initial Model set cooperatively before installing the tab.
+/// Reuse the normal resident builder for sorting, markers and cache identity.
+#[cfg(target_arch = "wasm32")]
+pub async fn prepare_open_geometry_web(
+    doc: CadDocument,
+    caches: &DerivedCaches,
+    model_bg: [f32; 4],
+    progress: &crate::io::OpenProgressState,
+) -> (CadDocument, PreparedOpenGeometry) {
+    let scene = open_geometry_scene(doc, caches, model_bg);
+    let block = scene.model_space_block_handle();
+    let scale = annotative::scale_handle_by_name(
+        &scene.document, &scene.document.header.current_annotation_scale,
+    );
+    let all_visible = scene.annotation_all_visible();
+    let depths = scene.draw_depth_map();
+    yield_to_browser().await;
+    let block_cache = Arc::new(cache::block_cache::BlockCache::build_web(
+        &scene.document, 1.0, scale, all_visible, model_bg, None, &depths,
+    ).await);
+    let key = scene.block_cache_key(scale, all_visible, None);
+    scene.block_defn_cache.borrow_mut().insert(
+        key, (scene.block_epoch, Arc::clone(&block_cache)),
+    );
+    let mut budget = WebWorkBudget::new();
+    let empty_selection = HashSet::default();
+    let tess_guard = wire_tess_memo_guard(
+        None, scene.annotation_scale, scale, all_visible, model_bg, None,
+    );
+    let total = scene.document.entity_count().max(1);
+    for (index, entity) in scene.document.entities().enumerate() {
+        if scene.resident_entity_visible(entity, block, None, scale, all_visible) {
+            let wires = tessellate_entity(
+                &scene.document, &empty_selection, None, model_bg, scene.annotation_scale,
+                scale, entity, Some(&block_cache), None, None, false,
+            );
+            scene.resident_tess_memo.borrow_mut().insert(
+                entity.common().handle, Arc::new(wires),
+            );
+        }
+        progress.set(crate::app::OPEN_PHASE_FINALIZING,
+            8000 + ((index + 1) as u64 * 1800 / total as u64) as u16, index + 1, total);
+        budget.checkpoint().await;
+    }
+    scene.resident_tess_guard.set(tess_guard);
+    yield_to_browser().await;
+    finish_open_geometry(scene)
+}
+
+fn finish_open_geometry(mut scene: Scene) -> (CadDocument, PreparedOpenGeometry) {
     let camera = scene.camera.borrow().clone();
     let perf = crate::perf::enabled();
     let t_wires = perf.then(iced::time::Instant::now);
@@ -1066,6 +1391,35 @@ pub fn prepare_open_geometry(
             resident_layout,
         },
     )
+}
+
+/// Shared by the regular resident builder and cooperative Web prewarming.
+fn wire_tess_memo_guard(
+    view_aabb: Option<[f32; 4]>,
+    anno: f32,
+    annotation_scale_handle: Option<Handle>,
+    all_visible: bool,
+    bg: [f32; 4],
+    viewport: Option<Handle>,
+) -> u64 {
+    let mut guard: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |value: u64| guard = guard.rotate_left(13) ^ value;
+    // Analytical GPU curves are zoom independent; wpp is deliberately absent.
+    if let Some(bounds) = view_aabb {
+        for component in bounds {
+            mix(component.to_bits() as u64);
+        }
+    }
+    mix(anno.to_bits() as u64);
+    mix(annotation_scale_handle.map(|handle| handle.value()).unwrap_or(0));
+    mix(all_visible as u64);
+    for channel in bg {
+        mix(channel.to_bits() as u64);
+    }
+    mix(viewport.map(|handle| handle.value()).unwrap_or(0));
+    // SDF atlas growth changes glyph UVs, so old text must be rebuilt.
+    mix(crate::scene::text::sdf_atlas::generation());
+    guard
 }
 
 /// Mirrors `cache::block_cache::SANE_EXTENT` — wire coords past this magnitude
@@ -2303,12 +2657,7 @@ impl Scene {
         } else {
             self.paper_bg_color
         };
-        let mut key = annotation_scale_handle.map(|handle| handle.value()).unwrap_or(0);
-        for component in bg {
-            key = key.rotate_left(13) ^ component.to_bits() as u64;
-        }
-        key = key.rotate_left(13) ^ all_visible as u64;
-        key = key.rotate_left(13) ^ viewport.map(|handle| handle.value()).unwrap_or(0);
+        let key = self.block_cache_key(annotation_scale_handle, all_visible, viewport);
         {
             let cache = self.block_defn_cache.borrow();
             if let Some((epoch, arc)) = cache.get(&key) {
@@ -2335,6 +2684,21 @@ impl Scene {
         cache.retain(|_, (epoch, _)| *epoch == self.block_epoch);
         cache.insert(key, (self.block_epoch, Arc::clone(&arc)));
         arc
+    }
+
+    fn block_cache_key(
+        &self,
+        annotation_scale_handle: Option<Handle>,
+        all_visible: bool,
+        viewport: Option<Handle>,
+    ) -> u64 {
+        let bg = if self.current_layout == "Model" { self.bg_color } else { self.paper_bg_color };
+        let mut key = annotation_scale_handle.map(|handle| handle.value()).unwrap_or(0);
+        for component in bg {
+            key = key.rotate_left(13) ^ component.to_bits() as u64;
+        }
+        key = key.rotate_left(13) ^ all_visible as u64;
+        key.rotate_left(13) ^ viewport.map(|handle| handle.value()).unwrap_or(0)
     }
 
     /// Install loader-thread geometry into this scene's Model resident cache.
@@ -9641,34 +10005,9 @@ impl Scene {
         let t_build = perf.then(iced::time::Instant::now);
         let mut wires: Vec<WireModel> = if memo_active {
             // Invalidate when any baked display input changes.
-            let guard = {
-                let mut g: u64 = 0xcbf2_9ce4_8422_2325;
-                let mut mix = |x: u64| g = g.rotate_left(13) ^ x;
-                // wpp removed from guard: GPU analytical rendering handles
-                // circles/arcs/ellipses, Point ignores wpp, and Light (the
-                // only remaining wpp consumer) is rare enough that its stale
-                // glyphs don't justify clearing every memoized entity on zoom.
-                if let Some(v) = view_aabb {
-                    for c in v {
-                        mix(c.to_bits() as u64);
-                    }
-                }
-                mix(anno.to_bits() as u64);
-                mix(annotation_scale_handle.map(|handle| handle.value()).unwrap_or(0));
-                mix(all_visible as u64);
-                // Direct entities and inherited/faded block colours still bake
-                // the background before Batches::finalize records its inputs.
-                for channel in bg {
-                    mix(channel.to_bits() as u64);
-                }
-                mix(avp.map(|h| h.value()).unwrap_or(0));
-                // SDF glyph quads bake the atlas UV of each tile, so a growth or
-                // a re-bake (which rescale / rewind every UV) makes memoized text
-                // address the wrong tile — garbage on screen, and a silent miss in
-                // the PDF export's glyph lookup (#385 under #347's conditions).
-                mix(crate::scene::text::sdf_atlas::generation());
-                g
-            };
+            let guard = wire_tess_memo_guard(
+                view_aabb, anno, annotation_scale_handle, all_visible, bg, avp,
+            );
             let (memo_cell, guard_cell) = if resident {
                 (&self.resident_tess_memo, &self.resident_tess_guard)
             } else {

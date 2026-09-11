@@ -79,7 +79,6 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.5.4"
-source = "git+https://github.com/HakanSeven12/cadcodec.git?rev=f23ffc873228e5f41b876485c741e4a8ac20a67d#f23ffc873228e5f41b876485c741e4a8ac20a67d"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
@@ -3931,6 +3930,7 @@ dependencies = [
  "acadrust",
  "bincode",
  "console_error_panic_hook",
+ "flate2",
  "getrandom 0.3.4",
  "js-sys",
  "serde",

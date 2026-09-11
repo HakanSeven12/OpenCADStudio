@@ -176,6 +176,7 @@ impl CadCommand for SplineditCommand {
                     let mut spline = self.spline.clone()?;
                     let op = match upper.as_str() { "C" | "CLOSE" => "__SPLINEDIT_CLOSE__", "O" | "OPEN" => "__SPLINEDIT_OPEN__", _ => "__SPLINEDIT_REVERSE__" };
                     apply_to_spline(&mut spline, op);
+                    if self.spline.as_ref() == Some(&spline) { return Some(CmdResult::NeedPoint); }
                     return Some(self.replace(spline));
                 }
                 _ => {}
@@ -297,44 +298,72 @@ pub fn apply_spline_op(doc: &mut acadrust::CadDocument, handle: acadrust::Handle
 }
 
 fn apply_to_spline(spline: &mut acadrust::entities::Spline, op: &str) {
-    match op {
-        "__SPLINEDIT_CLOSE__" => {
-            if spline.control_points.len() >= 2 {
-                let first = spline.control_points[0];
-                spline.control_points.push(first);
-                // Regenerate clamped knots.
-                spline.knots = acadrust::entities::Spline::generate_clamped_knots(
-                    spline.degree as usize,
-                    spline.control_points.len(),
-                );
-                spline.fit_points.clear();
-            }
-        }
-        "__SPLINEDIT_OPEN__" => {
-            if spline.control_points.len() >= 2 {
-                let n = spline.control_points.len();
-                let first = spline.control_points[0];
-                let last = spline.control_points[n - 1];
-                if (first.x - last.x).abs() < 1e-9
-                    && (first.y - last.y).abs() < 1e-9
-                    && (first.z - last.z).abs() < 1e-9
-                {
-                    spline.control_points.pop();
-                    spline.knots = acadrust::entities::Spline::generate_clamped_knots(
-                        spline.degree as usize,
-                        spline.control_points.len(),
-                    );
-                    spline.fit_points.clear();
-                }
-            }
-        }
-        "__SPLINEDIT_REVERSE__" => {
-            *spline = super::reverse::reverse_spline(spline);
-        }
-        _ => {}
-    }
+    let result = match op {
+        "__SPLINEDIT_CLOSE__" => change_closure(spline, true),
+        "__SPLINEDIT_OPEN__" => change_closure(spline, false),
+        "__SPLINEDIT_REVERSE__" => Some(super::reverse::reverse_spline(spline)),
+        _ => None,
+    };
+    if let Some(result) = result { *spline = result; }
 }
 
+fn change_closure(source: &acadrust::entities::Spline, closed: bool) -> Option<acadrust::entities::Spline> {
+    use cadkernel::space::{NurbsCurve3, Parameterization};
+    if (source.flags.closed || source.flags.periodic) == closed { return None; }
+    let fit_method = !source.fit_points.is_empty() || source.dwg_flags1 & 1 != 0 || source.dxf_flags & 32 != 0;
+    let parameterization = match source.knot_parameterization {
+        1 => Parameterization::Centripetal, 2 => Parameterization::Uniform, _ => Parameterization::Chord,
+    };
+    let xyz = |point: &Vector3| [point.x, point.y, point.z];
+    let controls: Vec<_> = source.control_points.iter().map(xyz).collect();
+    let degree = usize::try_from(source.degree).ok()?;
+    let weights = if source.weights.is_empty() { vec![1.0; controls.len()] } else { source.weights.clone() };
+    if fit_method && weights.windows(2).any(|pair| pair[0] != pair[1]) { return None; }
+    let stored_curve = || NurbsCurve3::new_strict(degree, controls.clone(), source.knots.clone(), weights.clone());
+    let mut fit_points = Vec::new();
+    let curve = if fit_method {
+        fit_points = source.fit_points.iter().map(xyz).collect();
+        if fit_points.is_empty() {
+            let curve = stored_curve()?;
+            let (start, end) = curve.domain();
+            let mut parameters: Vec<_> = curve.knots().iter().copied()
+                .filter(|parameter| *parameter >= start && if closed { *parameter <= end } else { *parameter < end }).collect();
+            parameters.dedup();
+            fit_points = parameters.into_iter().map(|parameter| curve.point_at_knot(parameter)).collect();
+        }
+        let curve = if closed {
+            NurbsCurve3::interpolate_periodic(&fit_points, parameterization)?
+        } else {
+            NurbsCurve3::interpolate_fit(&fit_points, None, None, parameterization)?
+        };
+        curve.compact_knots(source.control_tolerance.max(1e-9))?
+    } else if closed {
+        NurbsCurve3::from_weighted_control_polygon(degree, &controls, &weights, true)?
+    } else {
+        let curve = stored_curve()?;
+        curve.without_control_vertex(controls.len().checked_sub(1)?)?
+    };
+    let mut result = source.clone();
+    result.degree = curve.degree() as i32;
+    result.control_points = curve.control_points().iter().map(|point| Vector3::new(point[0], point[1], point[2])).collect();
+    result.knots = curve.knots().to_vec();
+    result.weights = curve.weights().to_vec();
+    result.flags.closed = closed;
+    result.flags.periodic = closed;
+    if closed { result.dxf_flags |= 2048; } else { result.dxf_flags &= !2048; }
+    result.flags.rational = if fit_method { false } else { source.flags.rational || curve.is_rational() };
+    result.fit_points = if !closed && fit_method {
+        fit_points.iter().map(|point| Vector3::new(point[0], point[1], point[2])).collect()
+    } else { Vec::new() };
+    if fit_method {
+        result.dwg_flags1 |= 1;
+        result.dxf_flags |= 32 | 1024;
+        result.begin_tangent = Vector3::ZERO;
+        result.end_tangent = Vector3::ZERO;
+    }
+    result.flags.planar = crate::entities::curve::spline_is_planar(&result);
+    Some(result)
+}
 
 // ── Autocomplete registry ─────────────────────────────────
 inventory::submit!(crate::command::CommandRegistration { names: &["SPLINEDIT"] });  // SplineditCommand

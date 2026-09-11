@@ -3255,7 +3255,10 @@ impl OpenCADStudio {
                             self.push_undo_snapshot(i, "PEDIT");
                             let source = pieces.remove(0);
                             self.tabs[i].scene.update_entity(source);
-                            for piece in pieces { self.tabs[i].scene.add_entity(piece); }
+                            for mut piece in pieces {
+                                piece.common_mut().handle = Handle::NULL;
+                                self.tabs[i].scene.add_entity(piece);
+                            }
                             let updated = self.tabs[i].scene.document.get_entity(handle).cloned();
                             if let Some(command) = self.tabs[i].active_cmd.as_mut() {
                                 if let Some(entity) = updated { command.inject_picked_entity(entity); }

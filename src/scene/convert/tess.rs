@@ -1282,6 +1282,7 @@ fn tessellate_entity_inner(
         }
         if matches!(e, EntityType::Wipeout(_)) {
             b.depth_override = Some(0.5);
+            b.line_weight_px = b.line_weight_px.max(1.5);
         }
     }
 

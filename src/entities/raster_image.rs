@@ -2,7 +2,10 @@ use acadrust::entities::{RasterImage, Wipeout};
 use crate::t;
 
 use crate::command::EntityTransform;
-use crate::entities::common::{center_grip, edit_prop as edit, ro_prop as ro, square_grip};
+use crate::entities::common::{
+    center_grip, edit_angle_prop as edit_angle, edit_prop as edit, parse_angle_deg, parse_f64,
+    ro_prop as ro, square_grip,
+};
 use crate::entities::text_support::{resolve_text_style, text_local_bounds};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
 use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke, RenderEntity, RenderObject};
@@ -473,6 +476,10 @@ fn wipeout_boundary(wipeout: &Wipeout) -> Vec<[f64; 3]> {
     }
 }
 
+fn wipeout_axis_length(axis: &acadrust::types::Vector3, size: f64) -> f64 {
+    (axis.x * axis.x + axis.y * axis.y + axis.z * axis.z).sqrt() * size.abs()
+}
+
 fn wipeout_pick_rings(wipeout: &Wipeout) -> Vec<Vec<[f64; 3]>> {
     let boundary = wipeout_boundary(wipeout);
     if wipeout_is_polygonal(wipeout)
@@ -672,13 +679,28 @@ impl PropertyEditable for Wipeout {
         let bg_transparency = self
             .flags
             .contains(acadrust::entities::WipeoutDisplayFlags::TRANSPARENCY_ON);
+        let width = wipeout_axis_length(&self.u_vector, self.size.x);
+        let height = wipeout_axis_length(&self.v_vector, self.size.y);
+        let rotation = self.u_vector.y.atan2(self.u_vector.x).to_degrees();
         vec![
+            PropSection {
+                title: t!("Image Adjust").into_owned(),
+                props: vec![
+                    ro(t!("Brightness").as_ref(), "wo_brightness", self.brightness.to_string()),
+                    ro(t!("Contrast").as_ref(), "wo_contrast", self.contrast.to_string()),
+                    ro(t!("Fade").as_ref(), "wo_fade", self.fade.to_string()),
+                ],
+            },
             PropSection {
                 title: t!("Geometry").into_owned(),
                 props: vec![
                     edit(t!("Position X").as_ref(), "wo_ox", self.insertion_point.x),
                     edit(t!("Position Y").as_ref(), "wo_oy", self.insertion_point.y),
                     edit(t!("Position Z").as_ref(), "wo_oz", self.insertion_point.z),
+                    edit_angle(t!("Rotation").as_ref(), "wo_rotation", rotation),
+                    edit(t!("Width").as_ref(), "wo_width", width),
+                    edit(t!("Height").as_ref(), "wo_height", height),
+                    ro(t!("Scale").as_ref(), "wo_scale", "1"),
                 ],
             },
             PropSection {
@@ -689,25 +711,57 @@ impl PropertyEditable for Wipeout {
                     ro(t!("Background transparency").as_ref(), "wo_bg_transparency", if bg_transparency { t!("Yes") } else { t!("No") }),
                 ],
             },
-            PropSection {
-                title: t!("Image Adjust").into_owned(),
-                props: vec![
-                    ro(t!("Brightness").as_ref(), "wo_brightness", self.brightness.to_string()),
-                    ro(t!("Contrast").as_ref(), "wo_contrast", self.contrast.to_string()),
-                    ro(t!("Fade").as_ref(), "wo_fade", self.fade.to_string()),
-                ],
-            },
         ]
     }
 
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
-        let Ok(v) = value.trim().parse::<f64>() else {
+        if field == "wo_rotation" {
+            let Some(target_degrees) = parse_angle_deg(value).filter(|value| value.is_finite()) else {
+                return;
+            };
+            let u = glam::DVec3::new(self.u_vector.x, self.u_vector.y, self.u_vector.z);
+            let v = glam::DVec3::new(self.v_vector.x, self.v_vector.y, self.v_vector.z);
+            let normal = u.cross(v).normalize_or_zero();
+            if normal.length_squared() <= 1e-18 {
+                return;
+            }
+            let current_radians = u.y.atan2(u.x);
+            let rotation = glam::DQuat::from_axis_angle(
+                normal,
+                target_degrees.to_radians() - current_radians,
+            );
+            let u = rotation * u;
+            let v = rotation * v;
+            self.u_vector = acadrust::types::Vector3::new(u.x, u.y, u.z);
+            self.v_vector = acadrust::types::Vector3::new(v.x, v.y, v.z);
+            return;
+        }
+
+        let Some(v) = parse_f64(value).filter(|value| value.is_finite()) else {
             return;
         };
         match field {
             "wo_ox" => self.insertion_point.x = v,
             "wo_oy" => self.insertion_point.y = v,
             "wo_oz" => self.insertion_point.z = v,
+            "wo_width" if v > 0.0 => {
+                let current = wipeout_axis_length(&self.u_vector, self.size.x);
+                if current > 1e-9 {
+                    let scale = v / current;
+                    self.u_vector.x *= scale;
+                    self.u_vector.y *= scale;
+                    self.u_vector.z *= scale;
+                }
+            }
+            "wo_height" if v > 0.0 => {
+                let current = wipeout_axis_length(&self.v_vector, self.size.y);
+                if current > 1e-9 {
+                    let scale = v / current;
+                    self.v_vector.x *= scale;
+                    self.v_vector.y *= scale;
+                    self.v_vector.z *= scale;
+                }
+            }
             _ => {}
         }
     }

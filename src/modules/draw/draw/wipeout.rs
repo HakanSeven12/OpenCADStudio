@@ -335,7 +335,7 @@ impl CadCommand for WipeoutCommand {
                 let mut preview = self.points.clone();
                 preview.push(point);
                 preview.push(first);
-                Some(WireModel::solid_f64(
+                let mut wire = WireModel::solid_f64(
                     "wipeout_preview".into(),
                     preview
                         .iter()
@@ -343,7 +343,9 @@ impl CadCommand for WipeoutCommand {
                         .collect(),
                     WireModel::CYAN,
                     false,
-                ))
+                );
+                wire.line_weight_px = 1.5;
+                Some(wire)
             }
             WipeoutMode::Rectangular => {
                 let first = self.first?;
@@ -359,12 +361,14 @@ impl CadCommand for WipeoutCommand {
                     ]
                     .map(|corner| self.plane.to_world(corner))
                 };
-                Some(WireModel::solid_f64(
+                let mut wire = WireModel::solid_f64(
                     "wipeout_preview".into(),
                     corners.iter().map(|p| [p.x, p.y, p.z]).collect(),
                     WireModel::CYAN,
                     false,
-                ))
+                );
+                wire.line_weight_px = 1.5;
+                Some(wire)
             }
             WipeoutMode::Polyline | WipeoutMode::Frames | WipeoutMode::ErasePolyline => None,
         }
@@ -409,11 +413,11 @@ fn make_rect_wipeout(first: DVec3, second: DVec3, plane: Plane) -> Option<Entity
 fn make_poly_wipeout(points: &[[f64; 2]], plane: Plane) -> Option<EntityType> {
     plane.normal()?;
     let frame = polygon_frame(points, Tolerance::default())?;
-    let [width, height] = frame.size;
+    let extent = frame.size[0].max(frame.size[1]);
     let mut wipeout = Wipeout::new();
     wipeout.insertion_point = vector(plane.point_at(frame.origin));
-    wipeout.u_vector = vector(plane.x_axis) * width;
-    wipeout.v_vector = vector(plane.y_axis) * height;
+    wipeout.u_vector = vector(plane.x_axis) * extent;
+    wipeout.v_vector = vector(plane.y_axis) * extent;
     wipeout.size = Vector2::new(1.0, 1.0);
     wipeout.clip_type = WipeoutClipType::Polygonal;
     wipeout.clip_boundary_vertices = frame
@@ -421,8 +425,8 @@ fn make_poly_wipeout(points: &[[f64; 2]], plane: Plane) -> Option<EntityType> {
         .iter()
         .map(|point| {
             Vector2::new(
-                (point[0] - frame.origin[0]) / width - 0.5,
-                0.5 - (point[1] - frame.origin[1]) / height,
+                (point[0] - frame.origin[0]) / extent - 0.5,
+                0.5 - (point[1] - frame.origin[1]) / extent,
             )
         })
         .collect();

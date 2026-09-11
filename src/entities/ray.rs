@@ -2,8 +2,10 @@ use acadrust::entities::{Ray, XLine};
 use crate::t;
 
 use crate::command::EntityTransform;
-use crate::entities::common::{center_grip, edit_prop as edit, square_grip};
-use crate::entities::curve::{point_along, unit_direction, unit_vector};
+use crate::entities::common::{
+    center_grip, edit_prop as edit, format_length, ro_prop as ro, square_grip,
+};
+use crate::entities::curve::{point_along, unit_direction};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
@@ -240,9 +242,21 @@ impl PropertyEditable for XLine {
                 edit(t!("Second X").as_ref(), "xl_sx", second_point.x),
                 edit(t!("Second Y").as_ref(), "xl_sy", second_point.y),
                 edit(t!("Second Z").as_ref(), "xl_sz", second_point.z),
-                edit(t!("Direction vector X").as_ref(), "xl_dx", self.direction.x),
-                edit(t!("Direction vector Y").as_ref(), "xl_dy", self.direction.y),
-                edit(t!("Direction vector Z").as_ref(), "xl_dz", self.direction.z),
+                ro(
+                    t!("Direction vector X").as_ref(),
+                    "xl_dx",
+                    format_length(self.direction.x),
+                ),
+                ro(
+                    t!("Direction vector Y").as_ref(),
+                    "xl_dy",
+                    format_length(self.direction.y),
+                ),
+                ro(
+                    t!("Direction vector Z").as_ref(),
+                    "xl_dz",
+                    format_length(self.direction.z),
+                ),
             ],
         }]
     }
@@ -264,18 +278,6 @@ impl PropertyEditable for XLine {
                     _ => unreachable!(),
                 }
                 if let Some(direction) = unit_direction(self.base_point, second_point) {
-                    self.direction = direction;
-                }
-            }
-            "xl_dx" | "xl_dy" | "xl_dz" => {
-                let mut direction = self.direction;
-                match field {
-                    "xl_dx" => direction.x = v,
-                    "xl_dy" => direction.y = v,
-                    "xl_dz" => direction.z = v,
-                    _ => unreachable!(),
-                }
-                if let Some(direction) = unit_vector(direction) {
                     self.direction = direction;
                 }
             }

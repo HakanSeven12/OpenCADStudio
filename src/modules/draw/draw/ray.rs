@@ -50,6 +50,9 @@ impl CadCommand for RayCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        if !pt.is_finite() {
+            return CmdResult::NeedPoint;
+        }
         if let Some(base) = self.base {
             let dir = pt - base;
             let len = dir.length();

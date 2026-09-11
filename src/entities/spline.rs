@@ -21,6 +21,30 @@ pub(crate) fn shows_fit_points(spline: &Spline) -> bool {
     uses_fit_method(spline) && (!spline.cv_frame_visible || spline.flags.periodic)
 }
 
+/// Conservative world bounds of a fit-only spline. Fit points are interpolation
+/// constraints, not control-hull vertices, so their box can exclude the curve.
+/// The shared kernel reconstructs the same spatial interpolation used by the
+/// curve consumers, then its control hull bounds every point of that curve.
+pub(crate) fn fit_geometry_bounds(spline: &Spline) -> Option<cadkernel::brep::Aabb> {
+    if !spline.control_points.is_empty() || spline.fit_points.len() < 2 { return None; }
+    use cadkernel::space::{NurbsCurve3, Parameterization};
+    let points: Vec<_> = spline.fit_points.iter().map(|p| [p.x,p.y,p.z]).collect();
+    let parameterization = match spline.knot_parameterization {
+        1 => Parameterization::Centripetal, 2 => Parameterization::Uniform,
+        _ => Parameterization::Chord,
+    };
+    let curve = if spline.flags.periodic {
+        NurbsCurve3::interpolate_periodic(&points, parameterization)?
+    } else {
+        if spline.flags.closed { return None; }
+        NurbsCurve3::interpolate_fit(&points,
+            Some([spline.begin_tangent.x,spline.begin_tangent.y,spline.begin_tangent.z]),
+            Some([spline.end_tangent.x,spline.end_tangent.y,spline.end_tangent.z]),
+            parameterization)?
+    };
+    let curve = curve.compact_knots(spline.control_tolerance.max(1e-9))?;
+    cadkernel::brep::Aabb::around(curve.control_points().iter().copied())
+}
 fn to_render(spl: &Spline) -> RenderEntity {
     let n = spl.control_points.len();
     if n < 2 {

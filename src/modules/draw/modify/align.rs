@@ -1,4 +1,4 @@
-// ALIGN command — align selected objects using 1 or 2 point pairs.
+// ALIGN command — rigid 3D placement using one, two, or three point pairs.
 //
 // Workflow:
 //   1. Select objects (Enter to finish selection)
@@ -23,6 +23,8 @@ pub struct AlignCommand {
     dst1: Option<DVec3>,
     src2: Option<DVec3>,
     dst2: Option<DVec3>,
+    src3: Option<DVec3>,
+    dst3: Option<DVec3>,
 }
 
 #[derive(PartialEq)]
@@ -32,6 +34,8 @@ enum AlignState {
     Dst1,
     Src2,
     Dst2,
+    Src3,
+    Dst3,
     AskScale,
 }
 
@@ -50,6 +54,8 @@ impl AlignCommand {
             dst1: None,
             src2: None,
             dst2: None,
+            src3: None,
+            dst3: None,
         }
     }
 }
@@ -72,9 +78,11 @@ impl CadCommand for AlignCommand {
                 t!("ALIGN  Specify 2nd source point (Enter = translate only):").into_owned()
             }
             AlignState::Dst2 => t!("ALIGN  Specify 2nd destination point:").into_owned(),
+            AlignState::Src3 => "ALIGN  Specify 3rd source point or <continue>:".into(),
+            AlignState::Dst3 => "ALIGN  Specify 3rd destination point:".into(),
             AlignState::AskScale => {
                 t!(
-                    "ALIGN  Scale objects based on alignment points? [Yes / No]:"
+                    "ALIGN  Scale objects based on alignment points? [Yes / No] <No>:"
                 )
                 .into_owned()
             }
@@ -103,6 +111,7 @@ impl CadCommand for AlignCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        if !pt.is_finite() { return CmdResult::NeedPoint; }
         match self.state {
             AlignState::Gathering => CmdResult::NeedPoint,
             AlignState::Src1 => {
@@ -116,14 +125,35 @@ impl CadCommand for AlignCommand {
                 CmdResult::NeedPoint
             }
             AlignState::Src2 => {
+                let pair = [self.src1.unwrap().to_array(), pt.to_array()];
+                if cadkernel::space::align_point_pairs(&pair, &pair, false).is_none() {
+                    return CmdResult::NeedPoint;
+                }
                 self.src2 = Some(pt);
                 self.state = AlignState::Dst2;
                 CmdResult::NeedPoint
             }
             AlignState::Dst2 => {
+                let pair = [self.dst1.unwrap().to_array(), pt.to_array()];
+                if cadkernel::space::align_point_pairs(&pair, &pair, false).is_none() {
+                    return CmdResult::NeedPoint;
+                }
                 self.dst2 = Some(pt);
-                self.state = AlignState::AskScale;
+                self.state = AlignState::Src3;
                 CmdResult::NeedPoint
+            }
+            AlignState::Src3 => {
+                let frame = [self.src1.unwrap().to_array(), self.src2.unwrap().to_array(), pt.to_array()];
+                if cadkernel::space::align_point_pairs(&frame, &frame, false).is_none() {
+                    return CmdResult::NeedPoint;
+                }
+                self.src3 = Some(pt);
+                self.state = AlignState::Dst3;
+                CmdResult::NeedPoint
+            }
+            AlignState::Dst3 => {
+                self.dst3 = Some(pt);
+                self.compute_align(false)
             }
             AlignState::AskScale => CmdResult::NeedPoint,
         }
@@ -156,6 +186,10 @@ impl CadCommand for AlignCommand {
             }
 
             // Default option shown as <No>.
+            AlignState::Src3 => {
+                self.state = AlignState::AskScale;
+                CmdResult::NeedPoint
+            }
             AlignState::AskScale => self.compute_align(false),
 
             _ => CmdResult::Cancel,
@@ -204,6 +238,8 @@ impl CadCommand for AlignCommand {
         match self.state {
             AlignState::Src2
             | AlignState::Dst2
+            | AlignState::Src3
+            | AlignState::Dst3
             | AlignState::AskScale => {
                 out.push(line(src1, dst1, "align_pair_1"));
             }
@@ -230,9 +266,14 @@ impl CadCommand for AlignCommand {
 
             // Once both pairs are complete, keep both visible while
             // waiting for the Scale / No Scale decision.
-            AlignState::AskScale => {
+            AlignState::Src3 | AlignState::Dst3 | AlignState::AskScale => {
                 if let (Some(src2), Some(dst2)) = (self.src2, self.dst2) {
                     out.push(line(src2, dst2, "align_pair_2"));
+                }
+                if self.state == AlignState::Dst3 {
+                    if let Some(src3) = self.src3 {
+                        out.push(line(src3, pt, "align_pair_3_preview"));
+                    }
                 }
             }
 
@@ -245,50 +286,20 @@ impl CadCommand for AlignCommand {
 
 impl AlignCommand {
     fn compute_align(&self, with_scale: bool) -> CmdResult {
-        let (s1, d1, s2, d2) = match (self.src1, self.dst1, self.src2, self.dst2) {
-            (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
-            _ => return CmdResult::Cancel,
-        };
-
-        // Build transform: move s1→d1, rotate so s2-s1 aligns with d2-d1 (in the world XY plane)
-        let src_vec = s2 - s1;
-        let dst_vec = d2 - d1;
-
-        let src_len = src_vec.length();
-        let dst_len = dst_vec.length();
-
-        if src_len < 1e-6 || dst_len < 1e-6 {
-            // Degenerate: just translate
-            let delta = d1 - s1;
-            return CmdResult::TransformSelected(
-                self.handles.clone(),
-                EntityTransform::Translate(delta),
-            );
+        let (Some(s1), Some(d1), Some(s2), Some(d2)) = (self.src1, self.dst1, self.src2, self.dst2)
+            else { return CmdResult::NeedPoint; };
+        let mut source = vec![s1.to_array(), s2.to_array()];
+        let mut target = vec![d1.to_array(), d2.to_array()];
+        if let (Some(s3), Some(d3)) = (self.src3, self.dst3) {
+            source.push(s3.to_array());
+            target.push(d3.to_array());
         }
-
-        // Angle from src_vec to dst_vec in the world XY plane
-        let src_angle = src_vec.y.atan2(src_vec.x);
-        let dst_angle = dst_vec.y.atan2(dst_vec.x);
-        let angle = dst_angle - src_angle;
-
-        let scale_factor = if with_scale { dst_len / src_len } else { 1.0 };
-
-        // Apply: translate to origin (s1), scale, rotate, translate to d1
-        // We use the EntityTransform enum — it doesn't support composed transforms directly.
-        // Return a special align result that carries the full matrix.
-        let _ = (angle, scale_factor, with_scale);
-
-        // Compose via AlignTransform CmdResult
-        CmdResult::AlignSelected {
-            handles: self.handles.clone(),
-            src1: s1,
-            dst1: d1,
-            angle_rad: angle,
-            scale: scale_factor,
-        }
+        let Some(matrix) = cadkernel::space::align_point_pairs(&source, &target, with_scale)
+            else { return CmdResult::NeedPoint; };
+        CmdResult::TransformSelected(self.handles.clone(), EntityTransform::Affine(
+            acadrust::types::Transform::from_matrix(acadrust::types::Matrix4 { m: matrix }),
+        ))
     }
 }
 
-
-// ── Autocomplete registry ─────────────────────────────────
 inventory::submit!(crate::command::CommandRegistration { names: &["ALIGN"] });  // AlignCommand

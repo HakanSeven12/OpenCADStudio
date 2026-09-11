@@ -13,13 +13,21 @@ use glam::DVec3;
 
 #[derive(Clone, Debug)]
 pub enum HatchEditOperation {
+    Appearance {
+        color: Option<acadrust::types::Color>,
+        layer: Option<String>,
+        transparency: Option<acadrust::types::Transparency>,
+    },
     Update {
         origin: Option<(f64, f64)>,
         disassociate: bool,
         style: Option<acadrust::entities::HatchStyleType>,
         annotative: Option<bool>,
     },
-    RecreateBoundary,
+    RecreateBoundary { associate: bool },
+    BeginAssociate,
+    AssociateBoundaries(Vec<Handle>),
+    DrawOrderBoundary { above: bool },
     Separate,
     AddBoundaries(Vec<Handle>),
     RemoveBoundaries(Vec<Handle>),

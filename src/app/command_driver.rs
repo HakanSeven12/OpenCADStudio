@@ -4456,6 +4456,31 @@ impl OpenCADStudio {
                         .push_error(crate::t!("HATCHEDIT: hatch entity not found.").as_ref());
                 } else {
                     use crate::command::HatchEditOperation;
+                    if matches!(&operation,HatchEditOperation::BeginAssociate) {
+                        let associative=matches!(self.tabs[i].scene.document.get_entity(handle),Some(acadrust::EntityType::Hatch(h)) if h.is_associative);
+                        if associative {
+                            self.command_line.push_info("HATCHEDIT: hatch is already associative.");
+                            self.tabs[i].active_cmd=None;
+                        }else{
+                            let command=crate::modules::draw::draw::hatchedit::HatcheditCommand::for_association(handle,name,scale,angle);
+                            self.tabs[i].scene.deselect_all();
+                            self.command_line.push_info(&command.prompt());
+                            self.tabs[i].active_cmd=Some(Box::new(command));
+                        }
+                        return Task::none();
+                    }
+                    if let HatchEditOperation::DrawOrderBoundary{above}=&operation {
+                        let references:Vec<_>=match self.tabs[i].scene.document.get_entity(handle) {
+                            Some(acadrust::EntityType::Hatch(h))=>h.paths.iter().flat_map(|p|p.boundary_handles.iter())
+                                .filter(|h|self.tabs[i].scene.document.get_entity(**h).is_some()).map(|h|format!("{:X}",h.value())).collect(),
+                            _=>Vec::new(),
+                        };
+                        self.tabs[i].active_cmd=None;
+                        if references.is_empty(){self.command_line.push_info("HATCHEDIT: no associated boundary objects.");return Task::none();}
+                        self.tabs[i].scene.deselect_all();self.tabs[i].scene.select_entity(handle,false);
+                        let command=format!("DRAWORDER {} {}",if *above{"ABOVE"}else{"UNDER"},references.join(" "));
+                        return self.dispatch_view(&command,i).unwrap_or_else(Task::none);
+                    }
                     if matches!(
                         &operation,
                         HatchEditOperation::DrawOrderFront | HatchEditOperation::DrawOrderBack
@@ -4472,6 +4497,22 @@ impl OpenCADStudio {
                     }
                     self.push_undo_snapshot(i, "HATCHEDIT");
                     match operation {
+                        HatchEditOperation::Appearance { color, layer, transparency } => {
+                            let layer=layer.map(|name|if name=="."{self.tabs[i].active_layer.clone()}else{name});
+                            if layer.as_ref().is_some_and(|name|self.tabs[i].scene.document.layers.get(name).is_none()) {
+                                self.discard_last_undo_entry(i);
+                                self.command_line.push_error("HATCHEDIT: layer not found.");
+                                return Task::none();
+                            }
+                            if let Some(entity)=self.tabs[i].scene.document.get_entity_mut(handle) {
+                                let common=entity.common_mut();
+                                if let Some(value)=color {common.color=value;common.color_name=None;common.color_book_handle=None;}
+                                if let Some(value)=layer {common.layer=value;}
+                                if let Some(value)=transparency {common.transparency=value;}
+                            }
+                            self.tabs[i].scene.bump_entities(&[(handle,crate::scene::ChangeKind::Modified)]);
+                            self.refresh_properties();
+                        }
                         HatchEditOperation::Update {
                             origin,
                             disassociate,
@@ -4591,7 +4632,25 @@ impl OpenCADStudio {
                                 .scene
                                 .edit_hatch_boundary_handles(handle, &handles, false);
                         }
-                        HatchEditOperation::RecreateBoundary => {
+                        HatchEditOperation::AssociateBoundaries(handles) => {
+                            let plane=match self.tabs[i].scene.document.get_entity(handle) {
+                                Some(acadrust::EntityType::Hatch(h))=>{
+                                    let storage=crate::entities::curve::ocs_plane(h.normal,h.elevation);
+                                    crate::command::WorkingPlane::new(glam::DVec3::from_array(storage.origin),glam::DVec3::from_array(storage.x_axis),glam::DVec3::from_array(storage.y_axis))
+                                },
+                                _=>self.tabs[i].ucs_xform().working_plane(),
+                            };
+                            let mut sources=self.tabs[i].scene.boundary_sources_on_plane(plane,1e-6);
+                            sources.retain(|h,_|handles.contains(h)&&*h!=handle);
+                            if crate::scene::boundary_faces(&sources,1e-6).is_empty() {
+                                self.discard_last_undo_entry(i);
+                                self.command_line.push_error("HATCHEDIT: selected objects do not form a closed boundary.");
+                                return Task::none();
+                            }
+                            let valid_handles:Vec<_>=sources.keys().copied().collect();
+                            self.tabs[i].scene.edit_hatch_boundary_handles(handle,&valid_handles,true);
+                        }
+                        HatchEditOperation::RecreateBoundary { associate } => {
                             let source = self.tabs[i].scene.document.get_entity(handle).cloned();
                             if let Some(acadrust::EntityType::Hatch(source)) = source {
                                 let storage = crate::entities::curve::ocs_plane(
@@ -4611,7 +4670,7 @@ impl OpenCADStudio {
                                         handles.push(boundary);
                                     }
                                 }
-                                if let Some(acadrust::EntityType::Hatch(hatch)) =
+                                if associate { if let Some(acadrust::EntityType::Hatch(hatch)) =
                                     self.tabs[i].scene.document.get_entity_mut(handle)
                                 {
                                     for (path, boundary) in
@@ -4621,7 +4680,7 @@ impl OpenCADStudio {
                                         path.flags.set_external(true);
                                     }
                                     hatch.is_associative = !handles.is_empty();
-                                }
+                                } }
                                 self.tabs[i].scene.bump_entities(&[(
                                     handle,
                                     crate::scene::ChangeKind::Modified,
@@ -4650,7 +4709,9 @@ impl OpenCADStudio {
                             }
                         }
                         HatchEditOperation::DrawOrderFront
-                        | HatchEditOperation::DrawOrderBack => unreachable!(),
+                        | HatchEditOperation::DrawOrderBack
+                        | HatchEditOperation::DrawOrderBoundary {..}
+                        | HatchEditOperation::BeginAssociate => unreachable!(),
                     }
                     self.tabs[i].dirty = true;
                     self.command_line

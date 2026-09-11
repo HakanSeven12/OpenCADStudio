@@ -808,7 +808,7 @@ impl OpenCADStudio {
                             scale,
                             angle,
                             annotative,
-                        );
+                        ).with_appearance(entity,self.tabs[i].scene.document.header.current_entity_color);
                         self.command_line.push_info(&cmd.prompt());
                         self.tabs[i].active_cmd = Some(Box::new(cmd));
                     } else {

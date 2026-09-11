@@ -20,6 +20,7 @@ pub mod refedit;
 pub mod reverse;
 pub mod rotate;
 pub mod scale;
+pub mod setbylayer;
 pub mod spline_ops;
 pub mod splinedit;
 pub mod stretch;

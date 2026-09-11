@@ -645,14 +645,56 @@ impl OpenCADStudio {
             // ── SETBYLAYER — clear color/linetype/lineweight overrides ────
             // Resets the selected entities' direct property overrides back to
             // ByLayer so they follow their layer again.
+            "SETBYLAYERMODE" => {
+                let command = crate::modules::draw::modify::setbylayer::ModeCommand;
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+            value if value.starts_with("SETBYLAYERMODE ") => {
+                if let Ok(mode) = value.trim_start_matches("SETBYLAYERMODE ").trim().parse::<u8>() {
+                    crate::modules::draw::modify::setbylayer::set_mode(mode);
+                } else { self.command_line.push_error("SETBYLAYERMODE requires an integer from 0 to 255."); }
+            }
             "SETBYLAYER" => {
-                let handles: Vec<_> = self.tabs[i]
+                let command = crate::modules::draw::modify::setbylayer::SetByLayerCommand::new(
+                    self.tabs[i].scene.selected.iter().copied().collect(),
+                );
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+            cmd if cmd.starts_with("SETBYLAYER_APPLY ") => {
+                let flags: Vec<_> = cmd.split_whitespace().skip(1).collect();
+                if flags.len() != 2 || flags.iter().any(|flag| !matches!(*flag, "0" | "1")) {
+                    return Some(Task::none());
+                }
+                let mask = crate::modules::draw::modify::setbylayer::mode();
+                let change_byblock = flags[0] == "1";
+                let include_blocks = flags[1] == "1";
+                let mut handles: Vec<_> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .into_iter()
                     .map(|(h, _)| h)
                     .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
                     .collect();
+                if include_blocks {
+                    let mut visited: std::collections::HashSet<_> = handles.iter().copied().collect();
+                    let mut index = 0;
+                    while index < handles.len() {
+                        let children = match self.tabs[i].scene.document.get_entity(handles[index]) {
+                            Some(acadrust::EntityType::Insert(insert)) => self.tabs[i].scene.document
+                                .block_records.get(&insert.block_name)
+                                .map(|block| block.entity_handles.clone()).unwrap_or_default(),
+                            _ => Vec::new(),
+                        };
+                        for child in children {
+                            if visited.insert(child) && !self.tabs[i].scene.is_layer_locked(child) {
+                                handles.push(child);
+                            }
+                        }
+                        index += 1;
+                    }
+                }
                 if handles.is_empty() {
                     self.command_line
                         .push_error(crate::t!("SETBYLAYER: select entities first.").as_ref());
@@ -662,11 +704,29 @@ impl OpenCADStudio {
                     for handle in &handles {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*handle) {
                             let common = entity.common_mut();
-                            common.color = acadrust::types::Color::ByLayer;
-                            common.color_name = None;
-                            common.color_book_handle = None;
-                            common.linetype = "ByLayer".to_string();
-                            common.line_weight = acadrust::types::LineWeight::ByLayer;
+                            if mask & 1 != 0 && (change_byblock || common.color != acadrust::types::Color::ByBlock) {
+                                common.color = acadrust::types::Color::ByLayer;
+                                common.color_name = None;
+                                common.color_book_handle = None;
+                            }
+                            if mask & 2 != 0 && (change_byblock || !common.linetype.eq_ignore_ascii_case("ByBlock")) {
+                                common.linetype = "ByLayer".to_string();
+                                common.linetype_handle = None;
+                            }
+                            if mask & 4 != 0 && (change_byblock || common.line_weight != acadrust::types::LineWeight::ByBlock) {
+                                common.line_weight = acadrust::types::LineWeight::ByLayer;
+                            }
+                            if mask & 8 != 0 && (change_byblock || common.material_flags != 1) {
+                                common.material_flags = 0;
+                                common.material_handle = None;
+                            }
+                            if mask & 16 != 0 && (change_byblock || common.plotstyle_flags != 1) {
+                                common.plotstyle_flags = 0;
+                                common.plotstyle_handle = None;
+                            }
+                            if mask & 128 != 0 && (change_byblock || common.transparency != acadrust::types::Transparency::BY_BLOCK) {
+                                common.transparency = acadrust::types::Transparency::BY_LAYER;
+                            }
                             changed += 1;
                         }
                     }

@@ -118,9 +118,11 @@ pub fn join_to_source(source: &EntityType, candidates: &[(Handle, &EntityType)])
                         }?;
                         let joined=cadkernel::space::source_join::join_nurbs_curves(&a,&b,JOIN_EPS)?;
                         let mut spline=source.clone();
+                        spline.degree=joined.degree() as i32;
                         spline.control_points=joined.control_points().iter().map(|p|Vector3::new(p[0],p[1],p[2])).collect();
                         spline.knots=joined.knots().to_vec();spline.weights=joined.weights().to_vec();
-                        spline.fit_points.clear();spline.flags.rational=true;
+                        spline.fit_points.clear();spline.flags.rational=joined.is_rational();
+                        spline.dwg_flags1 &= !1;spline.dxf_flags &= !32;
                         spline.flags.planar=cadkernel::space::are_coplanar(joined.control_points(),&[]);
                         spline.begin_tangent=Vector3::new(0.0,0.0,0.0);spline.end_tangent=Vector3::new(0.0,0.0,0.0);
                         Some(EntityType::Spline(spline))

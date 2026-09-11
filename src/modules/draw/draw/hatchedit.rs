@@ -35,6 +35,7 @@ pub struct HatcheditCommand {
     boundary_selection: Vec<Handle>,
     source_appearance: Option<(acadrust::types::Color,String,acadrust::types::Transparency)>,
     current_color: acadrust::types::Color,
+    current_transparency: acadrust::types::Transparency,
     boundary_region: bool,
 }
 
@@ -51,6 +52,7 @@ impl HatcheditCommand {
             boundary_selection: Vec::new(),
             source_appearance: None,
             current_color: acadrust::types::Color::ByLayer,
+            current_transparency: acadrust::types::Transparency::ByLayer,
             boundary_region: false,
         }
     }
@@ -78,6 +80,7 @@ impl HatcheditCommand {
             boundary_selection: Vec::new(),
             source_appearance: None,
             current_color: acadrust::types::Color::ByLayer,
+            current_transparency: acadrust::types::Transparency::ByLayer,
             boundary_region: false,
         }
     }
@@ -105,9 +108,9 @@ impl HatcheditCommand {
         let mut command=Self::with_handle(handle,name,scale,angle,false);
         command.input=Some("associate-select");command
     }
-    pub fn with_appearance(mut self,entity:Option<&acadrust::EntityType>,current_color:acadrust::types::Color)->Self {
+    pub fn with_appearance(mut self,entity:Option<&acadrust::EntityType>,current_color:acadrust::types::Color,current_transparency:acadrust::types::Transparency)->Self {
         self.source_appearance=entity.map(|e|{let c=e.common();(c.color,c.layer.clone(),c.transparency)});
-        self.current_color=current_color;self
+        self.current_color=current_color;self.current_transparency=current_transparency;self
     }
 
     fn update_operation(&self) -> HatchEditOperation {
@@ -249,7 +252,7 @@ impl CadCommand for HatcheditCommand {
                 }
                 "layer"=>if !text.trim().is_empty(){return self.apply_result(appearance(None,Some(text.trim().to_owned()),None));},
                 "transparency"=>{
-                    let value=match keyword.as_str(){"BYLAYER"=>Some(Transparency::BY_LAYER),"BYBLOCK"=>Some(Transparency::BY_BLOCK),
+                    let value=match keyword.as_str(){"."=>Some(self.current_transparency),"BYLAYER"=>Some(Transparency::BY_LAYER),"BYBLOCK"=>Some(Transparency::BY_BLOCK),
                         n=>n.parse::<u8>().ok().filter(|v|*v<=90).map(|v|Transparency::from_percent(v as f64 / 100.0))};
                     if let Some(value)=value{return self.apply_result(appearance(None,None,Some(value)));}
                 }

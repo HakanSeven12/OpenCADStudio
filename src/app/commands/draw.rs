@@ -808,7 +808,7 @@ impl OpenCADStudio {
                             scale,
                             angle,
                             annotative,
-                        ).with_appearance(entity,self.tabs[i].scene.document.header.current_entity_color);
+                        ).with_appearance(entity,self.tabs[i].scene.document.header.current_entity_color,self.tabs[i].scene.document.current_entity_transparency());
                         self.command_line.push_info(&cmd.prompt());
                         self.tabs[i].active_cmd = Some(Box::new(cmd));
                     } else {
@@ -816,7 +816,7 @@ impl OpenCADStudio {
                             .push_error(crate::t!("HATCHEDIT: selected entity is not a hatch.").as_ref());
                     }
                 } else {
-                    let cmd = HatcheditCommand::new();
+                    let cmd = HatcheditCommand::new().with_appearance(None,self.tabs[i].scene.document.header.current_entity_color,self.tabs[i].scene.document.current_entity_transparency());
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 }

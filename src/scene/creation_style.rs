@@ -252,7 +252,27 @@ fn apply_object_defaults(doc: &CadDocument, entity: &mut EntityType) {
 }
 
 pub fn apply_current_creation_styles(doc: &CadDocument, entity: &mut EntityType) {
+    entity.common_mut().transparency = doc.current_entity_transparency();
     apply_text_defaults(doc, entity);
     apply_dimension_defaults(doc, entity);
     apply_object_defaults(doc, entity);
+}
+
+pub(crate) fn parse_current_transparency(value: &str) -> Option<acadrust::types::Transparency> {
+    use acadrust::types::Transparency;
+    match value.trim().to_ascii_uppercase().as_str() {
+        "BYLAYER" | "-1" => Some(Transparency::ByLayer),
+        "BYBLOCK" | "-2" => Some(Transparency::ByBlock),
+        value => value.parse::<u8>().ok().filter(|value| *value <= 90)
+            .map(|value| Transparency::from_percent(value as f64 / 100.0)),
+    }
+}
+
+pub(crate) fn current_transparency_label(value: acadrust::types::Transparency) -> String {
+    use acadrust::types::Transparency;
+    match value {
+        Transparency::ByLayer => "ByLayer".into(),
+        Transparency::ByBlock => "ByBlock".into(),
+        Transparency::Explicit(_) => format!("{:.0}", value.as_percent() * 100.0),
+    }
 }

@@ -2808,7 +2808,17 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 } else {
                     match field {
                         "transparency" => {
-                            self.tabs[i].dirty = true;
+                            let Some(transparency) = crate::scene::creation_style::parse_current_transparency(&value) else {
+                                self.command_line.push_error("Transparency: expected ByLayer, ByBlock, or an integer from 0 to 90.");
+                                self.refresh_properties();
+                                return Task::none();
+                            };
+                            self.push_undo_snapshot(i, "CETRANSPARENCY");
+                            if self.tabs[i].scene.document.set_current_entity_transparency(transparency) {
+                                self.tabs[i].dirty = true;
+                            } else {
+                                self.command_line.push_error("CETRANSPARENCY: drawing variable dictionary is invalid.");
+                            }
                             self.refresh_properties();
                         }
                         "material" => {

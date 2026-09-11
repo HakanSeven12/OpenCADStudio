@@ -2671,6 +2671,8 @@ impl Scene {
         if let Some((color, transparency)) = entity_style {
             entity.common_mut().color = color;
             entity.common_mut().transparency = transparency;
+        } else {
+            entity.common_mut().transparency = self.document.current_entity_transparency();
         }
 
         self.add_entity(entity)

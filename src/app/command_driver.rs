@@ -3216,16 +3216,17 @@ impl OpenCADStudio {
                     apply_pedit, convert_to_polyline, PeditOp,
                 };
                 match &op {
-                    PeditOp::JoinSelection(handles, fuzz) => {
+                    PeditOp::JoinSelection(handles, fuzz, kind) => {
                         let mut available = handles.iter().filter_map(|handle| {
                             if self.tabs[i].scene.is_layer_locked(*handle) { return None; }
                             self.tabs[i].scene.document.get_entity(*handle).cloned().map(|entity| (*handle, entity))
                         }).collect::<Vec<_>>();
+                        let connector_distance = crate::modules::draw::modify::pedit::selection_connector_distance(&available, *fuzz);
                         let mut changes = Vec::new();
                         while !available.is_empty() {
                             let (source_handle, source) = available.remove(0);
                             let candidates = available.iter().map(|(handle, entity)| (*handle, entity)).collect::<Vec<_>>();
-                            if let Some((mut result, consumed)) = crate::modules::draw::modify::pedit::join_selection_extend(&source, &candidates, *fuzz) {
+                            if let Some((mut result, consumed)) = crate::modules::draw::modify::pedit::join_selection_extend(&source, &candidates, *fuzz, *kind, connector_distance) {
                                 *result.common_mut() = source.common().clone();
                                 available.retain(|(handle, _)| !consumed.contains(handle));
                                 changes.push((source_handle, result, consumed));

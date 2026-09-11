@@ -941,6 +941,37 @@ impl OpenCADStudio {
                 return Some(Task::none());
             }
 
+            "DRAWORDER_FRONT" | "DRAWORDER_BACK" | "DRAWORDER_ABOVE" | "DRAWORDER_UNDER" => {
+                let selected: Vec<acadrust::Handle> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .iter()
+                    .map(|(h, _)| *h)
+                    .collect();
+                if selected.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let selection = SelectObjectsCommand::plain("DRAWORDER", cmd);
+                    self.command_line.push_info(&selection.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(selection));
+                } else if matches!(cmd, "DRAWORDER_ABOVE" | "DRAWORDER_UNDER") {
+                    let command = DrawOrderCommand::for_reference_pick(
+                        selected,
+                        cmd == "DRAWORDER_ABOVE",
+                    );
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                } else {
+                    let primitive = if cmd == "DRAWORDER_FRONT" {
+                        "DRAWORDER FRONT"
+                    } else {
+                        "DRAWORDER BACK"
+                    };
+                    return Some(self.apply_cmd_result(crate::command::CmdResult::Relaunch(
+                        primitive.to_string(),
+                        selected,
+                    )));
+                }
+            }
             "DRAWORDER" => {
                 let selected: Vec<acadrust::Handle> = self.tabs[i]
                     .scene
@@ -968,25 +999,29 @@ impl OpenCADStudio {
                     self.command_line
                         .push_error(crate::t!("DRAWORDER: select entities first.").as_ref());
                 } else {
-                    // Parse relative target handle for ABOVE/UNDER.
-                    let relative_target: Option<(bool, acadrust::Handle)> = match option.as_str() {
-                        "A" | "ABOVE" => {
-                            let h_val = parts.get(2).and_then(|s| u64::from_str_radix(s, 16).ok());
-                            h_val.map(|v| (true, acadrust::Handle::new(v)))
-                        }
-                        "U" | "UNDER" | "BELOW" => {
-                            let h_val = parts.get(2).and_then(|s| u64::from_str_radix(s, 16).ok());
-                            h_val.map(|v| (false, acadrust::Handle::new(v)))
-                        }
+                    let relative_above = match option.as_str() {
+                        "A" | "ABOVE" => Some(true),
+                        "U" | "UNDER" | "BELOW" => Some(false),
                         _ => None,
                     };
+                    let references: Vec<_> = parts.iter().skip(2).filter_map(|text| {
+                        u64::from_str_radix(text.trim_start_matches("0x").trim_start_matches("0X"), 16)
+                            .ok().map(acadrust::Handle::new)
+                    }).filter(|handle| !selected.contains(handle)).collect();
+                    let relative_assignments = relative_above.and_then(|above| {
+                        assign_relative_group_keys(
+                            &self.tabs[i].scene.document,
+                            self.tabs[i].scene.current_layout_block_handle_pub(),
+                            &selected, &references, above,
+                        )
+                    });
                     let to_front_opt = match option.as_str() {
                         "F" | "FRONT" => Some(true),
                         "B" | "BACK" => Some(false),
                         _ => None,
                     };
 
-                    if relative_target.is_some() || to_front_opt.is_some() {
+                    if relative_assignments.is_some() || to_front_opt.is_some() {
                         self.push_undo_snapshot(i, "DRAWORDER");
                         let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
 
@@ -1083,43 +1118,11 @@ impl OpenCADStudio {
                         });
                         if let Some(ObjectType::SortEntitiesTable(table)) = doc.objects.get_mut(&th)
                         {
-                            if let Some((above, target)) = relative_target {
-                                // move_above/move_below recompute target±1 per
-                                // call, so looping them over N selected entities
-                                // ties the whole group onto one key. Read the
-                                // reference key once and hand out per-index
-                                // keys instead, keeping the moved entities a
-                                // distinct, selection-ordered block adjacent to
-                                // the reference.
-                                let target_sort = match table.get_sort_handle(target) {
-                                    Some(h) => h.value(),
-                                    None => {
-                                        // A reference object that was never
-                                        // reordered isn't in the table yet;
-                                        // seed it with its own handle as the
-                                        // implicit sort key.
-                                        table.add_entry(target, target);
-                                        table
-                                            .get_sort_handle(target)
-                                            .map_or(target.value(), |h| h.value())
-                                    }
-                                };
-                                for (k, h) in selected.iter().enumerate() {
-                                    let offset = 1 + k as u64;
-                                    let sort = if above {
-                                        target_sort.saturating_add(offset)
-                                    } else {
-                                        target_sort.saturating_sub(offset).max(1)
-                                    };
-                                    table.add_entry(*h, acadrust::Handle::new(sort));
+                            if let Some(assignments) = &relative_assignments {
+                                for (handle, sort) in assignments {
+                                    table.add_entry(*handle, acadrust::Handle::new(*sort));
                                 }
-                                let rel = if above { "above" } else { "below" };
-                                self.command_line.push_info(crate::tf!(
-                                    "DRAWORDER: moved {} entities {} {:x}.",
-                                    selected.len(),
-                                    rel,
-                                    target.value()
-                                ).as_ref());
+                                self.command_line.push_info(crate::t!("DRAWORDER: selection reordered relative to reference objects.").as_ref());
                             } else if let Some(to_front) = to_front_opt {
                                 if to_front {
                                     let (_, max_eff) = fb_baseline.unwrap_or((1, 0));
@@ -1250,11 +1253,12 @@ enum DrawOrderStep {
 ///    - `Front` / `F`: moves selection to front.
 ///    - `Back` / `B` / Enter: moves selection to back.
 ///    - `Above` / `A` / `Under` / `U`: advances to reference object pick.
-/// 3. Reference object pick: user can click the reference entity in the viewport
-///    or type its hex handle on the command line.
+/// 3. Gather reference objects, excluding the moved selection; Enter applies.
+///    Typed hexadecimal handles may also be accumulated before confirming.
 pub(crate) struct DrawOrderCommand {
     selected: Vec<acadrust::Handle>,
     step: DrawOrderStep,
+    references: Vec<acadrust::Handle>,
 }
 
 impl DrawOrderCommand {
@@ -1264,13 +1268,14 @@ impl DrawOrderCommand {
         } else {
             DrawOrderStep::ChooseVerb
         };
-        Self { selected, step }
+        Self { selected, step, references: Vec::new() }
     }
 
     pub(crate) fn for_reference_pick(selected: Vec<acadrust::Handle>, above: bool) -> Self {
         Self {
             selected,
             step: DrawOrderStep::PickReference { above },
+            references: Vec::new(),
         }
     }
 }
@@ -1289,10 +1294,10 @@ impl CadCommand for DrawOrderCommand {
                 crate::t!("DRAWORDER  [Above / Under / Front / Back] <Back>:").into_owned()
             }
             DrawOrderStep::PickReference { above: true } => {
-                crate::t!("DRAWORDER  Select reference object (move selection above):").into_owned()
+                format!("DRAWORDER  Select reference objects to move above ({} selected, Enter when done):", self.references.len())
             }
             DrawOrderStep::PickReference { above: false } => {
-                crate::t!("DRAWORDER  Select reference object (move selection under):").into_owned()
+                format!("DRAWORDER  Select reference objects to move under ({} selected, Enter when done):", self.references.len())
             }
         }
     }
@@ -1310,7 +1315,7 @@ impl CadCommand for DrawOrderCommand {
     }
 
     fn input_kind(&self) -> crate::command::InputKind {
-        if matches!(self.step, DrawOrderStep::SelectObjects) {
+        if matches!(self.step, DrawOrderStep::SelectObjects | DrawOrderStep::PickReference { .. }) {
             crate::command::InputKind::Point
         } else {
             crate::command::InputKind::SingleToken
@@ -1318,11 +1323,15 @@ impl CadCommand for DrawOrderCommand {
     }
 
     fn is_selection_gathering(&self) -> bool {
-        matches!(self.step, DrawOrderStep::SelectObjects)
+        matches!(self.step, DrawOrderStep::SelectObjects | DrawOrderStep::PickReference { .. })
     }
 
     fn on_selection_complete(&mut self, handles: Vec<acadrust::Handle>) -> crate::command::CmdResult {
-        self.selected = handles;
+        if matches!(self.step, DrawOrderStep::PickReference { .. }) {
+            self.references = handles.into_iter().filter(|handle| !self.selected.contains(handle)).collect();
+        } else {
+            self.selected = handles;
+        }
         crate::command::CmdResult::NeedPoint
     }
 
@@ -1341,7 +1350,12 @@ impl CadCommand for DrawOrderCommand {
                 let handles = std::mem::take(&mut self.selected);
                 crate::command::CmdResult::Relaunch("DRAWORDER BACK".into(), handles)
             }
-            DrawOrderStep::PickReference { .. } => crate::command::CmdResult::Cancel,
+            DrawOrderStep::PickReference { above } => {
+                if self.references.is_empty() { return crate::command::CmdResult::Cancel; }
+                let option = if above { "ABOVE" } else { "UNDER" };
+                let references = self.references.iter().map(|handle| format!("{:x}", handle.value())).collect::<Vec<_>>().join(" ");
+                crate::command::CmdResult::Relaunch(format!("DRAWORDER {option} {references}"), std::mem::take(&mut self.selected))
+            }
         }
     }
 
@@ -1374,47 +1388,63 @@ impl CadCommand for DrawOrderCommand {
                     _ => Some(crate::command::CmdResult::NeedPoint),
                 }
             }
-            DrawOrderStep::PickReference { above } => {
-                let hex_str = t.trim_start_matches("0x").trim_start_matches("0X");
-                if let Ok(val) = u64::from_str_radix(hex_str, 16) {
-                    let opt = if above { "A" } else { "U" };
-                    let cmd = format!("DRAWORDER {} {:x}", opt, val);
-                    let handles = std::mem::take(&mut self.selected);
-                    Some(crate::command::CmdResult::Relaunch(cmd, handles))
-                } else {
-                    Some(crate::command::CmdResult::NeedPoint)
+            DrawOrderStep::PickReference { .. } => {
+                for text in t.split_whitespace() {
+                    let hex = text.trim_start_matches("0x").trim_start_matches("0X");
+                    if let Ok(value) = u64::from_str_radix(hex, 16) {
+                        let handle = acadrust::Handle::new(value);
+                        if !handle.is_null() && !self.selected.contains(&handle) && !self.references.contains(&handle) {
+                            self.references.push(handle);
+                        }
+                    }
                 }
+                Some(crate::command::CmdResult::NeedPoint)
             }
         }
     }
 
-    fn needs_entity_pick(&self) -> bool {
-        matches!(self.step, DrawOrderStep::PickReference { .. })
-    }
-
-    fn on_entity_pick(
-        &mut self,
-        handle: acadrust::Handle,
-        _pt: glam::DVec3,
-    ) -> crate::command::CmdResult {
-        if handle.is_null() {
-            return crate::command::CmdResult::NeedPoint;
+    fn on_entity_pick(&mut self, handle: acadrust::Handle, _pt: glam::DVec3) -> crate::command::CmdResult {
+        if matches!(self.step, DrawOrderStep::PickReference { .. }) && !handle.is_null()
+            && !self.selected.contains(&handle) && !self.references.contains(&handle) {
+            self.references.push(handle);
         }
-        if let DrawOrderStep::PickReference { above } = self.step {
-            let opt = if above { "A" } else { "U" };
-            let cmd = format!("DRAWORDER {} {:x}", opt, handle.value());
-            let handles = std::mem::take(&mut self.selected);
-            crate::command::CmdResult::Relaunch(cmd, handles)
-        } else {
-            crate::command::CmdResult::NeedPoint
-        }
+        crate::command::CmdResult::NeedPoint
     }
-
     fn on_point(&mut self, _pt: glam::DVec3) -> crate::command::CmdResult {
         crate::command::CmdResult::NeedPoint
     }
 }
 
+/// Insert the selected block next to the extremal reference in effective draw
+/// order. Renumber the ordered siblings to avoid ties or saturated sort keys.
+fn assign_relative_group_keys(
+    document: &acadrust::CadDocument,
+    block: acadrust::Handle,
+    selected: &[acadrust::Handle],
+    references: &[acadrust::Handle],
+    above: bool,
+) -> Option<Vec<(acadrust::Handle, u64)>> {
+    use acadrust::objects::ObjectType;
+    let overrides: std::collections::HashMap<_, _> = document.objects.values().find_map(|object| {
+        if let ObjectType::SortEntitiesTable(table) = object {
+            (table.block_owner_handle == block).then(|| table.entries().map(|entry| (entry.entity_handle, entry.sort_handle.value())).collect())
+        } else { None }
+    }).unwrap_or_default();
+    let mut ordered: Vec<_> = document.entities().filter(|entity| {
+        let owner = entity.common().owner_handle;
+        owner == block || owner.is_null()
+    }).map(|entity| entity.common().handle).collect();
+    ordered.sort_by_key(|handle| (overrides.get(handle).copied().unwrap_or(handle.value()), handle.value()));
+    let selected_set: std::collections::HashSet<_> = selected.iter().copied().collect();
+    let reference_set: std::collections::HashSet<_> = references.iter().copied().collect();
+    let moved: Vec<_> = ordered.iter().copied().filter(|handle| selected_set.contains(handle)).collect();
+    if moved.is_empty() { return None; }
+    ordered.retain(|handle| !selected_set.contains(handle));
+    let indices: Vec<_> = ordered.iter().enumerate().filter_map(|(index, handle)| reference_set.contains(handle).then_some(index)).collect();
+    let insertion = if above { indices.into_iter().max()? + 1 } else { indices.into_iter().min()? };
+    ordered.splice(insertion..insertion, moved);
+    Some(ordered.into_iter().enumerate().map(|(index, handle)| (handle, index as u64 + 1)).collect())
+}
 /// Sort-key assignments sending `group` to the back of the active space.
 ///
 /// Normal case: the floor is the lowest effective sort key among non-moved

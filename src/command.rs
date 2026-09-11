@@ -20,6 +20,7 @@ pub enum HatchEditOperation {
     },
     Update {
         origin: Option<(f64, f64)>,
+        store_origin: bool,
         disassociate: bool,
         style: Option<acadrust::entities::HatchStyleType>,
         annotative: Option<bool>,

@@ -4524,10 +4524,20 @@ impl OpenCADStudio {
                         }
                         HatchEditOperation::Update {
                             origin,
+                            store_origin,
                             disassociate,
                             style,
                             annotative,
                         } => {
+                            if store_origin {
+                                if let Some((x, y)) = origin {
+                                    if !self.tabs[i].scene.document.set_hatch_origin([x, y]) {
+                                        self.discard_last_undo_entry(i);
+                                        self.command_line.push_error("HATCHEDIT: cannot store default origin.");
+                                        return Task::none();
+                                    }
+                                }
+                            }
                             if let Some(acadrust::EntityType::Hatch(hatch)) =
                                 self.tabs[i].scene.document.get_entity_mut(handle)
                             {

@@ -28,6 +28,9 @@ pub struct HatcheditCommand {
     step: HatcheditStep,
     origin: Option<(f64, f64)>,
     disassociate: bool,
+    store_origin: bool,
+    current_origin: [f64; 2],
+    origin_plane: cadkernel::space::Plane,
     style: Option<acadrust::entities::HatchStyleType>,
     annotative: Option<bool>,
     annotative_current: bool,
@@ -49,6 +52,9 @@ impl HatcheditCommand {
             step: HatcheditStep::PickHatch,
             origin: None,
             disassociate: false,
+            store_origin: false,
+            current_origin: [0.0, 0.0],
+            origin_plane: cadkernel::space::Plane::from_axes([0.0;3],[1.0,0.0,0.0],[0.0,1.0,0.0]),
             style: None,
             annotative: None,
             annotative_current: false,
@@ -81,6 +87,9 @@ impl HatcheditCommand {
             },
             origin: None,
             disassociate: false,
+            store_origin: false,
+            current_origin: [0.0, 0.0],
+            origin_plane: cadkernel::space::Plane::from_axes([0.0;3],[1.0,0.0,0.0],[0.0,1.0,0.0]),
             style: None,
             annotative: None,
             annotative_current: annotative,
@@ -129,14 +138,20 @@ impl HatcheditCommand {
         }
     }
     pub fn with_appearance(mut self,entity:Option<&acadrust::EntityType>,current_color:acadrust::types::Color,current_transparency:acadrust::types::Transparency)->Self {
-        if let Some(acadrust::EntityType::Hatch(hatch)) = entity { self.style_current = hatch.style; }
+        if let Some(acadrust::EntityType::Hatch(hatch)) = entity {
+            self.style_current = hatch.style;
+            self.origin_plane = crate::entities::curve::ocs_plane(hatch.normal, hatch.elevation);
+        }
         self.source_appearance=entity.map(|e|{let c=e.common();(c.color,c.layer.clone(),c.transparency)});
         self.current_color=current_color;self.current_transparency=current_transparency;self
     }
 
+    pub fn with_origin(mut self, origin: [f64; 2]) -> Self { self.current_origin = origin; self }
+
     fn update_operation(&self) -> HatchEditOperation {
         HatchEditOperation::Update {
             origin: self.origin,
+            store_origin: self.store_origin,
             disassociate: self.disassociate,
             style: self.style,
             annotative: self.annotative,
@@ -181,6 +196,9 @@ impl CadCommand for HatcheditCommand {
             }
             return match input {
                 "annotative"=>if self.annotative_current {"Make hatch annotative [Yes/No] <Y>:"} else {"Make hatch annotative [Yes/No] <N>:"},
+                "origin"=>"[Use current origin/Set new origin] <Use current origin>:",
+                "origin-point"=>"Select point:",
+                "origin-store"=>"Store as default origin? [Yes/No] <N>:",
                 "pattern"=>"Enter a pattern name or [Solid]:",
                 "scale"=>"Specify a scale for the pattern:",
                 "angle"=>"Specify an angle for the pattern:",
@@ -205,7 +223,7 @@ impl CadCommand for HatcheditCommand {
                 let scale = format!("{scale:.4}");
                 let angle = format!("{angle:.1}");
                 t!(
-                    "HATCHEDIT  Pattern:%{name}  Scale:%{scale}  Angle:%{angle}  [Style/Properties/COlor/LAyer/Transparency/DRaw order/ASsociate/DIsassociate/ANnotative/recreate Boundary/separate Hatches] <Properties>:",
+                    "HATCHEDIT  Pattern:%{name}  Scale:%{scale}  Angle:%{angle}  [Style/Origin/Properties/COlor/LAyer/Transparency/DRaw order/ASsociate/DIsassociate/ANnotative/recreate Boundary/separate Hatches] <Properties>:",
                     name = name,
                     scale = scale,
                     angle = angle
@@ -253,6 +271,8 @@ impl CadCommand for HatcheditCommand {
         if let Some(input) = self.input {
             use crate::command::CmdOption;
             return match input {
+                "origin" => vec![CmdOption::new("Use current origin", "U"), CmdOption::new("Set new origin", "S")],
+                "origin-store" => vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")],
                 "style" => vec![CmdOption::new("Ignore", "I"), CmdOption::new("Outer", "O"), CmdOption::new("Normal", "N")],
                 "draworder" => vec![CmdOption::new("Do not change", "N"), CmdOption::new("Send to back", "B"), CmdOption::new("Bring to front", "F"), CmdOption::new("Behind boundary", "H"), CmdOption::new("In front of boundary", "D")],
                 "annotative" | "boundary-associate" => vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")],
@@ -267,6 +287,7 @@ impl CadCommand for HatcheditCommand {
         }
         vec![
             crate::command::CmdOption::new("Style", "S"),
+            crate::command::CmdOption::new("Origin", "O"),
             crate::command::CmdOption::new("Properties", "P"),
             crate::command::CmdOption::new("Color", "CO"),
             crate::command::CmdOption::new("Layer", "LA"),
@@ -287,6 +308,21 @@ impl CadCommand for HatcheditCommand {
             use acadrust::types::{Color,Transparency};
             let appearance=|color,layer,transparency|HatchEditOperation::Appearance{color,layer,transparency};
             match input {
+                "origin" => match keyword.as_str() {
+                    "U" | "USE" => { self.origin = Some((self.current_origin[0], self.current_origin[1])); return self.apply_result(self.update_operation()); }
+                    "S" | "SET" => { self.input = Some("origin-point"); }
+                    _ => {},
+                },
+                "origin-point" => {
+                    let values: Option<Vec<f64>> = text.split(',').map(|s| s.trim().parse().ok()).collect();
+                    if let Some(values) = values.filter(|v| (2..=3).contains(&v.len()) && v.iter().all(|n| n.is_finite())) {
+                        return Some(self.on_point(DVec3::new(values[0], values[1], values.get(2).copied().unwrap_or(0.0))));
+                    }
+                }
+                "origin-store" => {
+                    self.store_origin = match keyword.as_str() { "Y" | "YES" => true, "N" | "NO" => false, _ => return Some(CmdResult::NeedPoint) };
+                    return self.apply_result(self.update_operation());
+                }
                 "style" => {
                     self.style = match keyword.as_str() {
                         "I" | "IGNORE" => Some(acadrust::entities::HatchStyleType::Ignore),
@@ -352,7 +388,7 @@ impl CadCommand for HatcheditCommand {
             }
             return Some(CmdResult::NeedPoint);
         }
-        let next=match keyword.as_str(){"S"|"STYLE"=>Some("style"),"P"|"PROPERTIES"=>Some("pattern"),"CO"|"COLOR"=>Some("color"),"LA"|"LAYER"=>Some("layer"),
+        let next=match keyword.as_str(){"O"|"ORIGIN"=>Some("origin"),"S"|"STYLE"=>Some("style"),"P"|"PROPERTIES"=>Some("pattern"),"CO"|"COLOR"=>Some("color"),"LA"|"LAYER"=>Some("layer"),
             "AN"|"ANNOTATIVE"=>Some("annotative"),"T"|"TRANSPARENCY"=>Some("transparency"),"DR"|"DRAW"|"DRAW ORDER"=>Some("draworder"),
             "B"|"BOUNDARY"|"R"|"RECREATE"=>Some("boundary-type"),_=>None};
         if let Some(input)=next {self.input=Some(input);return Some(CmdResult::NeedPoint);}
@@ -472,6 +508,15 @@ impl CadCommand for HatcheditCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        if self.input == Some("origin-point") {
+            if let Some(point) = self.origin_plane.project(pt.to_array()) {
+                if point.iter().all(|value| value.is_finite()) {
+                    self.origin = Some((point[0], point[1]));
+                    self.input = Some("origin-store");
+                }
+            }
+            return CmdResult::NeedPoint;
+        }
         if self.input==Some("associate-point") {
             if let Some((plane,sources))=&self.association_sources {
                 let point=plane.to_local(pt);
@@ -488,6 +533,9 @@ impl CadCommand for HatcheditCommand {
             None if matches!(self.step,HatcheditStep::EditOptions{..})=>{
                 self.input=Some("pattern");CmdResult::NeedPoint
             }
+            Some("origin")=>{self.origin=Some((self.current_origin[0],self.current_origin[1]));self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel)},
+            Some("origin-point")=>CmdResult::NeedPoint,
+            Some("origin-store")=>self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel),
             Some("style")=>{self.style=Some(self.style_current);self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel)},
             Some("annotative")=>{self.annotative=Some(self.annotative_current);self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel)},
             Some("pattern")=>{

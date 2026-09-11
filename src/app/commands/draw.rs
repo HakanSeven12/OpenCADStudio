@@ -775,7 +775,7 @@ impl OpenCADStudio {
                     selected,
                     inherited,
                     plane,
-                );
+                ).with_origin(self.tabs[i].scene.document.hatch_origin());
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
                 self.refresh_area_preview(i);
@@ -808,7 +808,7 @@ impl OpenCADStudio {
                             scale,
                             angle,
                             annotative,
-                        ).with_appearance(entity,self.tabs[i].scene.document.header.current_entity_color,self.tabs[i].scene.document.current_entity_transparency());
+                        ).with_appearance(entity,self.tabs[i].scene.document.header.current_entity_color,self.tabs[i].scene.document.current_entity_transparency()).with_origin(self.tabs[i].scene.document.hatch_origin());
                         self.command_line.push_info(&cmd.prompt());
                         self.tabs[i].active_cmd = Some(Box::new(cmd));
                     } else {
@@ -816,7 +816,7 @@ impl OpenCADStudio {
                             .push_error(crate::t!("HATCHEDIT: selected entity is not a hatch.").as_ref());
                     }
                 } else {
-                    let cmd = HatcheditCommand::new().with_appearance(None,self.tabs[i].scene.document.header.current_entity_color,self.tabs[i].scene.document.current_entity_transparency());
+                    let cmd = HatcheditCommand::new().with_appearance(None,self.tabs[i].scene.document.header.current_entity_color,self.tabs[i].scene.document.current_entity_transparency()).with_origin(self.tabs[i].scene.document.hatch_origin());
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 }

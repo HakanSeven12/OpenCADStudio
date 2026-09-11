@@ -196,6 +196,7 @@ pub struct HatchCommand {
     pattern_override: Option<(String, HatchPattern)>,
     angle_override: Option<f32>,
     scale_override: Option<f32>,
+    default_origin: [f64; 2],
     associative: bool,
     separate_hatches: bool,
     island_style: acadrust::entities::HatchStyleType,
@@ -244,6 +245,7 @@ impl HatchCommand {
             pattern_override: None,
             angle_override: None,
             scale_override: None,
+            default_origin: [0.0, 0.0],
             associative: true,
             separate_hatches: false,
             island_style: inherited
@@ -256,6 +258,8 @@ impl HatchCommand {
         command.set_object_selection(selected_objects);
         command
     }
+
+    pub fn with_origin(mut self, origin: [f64; 2]) -> Self { self.default_origin = origin; self }
 
     fn set_object_selection(&mut self, handles: Vec<Handle>) {
         let mut segments = Vec::new();
@@ -425,10 +429,21 @@ impl HatchCommand {
                     dashes: vec![],
                 }])
             });
-        let (name, pattern) = self
+        let (name, mut pattern) = self
             .pattern_override
             .clone()
             .unwrap_or_else(|| (pat_name.to_string(), default_pattern));
+        let angle = self.angle_override.unwrap_or(0.0);
+        let scale = self.scale_override.unwrap_or(1.0).max(1.0e-6);
+        if let (HatchPattern::Pattern(families), Some(anchor)) = (&mut pattern, local_boundary.first()) {
+            let (sin, cos) = (angle as f64).sin_cos();
+            let dx = self.default_origin[0] - anchor[0] as f64;
+            let dy = self.default_origin[1] - anchor[1] as f64;
+            for family in families {
+                family.x0 += ((dx * cos + dy * sin) / scale as f64) as f32;
+                family.y0 += ((-dx * sin + dy * cos) / scale as f64) as f32;
+            }
+        }
         HatchModel {
             render_instance: None,
             boundary: std::sync::Arc::new(rel),

@@ -656,7 +656,7 @@ impl OpenCADStudio {
 
             "NCOPY" | "NCOPYALL" => {
                 let command = crate::modules::draw::modify::ncopy::NcopyCommand::new(
-                    &self.tabs[i].scene.document,
+                    &self.tabs[i].scene.document, self.ncopy_bind,
                 );
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));

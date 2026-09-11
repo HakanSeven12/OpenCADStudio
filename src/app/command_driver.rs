@@ -927,6 +927,34 @@ impl OpenCADStudio {
         self.refresh_active_cmd_preview(i);
     }
 
+    /// Apply a command replacement without deleting a one-to-one entity edit.
+    /// Splits and entity-type conversions still allocate replacement identities.
+    fn replace_command_entity(
+        &mut self,
+        tab: usize,
+        handle: Handle,
+        mut entities: Vec<acadrust::EntityType>,
+    ) -> Vec<Handle> {
+        let same_type = entities.len() == 1 && self.tabs[tab].scene.document.get_entity(handle)
+            .is_some_and(|original| std::mem::discriminant(original) == std::mem::discriminant(&entities[0]));
+        let handles = if same_type {
+            let mut entity = entities.pop().expect("one replacement");
+            entity.common_mut().handle = handle;
+            // Scene::update_entity also retains the live owning block and
+            // refreshes dependent render caches without erase notifications.
+            if self.tabs[tab].scene.update_entity(entity) { vec![handle] } else { Vec::new() }
+        } else {
+            self.tabs[tab].scene.erase_entities(&[handle]);
+            entities.into_iter().map(|entity| self.tabs[tab].scene.add_entity(entity)).collect()
+        };
+        for &updated in &handles {
+            if matches!(self.tabs[tab].scene.document.get_entity(updated), Some(acadrust::EntityType::Dimension(_))) {
+                self.tabs[tab].scene.invalidate_dim_block_recorded(updated);
+            }
+        }
+        handles
+    }
+
     fn apply_cmd_result_inner(&mut self, result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
         let preserve_commit_layer = self.tabs[i]
@@ -2153,17 +2181,7 @@ impl OpenCADStudio {
                     .is_some_and(|c| c.name() == "SS_CATCHMENT");
                 self.push_undo_snapshot(i, label);
                 for (handle, entities) in replacements {
-                    self.tabs[i].scene.erase_entities(&[handle]);
-                    for entity in entities {
-                        let nh = self.tabs[i].scene.add_entity(entity);
-                        // Drop a stale *D block on any replaced dimension (#181).
-                        if matches!(
-                            self.tabs[i].scene.document.get_entity(nh),
-                            Some(acadrust::EntityType::Dimension(_))
-                        ) {
-                            self.tabs[i].scene.invalidate_dim_block_recorded(nh);
-                        }
-                    }
+                    self.replace_command_entity(i,handle,entities);
                 }
                 for entity in additions {
                     self.tabs[i].scene.add_entity(entity);
@@ -2189,11 +2207,7 @@ impl OpenCADStudio {
                 let label = self.history_label_from_active_cmd(i, "TRIM");
                 self.push_undo_snapshot(i, label);
                 for (handle, entities) in replacements {
-                    self.tabs[i].scene.erase_entities(&[handle]);
-                    let new_handles: Vec<Handle> = entities
-                        .into_iter()
-                        .map(|entity| self.tabs[i].scene.add_entity(entity))
-                        .collect();
+                    let new_handles = self.replace_command_entity(i,handle,entities);
                     if let Some(command) = self.tabs[i].active_cmd.as_mut() {
                         command.on_entity_replaced(handle, &new_handles);
                     }

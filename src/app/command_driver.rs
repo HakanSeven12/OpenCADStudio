@@ -1311,13 +1311,16 @@ impl OpenCADStudio {
     ) -> Task<Message> {
         use crate::modules::draw::modify::pedit::{apply_pedit, convert_to_polyline, PeditOp};
 
-        if !matches!(&op, PeditOp::Multiple(_, _) | PeditOp::JoinSelection(_))
+        if !matches!(
+            &op,
+            PeditOp::Multiple(_, _) | PeditOp::JoinSelection(_, _)
+        )
             && self.reject_locked_edit(tab, handle)
         {
             return Task::none();
         }
         match &op {
-            PeditOp::JoinSelection(handles) => {
+            PeditOp::JoinSelection(handles, fuzz) => {
                 let mut available = handles
                     .iter()
                     .filter_map(|handle| {
@@ -1340,7 +1343,11 @@ impl OpenCADStudio {
                         .map(|(handle, entity)| (*handle, entity))
                         .collect::<Vec<_>>();
                     if let Some((mut result, consumed)) =
-                        crate::modules::draw::modify::join::join_to_source(&source, &candidates)
+                        crate::modules::draw::modify::pedit::join_selection_extend(
+                            &source,
+                            &candidates,
+                            *fuzz,
+                        )
                     {
                         *result.common_mut() = source.common().clone();
                         available.retain(|(handle, _)| !consumed.contains(handle));

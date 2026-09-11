@@ -26,6 +26,11 @@ pub struct SplineCommand {
     pts: Vec<DVec3>,
     control_vertices: bool,
     choosing_method: bool,
+    choosing_knots: bool,
+    choosing_tangent: bool,
+    knot_parameterization: i32,
+    begin_tangent: Vector3,
+    end_tangent: Vector3,
 }
 
 impl SplineCommand {
@@ -34,6 +39,11 @@ impl SplineCommand {
             pts: Vec::new(),
             control_vertices: false,
             choosing_method: false,
+            choosing_knots: false,
+            choosing_tangent: false,
+            knot_parameterization: 0,
+            begin_tangent: Vector3::ZERO,
+            end_tangent: Vector3::ZERO,
         }
     }
 
@@ -48,11 +58,15 @@ impl SplineCommand {
         if self.pts.len() < 2 {
             return None;
         }
-        Some(EntityType::Spline(make_spline(
+        let mut spline = make_spline(
             &self.pts,
             closed,
             self.control_vertices,
-        )))
+        );
+        spline.knot_parameterization = self.knot_parameterization;
+        spline.begin_tangent = self.begin_tangent;
+        spline.end_tangent = self.end_tangent;
+        Some(EntityType::Spline(spline))
     }
 }
 
@@ -93,10 +107,14 @@ fn make_spline(pts: &[DVec3], closed: bool, control_vertices: bool) -> Spline {
         }
     };
     spline.flags.closed = closed;
+    // Closed fit curves use the kernel's periodic interpolation rather than
+    // appending a closing straight segment to an open interpolant.
+    spline.flags.periodic = closed && !control_vertices;
     spline
 }
 
 /// Preview the exact representation that `build()` commits.
+#[cfg(test)]
 fn sample_curve(pts: &[DVec3], closed: bool, control_vertices: bool) -> Vec<[f32; 3]> {
     if pts.len() < 2 {
         return pts
@@ -125,6 +143,10 @@ impl CadCommand for SplineCommand {
     fn prompt(&self) -> String {
         if self.choosing_method {
             "SPLINE  Choose creation method [Fit/Control vertices]:".into()
+        } else if self.choosing_knots {
+            "SPLINE  Enter knot parameterization [Chord/Square root/Uniform]:".into()
+        } else if self.choosing_tangent {
+            "SPLINE  Specify tangent direction:".into()
         } else if self.pts.is_empty() && self.control_vertices {
             t!("SPLINE  Specify first control point:").into_owned()
         } else if self.pts.is_empty() {
@@ -143,10 +165,18 @@ impl CadCommand for SplineCommand {
                 CmdOption::new("Control vertices", "CV"),
             ];
         }
-        if self.pts.is_empty() {
-            return vec![CmdOption::new(t!("Method").as_ref(), "M")];
+        if self.choosing_tangent { return vec![]; }
+        if self.choosing_knots {
+            return vec![CmdOption::new("Chord", "CH"), CmdOption::new("Square root", "S"), CmdOption::new("Uniform", "U")];
         }
-        let mut opts = vec![CmdOption::new(t!("Close").as_ref(), "C")];
+        if self.pts.is_empty() {
+            let mut options = vec![CmdOption::new(t!("Method").as_ref(), "M")];
+            if !self.control_vertices { options.push(CmdOption::new("Knots", "K")); }
+            return options;
+        }
+        let mut opts = vec![];
+        if self.pts.len() >= 3 { opts.push(CmdOption::new(t!("Close").as_ref(), "C")); }
+        if !self.control_vertices { opts.push(CmdOption::new("Tangency", "T")); }
         // Undo only makes sense once a control point exists.
         opts.push(CmdOption::new(t!("Undo").as_ref(), "U"));
         opts.push(CmdOption::enter(t!("Done").as_ref()));
@@ -154,7 +184,22 @@ impl CadCommand for SplineCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
-        if self.choosing_method || !pt.is_finite() {
+        if self.choosing_method || self.choosing_knots || !pt.is_finite() {
+            return CmdResult::NeedPoint;
+        }
+        if self.choosing_tangent {
+            let Some(anchor) = self.pts.last() else { return CmdResult::NeedPoint; };
+            let Some(dir) = (pt - *anchor).try_normalize() else { return CmdResult::NeedPoint; };
+            let tangent = Vector3::new(dir.x, dir.y, dir.z);
+            if self.pts.len() == 1 { self.begin_tangent = tangent; }
+            else { self.end_tangent = tangent; }
+            self.choosing_tangent = false;
+            if self.pts.len() > 1 {
+                return self.build(false).map_or(CmdResult::NeedPoint, CmdResult::CommitAndExit);
+            }
+            return CmdResult::NeedPoint;
+        }
+        if self.pts.last().is_some_and(|last| last.distance_squared(pt) < 1e-20) {
             return CmdResult::NeedPoint;
         }
         self.pts.push(pt);
@@ -162,10 +207,12 @@ impl CadCommand for SplineCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        if self.choosing_method {
+        if self.choosing_method || self.choosing_knots {
             self.choosing_method = false;
+            self.choosing_knots = false;
             return CmdResult::NeedPoint;
         }
+        if self.choosing_tangent { return CmdResult::NeedPoint; }
         match self.build(false) {
             Some(e) => CmdResult::CommitAndExit(e),
             None => CmdResult::Cancel,
@@ -180,6 +227,15 @@ impl CadCommand for SplineCommand {
         CmdResult::Cancel
     }
 
+    fn on_undo_step(&mut self) -> Option<CmdResult> {
+        if self.pts.is_empty() { return None; }
+        self.pts.pop();
+        self.end_tangent = Vector3::ZERO;
+        self.choosing_tangent = false;
+        if self.pts.is_empty() { self.begin_tangent = Vector3::ZERO; }
+        Some(CmdResult::NeedPoint)
+    }
+
     fn wants_text_input(&self) -> bool {
         true
     }
@@ -189,7 +245,26 @@ impl CadCommand for SplineCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if self.choosing_tangent { return None; }
+        if self.choosing_knots {
+            self.knot_parameterization = match text.trim().to_ascii_uppercase().as_str() {
+                "CH" | "CHORD" => 0,
+                "S" | "SQUARE" | "SQUAREROOT" => 1,
+                "U" | "UNIFORM" => 2,
+                _ => return None,
+            };
+            self.choosing_knots = false;
+            return Some(CmdResult::NeedPoint);
+        }
         match text.trim().to_uppercase().as_str() {
+            "K" | "KNOTS" if self.pts.is_empty() && !self.control_vertices => {
+                self.choosing_knots = true;
+                Some(CmdResult::NeedPoint)
+            }
+            "T" | "TANGENCY" if !self.pts.is_empty() && !self.control_vertices => {
+                self.choosing_tangent = true;
+                Some(CmdResult::NeedPoint)
+            }
             "M" | "METHOD" if self.pts.is_empty() => {
                 self.choosing_method = true;
                 Some(CmdResult::NeedPoint)
@@ -204,28 +279,32 @@ impl CadCommand for SplineCommand {
                 self.choosing_method = false;
                 Some(CmdResult::NeedPoint)
             }
-            "C" | "CLOSE" => match self.build(true) {
+            "C" | "CLOSE" if self.pts.len() >= 3 => match self.build(true) {
                 Some(e) => Some(CmdResult::CommitAndExit(e)),
                 None => Some(CmdResult::NeedPoint),
             },
             "U" | "UNDO" => {
-                self.pts.pop();
-                Some(CmdResult::NeedPoint)
+                self.on_undo_step().or(Some(CmdResult::NeedPoint))
             }
             _ => None,
         }
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
-        if self.pts.is_empty() {
+        if self.pts.is_empty() || self.choosing_method || self.choosing_knots || self.choosing_tangent {
             return None;
         }
         // Preview the committed construction method.
-        let mut ctrl = self.pts.clone();
-        ctrl.push(pt);
+        self.pts.push(pt);
+        let entity = self.build(false);
+        self.pts.pop();
+        let Some(EntityType::Spline(spline)) = entity else { return None; };
+        let points = crate::entities::curve::spline_curve(&spline)
+            .map(|curve| crate::entities::curve::curve_points(&curve))
+            .unwrap_or_else(|| crate::entities::spline::measurement_polyline(&spline));
         Some(WireModel::solid(
             "rubber_band".into(),
-            sample_curve(&ctrl, false, self.control_vertices),
+            points.into_iter().map(|p| [p[0] as f32, p[1] as f32, p[2] as f32]).collect(),
             WireModel::CYAN,
             false,
         ))

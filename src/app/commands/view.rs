@@ -1,5 +1,63 @@
 use super::*;
 
+// Sort tables belong to the block's extension dictionary. Reserve real handles
+// and reconnect older unattached tables without losing their existing entries.
+fn ensure_draw_order_table(
+    doc: &mut acadrust::CadDocument,
+    block: acadrust::Handle,
+) -> acadrust::Handle {
+    use acadrust::objects::{Dictionary, ObjectType, SortEntitiesTable};
+
+    // Older commands inserted objects using the unreserved next-handle value.
+    // Repair the allocator floor before creating anything beside those objects.
+    if let Some(maximum) = doc.objects.keys().map(|handle| handle.value()).max() {
+        doc.header.handle_seed = doc.header.handle_seed.max(maximum.saturating_add(1));
+    }
+    let dictionary = doc.extension_dictionary_handle(block).filter(|handle| {
+        matches!(doc.objects.get(handle), Some(ObjectType::Dictionary(_)))
+    });
+    let named_table = dictionary.and_then(|handle| match doc.objects.get(&handle) {
+        Some(ObjectType::Dictionary(value)) => value.get(SortEntitiesTable::DICTIONARY_KEY),
+        _ => None,
+    }).filter(|handle| matches!(doc.objects.get(handle),
+        Some(ObjectType::SortEntitiesTable(table)) if table.block_owner_handle == block));
+    let existing = named_table.or_else(|| doc.objects.iter().find_map(|(handle, object)| {
+        match object {
+            ObjectType::SortEntitiesTable(table) if table.block_owner_handle == block => Some(*handle),
+            _ => None,
+        }
+    }));
+    let dictionary = dictionary.unwrap_or_else(|| {
+        let handle = doc.allocate_handle();
+        let mut value = Dictionary::new();
+        value.handle = handle;
+        value.owner = block;
+        value.hard_owner = true;
+        doc.objects.insert(handle, ObjectType::Dictionary(value));
+        handle
+    });
+    doc.xdic_by_handle.insert(block, dictionary);
+    let handle = existing.unwrap_or_else(|| {
+        let handle = doc.allocate_handle();
+        let mut table = SortEntitiesTable::for_block(block);
+        table.handle = handle;
+        doc.objects.insert(handle, ObjectType::SortEntitiesTable(table));
+        handle
+    });
+    if let Some(ObjectType::SortEntitiesTable(table)) = doc.objects.get_mut(&handle) {
+        table.owner_handle = dictionary;
+    }
+    if let Some(ObjectType::Dictionary(value)) = doc.objects.get_mut(&dictionary) {
+        if let Some((_, entry)) = value.entries.iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case(SortEntitiesTable::DICTIONARY_KEY)) {
+            *entry = handle;
+        } else {
+            value.add_entry(SortEntitiesTable::DICTIONARY_KEY, handle);
+        }
+    }
+    handle
+}
+
 impl OpenCADStudio {
     pub(crate) fn dispatch_view(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
@@ -817,7 +875,7 @@ impl OpenCADStudio {
 
             // HATCHTOBACK ÔÇö move every hatch object in the active space to the back of the draw order.
             "HATCHTOBACK" => {
-                use acadrust::objects::{ObjectType, SortEntitiesTable};
+                use acadrust::objects::ObjectType;
                 let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
                 let doc_ref = &self.tabs[i].scene.document;
 
@@ -894,24 +952,9 @@ impl OpenCADStudio {
                     &locked_layers,
                 );
 
-                // 4. Ultra-fast targeted Delta Undo (snapshots ONLY the SortEntitiesTable, zero full-drawing clone).
-                let pending_delta = self.begin_undo(i, "DRAWORDER", hatches_to_move.len(), true);
-
-                // 5. Update or insert SortEntitiesTable directly.
-                let table_before = existing_table_handle
-                    .and_then(|h| self.tabs[i].scene.document.objects.get(&h).cloned());
-                let th = existing_table_handle.unwrap_or_else(|| {
-                    let nh = acadrust::Handle::new(self.tabs[i].scene.document.next_handle());
-                    let mut table = SortEntitiesTable::for_block(block_handle);
-                    table.handle = nh;
-                    self.tabs[i]
-                        .scene
-                        .document
-                        .objects
-                        .insert(nh, ObjectType::SortEntitiesTable(table));
-                    nh
-                });
-                self.tabs[i].scene.record_undo_object_before(th, table_before);
+                // Dictionary ownership and handle allocation are part of this undo step.
+                let pending_delta = self.begin_undo(i, "DRAWORDER", hatches_to_move.len(), false);
+                let th = ensure_draw_order_table(&mut self.tabs[i].scene.document, block_handle);
 
                 if let Some(ObjectType::SortEntitiesTable(table)) =
                     self.tabs[i].scene.document.objects.get_mut(&th)
@@ -984,7 +1027,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
             cmd if cmd.starts_with("DRAWORDER ") => {
-                use acadrust::objects::{ObjectType, SortEntitiesTable};
+                use acadrust::objects::ObjectType;
                 let parts: Vec<&str> = cmd.split_whitespace().collect();
                 let option = parts.get(1).unwrap_or(&"").to_uppercase();
                 let i = self.active_tab;
@@ -1098,24 +1141,7 @@ impl OpenCADStudio {
                         };
 
                         let doc = &mut self.tabs[i].scene.document;
-                        let table_handle = doc.objects.iter().find_map(|(h, obj)| {
-                            if let ObjectType::SortEntitiesTable(t) = obj {
-                                if t.block_owner_handle == block_handle {
-                                    Some(*h)
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        });
-                        let th = table_handle.unwrap_or_else(|| {
-                            let nh = acadrust::Handle::new(doc.next_handle());
-                            let mut table = SortEntitiesTable::for_block(block_handle);
-                            table.handle = nh;
-                            doc.objects.insert(nh, ObjectType::SortEntitiesTable(table));
-                            nh
-                        });
+                        let th = ensure_draw_order_table(doc, block_handle);
                         if let Some(ObjectType::SortEntitiesTable(table)) = doc.objects.get_mut(&th)
                         {
                             if let Some(assignments) = &relative_assignments {

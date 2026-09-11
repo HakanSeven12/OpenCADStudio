@@ -34,6 +34,7 @@ enum Step {
     Options,
     Refine,
     Add,
+    Delete,
     Elevate,
     Move { index: usize, refine: bool },
     Weight { index: usize },
@@ -89,8 +90,9 @@ impl CadCommand for SplineditCommand {
         match self.step {
             Step::SelectSpline => crate::t!("SPLINEDIT  Select spline:").into_owned(),
             Step::Options => crate::t!("SPLINEDIT  [Close/Open/Move vertex/Refine/rEverse/Undo/eXit] <eXit>:").into_owned(),
-            Step::Refine => crate::t!("SPLINEDIT  [Add/Elevate order/Move/Weight/eXit] <eXit>:").into_owned(),
+            Step::Refine => crate::t!("SPLINEDIT  [Add/Delete/Elevate order/Move/Weight/eXit] <eXit>:").into_owned(),
             Step::Add => crate::t!("SPLINEDIT  Specify a point on the spline <exit>:").into_owned(),
+            Step::Delete => crate::t!("SPLINEDIT  Specify control vertex to delete:").into_owned(),
             Step::Elevate => format!("SPLINEDIT  Enter new order <{}>:", self.spline.as_ref().map_or(4, |s| s.degree + 1)),
             Step::Move { index, .. } => format!("SPLINEDIT  Vertex {}: specify new location or [Next/Previous/Select point/eXit] <Next>:", index + 1),
             Step::SelectVertex { .. } => crate::t!("SPLINEDIT  Specify control vertex:").into_owned(),
@@ -101,7 +103,7 @@ impl CadCommand for SplineditCommand {
         use crate::command::CmdOption;
         match self.step {
             Step::Options => vec![CmdOption::new("Close", "C"), CmdOption::new("Open", "O"), CmdOption::new("Move vertex", "M"), CmdOption::new("Refine", "R"), CmdOption::new("Reverse", "E"), CmdOption::new("Undo", "U"), CmdOption::new("Exit", "X")],
-            Step::Refine => vec![CmdOption::new("Add", "A"), CmdOption::new("Elevate order", "E"), CmdOption::new("Move", "M"), CmdOption::new("Weight", "W"), CmdOption::new("Exit", "X")],
+            Step::Refine => vec![CmdOption::new("Add", "A"), CmdOption::new("Delete", "D"), CmdOption::new("Elevate order", "E"), CmdOption::new("Move", "M"), CmdOption::new("Weight", "W"), CmdOption::new("Exit", "X")],
             Step::Move { .. } | Step::Weight { .. } => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Select point", "S"), CmdOption::new("Exit", "X")],
             _ => Vec::new(),
         }
@@ -125,7 +127,7 @@ impl CadCommand for SplineditCommand {
             }
         }
     }
-    fn wants_text_input(&self) -> bool { !matches!(self.step, Step::SelectSpline | Step::Add | Step::Move { .. } | Step::SelectVertex { .. }) }
+    fn wants_text_input(&self) -> bool { !matches!(self.step, Step::SelectSpline | Step::Add | Step::Delete | Step::Move { .. } | Step::SelectVertex { .. }) }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let upper = text.trim().to_uppercase();
         if upper.is_empty() { return Some(self.on_enter()); }
@@ -151,6 +153,7 @@ impl CadCommand for SplineditCommand {
             },
             Step::Refine => match upper.as_str() {
                 "A" | "ADD" => self.step = Step::Add,
+                "D" | "DELETE" => self.step = Step::Delete,
                 "E" | "ELEVATE" => self.step = Step::Elevate,
                 "M" | "MOVE" => self.step = Step::Move { index: 0, refine: true },
                 "W" | "WEIGHT" => self.step = Step::Weight { index: 0 },
@@ -204,6 +207,26 @@ impl CadCommand for SplineditCommand {
                 }
                 CmdResult::NeedPoint
             }
+            Step::Delete => {
+                let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
+                let Some(index) = source.control_points.iter().enumerate().min_by(|(_, a), (_, b)| {
+                    let distance = |p: &Vector3| point.distance_squared(DVec3::new(p.x, p.y, p.z));
+                    distance(a).total_cmp(&distance(b))
+                }).map(|(index, _)| index) else { return CmdResult::NeedPoint; };
+                let controls = source.control_points.iter().map(|point| [point.x, point.y, point.z]).collect();
+                let weights = if source.weights.is_empty() { vec![1.0; source.control_points.len()] }
+                    else { source.weights.clone() };
+                let curve = cadkernel::space::NurbsCurve3::new_strict(source.degree as usize, controls,
+                    source.knots.clone(), weights).map(|curve| curve.with_periodicity(source.flags.periodic));
+                let Some(curve) = curve.and_then(|curve| curve.without_control_vertex(index)) else { return CmdResult::NeedPoint; };
+                let mut spline = source.clone();
+                spline.degree = curve.degree() as i32;
+                spline.control_points = curve.control_points().iter().map(|point| Vector3::new(point[0], point[1], point[2])).collect();
+                spline.weights = curve.weights().to_vec();
+                spline.knots = curve.knots().to_vec();
+                spline.fit_points.clear();
+                self.replace(spline)
+            }
             Step::Add => self.refined(Some(point), None).map_or(CmdResult::NeedPoint, |spline| self.replace(spline)),
             Step::Move { index, .. } => {
                 let Some(mut spline) = self.spline.clone() else { return CmdResult::NeedPoint; };
@@ -219,7 +242,7 @@ impl CadCommand for SplineditCommand {
         match self.step {
             Step::SelectSpline | Step::Options => CmdResult::Cancel,
             Step::Refine => { self.step = Step::Options; CmdResult::NeedPoint }
-            Step::Add | Step::SelectVertex { .. } => { self.step = Step::Refine; CmdResult::NeedPoint }
+            Step::Add | Step::Delete | Step::SelectVertex { .. } => { self.step = Step::Refine; CmdResult::NeedPoint }
             Step::Elevate => {
                 let degree = self.spline.as_ref().map_or(4, |s| s.degree as usize + 1);
                 self.on_text_input(&degree.to_string()).unwrap_or(CmdResult::NeedPoint)

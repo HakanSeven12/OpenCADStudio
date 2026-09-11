@@ -190,7 +190,7 @@ impl CadCommand for SplineditCommand {
         match self.step {
             Step::SelectSpline => crate::t!("SPLINEDIT  Select spline:").into_owned(),
             Step::Options if self.closed() => crate::t!("SPLINEDIT  [Open/Move vertex/Refine/rEverse/convert to Polyline/Undo/eXit] <eXit>:").into_owned(),
-            Step::Options => crate::t!("SPLINEDIT  [Close/Join/Move vertex/Refine/rEverse/Undo/eXit] <eXit>:").into_owned(),
+            Step::Options => crate::t!("SPLINEDIT  [Close/Join/Move vertex/Refine/rEverse/convert to Polyline/Undo/eXit] <eXit>:").into_owned(),
             Step::PolylinePrecision => crate::t!("SPLINEDIT  Specify precision 0-99 <10> (straight segments):").into_owned(),
             Step::Join => crate::t!("SPLINEDIT  Select any open curves to join to source:").into_owned(),
             Step::Refine => crate::t!("SPLINEDIT  [Add/Delete/Elevate order/Move/Weight/eXit] <eXit>:").into_owned(),

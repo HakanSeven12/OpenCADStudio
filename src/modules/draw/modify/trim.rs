@@ -30,7 +30,7 @@ use glam::DVec3;
 use cadkernel::geom2d::nurbs::clamped_uniform_knots;
 use cadkernel::geom2d::{
     intersect as kernel_intersect, trim_spans as kernel_trim_spans, Arc as KernelArc,
-    Circle as KernelCircle, Curve, Extent as KernelExtent,
+    BulgeArc, Circle as KernelCircle, Curve, Extent as KernelExtent,
     Ellipse as KernelEllipse, EllipseArc as KernelEllipseArc, Line as KernelLine,
     NurbsCurve, Ray as KernelRay, Tolerance as KernelTolerance, XLine as KernelXLine,
 };
@@ -393,6 +393,39 @@ fn line_seg_ts(ax: f64, ay: f64, bx: f64, by: f64, target: Handle, geos: &[Geo])
         target,
         geos,
     )
+}
+
+fn polyline_seg_ts(
+    p0: [f64; 2],
+    p1: [f64; 2],
+    bulge: f64,
+    target: Handle,
+    geos: &[Geo],
+) -> Vec<f64> {
+    if let Some(ba) = BulgeArc::from_bulge(p0, p1, bulge) {
+        let (from, to) = if ba.sweep >= 0.0 {
+            (ba.start_angle, ba.start_angle + ba.sweep)
+        } else {
+            (ba.end_angle, ba.end_angle - ba.sweep)
+        };
+        let arc_curve = Curve::Arc(KernelArc {
+            centre: ba.center,
+            radius: ba.radius,
+            start_angle: from,
+            end_angle: to,
+        });
+        let ts = cut_params(&arc_curve, target, geos);
+        let mut u_ts: Vec<f64> = if ba.sweep >= 0.0 {
+            ts
+        } else {
+            ts.into_iter().map(|t| (1.0 - t).clamp(0.0, 1.0)).collect()
+        };
+        u_ts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        u_ts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+        u_ts
+    } else {
+        line_seg_ts(p0[0], p0[1], p1[0], p1[1], target, geos)
+    }
 }
 
 fn arc_seg_ts(
@@ -846,11 +879,121 @@ fn trim_circle(orig: &CircleEnt, ts: &[f64], t_click: f64) -> Vec<EntityType> {
     vec![EntityType::Arc(arc)]
 }
 
+/// Extract a sub-polyline between parameter `s0` and `s1` (`s0 < s1`).
+/// Preserves and proportionally scales arc bulges on partial segments.
+fn extract_sub_polyline(poly: &LwPolyline, s0: f64, s1: f64) -> Option<LwPolyline> {
+    if s1 <= s0 + 1e-9 {
+        return None;
+    }
+    let n = poly.vertices.len();
+    if n < 2 {
+        return None;
+    }
+    let closed = poly.is_closed;
+    let seg_count = if closed { n } else { n - 1 };
+    if seg_count == 0 {
+        return None;
+    }
+
+    let vx = |i: usize| -> [f64; 2] {
+        let v = &poly.vertices[i % n];
+        [v.location.x, v.location.y]
+    };
+    let seg_bulge = |i: usize| -> f64 {
+        poly.vertices[i % n].bulge
+    };
+
+    let mut raw_verts: Vec<(f64, f64, f64)> = Vec::new();
+    let mut curr = s0;
+    while curr < s1 - 1e-9 {
+        let seg_idx_unwrapped = curr.floor() as usize;
+        let next_int = (seg_idx_unwrapped + 1) as f64;
+        let end_curr = s1.min(next_int);
+        let seg = seg_idx_unwrapped % seg_count;
+        let u_a = (curr - seg_idx_unwrapped as f64).clamp(0.0, 1.0);
+        let u_b = (end_curr - seg_idx_unwrapped as f64).clamp(0.0, 1.0);
+        if u_b > u_a + 1e-9 {
+            let p0 = vx(seg);
+            let p1 = vx(seg + 1);
+            let b = seg_bulge(seg);
+            let (start_pt, sub_bulge) = if let Some(ba) = BulgeArc::from_bulge(p0, p1, b) {
+                let sp = ba.sample(u_a);
+                let sub_b = if (u_a - 0.0).abs() < 1e-9 && (u_b - 1.0).abs() < 1e-9 {
+                    b
+                } else {
+                    let sweep = ba.sweep * (u_b - u_a);
+                    (sweep * 0.25).tan()
+                };
+                (sp, sub_b)
+            } else {
+                let sp = [
+                    p0[0] + u_a * (p1[0] - p0[0]),
+                    p0[1] + u_a * (p1[1] - p0[1]),
+                ];
+                (sp, 0.0)
+            };
+            raw_verts.push((start_pt[0], start_pt[1], sub_bulge));
+        }
+        curr = end_curr;
+    }
+
+    // End point of the last sub-segment
+    let end_pt = {
+        let seg_idx_unwrapped = (s1 - 1e-9).floor() as usize;
+        let seg = seg_idx_unwrapped % seg_count;
+        let u = (s1 - seg_idx_unwrapped as f64).clamp(0.0, 1.0);
+        let p0 = vx(seg);
+        let p1 = vx(seg + 1);
+        let b = seg_bulge(seg);
+        if let Some(ba) = BulgeArc::from_bulge(p0, p1, b) {
+            ba.sample(u)
+        } else {
+            [p0[0] + u * (p1[0] - p0[0]), p0[1] + u * (p1[1] - p0[1])]
+        }
+    };
+    raw_verts.push((end_pt[0], end_pt[1], 0.0));
+
+    // Filter out coincident consecutive points to prevent degenerate zero-length segments
+    let mut clean_verts: Vec<(f64, f64, f64)> = Vec::new();
+    for (x, y, b) in raw_verts {
+        if let Some(last) = clean_verts.last_mut() {
+            if (last.0 - x).hypot(last.1 - y) < 1e-6 {
+                if last.2 == 0.0 {
+                    last.2 = b;
+                }
+                continue;
+            }
+        }
+        clean_verts.push((x, y, b));
+    }
+
+    if let Some(last) = clean_verts.last_mut() {
+        last.2 = 0.0;
+    }
+
+    if clean_verts.len() < 2 {
+        return None;
+    }
+
+    let mut new_poly = poly.clone();
+    new_poly.common.handle = Handle::NULL;
+    new_poly.is_closed = false;
+    new_poly.vertices = clean_verts
+        .into_iter()
+        .map(|(x, y, b)| {
+            let mut v = LwVertex::from_coords(x, y);
+            v.bulge = b;
+            v
+        })
+        .collect();
+    Some(new_poly)
+}
+
 /// Trim a clicked LwPolyline: remove the portion containing the click, bounded
 /// by the nearest boundary intersections on each side. A closed polyline needs
 /// ≥2 cuts and becomes an open polyline (the surviving arc); an open one yields
-/// the surviving piece(s). Bulges on fully-surviving segments are kept; the
-/// partial end segments at a cut become straight (issue #65).
+/// the surviving piece(s). Bulges on surviving arc segments are preserved
+/// with proportionally scaled curvature.
 fn trim_lwpolyline(poly: &LwPolyline, cx: f64, cy: f64, geos: &[Geo]) -> Option<Vec<EntityType>> {
     let handle = poly.common.handle;
     let n = poly.vertices.len();
@@ -861,26 +1004,23 @@ fn trim_lwpolyline(poly: &LwPolyline, cx: f64, cy: f64, geos: &[Geo]) -> Option<
     let seg_count = if closed { n } else { n - 1 };
     let total = seg_count as f64;
 
-    let vx = |i: usize| -> (f64, f64) {
+    let vx = |i: usize| -> [f64; 2] {
         let v = &poly.vertices[i % n];
-        (v.location.x, v.location.y)
+        [v.location.x, v.location.y]
     };
-    let point_at = |t: f64| -> (f64, f64) {
-        let tt = if closed { t.rem_euclid(total) } else { t.clamp(0.0, total) };
-        let i = (tt.floor() as usize).min(seg_count.saturating_sub(1));
-        let u = tt - i as f64;
-        let (ax, ay) = vx(i);
-        let (bx, by) = vx(i + 1);
-        (ax + u * (bx - ax), ay + u * (by - ay))
+    let seg_bulge = |i: usize| -> f64 {
+        poly.vertices[i % n].bulge
     };
 
     // Boundary cuts as global params (segment index + local u).
     let mut cuts: Vec<f64> = Vec::new();
     for i in 0..seg_count {
-        let (ax, ay) = vx(i);
-        let (bx, by) = vx(i + 1);
-        for u in line_seg_ts(ax, ay, bx, by, handle, geos) {
-            cuts.push(i as f64 + u.clamp(0.0, 1.0));
+        let p0 = vx(i);
+        let p1 = vx(i + 1);
+        let b = seg_bulge(i);
+        for u in polyline_seg_ts(p0, p1, b, handle, geos) {
+            let param = i as f64 + u.clamp(0.0, 1.0);
+            cuts.push(if closed { param.rem_euclid(total) } else { param });
         }
     }
     cuts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -892,50 +1032,40 @@ fn trim_lwpolyline(poly: &LwPolyline, cx: f64, cy: f64, geos: &[Geo]) -> Option<
     // Click param: nearest point on the polyline.
     let mut best = (f64::INFINITY, 0.0_f64);
     for i in 0..seg_count {
-        let (ax, ay) = vx(i);
-        let (bx, by) = vx(i + 1);
-        let (dx, dy) = (bx - ax, by - ay);
-        let len2 = dx * dx + dy * dy;
-        let u = if len2 > 1e-12 {
-            (((cx - ax) * dx + (cy - ay) * dy) / len2).clamp(0.0, 1.0)
+        let p0 = vx(i);
+        let p1 = vx(i + 1);
+        let b = seg_bulge(i);
+        let (d, u) = if let Some(ba) = BulgeArc::from_bulge(p0, p1, b) {
+            let angle = (cy - ba.center[1]).atan2(cx - ba.center[0]);
+            let travelled = if ba.sweep >= 0.0 {
+                (angle - ba.start_angle).rem_euclid(TAU)
+            } else {
+                -((ba.start_angle - angle).rem_euclid(TAU))
+            };
+            let u = (travelled / ba.sweep).clamp(0.0, 1.0);
+            let pt = ba.sample(u);
+            let dist2 = (pt[0] - cx).powi(2) + (pt[1] - cy).powi(2);
+            (dist2, u)
         } else {
-            0.0
+            let (dx, dy) = (p1[0] - p0[0], p1[1] - p0[1]);
+            let len2 = dx * dx + dy * dy;
+            let u = if len2 > 1e-12 {
+                (((cx - p0[0]) * dx + (cy - p0[1]) * dy) / len2).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let px = p0[0] + u * dx;
+            let py = p0[1] + u * dy;
+            let dist2 = (px - cx).powi(2) + (py - cy).powi(2);
+            (dist2, u)
         };
-        let (px, py) = (ax + u * dx, ay + u * dy);
-        let d = (px - cx).powi(2) + (py - cy).powi(2);
         if d < best.0 {
             best = (d, i as f64 + u);
         }
     }
     let t_click = best.1;
 
-    // Emit the surviving sub-polyline from param `s0` to `s1` (s1 > s0), with
-    // both ends treated as cut points (straight) and interior vertices keeping
-    // their original bulge.
-    let emit = |s0: f64, s1: f64, start_cut: bool, end_cut: bool| -> Vec<(f64, f64, f64)> {
-        let mut o: Vec<(f64, f64, f64)> = Vec::new();
-        let (sx, sy) = point_at(s0);
-        let s_idx = (s0.floor() as usize) % seg_count;
-        let s_bulge = if start_cut { 0.0 } else { poly.vertices[s_idx % n].bulge };
-        o.push((sx, sy, s_bulge));
-        let mut k = s0.floor() as i64 + 1;
-        while (k as f64) < s1 - 1e-9 {
-            let idx = (k as usize) % n;
-            let seg = (k as usize) % seg_count;
-            o.push((vx(idx).0, vx(idx).1, poly.vertices[seg].bulge));
-            k += 1;
-        }
-        if end_cut {
-            if let Some(l) = o.last_mut() {
-                l.2 = 0.0; // outgoing toward the cut is partial → straight
-            }
-        }
-        let (ex, ey) = point_at(s1);
-        o.push((ex, ey, 0.0));
-        o
-    };
-
-    let mut pieces: Vec<Vec<(f64, f64, f64)>> = Vec::new();
+    let mut out: Vec<EntityType> = Vec::new();
     if closed {
         if cuts.len() < 2 {
             return None;
@@ -955,37 +1085,29 @@ fn trim_lwpolyline(poly: &LwPolyline, cx: f64, cy: f64, geos: &[Geo]) -> Option<
         while s1 <= hi {
             s1 += total;
         }
-        pieces.push(emit(hi, s1, true, true));
+        if let Some(piece) = extract_sub_polyline(poly, hi, s1) {
+            out.push(EntityType::LwPolyline(piece));
+        }
     } else {
         let lo = cuts.iter().cloned().rev().find(|&c| c < t_click - 1e-9);
         let hi = cuts.iter().cloned().find(|&c| c > t_click + 1e-9);
         if let Some(lo) = lo {
-            pieces.push(emit(0.0, lo, false, true));
+            if let Some(piece) = extract_sub_polyline(poly, 0.0, lo) {
+                out.push(EntityType::LwPolyline(piece));
+            }
         }
         if let Some(hi) = hi {
-            pieces.push(emit(hi, total, true, false));
+            if let Some(piece) = extract_sub_polyline(poly, hi, total) {
+                out.push(EntityType::LwPolyline(piece));
+            }
         }
     }
 
-    let mut out: Vec<EntityType> = Vec::new();
-    for verts in pieces {
-        if verts.len() < 2 {
-            continue;
-        }
-        let mut np = poly.clone();
-        np.common.handle = Handle::NULL;
-        np.is_closed = false;
-        np.vertices = verts
-            .into_iter()
-            .map(|(x, y, b)| {
-                let mut v = LwVertex::from_coords(x, y);
-                v.bulge = b;
-                v
-            })
-            .collect();
-        out.push(EntityType::LwPolyline(np));
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
     }
-    Some(out)
 }
 
 // ── Extend helpers ────────────────────────────────────────────────────────
@@ -1269,16 +1391,11 @@ fn entity_pts(e: &EntityType) -> Vec<[f32; 3]> {
         EntityType::Spline(s) => spline_pts_wire(s),
         EntityType::LwPolyline(p) => {
             let elev = p.elevation as f32;
-            let n = p.vertices.len();
-            let seg_count = if p.is_closed { n } else { n.saturating_sub(1) };
-            let mut pts = Vec::with_capacity(seg_count * 2);
-            for i in 0..seg_count {
-                let v0 = &p.vertices[i];
-                let v1 = &p.vertices[(i + 1) % n];
-                pts.push([v0.location.x as f32, v0.location.y as f32, elev]);
-                pts.push([v1.location.x as f32, v1.location.y as f32, elev]);
-            }
-            pts
+            let xy_pts = preview_sample_xy(e);
+            xy_pts
+                .into_iter()
+                .map(|pt| [pt[0] as f32, pt[1] as f32, elev])
+                .collect()
         }
         // For preview, show a 20-unit section of semi-infinite results
         EntityType::Ray(r) => {
@@ -1380,28 +1497,63 @@ fn crossing_trim_lwpolyline(
         let v = &poly.vertices[i % n];
         [v.location.x, v.location.y]
     };
+    let seg_bulge = |i: usize| -> f64 {
+        poly.vertices[i % n].bulge
+    };
 
     let mut removed = Vec::<(f64, f64)>::new();
     for i in 0..seg_count {
         let a = vertex_xy(i);
         let b = vertex_xy(i + 1);
-        let Some((inside_lo, inside_hi)) = segment_window_range(a, b, window) else {
+        let bulge = seg_bulge(i);
+        let window_range = if let Some(ba) = BulgeArc::from_bulge(a, b, bulge) {
+            let steps = 32usize;
+            let mut min_t: Option<f64> = None;
+            let mut max_t: Option<f64> = None;
+            for s in 0..=steps {
+                let t = s as f64 / steps as f64;
+                let pt = ba.sample(t);
+                if pt[0] >= window.min[0] - 1e-9 && pt[0] <= window.max[0] + 1e-9
+                    && pt[1] >= window.min[1] - 1e-9 && pt[1] <= window.max[1] + 1e-9
+                {
+                    min_t = Some(min_t.map_or(t, |m: f64| m.min(t)));
+                    max_t = Some(max_t.map_or(t, |m: f64| m.max(t)));
+                }
+            }
+            match (min_t, max_t) {
+                (Some(lo), Some(hi)) => Some((lo, hi)),
+                _ => None,
+            }
+        } else {
+            segment_window_range(a, b, window)
+        };
+        let Some((inside_lo, inside_hi)) = window_range else {
             continue;
         };
-        let cuts = line_seg_ts(a[0], a[1], b[0], b[1], handle, geos);
+        let cuts = polyline_seg_ts(a, b, bulge, handle, geos);
         if cuts.is_empty() {
             continue;
         }
 
-        let dx = b[0] - a[0];
-        let dy = b[1] - a[1];
-        let len2 = dx * dx + dy * dy;
-        let projected = if len2 > 1e-12 {
-            ((window.pick[0] - a[0]) * dx + (window.pick[1] - a[1]) * dy) / len2
+        let pick_t = if let Some(ba) = BulgeArc::from_bulge(a, b, bulge) {
+            let angle = (window.pick[1] - ba.center[1]).atan2(window.pick[0] - ba.center[0]);
+            let travelled = if ba.sweep >= 0.0 {
+                (angle - ba.start_angle).rem_euclid(TAU)
+            } else {
+                -((ba.start_angle - angle).rem_euclid(TAU))
+            };
+            (travelled / ba.sweep).clamp(inside_lo, inside_hi)
         } else {
-            (inside_lo + inside_hi) * 0.5
+            let dx = b[0] - a[0];
+            let dy = b[1] - a[1];
+            let len2 = dx * dx + dy * dy;
+            let projected = if len2 > 1e-12 {
+                ((window.pick[0] - a[0]) * dx + (window.pick[1] - a[1]) * dy) / len2
+            } else {
+                (inside_lo + inside_hi) * 0.5
+            };
+            projected.clamp(inside_lo, inside_hi)
         };
-        let pick_t = projected.clamp(inside_lo, inside_hi);
 
         let mut bounds = vec![0.0];
         bounds.extend(cuts);
@@ -1433,49 +1585,6 @@ fn crossing_trim_lwpolyline(
         merged.push(span);
     }
 
-    let point_at = |t: f64| {
-        let tt = if closed {
-            t.rem_euclid(total)
-        } else {
-            t.clamp(0.0, total)
-        };
-        let i = (tt.floor() as usize).min(seg_count.saturating_sub(1));
-        let u = tt - i as f64;
-        let a = vertex_xy(i);
-        let b = vertex_xy(i + 1);
-        [a[0] + u * (b[0] - a[0]), a[1] + u * (b[1] - a[1])]
-    };
-    let emit = |s0: f64, s1: f64| -> Option<EntityType> {
-        if s1 - s0 <= 1e-6 {
-            return None;
-        }
-        let mut vertices = Vec::<LwVertex>::new();
-        let start = point_at(s0);
-        vertices.push(LwVertex::from_coords(start[0], start[1]));
-        let mut k = s0.floor() as i64 + 1;
-        while (k as f64) < s1 - 1e-9 {
-            vertices.push(poly.vertices[(k as usize) % n]);
-            k += 1;
-        }
-        if let Some(last) = vertices.last_mut() {
-            last.bulge = 0.0;
-        }
-        let end = point_at(s1);
-        if vertices.last().is_none_or(|v| {
-            (v.location.x - end[0]).hypot(v.location.y - end[1]) > 1e-6
-        }) {
-            vertices.push(LwVertex::from_coords(end[0], end[1]));
-        }
-        if vertices.len() < 2 {
-            return None;
-        }
-        let mut piece = poly.clone();
-        piece.common.handle = Handle::NULL;
-        piece.is_closed = false;
-        piece.vertices = vertices;
-        Some(EntityType::LwPolyline(piece))
-    };
-
     let mut kept = Vec::<(f64, f64)>::new();
     if closed {
         for i in 0..merged.len() {
@@ -1503,7 +1612,7 @@ fn crossing_trim_lwpolyline(
 
     Some(
         kept.into_iter()
-            .filter_map(|(start, end)| emit(start, end))
+            .filter_map(|(start, end)| extract_sub_polyline(poly, start, end).map(EntityType::LwPolyline))
             .collect(),
     )
 }
@@ -3487,6 +3596,219 @@ mod tests {
         let c = circle(5.0);
         assert!(trim_circle(&c, &[], 0.3).is_empty());
         assert!(trim_circle(&c, &[0.4], 0.3).is_empty());
+    }
+
+    #[test]
+    fn trim_polyline_arc_segment_preserves_bulge() {
+        use std::f64::consts::FRAC_PI_8;
+        // Arc from (0, 0) to (2, 0) with bulge 1.0 (semicircle sweeping CCW under the chord)
+        let mut poly = LwPolyline::new();
+        poly.common.handle = Handle::new(10);
+        let mut v0 = LwVertex::from_coords(0.0, 0.0);
+        v0.bulge = 1.0;
+        let v1 = LwVertex::from_coords(2.0, 0.0);
+        poly.vertices = vec![v0, v1];
+
+        // Vertical cutter line at x = 1.0 crossing the arc at (1.0, -1.0)
+        let mut cutter = LineEnt::new();
+        cutter.start = Vector3::new(1.0, -2.0, 0.0);
+        cutter.end = Vector3::new(1.0, 2.0, 0.0);
+        cutter.common.handle = Handle::new(20);
+
+        let all = vec![EntityType::LwPolyline(poly), EntityType::Line(cutter)];
+        let geos = build_geos(&all);
+
+        // Click first half near (0.5, -0.8) -> first half removed, second half kept from (1.0, -1.0) to (2.0, 0.0)
+        let res = pick_trim_at(&all, &geos, Handle::new(10), 0.5, -0.8).expect("should trim polyline arc");
+        assert_eq!(res.len(), 1);
+        match &res[0] {
+            EntityType::LwPolyline(p) => {
+                assert_eq!(p.vertices.len(), 2);
+                let p0 = &p.vertices[0];
+                let p1 = &p.vertices[1];
+                assert!((p0.location.x - 1.0).abs() < 1e-5, "expected x=1.0, got {}", p0.location.x);
+                assert!((p0.location.y + 1.0).abs() < 1e-5, "expected y=-1.0, got {}", p0.location.y);
+                assert!((p1.location.x - 2.0).abs() < 1e-5, "expected x=2.0, got {}", p1.location.x);
+                assert!(p1.location.y.abs() < 1e-5, "expected y=0.0, got {}", p1.location.y);
+                // The surviving quarter circle should have bulge = tan(pi / 8)
+                let expected_bulge = FRAC_PI_8.tan();
+                assert!(
+                    (p0.bulge - expected_bulge).abs() < 1e-4,
+                    "surviving arc should retain quarter-circle bulge {}, got {}",
+                    expected_bulge,
+                    p0.bulge
+                );
+                assert_eq!(p1.bulge, 0.0);
+            }
+            other => panic!("expected LwPolyline, got {other:?}"),
+        }
+
+        // Click second half near (1.5, -0.8) -> second half removed, first half kept from (0.0, 0.0) to (1.0, -1.0)
+        let res2 = pick_trim_at(&all, &geos, Handle::new(10), 1.5, -0.8).expect("should trim polyline arc");
+        assert_eq!(res2.len(), 1);
+        match &res2[0] {
+            EntityType::LwPolyline(p) => {
+                assert_eq!(p.vertices.len(), 2);
+                let p0 = &p.vertices[0];
+                let p1 = &p.vertices[1];
+                assert!(p0.location.x.abs() < 1e-5, "expected x=0.0, got {}", p0.location.x);
+                assert!(p0.location.y.abs() < 1e-5, "expected y=0.0, got {}", p0.location.y);
+                assert!((p1.location.x - 1.0).abs() < 1e-5, "expected x=1.0, got {}", p1.location.x);
+                assert!((p1.location.y + 1.0).abs() < 1e-5, "expected y=-1.0, got {}", p1.location.y);
+                let expected_bulge = FRAC_PI_8.tan();
+                assert!(
+                    (p0.bulge - expected_bulge).abs() < 1e-4,
+                    "surviving arc should retain quarter-circle bulge {}, got {}",
+                    expected_bulge,
+                    p0.bulge
+                );
+                assert_eq!(p1.bulge, 0.0);
+            }
+            other => panic!("expected LwPolyline, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trim_multi_segment_polyline_with_arc() {
+        use std::f64::consts::FRAC_PI_8;
+        // Segment 0: straight line from (-2, 0) to (0, 0)
+        // Segment 1: arc from (0, 0) to (2, 0) with bulge 1.0
+        let mut poly = LwPolyline::new();
+        poly.common.handle = Handle::new(30);
+        let v0 = LwVertex::from_coords(-2.0, 0.0);
+        let mut v1 = LwVertex::from_coords(0.0, 0.0);
+        v1.bulge = 1.0;
+        let v2 = LwVertex::from_coords(2.0, 0.0);
+        poly.vertices = vec![v0, v1, v2];
+
+        // Vertical cutter at x = 1.0
+        let mut cutter = LineEnt::new();
+        cutter.start = Vector3::new(1.0, -2.0, 0.0);
+        cutter.end = Vector3::new(1.0, 2.0, 0.0);
+        cutter.common.handle = Handle::new(40);
+
+        let all = vec![EntityType::LwPolyline(poly), EntityType::Line(cutter)];
+        let geos = build_geos(&all);
+
+        // Click the far end of the arc near (1.5, -0.8) -> removes end, keeps straight seg + first half of arc
+        let res = pick_trim_at(&all, &geos, Handle::new(30), 1.5, -0.8).expect("should trim");
+        assert_eq!(res.len(), 1);
+        match &res[0] {
+            EntityType::LwPolyline(p) => {
+                assert_eq!(p.vertices.len(), 3);
+                // Vertex 0: (-2, 0), straight
+                assert!((p.vertices[0].location.x + 2.0).abs() < 1e-5);
+                assert!(p.vertices[0].bulge.abs() < 1e-5);
+                // Vertex 1: (0, 0), arc with quarter-turn bulge
+                assert!(p.vertices[1].location.x.abs() < 1e-5);
+                let expected_bulge = FRAC_PI_8.tan();
+                assert!((p.vertices[1].bulge - expected_bulge).abs() < 1e-4);
+                // Vertex 2: (1, -1), end
+                assert!((p.vertices[2].location.x - 1.0).abs() < 1e-5);
+                assert!((p.vertices[2].location.y + 1.0).abs() < 1e-5);
+            }
+            other => panic!("expected LwPolyline, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trim_negative_bulge_polyline_arc() {
+        use std::f64::consts::FRAC_PI_8;
+        // Negative bulge means CW arc: from (0, 0) to (2, 0) arches above the chord (y > 0)
+        let mut poly = LwPolyline::new();
+        poly.common.handle = Handle::new(50);
+        let mut v0 = LwVertex::from_coords(0.0, 0.0);
+        v0.bulge = -1.0;
+        let v1 = LwVertex::from_coords(2.0, 0.0);
+        poly.vertices = vec![v0, v1];
+
+        // Vertical cutter at x = 1.0 crossing at (1.0, 1.0)
+        let mut cutter = LineEnt::new();
+        cutter.start = Vector3::new(1.0, -2.0, 0.0);
+        cutter.end = Vector3::new(1.0, 2.0, 0.0);
+        cutter.common.handle = Handle::new(60);
+
+        let all = vec![EntityType::LwPolyline(poly), EntityType::Line(cutter)];
+        let geos = build_geos(&all);
+
+        // Click first half near (0.5, 0.8) -> removes first half, keeps second half from (1.0, 1.0) to (2.0, 0.0)
+        let res = pick_trim_at(&all, &geos, Handle::new(50), 0.5, 0.8).expect("should trim CW arc");
+        assert_eq!(res.len(), 1);
+        match &res[0] {
+            EntityType::LwPolyline(p) => {
+                assert_eq!(p.vertices.len(), 2);
+                let p0 = &p.vertices[0];
+                let p1 = &p.vertices[1];
+                assert!((p0.location.x - 1.0).abs() < 1e-5);
+                assert!((p0.location.y - 1.0).abs() < 1e-5);
+                assert!((p1.location.x - 2.0).abs() < 1e-5);
+                assert!(p1.location.y.abs() < 1e-5);
+                let expected_bulge = -FRAC_PI_8.tan();
+                assert!(
+                    (p0.bulge - expected_bulge).abs() < 1e-4,
+                    "expected negative bulge {}, got {}",
+                    expected_bulge,
+                    p0.bulge
+                );
+            }
+            other => panic!("expected LwPolyline, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trim_closed_polyline_with_arc() {
+        use std::f64::consts::FRAC_PI_8;
+        // Closed polyline:
+        // Vertex 0: (0, 0), bulge 1.0 (arc to (2, 0) below chord, peak at y=-1)
+        // Vertex 1: (2, 0), bulge 0.0 (straight to (2, 2))
+        // Vertex 2: (2, 2), bulge 0.0 (straight to (0, 2))
+        // Vertex 3: (0, 2), bulge 0.0 (straight back to (0, 0))
+        let mut poly = LwPolyline::new();
+        poly.common.handle = Handle::new(70);
+        poly.is_closed = true;
+        let mut v0 = LwVertex::from_coords(0.0, 0.0);
+        v0.bulge = 1.0;
+        let v1 = LwVertex::from_coords(2.0, 0.0);
+        let v2 = LwVertex::from_coords(2.0, 2.0);
+        let v3 = LwVertex::from_coords(0.0, 2.0);
+        poly.vertices = vec![v0, v1, v2, v3];
+
+        // Cutter 1: x = 1.0 cuts the arc at (1.0, -1.0)
+        let mut c1 = LineEnt::new();
+        c1.start = Vector3::new(1.0, -3.0, 0.0);
+        c1.end = Vector3::new(1.0, -0.5, 0.0);
+        c1.common.handle = Handle::new(80);
+
+        // Cutter 2: y = 1.0 cuts vertical edges at x=0 and x=2
+        let mut c2 = LineEnt::new();
+        c2.start = Vector3::new(-1.0, 1.0, 0.0);
+        c2.end = Vector3::new(3.0, 1.0, 0.0);
+        c2.common.handle = Handle::new(81);
+
+        let all = vec![
+            EntityType::LwPolyline(poly),
+            EntityType::Line(c1),
+            EntityType::Line(c2),
+        ];
+        let geos = build_geos(&all);
+
+        // Click first half of arc near (0.5, -0.8):
+        // Nearest cuts are at (1.0, -1.0) on seg 0 and at (0.0, 1.0) on seg 3.
+        // Trim removes that corner/arc portion and leaves an open polyline
+        let res = pick_trim_at(&all, &geos, Handle::new(70), 0.5, -0.8).expect("should trim closed polyline");
+        assert_eq!(res.len(), 1);
+        match &res[0] {
+            EntityType::LwPolyline(p) => {
+                assert!(!p.is_closed);
+                // Starts at (1.0, -1.0) with remaining quarter-circle arc
+                let start_v = &p.vertices[0];
+                assert!((start_v.location.x - 1.0).abs() < 1e-5);
+                assert!((start_v.location.y + 1.0).abs() < 1e-5);
+                let expected_bulge = FRAC_PI_8.tan();
+                assert!((start_v.bulge - expected_bulge).abs() < 1e-4);
+            }
+            other => panic!("expected LwPolyline, got {other:?}"),
+        }
     }
 }
 

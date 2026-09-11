@@ -4038,12 +4038,36 @@ impl OpenCADStudio {
                     .and_then(|e| break_entity(e, p1, p2));
                 match replacement {
                     Some(frags) => {
+                        let unchanged = frags.len() == 1 && self.tabs[i].scene.document.get_entity(handle)
+                            .is_some_and(|original| {
+                                let mut fragment = frags[0].clone();
+                                fragment.common_mut().handle = handle;
+                                &fragment == original
+                            });
+                        if unchanged {
+                            self.tabs[i].active_cmd = None;
+                            self.tabs[i].snap_result = None;
+                            self.tabs[i].scene.clear_preview_wire();
+                            self.restore_pre_cmd_tangent();
+                            self.command_line.push_output("BREAK: no geometry changed.");
+                            return Task::none();
+                        }
                         let label = self.history_label_from_active_cmd(i, "BREAK");
                         self.push_undo_snapshot(i, label);
-                        self.tabs[i].scene.erase_entities(&[handle]);
                         let count = frags.len();
-                        for e in frags {
-                            self.tabs[i].scene.add_entity(e);
+                        let owner = self.tabs[i].scene.document.get_entity(handle)
+                            .map(|entity| entity.common().owner_handle);
+                        let mut fragments = frags.into_iter();
+                        if let Some(mut first) = fragments.next() {
+                            first.common_mut().handle = handle;
+                            self.tabs[i].scene.update_entity(first);
+                            for mut fragment in fragments {
+                                fragment.common_mut().handle = Handle::NULL;
+                                if let Some(owner) = owner { fragment.common_mut().owner_handle = owner; }
+                                self.tabs[i].scene.add_entity(fragment);
+                            }
+                        } else {
+                            self.tabs[i].scene.erase_entities(&[handle]);
                         }
                         self.tabs[i].dirty = true;
                         self.tabs[i].scene.clear_preview_wire();

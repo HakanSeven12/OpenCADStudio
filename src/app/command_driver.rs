@@ -3897,23 +3897,25 @@ impl OpenCADStudio {
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
             }
-            CmdResult::DivideEntity { handle, n } => {
+            CmdResult::DivideEntity { handle, n, marker } => {
                 use crate::modules::draw::inquiry::divide::divide_entity;
                 let pts = self.tabs[i]
                     .scene
                     .document
                     .get_entity(handle)
-                    .map(|e| divide_entity(e, n))
+                    .map(|e| divide_entity(e, n, marker.as_ref()))
                     .unwrap_or_default();
                 let count = pts.len();
                 if count > 0 {
                     self.push_undo_snapshot(i, "DIVIDE");
-                    for p in pts {
+                    let layer = self.tabs[i].active_layer.clone();
+                    for mut p in pts {
+                        p.as_entity_mut().set_layer(layer.clone());
                         self.tabs[i].scene.add_entity(p);
                     }
                     self.tabs[i].dirty = true;
                     self.command_line
-                        .push_output(crate::tf!("DIVIDE: {count} point(s) placed.").as_ref());
+                        .push_output(crate::tf!("DIVIDE: {count} marker(s) placed.").as_ref());
                 } else {
                     self.command_line
                         .push_error(crate::t!("DIVIDE: entity type not supported or N < 2.").as_ref());

@@ -69,6 +69,7 @@ fn resolve_hw(taper_ratio: f32, world_hw: f32, px_hw: f32) -> f32 {
     if world_hw > 0.0 {
         return max(world_hw / u.world_per_pixel, 0.5);
     }
+    if world_hw < 0.0 { return max(-world_hw, 0.5); }
     var display_hw = max(px_hw * u.lineweight_scale, 0.5);
     if u.lineweight_scale < 0.0 {
         let scale = -u.lineweight_scale;
@@ -185,7 +186,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
         let perpendicular = vec2<f32>(-direction.y, direction.x);
         let clip_position = mix(clip_a, clip_b, which_end);
 
-        let half_width = resolve_hw(0.0, 0.0, wire_const.half_width);
+        let half_width = resolve_hw(0.0, wire_const.world_half_width, wire_const.half_width);
         let extension = which_end * 2.0 - 1.0;
         let offset_px = perpendicular * half_width * side
             + direction * half_width * extension;

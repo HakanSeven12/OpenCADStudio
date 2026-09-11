@@ -1496,6 +1496,19 @@ mod block_wire_storage_tests {
     }
 
     #[test]
+    fn both_block_wire_shaders_honor_fixed_screen_width() {
+        for source in [
+            include_str!("../../shaders/block_wire.wgsl"),
+            include_str!("../../shaders/block_wire_storage.wgsl"),
+        ] {
+            assert!(source.contains("if world_hw < 0.0"));
+            assert!(source.contains(
+                "resolve_hw(0.0, wire_const.world_half_width, wire_const.half_width)"
+            ));
+        }
+    }
+
+    #[test]
     fn wire_shader_validates_with_naga() {
         let source = include_str!("../../shaders/wire.wgsl");
         let module = naga::front::wgsl::parse_str(source).expect("wire.wgsl parses cleanly");

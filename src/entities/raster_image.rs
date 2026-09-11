@@ -722,14 +722,22 @@ impl PropertyEditable for Wipeout {
             let u = glam::DVec3::new(self.u_vector.x, self.u_vector.y, self.u_vector.z);
             let v = glam::DVec3::new(self.v_vector.x, self.v_vector.y, self.v_vector.z);
             let normal = u.cross(v).normalize_or_zero();
-            if normal.length_squared() <= 1e-18 {
+            if normal.length_squared() <= 1e-18 || normal.z.abs() <= 1e-12 {
                 return;
             }
-            let current_radians = u.y.atan2(u.x);
-            let rotation = glam::DQuat::from_axis_angle(
-                normal,
-                target_degrees.to_radians() - current_radians,
-            );
+            let target_radians = target_degrees.to_radians();
+            let horizontal = glam::DVec3::new(target_radians.cos(), target_radians.sin(), 0.0);
+            let target = (normal.z * horizontal - normal.dot(horizontal) * glam::DVec3::Z)
+                * normal.z.signum();
+            let direction = u.normalize_or_zero();
+            let target = target.normalize_or_zero();
+            if direction == glam::DVec3::ZERO || target == glam::DVec3::ZERO {
+                return;
+            }
+            let angle = normal
+                .dot(direction.cross(target))
+                .atan2(direction.dot(target));
+            let rotation = glam::DQuat::from_axis_angle(normal, angle);
             let u = rotation * u;
             let v = rotation * v;
             self.u_vector = acadrust::types::Vector3::new(u.x, u.y, u.z);
@@ -784,5 +792,35 @@ impl Transformable for Wipeout {
                 reflect_vec3(&mut entity.v_vector.x, &mut entity.v_vector.y, ax, ay, len2);
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod wipeout_property_tests {
+    use super::*;
+
+    #[test]
+    fn rotation_reaches_the_requested_angle_for_mirrored_and_tilted_frames() {
+        for (u, v, target) in [
+            ([1.0, 0.0, 0.0], [0.0, -1.0, 0.0], 90.0),
+            ([1.0, 0.0, 1.0], [0.0, 1.0, 0.0], 45.0),
+        ] {
+            let mut wipeout = Wipeout::new();
+            wipeout.u_vector = acadrust::types::Vector3::new(u[0], u[1], u[2]);
+            wipeout.v_vector = acadrust::types::Vector3::new(v[0], v[1], v[2]);
+            let lengths = (wipeout.u_vector.length(), wipeout.v_vector.length());
+
+            wipeout.apply_geom_prop("wo_rotation", &target.to_string());
+
+            let angle = wipeout
+                .u_vector
+                .y
+                .atan2(wipeout.u_vector.x)
+                .to_degrees()
+                .rem_euclid(360.0);
+            assert!((angle - target).abs() < 1e-9, "target={target} actual={angle}");
+            assert!((wipeout.u_vector.length() - lengths.0).abs() < 1e-12);
+            assert!((wipeout.v_vector.length() - lengths.1).abs() < 1e-12);
+        }
     }
 }

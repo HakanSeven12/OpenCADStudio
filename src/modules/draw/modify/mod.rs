@@ -14,6 +14,7 @@ pub mod lengthen;
 pub mod mirror;
 pub mod mledit;
 pub mod offset;
+pub mod overkill;
 pub mod pedit;
 pub mod block_edit;
 pub mod refedit;

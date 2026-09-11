@@ -682,61 +682,84 @@ impl OpenCADStudio {
                 }
             }
 
-            // ── OVERKILL — delete duplicate (identical) objects ──────────
-            // Removes objects that are identical in geometry AND properties to
-            // another object (compared with the handle ignored). Operates on
-            // the current selection, or the whole drawing when nothing is
-            // selected. Conservative: only exact duplicates are removed.
-            "OVERKILL" => {
-                use acadrust::Handle;
-                let selected: std::collections::HashSet<u64> = self.tabs[i]
-                    .scene
-                    .selected_entities()
-                    .into_iter()
-                    .map(|(h, _)| h.value())
-                    .collect();
-                // Capture (handle, type-name, handle-normalized clone) for each
-                // candidate while the document is borrowed immutably.
-                let candidates: Vec<(Handle, String, acadrust::EntityType)> = self.tabs[i]
-                    .scene
-                    .document
-                    .entities()
-                    .filter(|e| {
-                        (selected.is_empty() || selected.contains(&e.common().handle.value()))
-                            && !self.tabs[i].scene.is_layer_locked(e.common().handle)
-                    })
-                    .map(|e| {
-                        let key = crate::entities::names::dxf_name(e).to_string();
-                        let mut norm = e.clone();
-                        norm.common_mut().handle = Handle::NULL;
-                        (e.common().handle, key, norm)
-                    })
-                    .collect();
-                // Bucket by (type, layer) so only like objects are compared.
-                let mut kept: Vec<(String, acadrust::EntityType)> = Vec::new();
-                let mut dups: Vec<Handle> = Vec::new();
-                for (h, key, norm) in &candidates {
-                    let bucket = format!("{key}\u{0}{}", norm.common().layer);
-                    if kept.iter().any(|(b, e)| b == &bucket && e == norm) {
-                        dups.push(*h);
-                    } else {
-                        kept.push((bucket, norm.clone()));
-                    }
-                }
-                if dups.is_empty() {
-                    self.command_line
-                        .push_output(crate::t!("OVERKILL: no duplicate objects found.").as_ref());
-                } else {
-                    let n = dups.len();
-                    self.push_undo_snapshot(i, "OVERKILL");
-                    self.tabs[i].scene.erase_entities(&dups);
-                    self.tabs[i].dirty = true;
-                    self.refresh_properties();
-                    self.command_line
-                        .push_output(crate::tf!("OVERKILL: deleted {n} duplicate object(s).").as_ref());
-                }
+            // OVERKILL gathers objects, exposes cleanup settings, then applies one undo group.
+            "OVERKILL" | "-OVERKILL" => {
+                let handles=self.tabs[i].scene.selected_entities().iter().map(|(h,_)|*h).collect();
+                let command=crate::modules::draw::modify::overkill::OverkillCommand::new(handles);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd=Some(Box::new(command));
             }
-
+            value if value.starts_with("OVERKILL_APPLY ") => {
+                use crate::modules::draw::modify::overkill::{normalized,optimize};
+                let values:Vec<_>=value.split_whitespace().skip(1).collect();
+                if values.len()!=6 { return Some(self.finish_dispatch(cmd)); }
+                let tolerance=values[0].parse::<f64>().unwrap_or(1e-6);
+                let ignore=values[1].parse::<u16>().unwrap_or(0);
+                let optimize_plines=values[2]=="1";
+                let overlap=values[3]=="1";
+                let end_to_end=values[4]=="1";
+                let preserve_associative=values[5]=="1";
+                let mut candidates:Vec<_>=self.tabs[i].scene.selected_entities().into_iter()
+                    .filter(|(h,e)|!self.tabs[i].scene.is_layer_locked(*h)
+                        && (!preserve_associative||e.common().reactors.is_empty()))
+                    .map(|(h,e)|(h,e.clone())).collect();
+                candidates.sort_by_key(|(h,_)|h.value());
+                let mut changed=std::collections::HashSet::new();
+                if optimize_plines { for (h,e) in &mut candidates {
+                    let before=e.clone(); optimize(e,tolerance); if *e!=before {changed.insert(*h);}
+                } }
+                let mut removed=std::collections::HashSet::new();
+                // Iterate to a fixed point: a bridge can join two previously disjoint intervals.
+                loop {
+                    let mut progress=false;
+                    for a in 0..candidates.len() {
+                        if removed.contains(&candidates[a].0) {continue;}
+                        for b in a+1..candidates.len() {
+                            if removed.contains(&candidates[b].0) {continue;}
+                            let left=normalized(&candidates[a].1,ignore);
+                            let right=normalized(&candidates[b].1,ignore);
+                            if left==right {
+                                removed.insert(candidates[b].0);progress=true;continue;
+                            }
+                            let (acadrust::EntityType::Line(l),acadrust::EntityType::Line(r))=(&left,&right)
+                                else {continue;};
+                            if l.common!=r.common||l.thickness!=r.thickness||l.normal!=r.normal {continue;}
+                            let point=|p:acadrust::types::Vector3|[p.x,p.y,p.z];
+                            let Some(union)=cadkernel::space::line_union(
+                                [point(l.start),point(l.end)],[point(r.start),point(r.end)],tolerance)
+                                else {continue;};
+                            let allowed=match union.kind {
+                                cadkernel::space::LineUnionKind::Duplicate=>true,
+                                cadkernel::space::LineUnionKind::Overlap=>overlap,
+                                cadkernel::space::LineUnionKind::EndToEnd=>end_to_end,
+                            };
+                            if !allowed {continue;}
+                            if let acadrust::EntityType::Line(line)=&mut candidates[a].1 {
+                                line.start=acadrust::types::Vector3::new(union.start[0],union.start[1],union.start[2]);
+                                line.end=acadrust::types::Vector3::new(union.end[0],union.end[1],union.end[2]);
+                            }
+                            changed.insert(candidates[a].0);removed.insert(candidates[b].0);progress=true;
+                        }
+                    }
+                    if !progress {break;}
+                }
+                if !changed.is_empty()||!removed.is_empty() {
+                    self.push_undo_snapshot(i,"OVERKILL");
+                    let updates:Vec<_>=candidates.into_iter().filter(|(h,_)|changed.contains(h)&&!removed.contains(h)).collect();
+                    let mut changes = Vec::new();
+                    for (handle, entity) in updates {
+                        if let Some(target) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                            *target = entity;
+                            changes.push((handle, crate::scene::ChangeKind::Modified));
+                        }
+                    }
+                    self.tabs[i].scene.bump_entities(&changes);
+                    let handles:Vec<_>=removed.iter().copied().collect();
+                    self.tabs[i].scene.erase_entities(&handles);
+                    self.tabs[i].dirty=true;self.refresh_properties();
+                }
+                self.command_line.push_output(&format!("OVERKILL: removed {} objects; updated {} objects.",removed.len(),changed.len()));
+            }
             // ── PICKADD / PICKDRAG — selection UX (#226, app settings) ───
             // Bare form reports; `<name> 0|1` sets and persists. Defaults keep
             // today's behaviour (PICKADD 1, PICKDRAG 0).

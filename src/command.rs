@@ -1548,7 +1548,7 @@ pub enum CmdResult {
     /// Place Point entities at N equal intervals along the entity.
     DivideEntity { handle: Handle, n: usize, marker: Option<CurveMarker> },
     /// Place Point entities at `segment_length` intervals along the entity.
-    MeasureEntity { handle: Handle, segment_length: f64 },
+    MeasureEntity { handle: Handle, segment_length: f64, pick_point: DVec3, marker: Option<CurveMarker> },
     /// Extend/trim a Line or Arc by the given mode; end command.
     LengthenEntity {
         handle: Handle,

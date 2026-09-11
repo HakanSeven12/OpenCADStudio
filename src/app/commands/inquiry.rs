@@ -996,7 +996,7 @@ impl OpenCADStudio {
 
             "MEASURE" => {
                 use crate::modules::draw::inquiry::divide::MeasureCommand;
-                let cmd = MeasureCommand::new();
+                let cmd = MeasureCommand::new().with_blocks(self.tabs[i].scene.custom_block_names());
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }

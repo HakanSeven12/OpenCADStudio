@@ -692,10 +692,17 @@ impl OpenCADStudio {
             // ── OVERKILL — delete duplicate (identical) objects ──────────
             // Removes objects that are identical in geometry AND properties to
             // another object (compared with the handle ignored). Operates on
-            // the current selection, or the whole drawing when nothing is
+            // the current selection, gathering objects first when nothing is
             // selected. Conservative: only exact duplicates are removed.
             "OVERKILL" => {
                 use acadrust::Handle;
+                if self.tabs[i].scene.selected.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let selection = SelectObjectsCommand::new("OVERKILL");
+                    self.command_line.push_info(&selection.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(selection));
+                    return Some(self.finish_dispatch(cmd));
+                }
                 let selected: std::collections::HashSet<u64> = self.tabs[i]
                     .scene
                     .selected_entities()
@@ -709,7 +716,7 @@ impl OpenCADStudio {
                     .document
                     .entities()
                     .filter(|e| {
-                        (selected.is_empty() || selected.contains(&e.common().handle.value()))
+                        selected.contains(&e.common().handle.value())
                             && !self.tabs[i].scene.is_layer_locked(e.common().handle)
                     })
                     .map(|e| {

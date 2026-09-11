@@ -5,7 +5,8 @@
 
 use crate::t;
 use acadrust::types::Vector3;
-use acadrust::{EntityType, Spline};
+use acadrust::{CadDocument, EntityType, Handle, Spline};
+use std::collections::HashMap;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -31,6 +32,9 @@ pub struct SplineCommand {
     knot_parameterization: i32,
     begin_tangent: Vector3,
     end_tangent: Vector3,
+    choosing_objects: bool,
+    convertible: HashMap<Handle, Spline>,
+    selected_objects: Vec<Handle>,
 }
 
 impl SplineCommand {
@@ -44,6 +48,9 @@ impl SplineCommand {
             knot_parameterization: 0,
             begin_tangent: Vector3::ZERO,
             end_tangent: Vector3::ZERO,
+            choosing_objects: false,
+            convertible: HashMap::new(),
+            selected_objects: Vec::new(),
         }
     }
 
@@ -52,6 +59,13 @@ impl SplineCommand {
             control_vertices: true,
             ..Self::new()
         }
+    }
+
+    pub fn with_document(mut self, document: &CadDocument) -> Self {
+        self.convertible = document.entities().filter_map(|entity| {
+            spline_from_polyline(entity).map(|spline| (entity.common().handle, spline))
+        }).collect();
+        self
     }
 
     fn build(&self, closed: bool) -> Option<EntityType> {
@@ -68,6 +82,45 @@ impl SplineCommand {
         spline.end_tangent = self.end_tangent;
         Some(EntityType::Spline(spline))
     }
+}
+
+fn control_spline(points: &[[f64; 3]], degree: usize, closed: bool) -> Option<Spline> {
+    let curve = cadkernel::space::NurbsCurve3::from_control_polygon(degree, points, closed)?;
+    let mut spline = Spline {
+        degree: curve.degree() as i32,
+        control_points: curve.control_points().iter().map(|p| Vector3::new(p[0], p[1], p[2])).collect(),
+        knots: curve.knots().to_vec(),
+        weights: curve.weights().to_vec(),
+        ..Default::default()
+    };
+    spline.flags.closed = closed;
+    spline.flags.periodic = closed;
+    spline.flags.planar = crate::entities::curve::spline_is_planar(&spline);
+    Some(spline)
+}
+
+fn spline_from_polyline(entity: &EntityType) -> Option<Spline> {
+    let (degree, points, closed, normal) = match entity {
+        EntityType::Polyline2D(poly) if poly.flags.is_spline_fit() => {
+            let degree = match poly.smooth_surface as i16 { 5 => 2, 6 => 3, _ => return None };
+            let plane = crate::entities::curve::ocs_plane(poly.normal, poly.elevation);
+            let controls: Vec<_> = poly.vertices.iter().filter(|vertex| vertex.flags.bits() & 16 != 0)
+                .map(|vertex| plane.point_at([vertex.location.x, vertex.location.y])).collect();
+            (degree, controls, poly.is_closed(), poly.normal)
+        }
+        EntityType::Polyline3D(poly) if poly.flags.spline_fit => {
+            let degree = match poly.smooth_type as i16 { 5 => 2, 6 => 3, _ => return None };
+            let controls: Vec<_> = poly.vertices.iter().filter(|vertex| vertex.flags & 16 != 0)
+                .map(|vertex| [vertex.position.x, vertex.position.y, vertex.position.z]).collect();
+            (degree, controls, poly.is_closed(), poly.normal)
+        }
+        _ => return None,
+    };
+    let mut spline = control_spline(&points, degree, closed)?;
+    spline.normal = normal;
+    spline.common = entity.common().clone();
+    spline.common.handle = Handle::NULL;
+    Some(spline)
 }
 
 /// Store the chosen construction method directly in the persistent spline.
@@ -141,6 +194,7 @@ impl CadCommand for SplineCommand {
     }
 
     fn prompt(&self) -> String {
+        if self.choosing_objects { return t!("Select spline-fit polylines:").to_string(); }
         if self.choosing_method {
             "SPLINE  Choose creation method [Fit/Control vertices]:".into()
         } else if self.choosing_knots {
@@ -159,6 +213,7 @@ impl CadCommand for SplineCommand {
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
+        if self.choosing_objects { return Vec::new(); }
         if self.choosing_method {
             return vec![
                 CmdOption::new("Fit", "FIT"),
@@ -170,7 +225,7 @@ impl CadCommand for SplineCommand {
             return vec![CmdOption::new("Chord", "CH"), CmdOption::new("Square root", "S"), CmdOption::new("Uniform", "U")];
         }
         if self.pts.is_empty() {
-            let mut options = vec![CmdOption::new(t!("Method").as_ref(), "M")];
+            let mut options = vec![CmdOption::new(t!("Method").as_ref(), "M"), CmdOption::new("Object", "O")];
             if !self.control_vertices { options.push(CmdOption::new("Knots", "K")); }
             return options;
         }
@@ -184,7 +239,7 @@ impl CadCommand for SplineCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
-        if self.choosing_method || self.choosing_knots || !pt.is_finite() {
+        if self.choosing_objects || self.choosing_method || self.choosing_knots || !pt.is_finite() {
             return CmdResult::NeedPoint;
         }
         if self.choosing_tangent {
@@ -207,6 +262,14 @@ impl CadCommand for SplineCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
+        if self.choosing_objects {
+            let replacements = self.selected_objects.iter().filter_map(|handle| {
+                self.convertible.get(handle).map(|spline| (*handle, vec![EntityType::Spline(spline.clone())]))
+            }).collect::<Vec<_>>();
+            return if replacements.is_empty() { CmdResult::Cancel }
+                else { CmdResult::ReplaceMany(replacements, Vec::new()) };
+        }
+
         if self.choosing_method || self.choosing_knots {
             self.choosing_method = false;
             self.choosing_knots = false;
@@ -220,7 +283,13 @@ impl CadCommand for SplineCommand {
     }
 
     fn enter_accepts_default_start(&self) -> bool {
-        self.pts.is_empty() && !self.choosing_method
+        self.pts.is_empty() && !self.choosing_method && !self.choosing_objects
+    }
+
+    fn is_selection_gathering(&self) -> bool { self.choosing_objects }
+    fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
+        self.selected_objects = handles.into_iter().filter(|handle| self.convertible.contains_key(handle)).collect();
+        self.on_enter()
     }
 
     fn on_escape(&mut self) -> CmdResult {
@@ -263,6 +332,10 @@ impl CadCommand for SplineCommand {
             }
             "T" | "TANGENCY" if !self.pts.is_empty() && !self.control_vertices => {
                 self.choosing_tangent = true;
+                Some(CmdResult::NeedPoint)
+            }
+            "O" | "OBJECT" if self.pts.is_empty() => {
+                self.choosing_objects = true;
                 Some(CmdResult::NeedPoint)
             }
             "M" | "METHOD" if self.pts.is_empty() => {

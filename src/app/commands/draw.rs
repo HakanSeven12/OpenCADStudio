@@ -881,7 +881,7 @@ impl OpenCADStudio {
                     SplineCommand::control_vertices()
                 } else {
                     SplineCommand::new()
-                };
+                }.with_document(&self.tabs[i].scene.document);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }

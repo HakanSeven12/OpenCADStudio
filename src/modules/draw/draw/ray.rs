@@ -168,7 +168,9 @@ impl XLineCommand {
                 let base = self.base?;
                 let first = self.reference?.1;
                 let last = (pt - base).try_normalize()?;
-                (base, first + last)
+                let direction = cadkernel::space::curve::angle_bisector(
+                    first.to_array(), last.to_array(), self.plane.z.to_array())?;
+                (base, DVec3::from_array(direction))
             }
             XLineMode::OffsetSide => {
                 let (base, dir) = self.reference?;
@@ -491,6 +493,24 @@ mod tests {
                 panic!("valid bisector must commit");
             };
             let expected = (DVec3::X + end).normalize();
+            assert!(direction(entity).abs_diff_eq(expected, 1.0e-12));
+        }
+    }
+
+    #[test]
+    fn opposite_xline_rays_use_the_working_plane_orientation() {
+        for (plane, expected) in [
+            (WorkingPlane::default(), DVec3::Y),
+            (WorkingPlane::new(DVec3::ZERO, DVec3::X, -DVec3::Y), -DVec3::Y),
+        ] {
+            let mut command = XLineCommand::new();
+            command.set_working_plane(plane);
+            command.on_text_input("BISECT");
+            command.on_point(DVec3::ZERO);
+            command.on_point(DVec3::X);
+            let CmdResult::CommitEntity(entity) = command.on_point(-DVec3::X) else {
+                panic!("opposite rays must have an oriented bisector");
+            };
             assert!(direction(entity).abs_diff_eq(expected, 1.0e-12));
         }
     }

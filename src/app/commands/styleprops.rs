@@ -721,6 +721,25 @@ impl OpenCADStudio {
                             if left==right {
                                 removed.insert(candidates[b].0);progress=true;continue;
                             }
+                            if overlap {
+                                let contained = |circle: &acadrust::entities::Circle, arc: &acadrust::entities::Arc| {
+                                    circle.common == arc.common && circle.thickness == arc.thickness
+                                        && cadkernel::space::arc_union::circle_contains_arc(
+                                            [circle.center.x,circle.center.y,circle.center.z],
+                                            [circle.normal.x,circle.normal.y,circle.normal.z],circle.radius,
+                                            cadkernel::space::arc_union::CircularArc { center:[arc.center.x,arc.center.y,arc.center.z],
+                                                normal:[arc.normal.x,arc.normal.y,arc.normal.z],radius:arc.radius,start:arc.start_angle,end:arc.end_angle })
+                                };
+                                match (&left,&right) {
+                                    (acadrust::EntityType::Circle(circle),acadrust::EntityType::Arc(arc)) if contained(circle,arc) => {
+                                        removed.insert(candidates[b].0);progress=true;continue;
+                                    }
+                                    (acadrust::EntityType::Arc(arc),acadrust::EntityType::Circle(circle)) if contained(circle,arc) => {
+                                        removed.insert(candidates[a].0);progress=true;break;
+                                    }
+                                    _ => {},
+                                }
+                            }
                             if let (acadrust::EntityType::Arc(l),acadrust::EntityType::Arc(r))=(&left,&right) {
                                 use cadkernel::space::arc_union::{CircularArc,ArcUnionKind,circular_arc_union};
                                 if l.common!=r.common || l.thickness!=r.thickness {continue;}

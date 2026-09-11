@@ -1148,10 +1148,17 @@ impl OpenCADStudio {
                         sources.push(*handle);
                     }
                 }
-                // Assemble remaining selected open edges on the active plane.
-                // Face discovery and exact curve reconstruction reuse the
-                // same kernel-backed boundary path used by area selection.
-                let working_plane = self.tabs[i].ucs_xform().working_plane();
+                // Open inputs must share one geometric plane, independently of the UCS.
+                let open_curves: Vec<_> = self.tabs[i].scene.selected_entities().iter()
+                    .filter(|(handle, _)| !sources.contains(handle))
+                    .filter_map(|(_, entity)| crate::entities::curve::entity_curve(entity))
+                    .collect();
+                if let Some(plane) = cadkernel::space::common_curve_plane(&open_curves, 1.0e-6) {
+                let working_plane = crate::command::WorkingPlane::new(
+                    glam::DVec3::from_array(plane.origin),
+                    glam::DVec3::from_array(plane.x_axis),
+                    glam::DVec3::from_array(plane.y_axis),
+                );
                 let selected_handles: rustc_hash::FxHashSet<_> = self.tabs[i].scene
                     .selected_entities().iter().map(|(handle, _)| *handle).collect();
                 let mut boundary_sources = self.tabs[i].scene
@@ -1159,11 +1166,6 @@ impl OpenCADStudio {
                 boundary_sources.retain(|handle, _| {
                     selected_handles.contains(handle) && !sources.contains(handle)
                 });
-                let plane = cadkernel::space::Plane::from_axes(
-                    working_plane.origin.to_array(),
-                    working_plane.x.to_array(),
-                    working_plane.y.to_array(),
-                );
                 for ring in crate::scene::boundary_faces(&boundary_sources, 1.0e-6) {
                     let paths = crate::scene::exact_hatch_paths(
                         std::slice::from_ref(&ring), &[true], &boundary_sources, 1.0e-6,
@@ -1181,6 +1183,9 @@ impl OpenCADStudio {
                     region.common.layer = self.tabs[i].active_layer.clone();
                     regions.push((region, body));
                     sources.extend(crate::scene::ring_source_handles(&ring, &boundary_sources));
+                }
+                } else if !open_curves.is_empty() {
+                    self.command_line.push_error("REGION: open objects must form coplanar, noncollinear boundaries.");
                 }
                 if regions.is_empty() {
                     self.command_line

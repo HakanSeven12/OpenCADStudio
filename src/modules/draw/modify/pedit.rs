@@ -5,7 +5,7 @@ use acadrust::types::{Vector2, Vector3};
 use acadrust::{EntityType, Handle};
 use cadkernel::geom2d::nurbs::clamped_uniform_knots;
 use cadkernel::geom2d::NurbsCurve;
-use glam::{DVec2, DVec3};
+use glam::DVec3;
 use rustc_hash::FxHashMap as HashMap;
 
 use crate::command::{CadCommand, CmdResult};
@@ -37,6 +37,7 @@ enum Mode {
     AwaitWidth,
     AwaitLinetype,
     PolyVertex(usize),
+    PolyTangent(usize),
     PolyRange { start: usize, end: usize, split: bool },
     PolyMove(usize),
     PolyInsert(usize),
@@ -59,6 +60,7 @@ pub struct PeditCommand {
     info: HashMap<u64, PeditTarget>,
     mode: Mode,
     undo_count: usize,
+    vertex_tangents: HashMap<usize, f64>,
     mesh_smooth_type: acadrust::entities::polygon_mesh::SurfaceSmoothType,
     mesh_smooth_density: (i16, i16),
     mesh_vertex_default: isize,
@@ -89,6 +91,7 @@ impl PeditCommand {
             info,
             mode: Mode::PickTarget,
             undo_count: 0,
+            vertex_tangents: HashMap::default(),
             mesh_smooth_type,
             mesh_smooth_density: (
                 surface_u_density.clamp(2, 200),
@@ -230,8 +233,9 @@ impl CadCommand for PeditCommand {
                 vertex = index + 1
             )
             .into_owned(),
-            Mode::PolyVertex(index) => format!("PEDIT  Vertex {} [Next/Previous/Break/Insert/Move/Straighten/Width/eXit] <Next>:", index + 1),
+            Mode::PolyVertex(index) => format!("PEDIT  Vertex {} [Next/Previous/Break/Insert/Move/Straighten/Tangent/Width/eXit] <Next>:", index + 1),
             Mode::PolyRange { end, .. } => format!("PEDIT  Vertex {} [Next/Previous/Go/eXit] <Next>:", end + 1),
+            Mode::PolyTangent(_) => "PEDIT  Specify direction of vertex tangent:".to_string(),
             Mode::PolyMove(index) => format!("PEDIT  Specify new location for vertex {}:", index + 1),
             Mode::PolyWidthStart(_, width) => format!("PEDIT  Specify starting width for next segment <{width}>:"),
             Mode::PolyWidthEnd(_, width) => format!("PEDIT  Specify ending width for next segment <{width}>:"),
@@ -294,7 +298,7 @@ impl CadCommand for PeditCommand {
                 vec![CmdOption::new(t!("Yes").as_ref(), "Y"), CmdOption::new(t!("No").as_ref(), "N")]
             }
             Mode::JoinGather(_) => vec![CmdOption::enter(t!("Join").as_ref())],
-            Mode::PolyVertex(_) => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Break", "B"), CmdOption::new("Straighten", "S"), CmdOption::new("Insert", "I"), CmdOption::new("Move", "M"), CmdOption::new("Width", "W"), CmdOption::new("Exit", "X")],
+            Mode::PolyVertex(_) => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Break", "B"), CmdOption::new("Straighten", "S"), CmdOption::new("Tangent", "T"), CmdOption::new("Insert", "I"), CmdOption::new("Move", "M"), CmdOption::new("Width", "W"), CmdOption::new("Exit", "X")],
             Mode::PolyRange { .. } => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Go", "G"), CmdOption::new("Exit", "X")],
             Mode::AwaitLinetype => vec![CmdOption::new("On", "ON"), CmdOption::new("Off", "OFF")],
             Mode::MeshVertexMove(_) => vec![],
@@ -389,7 +393,7 @@ impl CadCommand for PeditCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        !matches!(self.mode, Mode::PickTarget | Mode::MeshVertexMove(_) | Mode::PolyMove(_) | Mode::PolyInsert(_))
+        !matches!(self.mode, Mode::PickTarget | Mode::MeshVertexMove(_) | Mode::PolyMove(_) | Mode::PolyInsert(_) | Mode::PolyTangent(_))
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
@@ -466,6 +470,13 @@ impl CadCommand for PeditCommand {
             }
             Mode::JoinGather(_) => None,
             Mode::PolyMove(_) | Mode::PolyInsert(_) => None,
+            Mode::PolyTangent(index) => {
+                let angle = text.trim().parse::<f64>().ok()?;
+                if !angle.is_finite() { return Some(CmdResult::NeedPoint); }
+                self.vertex_tangents.insert(*index, angle.to_radians().rem_euclid(TAU));
+                self.mode = Mode::PolyVertex(*index);
+                Some(CmdResult::NeedPoint)
+            }
             Mode::PolyRange { start, end, split } => {
                 match up.as_str() {
                     "N" | "NEXT" => { if *end + 1 < vertex_count { *end += 1; } }
@@ -484,6 +495,7 @@ impl CadCommand for PeditCommand {
                 match up.as_str() {
                     "N" | "NEXT" => { if *index + 1 < vertex_count { *index += 1; } }
                     "P" | "PREVIOUS" => { *index = index.saturating_sub(1); }
+                    "T" | "TANGENT" => self.mode = Mode::PolyTangent(*index),
                     "B" | "BREAK" => self.mode = Mode::PolyRange { start: *index, end: *index, split: true },
                     "S" | "STRAIGHTEN" => self.mode = Mode::PolyRange { start: *index, end: *index, split: false },
                     "I" | "INSERT" => self.mode = Mode::PolyInsert(*index),
@@ -629,7 +641,7 @@ impl CadCommand for PeditCommand {
                     }
                     "F" | "FIT" => Some(CmdResult::PeditOp {
                         handle,
-                        op: PeditOp::Fit,
+                        op: PeditOp::FitWithTangents(self.vertex_tangents.iter().map(|(index, angle)| (*index, *angle)).collect()),
                     }),
                     "S" | "SPLINE" => Some(CmdResult::PeditOp {
                         handle,
@@ -659,6 +671,20 @@ impl CadCommand for PeditCommand {
     }
 
     fn on_point(&mut self, point: DVec3) -> CmdResult {
+        if let Mode::PolyTangent(index) = self.mode {
+            let Some(entity) = self.target.and_then(|handle| self.entities.get(&handle.value())) else { return CmdResult::NeedPoint; };
+            let (normal, elevation, location) = match entity {
+                EntityType::LwPolyline(p) => { let Some(v) = p.vertices.get(index) else { return CmdResult::NeedPoint; }; (p.normal, p.elevation, [v.location.x, v.location.y]) }
+                EntityType::Polyline2D(p) => { let Some(v) = p.vertices.get(index) else { return CmdResult::NeedPoint; }; (p.normal, p.elevation, [v.location.x, v.location.y]) }
+                _ => return CmdResult::NeedPoint,
+            };
+            let Some(local) = crate::entities::curve::ocs_plane(normal, elevation).project([point.x, point.y, point.z]) else { return CmdResult::NeedPoint; };
+            let delta = cadkernel::geom2d::Vec2::new(local[0] - location[0], local[1] - location[1]);
+            if delta.length_squared() <= 1e-24 { return CmdResult::NeedPoint; }
+            self.vertex_tangents.insert(index, delta.angle().rem_euclid(TAU));
+            self.mode = Mode::PolyVertex(index);
+            return CmdResult::NeedPoint;
+        }
         if let Mode::PolyMove(index) | Mode::PolyInsert(index) = self.mode {
             if !point.is_finite() { return CmdResult::NeedPoint; }
             let Some(handle) = self.target else { return CmdResult::Cancel; };
@@ -739,6 +765,7 @@ pub enum PeditOp {
     /// Replace the picked Line/Arc with an equivalent LwPolyline (#263).
     ConvertToPolyline,
     Fit,
+    FitWithTangents(Vec<(usize, f64)>),
     Spline,
     Decurve,
     SetMeshClosedM(bool),
@@ -890,23 +917,20 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
             }
             _ => false,
         },
-        PeditOp::Fit => match entity {
-            EntityType::LwPolyline(p) => fit_curve(p),
-            _ => false,
-        },
+        PeditOp::Fit | PeditOp::FitWithTangents(_) => {
+            let overrides = match op { PeditOp::FitWithTangents(values) => values.as_slice(), _ => &[] };
+            let Some(fitted) = fit_entity(entity, overrides) else { return false; };
+            *entity = fitted;
+            true
+        }
         PeditOp::Spline => match entity {
             EntityType::LwPolyline(p) => spline_smooth(p),
             _ => false,
         },
-        PeditOp::Decurve => match entity {
-            EntityType::LwPolyline(p) => {
-                for v in &mut p.vertices {
-                    v.bulge = 0.0;
-                }
-                true
-            }
-            _ => false,
-        },
+        PeditOp::Decurve => {
+            let Some(straight) = decurve_entity(entity) else { return false; };
+            *entity = straight; true
+        }
         PeditOp::SetMeshClosedM(closed) => match entity {
             EntityType::PolygonMesh(mesh) => {
                 if mesh.is_closed_m() == *closed {
@@ -1094,139 +1118,96 @@ mod convert_tests {
 
 // ── Curve fitting ─────────────────────────────────────────────────────────
 
-fn vert_xy(v: &LwVertex) -> DVec2 {
-    DVec2::new(v.location.x, v.location.y)
-}
-
-/// Wrap an angle into (-pi, pi].
-fn wrap_angle(mut a: f64) -> f64 {
-    while a > std::f64::consts::PI {
-        a -= TAU;
-    }
-    while a <= -std::f64::consts::PI {
-        a += TAU;
-    }
-    a
-}
-
-/// Bulge of the arc `a` -> `b` whose tangent AT `a` is `t` (entry form).
-fn bulge_entry(a: DVec2, t: DVec2, b: DVec2) -> f64 {
-    let d = b - a;
-    if d.length_squared() < 1e-12 {
-        return 0.0;
-    }
-    (wrap_angle(d.y.atan2(d.x) - t.y.atan2(t.x)) / 2.0).tan()
-}
-
-/// Bulge of the arc `a` -> `b` whose tangent AT `b` is `t` (exit form).
-fn bulge_exit(a: DVec2, b: DVec2, t: DVec2) -> f64 {
-    let d = b - a;
-    if d.length_squared() < 1e-12 {
-        return 0.0;
-    }
-    (wrap_angle(t.y.atan2(t.x) - d.y.atan2(d.x)) / 2.0).tan()
-}
-
-/// PEDIT Fit: replace every segment with a BIARC — two arcs that leave the
-/// start vertex along its tangent, meet each other tangentially at an
-/// inserted knee vertex, and arrive at the end vertex along ITS tangent.
-/// Both segments at a vertex share that vertex's tangent (the average of the
-/// neighbouring chords), so the whole run is tangent-continuous — arcs
-/// mutually tangent everywhere, which a single arc per segment cannot do.
-fn fit_curve(p: &mut acadrust::LwPolyline) -> bool {
-    let n = p.vertices.len();
-    if n < 3 {
-        return false;
-    }
-    let pts: Vec<DVec2> = p.vertices.iter().map(vert_xy).collect();
-    let chord = |i: usize| -> DVec2 {
-        let a = pts[i % n];
-        let b = pts[(i + 1) % n];
-        (b - a).normalize_or_zero()
+fn fit_entity(entity: &EntityType, overrides: &[(usize, f64)]) -> Option<EntityType> {
+    use acadrust::entities::{Polyline2D, PolylineFlags, Vertex2D, VertexFlags};
+    let mut polyline = match entity {
+        EntityType::Polyline2D(p) => p.clone(),
+        EntityType::LwPolyline(p) => {
+            let mut result = Polyline2D::new();
+            result.common = p.common.clone(); result.normal = p.normal;
+            result.elevation = p.elevation; result.thickness = p.thickness;
+            result.flags = PolylineFlags::from_bits((p.is_closed as u16) | if p.plinegen { 128 } else { 0 });
+            result.vertices = p.vertices.iter().map(|v| {
+                let mut vertex = Vertex2D::new(Vector3::new(v.location.x, v.location.y, p.elevation));
+                vertex.start_width = if p.constant_width != 0.0 { p.constant_width } else { v.start_width };
+                vertex.end_width = if p.constant_width != 0.0 { p.constant_width } else { v.end_width };
+                vertex.id = v.vertex_id;
+                vertex
+            }).collect();
+            result
+        }
+        _ => return None,
     };
-    // Per-vertex tangents.
-    let tangent = |i: usize| -> DVec2 {
-        if !p.is_closed && i == 0 {
-            return chord(0);
+    // Refit the defining vertices, never the previously inserted fit knees.
+    let mut originals = defining_vertices(&polyline);
+    for vertex in &mut originals {
+        if vertex.start_width == 0.0 { vertex.start_width = polyline.start_width; }
+        if vertex.end_width == 0.0 { vertex.end_width = polyline.end_width; }
+    }
+    for &(index, angle) in overrides {
+        let vertex = originals.get_mut(index)?;
+        if !angle.is_finite() { return None; }
+        vertex.curve_tangent = angle.rem_euclid(TAU);
+        vertex.flags = VertexFlags::from_bits(vertex.flags.bits() | 2);
+    }
+    let points: Vec<_> = originals.iter().map(|v| [v.location.x, v.location.y]).collect();
+    let directions: Vec<_> = originals.iter().map(|v| (v.flags.bits() & 2 != 0).then(|| [v.curve_tangent.cos(), v.curve_tangent.sin()])).collect();
+    let fitted = cadkernel::geom2d::fit_arc_chain(&points, polyline.flags.is_closed(), &directions)?;
+    let mut vertices = Vec::with_capacity(fitted.len());
+    for (i, fitted_vertex) in fitted.iter().enumerate() {
+        let original = &originals[fitted_vertex.source];
+        let mut vertex = original.clone();
+        vertex.location = Vector3::new(fitted_vertex.point[0], fitted_vertex.point[1], polyline.elevation);
+        vertex.bulge = fitted_vertex.bulge;
+        let end_fraction = fitted.get(i + 1).filter(|next| next.source == fitted_vertex.source).map_or(1.0, |next| next.fraction);
+        vertex.start_width = original.start_width + (original.end_width - original.start_width) * fitted_vertex.fraction;
+        vertex.end_width = original.start_width + (original.end_width - original.start_width) * end_fraction;
+        if fitted_vertex.inserted { vertex.flags = VertexFlags::EXTRA_VERTEX; vertex.id = 0; }
+        vertices.push(vertex);
+    }
+    polyline.start_width = originals.first()?.start_width;
+    polyline.end_width = originals.first()?.end_width;
+    polyline.vertices = vertices;
+    polyline.flags = PolylineFlags::from_bits((polyline.flags.bits() & !4) | 2);
+    Some(EntityType::Polyline2D(polyline))
+}
+
+fn defining_vertices(polyline: &acadrust::entities::Polyline2D) -> Vec<acadrust::entities::Vertex2D> {
+    polyline.vertices.iter().enumerate().filter(|(_, vertex)| vertex.flags.bits() & 1 == 0).map(|(index, vertex)| {
+        let mut original = vertex.clone();
+        if let Some(knee) = polyline.vertices[index + 1..].iter().take_while(|next| next.flags.bits() & 1 != 0).last() {
+            original.end_width = knee.end_width;
         }
-        if !p.is_closed && i == n - 1 {
-            return chord(n - 2);
+        original
+    }).collect()
+}
+
+fn decurve_entity(entity: &EntityType) -> Option<EntityType> {
+    let mut result = match entity {
+        EntityType::LwPolyline(p) => p.clone(),
+        EntityType::Polyline2D(p) => {
+            let mut result = acadrust::LwPolyline::new();
+            result.common = p.common.clone(); result.normal = p.normal;
+            result.elevation = p.elevation; result.thickness = p.thickness;
+            result.is_closed = p.flags.is_closed(); result.plinegen = p.flags.bits() & 128 != 0;
+            result.vertices = defining_vertices(p).iter().map(|v| {
+                let mut vertex = LwVertex::new(Vector2::new(v.location.x, v.location.y));
+                vertex.vertex_id = v.id;
+                vertex.start_width = if v.start_width == 0.0 { p.start_width } else { v.start_width };
+                vertex.end_width = if v.end_width == 0.0 { p.end_width } else { v.end_width };
+                vertex
+            }).collect();
+            result
         }
-        let prev = chord((i + n - 1) % n);
-        let cur = chord(i % n);
-        let sum = prev + cur;
-        if sum.length_squared() < 1e-12 {
-            cur
-        } else {
-            sum.normalize()
-        }
+        _ => return None,
     };
-    let seg_count = if p.is_closed { n } else { n - 1 };
-    let mut out: Vec<LwVertex> = Vec::with_capacity(seg_count * 2 + 1);
-    for i in 0..seg_count {
-        let p0 = pts[i % n];
-        let p1 = pts[(i + 1) % n];
-        let t0 = tangent(i % n);
-        let t1 = tangent((i + 1) % n);
-        let d = p1 - p0;
-        let src = &p.vertices[i % n];
-        let mut push = |q: DVec2, bulge: f64| {
-            let mut v = LwVertex::new(Vector2::new(q.x, q.y));
-            v.bulge = bulge;
-            v.start_width = src.start_width;
-            v.end_width = src.end_width;
-            out.push(v);
-        };
-        if d.length_squared() < 1e-12 {
-            push(p0, 0.0);
-            continue;
+    for vertex in &mut result.vertices { vertex.bulge = 0.0; }
+    if let Some(width) = result.vertices.first().map(|v| v.start_width) {
+        if result.vertices.iter().all(|v| v.start_width == width && v.end_width == width) {
+            result.constant_width = width;
         }
-        // Both tangents already aligned with the chord: keep it straight.
-        let dn = d.normalize();
-        if (dn - t0).length_squared() < 1e-12 && (dn - t1).length_squared() < 1e-12 {
-            push(p0, 0.0);
-            continue;
-        }
-        // Classic equal-parameter biarc: apexes A = p0 + k*t0, B = p1 - k*t1
-        // and the knee M at their midpoint. Tangency at M needs |AB| = 2k,
-        // i.e. 2(1 - t0.t1) k^2 + 2 (d.(t0+t1)) k - |d|^2 = 0 — A and B are
-        // then the tangent-line apexes of their arcs, so both arcs' tangents
-        // at M run along AB and the pair is tangent-continuous.
-        let dot_tt = t0.dot(t1).clamp(-1.0, 1.0);
-        let b_lin = d.dot(t0 + t1);
-        let a_quad = 2.0 * (1.0 - dot_tt);
-        let k = if a_quad.abs() > 1e-9 {
-            let disc = b_lin * b_lin + a_quad * d.length_squared();
-            if disc < 0.0 {
-                push(p0, bulge_entry(p0, t0, p1));
-                continue;
-            }
-            (-b_lin + disc.sqrt()) / a_quad
-        } else if b_lin.abs() > 1e-9 {
-            // Parallel tangents: the quadratic degenerates to one root.
-            d.length_squared() / (2.0 * b_lin)
-        } else {
-            // Anti-parallel S with no along-tangent reach: symmetric split.
-            (d.length_squared() / 4.0).sqrt()
-        };
-        if !k.is_finite() || k <= 1e-9 {
-            push(p0, bulge_entry(p0, t0, p1));
-            continue;
-        }
-        let m = (p0 + t0 * k + p1 - t1 * k) * 0.5;
-        push(p0, bulge_entry(p0, t0, m));
-        push(m, bulge_exit(m, p1, t1));
     }
-    if !p.is_closed {
-        let mut last = p.vertices[n - 1].clone();
-        last.bulge = 0.0;
-        out.push(last);
-    }
-    if out.len() < 2 {
-        return false;
-    }
-    p.vertices = out;
-    true
+    Some(EntityType::LwPolyline(result))
 }
 
 /// PEDIT Spline: replace the shape with a sampled uniform cubic B-spline of

@@ -566,51 +566,6 @@ fn convert_to_fit_method(spline: &mut Spline) -> bool {
     uses_fit_method(spline)
 }
 
-fn tangent_is_set(tangent: &acadrust::types::Vector3) -> bool {
-    tangent.x * tangent.x + tangent.y * tangent.y + tangent.z * tangent.z > 1e-18
-}
-
-/// Stored or kernel-derived fit-curve end tangents.
-fn effective_fit_tangents(
-    spline: &Spline,
-) -> (acadrust::types::Vector3, acadrust::types::Vector3) {
-    let begin_set = tangent_is_set(&spline.begin_tangent);
-    let end_set = tangent_is_set(&spline.end_tangent);
-    if begin_set && end_set {
-        return (spline.begin_tangent, spline.end_tangent);
-    }
-
-    let derived = crate::entities::curve::spline_curve(spline).and_then(|planar| {
-        let KernelCurve::Nurbs(curve) = &planar.curve else {
-            return None;
-        };
-        let (start, end) = curve.domain();
-        Some((
-            planar.plane.vector_at(curve.derivative_at_knot(start)),
-            planar.plane.vector_at(curve.derivative_at_knot(end)),
-        ))
-    });
-
-    let Some((derived_begin, derived_end)) = derived else {
-        return (spline.begin_tangent, spline.end_tangent);
-    };
-    let vector = |value: [f64; 3]| {
-        acadrust::types::Vector3::new(value[0], value[1], value[2])
-    };
-    (
-        if begin_set {
-            spline.begin_tangent
-        } else {
-            vector(derived_begin)
-        },
-        if end_set {
-            spline.end_tangent
-        } else {
-            vector(derived_end)
-        },
-    )
-}
-
 fn grips(spline: &Spline) -> Vec<GripDef> {
     let fit_method = uses_fit_method(spline);
     let derived_control = control_vertices(spline);
@@ -661,7 +616,6 @@ fn properties(spline: &Spline) -> Vec<PropSection> {
         _ => "Custom",
     };
     let current = crate::scene::view::dispatch::prop_current_vertex();
-    let (effective_begin_tangent, effective_end_tangent) = effective_fit_tangents(spline);
     let mut data_points = if show_fit {
         let count = spline.fit_points.len();
         let index = current.min(count.saturating_sub(1));
@@ -794,32 +748,32 @@ fn properties(spline: &Spline) -> Vec<PropSection> {
             edit_scalar(
                 t!("Start tangent vector X").as_ref(),
                 "start_tan_x",
-                effective_begin_tangent.x,
+                spline.begin_tangent.x,
             ),
             edit_scalar(
                 t!("Start tangent vector Y").as_ref(),
                 "start_tan_y",
-                effective_begin_tangent.y,
+                spline.begin_tangent.y,
             ),
             edit_scalar(
                 t!("Start tangent vector Z").as_ref(),
                 "start_tan_z",
-                effective_begin_tangent.z,
+                spline.begin_tangent.z,
             ),
             edit_scalar(
                 t!("End tangent vector X").as_ref(),
                 "end_tan_x",
-                effective_end_tangent.x,
+                spline.end_tangent.x,
             ),
             edit_scalar(
                 t!("End tangent vector Y").as_ref(),
                 "end_tan_y",
-                effective_end_tangent.y,
+                spline.end_tangent.y,
             ),
             edit_scalar(
                 t!("End tangent vector Z").as_ref(),
                 "end_tan_z",
-                effective_end_tangent.z,
+                spline.end_tangent.z,
             ),
         ]);
     }
@@ -898,7 +852,6 @@ fn apply_geom_prop(spline: &mut Spline, field: &str, value: &str) {
     {
         return;
     }
-    let (effective_begin_tangent, effective_end_tangent) = effective_fit_tangents(spline);
     let Some(v) = parse_f64(value) else { return };
     let control_index = crate::scene::view::dispatch::prop_current_vertex()
         .min(spline.control_points.len().saturating_sub(1));
@@ -953,9 +906,6 @@ fn apply_geom_prop(spline: &mut Spline, field: &str, value: &str) {
             }
         }
         "start_tan_x" | "start_tan_y" | "start_tan_z" => {
-            if !tangent_is_set(&spline.begin_tangent) {
-                spline.begin_tangent = effective_begin_tangent;
-            }
             match field {
                 "start_tan_x" => spline.begin_tangent.x = v,
                 "start_tan_y" => spline.begin_tangent.y = v,
@@ -964,9 +914,6 @@ fn apply_geom_prop(spline: &mut Spline, field: &str, value: &str) {
             }
         }
         "end_tan_x" | "end_tan_y" | "end_tan_z" => {
-            if !tangent_is_set(&spline.end_tangent) {
-                spline.end_tangent = effective_end_tangent;
-            }
             match field {
                 "end_tan_x" => spline.end_tangent.x = v,
                 "end_tan_y" => spline.end_tangent.y = v,
@@ -1183,5 +1130,27 @@ mod tests {
             apply_geom_prop(&mut spline, "fit_tolerance", invalid);
             assert_eq!(spline.fit_tolerance, 1.5);
         }
+    }
+
+    #[test]
+    fn tangent_properties_edit_only_the_stored_component() {
+        let mut spline = Spline::default();
+        spline.fit_points = vec![
+            acadrust::types::Vector3::ZERO,
+            acadrust::types::Vector3::new(1.0, 1.0, 0.0),
+        ];
+
+        let start_y = properties(&spline)
+            .into_iter()
+            .flat_map(|section| section.props)
+            .find(|property| property.field == "start_tan_y")
+            .unwrap();
+        assert_eq!(start_y.value, PropValue::EditText("0".into()));
+
+        apply_geom_prop(&mut spline, "start_tan_y", "2.5");
+        assert_eq!(
+            spline.begin_tangent,
+            acadrust::types::Vector3::new(0.0, 2.5, 0.0)
+        );
     }
 }

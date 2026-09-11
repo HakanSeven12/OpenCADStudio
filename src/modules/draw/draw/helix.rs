@@ -122,7 +122,7 @@ impl HelixCommand {
             .iter()
             .map(|point| Vector3::new(point[0], point[1], point[2]))
             .collect();
-        spline.flags.planar = false;
+        spline.flags.planar = height == 0.0;
         spline.flags.rational = nurbs.is_rational();
         if spline.flags.rational {
             spline.weights = nurbs.weights().to_vec();
@@ -262,7 +262,7 @@ impl CadCommand for HelixCommand {
                 } else {
                     distance
                 };
-                if radius > EPSILON {
+                if radius >= 0.0 {
                     self.base_radius = radius;
                     self.top_radius = radius;
                     self.step = Step::TopRadius;
@@ -272,21 +272,20 @@ impl CadCommand for HelixCommand {
             Step::TopRadius | Step::TopDiameter => {
                 let local = self.plane.vector_to_local(point - self.center);
                 let distance = local.x.hypot(local.y);
-                self.top_radius = if self.step == Step::TopDiameter {
+                let top_radius = if self.step == Step::TopDiameter {
                     distance * 0.5
                 } else {
                     distance
                 };
-                self.step = Step::Final;
+                if self.base_radius > 0.0 || top_radius > 0.0 {
+                    self.top_radius = top_radius;
+                    self.step = Step::Final;
+                }
                 CmdResult::NeedPoint
             }
             Step::Final => {
                 let height = (point - self.center).dot(self.plane.z);
-                if height.abs() <= EPSILON {
-                    CmdResult::NeedPoint
-                } else {
-                    self.commit(height, self.plane.z)
-                }
+                self.commit(height, self.plane.z)
             }
             Step::AxisEndpoint => {
                 let vector = point - self.center;
@@ -310,6 +309,9 @@ impl CadCommand for HelixCommand {
                 CmdResult::NeedPoint
             }
             Step::TopRadius | Step::TopDiameter => {
+                if self.base_radius == 0.0 {
+                    return CmdResult::NeedPoint;
+                }
                 self.top_radius = self.base_radius;
                 self.step = Step::Final;
                 CmdResult::NeedPoint
@@ -382,7 +384,7 @@ impl CadCommand for HelixCommand {
             }
             Step::BaseRadius => {
                 let radius = Self::parse_value(value)?;
-                if radius > EPSILON {
+                if radius >= 0.0 {
                     self.base_radius = radius;
                     self.top_radius = radius;
                     self.step = Step::TopRadius;
@@ -391,7 +393,7 @@ impl CadCommand for HelixCommand {
             }
             Step::BaseDiameter => {
                 let diameter = Self::parse_value(value)?;
-                if diameter > EPSILON {
+                if diameter >= 0.0 {
                     self.base_radius = diameter * 0.5;
                     self.top_radius = self.base_radius;
                     self.step = Step::TopRadius;
@@ -400,7 +402,7 @@ impl CadCommand for HelixCommand {
             }
             Step::TopRadius => {
                 let radius = Self::parse_value(value)?;
-                if radius >= 0.0 {
+                if radius >= 0.0 && (self.base_radius > 0.0 || radius > 0.0) {
                     self.top_radius = radius;
                     self.step = Step::Final;
                 }
@@ -408,7 +410,7 @@ impl CadCommand for HelixCommand {
             }
             Step::TopDiameter => {
                 let diameter = Self::parse_value(value)?;
-                if diameter >= 0.0 {
+                if diameter >= 0.0 && (self.base_radius > 0.0 || diameter > 0.0) {
                     self.top_radius = diameter * 0.5;
                     self.step = Step::Final;
                 }
@@ -416,11 +418,15 @@ impl CadCommand for HelixCommand {
             }
             Step::Final => {
                 let height = Self::parse_value(value)?;
-                (height.abs() > EPSILON).then(|| self.commit(height, self.plane.z))
+                Some(self.commit(height, self.plane.z))
             }
             Step::AxisEndpoint => None,
             Step::Turns => {
                 let turns = Self::parse_turns(value)?;
+                if turns > 500.0 {
+                    self.step = Step::Final;
+                    return Some(CmdResult::NeedPoint);
+                }
                 if turns > EPSILON {
                     self.turns = turns;
                     self.requested_turn_height = None;

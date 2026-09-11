@@ -941,6 +941,37 @@ impl OpenCADStudio {
                 return Some(Task::none());
             }
 
+            "DRAWORDER_FRONT" | "DRAWORDER_BACK" | "DRAWORDER_ABOVE" | "DRAWORDER_UNDER" => {
+                let selected: Vec<acadrust::Handle> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .iter()
+                    .map(|(h, _)| *h)
+                    .collect();
+                if selected.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let selection = SelectObjectsCommand::plain("DRAWORDER", cmd);
+                    self.command_line.push_info(&selection.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(selection));
+                } else if matches!(cmd, "DRAWORDER_ABOVE" | "DRAWORDER_UNDER") {
+                    let command = DrawOrderCommand::for_reference_pick(
+                        selected,
+                        cmd == "DRAWORDER_ABOVE",
+                    );
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                } else {
+                    let primitive = if cmd == "DRAWORDER_FRONT" {
+                        "DRAWORDER FRONT"
+                    } else {
+                        "DRAWORDER BACK"
+                    };
+                    return Some(self.apply_cmd_result(crate::command::CmdResult::Relaunch(
+                        primitive.to_string(),
+                        selected,
+                    )));
+                }
+            }
             "DRAWORDER" => {
                 let selected: Vec<acadrust::Handle> = self.tabs[i]
                     .scene

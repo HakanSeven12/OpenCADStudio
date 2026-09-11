@@ -63,6 +63,8 @@ pub(super) const SMALL_W: f32 = ROW_H;
 pub(super) const ARROW_W: f32 = ROW_H * 0.4;
 /// Height of the ▾ strip at the bottom of a large dropdown.
 pub(super) const LARGE_ARR: f32 = ROW_H * 0.55;
+/// Arrow size used under large dropdown tools such as Circle.
+pub(super) const LARGE_DROPDOWN_ARROW_SIZE: f32 = 9.0;
 /// Total ribbon tool-area height = 3 × ROW_H + 6 px v-padding + 12 px group-label.
 pub(super) const TOOL_BAR_H: f32 = 3.0 * ROW_H + 18.0;
 /// Height of a collapsed panel button's large representative face (big icon +
@@ -706,7 +708,7 @@ pub(super) fn render_large_dropdown<'a>(
     });
 
     let arr_btn = button(
-        container(icons::themed_arrow_down(9.0))
+        container(icons::themed_arrow_down(LARGE_DROPDOWN_ARROW_SIZE))
             .width(Fill)
             .height(Fill)
             .align_x(iced::Center)

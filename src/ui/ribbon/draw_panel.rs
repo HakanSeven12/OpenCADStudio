@@ -7,7 +7,7 @@ use iced::{Element, Fill, Theme};
 
 use super::widgets::{
     make_icon, make_tip, muted_text_style, popup_panel_style, popup_row_style, tip_style,
-    tool_btn_style,
+    tool_btn_style, LARGE_DROPDOWN_ARROW_SIZE,
 };
 use super::{dropdown_backdrop, position_ribbon_dropdown, Ribbon};
 use crate::app::Message;
@@ -21,6 +21,7 @@ const SCALE: f32 = 0.7;
 const CELL: f32 = 36.0 * SCALE;
 const GAP: f32 = 3.0 * SCALE;
 const OPTION_HEIGHT: f32 = 30.0 * SCALE;
+const GROUP_TITLE_ARROW_SIZE: f32 = LARGE_DROPDOWN_ARROW_SIZE * 1.5;
 
 pub(super) struct Tool {
     pub command: &'static str,
@@ -170,9 +171,9 @@ pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Ele
     };
     let expanded = open.as_deref().and_then(parent_panel) == Some(panel.id);
     let arrow = if expanded {
-        icons::themed_arrow_up(7.0)
+        icons::themed_arrow_up(GROUP_TITLE_ARROW_SIZE)
     } else {
-        icons::themed_arrow_down(7.0)
+        icons::themed_arrow_down(GROUP_TITLE_ARROW_SIZE)
     };
     PosReport::new(
         panel.id,

@@ -30,6 +30,7 @@ pub struct WipeoutCommand {
     plane: WorkingPlane,
     selected_polyline: Option<Handle>,
     frame_mode: i16,
+    picked_entity: Option<EntityType>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -50,6 +51,7 @@ impl WipeoutCommand {
             plane: WorkingPlane::default(),
             selected_polyline: None,
             frame_mode: frame_mode.clamp(0, 2),
+            picked_entity: None,
         }
     }
 
@@ -61,6 +63,7 @@ impl WipeoutCommand {
             plane: WorkingPlane::default(),
             selected_polyline: None,
             frame_mode: 1,
+            picked_entity: None,
         }
     }
 
@@ -73,6 +76,7 @@ impl WipeoutCommand {
             plane: WorkingPlane::default(),
             selected_polyline: None,
             frame_mode: 1,
+            picked_entity: None,
         }
     }
 
@@ -238,6 +242,15 @@ impl CadCommand for WipeoutCommand {
     }
 
     fn on_entity_pick(&mut self, handle: Handle, _point: DVec3) -> CmdResult {
+        let Some(entity)=self.picked_entity.take().filter(|e|e.common().handle==handle) else {
+            return CmdResult::NeedPoint;
+        };
+        if !matches!(entity,EntityType::LwPolyline(_)|EntityType::Polyline2D(_)) {
+            return CmdResult::NeedPoint;
+        }
+        if wipeout_from_polyline(&entity).is_none() {
+            return CmdResult::Measurement("WIPEOUT: select a closed planar polyline made of zero-width straight segments.".into());
+        }
         if handle.is_null() {
             CmdResult::NeedPoint
         } else {
@@ -246,6 +259,9 @@ impl CadCommand for WipeoutCommand {
             CmdResult::NeedPoint
         }
     }
+
+    fn inject_before_entity_pick(&self)->bool {self.mode==WipeoutMode::Polyline}
+    fn inject_picked_entity(&mut self,entity:EntityType){self.picked_entity=Some(entity);}
 
     fn wants_text_input(&self) -> bool {
         matches!(

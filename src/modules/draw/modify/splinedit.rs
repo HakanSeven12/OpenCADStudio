@@ -92,7 +92,7 @@ impl SplineditCommand {
             curve.insert_knot(parameter);
         }
         if let Some(degree) = degree {
-            if degree <= curve.degree() || degree > 26 { return None; }
+            if degree <= curve.degree() || degree > 25 { return None; }
             curve = curve.elevated(degree - curve.degree())?;
         }
         let mut result = crate::modules::draw::modify::spline_ops::nurbs_to_spline(&curve, source);
@@ -181,7 +181,13 @@ impl CadCommand for SplineditCommand {
                 _ => {}
             },
             Step::Elevate => {
-                if let Some(spline) = upper.parse::<usize>().ok().and_then(|degree| self.refined(None, Some(degree))) {
+                let current_order = self.spline.as_ref()?.degree.max(1) as usize + 1;
+                let order = upper.parse::<usize>().ok().filter(|order| *order >= current_order && *order <= 26)?;
+                if order == current_order {
+                    self.step = Step::Refine;
+                    return Some(CmdResult::NeedPoint);
+                }
+                if let Some(spline) = self.refined(None, Some(order - 1)) {
                     self.step = Step::Refine;
                     return Some(self.replace(spline));
                 }
@@ -264,8 +270,8 @@ impl CadCommand for SplineditCommand {
             Step::Refine => { self.step = Step::Options; CmdResult::NeedPoint }
             Step::Add | Step::Delete | Step::SelectVertex { .. } => { self.step = Step::Refine; CmdResult::NeedPoint }
             Step::Elevate => {
-                let degree = self.spline.as_ref().map_or(4, |s| s.degree as usize + 1);
-                self.on_text_input(&degree.to_string()).unwrap_or(CmdResult::NeedPoint)
+                let order = self.spline.as_ref().map_or(4, |s| s.degree as usize + 1);
+                self.on_text_input(&order.to_string()).unwrap_or(CmdResult::NeedPoint)
             }
             Step::Move { .. } | Step::Weight { .. } => self.on_text_input("N").unwrap_or(CmdResult::NeedPoint),
         }

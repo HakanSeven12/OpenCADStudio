@@ -890,6 +890,9 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
     }
 
     pub(super) fn on_command_escape(&mut self) -> Task<Message> {
+        if self.ribbon.escape_extension() {
+            return Task::none();
+        }
                 // Esc drops an unconsumed one-shot snap override and closes
                 // its menu (#337). Falls through — Esc keeps its usual effect.
                 self.snap_override_popup = None;

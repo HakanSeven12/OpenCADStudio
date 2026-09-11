@@ -1246,7 +1246,7 @@ impl OpenCADStudio {
             };
 
             let mut seen_handles = rustc_hash::FxHashSet::default();
-            let edited_handles: Vec<_> = grip
+            let mut edited_handles: Vec<_> = grip
                 .targets
                 .iter()
                 .map(|target| target.handle)
@@ -1704,6 +1704,29 @@ impl OpenCADStudio {
                         vertex_id,
                         original_bulge,
                     );
+                }
+            }
+            // Re-solve constrained neighbors on each drag frame and include
+            // their original state in the gesture's undo record.
+            let solved_by_constraints = self.tabs[i].scene.solve_sketch_constraints_preview(&edited_handles);
+            for (handle, _) in &solved_by_constraints {
+                let handle = *handle;
+                if !self.grip_preview_handles.contains(&handle) {
+                    if let Some(original) = self.tabs[i].scene.document.get_entity(handle).cloned() {
+                        self.grip_originals.push((handle, original));
+                    }
+                    self.grip_preview_handles.push(handle);
+                    if !self.tabs[i].scene.meshes.contains_key(&handle) {
+                        self.tabs[i].scene.preview_hidden.insert(handle);
+                    }
+                }
+                if !edited_handles.contains(&handle) {
+                    edited_handles.push(handle);
+                }
+            }
+            for (handle, new_entity) in solved_by_constraints {
+                if let Some(slot) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                    *slot = new_entity;
                 }
             }
             let mesh_changes: Vec<_> = edited_handles
@@ -3887,6 +3910,7 @@ impl OpenCADStudio {
                 } else if self.tabs[i].active_cmd.as_ref()
                     .is_some_and(|command| command.entity_pick_accepts_points())
                 {
+                    self.refresh_command_point_pick_context(i);
                     self.tabs[i].active_cmd.as_mut().map(|command| command.on_point(pick_wcs))
                 } else if self.tabs[i]
                     .active_cmd
@@ -3963,6 +3987,7 @@ impl OpenCADStudio {
                 // (LINE tangent to two circles, which needs both). When
                 // it does, sync last_point to the command's resolved
                 // anchor since it replaced the picked coordinate.
+                self.refresh_command_point_pick_context(i);
                 let handled = self.tabs[i]
                     .active_cmd
                     .as_mut()

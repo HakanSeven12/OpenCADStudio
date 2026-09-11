@@ -16,7 +16,7 @@ use crate::t;
 use crate::ui::{icons, wrap_bar::PosReport};
 
 const PANEL_ID: &str = "draw_extension";
-const GROUP_ID: &str = "draw_extension_group";
+const TITLE_ID: &str = "draw_extension_title";
 const SCALE: f32 = 0.7;
 const CELL: f32 = 36.0 * SCALE;
 const GAP: f32 = 3.0 * SCALE;
@@ -125,14 +125,6 @@ pub(super) fn owns_dropdown(id: &str) -> bool {
             .any(|tool| tool.command == id && !tool.options.is_empty())
 }
 
-pub(super) fn group_anchor<'a>(title: &str, content: Element<'a, Message>) -> Element<'a, Message> {
-    if title == "Draw" {
-        PosReport::new(GROUP_ID, content).into()
-    } else {
-        content
-    }
-}
-
 pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Element<'a, Message> {
     if title != "Draw" || TOOLS.is_empty() {
         return container(text(t!(title)).size(9).style(muted_text_style))
@@ -148,7 +140,7 @@ pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Ele
     PosReport::new(
         PANEL_ID,
         button(
-            row![text(t!(title)).size(9), arrow]
+            row![PosReport::new(TITLE_ID, text(t!(title)).size(9)), arrow]
                 .spacing(4)
                 .align_y(iced::Center),
         )
@@ -197,9 +189,9 @@ fn tool_button(tool: &Tool, active: bool) -> Element<'static, Message> {
 pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element<'a, Message> {
     let width = (7.0 * (CELL + GAP) - GAP + 12.0).min((win.0 - 8.0).max(CELL + 12.0));
     let (_, x, anchor_top) = ribbon.dd_anchor(PANEL_ID, width, win.0);
-    let anchor = crate::ui::wrap_bar::dropdown_bounds(GROUP_ID);
+    let anchor = crate::ui::wrap_bar::dropdown_bounds(TITLE_ID);
     let left = anchor
-        .map_or(x, |b| b.x)
+        .map_or(x, |b| b.x + (b.width - width) / 2.0)
         .clamp(0.0, (win.0 - width).max(0.0));
     let top = anchor_top.min((win.1 - 80.0).max(0.0));
     let available_height = (win.1 - top - 4.0).max(1.0);

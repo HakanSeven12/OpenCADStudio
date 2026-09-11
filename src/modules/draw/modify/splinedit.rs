@@ -35,6 +35,12 @@ enum Step {
     Refine,
     Join,
     PolylinePrecision,
+    FitOptions,
+    FitMove { index: usize },
+    FitSelectMove,
+    FitDelete,
+    FitAddPick,
+    FitAddNew { index: usize, first: bool },
     Add,
     Delete,
     Elevate,
@@ -96,7 +102,31 @@ impl SplineditCommand {
         else { entity.common_mut().handle = acadrust::Handle::NULL; CmdResult::ReplaceMany(Vec::new(), vec![entity]) }
     }
 
-    fn picked_vertex(&self, point: DVec3) -> Option<usize> {
+    fn picked_vertex(&self, point: DVec3) -> Option<usize> { self.picked_from_points(point, &self.spline.as_ref()?.control_points) }
+    fn picked_fit_point(&self, point: DVec3) -> Option<usize> { self.picked_from_points(point, &self.spline.as_ref()?.fit_points) }
+    fn has_fit_data(&self) -> bool { self.spline.as_ref().is_some_and(|s| s.fit_points.len() >= 3) }
+
+    fn replace_fit_points(&mut self, points: Vec<Vector3>) -> CmdResult {
+        let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
+        if points == source.fit_points { return CmdResult::NeedPoint; }
+        if source.fit_tolerance != 0.0 || source.weights.windows(2).any(|w| w[0] != w[1]) {
+            return CmdResult::ReportError(crate::t!("Editing weighted or tolerance-fitted interpolation data is not supported.").into_owned());
+        }
+        let mut result = source.clone();
+        result.fit_points = points; result.control_points.clear(); result.knots.clear(); result.weights.clear();
+        let Some(curve) = spatial_spline(&result).and_then(|curve| curve.compact_knots(source.control_tolerance.max(1e-9))) else {
+            return CmdResult::ReportError(crate::t!("Fit points do not define a valid spline.").into_owned());
+        };
+        result.degree = curve.degree() as i32;
+        result.control_points = curve.control_points().iter().map(|p| Vector3::new(p[0],p[1],p[2])).collect();
+        result.knots = curve.knots().to_vec(); result.weights = curve.weights().to_vec();
+        result.dwg_flags1 |= 1; result.dxf_flags |= 32 | 1024;
+        result.flags.rational = false;
+        result.flags.planar = crate::entities::curve::spline_is_planar(&result);
+        self.replace(result)
+    }
+
+    fn picked_from_points(&self, point: DVec3, points: &[Vector3]) -> Option<usize> {
         let context = self.pick_context?;
         let project = |point: DVec3| {
             let clip = context.view * (point - context.eye).as_vec3().extend(1.0);
@@ -108,7 +138,7 @@ impl SplineditCommand {
                 && screen.y >= 0.0 && screen.y <= context.bounds.height).then_some(screen)
         };
         let cursor = project(point)?;
-        self.spline.as_ref()?.control_points.iter().enumerate().filter_map(|(index, vertex)| {
+        points.iter().enumerate().filter_map(|(index, vertex)| {
             let screen = project(DVec3::new(vertex.x, vertex.y, vertex.z))?;
             let distance = (screen.x - cursor.x).hypot(screen.y - cursor.y);
             (distance.is_finite() && distance <= context.aperture_px).then_some((index, distance))
@@ -188,6 +218,13 @@ impl CadCommand for SplineditCommand {
     fn name(&self) -> &'static str { "SPLINEDIT" }
     fn prompt(&self) -> String {
         match self.step {
+            Step::FitOptions => crate::t!("SPLINEDIT  Fit data [Add/Delete/Move/eXit] <eXit>:").into_owned(),
+            Step::FitMove { .. } => crate::t!("SPLINEDIT  Specify new location or [Next/Previous/Select point/eXit] <Next>:").into_owned(),
+            Step::FitSelectMove | Step::FitDelete | Step::FitAddPick => crate::t!("SPLINEDIT  Specify existing fit point on spline <exit>:").into_owned(),
+            Step::FitAddNew { first: true, .. } => crate::t!("SPLINEDIT  Specify new point or [After/Before] <exit>:").into_owned(),
+            Step::FitAddNew { .. } => crate::t!("SPLINEDIT  Specify new fit point to add <exit>:").into_owned(),
+            Step::Options if self.has_fit_data() && self.closed() => crate::t!("SPLINEDIT  [Fit data/Open/Move vertex/Refine/rEverse/convert to Polyline/Undo/eXit] <eXit>:").into_owned(),
+            Step::Options if self.has_fit_data() => crate::t!("SPLINEDIT  [Fit data/Close/Join/Move vertex/Refine/rEverse/convert to Polyline/Undo/eXit] <eXit>:").into_owned(),
             Step::SelectSpline => crate::t!("SPLINEDIT  Select spline:").into_owned(),
             Step::Options if self.closed() => crate::t!("SPLINEDIT  [Open/Move vertex/Refine/rEverse/convert to Polyline/Undo/eXit] <eXit>:").into_owned(),
             Step::Options => crate::t!("SPLINEDIT  [Close/Join/Move vertex/Refine/rEverse/convert to Polyline/Undo/eXit] <eXit>:").into_owned(),
@@ -205,8 +242,12 @@ impl CadCommand for SplineditCommand {
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
         match self.step {
+            Step::FitOptions => vec![CmdOption::new("Add", "A"), CmdOption::new("Delete", "D"), CmdOption::new("Move", "M"), CmdOption::new("Exit", "X")],
+            Step::FitMove { .. } => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Select point", "S"), CmdOption::new("Exit", "X")],
+            Step::FitAddNew { first: true, .. } => vec![CmdOption::new("After", "A"), CmdOption::new("Before", "B")],
             Step::Options => {
                 let mut options = vec![if self.closed() { CmdOption::new("Open", "O") } else { CmdOption::new("Close", "C") }];
+                if self.has_fit_data() { options.insert(0, CmdOption::new("Fit data", "F")); }
                 if !self.closed() { options.push(CmdOption::new("Join", "J")); }
                 options.extend([CmdOption::new("Move vertex", "M"), CmdOption::new("Refine", "R"), CmdOption::new("Reverse", "E"), CmdOption::new("Polyline (lines)", "P"), CmdOption::new("Undo", "U"), CmdOption::new("Exit", "X")]);
                 options
@@ -244,12 +285,13 @@ impl CadCommand for SplineditCommand {
             }
         }
     }
-    fn wants_text_input(&self) -> bool { !matches!(self.step, Step::SelectSpline | Step::Join | Step::Add | Step::Delete | Step::Move { .. } | Step::SelectVertex { .. }) }
+    fn wants_text_input(&self) -> bool { !matches!(self.step, Step::SelectSpline | Step::Join | Step::Add | Step::Delete | Step::Move { .. } | Step::SelectVertex { .. } | Step::FitMove { .. } | Step::FitSelectMove | Step::FitDelete | Step::FitAddPick | Step::FitAddNew { .. }) }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let upper = text.trim().to_uppercase();
         if upper.is_empty() { return Some(self.on_enter()); }
         match self.step {
             Step::Options => match upper.as_str() {
+                "F" | "FIT" if self.has_fit_data() => self.step = Step::FitOptions,
                 "P" | "POLYLINE" => self.step = Step::PolylinePrecision,
                 "J" | "JOIN" if !self.closed() => { self.join_candidates.clear(); self.step = Step::Join; },
                 "R" | "REFINE" => self.step = Step::Refine,
@@ -273,6 +315,28 @@ impl CadCommand for SplineditCommand {
                     if self.spline.as_ref() == Some(&spline) { return Some(CmdResult::NeedPoint); }
                     return Some(self.replace(spline));
                 }
+                _ => {}
+            },
+            Step::FitOptions => match upper.as_str() {
+                "A" | "ADD" => self.step = Step::FitAddPick,
+                "D" | "DELETE" => self.step = Step::FitDelete,
+                "M" | "MOVE" => self.step = Step::FitMove { index: 0 },
+                "X" | "EXIT" => self.step = Step::Options,
+                _ => {}
+            },
+            Step::FitMove { index } => {
+                let count = self.spline.as_ref()?.fit_points.len();
+                if count == 0 { return Some(CmdResult::NeedPoint); }
+                self.step = match upper.as_str() {
+                    "N" | "NEXT" => Step::FitMove { index: (index + 1) % count },
+                    "P" | "PREVIOUS" => Step::FitMove { index: (index + count - 1) % count },
+                    "S" | "SELECT" | "SELECT POINT" => Step::FitSelectMove,
+                    "X" | "EXIT" => Step::FitOptions, _ => self.step,
+                };
+            }
+            Step::FitAddNew { first: true, .. } => match upper.as_str() {
+                "A" | "AFTER" => self.step = Step::FitAddNew { index: 1, first: false },
+                "B" | "BEFORE" => self.step = Step::FitAddNew { index: 0, first: false },
                 _ => {}
             },
             Step::PolylinePrecision => {
@@ -330,7 +394,7 @@ impl CadCommand for SplineditCommand {
         Some(CmdResult::NeedPoint)
     }
     fn wants_point_pick_context(&self) -> bool {
-        matches!(self.step, Step::Delete | Step::SelectVertex { .. })
+        matches!(self.step, Step::Delete | Step::SelectVertex { .. } | Step::FitDelete | Step::FitSelectMove | Step::FitAddPick)
     }
     fn set_point_pick_context(&mut self, context: Option<crate::command::PointPickContext>) {
         self.pick_context = context;
@@ -338,6 +402,31 @@ impl CadCommand for SplineditCommand {
     fn on_point(&mut self, point: DVec3) -> CmdResult {
         if !point.is_finite() { return CmdResult::NeedPoint; }
         match self.step {
+            Step::FitSelectMove | Step::FitDelete | Step::FitAddPick => {
+                let Some(index) = self.picked_fit_point(point) else { return CmdResult::NeedPoint; };
+                match self.step {
+                    Step::FitSelectMove => { self.step = Step::FitMove { index }; CmdResult::NeedPoint }
+                    Step::FitAddPick => { self.step = Step::FitAddNew { index: index + 1, first: index == 0 }; CmdResult::NeedPoint }
+                    _ => {
+                        let mut points = self.spline.as_ref().unwrap().fit_points.clone();
+                        if points.len() <= 3 { self.step = Step::FitOptions; return CmdResult::ReportError(crate::t!("Cannot delete beyond this.").into_owned()); }
+                        points.remove(index); self.replace_fit_points(points)
+                    }
+                }
+            }
+            Step::FitMove { index } => {
+                let mut points = self.spline.as_ref().unwrap().fit_points.clone();
+                let Some(vertex) = points.get_mut(index) else { return CmdResult::NeedPoint; };
+                *vertex = Vector3::new(point.x,point.y,point.z); self.replace_fit_points(points)
+            }
+            Step::FitAddNew { index, .. } => {
+                let mut points = self.spline.as_ref().unwrap().fit_points.clone();
+                if index > points.len() { return CmdResult::NeedPoint; }
+                points.insert(index,Vector3::new(point.x,point.y,point.z));
+                let result = self.replace_fit_points(points);
+                if matches!(&result, CmdResult::ReplaceManyContinue(_)) { self.step = Step::FitAddNew { index: index + 1, first: false }; }
+                result
+            }
             Step::SelectVertex { weight, refine } => {
                 if let Some(index) = self.picked_vertex(point) {
                     self.step = if weight { Step::Weight { index } } else { Step::Move { index, refine } };
@@ -376,6 +465,10 @@ impl CadCommand for SplineditCommand {
     fn on_enter(&mut self) -> CmdResult {
         match self.step {
             Step::SelectSpline | Step::Options => CmdResult::Cancel,
+            Step::FitOptions => { self.step = Step::Options; CmdResult::NeedPoint }
+            Step::FitDelete | Step::FitAddPick | Step::FitSelectMove => { self.step = Step::FitOptions; CmdResult::NeedPoint }
+            Step::FitAddNew { .. } => { self.step = Step::FitAddPick; CmdResult::NeedPoint }
+            Step::FitMove { .. } => self.on_text_input("N").unwrap_or(CmdResult::NeedPoint),
             Step::Join => self.finish_join(),
             Step::PolylinePrecision => self.convert_polyline(10),
             Step::Refine => { self.step = Step::Options; CmdResult::NeedPoint }

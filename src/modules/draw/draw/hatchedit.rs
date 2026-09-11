@@ -31,6 +31,8 @@ pub struct HatcheditCommand {
     store_origin: bool,
     current_origin: [f64; 2],
     origin_plane: cadkernel::space::Plane,
+    origin_bounds: Option<([f64;2],[f64;2])>,
+    origin_bounds_unavailable: bool,
     style: Option<acadrust::entities::HatchStyleType>,
     annotative: Option<bool>,
     annotative_current: bool,
@@ -53,6 +55,8 @@ impl HatcheditCommand {
             origin: None,
             disassociate: false,
             store_origin: false,
+            origin_bounds: None,
+            origin_bounds_unavailable: false,
             current_origin: [0.0, 0.0],
             origin_plane: cadkernel::space::Plane::from_axes([0.0;3],[1.0,0.0,0.0],[0.0,1.0,0.0]),
             style: None,
@@ -88,6 +92,8 @@ impl HatcheditCommand {
             origin: None,
             disassociate: false,
             store_origin: false,
+            origin_bounds: None,
+            origin_bounds_unavailable: false,
             current_origin: [0.0, 0.0],
             origin_plane: cadkernel::space::Plane::from_axes([0.0;3],[1.0,0.0,0.0],[0.0,1.0,0.0]),
             style: None,
@@ -141,6 +147,15 @@ impl HatcheditCommand {
         if let Some(acadrust::EntityType::Hatch(hatch)) = entity {
             self.style_current = hatch.style;
             self.origin_plane = crate::entities::curve::ocs_plane(hatch.normal, hatch.elevation);
+            self.origin_bounds = hatch.paths.iter().flat_map(|path| &path.edges)
+                .map(crate::entities::hatch::edge_curve).collect::<Option<Vec<_>>>()
+                .and_then(|curves| {
+                    // The origin command's elliptic boundary extents differ from
+                    // geometric extrema; leave that case unavailable until its
+                    // placement convention is represented by the kernel.
+                    if curves.iter().any(|curve| matches!(curve, cadkernel::geom2d::Curve::Ellipse(_) | cadkernel::geom2d::Curve::Nurbs(_))) { return None; }
+                    cadkernel::geom2d::analytic_curve_bounds(&curves)
+                });
         }
         self.source_appearance=entity.map(|e|{let c=e.common();(c.color,c.layer.clone(),c.transparency)});
         self.current_color=current_color;self.current_transparency=current_transparency;self
@@ -196,7 +211,9 @@ impl CadCommand for HatcheditCommand {
             }
             return match input {
                 "annotative"=>if self.annotative_current {"Make hatch annotative [Yes/No] <Y>:"} else {"Make hatch annotative [Yes/No] <N>:"},
-                "origin"=>"[Use current origin/Set new origin] <Use current origin>:",
+                "origin" if self.origin_bounds_unavailable=>"Boundary extents unavailable for this geometry. [Use current origin/Set new origin/Default to boundary extents] <Use current origin>:",
+                "origin"=>"[Use current origin/Set new origin/Default to boundary extents] <Use current origin>:",
+                "origin-extents"=>"[bottom Left/bottom Right/top rIght/top lEft/Center] <bottom Left>:",
                 "origin-point"=>"Select point:",
                 "origin-store"=>"Store as default origin? [Yes/No] <N>:",
                 "pattern"=>"Enter a pattern name or [Solid]:",
@@ -271,7 +288,8 @@ impl CadCommand for HatcheditCommand {
         if let Some(input) = self.input {
             use crate::command::CmdOption;
             return match input {
-                "origin" => vec![CmdOption::new("Use current origin", "U"), CmdOption::new("Set new origin", "S")],
+                "origin" => vec![CmdOption::new("Use current origin", "U"), CmdOption::new("Set new origin", "S"), CmdOption::new("Default to boundary extents", "D")],
+                "origin-extents" => vec![CmdOption::new("Bottom left", "L"), CmdOption::new("Bottom right", "R"), CmdOption::new("Top right", "I"), CmdOption::new("Top left", "E"), CmdOption::new("Center", "C")],
                 "origin-store" => vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")],
                 "style" => vec![CmdOption::new("Ignore", "I"), CmdOption::new("Outer", "O"), CmdOption::new("Normal", "N")],
                 "draworder" => vec![CmdOption::new("Do not change", "N"), CmdOption::new("Send to back", "B"), CmdOption::new("Bring to front", "F"), CmdOption::new("Behind boundary", "H"), CmdOption::new("In front of boundary", "D")],
@@ -311,8 +329,26 @@ impl CadCommand for HatcheditCommand {
                 "origin" => match keyword.as_str() {
                     "U" | "USE" => { self.origin = Some((self.current_origin[0], self.current_origin[1])); return self.apply_result(self.update_operation()); }
                     "S" | "SET" => { self.input = Some("origin-point"); }
+                    "D" | "DEFAULT" => {
+                        self.origin_bounds_unavailable = self.origin_bounds.is_none();
+                        if !self.origin_bounds_unavailable { self.input = Some("origin-extents"); }
+                    }
                     _ => {},
                 },
+                "origin-extents" => {
+                    if let Some((min,max)) = self.origin_bounds {
+                        let origin = match keyword.as_str() {
+                            "L" | "LEFT" => min,
+                            "R" | "RIGHT" => [max[0],min[1]],
+                            "I" | "TOP RIGHT" => max,
+                            "E" | "TOP LEFT" => [min[0],max[1]],
+                            "C" | "CENTER" => [min[0]*0.5+max[0]*0.5,min[1]*0.5+max[1]*0.5],
+                            _ => return Some(CmdResult::NeedPoint),
+                        };
+                        self.origin = Some((origin[0],origin[1]));
+                        self.input = Some("origin-store");
+                    }
+                }
                 "origin-point" => {
                     let values: Option<Vec<f64>> = text.split(',').map(|s| s.trim().parse().ok()).collect();
                     if let Some(values) = values.filter(|v| (2..=3).contains(&v.len()) && v.iter().all(|n| n.is_finite())) {
@@ -534,6 +570,10 @@ impl CadCommand for HatcheditCommand {
                 self.input=Some("pattern");CmdResult::NeedPoint
             }
             Some("origin")=>{self.origin=Some((self.current_origin[0],self.current_origin[1]));self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel)},
+            Some("origin-extents")=>{
+                if let Some((min,_)) = self.origin_bounds { self.origin=Some((min[0],min[1])); self.input=Some("origin-store"); }
+                CmdResult::NeedPoint
+            },
             Some("origin-point")=>CmdResult::NeedPoint,
             Some("origin-store")=>self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel),
             Some("style")=>{self.style=Some(self.style_current);self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel)},

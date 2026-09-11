@@ -596,9 +596,23 @@ impl OpenCADStudio {
 
             "REVERSE" => {
                 use crate::modules::draw::modify::reverse::ReverseCommand;
-                let new_cmd = ReverseCommand::new();
-                self.command_line.push_info(&new_cmd.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+                if self.tabs[i].scene.selected.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let selection = SelectObjectsCommand::new("REVERSE");
+                    self.command_line.push_info(&selection.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(selection));
+                } else {
+                    let replacements = self.tabs[i].scene.selected_entities().into_iter()
+                        .filter(|(handle, _)| !self.tabs[i].scene.is_layer_locked(*handle))
+                        .filter_map(|(handle, entity)| ReverseCommand::reversed(entity)
+                            .map(|reversed| (handle, vec![reversed])))
+                        .collect::<Vec<_>>();
+                    if !replacements.is_empty() {
+                        return Some(self.apply_cmd_result(crate::command::CmdResult::ReplaceMany(
+                            replacements, Vec::new(),
+                        )));
+                    }
+                }
             }
 
             "MEASUREGEOM" => {

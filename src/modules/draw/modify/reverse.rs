@@ -54,7 +54,7 @@ impl ReverseCommand {
     }
 
     /// Build a reversed copy of `entity`, or `None` for an unsupported type.
-    fn reversed(entity: &EntityType) -> Option<EntityType> {
+    pub fn reversed(entity: &EntityType) -> Option<EntityType> {
         match entity {
             EntityType::Line(line) => {
                 let mut out = line.clone();
@@ -176,9 +176,8 @@ fn reverse_polyline2d(pl: &acadrust::entities::Polyline2D) -> acadrust::entities
     out
 }
 
-/// Reverse a Spline: flip control points and fit points, regenerate the
-/// clamped knot vector. Mirrors `splinedit::apply_spline_op`'s REVERSE branch.
-fn reverse_spline(sp: &Spline) -> Spline {
+/// Reverse stored coordinates in 3D and let the kernel mirror the knot domain.
+pub(super) fn reverse_spline(sp: &Spline) -> Spline {
     let mut out = sp.clone();
     out.control_points.reverse();
     out.fit_points.reverse();
@@ -186,8 +185,11 @@ fn reverse_spline(sp: &Spline) -> Spline {
     if out.weights.len() == out.control_points.len() {
         out.weights.reverse();
     }
-    out.knots =
-        Spline::generate_clamped_knots(out.degree as usize, out.control_points.len());
+    if let Some(curve) = super::spline_ops::spline_to_nurbs(sp) {
+        out.knots = curve.reversed().knots().to_vec();
+    }
+    out.begin_tangent = acadrust::types::Vector3::new(-sp.end_tangent.x, -sp.end_tangent.y, -sp.end_tangent.z);
+    out.end_tangent = acadrust::types::Vector3::new(-sp.begin_tangent.x, -sp.begin_tangent.y, -sp.begin_tangent.z);
     out
 }
 

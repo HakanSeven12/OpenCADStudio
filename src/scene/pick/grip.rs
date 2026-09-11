@@ -56,6 +56,8 @@ pub enum GripEditMode {
     Lengthen,
     Radius,
     ArcLength,
+    RectangleWidth,
+    RectangleHeight,
 }
 
 #[derive(Clone, Debug)]
@@ -104,6 +106,18 @@ impl GripEdit {
     pub fn arc_length(handle: Handle, grip_id: usize, world: DVec3) -> Self {
         let mut edit = Self::single(handle, grip_id, false, world);
         edit.mode = GripEditMode::ArcLength;
+        edit
+    }
+
+    pub fn rectangle_width(handle: Handle, grip_id: usize, world: DVec3) -> Self {
+        let mut edit = Self::single(handle, grip_id, false, world);
+        edit.mode = GripEditMode::RectangleWidth;
+        edit
+    }
+
+    pub fn rectangle_height(handle: Handle, grip_id: usize, world: DVec3) -> Self {
+        let mut edit = Self::single(handle, grip_id, false, world);
+        edit.mode = GripEditMode::RectangleHeight;
         edit
     }
 }

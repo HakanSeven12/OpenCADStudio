@@ -86,6 +86,20 @@ fn make_pline(points: &[DVec3], plane: WorkingPlane) -> EntityType {
     }))
 }
 
+/// Plain four-corner rectangles still use the lightweight polyline entity,
+/// but carry the same semantic hint as rectangles made by the full RECT
+/// command.  Keep this separate from `make_pline`, which is also used by
+/// polygon commands.
+fn make_basic_rect(points: &[DVec3; 4], plane: WorkingPlane) -> EntityType {
+    let mut entity = make_pline(points, plane);
+    if let EntityType::LwPolyline(polyline) = &mut entity {
+        let mut marker = acadrust::xdata::ExtendedDataRecord::new("OCS_RECTANGLE");
+        marker.add_value(acadrust::xdata::XDataValue::Integer16(1));
+        polyline.common.extended_data.add_record(marker);
+    }
+    entity
+}
+
 #[derive(Clone, Copy)]
 struct RectStyle {
     chamfer_first: f64,
@@ -894,7 +908,7 @@ impl CadCommand for RectRotCommand {
                 let c = b + perp * h;
                 let d = a + perp * h;
                 let corners = [a, b, c, d].map(|point| self.plane.to_world(point));
-                CmdResult::CommitAndExit(make_pline(&corners, self.plane))
+                CmdResult::CommitAndExit(make_basic_rect(&corners, self.plane))
             }
         }
     }
@@ -998,7 +1012,7 @@ impl CadCommand for RectCenCommand {
                     return CmdResult::NeedPoint;
                 }
                 let q = ucs_box_around_center(c, pt, self.plane);
-                CmdResult::CommitAndExit(make_pline(&q, self.plane))
+                CmdResult::CommitAndExit(make_basic_rect(&q, self.plane))
             }
         }
     }
@@ -1477,6 +1491,25 @@ fn edge_poly_params(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn basic_rectangle_constructor_adds_semantic_marker() {
+        let plane = WorkingPlane::default();
+        let corners = [
+            DVec3::new(0.0, 0.0, 0.0),
+            DVec3::new(10.0, 0.0, 0.0),
+            DVec3::new(10.0, 5.0, 0.0),
+            DVec3::new(0.0, 5.0, 0.0),
+        ];
+        let EntityType::LwPolyline(polyline) = make_basic_rect(&corners, plane) else {
+            panic!("rectangle constructor must create an LwPolyline");
+        };
+        assert!(polyline
+            .common
+            .extended_data
+            .get_record("OCS_RECTANGLE")
+            .is_some());
+    }
 
     #[test]
     fn polygon_variants_share_last_valid_side_count() {

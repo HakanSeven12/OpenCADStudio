@@ -984,6 +984,12 @@ bg={bg_ms:.1}ms n={view_count}"
                         crate::scene::pick::grip::GripEditMode::ArcLength => {
                             crate::scene::model::object::GripMenuAction::ArcLength
                         }
+                        crate::scene::pick::grip::GripEditMode::RectangleWidth => {
+                            crate::scene::model::object::GripMenuAction::RectangleWidth
+                        }
+                        crate::scene::pick::grip::GripEditMode::RectangleHeight => {
+                            crate::scene::model::object::GripMenuAction::RectangleHeight
+                        }
                         _ => return None,
                     };
                     let original = self
@@ -1772,6 +1778,8 @@ bg={bg_ms:.1}ms n={view_count}"
                 crate::scene::pick::grip::GripEditMode::Lengthen
                     | crate::scene::pick::grip::GripEditMode::Radius
                     | crate::scene::pick::grip::GripEditMode::ArcLength
+                    | crate::scene::pick::grip::GripEditMode::RectangleWidth
+                    | crate::scene::pick::grip::GripEditMode::RectangleHeight
             )
         });
         let dyn_capturing =

@@ -888,6 +888,13 @@ pub(crate) fn is_rectangle(pline: &LwPolyline) -> bool {
     if pline.common.extended_data.get_record("OCS_RECTANGLE").is_some() {
         return true;
     }
+    is_resizable_rectangle(pline)
+}
+
+/// Geometry check used for constrained rectangle grips. Unlike the semantic
+/// marker, this must stop matching as soon as an unrestricted vertex edit has
+/// distorted the four-corner rectangle.
+fn is_resizable_rectangle(pline: &LwPolyline) -> bool {
     if !pline.is_closed
         || pline.vertices.len() != 4
         || pline.vertices.iter().any(|vertex| vertex.bulge.abs() > 1.0e-9)
@@ -1242,7 +1249,19 @@ impl crate::entities::traits::Grippable for LwPolyline {
                 action: GripMenuAction::ConvertToArc,
             }
         };
-        vec![
+        let mut items = Vec::new();
+        if is_resizable_rectangle(self) && seg < 4 {
+            // Moving an edge changes the dimension perpendicular to it.
+            items.push(GripMenuItem {
+                label: if seg % 2 == 0 { "Height" } else { "Width" },
+                action: if seg % 2 == 0 {
+                    GripMenuAction::RectangleHeight
+                } else {
+                    GripMenuAction::RectangleWidth
+                },
+            });
+        }
+        items.extend([
             GripMenuItem {
                 label: "Stretch",
                 action: GripMenuAction::Stretch,
@@ -1252,7 +1271,94 @@ impl crate::entities::traits::Grippable for LwPolyline {
                 action: GripMenuAction::AddVertex,
             },
             convert,
-        ]
+        ]);
+        items
+    }
+
+    fn grip_menu_value_prompt(
+        &self,
+        grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+    ) -> Option<&'static str> {
+        use crate::scene::model::object::GripMenuAction as A;
+        let n = self.vertices.len();
+        (is_resizable_rectangle(self)
+            && n == 4
+            && (n..n + 4).contains(&grip_id)
+            && matches!(action, A::RectangleWidth | A::RectangleHeight))
+        .then_some(match action {
+            A::RectangleWidth => "New width",
+            _ => "New height",
+        })
+    }
+
+    fn grip_menu_point_value(
+        &self,
+        grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+        point: glam::DVec3,
+    ) -> Option<f64> {
+        use crate::scene::model::object::GripMenuAction as A;
+        if !is_resizable_rectangle(self)
+            || !matches!(action, A::RectangleWidth | A::RectangleHeight)
+        {
+            return None;
+        }
+        let seg = grip_id.checked_sub(4)?;
+        if seg >= 4 {
+            return None;
+        }
+        let opposite_mid = {
+            let a = self.vertices[(seg + 2) % 4].location;
+            let b = self.vertices[(seg + 3) % 4].location;
+            Vec2::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5)
+        };
+        let edge = {
+            let a = self.vertices[seg].location;
+            let b = self.vertices[(seg + 1) % 4].location;
+            Vec2::new(b.x - a.x, b.y - a.y)
+        };
+        let edge_length = edge.length();
+        if edge_length <= 1.0e-12 {
+            return None;
+        }
+        let normal = Vec2::new(-edge.y / edge_length, edge.x / edge_length);
+        let value = (Vec2::new(point.x, point.y) - opposite_mid).dot(normal).abs();
+        (value > 1.0e-9).then_some(value)
+    }
+
+    fn apply_grip_menu_value(
+        &mut self,
+        grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+        value: f64,
+    ) {
+        use crate::scene::model::object::GripMenuAction as A;
+        if !is_resizable_rectangle(self) || value <= 1.0e-9
+            || !matches!(action, A::RectangleWidth | A::RectangleHeight)
+        {
+            return;
+        }
+        let Some(seg) = grip_id.checked_sub(4) else {
+            return;
+        };
+        if seg >= 4 {
+            return;
+        }
+        let i0 = seg;
+        let i1 = (seg + 1) % 4;
+        let o0 = (seg + 3) % 4;
+        let o1 = (seg + 2) % 4;
+        let selected_mid = (self.vertices[i0].location + self.vertices[i1].location) * 0.5;
+        let opposite_mid = (self.vertices[o0].location + self.vertices[o1].location) * 0.5;
+        let delta = selected_mid - opposite_mid;
+        let distance = (delta.x * delta.x + delta.y * delta.y).sqrt();
+        if distance <= 1.0e-9 {
+            return;
+        }
+        let direction = acadrust::types::Vector2::new(delta.x / distance, delta.y / distance);
+        self.vertices[i0].location = self.vertices[o0].location + direction * value;
+        self.vertices[i1].location = self.vertices[o1].location + direction * value;
     }
     fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
         use crate::scene::model::object::GripMenuAction as A;
@@ -1440,7 +1546,8 @@ impl crate::entities::traits::MassPropsCalc for acadrust::entities::LwPolyline {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entities::traits::PropertyEditable;
+    use crate::entities::traits::{Grippable, PropertyEditable};
+    use crate::scene::model::object::GripMenuAction;
     use acadrust::entities::{LwPolyline, LwVertex};
     use acadrust::Vector2;
 
@@ -1451,6 +1558,50 @@ mod tests {
             pl.vertices.push(LwVertex::new(Vector2::new(i as f64 * 10.0, 0.0)));
         }
         pl
+    }
+
+    fn make_test_rectangle() -> LwPolyline {
+        let mut pl = LwPolyline::default();
+        pl.is_closed = true;
+        pl.vertices = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]
+            .into_iter()
+            .map(|(x, y)| LwVertex::new(Vector2::new(x, y)))
+            .collect();
+        pl
+    }
+
+    #[test]
+    fn rectangle_midpoint_offers_dimension_before_stretch() {
+        let pl = make_test_rectangle();
+        let bottom = pl.grip_menu(4);
+        assert_eq!(bottom[0].action, GripMenuAction::RectangleHeight);
+        assert_eq!(bottom[1].action, GripMenuAction::Stretch);
+
+        let right = pl.grip_menu(5);
+        assert_eq!(right[0].action, GripMenuAction::RectangleWidth);
+        assert_eq!(right[1].action, GripMenuAction::Stretch);
+    }
+
+    #[test]
+    fn rectangle_dimension_edit_keeps_opposite_edge_fixed() {
+        let mut pl = make_test_rectangle();
+        pl.apply_grip_menu_value(6, GripMenuAction::RectangleHeight, 8.0);
+        assert_eq!(pl.vertices[0].location, Vector2::new(0.0, 0.0));
+        assert_eq!(pl.vertices[1].location, Vector2::new(10.0, 0.0));
+        assert_eq!(pl.vertices[2].location, Vector2::new(10.0, 8.0));
+        assert_eq!(pl.vertices[3].location, Vector2::new(0.0, 8.0));
+        assert!(is_resizable_rectangle(&pl));
+    }
+
+    #[test]
+    fn rectangle_point_preview_reports_full_dimension() {
+        let pl = make_test_rectangle();
+        let value = pl.grip_menu_point_value(
+            5,
+            GripMenuAction::RectangleWidth,
+            glam::DVec3::new(14.0, 2.5, 0.0),
+        );
+        assert_eq!(value, Some(14.0));
     }
 
     #[test]

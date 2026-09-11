@@ -1590,6 +1590,12 @@ impl OpenCADStudio {
                 GripEditMode::ArcLength => {
                     Some(crate::scene::model::object::GripMenuAction::ArcLength)
                 }
+                GripEditMode::RectangleWidth => {
+                    Some(crate::scene::model::object::GripMenuAction::RectangleWidth)
+                }
+                GripEditMode::RectangleHeight => {
+                    Some(crate::scene::model::object::GripMenuAction::RectangleHeight)
+                }
                 GripEditMode::Stretch => None,
             };
             let actions: Vec<_> = if menu_action.is_some() {
@@ -3268,6 +3274,7 @@ impl OpenCADStudio {
             if matches!(
                 grip.mode,
                 GripEditMode::Lengthen | GripEditMode::Radius | GripEditMode::ArcLength
+                    | GripEditMode::RectangleWidth | GripEditMode::RectangleHeight
             ) {
                 self.grip_pending = None;
                 self.command_line.input.clear();

@@ -209,6 +209,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 GripEditMode::Lengthen
                                     | GripEditMode::Radius
                                     | GripEditMode::ArcLength
+                                    | GripEditMode::RectangleWidth
+                                    | GripEditMode::RectangleHeight
                             )
                         }) {
                             self.command_line.input.push_str(&s);
@@ -262,6 +264,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 GripEditMode::Lengthen
                                     | GripEditMode::Radius
                                     | GripEditMode::ArcLength
+                                    | GripEditMode::RectangleWidth
+                                    | GripEditMode::RectangleHeight
                             )
                         }) {
                             self.command_line.input.pop();
@@ -316,6 +320,12 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         crate::scene::model::object::GripMenuAction::ArcLength => {
                             Some(GripEditMode::ArcLength)
                         }
+                        crate::scene::model::object::GripMenuAction::RectangleWidth => {
+                            Some(GripEditMode::RectangleWidth)
+                        }
+                        crate::scene::model::object::GripMenuAction::RectangleHeight => {
+                            Some(GripEditMode::RectangleHeight)
+                        }
                         _ => None,
                     };
                     expected_mode.is_some_and(|mode| {
@@ -368,6 +378,12 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 ) | (
                                     GripEditMode::ArcLength,
                                     crate::scene::model::object::GripMenuAction::ArcLength,
+                                ) | (
+                                    GripEditMode::RectangleWidth,
+                                    crate::scene::model::object::GripMenuAction::RectangleWidth,
+                                ) | (
+                                    GripEditMode::RectangleHeight,
+                                    crate::scene::model::object::GripMenuAction::RectangleHeight,
                                 )
                             )
                                 && grip.handle == pending.handle
@@ -1410,6 +1426,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         GripMenuAction::Lengthen
                             | GripMenuAction::Radius
                             | GripMenuAction::ArcLength
+                            | GripMenuAction::RectangleWidth
+                            | GripMenuAction::RectangleHeight
                     ) {
                         if let Some((_, grip)) = self.tabs[i]
                             .selected_grip_handles
@@ -1439,6 +1457,16 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     popup.grip_id,
                                     grip.world,
                                 ),
+                                GripMenuAction::RectangleWidth => GripEdit::rectangle_width(
+                                    popup.handle,
+                                    popup.grip_id,
+                                    grip.world,
+                                ),
+                                GripMenuAction::RectangleHeight => GripEdit::rectangle_height(
+                                    popup.handle,
+                                    popup.grip_id,
+                                    grip.world,
+                                ),
                                 _ => GripEdit::lengthen(
                                     popup.handle,
                                     popup.grip_id,
@@ -1460,6 +1488,10 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             self.command_line.push_info(
                                 crate::t!("Specify point or enter arc length:").as_ref(),
                             );
+                        } else if matches!(item.action, GripMenuAction::RectangleWidth) {
+                            self.command_line.push_info("Specify point or enter width:");
+                        } else if matches!(item.action, GripMenuAction::RectangleHeight) {
+                            self.command_line.push_info("Specify point or enter height:");
                         } else {
                             self.command_line.push_info(
                                 crate::t!("Specify point or enter distance:").as_ref(),

@@ -2485,6 +2485,8 @@ fn emit_wire(
         let sx = ((ax.x - o.x).powi(2) + (ax.y - o.y).powi(2) + (ax.z - o.z).powi(2)).sqrt();
         let sy = ((ay.x - o.x).powi(2) + (ay.y - o.y).powi(2) + (ay.z - o.z).powi(2)).sqrt();
         lw.world_width * ((sx + sy) * 0.5) as f32
+    } else if lw.world_width < 0.0 {
+        lw.world_width
     } else {
         0.0
     };

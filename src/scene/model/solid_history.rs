@@ -1609,6 +1609,12 @@ pub fn primitive_properties(
     document: &acadrust::CadDocument,
     handle: acadrust::Handle,
 ) -> Vec<PropSection> {
+    if !matches!(
+        document.get_entity(handle),
+        Some(acadrust::EntityType::Solid3D(_) | acadrust::EntityType::Surface(_))
+    ) {
+        return Vec::new();
+    }
     let Some(operation) = primitive_property_operation(document, handle) else {
         return brep_properties(document, handle);
     };

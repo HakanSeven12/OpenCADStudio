@@ -120,6 +120,7 @@ pub fn visualization_section(entity: &EntityType) -> Option<PropSection> {
             | EntityType::BlockEnd(_)
             | EntityType::Seqend(_)
             | EntityType::Leader(_)
+            | EntityType::Wipeout(_)
             | EntityType::Unknown(_)
             // Non-plotting drawing-view border: never rendered, no properties.
             | EntityType::ViewBorder(_)

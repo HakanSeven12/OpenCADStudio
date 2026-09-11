@@ -83,6 +83,7 @@ fn resolve_hw(taper_ratio: f32, world_hw: f32, px_hw: f32) -> f32 {
         return max((taper_ratio * world_hw) / u.world_per_pixel, 0.5);
     }
     if world_hw > 0.0 { return max(world_hw / u.world_per_pixel, 0.5); }
+    if world_hw < 0.0 { return max(-world_hw, 0.5); }
     var display_hw = max(px_hw * u.lineweight_scale, 0.5);
     if u.lineweight_scale < 0.0 {
         let scale = -u.lineweight_scale;
@@ -200,7 +201,7 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
 
         let clip_pos = mix(clip_a, clip_b, which_end);
 
-        let hw = resolve_hw(0.0, 0.0, c.half_width);
+        let hw = resolve_hw(0.0, c.world_half_width, c.half_width);
         let ext = which_end * 2.0 - 1.0;
         let offset_px = perp * hw * side + dir * hw * ext;
         let ndc_offset = offset_px / (u.viewport_size * 0.5);

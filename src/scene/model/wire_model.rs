@@ -407,11 +407,10 @@ pub struct WireModel {
     pub pattern: [f32; 8],
     /// Rendered line width in screen pixels (half-width = line_weight_px / 2).
     pub line_weight_px: f32,
-    /// World-space band width (drawing units). `0.0` = a normal wire whose
-    /// width comes from `line_weight_px` (screen pixels). Non-zero = a wide
-    /// polyline: the shader expands this centre-line to `world_width` world
-    /// units (scaling with zoom) so the band IS the wire — the linetype dash
-    /// pattern then applies to the band instead of a separate hatch fill.
+    /// World-space band width (drawing units). Positive values create a wide
+    /// polyline band that scales with zoom. Zero uses `line_weight_px` and the
+    /// drawing's lineweight display setting. A negative value encodes a fixed
+    /// screen-pixel width whose absolute value bypasses that display setting.
     pub world_width: f32,
     /// Per-point full band width (drawing units), aligned index-for-index with
     /// [`points`], for a polyline whose width VARIES (a taper). Empty = a
@@ -551,6 +550,12 @@ impl WireModel {
         let mut w = Self::solid(name, hi, color, selected);
         w.points_low = lo;
         w
+    }
+
+    pub fn set_fixed_screen_width(&mut self, width_px: f32) {
+        let width_px = width_px.max(1.0);
+        self.line_weight_px = width_px;
+        self.world_width = -width_px;
     }
 
     /// Create a solid wire (no dash pattern, 1px weight).

@@ -31,6 +31,7 @@ pub struct HatcheditCommand {
     style: Option<acadrust::entities::HatchStyleType>,
     annotative: Option<bool>,
     annotative_current: bool,
+    style_current: acadrust::entities::HatchStyleType,
     input: Option<&'static str>,
     boundary_selection: Vec<Handle>,
     source_appearance: Option<(acadrust::types::Color,String,acadrust::types::Transparency)>,
@@ -51,6 +52,7 @@ impl HatcheditCommand {
             style: None,
             annotative: None,
             annotative_current: false,
+            style_current: acadrust::entities::HatchStyleType::Normal,
             input: None,
             boundary_selection: Vec::new(),
             source_appearance: None,
@@ -82,6 +84,7 @@ impl HatcheditCommand {
             style: None,
             annotative: None,
             annotative_current: annotative,
+            style_current: acadrust::entities::HatchStyleType::Normal,
             input: None,
             boundary_selection: Vec::new(),
             source_appearance: None,
@@ -126,6 +129,7 @@ impl HatcheditCommand {
         }
     }
     pub fn with_appearance(mut self,entity:Option<&acadrust::EntityType>,current_color:acadrust::types::Color,current_transparency:acadrust::types::Transparency)->Self {
+        if let Some(acadrust::EntityType::Hatch(hatch)) = entity { self.style_current = hatch.style; }
         self.source_appearance=entity.map(|e|{let c=e.common();(c.color,c.layer.clone(),c.transparency)});
         self.current_color=current_color;self.current_transparency=current_transparency;self
     }
@@ -147,6 +151,14 @@ impl CadCommand for HatcheditCommand {
 
     fn prompt(&self) -> String {
         if let Some(input)=self.input {
+            if input == "style" {
+                let current = match self.style_current {
+                    acadrust::entities::HatchStyleType::Normal => "Normal",
+                    acadrust::entities::HatchStyleType::Outer => "Outer",
+                    acadrust::entities::HatchStyleType::Ignore => "Ignore",
+                };
+                return format!("Enter hatching style [Ignore/Outer/Normal] <{current}>:");
+            }
             if let Some((color,layer,transparency))=&self.source_appearance {
                 match input {
                     "color"=>return format!("New color [Truecolor/. (for use current)] <{color:?}>:"),
@@ -193,7 +205,7 @@ impl CadCommand for HatcheditCommand {
                 let scale = format!("{scale:.4}");
                 let angle = format!("{angle:.1}");
                 t!(
-                    "HATCHEDIT  Pattern:%{name}  Scale:%{scale}  Angle:%{angle}  [Properties/COlor/LAyer/Transparency/DRaw order/ASsociate/DIsassociate/ANnotative/recreate Boundary/separate Hatches] <Properties>:",
+                    "HATCHEDIT  Pattern:%{name}  Scale:%{scale}  Angle:%{angle}  [Style/Properties/COlor/LAyer/Transparency/DRaw order/ASsociate/DIsassociate/ANnotative/recreate Boundary/separate Hatches] <Properties>:",
                     name = name,
                     scale = scale,
                     angle = angle
@@ -241,6 +253,7 @@ impl CadCommand for HatcheditCommand {
         if let Some(input) = self.input {
             use crate::command::CmdOption;
             return match input {
+                "style" => vec![CmdOption::new("Ignore", "I"), CmdOption::new("Outer", "O"), CmdOption::new("Normal", "N")],
                 "draworder" => vec![CmdOption::new("Do not change", "N"), CmdOption::new("Send to back", "B"), CmdOption::new("Bring to front", "F"), CmdOption::new("Behind boundary", "H"), CmdOption::new("In front of boundary", "D")],
                 "annotative" | "boundary-associate" => vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")],
                 "boundary-type" => vec![CmdOption::new("Region", "R"), CmdOption::new("Polyline", "P")],
@@ -253,6 +266,7 @@ impl CadCommand for HatcheditCommand {
             return Vec::new();
         }
         vec![
+            crate::command::CmdOption::new("Style", "S"),
             crate::command::CmdOption::new("Properties", "P"),
             crate::command::CmdOption::new("Color", "CO"),
             crate::command::CmdOption::new("Layer", "LA"),
@@ -273,6 +287,15 @@ impl CadCommand for HatcheditCommand {
             use acadrust::types::{Color,Transparency};
             let appearance=|color,layer,transparency|HatchEditOperation::Appearance{color,layer,transparency};
             match input {
+                "style" => {
+                    self.style = match keyword.as_str() {
+                        "I" | "IGNORE" => Some(acadrust::entities::HatchStyleType::Ignore),
+                        "O" | "OUTER" => Some(acadrust::entities::HatchStyleType::Outer),
+                        "N" | "NORMAL" => Some(acadrust::entities::HatchStyleType::Normal),
+                        _ => return Some(CmdResult::NeedPoint),
+                    };
+                    return self.apply_result(self.update_operation());
+                }
                 "annotative" => {
                     let value = match keyword.as_str() { "Y" | "YES" => true, "N" | "NO" => false, _ => return Some(CmdResult::NeedPoint) };
                     self.annotative = Some(value);
@@ -329,7 +352,7 @@ impl CadCommand for HatcheditCommand {
             }
             return Some(CmdResult::NeedPoint);
         }
-        let next=match keyword.as_str(){"P"|"PROPERTIES"=>Some("pattern"),"CO"|"COLOR"=>Some("color"),"LA"|"LAYER"=>Some("layer"),
+        let next=match keyword.as_str(){"S"|"STYLE"=>Some("style"),"P"|"PROPERTIES"=>Some("pattern"),"CO"|"COLOR"=>Some("color"),"LA"|"LAYER"=>Some("layer"),
             "AN"|"ANNOTATIVE"=>Some("annotative"),"T"|"TRANSPARENCY"=>Some("transparency"),"DR"|"DRAW"|"DRAW ORDER"=>Some("draworder"),
             "B"|"BOUNDARY"|"R"|"RECREATE"=>Some("boundary-type"),_=>None};
         if let Some(input)=next {self.input=Some(input);return Some(CmdResult::NeedPoint);}
@@ -465,6 +488,7 @@ impl CadCommand for HatcheditCommand {
             None if matches!(self.step,HatcheditStep::EditOptions{..})=>{
                 self.input=Some("pattern");CmdResult::NeedPoint
             }
+            Some("style")=>{self.style=Some(self.style_current);self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel)},
             Some("annotative")=>{self.annotative=Some(self.annotative_current);self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel)},
             Some("pattern")=>{
                 if matches!(&self.step,HatcheditStep::EditOptions{name,..} if name.eq_ignore_ascii_case("SOLID")) {

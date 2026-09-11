@@ -76,6 +76,7 @@ impl ReverseCommand {
                 Some(EntityType::Polyline3D(out))
             }
             EntityType::Spline(sp) => Some(EntityType::Spline(reverse_spline(sp))),
+            EntityType::Helix(helix) => crate::entities::helix::reversed(helix).map(EntityType::Helix),
             _ => None,
         }
     }
@@ -199,7 +200,7 @@ impl CadCommand for ReverseCommand {
     }
 
     fn prompt(&self) -> String {
-        t!("REVERSE  Select line, polyline or spline to reverse:").into_owned()
+        t!("REVERSE  Select line, polyline, spline or helix to reverse:").into_owned()
     }
 
     fn needs_entity_pick(&self) -> bool {

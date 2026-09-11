@@ -134,7 +134,7 @@ impl HelixCommand {
         let start = self.center + start_direction * curve.base_radius;
         helix.start_point = Vector3::new(start.x, start.y, start.z);
         helix.axis_vector = Vector3::new(axis.x, axis.y, axis.z);
-        helix.radius = curve.base_radius;
+        helix.radius = curve.top_radius;
         helix.turns = curve.turns;
         helix.turn_height = height / curve.turns;
         helix.handedness = self.counter_clockwise;

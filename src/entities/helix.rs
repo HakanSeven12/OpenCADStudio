@@ -52,10 +52,13 @@ fn spline_curve(spline: &Spline) -> Option<NurbsCurve3> {
 
 fn axis_frame(helix: &Helix) -> Option<(Vec3, Vec3, Vec3)> {
     let base = point(helix.axis_base_point);
-    let axis = point(helix.axis_vector).normalize()?;
-    let radial = point(helix.start_point) - base;
-    let start_direction = (radial - axis * radial.dot(axis)).normalize()?;
-    Some((base, axis, start_direction))
+    let tangent = spline_curve(&helix.spline).map(|curve| curve.tangent_at(0.0)).unwrap_or([0.0;3]);
+    let (axis, radial, _) = HelixCurve::frame_from_points(base.to_array(),point(helix.axis_vector).to_array(),point(helix.start_point).to_array(),tangent)?;
+    Some((base,Vec3::from(axis),Vec3::from(radial)))
+}
+
+fn base_radius(helix: &Helix) -> Option<f64> {
+    radius_from_axis(helix, point(helix.start_point))
 }
 
 fn radius_from_axis(helix: &Helix, value: Vec3) -> Option<f64> {
@@ -77,7 +80,7 @@ fn kernel_curve(helix: &Helix, top_radius: f64) -> Option<HelixCurve> {
         base_center: base.to_array(),
         axis_direction: axis.to_array(),
         start_direction: start_direction.to_array(),
-        base_radius: helix.radius,
+        base_radius: base_radius(helix)?,
         top_radius,
         height: helix.turns * helix.turn_height,
         turns: helix.turns,
@@ -87,6 +90,27 @@ fn kernel_curve(helix: &Helix, top_radius: f64) -> Option<HelixCurve> {
             HelixDirection::Clockwise
         },
     })
+}
+
+/// Reverse generating parameters together with the exact stored spline.
+pub(crate) fn reversed(helix: &Helix) -> Option<Helix> {
+    let original_curve = spline_curve(&helix.spline)?;
+    let parameters = kernel_curve(helix,top_radius(helix))?.reversed()?;
+    let mut result = helix.clone();
+    result.axis_base_point = vector(Vec3::from(parameters.base_center));
+    result.axis_vector = vector(Vec3::from(parameters.axis_direction));
+    result.start_point = vector(Vec3::from(original_curve.point_at(1.0)));
+    result.radius = parameters.top_radius;
+    // Reverse the evaluated curve itself instead of fitting it again.
+    let reversed_curve=original_curve.reversed()?;
+    result.spline.control_points=reversed_curve.control_points().iter().map(|point|Vector3::new(point[0],point[1],point[2])).collect();
+    result.spline.fit_points.reverse();
+    result.spline.weights=if helix.spline.weights.is_empty(){Vec::new()}else{reversed_curve.weights().to_vec()};
+    result.spline.knots=reversed_curve.knots().to_vec();
+    let begin=helix.spline.begin_tangent;let end=helix.spline.end_tangent;
+    result.spline.begin_tangent=Vector3::new(-end.x,-end.y,-end.z);
+    result.spline.end_tangent=Vector3::new(-begin.x,-begin.y,-begin.z);
+    Some(result)
 }
 
 fn projected_direction(direction: Vec3, axis: Vec3) -> Option<Vec3> {
@@ -111,6 +135,7 @@ fn rebuild(helix: &mut Helix, top_radius: f64) -> bool {
     let Some(nurbs) = curve.nurbs() else {
         return false;
     };
+    helix.radius = top_radius;
     helix.spline.degree = nurbs.degree() as i32;
     helix.spline.knots = nurbs.knots().to_vec();
     helix.spline.control_points = nurbs
@@ -194,7 +219,7 @@ fn properties(helix: &Helix) -> Vec<PropSection> {
             edit(t!("Height").as_ref(), "height", height),
             edit(t!("Turns").as_ref(), "turns", helix.turns),
             edit(t!("Turn height").as_ref(), "turn_height", helix.turn_height),
-            edit(t!("Base radius").as_ref(), "base_radius", helix.radius),
+            edit(t!("Base radius").as_ref(), "base_radius", base_radius(helix).unwrap_or(0.0)),
             edit(t!("Top radius").as_ref(), "top_radius", top_radius),
             choice(t!("Twist").as_ref(), "twist", &twist, &twist_options),
             ro(t!("Turn slope").as_ref(), "turn_slope", format_angle(turn_slope)),
@@ -284,7 +309,6 @@ fn apply_geom_prop(helix: &mut Helix, field: &str, value: &str) {
             let Some((base, _, start_direction)) = axis_frame(helix) else {
                 return;
             };
-            helix.radius = number;
             helix.start_point = vector(base + start_direction * number);
         }
         "top_radius" if number >= 0.0 => {
@@ -303,6 +327,7 @@ fn apply_geom_prop(helix: &mut Helix, field: &str, value: &str) {
 fn apply_grip(helix: &mut Helix, grip_id: usize, apply: GripApply) {
     let original = helix.clone();
     let top = top_radius(helix);
+    let Some(base_radius) = base_radius(helix) else { return; };
     let Some((base, axis, start_direction)) = axis_frame(helix) else {
         return;
     };
@@ -334,7 +359,6 @@ fn apply_grip(helix: &mut Helix, grip_id: usize, apply: GripApply) {
             if radius <= EPSILON {
                 return;
             }
-            helix.radius = radius;
             helix.start_point = vector(base + radial);
         }
         (2, GripApply::Absolute(position)) => {
@@ -362,7 +386,7 @@ fn apply_grip(helix: &mut Helix, grip_id: usize, apply: GripApply) {
                 *helix = original;
                 return;
             };
-            helix.start_point = vector(base + start_direction * helix.radius);
+            helix.start_point = vector(base + start_direction * base_radius);
         }
         (3, GripApply::Absolute(position)) => {
             let position = kernel(position);

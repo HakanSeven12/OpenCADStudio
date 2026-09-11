@@ -15,7 +15,7 @@ use crate::modules::IconKind;
 use crate::t;
 use crate::ui::{icons, wrap_bar::PosReport};
 
-const PANEL_ID: &str = "draw_extension";
+pub(super) const PANEL_ID: &str = "draw_extension";
 const TITLE_ID: &str = "draw_extension_title";
 const SCALE: f32 = 0.7;
 const CELL: f32 = 36.0 * SCALE;
@@ -53,16 +53,6 @@ const TOOLS: &[Tool] = &[
         label: "Ray",
         icon: include_bytes!("../../../assets/icons/ray.svg"),
         options: &[],
-    },
-    Tool {
-        command: "MULTIPOINT",
-        label: "Multiple Points",
-        icon: include_bytes!("../../../assets/icons/multipoint.svg"),
-        options: &[
-            ("POINT", "Single Point"),
-            ("MULTIPOINT", "Multiple Points"),
-            ("DDPTYPE", "Point Style"),
-        ],
     },
     Tool {
         command: "DIVIDE",
@@ -105,6 +95,16 @@ const TOOLS: &[Tool] = &[
         label: "Donut",
         icon: include_bytes!("../../../assets/icons/donut.svg"),
         options: &[],
+    },
+    Tool {
+        command: "MULTIPOINT",
+        label: "Multiple Points",
+        icon: include_bytes!("../../../assets/icons/multipoint.svg"),
+        options: &[
+            ("POINT", "Single Point"),
+            ("MULTIPOINT", "Multiple Points"),
+            ("DDPTYPE", "Point Style"),
+        ],
     },
     Tool {
         command: "REVCLOUD",

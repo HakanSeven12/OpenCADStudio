@@ -351,6 +351,21 @@ impl Ribbon {
         self.layer_filter.clear();
     }
 
+    pub fn escape_extension(&mut self) -> bool {
+        let Some(id) = self.open_dropdown.as_deref() else {
+            return false;
+        };
+        if !draw_panel::owns_dropdown(id) {
+            return false;
+        }
+        if id == draw_panel::PANEL_ID {
+            self.close_dropdown();
+        } else {
+            self.open_dropdown = Some(draw_panel::PANEL_ID.to_string());
+        }
+        true
+    }
+
     /// Toggle the flyout of a collapsed ribbon panel (identified by its title).
     pub fn toggle_collapsed_panel(&mut self, id: &str) {
         if self.collapsed_open.as_deref() == Some(id) {

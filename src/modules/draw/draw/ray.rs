@@ -9,7 +9,7 @@ use acadrust::entities::{Ray as RayEnt, XLine as XLineEnt};
 use acadrust::types::Vector3;
 use acadrust::EntityType;
 
-use crate::command::{CadCommand, CmdResult};
+use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::scene::model::wire_model::WireModel;
 use glam::DVec3;
 
@@ -123,11 +123,62 @@ impl CadCommand for RayCommand {
 
 pub struct XLineCommand {
     base: Option<DVec3>,
+    mode: XLineMode,
+    plane: WorkingPlane,
+    reference: Option<(DVec3, DVec3)>,
+    picked: Option<EntityType>,
+    offset: Option<f64>,
+}
+
+#[derive(Clone, Copy)]
+enum XLineMode {
+    Points,
+    Direction(DVec3),
+    Angle,
+    AngleReference,
+    Bisect,
+    OffsetDistance,
+    OffsetPick,
+    OffsetSide,
 }
 
 impl XLineCommand {
     pub fn new() -> Self {
-        Self { base: None }
+        Self {
+            base: None,
+            mode: XLineMode::Points,
+            plane: WorkingPlane::default(),
+            reference: None,
+            picked: None,
+            offset: None,
+        }
+    }
+
+    fn geometry(&self, pt: DVec3) -> Option<(DVec3, DVec3)> {
+        if !pt.is_finite() { return None; }
+        let (base, direction) = match self.mode {
+            XLineMode::Points => (self.base?, pt - self.base?),
+            XLineMode::Direction(dir) => (pt, dir),
+            XLineMode::Bisect => {
+                let base = self.base?;
+                let first = self.reference?.1;
+                let last = (pt - base).try_normalize()?;
+                (base, first + last)
+            }
+            XLineMode::OffsetSide => {
+                let (base, dir) = self.reference?;
+                if let Some(distance) = self.offset {
+                    let normal = self.plane.z.cross(dir).try_normalize()?;
+                    let side = (pt - base).dot(normal);
+                    if side.abs() < 1e-10 { return None; }
+                    (base + normal * distance * side.signum(), dir)
+                } else {
+                    (pt, dir)
+                }
+            }
+            _ => return None,
+        };
+        Some((base, direction.try_normalize()?))
     }
 }
 
@@ -137,43 +188,138 @@ impl CadCommand for XLineCommand {
     }
 
     fn prompt(&self) -> String {
-        if self.base.is_none() {
-            t!("XLINE  Specify a point:").into_owned()
-        } else {
-            t!("XLINE  Specify through point:").into_owned()
-        }
+        match self.mode {
+            XLineMode::Points if self.base.is_none() => "XLINE  Specify a point or [Hor/Ver/Ang/Bisect/Offset]:",
+            XLineMode::Angle => "XLINE  Enter angle of xline <0> or [Reference]:",
+            XLineMode::AngleReference | XLineMode::OffsetPick => "XLINE  Select a line object:",
+            XLineMode::Bisect if self.base.is_none() => "XLINE  Specify angle vertex point:",
+            XLineMode::Bisect if self.reference.is_none() => "XLINE  Specify angle start point:",
+            XLineMode::Bisect => "XLINE  Specify angle end point:",
+            XLineMode::OffsetDistance => "XLINE  Specify offset distance or [Through] <Through>:",
+            XLineMode::OffsetSide if self.offset.is_some() => "XLINE  Specify side to offset:",
+            _ => "XLINE  Specify through point:",
+        }.into()
     }
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
-        if self.base.is_some() {
-            vec![CmdOption::enter(t!("Done").as_ref())]
-        } else {
-            vec![]
+        match self.mode {
+            XLineMode::Points if self.base.is_none() => vec![
+                CmdOption::new("Hor", "H"), CmdOption::new("Ver", "V"),
+                CmdOption::new("Ang", "A"), CmdOption::new("Bisect", "B"),
+                CmdOption::new("Offset", "O"),
+            ],
+            XLineMode::Angle => vec![CmdOption::new("Reference", "R")],
+            XLineMode::OffsetDistance => vec![CmdOption::new("Through", "T")],
+            _ => vec![CmdOption::enter(t!("Done").as_ref())],
         }
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
-        if let Some(base) = self.base {
-            let dir = pt - base;
-            let len = dir.length();
-            if len < 1e-6 {
-                return CmdResult::NeedPoint;
-            }
-            let dir_n = dir / len;
-            let xline = XLineEnt::new(
+        if !pt.is_finite() { return CmdResult::NeedPoint; }
+        if let Some((base, dir)) = self.geometry(pt) {
+            let entity = XLineEnt::new(
                 Vector3::new(base.x, base.y, base.z),
-                Vector3::new(dir_n.x, dir_n.y, dir_n.z),
+                Vector3::new(dir.x, dir.y, dir.z),
             );
-            CmdResult::CommitEntity(EntityType::XLine(xline))
-        } else {
-            self.base = Some(pt);
-            CmdResult::NeedPoint
+            if matches!(self.mode, XLineMode::OffsetSide) {
+                self.mode = XLineMode::OffsetPick;
+                self.reference = None;
+            }
+            return CmdResult::CommitEntity(EntityType::XLine(entity));
         }
+        match self.mode {
+            XLineMode::Points | XLineMode::Bisect if self.base.is_none() => self.base = Some(pt),
+            XLineMode::Bisect if self.reference.is_none() => {
+                if let Some(dir) = (pt - self.base.unwrap()).try_normalize() {
+                    self.reference = Some((self.base.unwrap(), dir));
+                }
+            }
+            _ => {}
+        }
+        CmdResult::NeedPoint
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        CmdResult::Cancel
+        match self.mode {
+            XLineMode::Angle => self.on_text_input("0").unwrap_or(CmdResult::NeedPoint),
+            XLineMode::OffsetDistance => {
+                self.mode = XLineMode::OffsetPick;
+                CmdResult::NeedPoint
+            }
+            _ => CmdResult::Cancel,
+        }
+    }
+
+    fn set_working_plane(&mut self, plane: WorkingPlane) { self.plane = plane; }
+    fn wants_text_input(&self) -> bool { true }
+    fn point_step_accepts_keywords(&self) -> bool { true }
+    fn dyn_field(&self) -> crate::command::DynField {
+        match self.mode {
+            XLineMode::Angle => crate::command::DynField::Angle,
+            XLineMode::OffsetDistance => crate::command::DynField::Distance,
+            _ => crate::command::DynField::Point,
+        }
+    }
+    fn dyn_commit_as_text(&self) -> bool {
+        matches!(self.mode, XLineMode::Angle | XLineMode::OffsetDistance)
+    }
+    fn dyn_auto_sign_angle(&self) -> bool { false }
+    fn needs_entity_pick(&self) -> bool {
+        matches!(self.mode, XLineMode::AngleReference | XLineMode::OffsetPick)
+    }
+    fn inject_before_entity_pick(&self) -> bool { true }
+    fn inject_picked_entity(&mut self, entity: EntityType) { self.picked = Some(entity); }
+    fn on_entity_pick(&mut self, _handle: acadrust::Handle, _pt: DVec3) -> CmdResult {
+        let xyz = |v: Vector3| DVec3::new(v.x, v.y, v.z);
+        let reference = match self.picked.take() {
+            Some(EntityType::Line(line)) => Some((xyz(line.start), xyz(line.end) - xyz(line.start))),
+            Some(EntityType::Ray(line)) => Some((xyz(line.base_point), xyz(line.direction))),
+            Some(EntityType::XLine(line)) => Some((xyz(line.base_point), xyz(line.direction))),
+            _ => None,
+        };
+        if let Some((base, dir)) = reference {
+            if let Some(dir) = dir.try_normalize() {
+                self.reference = Some((base, dir));
+                self.mode = if matches!(self.mode, XLineMode::AngleReference) {
+                    XLineMode::Angle
+                } else { XLineMode::OffsetSide };
+            }
+        }
+        CmdResult::NeedPoint
+    }
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        let key = text.trim().to_ascii_uppercase();
+        match self.mode {
+            XLineMode::Points if self.base.is_none() => {
+                self.mode = match key.as_str() {
+                    "H" | "HOR" => XLineMode::Direction(self.plane.x),
+                    "V" | "VER" => XLineMode::Direction(self.plane.y),
+                    "A" | "ANG" => XLineMode::Angle,
+                    "B" | "BISECT" => XLineMode::Bisect,
+                    "O" | "OFFSET" => XLineMode::OffsetDistance,
+                    _ => return None,
+                };
+            }
+            XLineMode::Angle => {
+                if key == "R" || key == "REFERENCE" {
+                    self.mode = XLineMode::AngleReference;
+                } else {
+                    let angle: f64 = key.parse().ok().filter(|v: &f64| v.is_finite())?;
+                    let (sin, cos) = angle.to_radians().sin_cos();
+                    let axis = self.reference.map_or(self.plane.x, |(_, dir)| dir);
+                    self.mode = XLineMode::Direction(axis * cos + self.plane.z.cross(axis) * sin);
+                }
+            }
+            XLineMode::OffsetDistance => {
+                self.offset = if key == "T" || key == "THROUGH" { None } else {
+                    Some(key.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0)?)
+                };
+                self.mode = XLineMode::OffsetPick;
+            }
+            _ => return None,
+        }
+        Some(CmdResult::NeedPoint)
     }
 
     fn on_escape(&mut self) -> CmdResult {
@@ -181,9 +327,9 @@ impl CadCommand for XLineCommand {
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
-        let pt = pt.as_vec3();
-        let base = self.base?.as_vec3();
-        let dir = (pt - base).normalize_or_zero();
+        let (base, dir) = self.geometry(pt)?;
+        let base = base.as_vec3();
+        let dir = dir.as_vec3();
         let far_pos = base + dir * DISPLAY_EXTENT;
         let far_neg = base - dir * DISPLAY_EXTENT;
         Some(WireModel {

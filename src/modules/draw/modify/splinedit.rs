@@ -205,7 +205,7 @@ impl CadCommand for SplineditCommand {
         match self.step {
             Step::SelectSpline => crate::t!("SPLINEDIT  Select spline:").into_owned(),
             Step::Options if self.closed() => crate::t!("SPLINEDIT  [Open/Move vertex/Refine/rEverse/convert to Polyline/Undo/eXit] <eXit>:").into_owned(),
-            Step::Options => crate::t!("SPLINEDIT  [Close/Join/Move vertex/Refine/rEverse/Undo/eXit] <eXit>:").into_owned(),
+            Step::Options => crate::t!("SPLINEDIT  [Close/Join/Move vertex/Refine/rEverse/convert to Polyline/Undo/eXit] <eXit>:").into_owned(),
             Step::PolylinePrecision => crate::t!("SPLINEDIT  Specify precision 0-99 <10> (straight segments):").into_owned(),
             Step::Join => crate::t!("SPLINEDIT  Select any open curves to join to source:").into_owned(),
             Step::Refine => crate::t!("SPLINEDIT  [Add/Delete/Elevate order/Move/Weight/eXit] <eXit>:").into_owned(),
@@ -673,6 +673,95 @@ mod tests {
         });
         assert_eq!(command.picked_vertex(DVec3::new(-0.49, 0.0, 0.0)), Some(0));
         assert_eq!(command.picked_vertex(DVec3::new(0.0, 0.5, 0.0)), None);
+    }
+
+    #[test]
+    fn planar_polyline_conversion_honors_source_deletion_policy() {
+        let handle = Handle::new(41);
+        let mut spline = control_spline(
+            &[
+                [0.0, 0.0, 2.0],
+                [1.0, 2.0, 2.0],
+                [3.0, 0.0, 2.0],
+            ],
+            2,
+        );
+        spline.common.handle = handle;
+        spline.flags.planar = true;
+        let mut command = SplineditCommand::new().with_delete_source(false);
+        command.inject_picked_entity(EntityType::Spline(spline));
+        command.on_entity_pick(handle, DVec3::ZERO);
+        let CmdResult::ReplaceMany(replacements, additions) = command.convert_polyline(10) else {
+            panic!("expected a polyline conversion");
+        };
+        assert!(replacements.is_empty());
+        let [EntityType::LwPolyline(polyline)] = additions.as_slice() else {
+            panic!("expected a lightweight polyline");
+        };
+        assert!(polyline.common.handle.is_null());
+        assert_eq!(polyline.elevation, 2.0);
+        assert!(polyline.vertices.len() > 2);
+    }
+
+    #[test]
+    fn nonplanar_spline_converts_to_a_spatial_polyline() {
+        let spline = control_spline(
+            &[
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 1.0],
+                [2.0, 1.0, 0.0],
+                [3.0, 0.0, 2.0],
+            ],
+            3,
+        );
+        let mut command = selected_command(spline);
+        let CmdResult::ReplaceMany(replacements, additions) = command.convert_polyline(10) else {
+            panic!("expected a polyline conversion");
+        };
+        assert!(additions.is_empty());
+        let [(_, entities)] = replacements.as_slice() else {
+            panic!("expected one source replacement");
+        };
+        let [EntityType::Polyline3D(polyline)] = entities.as_slice() else {
+            panic!("expected a spatial polyline");
+        };
+        assert!(polyline.vertices.len() > 2);
+    }
+
+    #[test]
+    fn closed_conversion_closes_once_and_invalid_precision_retries() {
+        let curve = cadkernel::space::NurbsCurve3::from_control_polygon(
+            2,
+            &[
+                [0.0, 0.0, 0.0],
+                [2.0, 0.0, 0.0],
+                [2.0, 2.0, 0.0],
+                [0.0, 2.0, 0.0],
+            ],
+            true,
+        )
+        .unwrap();
+        let mut spline = control_spline(curve.control_points(), curve.degree());
+        spline.knots = curve.knots().to_vec();
+        spline.weights = curve.weights().to_vec();
+        spline.flags.closed = true;
+        spline.flags.periodic = true;
+        let mut command = selected_command(spline);
+        command.on_text_input("POLYLINE");
+        assert!(matches!(command.on_text_input("100"), Some(CmdResult::ReportError(_))));
+        assert!(matches!(command.step, Step::PolylinePrecision));
+        let CmdResult::ReplaceMany(replacements, _) = command.on_enter() else {
+            panic!("expected the default conversion");
+        };
+        let [(_, entities)] = replacements.as_slice() else {
+            panic!("expected one source replacement");
+        };
+        let [EntityType::LwPolyline(polyline)] = entities.as_slice() else {
+            panic!("expected a lightweight polyline");
+        };
+        assert!(polyline.is_closed);
+        assert!(polyline.vertices.len() >= 4);
+        assert_ne!(polyline.vertices.first().unwrap().location, polyline.vertices.last().unwrap().location);
     }
 }
 

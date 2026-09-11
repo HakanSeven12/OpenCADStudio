@@ -929,6 +929,8 @@ impl OpenCADStudio {
 
     fn apply_cmd_result_inner(&mut self, result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
+        let preserve_commit_style = self.tabs[i].active_cmd.as_ref()
+            .is_some_and(|command| command.preserve_commit_style());
         let preserve_commit_layer = self.tabs[i]
         .active_cmd
         .as_ref()
@@ -1070,7 +1072,9 @@ impl OpenCADStudio {
                     .all(|entity| self.delta_add_safe(i, entity));
                 let pending = self.begin_undo(i, label, entities.len(), delta_safe);
                 for entity in entities {
-                    if preserve_commit_layer {
+                    if preserve_commit_style {
+                        let _ = self.commit_entity_handle_preserve_style(entity);
+                    } else if preserve_commit_layer {
                         let _ = self.commit_entity_handle_preserve_layer(entity);
                     } else {
                         self.commit_entity(entity);
@@ -1093,7 +1097,13 @@ impl OpenCADStudio {
                     .all(|entity| self.delta_add_safe(i, entity));
                 let pending = self.begin_undo(i, label, entities.len(), delta_safe);
                 for entity in entities {
-                    self.commit_entity(entity);
+                    if preserve_commit_style {
+                        let _ = self.commit_entity_handle_preserve_style(entity);
+                    } else if preserve_commit_layer {
+                        let _ = self.commit_entity_handle_preserve_layer(entity);
+                    } else {
+                        self.commit_entity(entity);
+                    }
                 }
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.clear_preview_wire();

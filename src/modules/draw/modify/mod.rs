@@ -13,6 +13,7 @@ pub mod join;
 pub mod lengthen;
 pub mod mirror;
 pub mod mledit;
+pub mod ncopy;
 pub mod offset;
 pub mod pedit;
 pub mod block_edit;

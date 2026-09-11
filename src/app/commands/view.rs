@@ -36,7 +36,6 @@ fn ensure_draw_order_table(
         doc.objects.insert(handle, ObjectType::Dictionary(value));
         handle
     });
-    doc.xdic_by_handle.insert(block, dictionary);
     let handle = existing.unwrap_or_else(|| {
         let handle = doc.allocate_handle();
         let mut table = SortEntitiesTable::for_block(block);
@@ -879,13 +878,11 @@ impl OpenCADStudio {
                 let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
                 let doc_ref = &self.tabs[i].scene.document;
 
-                // 1. Single scan over objects to find existing SortEntitiesTable handle & overrides.
-                let mut existing_table_handle = None;
+                // 1. Read existing SortEntitiesTable overrides.
                 let mut overrides: Option<rustc_hash::FxHashMap<u64, u64>> = None;
-                for (h, obj) in &doc_ref.objects {
+                for obj in doc_ref.objects.values() {
                     if let ObjectType::SortEntitiesTable(t) = obj {
                         if t.block_owner_handle == block_handle {
-                            existing_table_handle = Some(*h);
                             if !t.is_empty() {
                                 overrides = Some(
                                     t.entries()

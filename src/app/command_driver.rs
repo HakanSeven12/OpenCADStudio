@@ -6441,6 +6441,38 @@ fn resample_widths(source: &[(f64, f64)], count: usize) -> Vec<(f64, f64)> {
 }
 
 #[cfg(test)]
+mod command_replacement_tests {
+    use super::*;
+    use acadrust::entities::{Circle, Line};
+    use acadrust::types::Vector3;
+
+    #[test]
+    fn one_to_one_edits_keep_identity_but_type_changes_do_not() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let tab = app.active_tab;
+        let handle = app.tabs[tab].scene.add_entity(acadrust::EntityType::Line(
+            Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0)),
+        ));
+        let owner = app.tabs[tab].scene.document.get_entity(handle).unwrap().common().owner_handle;
+
+        let kept = app.replace_command_entity(tab, handle, vec![acadrust::EntityType::Line(
+            Line::from_points(Vector3::ZERO, Vector3::new(3.0, 0.0, 0.0)),
+        )]);
+        assert_eq!(kept, vec![handle]);
+        let edited = app.tabs[tab].scene.document.get_entity(handle).unwrap();
+        assert_eq!(edited.common().owner_handle, owner);
+        assert!(matches!(edited, acadrust::EntityType::Line(line) if line.end.x == 3.0));
+
+        let allocated = app.replace_command_entity(tab, handle,
+            vec![acadrust::EntityType::Circle(Circle::from_coords(0.0, 0.0, 0.0, 2.0))]);
+        assert_eq!(allocated.len(), 1);
+        assert_ne!(allocated[0], handle);
+        assert!(app.tabs[tab].scene.document.get_entity(handle).is_none());
+    }
+}
+
+#[cfg(test)]
 mod sketch_constraint_undo_tests {
     use super::*;
     use crate::scene::sketch_constraints::{ConstraintKind, SketchRef, SketchScope};

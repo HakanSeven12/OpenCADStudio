@@ -680,7 +680,7 @@ impl CadCommand for PeditCommand {
             };
             let Some(local) = crate::entities::curve::ocs_plane(normal, elevation).project([point.x, point.y, point.z]) else { return CmdResult::NeedPoint; };
             let delta = cadkernel::geom2d::Vec2::new(local[0] - location[0], local[1] - location[1]);
-            if delta.length_squared() <= 1e-24 { return CmdResult::NeedPoint; }
+            if !delta.length_squared().is_finite() || delta.length_squared() <= 1e-24 { return CmdResult::NeedPoint; }
             self.vertex_tangents.insert(index, delta.angle().rem_euclid(TAU));
             self.mode = Mode::PolyVertex(index);
             return CmdResult::NeedPoint;
@@ -1144,6 +1144,8 @@ fn fit_entity(entity: &EntityType, overrides: &[(usize, f64)]) -> Option<EntityT
         if vertex.start_width == 0.0 { vertex.start_width = polyline.start_width; }
         if vertex.end_width == 0.0 { vertex.end_width = polyline.end_width; }
     }
+    if originals.iter().any(|vertex| !vertex.start_width.is_finite() || !vertex.end_width.is_finite()
+        || vertex.start_width < 0.0 || vertex.end_width < 0.0) { return None; }
     for &(index, angle) in overrides {
         let vertex = originals.get_mut(index)?;
         if !angle.is_finite() { return None; }

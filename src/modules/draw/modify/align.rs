@@ -4,10 +4,11 @@
 //   1. Select objects (Enter to finish selection)
 //   2. First source point → first destination point
 //   3. Second source point → second destination point (Enter to skip = translate only)
-//   4. Enter = apply (scale = optional: Y/N prompt after 2nd pair)
+//   4. Continue for a third pair, or press Enter to choose two-pair scaling
 //
 // With 1 pair:  pure translation (src1 → dst1)
 // With 2 pairs: translate + rotate (+ optional uniform scale to fit)
+// With 3 pairs: rigid 3D placement without scaling
 
 use acadrust::Handle;
 use glam::DVec3;
@@ -303,3 +304,50 @@ impl AlignCommand {
 }
 
 inventory::submit!(crate::command::CommandRegistration { names: &["ALIGN"] });  // AlignCommand
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn three_pairs_apply_a_rigid_spatial_frame() {
+        let handle = Handle::new(9);
+        let mut command = AlignCommand::with_selection(vec![handle]);
+        let source = [DVec3::ZERO, DVec3::X, DVec3::Y];
+        let origin = DVec3::new(5.0, 6.0, 7.0);
+        let target = [origin, origin + DVec3::Y, origin + DVec3::Z];
+
+        assert!(matches!(command.on_point(DVec3::splat(f64::NAN)), CmdResult::NeedPoint));
+        for point in [source[0], target[0], source[1], target[1]] {
+            assert!(matches!(command.on_point(point), CmdResult::NeedPoint));
+        }
+        assert!(matches!(command.on_point(DVec3::X * 2.0), CmdResult::NeedPoint));
+        assert!(matches!(command.state, AlignState::Src3));
+        assert!(matches!(command.on_point(source[2]), CmdResult::NeedPoint));
+
+        let CmdResult::TransformSelected(handles, EntityTransform::Affine(transform)) =
+            command.on_point(target[2])
+        else {
+            panic!("third destination must complete alignment");
+        };
+        assert_eq!(handles, vec![handle]);
+        for (from, expected) in source.into_iter().zip(target) {
+            let actual = transform.apply(acadrust::types::Vector3::new(from.x, from.y, from.z));
+            let actual = DVec3::new(actual.x, actual.y, actual.z);
+            assert!(actual.abs_diff_eq(expected, 1.0e-12));
+        }
+    }
+
+    #[test]
+    fn one_pair_still_translates_without_requesting_a_frame() {
+        let handle = Handle::new(3);
+        let mut command = AlignCommand::with_selection(vec![handle]);
+        assert!(matches!(command.on_point(DVec3::new(1.0, 2.0, 3.0)), CmdResult::NeedPoint));
+        assert!(matches!(command.on_point(DVec3::new(4.0, 6.0, 8.0)), CmdResult::NeedPoint));
+        assert!(matches!(
+            command.on_enter(),
+            CmdResult::TransformSelected(handles, EntityTransform::Translate(delta))
+                if handles == vec![handle] && delta == DVec3::new(3.0, 4.0, 5.0)
+        ));
+    }
+}

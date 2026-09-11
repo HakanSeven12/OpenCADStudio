@@ -168,6 +168,7 @@ impl CadCommand for HatcheditCommand {
                 }
             }
             return match input {
+                "annotative"=>if self.annotative_current {"Make hatch annotative [Yes/No] <Y>:"} else {"Make hatch annotative [Yes/No] <N>:"},
                 "pattern"=>"Enter a pattern name or [Solid]:",
                 "scale"=>"Specify a scale for the pattern:",
                 "angle"=>"Specify an angle for the pattern:",
@@ -192,7 +193,7 @@ impl CadCommand for HatcheditCommand {
                 let scale = format!("{scale:.4}");
                 let angle = format!("{angle:.1}");
                 t!(
-                    "HATCHEDIT  Pattern:%{name}  Scale:%{scale}  Angle:%{angle}  [Properties/COlor/LAyer/Transparency/DRaw order/Disassociate/Annotative/Recreate/Separate] <Properties>:",
+                    "HATCHEDIT  Pattern:%{name}  Scale:%{scale}  Angle:%{angle}  [Properties/COlor/LAyer/Transparency/DRaw order/ASsociate/DIsassociate/ANnotative/recreate Boundary/separate Hatches] <Properties>:",
                     name = name,
                     scale = scale,
                     angle = angle
@@ -237,7 +238,17 @@ impl CadCommand for HatcheditCommand {
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
         if self.input==Some("associate-point") {return vec![crate::command::CmdOption::new("Select objects","S")];}
-        if self.input.is_some() {return Vec::new();}
+        if let Some(input) = self.input {
+            use crate::command::CmdOption;
+            return match input {
+                "draworder" => vec![CmdOption::new("Do not change", "N"), CmdOption::new("Send to back", "B"), CmdOption::new("Bring to front", "F"), CmdOption::new("Behind boundary", "H"), CmdOption::new("In front of boundary", "D")],
+                "annotative" | "boundary-associate" => vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")],
+                "boundary-type" => vec![CmdOption::new("Region", "R"), CmdOption::new("Polyline", "P")],
+                "color" => vec![CmdOption::new("Truecolor", "T")],
+                "pattern" => vec![CmdOption::new("Solid", "SOLID")],
+                _ => Vec::new(),
+            };
+        }
         if !matches!(self.step, HatcheditStep::EditOptions { .. }) {
             return Vec::new();
         }
@@ -248,13 +259,11 @@ impl CadCommand for HatcheditCommand {
             crate::command::CmdOption::new("Transparency", "T"),
             crate::command::CmdOption::new("Draw order", "DR"),
             crate::command::CmdOption::new("Associate", "AS"),
-            crate::command::CmdOption::new("Disassociate", "D"),
-            crate::command::CmdOption::new("Annotative", "N"),
-            crate::command::CmdOption::new("Recreate boundary", "R"),
-            crate::command::CmdOption::new("Separate hatches", "E"),
-            crate::command::CmdOption::new("Draw front", "F"),
-            crate::command::CmdOption::new("Draw back", "B"),
-            crate::command::CmdOption::enter("Apply"),
+            crate::command::CmdOption::new("Disassociate", "DI"),
+            crate::command::CmdOption::new("Annotative", "AN"),
+            crate::command::CmdOption::new("Recreate boundary", "B"),
+            crate::command::CmdOption::new("Separate hatches", "H"),
+            crate::command::CmdOption::enter("Properties"),
         ]
     }
 
@@ -264,6 +273,11 @@ impl CadCommand for HatcheditCommand {
             use acadrust::types::{Color,Transparency};
             let appearance=|color,layer,transparency|HatchEditOperation::Appearance{color,layer,transparency};
             match input {
+                "annotative" => {
+                    let value = match keyword.as_str() { "Y" | "YES" => true, "N" | "NO" => false, _ => return Some(CmdResult::NeedPoint) };
+                    self.annotative = Some(value);
+                    return self.apply_result(self.update_operation());
+                }
                 "associate-point"=>{
                     if matches!(keyword.as_str(),"S"|"SELECT"|"SELECT OBJECTS") {self.input=Some("associate-select");}
                     return Some(CmdResult::NeedPoint);
@@ -316,9 +330,10 @@ impl CadCommand for HatcheditCommand {
             return Some(CmdResult::NeedPoint);
         }
         let next=match keyword.as_str(){"P"|"PROPERTIES"=>Some("pattern"),"CO"|"COLOR"=>Some("color"),"LA"|"LAYER"=>Some("layer"),
-            "T"|"TRANSPARENCY"=>Some("transparency"),"DR"|"DRAW"|"DRAW ORDER"=>Some("draworder"),
+            "AN"|"ANNOTATIVE"=>Some("annotative"),"T"|"TRANSPARENCY"=>Some("transparency"),"DR"|"DRAW"|"DRAW ORDER"=>Some("draworder"),
             "B"|"BOUNDARY"|"R"|"RECREATE"=>Some("boundary-type"),_=>None};
         if let Some(input)=next {self.input=Some(input);return Some(CmdResult::NeedPoint);}
+        if matches!(keyword.as_str(),"H"|"HATCHES"|"SEPARATE") {return self.apply_result(HatchEditOperation::Separate);}
         if matches!(keyword.as_str(),"AS"|"ASSOCIATE"){return self.apply_result(HatchEditOperation::BeginAssociate);}
         if matches!(keyword.as_str(),"DI"|"DISASSOCIATE"){
             self.disassociate=true;return self.apply_result(self.update_operation());
@@ -450,6 +465,7 @@ impl CadCommand for HatcheditCommand {
             None if matches!(self.step,HatcheditStep::EditOptions{..})=>{
                 self.input=Some("pattern");CmdResult::NeedPoint
             }
+            Some("annotative")=>{self.annotative=Some(self.annotative_current);self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel)},
             Some("pattern")=>{
                 if matches!(&self.step,HatcheditStep::EditOptions{name,..} if name.eq_ignore_ascii_case("SOLID")) {
                     self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel)

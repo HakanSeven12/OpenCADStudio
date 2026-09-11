@@ -5,7 +5,7 @@ use acadrust::{Entity, EntityType, Handle};
 use cadkernel::space::PlanarCurve;
 use glam::DVec3;
 use crate::command::{CadCommand, CmdOption, CmdResult, CurveMarker, WorkingPlane};
-use crate::entities::curve::entity_curve;
+use crate::entities::curve::{entity_curve, entity_spatial_measurement};
 use crate::t;
 const MEASURE: bool = true;
 
@@ -213,9 +213,11 @@ pub fn divide_entity(entity: &EntityType, n: usize) -> Vec<EntityType> {
     if n < 2 {
         return vec![];
     }
-    let Some((curve, total)) = measurable(entity) else {
+    let Some(curve) = entity_curve(entity) else {
         return vec![];
     };
+    let total = curve.length();
+    if !total.is_finite() || total <= 1e-10 { return vec![]; }
     let step = total / n as f64;
     (1..n)
         .map(|k| make_point(curve.point_at_distance(step * k as f64)))
@@ -244,7 +246,7 @@ pub fn measure_entity(entity: &EntityType, segment_length: f64, pick_point: DVec
     pts
 }
 
-fn make_marker(curve: &PlanarCurve, distance: f64, marker: Option<&CurveMarker>) -> EntityType {
+fn make_marker(curve: &MeasuredCurve, distance: f64, marker: Option<&CurveMarker>) -> EntityType {
     let pos = curve.point_at_distance(distance);
     let Some(marker) = marker else {
         let mut point = PointEnt::new();
@@ -268,9 +270,36 @@ fn make_point(pos: [f64; 3]) -> EntityType {
     EntityType::Point(p)
 }
 
-fn measurable(entity: &EntityType) -> Option<(PlanarCurve, f64)> {
-    let curve = entity_curve(entity)?;
-    let total = curve.curve.length();
+/// The entity's curve and its length, or `None` for anything that cannot be
+/// walked along — a hatch, a block, an unbounded ray.
+enum MeasuredCurve {
+    Planar(PlanarCurve),
+    Spatial(cadkernel::space::ArcLengthCurve3),
+}
+impl MeasuredCurve {
+    fn is_closed(&self) -> bool {
+        match self { Self::Planar(curve) => curve.is_closed(), Self::Spatial(curve) => curve.is_closed() }
+    }
+    fn point_at_distance(&self, distance: f64) -> [f64; 3] {
+        match self { Self::Planar(curve) => curve.point_at_distance(distance), Self::Spatial(curve) => curve.point_at_distance(distance) }
+    }
+    fn parameter_at_distance(&self, distance: f64) -> f64 {
+        match self { Self::Planar(curve) => curve.parameter_at_distance(distance), Self::Spatial(curve) => curve.parameter_at_distance(distance) }
+    }
+    fn tangent_at(&self, parameter: f64) -> [f64; 3] {
+        match self { Self::Planar(curve) => curve.tangent_at(parameter), Self::Spatial(curve) => curve.tangent_at(parameter) }
+    }
+}
+
+fn measurable(entity: &EntityType) -> Option<(MeasuredCurve, f64)> {
+    let (curve, total) = if let Some(curve) = entity_curve(entity) {
+        let total = curve.length();
+        (MeasuredCurve::Planar(curve), total)
+    } else {
+        let curve = entity_spatial_measurement(entity)?;
+        let total = curve.length();
+        (MeasuredCurve::Spatial(curve), total)
+    };
     (total.is_finite() && total > 1e-10).then_some((curve, total))
 }
 

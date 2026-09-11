@@ -107,6 +107,51 @@ pub fn entity_curve(entity: &EntityType) -> Option<PlanarCurve> {
     }
 }
 
+/// Exact spatial source geometry for commands that traverse nonplanar curves.
+/// Curve construction and arc-length calculations remain in the kernel.
+pub fn entity_spatial_measurement(entity: &EntityType) -> Option<cadkernel::space::ArcLengthCurve3> {
+    use cadkernel::space::{ArcLengthCurve3, NurbsCurve3, Parameterization};
+    let curve = match entity {
+        EntityType::Polyline3D(polyline) => {
+            if polyline.flags.spline_fit {
+                let degree = match polyline.smooth_type as i16 { 5 => 2, 6 => 3, _ => return None };
+                let controls: Vec<_> = polyline.vertices.iter().filter(|vertex| vertex.flags & 16 != 0)
+                    .map(|vertex| [vertex.position.x, vertex.position.y, vertex.position.z]).collect();
+                let curve = NurbsCurve3::from_control_polygon(degree, &controls, polyline.is_closed())?;
+                return ArcLengthCurve3::from_nurbs(curve);
+            }
+            let points: Vec<_> = polyline.vertices.iter().map(|vertex| {
+                [vertex.position.x, vertex.position.y, vertex.position.z]
+            }).collect();
+            return ArcLengthCurve3::from_polyline(&points, polyline.is_closed());
+        }
+        EntityType::Spline(spline) => {
+            if crate::entities::spline::uses_fit_method(spline) {
+                let points: Vec<_> = spline.fit_points.iter().copied().map(xyz).collect();
+                let parameterization = match spline.knot_parameterization {
+                    1 => Parameterization::Centripetal, 2 => Parameterization::Uniform,
+                    _ => Parameterization::Chord,
+                };
+                if spline.flags.periodic {
+                    NurbsCurve3::interpolate_periodic(&points, parameterization)?
+                } else {
+                    if spline.flags.closed { return None; }
+                    NurbsCurve3::interpolate_fit(&points, Some(xyz(spline.begin_tangent)),
+                        Some(xyz(spline.end_tangent)), parameterization)?
+                }
+            } else {
+                let controls: Vec<_> = spline.control_points.iter().copied().map(xyz).collect();
+                let weights = if spline.weights.is_empty() { vec![1.0; controls.len()] }
+                    else { spline.weights.clone() };
+                NurbsCurve3::new_strict(spline.degree as usize, controls, spline.knots.clone(), weights)?
+                    .with_periodicity(spline.flags.periodic)
+            }
+        }
+        _ => return None,
+    };
+    ArcLengthCurve3::from_nurbs(curve)
+}
+
 /// The plane an OCS-stored entity's coordinates are read in.
 ///
 /// `elevation` is the entity's third stored coordinate — the distance along

@@ -96,12 +96,6 @@ pub struct Ribbon {
     tool_bar_h: Arc<AtomicU32>,
     /// User-chosen panel density (persisted). `Auto` sizes by window width.
     collapse_mode: CollapseMode,
-    /// Font size (px) of the caption under a large button's icon (persisted;
-    /// Options → Display → "Ribbon label size").
-    label_font_size: i32,
-    /// Font size (px) of a panel's own title, shown beneath its tools
-    /// (persisted; Options → Display → "Ribbon section title size").
-    group_title_font_size: i32,
     /// Set by `CollapsePanels` when the tool row is in its tight state; the mode
     /// selector hides itself then to give the cramped tab row its space back.
     collapse_tight: Arc<AtomicBool>,
@@ -198,8 +192,6 @@ impl Ribbon {
             tool_bar_h: Arc::new(AtomicU32::new(TOOL_BAR_H.to_bits())),
             collapse_mode: CollapseMode::default(),
             collapse_tight: Arc::new(AtomicBool::new(false)),
-            label_font_size: 10,
-            group_title_font_size: 9,
         }
     }
 
@@ -212,28 +204,6 @@ impl Ribbon {
     /// The current tool-panel density (for saving into the app config).
     pub fn collapse_mode(&self) -> CollapseMode {
         self.collapse_mode
-    }
-
-    /// Change the icon-label font size. Persistence is handled by the caller
-    /// via the consolidated app config (`save_config`).
-    pub fn set_label_font_size(&mut self, size: i32) {
-        self.label_font_size = size.clamp(8, 16);
-    }
-
-    /// The current icon-label font size (for saving into the app config).
-    pub fn label_font_size(&self) -> i32 {
-        self.label_font_size
-    }
-
-    /// Change the panel-title font size. Persistence is handled by the
-    /// caller via the consolidated app config (`save_config`).
-    pub fn set_group_title_font_size(&mut self, size: i32) {
-        self.group_title_font_size = size.clamp(7, 14);
-    }
-
-    /// The current panel-title font size (for saving into the app config).
-    pub fn group_title_font_size(&self) -> i32 {
-        self.group_title_font_size
     }
 
     /// Current tab-bar height as last measured by the `WrapBar` widget.
@@ -633,8 +603,6 @@ impl Ribbon {
                             &self.active_linetype,
                             self.active_lineweight,
                             &style_ctx,
-                            self.label_font_size,
-                            self.group_title_font_size,
                         ),
                         render_group(
                             true,
@@ -649,8 +617,6 @@ impl Ribbon {
                             &self.active_linetype,
                             self.active_lineweight,
                             &style_ctx,
-                            self.label_font_size,
-                            self.group_title_font_size,
                         ),
                         collapse_button(
                             g,
@@ -665,7 +631,6 @@ impl Ribbon {
                             &self.active_linetype,
                             self.active_lineweight,
                             &style_ctx,
-                            self.label_font_size,
                             false,
                         ),
                         collapse_button(
@@ -681,14 +646,13 @@ impl Ribbon {
                             &self.active_linetype,
                             self.active_lineweight,
                             &style_ctx,
-                            self.label_font_size,
                             true,
                         ),
                         ],
                     }
                     })
                     .collect();
-                CollapsePanels::new(panels, self.collapsed_open.clone(), widgets::tool_bar_h(self.group_title_font_size as f32))
+                CollapsePanels::new(panels, self.collapsed_open.clone(), TOOL_BAR_H)
                     .report_height(self.tool_bar_h.clone())
                     .report_tight(self.collapse_tight.clone())
                     .mode(self.collapse_mode)
@@ -1339,7 +1303,7 @@ impl Ribbon {
     }
 }
 
-/// Render a single ribbon panel (tools + group label), `tool_bar_h(group_title_font_size)` tall.
+/// Render a single ribbon panel (tools + group label), fixed `TOOL_BAR_H` tall.
 /// When `compact`, large tools/dropdowns are drawn as small icon columns.
 #[allow(clippy::too_many_arguments)]
 fn render_group<'a>(
@@ -1355,8 +1319,6 @@ fn render_group<'a>(
     active_linetype: &'a str,
     active_lineweight: LineWeight,
     style_ctx: &StyleContext<'_>,
-    label_font_size: i32,
-    group_title_font_size: i32,
 ) -> Element<'a, Message> {
     let mut items_row: Vec<Element<Message>> = Vec::new();
     let mut small_buf: Vec<Element<Message>> = Vec::new();
@@ -1373,7 +1335,6 @@ fn render_group<'a>(
         active_lineweight,
         style_ctx,
         compact,
-        label_font_size: label_font_size as f32,
     };
 
     for item in &group.tools {
@@ -1411,12 +1372,12 @@ fn render_group<'a>(
 
     draw_panel::group_anchor(group.title, column![
         tools_el,
-        draw_panel::group_title(group.title, open_dd, group_title_font_size as f32),
+        draw_panel::group_title(group.title, open_dd),
     ]
     .align_x(iced::Center)
     .spacing(0)
     .padding([3u16, 4])
-    .height(Length::Fixed(widgets::tool_bar_h(group_title_font_size as f32)))
+    .height(Length::Fixed(TOOL_BAR_H))
     .into())
 }
 
@@ -1479,7 +1440,6 @@ fn collapse_button<'a>(
     active_linetype: &'a str,
     active_lineweight: LineWeight,
     style_ctx: &StyleContext<'_>,
-    label_font_size: i32,
     // When set, this is the TIGHT step (reached once even the all-collapsed row
     // overflows): the whole panel becomes a single non-running button — the first
     // tool's icon + a ▾ that opens the tools flyout. Nothing runs directly here.
@@ -1520,9 +1480,7 @@ fn collapse_button<'a>(
         .style(button::subtle)
         .width(Fill)
         .padding([3, 5]);
-        // This tight-mode panel *title* (not an icon caption) keeps its own
-        // fixed size regardless of the icon-label font-size setting.
-        return automatic_large_button(localized_title, content.into(), 9.0);
+        return automatic_large_button(localized_title, content.into());
     }
 
     // Collapsed (not yet tight): a large representative-tool face — a live button
@@ -1545,7 +1503,6 @@ fn collapse_button<'a>(
                     active_lineweight,
                     style_ctx,
                     compact: false,
-                    label_font_size: label_font_size as f32,
                 },
             )
         }
@@ -1564,7 +1521,6 @@ fn collapse_button<'a>(
                     active_lineweight,
                     style_ctx,
                     compact: false,
-                    label_font_size: label_font_size as f32,
                 },
             )
         }
@@ -1589,8 +1545,7 @@ fn collapse_button<'a>(
     .style(button::subtle)
     .width(Fill)
     .padding([1, 4]);
-    // Same fixed-size opener title as the tight-mode branch above.
-    let opener = automatic_large_button(localized_title, opener.into(), 9.0);
+    let opener = automatic_large_button(localized_title, opener.into());
 
     // The large face fills a fixed slot so a collapsed panel is shorter than a full
     // 3-row panel, letting `CollapsePanels` shrink the ribbon row.

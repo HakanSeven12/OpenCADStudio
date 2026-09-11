@@ -3,29 +3,6 @@
 #[cfg(windows)]
 use std::path::Path;
 
-/// `YYYYMMDD_HHMMSS` in local time, for `OCS_BUILD_STAMP` — shown in the
-/// window title and (via `packaging/build_macos_signed.sh`) the macOS
-/// bundle name, so a rebuilt-and-reinstalled dev build is visibly distinct
-/// from whatever was running before it, independent of the (per-week, not
-/// per-build) `OCS_APP_VERSION`. Shells out rather than adding a date/time
-/// crate purely for this cosmetic build-script string.
-fn build_stamp() -> String {
-    #[cfg(windows)]
-    let output = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-Command", "Get-Date -Format yyyyMMdd_HHmmss"])
-        .output();
-    #[cfg(not(windows))]
-    let output = std::process::Command::new("date").args(["+%Y%m%d_%H%M%S"]).output();
-
-    output
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "unknown".to_string())
-}
-
 fn main() {
     let version = std::env::var("CARGO_PKG_VERSION").expect("Cargo package version");
     let parts: Vec<&str> = version.split('.').collect();
@@ -43,15 +20,6 @@ fn main() {
             println!("cargo:rerun-if-changed=.git/{reference}");
         }
     }
-    // `OCS_BUILD_STAMP` must reflect the actual compile time, not just when
-    // git state changes, so window-title/bundle-name builds run in
-    // succession (the normal edit-rebuild-reinstall loop, no commit in
-    // between) are still distinguishable. Once *any* rerun-if directive is
-    // emitted, Cargo stops auto-rerunning on ordinary source edits, so a
-    // path that can never exist forces a rerun every time regardless of the
-    // other (git-state-gated) directives above.
-    println!("cargo:rerun-if-changed=__ocs_force_build_rs_rerun__");
-    println!("cargo:rustc-env=OCS_BUILD_STAMP={}", build_stamp());
     let revision = std::process::Command::new("git")
         .args(["rev-parse", "--short=12", "HEAD"])
         .output()

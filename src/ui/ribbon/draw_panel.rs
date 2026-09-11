@@ -133,9 +133,9 @@ pub(super) fn group_anchor<'a>(title: &str, content: Element<'a, Message>) -> El
     }
 }
 
-pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>, font_size: f32) -> Element<'a, Message> {
+pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Element<'a, Message> {
     if title != "Draw" || TOOLS.is_empty() {
-        return container(text(t!(title)).size(font_size).style(muted_text_style))
+        return container(text(t!(title)).size(9).style(muted_text_style))
             .padding([1, 4])
             .into();
     }
@@ -148,7 +148,7 @@ pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>, font_s
     PosReport::new(
         PANEL_ID,
         button(
-            row![text(t!(title)).size(font_size), arrow]
+            row![text(t!(title)).size(9), arrow]
                 .spacing(4)
                 .align_y(iced::Center),
         )

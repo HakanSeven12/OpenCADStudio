@@ -12,6 +12,7 @@ dependencies = [
  "bincode",
  "bytemuck",
  "cadkernel",
+ "cadkernel-constraints",
  "clap",
  "console_error_panic_hook",
  "cosmic-text 0.15.0",
@@ -39,7 +40,6 @@ dependencies = [
  "objc2-app-kit 0.2.2",
  "objc2-foundation 0.2.2",
  "ocs_doc_api",
- "ocs_gcs",
  "ocs_plugin_api",
  "open",
  "printpdf",
@@ -895,12 +895,20 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 [[package]]
 name = "cadkernel"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/cadkernel.git?rev=0507b720fef47bd7da0d4f777f97f1743a4f4038#0507b720fef47bd7da0d4f777f97f1743a4f4038"
+source = "git+https://github.com/HakanSeven12/cadkernel.git?rev=7d12f4a87c4737bb83fdad40e613468513d38904#7d12f4a87c4737bb83fdad40e613468513d38904"
 dependencies = [
  "acadrust",
  "cavalier_contours",
  "rustc-hash 2.1.3",
  "spade",
+]
+
+[[package]]
+name = "cadkernel-constraints"
+version = "0.1.0"
+source = "git+https://github.com/HakanSeven12/cadkernel.git?rev=7d12f4a87c4737bb83fdad40e613468513d38904#7d12f4a87c4737bb83fdad40e613468513d38904"
+dependencies = [
+ "nalgebra",
 ]
 
 [[package]]
@@ -3950,13 +3958,6 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "toml 1.1.3+spec-1.1.0",
-]
-
-[[package]]
-name = "ocs_gcs"
-version = "0.1.0"
-dependencies = [
- "nalgebra",
 ]
 
 [[package]]

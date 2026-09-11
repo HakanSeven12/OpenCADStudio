@@ -1,44 +1,11 @@
-//! Additive DWG/DXF-native constraint persistence
-//! (`docs/dwg_constraint_compatibility_design.md`).
-//!
-//! Writes the `acadrust`-modeled `AssocNetwork`/`AssocAction`/
-//! `Assoc2dConstraintGroup` object graph alongside — not instead of — the
-//! existing `OCS_SKETCH_CONSTRAINTS` XRecord (`sketch_persist.rs`), so a
-//! saved file also carries constraints AutoCAD/BricsCAD recognize as their
-//! own native objects. `sketch_persist.rs` stays the format this app reads
-//! back on open; this module is one-way (write-only) for now — see the
-//! design doc §6 for why (our model can carry things, like
-//! `DrivingValue::Named`, the native graph doesn't perfectly round-trip
-//! today) and §9 for what's confirmed vs. still unverified against real
-//! AutoCAD/BricsCAD (nothing here has been opened in either — verification
-//! so far is a real DWG+DXF round trip through `acadrust`'s own reader,
-//! which confirms self-consistency, not real-world compatibility).
-//!
-//! **DWG is the only format this graph round-trips through with its
-//! dependency chain intact.** Confirmed by reading `acadrust`'s own DXF
-//! writer (`io/dxf/writer/section_writer.rs`'s `is_unrestorable_assoc_object`,
-//! consulted from its `ObjectType::Associative` write arm): it deliberately
-//! does not write `AssocDependency`/`AssocValueDependency`/
-//! `AssocGeomDependency`/`AssocVariable` objects to DXF at all
-//! ("Unrestorable associative-framework objects are not written") — DWG has
-//! no equivalent filter. A DXF save still keeps the
-//! `Assoc2dConstraintGroup`/`AssocNetwork` shell and every constraint node's
-//! own embedded geometry (real coordinates, written directly on the node —
-//! not lost), but each node's `geometry_dependency`/`value_dependency`
-//! handle points at nothing once reloaded, and no `AssocVariable` survives.
-//! This module still materializes the same graph for both formats rather
-//! than special-casing DXF to write less: the shell that does survive is
-//! strictly more than nothing, dangling handles are an ordinary, tolerated
-//! pattern in both formats (e.g. a reference to a purged object), and
-//! working around an upstream limitation by patching `acadrust` is out of
-//! scope (this project's stated preference — see `named_parameters_persist.rs`).
-//! See the test module for the DWG-vs-DXF difference demonstrated directly.
+//! Maps sketch constraints to the drawing format's native associative object graph.
+//! The application record remains authoritative when both representations exist.
 
 use acadrust::objects::{
-    Assoc2dConstraintGroup, AssocAction, AssocConstraintNode,
-    AssocConstraintNodeData, AssocDependency, AssocEvalValue, AssocEvalVariant,
-    AssocGeomDependency, AssocNetwork, AssocPersistentSubentId, AssocValueDependency,
-    AssocVariable, AssociativeData, AssociativeObject, ObjectType,
+    Assoc2dConstraintGroup, AssocAction, AssocConstraintNode, AssocConstraintNodeData,
+    AssocDependency, AssocEvalValue, AssocEvalVariant, AssocGeomDependency, AssocNetwork,
+    AssocPersistentSubentId, AssocValueDependency, AssocVariable, AssociativeData,
+    AssociativeObject, ObjectType,
 };
 use acadrust::types::{Handle, Vector3};
 use acadrust::{CadDocument, EntityType};
@@ -48,17 +15,14 @@ use super::named_parameters::{DrivingValue, ParameterTable};
 use super::sketch_constraints::{ConstraintKind, SketchConstraint, SketchConstraintSet, SketchRef};
 use super::Scene;
 
-/// The default sub-dictionary key `AcDbAssocNetwork::getInstanceFromObject`
-/// uses when none is given — confirmed from Autodesk's own ObjectARX
-/// reference (design doc §2b/§7.1), not guessed.
+/// Default sub-dictionary key used for an associative network.
 const NETWORK_DICTIONARY_KEY: &str = "ACAD_ASSOCNETWORK";
 
 /// `AcConstraintGroupNode::GroupNodeId::kNullGroupNodeId` — node id 0 is
 /// reserved as "no node", so real node ids start at 1.
 const FIRST_NODE_ID: i32 = 1;
 
-/// `AcDb::ImplicitPointType` (design doc §4/§7.2) — confirmed from
-/// Autodesk's live ObjectARX reference.
+/// Native implicit-point type values.
 mod implicit_point_type {
     pub const START: u8 = 0;
     pub const END: u8 = 1;
@@ -130,7 +94,7 @@ impl<'a> GroupBuilder<'a> {
     /// `is_implied`/`is_active` instead of `geometry_dependency`/
     /// `geometry_node_id`, i.e. they don't obviously look like the same
     /// "geometry dependency for an entity reference" role) — without
-    /// confirming that against a real AutoCAD-written file, guessing would
+    /// confirming that against a real externally written file, guessing would
     /// risk writing a wrong-but-plausible-looking object graph, which is
     /// worse than the honest "not persisted to DWG yet" gap this already
     /// degrades to (same contract as `ArcLength`, which has no native
@@ -165,7 +129,8 @@ impl<'a> GroupBuilder<'a> {
                 };
             }
             EntityType::Circle(c) => {
-                let (axis_x, _axis_y) = crate::scene::view::transform::ocs_axes((c.normal.x, c.normal.y, c.normal.z));
+                let (axis_x, _axis_y) =
+                    crate::scene::view::transform::ocs_axes((c.normal.x, c.normal.y, c.normal.z));
                 self.push_node(
                     node_id,
                     "ACCONSTRAINEDCIRCLE",
@@ -183,7 +148,8 @@ impl<'a> GroupBuilder<'a> {
                 );
             }
             EntityType::Arc(a) => {
-                let (axis_x, _axis_y) = crate::scene::view::transform::ocs_axes((a.normal.x, a.normal.y, a.normal.z));
+                let (axis_x, _axis_y) =
+                    crate::scene::view::transform::ocs_axes((a.normal.x, a.normal.y, a.normal.z));
                 let direction = Vector3::new(axis_x.0, axis_x.1, axis_x.2);
                 let start_point = a.center
                     + Vector3::new(axis_x.0, axis_x.1, axis_x.2) * (a.radius * a.start_angle.cos())
@@ -218,12 +184,14 @@ impl<'a> GroupBuilder<'a> {
         Some(node_id)
     }
 
-    /// The `ImplicitPoint` node id for one marker on `entity` (line
-    /// start/end, circle/arc center — design doc §4's confirmed
-    /// `AcDb::ImplicitPointType` mapping), creating it the first time this
-    /// exact (entity, marker) pair is referenced.
+    /// Returns the point-node id for a line endpoint or curve center,
+    /// creating it the first time the marker is referenced.
     fn point_node(&mut self, handle: Handle, marker: i32) -> Option<i32> {
-        if let Some(existing) = self.entities.get(&handle).and_then(|e| e.points.get(&marker)) {
+        if let Some(existing) = self
+            .entities
+            .get(&handle)
+            .and_then(|e| e.points.get(&marker))
+        {
             return Some(*existing);
         }
         let curve_id = self.geometry_node(handle)?;
@@ -246,7 +214,11 @@ impl<'a> GroupBuilder<'a> {
                 curve_id,
             },
         );
-        self.entities.entry(handle).or_default().points.insert(marker, node_id);
+        self.entities
+            .entry(handle)
+            .or_default()
+            .points
+            .insert(marker, node_id);
         Some(node_id)
     }
 
@@ -259,9 +231,7 @@ impl<'a> GroupBuilder<'a> {
         }
     }
 
-    /// Records an undirected edge (design doc's confirmed reading of
-    /// `AcConstraintGroupNode`: "connection between two nodes is not
-    /// directed") between two node ids, on both nodes' own `connections`.
+    /// Records an undirected edge on both nodes.
     fn connect(&mut self, a: i32, b: i32) {
         if let Some(node) = self.nodes.iter_mut().find(|n| n.node_id == a) {
             node.connections.push(b);
@@ -272,9 +242,7 @@ impl<'a> GroupBuilder<'a> {
     }
 }
 
-/// Class name for a plain `Geometrical`-shaped constraint — the
-/// `is_plain_geometrical_constraint` list confirmed in
-/// `dwg_stream_readers/object_reader/associative.rs` (design doc §3).
+/// Class name for a plain `Geometrical`-shaped constraint.
 fn geometrical_class_name(kind: ConstraintKind) -> Option<&'static str> {
     match kind {
         ConstraintKind::Coincident => Some("ACPOINTCOINCIDENCECONSTRAINT"),
@@ -282,7 +250,7 @@ fn geometrical_class_name(kind: ConstraintKind) -> Option<&'static str> {
         ConstraintKind::Vertical => Some("ACVERTICALCONSTRAINT"),
         ConstraintKind::Perpendicular => Some("ACPERPENDICULARCONSTRAINT"),
         ConstraintKind::Tangent => Some("ACTANGENTCONSTRAINT"),
-        // AutoCAD's own `GeomConstraintType` enum (ObjectARX's
+        // the native format's own `GeomConstraintType` enum (native SDK's
         // `AcGeomConstraint.h`) lists `kNormal` alongside `kPerpendicular`
         // as a distinct, real geometric-constraint kind.
         ConstraintKind::Normal => Some("ACNORMALCONSTRAINT"),
@@ -293,17 +261,20 @@ fn geometrical_class_name(kind: ConstraintKind) -> Option<&'static str> {
         ConstraintKind::Midpoint => Some("ACMIDPOINTCONSTRAINT"),
         ConstraintKind::PointOnCurve => Some("ACPOINTCURVECONSTRAINT"),
         ConstraintKind::Symmetric => Some("ACSYMMETRICCONSTRAINT"),
-        // Also a plain `Geometrical`-shaped node in AutoCAD's own class list
+        // Also a plain `Geometrical`-shaped node in the native format's own class list
         // (`is_plain_geometrical_constraint`) — unlike `Equal`, its class
         // name never branches on entity type, so it belongs here rather
         // than in the caller's per-entity-type dispatch.
         ConstraintKind::EqualDistance => Some("ACEQUALDISTANCECONSTRAINT"),
-        // `Equal` isn't one native kind — the line/circle split below
-        // (design doc §5) needs the resolved entity types, not just the
-        // ConstraintKind, so it's handled by the caller instead of here.
-        ConstraintKind::Equal | ConstraintKind::Parallel | ConstraintKind::Distance
-        | ConstraintKind::Angle | ConstraintKind::Radius | ConstraintKind::Diameter
-        | ConstraintKind::DistanceX | ConstraintKind::DistanceY => None,
+        // `Equal` needs the resolved entity types, so the caller handles it.
+        ConstraintKind::Equal
+        | ConstraintKind::Parallel
+        | ConstraintKind::Distance
+        | ConstraintKind::Angle
+        | ConstraintKind::Radius
+        | ConstraintKind::Diameter
+        | ConstraintKind::DistanceX
+        | ConstraintKind::DistanceY => None,
         // No native DWG representation exists at all: neither
         // `AcExplicitConstr.h` (Distance/Angle/RadiusDiameter — no
         // ArcLength-shaped class) nor `acadrust`'s `AssocConstraintNodeData`
@@ -316,13 +287,15 @@ fn geometrical_class_name(kind: ConstraintKind) -> Option<&'static str> {
 }
 
 /// `Diameter`/`DistanceX`/`DistanceY` reuse `Radius`'/`Distance`'s own DWG
-/// class — real AutoCAD represents them as the same
+/// class — native implementations represents them as the same
 /// `AcRadiusDiameterConstraint`/`AcDistanceConstraint` object with a
 /// different `RadiusDiameterConstrType`/`DirectionType` mode byte (set in
 /// `constraint_node` below), not a distinct native class.
 const fn dimensional_class_name(kind: ConstraintKind) -> &'static str {
     match kind {
-        ConstraintKind::Distance | ConstraintKind::DistanceX | ConstraintKind::DistanceY => "ACDISTANCECONSTRAINT",
+        ConstraintKind::Distance | ConstraintKind::DistanceX | ConstraintKind::DistanceY => {
+            "ACDISTANCECONSTRAINT"
+        }
         ConstraintKind::Angle => "ACANGLECONSTRAINT",
         ConstraintKind::Radius | ConstraintKind::Diameter => "ACRADIUSDIAMETERCONSTRAINT",
         _ => "",
@@ -355,7 +328,11 @@ fn constraint_node(
         builder.push_node(
             node_id,
             class_name,
-            AssocConstraintNodeData::Geometrical { owner_id, is_implied: false, is_active: true },
+            AssocConstraintNodeData::Geometrical {
+                owner_id,
+                is_implied: false,
+                is_active: true,
+            },
         );
         for target in &target_refs {
             builder.connect(node_id, *target);
@@ -370,7 +347,12 @@ fn constraint_node(
             builder.push_node(
                 node_id,
                 "ACPARALLELCONSTRAINT",
-                AssocConstraintNodeData::Parallel { owner_id: na, is_implied: false, is_active: true, datum_line_index: None },
+                AssocConstraintNodeData::Parallel {
+                    owner_id: na,
+                    is_implied: false,
+                    is_active: true,
+                    datum_line_index: None,
+                },
             );
             builder.connect(node_id, na);
             builder.connect(node_id, nb);
@@ -381,21 +363,35 @@ fn constraint_node(
             let (na, nb) = (builder.ref_node(*a)?, builder.ref_node(*b)?);
             let both_lines = matches!(document.get_entity(a.entity), Some(EntityType::Line(_)))
                 && matches!(document.get_entity(b.entity), Some(EntityType::Line(_)));
-            let class_name = if both_lines { "ACEQUALLENGTHCONSTRAINT" } else { "ACEQUALRADIUSCONSTRAINT" };
+            let class_name = if both_lines {
+                "ACEQUALLENGTHCONSTRAINT"
+            } else {
+                "ACEQUALRADIUSCONSTRAINT"
+            };
             let node_id = builder.alloc_node_id();
             builder.push_node(
                 node_id,
                 class_name,
-                AssocConstraintNodeData::Geometrical { owner_id: na, is_implied: false, is_active: true },
+                AssocConstraintNodeData::Geometrical {
+                    owner_id: na,
+                    is_implied: false,
+                    is_active: true,
+                },
             );
             builder.connect(node_id, na);
             builder.connect(node_id, nb);
             Some(node_id)
         }
-        ConstraintKind::Distance | ConstraintKind::DistanceX | ConstraintKind::DistanceY
-        | ConstraintKind::Angle | ConstraintKind::Radius | ConstraintKind::Diameter => {
+        ConstraintKind::Distance
+        | ConstraintKind::DistanceX
+        | ConstraintKind::DistanceY
+        | ConstraintKind::Angle
+        | ConstraintKind::Radius
+        | ConstraintKind::Diameter => {
             let target_refs: Vec<i32> = match constraint.kind {
-                ConstraintKind::Radius | ConstraintKind::Diameter => vec![builder.ref_node(*refs.first()?)?],
+                ConstraintKind::Radius | ConstraintKind::Diameter => {
+                    vec![builder.ref_node(*refs.first()?)?]
+                }
                 _ => {
                     let [a, b] = refs else { return None };
                     vec![builder.ref_node(*a)?, builder.ref_node(*b)?]
@@ -415,7 +411,7 @@ fn constraint_node(
                     distance: None,
                 },
                 // X-only/Y-only: `kFixedDirection` with the fixed unit
-                // vector the distance is measured along — AutoCAD's own
+                // vector the distance is measured along — the native format's own
                 // representation of DistanceX/DistanceY, not a distinct
                 // constraint class.
                 ConstraintKind::DistanceX => AssocConstraintNodeData::Distance {
@@ -482,13 +478,19 @@ struct Allocator<'a> {
     document: &'a mut CadDocument,
     /// One `AssocVariable` handle per distinct named parameter actually
     /// referenced in this scope, created once and shared by every
-    /// constraint that references the same name (mirrors how AutoCAD's own
+    /// constraint that references the same name (mirrors how the native format's own
     /// variables work — one object, many dependents).
     variables: FxHashMap<String, Handle>,
 }
 
 impl Allocator<'_> {
-    fn insert_associative(&mut self, owner: Handle, dxf_name: &str, cpp_class_name: &str, data: AssociativeData) -> Handle {
+    fn insert_associative(
+        &mut self,
+        owner: Handle,
+        dxf_name: &str,
+        cpp_class_name: &str,
+        data: AssociativeData,
+    ) -> Handle {
         let handle = self.document.allocate_handle();
         self.insert_associative_at(handle, owner, dxf_name, cpp_class_name, data);
         handle
@@ -499,7 +501,14 @@ impl Allocator<'_> {
     /// reference each other (`AssocAction::owning_network` /
     /// `AssocNetwork::owned_actions`) and so must both have real handles
     /// before either object is actually built.
-    fn insert_associative_at(&mut self, handle: Handle, owner: Handle, dxf_name: &str, cpp_class_name: &str, data: AssociativeData) {
+    fn insert_associative_at(
+        &mut self,
+        handle: Handle,
+        owner: Handle,
+        dxf_name: &str,
+        cpp_class_name: &str,
+        data: AssociativeData,
+    ) {
         let object = AssociativeObject {
             handle,
             owner,
@@ -508,7 +517,9 @@ impl Allocator<'_> {
             data,
             ..Default::default()
         };
-        self.document.objects.insert(handle, ObjectType::Associative(object));
+        self.document
+            .objects
+            .insert(handle, ObjectType::Associative(object));
     }
 
     fn geom_dependency(&mut self, group_handle: Handle, entity: Handle) -> Handle {
@@ -527,18 +538,13 @@ impl Allocator<'_> {
                 },
                 class_version: 1,
                 enabled: true,
-                // Whole-entity dependency, not a sub-entity — no persistent
-                // subentity class name needed (design doc §7.2: the real
-                // point/curve addressing lives on the constraint-node data,
-                // not here).
+                // Point and curve addressing lives on constraint-node data.
                 persistent_subent: AssocPersistentSubentId::default(),
             }),
         )
     }
 
-    /// The `AssocVariable` handle for `name`, creating it once per scope.
-    /// `formula` is our own `ParameterTable` source string for this name —
-    /// `AcDbAssocVariable.expression` is exactly this shape (design doc §5).
+    /// Returns the `AssocVariable` handle for `name`, creating it once per scope.
     fn variable(&mut self, group_handle: Handle, name: &str, formula: &str) -> Handle {
         if let Some(&handle) = self.variables.get(name) {
             return handle;
@@ -552,9 +558,7 @@ impl Allocator<'_> {
                 class_version: 1,
                 name: name.to_string(),
                 expression: formula.to_string(),
-                // Left empty deliberately: "If empty, the default evaluator
-                // for current acad version will be used" (Autodesk's own
-                // AcDbAssocVariable.h, design doc §5/§7.4) — not a gap.
+                // Empty selects the format's default expression evaluator.
                 evaluator: String::new(),
                 description: String::new(),
                 value: AssocEvalVariant::default(),
@@ -568,13 +572,18 @@ impl Allocator<'_> {
         handle
     }
 
-    /// `variable_handle` is `Some` (from a prior call to [`Allocator::variable`])
-    /// when this driving value is `DrivingValue::Named` — `Handle::NULL`'s
-    /// meaning for `AssocDependency::dependent_on` (design doc §5: "`NULL`
-    /// for a bare literal, or an `AssocVariable`'s handle when the value is
-    /// driven by a named parameter") for a plain `DrivingValue::Literal`.
-    fn value_dependency(&mut self, group_handle: Handle, variable_handle: Option<Handle>, resolved: f64) -> Handle {
-        let value = AssocEvalVariant { code: 40, value: AssocEvalValue::Real(resolved) };
+    /// Uses a variable dependency for named values and a null dependency for
+    /// literal values.
+    fn value_dependency(
+        &mut self,
+        group_handle: Handle,
+        variable_handle: Option<Handle>,
+        resolved: f64,
+    ) -> Handle {
+        let value = AssocEvalVariant {
+            code: 40,
+            value: AssocEvalValue::Real(resolved),
+        };
         self.insert_associative(
             group_handle,
             "ACDBASSOCVALUEDEPENDENCY",
@@ -595,17 +604,22 @@ impl Allocator<'_> {
     }
 }
 
-/// Patches a geometry node's `geometry_dependency` field — only the
-/// whole-geometry variants (`BoundedLine`/`Circle`/`Arc`) carry one;
-/// `ImplicitPoint` nodes stay `Handle::NULL` (design doc §7.2, confirmed
-/// from Autodesk's own `AcConstrainedImplicitPoint` docs: it does not hold
-/// its own `AssocGeomDependency`, only `curve_id` pointing at the geometry
-/// node that does).
+/// Sets the dependency on whole-geometry nodes. Implicit points retain a
+/// null dependency and refer to their owning geometry node by `curve_id`.
 fn set_geometry_dependency(data: &mut AssocConstraintNodeData, handle: Handle) {
     match data {
-        AssocConstraintNodeData::BoundedLine { geometry_dependency, .. }
-        | AssocConstraintNodeData::Circle { geometry_dependency, .. }
-        | AssocConstraintNodeData::Arc { geometry_dependency, .. } => {
+        AssocConstraintNodeData::BoundedLine {
+            geometry_dependency,
+            ..
+        }
+        | AssocConstraintNodeData::Circle {
+            geometry_dependency,
+            ..
+        }
+        | AssocConstraintNodeData::Arc {
+            geometry_dependency,
+            ..
+        } => {
             *geometry_dependency = handle;
         }
         _ => {}
@@ -617,9 +631,15 @@ fn set_geometry_dependency(data: &mut AssocConstraintNodeData, handle: Handle) {
 /// [`constraint_node`] defers to `needs_value_dependency`).
 fn set_value_dependency(data: &mut AssocConstraintNodeData, handle: Handle) {
     match data {
-        AssocConstraintNodeData::Distance { value_dependency, .. }
-        | AssocConstraintNodeData::Angle { value_dependency, .. }
-        | AssocConstraintNodeData::RadiusDiameter { value_dependency, .. } => {
+        AssocConstraintNodeData::Distance {
+            value_dependency, ..
+        }
+        | AssocConstraintNodeData::Angle {
+            value_dependency, ..
+        }
+        | AssocConstraintNodeData::RadiusDiameter {
+            value_dependency, ..
+        } => {
             *value_dependency = handle;
         }
         _ => {}
@@ -679,10 +699,8 @@ fn ensure_associative_classes_registered(document: &mut CadDocument) {
 
 /// Ensures `owner`'s extension dictionary exists, returning its handle.
 /// `acadrust::CadDocument` only exposes creating one through
-/// [`CadDocument::ensure_xrecord`] — the `xdic_by_handle` side map a
-/// Dictionary-owned object would otherwise need is private to that crate
-/// (design doc's documented reason this module anchors at a real entity
-/// owner instead of the top-level NOD). So a throwaway XRecord is created
+/// [`CadDocument::ensure_xrecord`] — the dictionary side map is private to
+/// that crate. A throwaway XRecord is therefore created
 /// and immediately removed purely to force that wiring through the one
 /// public entry point that gets it right for both DWG and DXF.
 fn ensure_extension_dictionary(document: &mut CadDocument, owner: Handle) -> Handle {
@@ -703,38 +721,54 @@ fn ensure_extension_dictionary(document: &mut CadDocument, owner: Handle) -> Han
 /// for clearing a stale `ACAD_ASSOCNETWORK` entry before a resave rebuilds
 /// it from scratch.
 fn remove_dictionary_entry(document: &mut CadDocument, dictionary_handle: Handle, key: &str) {
-    let Some(ObjectType::Dictionary(dictionary)) = document.objects.get_mut(&dictionary_handle) else {
+    let Some(ObjectType::Dictionary(dictionary)) = document.objects.get_mut(&dictionary_handle)
+    else {
         return;
     };
-    let Some(index) = dictionary.entries.iter().position(|(name, _)| name.eq_ignore_ascii_case(key)) else {
+    let Some(index) = dictionary
+        .entries
+        .iter()
+        .position(|(name, _)| name.eq_ignore_ascii_case(key))
+    else {
         return;
     };
     let (_, target) = dictionary.entries.remove(index);
     remove_owned_recursive(document, target);
 }
 
-fn set_dictionary_entry(document: &mut CadDocument, dictionary_handle: Handle, key: &str, target: Handle) {
-    let Some(ObjectType::Dictionary(dictionary)) = document.objects.get_mut(&dictionary_handle) else {
+fn set_dictionary_entry(
+    document: &mut CadDocument,
+    dictionary_handle: Handle,
+    key: &str,
+    target: Handle,
+) {
+    let Some(ObjectType::Dictionary(dictionary)) = document.objects.get_mut(&dictionary_handle)
+    else {
         return;
     };
-    if let Some((_, handle)) = dictionary.entries.iter_mut().find(|(name, _)| name.eq_ignore_ascii_case(key)) {
+    if let Some((_, handle)) = dictionary
+        .entries
+        .iter_mut()
+        .find(|(name, _)| name.eq_ignore_ascii_case(key))
+    {
         *handle = target;
     } else {
         dictionary.add_entry(key, target);
     }
 }
 
-/// Removes `root` and every object transitively owned by it (design doc §6:
-/// this module rebuilds a scope's whole native graph on every save, so the
-/// previous save's objects must be fully torn down first — otherwise a
-/// resave accumulates orphaned `AssocGeomDependency`/`AssocValueDependency`/
-/// `AssocVariable` objects forever instead of replacing them).
+/// Removes `root` and every object transitively owned by it so rebuilding the
+/// graph cannot accumulate orphaned dependency or variable objects.
 fn remove_owned_recursive(document: &mut CadDocument, root: Handle) {
     if root.is_null() {
         return;
     }
-    let children: Vec<Handle> =
-        document.objects.keys().copied().filter(|&h| document.object_owner(h) == Some(root)).collect();
+    let children: Vec<Handle> = document
+        .objects
+        .keys()
+        .copied()
+        .filter(|&h| document.object_owner(h) == Some(root))
+        .collect();
     for child in children {
         remove_owned_recursive(document, child);
     }
@@ -743,7 +777,7 @@ fn remove_owned_recursive(document: &mut CadDocument, root: Handle) {
 
 /// Whether `owner`'s scope already carries a materialized native graph —
 /// from an earlier save with the setting on, or from a file that came from
-/// real AutoCAD/BricsCAD. Drives the "sync-if-present, create-only-if-
+/// real compatible applications. Drives the "sync-if-present, create-only-if-
 /// enabled" rule in [`Scene::materialize_dwg_native_constraints_for_save`]:
 /// a scope that already has this graph keeps getting it rebuilt on every
 /// save regardless of the current setting, so turning the setting off never
@@ -762,7 +796,12 @@ fn has_native_network(document: &CadDocument, owner: Handle) -> bool {
 /// One scope's worth of
 /// [`Scene::materialize_dwg_native_constraints_for_save`] — see that
 /// method's doc comment for the save-time contract this implements.
-fn materialize_scope(document: &mut CadDocument, owner: Handle, set: &SketchConstraintSet, parameters: &ParameterTable) {
+fn materialize_scope(
+    document: &mut CadDocument,
+    owner: Handle,
+    set: &SketchConstraintSet,
+    parameters: &ParameterTable,
+) {
     let dictionary_handle = ensure_extension_dictionary(document, owner);
     remove_dictionary_entry(document, dictionary_handle, NETWORK_DICTIONARY_KEY);
 
@@ -774,9 +813,16 @@ fn materialize_scope(document: &mut CadDocument, owner: Handle, set: &SketchCons
             if !constraint.enabled {
                 continue;
             }
-            constraint_node(&mut builder, document, constraint, &mut needs_value_dependency);
+            constraint_node(
+                &mut builder,
+                document,
+                constraint,
+                &mut needs_value_dependency,
+            );
         }
-        let GroupBuilder { nodes, entities, .. } = builder;
+        let GroupBuilder {
+            nodes, entities, ..
+        } = builder;
         (nodes, entities)
     };
     if nodes.is_empty() {
@@ -806,24 +852,35 @@ fn materialize_scope(document: &mut CadDocument, owner: Handle, set: &SketchCons
     // reference each other, so both handles are reserved up front.
     let group_handle = document.allocate_handle();
     let network_handle = document.allocate_handle();
-    let mut allocator = Allocator { document, variables: FxHashMap::default() };
+    let mut allocator = Allocator {
+        document,
+        variables: FxHashMap::default(),
+    };
 
     for (entity_handle, entity_nodes) in &entities {
         if entity_nodes.geometry_node_id == 0 {
             continue;
         }
         let dep_handle = allocator.geom_dependency(group_handle, *entity_handle);
-        if let Some(node) = nodes.iter_mut().find(|n| n.node_id == entity_nodes.geometry_node_id) {
+        if let Some(node) = nodes
+            .iter_mut()
+            .find(|n| n.node_id == entity_nodes.geometry_node_id)
+        {
             set_geometry_dependency(&mut node.data, dep_handle);
         }
     }
 
     for (node_id, driving) in needs_value_dependency {
         let Some(driving) = driving else { continue };
-        let Ok(resolved) = driving.resolve(parameters) else { continue };
+        let Ok(resolved) = driving.resolve(parameters) else {
+            continue;
+        };
         let variable_handle = match &driving {
             DrivingValue::Named(name) => {
-                let formula = parameters.get(name).map(|p| p.source.clone()).unwrap_or_default();
+                let formula = parameters
+                    .get(name)
+                    .map(|p| p.source.clone())
+                    .unwrap_or_default();
                 Some(allocator.variable(group_handle, name, &formula))
             }
             DrivingValue::Literal(_) => None,
@@ -835,12 +892,13 @@ fn materialize_scope(document: &mut CadDocument, owner: Handle, set: &SketchCons
     }
 
     let group = Assoc2dConstraintGroup {
-        action: AssocAction { owning_network: network_handle, ..Default::default() },
+        action: AssocAction {
+            owning_network: network_handle,
+            ..Default::default()
+        },
         version: 1,
         flag: true,
-        // Identity XY plane at the world origin: every entity this module
-        // builds constraint nodes for already lives in world XY (design doc
-        // §4 — a rotated/offset sketch plane isn't modeled yet).
+        // Only world-XY entities reach native graph materialization.
         work_plane: [Vector3::ZERO, Vector3::UNIT_X, Vector3::UNIT_Y],
         dependency: Handle::NULL,
         actions: Vec::new(),
@@ -869,23 +927,25 @@ fn materialize_scope(document: &mut CadDocument, owner: Handle, set: &SketchCons
         AssociativeData::Network(network),
     );
 
-    set_dictionary_entry(allocator.document, dictionary_handle, NETWORK_DICTIONARY_KEY, network_handle);
+    set_dictionary_entry(
+        allocator.document,
+        dictionary_handle,
+        NETWORK_DICTIONARY_KEY,
+        network_handle,
+    );
 }
 
 impl Scene {
     /// Rebuilds every sketch scope's native `AssocNetwork`/
     /// `Assoc2dConstraintGroup` graph from `self.sketch_constraints`,
-    /// replacing whatever this module wrote on a previous save — the same
-    /// "materialize right before save, from scratch every time" convention
-    /// `sketch_persist.rs`'s `materialize_sketch_constraints_for_save` uses,
-    /// called alongside it, not instead of it (design doc §6: additive).
+    /// replacing whatever this module wrote on a previous save.
     ///
     /// `enabled` is the app's `write_dwg_native_constraints` Options toggle
     /// (off by default — this graph adds file weight every save, whether or
-    /// not AutoCAD/BricsCAD interop is wanted). It only gates *creating* the
+    /// not compatible applications interop is wanted). It only gates *creating* the
     /// graph in a scope that doesn't have one yet: a scope that already
     /// carries one — from an earlier save with the setting on, or from a
-    /// file that came from real AutoCAD — keeps getting it rebuilt in sync
+    /// file that came from native implementations — keeps getting it rebuilt in sync
     /// regardless of the current setting ([`has_native_network`]), so
     /// toggling this off never leaves a stale graph sitting in the file.
     pub(crate) fn materialize_dwg_native_constraints_for_save(&mut self, enabled: bool) {
@@ -922,7 +982,10 @@ mod tests {
     }
 
     fn circle_entity(scene: &mut Scene, center: (f64, f64), radius: f64) -> Handle {
-        scene.add_entity(EntityType::Circle(Circle::from_center_radius(Vector3::new(center.0, center.1, 0.0), radius)))
+        scene.add_entity(EntityType::Circle(Circle::from_center_radius(
+            Vector3::new(center.0, center.1, 0.0),
+            radius,
+        )))
     }
 
     fn arc_entity(scene: &mut Scene, center: (f64, f64), radius: f64) -> Handle {
@@ -941,22 +1004,34 @@ mod tests {
     /// any broken link, since every test using this expects the graph to be
     /// present and well-formed.
     fn native_group(document: &CadDocument, owner: Handle) -> &Assoc2dConstraintGroup {
-        let dict = document.extension_dictionary_handle(owner).expect("extension dictionary should exist");
+        let dict = document
+            .extension_dictionary_handle(owner)
+            .expect("extension dictionary should exist");
         let Some(ObjectType::Dictionary(dictionary)) = document.objects.get(&dict) else {
             panic!("expected owner's extension dictionary object to exist");
         };
-        let network_handle =
-            dictionary.get(NETWORK_DICTIONARY_KEY).expect("ACAD_ASSOCNETWORK entry should exist");
-        let Some(ObjectType::Associative(AssociativeObject { data: AssociativeData::Network(network), .. })) =
-            document.objects.get(&network_handle)
+        let network_handle = dictionary
+            .get(NETWORK_DICTIONARY_KEY)
+            .expect("ACAD_ASSOCNETWORK entry should exist");
+        let Some(ObjectType::Associative(AssociativeObject {
+            data: AssociativeData::Network(network),
+            ..
+        })) = document.objects.get(&network_handle)
         else {
             panic!("expected an AssocNetwork object at the ACAD_ASSOCNETWORK handle");
         };
-        let group_handle = *network.owned_actions.first().expect("network should own the constraint group");
-        let Some(ObjectType::Associative(AssociativeObject { data: AssociativeData::ConstraintGroup(group), .. })) =
-            document.objects.get(&group_handle)
+        let group_handle = *network
+            .owned_actions
+            .first()
+            .expect("network should own the constraint group");
+        let Some(ObjectType::Associative(AssociativeObject {
+            data: AssociativeData::ConstraintGroup(group),
+            ..
+        })) = document.objects.get(&group_handle)
         else {
-            panic!("expected an Assoc2dConstraintGroup object at the network's owned action handle");
+            panic!(
+                "expected an Assoc2dConstraintGroup object at the network's owned action handle"
+            );
         };
         group
     }
@@ -967,23 +1042,24 @@ mod tests {
             let mut scene = Scene::new();
             let a = line_entity(&mut scene, (0.0, 0.0), (10.0, 0.0));
             let b = line_entity(&mut scene, (10.0, 0.0), (10.0, 5.0));
-            scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-                ConstraintKind::Horizontal,
-                vec![SketchRef::whole(a)],
-                None,
-            );
-            scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-                ConstraintKind::Vertical,
-                vec![SketchRef::whole(b)],
-                None,
-            );
+            scene
+                .sketch_constraint_set_mut(SketchScope::ModelSpace)
+                .add(ConstraintKind::Horizontal, vec![SketchRef::whole(a)], None);
+            scene
+                .sketch_constraint_set_mut(SketchScope::ModelSpace)
+                .add(ConstraintKind::Vertical, vec![SketchRef::whole(b)], None);
 
             scene.materialize_dwg_native_constraints_for_save(true);
             let owner = scene.document.header.model_space_block_handle;
             // Sanity before the round trip even happens: root + 2 geometry
             // nodes + 2 constraint nodes.
             let before = native_group(&scene.document, owner);
-            assert_eq!(before.nodes.len(), 5, "expected root + 2 geometry + 2 constraint nodes, got {:#?}", before.nodes);
+            assert_eq!(
+                before.nodes.len(),
+                5,
+                "expected root + 2 geometry + 2 constraint nodes, got {:#?}",
+                before.nodes
+            );
 
             let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version)
                 .unwrap_or_else(|e| panic!("save to {ext}: {e}"));
@@ -991,7 +1067,8 @@ mod tests {
                 .unwrap_or_else(|e| panic!("reload {ext}: {e}"));
 
             let group = native_group(&reloaded, owner);
-            let class_names: Vec<&str> = group.nodes.iter().map(|n| n.class_name.as_str()).collect();
+            let class_names: Vec<&str> =
+                group.nodes.iter().map(|n| n.class_name.as_str()).collect();
             assert!(
                 class_names.contains(&"ACHORIZONTALCONSTRAINT"),
                 "{ext}: missing horizontal constraint node, got {class_names:?}"
@@ -1001,7 +1078,10 @@ mod tests {
                 "{ext}: missing vertical constraint node, got {class_names:?}"
             );
             assert_eq!(
-                class_names.iter().filter(|&&n| n == "ACCONSTRAINEDBOUNDEDLINE").count(),
+                class_names
+                    .iter()
+                    .filter(|&&n| n == "ACCONSTRAINEDBOUNDEDLINE")
+                    .count(),
                 2,
                 "{ext}: expected both lines' geometry nodes to survive, got {class_names:?}"
             );
@@ -1012,12 +1092,17 @@ mod tests {
         let mut scene = Scene::new();
         let a = line_entity(&mut scene, (0.0, 0.0), (10.0, 0.0));
         let b = line_entity(&mut scene, (20.0, 0.0), (30.0, 0.0));
-        scene.named_parameters.set("gap", "5").expect("defining the parameter should succeed");
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-            ConstraintKind::Distance,
-            vec![SketchRef::point(a, 1), SketchRef::point(b, 0)],
-            Some(DrivingValue::Named("gap".to_string())),
-        );
+        scene
+            .named_parameters
+            .set("gap", "5")
+            .expect("defining the parameter should succeed");
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .add(
+                ConstraintKind::Distance,
+                vec![SketchRef::point(a, 1), SketchRef::point(b, 0)],
+                Some(DrivingValue::Named("gap".to_string())),
+            );
         let owner = scene.document.header.model_space_block_handle;
         (scene, owner)
     }
@@ -1040,7 +1125,10 @@ mod tests {
     fn a_dwg_save_keeps_the_full_dependency_chain_including_the_named_variable() {
         let (mut scene, owner) = distance_with_named_parameter_scene();
         scene.materialize_dwg_native_constraints_for_save(true);
-        assert!(has_variable_named(&scene.document, "gap"), "expected an AssocVariable BEFORE serialization");
+        assert!(
+            has_variable_named(&scene.document, "gap"),
+            "expected an AssocVariable BEFORE serialization"
+        );
 
         let bytes = crate::io::save_to_bytes(&scene.document, "dwg", scene.document.version)
             .unwrap_or_else(|e| panic!("save to dwg: {e}"));
@@ -1049,11 +1137,21 @@ mod tests {
 
         let group = native_group(&reloaded, owner);
         assert!(
-            group.nodes.iter().any(|n| n.class_name == "ACDISTANCECONSTRAINT"),
+            group
+                .nodes
+                .iter()
+                .any(|n| n.class_name == "ACDISTANCECONSTRAINT"),
             "expected an ACDISTANCECONSTRAINT node, got {:?}",
-            group.nodes.iter().map(|n| &n.class_name).collect::<Vec<_>>()
+            group
+                .nodes
+                .iter()
+                .map(|n| &n.class_name)
+                .collect::<Vec<_>>()
         );
-        assert!(has_variable_named(&reloaded, "gap"), "expected the AssocVariable \"gap\" to survive a DWG round trip");
+        assert!(
+            has_variable_named(&reloaded, "gap"),
+            "expected the AssocVariable \"gap\" to survive a DWG round trip"
+        );
     }
 
     /// Confirmed by reading the actual DXF writer
@@ -1084,14 +1182,20 @@ mod tests {
 
         let group = native_group(&reloaded, owner);
         assert!(
-            group.nodes.iter().any(|n| n.class_name == "ACDISTANCECONSTRAINT"),
+            group
+                .nodes
+                .iter()
+                .any(|n| n.class_name == "ACDISTANCECONSTRAINT"),
             "expected the ACDISTANCECONSTRAINT node's shell to survive, got {:?}",
-            group.nodes.iter().map(|n| &n.class_name).collect::<Vec<_>>()
+            group
+                .nodes
+                .iter()
+                .map(|n| &n.class_name)
+                .collect::<Vec<_>>()
         );
         assert!(
             !has_variable_named(&reloaded, "gap"),
-            "acadrust's DXF writer should not carry AssocVariable — if this now passes, upstream has fixed \
-             is_unrestorable_assoc_object and materialize_scope's doc comments/design doc should be updated"
+            "acadrust's DXF writer should not carry AssocVariable; update the native materializer if this changes"
         );
     }
 
@@ -1099,17 +1203,18 @@ mod tests {
     fn resaving_replaces_rather_than_accumulates_native_objects() {
         let mut scene = Scene::new();
         let a = line_entity(&mut scene, (0.0, 0.0), (10.0, 0.0));
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-            ConstraintKind::Horizontal,
-            vec![SketchRef::whole(a)],
-            None,
-        );
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .add(ConstraintKind::Horizontal, vec![SketchRef::whole(a)], None);
 
         scene.materialize_dwg_native_constraints_for_save(true);
         let first_count = scene.document.objects.len();
         scene.materialize_dwg_native_constraints_for_save(true);
         let second_count = scene.document.objects.len();
-        assert_eq!(first_count, second_count, "a resave with the same constraints must not accumulate new objects");
+        assert_eq!(
+            first_count, second_count,
+            "a resave with the same constraints must not accumulate new objects"
+        );
     }
 
     #[test]
@@ -1131,18 +1236,19 @@ mod tests {
     }
 
     fn model_space_has_native_network(scene: &Scene) -> bool {
-        has_native_network(&scene.document, scene.document.header.model_space_block_handle)
+        has_native_network(
+            &scene.document,
+            scene.document.header.model_space_block_handle,
+        )
     }
 
     #[test]
     fn the_setting_off_skips_a_scope_with_no_existing_native_graph() {
         let mut scene = Scene::new();
         let a = line_entity(&mut scene, (0.0, 0.0), (10.0, 0.0));
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-            ConstraintKind::Horizontal,
-            vec![SketchRef::whole(a)],
-            None,
-        );
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .add(ConstraintKind::Horizontal, vec![SketchRef::whole(a)], None);
 
         scene.materialize_dwg_native_constraints_for_save(false);
         assert!(
@@ -1160,20 +1266,19 @@ mod tests {
     fn the_setting_off_still_resyncs_a_scope_that_already_has_a_native_graph() {
         let mut scene = Scene::new();
         let a = line_entity(&mut scene, (0.0, 0.0), (10.0, 0.0));
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-            ConstraintKind::Horizontal,
-            vec![SketchRef::whole(a)],
-            None,
-        );
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .add(ConstraintKind::Horizontal, vec![SketchRef::whole(a)], None);
         scene.materialize_dwg_native_constraints_for_save(true);
-        assert!(model_space_has_native_network(&scene), "sanity: the graph should exist after the first, enabled save");
+        assert!(
+            model_space_has_native_network(&scene),
+            "sanity: the graph should exist after the first, enabled save"
+        );
 
         let b = line_entity(&mut scene, (0.0, 0.0), (0.0, 10.0));
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-            ConstraintKind::Vertical,
-            vec![SketchRef::whole(b)],
-            None,
-        );
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .add(ConstraintKind::Vertical, vec![SketchRef::whole(b)], None);
         scene.materialize_dwg_native_constraints_for_save(false);
 
         let owner = scene.document.header.model_space_block_handle;
@@ -1194,11 +1299,9 @@ mod tests {
     fn the_setting_off_does_not_remove_an_existing_native_graph() {
         let mut scene = Scene::new();
         let a = line_entity(&mut scene, (0.0, 0.0), (10.0, 0.0));
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-            ConstraintKind::Horizontal,
-            vec![SketchRef::whole(a)],
-            None,
-        );
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .add(ConstraintKind::Horizontal, vec![SketchRef::whole(a)], None);
         scene.materialize_dwg_native_constraints_for_save(true);
         scene.materialize_dwg_native_constraints_for_save(false);
         assert!(
@@ -1225,23 +1328,56 @@ mod tests {
             let axis = line_entity(&mut scene, (0.0, 0.0), (0.0, 10.0));
 
             let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
-            set.add(ConstraintKind::Concentric, vec![SketchRef::center(circle_a), SketchRef::center(circle_b)], None);
-            set.add(ConstraintKind::Colinear, vec![SketchRef::whole(line_a), SketchRef::whole(line_b)], None);
+            set.add(
+                ConstraintKind::Concentric,
+                vec![SketchRef::center(circle_a), SketchRef::center(circle_b)],
+                None,
+            );
+            set.add(
+                ConstraintKind::Colinear,
+                vec![SketchRef::whole(line_a), SketchRef::whole(line_b)],
+                None,
+            );
             set.add(ConstraintKind::Fixed, vec![SketchRef::whole(line_a)], None);
-            set.add(ConstraintKind::CenterPoint, vec![SketchRef::point(marker, 0), SketchRef::center(circle_a)], None);
-            set.add(ConstraintKind::Midpoint, vec![SketchRef::point(marker, 1), SketchRef::whole(line_a)], None);
-            set.add(ConstraintKind::PointOnCurve, vec![SketchRef::point(marker, 0), SketchRef::whole(circle_a)], None);
+            set.add(
+                ConstraintKind::CenterPoint,
+                vec![SketchRef::point(marker, 0), SketchRef::center(circle_a)],
+                None,
+            );
+            set.add(
+                ConstraintKind::Midpoint,
+                vec![SketchRef::point(marker, 1), SketchRef::whole(line_a)],
+                None,
+            );
+            set.add(
+                ConstraintKind::PointOnCurve,
+                vec![SketchRef::point(marker, 0), SketchRef::whole(circle_a)],
+                None,
+            );
             set.add(
                 ConstraintKind::EqualDistance,
-                vec![SketchRef::point(line_b, 0), SketchRef::point(line_b, 1), SketchRef::point(line_a, 0), SketchRef::point(line_a, 1)],
+                vec![
+                    SketchRef::point(line_b, 0),
+                    SketchRef::point(line_b, 1),
+                    SketchRef::point(line_a, 0),
+                    SketchRef::point(line_a, 1),
+                ],
                 None,
             );
             set.add(
                 ConstraintKind::Symmetric,
-                vec![SketchRef::center(circle_a), SketchRef::center(circle_b), SketchRef::whole(axis)],
+                vec![
+                    SketchRef::center(circle_a),
+                    SketchRef::center(circle_b),
+                    SketchRef::whole(axis),
+                ],
                 None,
             );
-            set.add(ConstraintKind::Normal, vec![SketchRef::whole(circle_a), SketchRef::whole(line_a)], None);
+            set.add(
+                ConstraintKind::Normal,
+                vec![SketchRef::whole(circle_a), SketchRef::whole(line_a)],
+                None,
+            );
 
             scene.materialize_dwg_native_constraints_for_save(true);
             let owner = scene.document.header.model_space_block_handle;
@@ -1252,7 +1388,8 @@ mod tests {
                 .unwrap_or_else(|e| panic!("reload {ext}: {e}"));
 
             let group = native_group(&reloaded, owner);
-            let class_names: Vec<&str> = group.nodes.iter().map(|n| n.class_name.as_str()).collect();
+            let class_names: Vec<&str> =
+                group.nodes.iter().map(|n| n.class_name.as_str()).collect();
 
             for expected in [
                 "ACCONCENTRICCONSTRAINT",
@@ -1265,7 +1402,10 @@ mod tests {
                 "ACSYMMETRICCONSTRAINT",
                 "ACNORMALCONSTRAINT",
             ] {
-                assert!(class_names.contains(&expected), "{ext}: missing {expected} node, got {class_names:?}");
+                assert!(
+                    class_names.contains(&expected),
+                    "{ext}: missing {expected} node, got {class_names:?}"
+                );
             }
         }
     }
@@ -1286,7 +1426,11 @@ mod tests {
             let circle = circle_entity(&mut scene, (10.0, -6.0), 2.0);
 
             let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
-            set.add(ConstraintKind::Concentric, vec![SketchRef::center(arc), SketchRef::center(circle)], None);
+            set.add(
+                ConstraintKind::Concentric,
+                vec![SketchRef::center(arc), SketchRef::center(circle)],
+                None,
+            );
             set.add(
                 ConstraintKind::Radius,
                 vec![SketchRef::whole(arc)],
@@ -1298,14 +1442,25 @@ mod tests {
 
             let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version)
                 .unwrap_or_else(|e| panic!("save to {ext}: {e}"));
-            let reloaded = crate::io::load_bytes(&format!("arc_ref.{ext}"), bytes).unwrap_or_else(|e| panic!("reload {ext}: {e}"));
+            let reloaded = crate::io::load_bytes(&format!("arc_ref.{ext}"), bytes)
+                .unwrap_or_else(|e| panic!("reload {ext}: {e}"));
 
             let group = native_group(&reloaded, owner);
-            let class_names: Vec<&str> = group.nodes.iter().map(|n| n.class_name.as_str()).collect();
-            assert!(class_names.contains(&"ACCONCENTRICCONSTRAINT"), "{ext}: missing ACCONCENTRICCONSTRAINT, got {class_names:?}");
-            assert!(class_names.contains(&"ACRADIUSDIAMETERCONSTRAINT"), "{ext}: missing ACRADIUSDIAMETERCONSTRAINT, got {class_names:?}");
+            let class_names: Vec<&str> =
+                group.nodes.iter().map(|n| n.class_name.as_str()).collect();
             assert!(
-                group.nodes.iter().any(|n| n.class_name == "ACCONSTRAINEDARC"),
+                class_names.contains(&"ACCONCENTRICCONSTRAINT"),
+                "{ext}: missing ACCONCENTRICCONSTRAINT, got {class_names:?}"
+            );
+            assert!(
+                class_names.contains(&"ACRADIUSDIAMETERCONSTRAINT"),
+                "{ext}: missing ACRADIUSDIAMETERCONSTRAINT, got {class_names:?}"
+            );
+            assert!(
+                group
+                    .nodes
+                    .iter()
+                    .any(|n| n.class_name == "ACCONSTRAINEDARC"),
                 "{ext}: the arc should have its own geometry node, got {class_names:?}"
             );
         }
@@ -1325,25 +1480,34 @@ mod tests {
             let arc = arc_entity(&mut scene, (0.0, 0.0), 4.0);
             let line = line_entity(&mut scene, (20.0, 20.0), (21.0, 20.0));
 
-            scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-                ConstraintKind::Coincident,
-                vec![SketchRef::point(arc, 0), SketchRef::point(line, 0)],
-                None,
-            );
+            scene
+                .sketch_constraint_set_mut(SketchScope::ModelSpace)
+                .add(
+                    ConstraintKind::Coincident,
+                    vec![SketchRef::point(arc, 0), SketchRef::point(line, 0)],
+                    None,
+                );
 
             scene.materialize_dwg_native_constraints_for_save(true);
             let owner = scene.document.header.model_space_block_handle;
 
             let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version)
                 .unwrap_or_else(|e| panic!("save to {ext}: {e}"));
-            let reloaded =
-                crate::io::load_bytes(&format!("arc_endpoint_ref.{ext}"), bytes).unwrap_or_else(|e| panic!("reload {ext}: {e}"));
+            let reloaded = crate::io::load_bytes(&format!("arc_endpoint_ref.{ext}"), bytes)
+                .unwrap_or_else(|e| panic!("reload {ext}: {e}"));
 
             let group = native_group(&reloaded, owner);
-            let class_names: Vec<&str> = group.nodes.iter().map(|n| n.class_name.as_str()).collect();
-            assert!(class_names.contains(&"ACPOINTCOINCIDENCECONSTRAINT"), "{ext}: missing ACPOINTCOINCIDENCECONSTRAINT, got {class_names:?}");
+            let class_names: Vec<&str> =
+                group.nodes.iter().map(|n| n.class_name.as_str()).collect();
             assert!(
-                group.nodes.iter().any(|n| n.class_name == "ACCONSTRAINEDARC"),
+                class_names.contains(&"ACPOINTCOINCIDENCECONSTRAINT"),
+                "{ext}: missing ACPOINTCOINCIDENCECONSTRAINT, got {class_names:?}"
+            );
+            assert!(
+                group
+                    .nodes
+                    .iter()
+                    .any(|n| n.class_name == "ACCONSTRAINEDARC"),
                 "{ext}: the arc should still have its own geometry node, got {class_names:?}"
             );
         }
@@ -1361,15 +1525,21 @@ mod tests {
     fn a_constraint_referencing_an_ellipse_is_absent_from_the_native_graph_but_not_from_xrecord() {
         for ext in ["dxf", "dwg"] {
             let mut scene = Scene::new();
-            let ellipse = scene.add_entity(EntityType::Ellipse(acadrust::entities::Ellipse::from_center_axes(
-                Vector3::new(0.0, 0.0, 0.0),
-                Vector3::new(4.0, 0.0, 0.0),
-                0.5,
-            )));
+            let ellipse = scene.add_entity(EntityType::Ellipse(
+                acadrust::entities::Ellipse::from_center_axes(
+                    Vector3::new(0.0, 0.0, 0.0),
+                    Vector3::new(4.0, 0.0, 0.0),
+                    0.5,
+                ),
+            ));
             let circle = circle_entity(&mut scene, (10.0, 10.0), 2.0);
 
             let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
-            set.add(ConstraintKind::Concentric, vec![SketchRef::center(ellipse), SketchRef::center(circle)], None);
+            set.add(
+                ConstraintKind::Concentric,
+                vec![SketchRef::center(ellipse), SketchRef::center(circle)],
+                None,
+            );
             set.add(ConstraintKind::Fixed, vec![SketchRef::whole(circle)], None);
 
             scene.materialize_sketch_constraints_for_save();
@@ -1378,12 +1548,16 @@ mod tests {
 
             let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version)
                 .unwrap_or_else(|e| panic!("save to {ext}: {e}"));
-            let reloaded_doc =
-                crate::io::load_bytes(&format!("ellipse_ref.{ext}"), bytes).unwrap_or_else(|e| panic!("reload {ext}: {e}"));
+            let reloaded_doc = crate::io::load_bytes(&format!("ellipse_ref.{ext}"), bytes)
+                .unwrap_or_else(|e| panic!("reload {ext}: {e}"));
 
             let group = native_group(&reloaded_doc, owner);
-            let class_names: Vec<&str> = group.nodes.iter().map(|n| n.class_name.as_str()).collect();
-            assert!(class_names.contains(&"ACFIXEDCONSTRAINT"), "{ext}: the other constraint should still persist, got {class_names:?}");
+            let class_names: Vec<&str> =
+                group.nodes.iter().map(|n| n.class_name.as_str()).collect();
+            assert!(
+                class_names.contains(&"ACFIXEDCONSTRAINT"),
+                "{ext}: the other constraint should still persist, got {class_names:?}"
+            );
             assert!(
                 !class_names.contains(&"ACCONCENTRICCONSTRAINT"),
                 "{ext}: the ellipse-referencing Concentric constraint has no supported geometry node and must not appear, got {class_names:?}"
@@ -1394,13 +1568,18 @@ mod tests {
             reloaded_scene.load_sketch_constraints_from_document();
             let restored = reloaded_scene
                 .sketch_constraint_set(SketchScope::ModelSpace)
-                .unwrap_or_else(|| panic!("{ext}: no ModelSpace constraint set survived the round trip"));
+                .unwrap_or_else(|| {
+                    panic!("{ext}: no ModelSpace constraint set survived the round trip")
+                });
             let kinds: Vec<ConstraintKind> = restored.constraints.iter().map(|c| c.kind).collect();
-            assert!(kinds.contains(&ConstraintKind::Concentric), "{ext}: the ellipse constraint should still round-trip via XRecord, got {kinds:?}");
+            assert!(
+                kinds.contains(&ConstraintKind::Concentric),
+                "{ext}: the ellipse constraint should still round-trip via XRecord, got {kinds:?}"
+            );
         }
     }
 
-    /// Constraint-parity Phase 4a: `ArcLength` has no ObjectARX class at
+    /// Constraint-parity Phase 4a: `ArcLength` has no native SDK class at
     /// all (confirmed against `AcExplicitConstr.h`) — this asserts the
     /// degradation is exactly as documented: the native DWG/DXF graph
     /// gets every *other* constraint on the arc (Radius, here) but no
@@ -1414,8 +1593,16 @@ mod tests {
             let arc = arc_entity(&mut scene, (0.0, 0.0), 4.0);
 
             let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
-            set.add(ConstraintKind::Radius, vec![SketchRef::whole(arc)], Some(DrivingValue::Literal(4.0)));
-            set.add(ConstraintKind::ArcLength, vec![SketchRef::whole(arc)], Some(DrivingValue::Literal(6.0)));
+            set.add(
+                ConstraintKind::Radius,
+                vec![SketchRef::whole(arc)],
+                Some(DrivingValue::Literal(4.0)),
+            );
+            set.add(
+                ConstraintKind::ArcLength,
+                vec![SketchRef::whole(arc)],
+                Some(DrivingValue::Literal(6.0)),
+            );
 
             // Both materializers, "called alongside, not instead of" each
             // other (`materialize_dwg_native_constraints_for_save`'s own
@@ -1427,12 +1614,16 @@ mod tests {
 
             let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version)
                 .unwrap_or_else(|e| panic!("save to {ext}: {e}"));
-            let reloaded_doc =
-                crate::io::load_bytes(&format!("arc_length.{ext}"), bytes).unwrap_or_else(|e| panic!("reload {ext}: {e}"));
+            let reloaded_doc = crate::io::load_bytes(&format!("arc_length.{ext}"), bytes)
+                .unwrap_or_else(|e| panic!("reload {ext}: {e}"));
 
             let group = native_group(&reloaded_doc, owner);
-            let class_names: Vec<&str> = group.nodes.iter().map(|n| n.class_name.as_str()).collect();
-            assert!(class_names.contains(&"ACRADIUSDIAMETERCONSTRAINT"), "{ext}: missing ACRADIUSDIAMETERCONSTRAINT, got {class_names:?}");
+            let class_names: Vec<&str> =
+                group.nodes.iter().map(|n| n.class_name.as_str()).collect();
+            assert!(
+                class_names.contains(&"ACRADIUSDIAMETERCONSTRAINT"),
+                "{ext}: missing ACRADIUSDIAMETERCONSTRAINT, got {class_names:?}"
+            );
             assert!(
                 !class_names.iter().any(|n| n.contains("ARCLENGTH")),
                 "{ext}: ArcLength has no native DWG class and must not appear here, got {class_names:?}"
@@ -1446,16 +1637,21 @@ mod tests {
             reloaded_scene.load_sketch_constraints_from_document();
             let restored = reloaded_scene
                 .sketch_constraint_set(SketchScope::ModelSpace)
-                .unwrap_or_else(|| panic!("{ext}: no ModelSpace constraint set survived the round trip"));
+                .unwrap_or_else(|| {
+                    panic!("{ext}: no ModelSpace constraint set survived the round trip")
+                });
             let kinds: Vec<ConstraintKind> = restored.constraints.iter().map(|c| c.kind).collect();
-            assert!(kinds.contains(&ConstraintKind::ArcLength), "{ext}: ArcLength should still round-trip via XRecord, got {kinds:?}");
+            assert!(
+                kinds.contains(&ConstraintKind::ArcLength),
+                "{ext}: ArcLength should still round-trip via XRecord, got {kinds:?}"
+            );
         }
     }
 
     /// Constraint-parity Phase 2: `Diameter`/`DistanceX`/`DistanceY` reuse
     /// `Radius`'/`Distance`'s own DWG class with a different
     /// `RadiusDiameterConstrType`/`DirectionType` mode byte, matching real
-    /// AutoCAD's representation (this module's own research, folded into
+    /// the native format's representation (this module's own research, folded into
     /// `dimensional_class_name`'s doc comment). Confirms that byte actually
     /// survives a real DWG/DXF write+read, not just the in-memory node this
     /// module built.
@@ -1467,7 +1663,11 @@ mod tests {
             let line = line_entity(&mut scene, (0.0, 0.0), (10.0, 0.0));
 
             let set = scene.sketch_constraint_set_mut(SketchScope::ModelSpace);
-            set.add(ConstraintKind::Diameter, vec![SketchRef::whole(circle)], Some(DrivingValue::Literal(16.0)));
+            set.add(
+                ConstraintKind::Diameter,
+                vec![SketchRef::whole(circle)],
+                Some(DrivingValue::Literal(16.0)),
+            );
             set.add(
                 ConstraintKind::DistanceX,
                 vec![SketchRef::point(line, 0), SketchRef::point(line, 1)],
@@ -1484,8 +1684,8 @@ mod tests {
 
             let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version)
                 .unwrap_or_else(|e| panic!("save to {ext}: {e}"));
-            let reloaded =
-                crate::io::load_bytes(&format!("diameter_directed.{ext}"), bytes).unwrap_or_else(|e| panic!("reload {ext}: {e}"));
+            let reloaded = crate::io::load_bytes(&format!("diameter_directed.{ext}"), bytes)
+                .unwrap_or_else(|e| panic!("reload {ext}: {e}"));
 
             let group = native_group(&reloaded, owner);
             let radius_diameter_nodes: Vec<_> = group
@@ -1502,11 +1702,19 @@ mod tests {
                 .nodes
                 .iter()
                 .filter_map(|n| match &n.data {
-                    AssocConstraintNodeData::Distance { direction_type, distance, .. } => Some((*direction_type, *distance)),
+                    AssocConstraintNodeData::Distance {
+                        direction_type,
+                        distance,
+                        ..
+                    } => Some((*direction_type, *distance)),
                     _ => None,
                 })
                 .collect();
-            assert_eq!(distance_nodes.len(), 2, "{ext}: expected DistanceX and DistanceY nodes, got {distance_nodes:?}");
+            assert_eq!(
+                distance_nodes.len(),
+                2,
+                "{ext}: expected DistanceX and DistanceY nodes, got {distance_nodes:?}"
+            );
             assert!(
                 distance_nodes.contains(&(1, Some(Vector3::new(1.0, 0.0, 0.0)))),
                 "{ext}: DistanceX should round-trip as direction_type=1 with a (1,0,0) direction, got {distance_nodes:?}"

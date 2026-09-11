@@ -35,9 +35,3 @@ __pycache__/
 
 # Claude Code local preview/dev-server config
 .claude/launch.json
-
-# macOS Finder metadata
-.DS_Store
-
-# Local code-indexing tool cache
-.understand-anything/

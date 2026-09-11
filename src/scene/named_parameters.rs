@@ -1,32 +1,5 @@
-//! Named, formula-capable document parameters — data model.
-//!
-//! Design: `docs/named_parameters_design.md`. This is stage 1 of that doc's
-//! §4 staged plan: the parameter table type plus a small expression
-//! parser/evaluator, unit-tested in isolation — no document/UI integration
-//! yet (that's stage 2's XRecord persistence, mirroring
-//! [`super::sketch_persist`], and stage 3's
-//! `SketchConstraint::driving_param` wiring).
-//!
-//! A [`Parameter`] is a name plus a formula: either a bare literal (`12.5`)
-//! or an expression referencing other parameters by name (`2 * hole_dia +
-//! 1.5`). A [`ParameterTable`] holds every parameter for one document (per
-//! the design doc's §2: one table per document, not per-[`super::
-//! sketch_constraints::SketchScope`]) and resolves each one's numeric value,
-//! rejecting a circular reference at the moment it would be introduced
-//! rather than at evaluation time — the design doc's explicit requirement
-//! ("A referencing B referencing A must be rejected, not silently
-//! infinite-loop or panic"), and the same real-time-rejection behavior a
-//! spreadsheet gives for a circular formula.
-//!
-//! No existing workspace dependency parses expressions (the design doc's §2
-//! flags checking `evalexpr`/`meval` before hand-rolling one). Hand-rolled
-//! here instead: cycle detection needs the set of names an expression
-//! references *before* it's evaluated, which means owning the parse tree —
-//! treating evaluation as a black box, the way a generic expression-eval
-//! crate is normally used, would just mean re-deriving that same dependency
-//! information by other means. [`Expr::refs`] *is* that dependency
-//! information, not extra work spent duplicating what such a crate computes
-//! internally anyway.
+//! Named, formula-capable parameters stored per drawing.
+//! Formulas are parsed locally so dependency cycles can be rejected before evaluation.
 
 use super::Scene;
 use serde::{Deserialize, Serialize};
@@ -34,12 +7,8 @@ use std::collections::HashMap;
 use std::fmt;
 
 /// A parsed formula. Ordinary arithmetic plus [`Expr::Ref`] (a reference to
-/// another parameter by name — what makes this a *named*-parameter system
-/// rather than a plain calculator) and [`Expr::Call`] (a function call).
-/// `Call` is in the grammar now so it doesn't need a rewrite if/when more
-/// functions are wanted later (design doc §5 open question 2 leaves the
-/// exact v1 function set undecided); only a small, conservative builtin set
-/// is actually wired up for now (see `call_builtin`).
+/// another parameter by name) and [`Expr::Call`] (a function call). Only the
+/// small builtin set in `call_builtin` is accepted.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Expr {
     Number(f64),
@@ -66,7 +35,11 @@ impl Expr {
                 }
             }
             Expr::Neg(a) => a.refs(out),
-            Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b) | Expr::Pow(a, b) => {
+            Expr::Add(a, b)
+            | Expr::Sub(a, b)
+            | Expr::Mul(a, b)
+            | Expr::Div(a, b)
+            | Expr::Pow(a, b) => {
                 a.refs(out);
                 b.refs(out);
             }
@@ -98,7 +71,11 @@ pub enum ParamError {
     /// `b = a`.
     Cycle(Vec<String>),
     UnknownFunction(String),
-    WrongArgCount { function: String, expected: usize, found: usize },
+    WrongArgCount {
+        function: String,
+        expected: usize,
+        found: usize,
+    },
     /// Raised by `resolve`/`resolve_all`, not `set` — a formula may
     /// legitimately reference a parameter that doesn't exist *yet* (order of
     /// definition shouldn't matter, mirroring a spreadsheet); this only
@@ -114,8 +91,15 @@ impl fmt::Display for ParamError {
             ParamError::InvalidName(name) => write!(f, "'{name}' is not a valid parameter name"),
             ParamError::Cycle(path) => write!(f, "circular reference: {}", path.join(" -> ")),
             ParamError::UnknownFunction(name) => write!(f, "unknown function '{name}'"),
-            ParamError::WrongArgCount { function, expected, found } => {
-                write!(f, "{function}() expects {expected} argument(s), found {found}")
+            ParamError::WrongArgCount {
+                function,
+                expected,
+                found,
+            } => {
+                write!(
+                    f,
+                    "{function}() expects {expected} argument(s), found {found}"
+                )
             }
             ParamError::UndefinedReference(name) => write!(f, "'{name}' is not defined"),
             ParamError::DivisionByZero => write!(f, "division by zero"),
@@ -125,9 +109,8 @@ impl fmt::Display for ParamError {
 
 impl std::error::Error for ParamError {}
 
-/// The v1 builtin function set — deliberately small (design doc §5 open
-/// question 2 defers the full surface). Also doubles as the reserved-word
-/// list `is_reserved_name` checks a parameter name against, so a formula
+/// The builtin function set. It also supplies the reserved-word list that
+/// `is_reserved_name` checks a parameter name against, so a formula
 /// like `sqrt(x)` is never ambiguous between "call the builtin" and
 /// "multiply by a parameter named sqrt".
 const BUILTIN_FUNCTIONS: &[&str] = &["sqrt", "abs", "pow", "min", "max"];
@@ -137,7 +120,7 @@ pub fn is_reserved_name(name: &str) -> bool {
 }
 
 /// A valid parameter name: starts with a letter or underscore, followed by
-/// letters/digits/underscores. (Design doc §5 open question 5.)
+/// letters, digits, or underscores.
 pub fn is_valid_name(name: &str) -> bool {
     let mut chars = name.chars();
     match chars.next() {
@@ -147,12 +130,7 @@ pub fn is_valid_name(name: &str) -> bool {
     chars.all(|c| c.is_alphanumeric() || c == '_')
 }
 
-/// A dimensional constraint's driving value (design doc §2's own suggested
-/// shape for `SketchConstraint::driving_param`, stage 3 of the named-
-/// parameters staged plan): either a literal number typed directly, or a
-/// reference to a named parameter resolved through a [`ParameterTable`] at
-/// solve time. Lives here rather than in `sketch_constraints.rs` since
-/// resolving `Named` needs `ParameterTable`, which this module owns.
+/// A dimensional constraint's literal or named driving value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DrivingValue {
     Literal(f64),
@@ -182,7 +160,11 @@ impl From<f64> for DrivingValue {
 fn call_builtin(name: &str, args: &[f64]) -> Result<f64, ParamError> {
     fn check_arity(name: &str, args: &[f64], expected: usize) -> Result<(), ParamError> {
         if args.len() != expected {
-            return Err(ParamError::WrongArgCount { function: name.to_string(), expected, found: args.len() });
+            return Err(ParamError::WrongArgCount {
+                function: name.to_string(),
+                expected,
+                found: args.len(),
+            });
         }
         Ok(())
     }
@@ -302,7 +284,9 @@ fn tokenize(src: &str) -> Result<Vec<Token>, ParamError> {
                     }
                 }
                 let text: String = chars[start..i].iter().collect();
-                let value: f64 = text.parse().map_err(|_| ParamError::Parse(format!("invalid number '{text}'")))?;
+                let value: f64 = text
+                    .parse()
+                    .map_err(|_| ParamError::Parse(format!("invalid number '{text}'")))?;
                 tokens.push(Token::Number(value));
             }
             _ if c.is_alphabetic() || c == '_' => {
@@ -340,8 +324,12 @@ impl<'a> Parser<'a> {
     fn expect(&mut self, expected: Token) -> Result<(), ParamError> {
         match self.bump() {
             Some(t) if t == expected => Ok(()),
-            Some(t) => Err(ParamError::Parse(format!("expected {expected:?}, found {t:?}"))),
-            None => Err(ParamError::Parse(format!("expected {expected:?}, found end of formula"))),
+            Some(t) => Err(ParamError::Parse(format!(
+                "expected {expected:?}, found {t:?}"
+            ))),
+            None => Err(ParamError::Parse(format!(
+                "expected {expected:?}, found end of formula"
+            ))),
         }
     }
 
@@ -453,10 +441,16 @@ pub fn parse(source: &str) -> Result<Expr, ParamError> {
     if tokens.is_empty() {
         return Err(ParamError::Parse("empty formula".to_string()));
     }
-    let mut parser = Parser { tokens: &tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens: &tokens,
+        pos: 0,
+    };
     let expr = parser.parse_expr()?;
     if parser.pos != tokens.len() {
-        return Err(ParamError::Parse(format!("unexpected trailing token {:?}", tokens[parser.pos])));
+        return Err(ParamError::Parse(format!(
+            "unexpected trailing token {:?}",
+            tokens[parser.pos]
+        )));
     }
     Ok(expr)
 }
@@ -471,17 +465,14 @@ pub struct Parameter {
     pub expr: Expr,
 }
 
-/// Every named parameter for one document (design doc §2: per-document, not
-/// per-[`super::sketch_constraints::SketchScope`] — a block/xref does not
-/// get its own independent table; open question 4 leaves whether that's the
-/// final answer, but it's this stage's working assumption).
+/// Every named parameter for one document.
 ///
 /// `parameters` is intentionally not `pub` (unlike the sibling
 /// `SketchConstraintSet::constraints`): this table's entire value is that
 /// every stored formula is already known to be parse-valid and cycle-free,
 /// an invariant only `set`/`remove` maintain. A direct external push could
 /// silently violate it.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ParameterTable {
     parameters: Vec<Parameter>,
 }
@@ -523,10 +514,8 @@ impl ParameterTable {
     /// entry point; a future UI stage that wants add-vs-rename semantics can
     /// check `contains` itself first).
     ///
-    /// Rejects: an invalid identifier or one colliding with a builtin
-    /// function name (`is_valid_name`/`is_reserved_name`), a formula that
-    /// fails to parse, and — the design doc's explicit requirement — a
-    /// formula that would close a circular reference right now. A reference
+    /// Rejects an invalid or reserved identifier, malformed formula, or
+    /// circular reference. A reference
     /// to a parameter that doesn't exist *yet* is not rejected (order of
     /// definition shouldn't matter, mirroring a spreadsheet); it only
     /// surfaces as [`ParamError::UndefinedReference`] when [`Self::resolve`]
@@ -542,7 +531,11 @@ impl ParameterTable {
                 self.parameters[i].source = source.to_string();
                 self.parameters[i].expr = expr;
             }
-            None => self.parameters.push(Parameter { name: name.to_string(), source: source.to_string(), expr }),
+            None => self.parameters.push(Parameter {
+                name: name.to_string(),
+                source: source.to_string(),
+                expr,
+            }),
         }
         Ok(())
     }
@@ -589,7 +582,12 @@ impl ParameterTable {
     /// Depth-first search from `current` to `target`, following each
     /// visited parameter's existing formula's references. Returns the path
     /// (starting with `current`) if `target` is reachable.
-    fn find_path(&self, current: &str, target: &str, visiting: &mut Vec<String>) -> Option<Vec<String>> {
+    fn find_path(
+        &self,
+        current: &str,
+        target: &str,
+        visiting: &mut Vec<String>,
+    ) -> Option<Vec<String>> {
         if current == target {
             return Some(vec![current.to_string()]);
         }
@@ -617,12 +615,8 @@ impl ParameterTable {
         None
     }
 
-    /// Resolves one parameter's numeric value, evaluating its dependency
-    /// chain as needed. No state is kept between calls (a fresh memo cache
-    /// every call) — mirrors `refresh_sketch_constraints`'s
-    /// rebuild-from-scratch-per-trigger model (design doc §2): this stage
-    /// has no document/UI integration yet to decide when a cached value
-    /// would go stale, so it simply never caches across calls.
+    /// Resolves one parameter's numeric value and dependency chain using a
+    /// fresh memo cache.
     pub fn resolve(&self, name: &str) -> Result<f64, ParamError> {
         let mut cache = HashMap::new();
         let mut stack = Vec::new();
@@ -642,7 +636,12 @@ impl ParameterTable {
         out
     }
 
-    fn resolve_inner(&self, name: &str, cache: &mut HashMap<String, f64>, stack: &mut Vec<String>) -> Result<f64, ParamError> {
+    fn resolve_inner(
+        &self,
+        name: &str,
+        cache: &mut HashMap<String, f64>,
+        stack: &mut Vec<String>,
+    ) -> Result<f64, ParamError> {
         if let Some(v) = cache.get(name) {
             return Ok(*v);
         }
@@ -654,7 +653,9 @@ impl ParameterTable {
             cyc.push(name.to_string());
             return Err(ParamError::Cycle(cyc));
         }
-        let param = self.get(name).ok_or_else(|| ParamError::UndefinedReference(name.to_string()))?;
+        let param = self
+            .get(name)
+            .ok_or_else(|| ParamError::UndefinedReference(name.to_string()))?;
         stack.push(name.to_string());
         let value = self.eval(&param.expr, cache, stack)?;
         stack.pop();
@@ -662,7 +663,12 @@ impl ParameterTable {
         Ok(value)
     }
 
-    fn eval(&self, expr: &Expr, cache: &mut HashMap<String, f64>, stack: &mut Vec<String>) -> Result<f64, ParamError> {
+    fn eval(
+        &self,
+        expr: &Expr,
+        cache: &mut HashMap<String, f64>,
+        stack: &mut Vec<String>,
+    ) -> Result<f64, ParamError> {
         Ok(match expr {
             Expr::Number(n) => *n,
             Expr::Ref(name) => self.resolve_inner(name, cache, stack)?,
@@ -677,7 +683,9 @@ impl ParameterTable {
                 }
                 self.eval(a, cache, stack)? / denom
             }
-            Expr::Pow(a, b) => self.eval(a, cache, stack)?.powf(self.eval(b, cache, stack)?),
+            Expr::Pow(a, b) => self
+                .eval(a, cache, stack)?
+                .powf(self.eval(b, cache, stack)?),
             Expr::Call(fname, args) => {
                 let mut values = Vec::with_capacity(args.len());
                 for arg in args {
@@ -690,8 +698,8 @@ impl ParameterTable {
 }
 
 impl Scene {
-    /// The document's named-parameter table (design doc §2: one per
-    /// document). Read-only accessor; use [`Scene::named_parameters_mut`] to
+    /// The document's named-parameter table. Use
+    /// [`Scene::named_parameters_mut`] to
     /// define/redefine/remove a parameter.
     pub fn named_parameters(&self) -> &ParameterTable {
         &self.named_parameters
@@ -726,7 +734,9 @@ mod tests {
     fn eval_literal(src: &str) -> f64 {
         let table = ParameterTable::new();
         let expr = parse(src).unwrap_or_else(|e| panic!("parse '{src}': {e}"));
-        table.eval(&expr, &mut HashMap::new(), &mut Vec::new()).unwrap_or_else(|e| panic!("eval '{src}': {e}"))
+        table
+            .eval(&expr, &mut HashMap::new(), &mut Vec::new())
+            .unwrap_or_else(|e| panic!("eval '{src}': {e}"))
     }
 
     #[test]
@@ -754,11 +764,22 @@ mod tests {
 
         let table = ParameterTable::new();
         let expr = parse("sqrt(1, 2)").unwrap();
-        let err = table.eval(&expr, &mut HashMap::new(), &mut Vec::new()).unwrap_err();
-        assert_eq!(err, ParamError::WrongArgCount { function: "sqrt".to_string(), expected: 1, found: 2 });
+        let err = table
+            .eval(&expr, &mut HashMap::new(), &mut Vec::new())
+            .unwrap_err();
+        assert_eq!(
+            err,
+            ParamError::WrongArgCount {
+                function: "sqrt".to_string(),
+                expected: 1,
+                found: 2
+            }
+        );
 
         let expr = parse("bogus(1)").unwrap();
-        let err = table.eval(&expr, &mut HashMap::new(), &mut Vec::new()).unwrap_err();
+        let err = table
+            .eval(&expr, &mut HashMap::new(), &mut Vec::new())
+            .unwrap_err();
         assert_eq!(err, ParamError::UnknownFunction("bogus".to_string()));
     }
 
@@ -766,16 +787,31 @@ mod tests {
     fn division_by_zero_is_reported_not_panicked() {
         let table = ParameterTable::new();
         let expr = parse("1 / 0").unwrap();
-        assert_eq!(table.eval(&expr, &mut HashMap::new(), &mut Vec::new()), Err(ParamError::DivisionByZero));
+        assert_eq!(
+            table.eval(&expr, &mut HashMap::new(), &mut Vec::new()),
+            Err(ParamError::DivisionByZero)
+        );
     }
 
     #[test]
     fn set_rejects_invalid_and_reserved_names() {
         let mut table = ParameterTable::new();
-        assert!(matches!(table.set("2bad", "1"), Err(ParamError::InvalidName(_))));
-        assert!(matches!(table.set("has space", "1"), Err(ParamError::InvalidName(_))));
-        assert!(matches!(table.set("", "1"), Err(ParamError::InvalidName(_))));
-        assert!(matches!(table.set("sqrt", "1"), Err(ParamError::InvalidName(_))));
+        assert!(matches!(
+            table.set("2bad", "1"),
+            Err(ParamError::InvalidName(_))
+        ));
+        assert!(matches!(
+            table.set("has space", "1"),
+            Err(ParamError::InvalidName(_))
+        ));
+        assert!(matches!(
+            table.set("", "1"),
+            Err(ParamError::InvalidName(_))
+        ));
+        assert!(matches!(
+            table.set("sqrt", "1"),
+            Err(ParamError::InvalidName(_))
+        ));
         assert!(table.set("_valid1", "1").is_ok());
     }
 
@@ -800,7 +836,10 @@ mod tests {
     fn resolving_an_undefined_reference_reports_which_name_is_missing() {
         let mut table = ParameterTable::new();
         table.set("a", "b + 1").unwrap();
-        assert_eq!(table.resolve("a"), Err(ParamError::UndefinedReference("b".to_string())));
+        assert_eq!(
+            table.resolve("a"),
+            Err(ParamError::UndefinedReference("b".to_string()))
+        );
     }
 
     #[test]
@@ -808,7 +847,10 @@ mod tests {
         let mut table = ParameterTable::new();
         let err = table.set("a", "a + 1").unwrap_err();
         assert!(matches!(err, ParamError::Cycle(_)));
-        assert!(!table.contains("a"), "a rejected formula must not be stored");
+        assert!(
+            !table.contains("a"),
+            "a rejected formula must not be stored"
+        );
     }
 
     #[test]
@@ -816,7 +858,10 @@ mod tests {
         let mut table = ParameterTable::new();
         table.set("a", "b").unwrap();
         // b doesn't exist yet -- not a cycle, a is just unresolved for now.
-        assert_eq!(table.resolve("a"), Err(ParamError::UndefinedReference("b".to_string())));
+        assert_eq!(
+            table.resolve("a"),
+            Err(ParamError::UndefinedReference("b".to_string()))
+        );
         // Defining b = a closes the loop right here and must be rejected,
         // leaving b undefined rather than silently accepted.
         let err = table.set("b", "a").unwrap_err();
@@ -824,7 +869,10 @@ mod tests {
         assert!(!table.contains("b"));
         // a's formula (still "b") is untouched -- it stays unresolved, not
         // corrupted by the rejected attempt.
-        assert_eq!(table.resolve("a"), Err(ParamError::UndefinedReference("b".to_string())));
+        assert_eq!(
+            table.resolve("a"),
+            Err(ParamError::UndefinedReference("b".to_string()))
+        );
     }
 
     #[test]
@@ -849,8 +897,14 @@ mod tests {
 
         let results = table.resolve_all();
         assert_eq!(results.get("good"), Some(&Ok(10.0)));
-        assert_eq!(results.get("bad"), Some(&Err(ParamError::UndefinedReference("missing".to_string()))));
-        assert_eq!(results.get("depends_on_bad"), Some(&Err(ParamError::UndefinedReference("missing".to_string()))));
+        assert_eq!(
+            results.get("bad"),
+            Some(&Err(ParamError::UndefinedReference("missing".to_string())))
+        );
+        assert_eq!(
+            results.get("depends_on_bad"),
+            Some(&Err(ParamError::UndefinedReference("missing".to_string())))
+        );
     }
 
     #[test]
@@ -859,8 +913,14 @@ mod tests {
         table.set("a", "1").unwrap();
         table.set("b", "a + 1").unwrap();
         assert!(table.remove("a"));
-        assert!(!table.remove("a"), "removing an already-removed name reports false");
-        assert_eq!(table.resolve("b"), Err(ParamError::UndefinedReference("a".to_string())));
+        assert!(
+            !table.remove("a"),
+            "removing an already-removed name reports false"
+        );
+        assert_eq!(
+            table.resolve("b"),
+            Err(ParamError::UndefinedReference("a".to_string()))
+        );
     }
 
     #[test]

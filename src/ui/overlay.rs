@@ -728,12 +728,7 @@ struct SelectionCanvas {
     crosshair_bg: [f32; 4],
     crosshair: CrosshairOptions,
     selection_visual: SelectionVisualOptions,
-    /// One glyph per persistent sketch constraint in the current scope
-    /// (design doc §6.3/§7): screen anchor + label text (its symbol, plus a
-    /// dimensional kind's driving value — `sketch_constraints::glyph_label`)
-    /// + whether `solve_scope`'s `classify_redundant` call (stage 10/11)
-    /// flagged this constraint as redundant/conflicting — the design doc
-    /// §6.3's recommended "glyph color, not wire recoloring" state cue.
+    /// Constraint glyph anchor, label, and conflict state for the current scope.
     constraint_glyphs: Vec<(Point, String, bool)>,
 }
 
@@ -1630,18 +1625,15 @@ impl canvas::Program<Message> for SelectionCanvas {
             frame.stroke(&b1, stroke.clone());
             frame.stroke(&b2, stroke);
         }
-        // Persistent sketch-constraint glyphs (design doc §6.3/§7): a small
-        // pill at each constraint's anchor point, its symbol (plus value for
-        // a dimensional kind) as text — visual-only for now, no hit-testing.
+        // Constraint glyphs are visual-only and have no hit testing.
         if !self.constraint_glyphs.is_empty() {
             const GLYPH_SIZE: f32 = 11.0;
             const GLYPH_PAD_X: f32 = 5.0;
             const GLYPH_PAD_Y: f32 = 2.0;
             let normal_bg = theme.palette().primary.base.color;
             let normal_fg = theme.palette().primary.base.text;
-            // Design doc §6.3's recommended color cue: a constraint
-            // `solve_scope` flagged as redundant/conflicting (stage 10/11's
-            // `classify_redundant`) gets the danger palette instead of the
+            // A redundant or conflicting constraint gets the danger palette
+            // instead of the
             // ordinary primary one — same information a resolver panel
             // would show, surfaced right on the geometry.
             let conflict_bg = theme.palette().danger.base.color;

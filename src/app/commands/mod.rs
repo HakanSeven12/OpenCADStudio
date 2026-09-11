@@ -298,10 +298,12 @@ pub fn start_allowed(cmd: &str) -> bool {
             | "PERF"
             | "CUI"
             | "ALIASEDIT"
-            | "OPTIONS"
-            | "OP"
             | "CUILOAD"
             | "CUIIMPORT"
+            // The start page already offers Options as a button, so the
+            // command that opens the same dialog belongs here too.
+            | "OPTIONS"
+            | "OP"
     )
 }
 

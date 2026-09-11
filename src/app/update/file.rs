@@ -407,7 +407,6 @@ impl OpenCADStudio {
             cursor_type: self.cursor_type,
             crosshair_color: self.crosshair_color,
             lineweight_display_scale: self.lineweight_display_scale,
-            ui_scale: self.ui_scale,
             isometric_drafting: self.isometric_drafting,
             iso_plane: self.iso_plane,
             snap_angle_deg: self.snap_angle_deg,
@@ -477,7 +476,6 @@ impl OpenCADStudio {
             .map(crate::app::config::rgb_to_hex)
             .unwrap_or_default();
         self.lineweight_display_scale = s.lineweight_display_scale.clamp(25, 200);
-        self.ui_scale = s.ui_scale.clamp(50, 200);
         self.isometric_drafting = s.isometric_drafting;
         self.iso_plane = s.iso_plane;
         self.snap_angle_deg = if s.snap_angle_deg.is_finite() {
@@ -836,8 +834,6 @@ impl OpenCADStudio {
             annotation_auto_scale: self.annotation_auto_scale,
             ribbon: crate::app::config::RibbonConfig {
                 collapse: self.ribbon.collapse_mode(),
-                label_font_size: self.ribbon.label_font_size(),
-                group_title_font_size: self.ribbon.group_title_font_size(),
             },
             plot: self.plot_dialog.clone(),
             shortcuts: crate::app::config::ShortcutConfig {
@@ -895,9 +891,6 @@ impl OpenCADStudio {
         self.dock = dock;
         self.annotation_auto_scale = cfg.annotation_auto_scale.clamp(-4, 4);
         self.ribbon.set_collapse_mode(cfg.ribbon.collapse);
-        self.ribbon.set_label_font_size(cfg.ribbon.label_font_size);
-        self.ribbon
-            .set_group_title_font_size(cfg.ribbon.group_title_font_size);
         self.plot_dialog = cfg.plot;
         self.shortcut_bindings = cfg.shortcuts.bindings.into_iter().collect();
         self.shortcut_bindings
@@ -1449,8 +1442,7 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
                 self.tabs[i].scene.material_base_dir =
                     path.parent().map(std::path::Path::to_path_buf);
                 self.tabs[i].scene.document = doc;
-                // Design doc §8 stage 4: read back any persisted sketch
-                // constraint sets right after the document is installed.
+                // Load persisted constraints after installing the document.
                 self.tabs[i].scene.load_sketch_constraints_from_document();
                 // named_parameters_design.md stage 2: same load-time hook,
                 // for the document-wide parameter table.
@@ -1718,15 +1710,12 @@ pub(super) fn on_open_file(&mut self) -> Task<Message> {
         self.tabs[i].scene.document.header.user_real1 =
             self.tabs[i].scene.annotation_scale as f64;
         self.sync_solid_models_for_save(i);
-        // Design doc §8 stage 4: write any sketch constraint sets into the
-        // document right before it's serialized.
+        // Materialize constraints immediately before serialization.
         self.tabs[i].scene.materialize_sketch_constraints_for_save();
         // named_parameters_design.md stage 2: same save-time hook, for the
         // document-wide parameter table.
         self.tabs[i].scene.materialize_named_parameters_for_save();
-        // docs/dwg_constraint_compatibility_design.md: additive DWG/DXF-
-        // native constraint graph, alongside (not instead of) the XRecord
-        // above — same save-time hook.
+        // Keep the optional native constraint graph synchronized on save.
         self.tabs[i].scene.materialize_dwg_native_constraints_for_save(self.write_dwg_native_constraints);
     }
 

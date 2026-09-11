@@ -805,9 +805,7 @@ bg={bg_ms:.1}ms n={view_count}"
             let point_cursor = tab.active_cmd.as_ref().is_some_and(|cmd| {
                 !cmd.needs_entity_pick() && !cmd.is_selection_gathering()
             });
-            // Persistent sketch-constraint glyphs (design doc §6.3/§7) — model
-            // space only, like the constraints themselves; paper space shows
-            // none (out of scope per the design doc §3.1).
+            // Constraint glyphs are displayed in model space only.
             let constraint_glyphs: Vec<(iced::Point, String, bool)> = if is_paper {
                 Vec::new()
             } else {

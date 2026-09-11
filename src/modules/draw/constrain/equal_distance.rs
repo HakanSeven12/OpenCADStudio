@@ -1,6 +1,5 @@
-//! EDCONSTRAINT — AutoCAD's fourth `Equal` sub-kind
-//! (`ACEQUALDISTANCECONSTRAINT`): the distance between one point pair
-//! equals the distance between another, rather than two whole entities
+//! EDCONSTRAINT makes the distance between one point pair equal the
+//! distance between another pair, rather than comparing whole entities.
 //! being equal length/radius. Needs four point picks (unlike the two
 //! whole-entity selections `ECONSTRAINT` uses), so — like
 //! `CoincidentConstraintCommand` — it accumulates raw points and hands them
@@ -17,7 +16,9 @@ pub mod equal_distance_tool {
         ToolDef {
             id: "EDCONSTRAINT",
             label: "Equal Distance",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/equal_distance.svg")),
+            icon: IconKind::Svg(include_bytes!(
+                "../../../../assets/icons/constrain/equal_distance.svg"
+            )),
             event: ModuleEvent::Command("EDCONSTRAINT".to_string()),
         }
     }
@@ -53,8 +54,13 @@ impl CadCommand for EqualDistanceConstraintCommand {
         if self.points.len() < 4 {
             return CmdResult::NeedPoint;
         }
-        let [a, b, c, d] = self.points[..] else { unreachable!("just checked len == 4") };
-        CmdResult::AddEqualDistanceConstraint { points: [a, b, c, d], label: "Equal distance constraint" }
+        let [a, b, c, d] = self.points[..] else {
+            unreachable!("just checked len == 4")
+        };
+        CmdResult::AddEqualDistanceConstraint {
+            points: [a, b, c, d],
+            label: "Equal distance constraint",
+        }
     }
 
     fn on_enter(&mut self) -> CmdResult {
@@ -67,4 +73,6 @@ impl CadCommand for EqualDistanceConstraintCommand {
 }
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["EDCONSTRAINT"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["EDCONSTRAINT"]
+});

@@ -915,16 +915,8 @@ impl OpenCADStudio {
         TableCellEditStart::Started
     }
 
-    /// Design doc §6.2 (stage 8, Phase B live inference): after a `LINE`
-    /// command commits `new_handle`, auto-adds a Coincident constraint for
-    /// every endpoint that already coincides with an existing entity's
-    /// point in the current scope (`sketch_constraints::infer_coincident_refs`).
-    /// Suppressible by holding Shift while placing the point — reuses the
-    /// existing `shift_down` tracking rather than the design doc's proposed
-    /// new `CadCommand::set_modifier` mechanism, since this dispatch site
-    /// already reads `self.shift_down` directly (`apply_cmd_result_inner`'s
-    /// Ctrl/Shift push at :392-393) and needs no per-command plumbing.
-    /// No-op (and no undo entry) when nothing was inferred.
+    /// Adds inferred Coincident constraints after a line is committed.
+    /// Holding Shift suppresses inference. No match means no undo entry.
     fn infer_and_add_coincident_constraints(&mut self, i: usize, new_handle: Handle, entity: &acadrust::EntityType) {
         if self.shift_down {
             return;
@@ -939,7 +931,12 @@ impl OpenCADStudio {
         if pairs.is_empty() {
             return;
         }
-        let constraints_before = self.tabs[i].scene.sketch_constraint_set(scope).cloned();
+        let constraints_before = self
+            .tabs[i]
+            .scene
+            .sketch_constraint_set(scope)
+            .cloned()
+            .unwrap_or_else(|| crate::scene::sketch_constraints::SketchConstraintSet::new(scope));
         let mut touched: Vec<Handle> = Vec::new();
         for (new_ref, existing_ref) in &pairs {
             touched.push(new_ref.entity);
@@ -948,13 +945,10 @@ impl OpenCADStudio {
         touched.sort();
         touched.dedup();
         let label = "Coincident (inferred)";
-        // Mirrors `CmdResult::AddSketchConstraint`'s handler: brackets the
-        // add-and-solve in its own `begin_undo`/`commit_undo_delta` so any
-        // geometry the solve moves (the two points may be within epsilon but
-        // not bit-identical) is captured as an undoable `Delta`, then pushes
-        // the constraint-set edit itself as the separate, adjacent
-        // `SketchConstraints` entry stage 9 established.
         let pending = self.begin_undo(i, label, touched.len(), true);
+        self.tabs[i]
+            .scene
+            .record_undo_sketch_constraints_before(scope, constraints_before);
         for (new_ref, existing_ref) in pairs {
             self.tabs[i].scene.sketch_constraint_set_mut(scope).add(
                 crate::scene::sketch_constraints::ConstraintKind::Coincident,
@@ -968,31 +962,9 @@ impl OpenCADStudio {
         if let Some(pd) = pending {
             self.commit_undo_delta(i, pd);
         }
-        self.push_sketch_constraints_history(i, label, scope, constraints_before);
     }
 
-    /// Design doc §6.4 (stage 11, Phase C): removes the first
-    /// redundant/conflicting constraint `SketchConstraintSet::conflicts`
-    /// (populated by `solve_scope`'s `ocs_gcs::diagnosis::classify_redundant`
-    /// call, stage 10) flags in the active tab's current sketch scope, and
-    /// re-solves.
-    ///
-    /// **Scope-down from this doc**: a full `ConflictResolverPanel` — a
-    /// window listing every flagged constraint by name with a cyclable live
-    /// preview of each candidate fix before committing — is real, standalone
-    /// UI work (new window state, `Message` plumbing for open/close/select/
-    /// preview/commit) this pass didn't have live-UI-testing access to
-    /// verify (the desktop session's app focus was blocked by an unrelated
-    /// stuck System Settings window for the whole of this stage). What's
-    /// built instead is bounded but real: a status-bar pill, visible only
-    /// when the current scope has at least one flagged conflict, that
-    /// removes exactly one flagged constraint per click — "guided" in that
-    /// the flagged set already comes from `classify_redundant`, just without
-    /// per-candidate naming/preview/choice. A user with several conflicts
-    /// clicks it repeatedly, watching the DOF/conflict count drop, same
-    /// outcome as the panel's "remove and re-solve" action minus the
-    /// browsing UI. The full panel remains open follow-up work, not silently
-    /// dropped.
+    /// Removes and re-solves the first conflicting constraint in the active scope.
     pub(super) fn resolve_one_sketch_conflict(&mut self) {
         let i = self.active_tab;
         let scope = self.tabs[i].current_sketch_scope();
@@ -1002,8 +974,11 @@ impl OpenCADStudio {
         let touched: Vec<Handle> = constraint.refs.iter().map(|r| r.entity).collect();
         let label = "Remove conflicting constraint";
 
-        let constraints_before = Some(set.clone());
+        let constraints_before = set.clone();
         let pending = self.begin_undo(i, label, touched.len(), true);
+        self.tabs[i]
+            .scene
+            .record_undo_sketch_constraints_before(scope, constraints_before);
         self.tabs[i].scene.sketch_constraint_set_mut(scope).remove(id);
         let changes: Vec<(Handle, crate::scene::ChangeKind)> =
             touched.into_iter().map(|h| (h, crate::scene::ChangeKind::Modified)).collect();
@@ -1011,28 +986,10 @@ impl OpenCADStudio {
         if let Some(pd) = pending {
             self.commit_undo_delta(i, pd);
         }
-        self.push_sketch_constraints_history(i, label, scope, constraints_before);
     }
 
-    /// PARAMETERS' Apply button (`docs/named_parameters_design.md` stage 4):
-    /// rebuilds the active tab's `Scene::named_parameters` from the
-    /// editor's working buffer, reports any row that failed to validate via
-    /// the command line, and re-solves every scope with a constraint driven
-    /// by a named parameter — the entire point of a *named* parameter is
-    /// that editing it ripples to whatever references it, the same way
-    /// editing a constraint's literal value already does.
-    ///
-    /// **Deliberate scope-down, matching this project's established
-    /// treatment of undo-granularity questions** (design doc §5 open
-    /// question 3, and the sibling constraint-system project's stage 9): the
-    /// geometry this ripple moves is bracketed into one undo step below
-    /// (same `begin_undo`/`bump_entities`/`commit_undo_delta` pattern
-    /// `resolve_one_sketch_conflict` above uses), but the parameter *table*
-    /// edit itself has no undo entry of its own yet — that would need a new
-    /// `HistorySnapshot` variant mirroring `SketchConstraints`
-    /// (`push_sketch_constraints_history`). Left for a follow-up, not
-    /// silently dropped: undoing after an Apply undoes the geometry it
-    /// moved, not the parameter values themselves.
+    /// Rebuilds the active tab's `Scene::named_parameters` from the
+    /// editor's working buffer and re-solves dependent constraints.
     pub(super) fn apply_named_parameter_editor_rows(&mut self) {
         let i = self.active_tab;
         // A name shared by more than one row can't be resolved by picking
@@ -1057,7 +1014,6 @@ impl OpenCADStudio {
             failed += duplicates.len();
         }
         let param_count = table.len();
-        self.tabs[i].scene.named_parameters = table;
 
         // The whole table just changed, not one isolated value, so there is
         // no cheaper "which handles actually moved" test worth doing here —
@@ -1073,17 +1029,18 @@ impl OpenCADStudio {
             .flat_map(|c| c.refs.iter().map(|r| r.entity))
             .collect();
 
+        let pending = self.begin_undo(i, "Apply named parameters", touched.len(), true);
+        self.tabs[i].scene.record_undo_named_parameters_before();
+        self.tabs[i].scene.named_parameters = table;
+        self.tabs[i].dirty = true;
         if !touched.is_empty() {
-            let pending = self.begin_undo(i, "Apply named parameters", touched.len(), true);
             let changes: Vec<(Handle, crate::scene::ChangeKind)> =
                 touched.into_iter().map(|h| (h, crate::scene::ChangeKind::Modified)).collect();
             self.tabs[i].scene.bump_entities(&changes);
-            if let Some(pd) = pending {
-                self.commit_undo_delta(i, pd);
-            }
         }
-
-        self.tabs[i].dirty = true;
+        if let Some(pd) = pending {
+            self.commit_undo_delta(i, pd);
+        }
         if failed == 0 {
             self.command_line.push_info(crate::tf!("{} parameter(s) applied.", param_count).as_ref());
         }
@@ -1111,13 +1068,9 @@ impl OpenCADStudio {
         if touched.is_empty() {
             return;
         }
-        let pending = self.begin_undo(i, "Edit named parameter", touched.len(), true);
         let changes: Vec<(Handle, crate::scene::ChangeKind)> =
             touched.into_iter().map(|h| (h, crate::scene::ChangeKind::Modified)).collect();
         self.tabs[i].scene.bump_entities(&changes);
-        if let Some(pd) = pending {
-            self.commit_undo_delta(i, pd);
-        }
     }
 
     /// Commits one field of one Parameters-section row (Properties panel) —
@@ -1150,24 +1103,30 @@ impl OpenCADStudio {
             return Task::none();
         };
 
-        let (result, resolve_name) = match field {
-            ParamField::Formula => {
-                if typed.is_empty() || typed == current.source {
-                    self.refresh_properties();
-                    return Task::none();
-                }
-                (self.tabs[i].scene.named_parameters_mut().set(&current.name, &typed), current.name.clone())
+        match field {
+            ParamField::Formula if typed.is_empty() || typed == current.source => {
+                self.refresh_properties();
+                return Task::none();
             }
+            ParamField::Name if typed.is_empty() || typed == current.name => {
+                self.refresh_properties();
+                return Task::none();
+            }
+            ParamField::Name if self.tabs[i].scene.named_parameters().contains(&typed) => {
+                self.command_line.push_error(crate::tf!("Parameter '{}' already exists.", typed).as_ref());
+                self.refresh_properties();
+                return Task::none();
+            }
+            _ => {}
+        }
+
+        let pending = self.begin_undo(i, "Edit named parameter", 0, true);
+        self.tabs[i].scene.record_undo_named_parameters_before();
+
+        let (result, resolve_name) = match field {
+            ParamField::Formula =>
+                (self.tabs[i].scene.named_parameters_mut().set(&current.name, &typed), current.name.clone()),
             ParamField::Name => {
-                if typed.is_empty() || typed == current.name {
-                    self.refresh_properties();
-                    return Task::none();
-                }
-                if self.tabs[i].scene.named_parameters().contains(&typed) {
-                    self.command_line.push_error(crate::tf!("Parameter '{}' already exists.", typed).as_ref());
-                    self.refresh_properties();
-                    return Task::none();
-                }
                 self.tabs[i].scene.named_parameters_mut().remove(&current.name);
                 let outcome = self.tabs[i].scene.named_parameters_mut().set(&typed, &current.source);
                 if outcome.is_err() {
@@ -1178,17 +1137,49 @@ impl OpenCADStudio {
         };
 
         if let Err(e) = result {
+            self.tabs[i].scene.take_undo_recording();
             self.command_line.push_error(crate::tf!("Parameter '{}': {}", current.name, e).as_ref());
             self.refresh_properties();
             return Task::none();
         }
+
+        if field == ParamField::Name {
+            let affected: Vec<usize> = self.tabs[i]
+                .scene
+                .sketch_constraints
+                .iter()
+                .enumerate()
+                .filter_map(|(index, set)| {
+                    set.constraints
+                        .iter()
+                        .any(|constraint| {
+                            matches!(&constraint.driving_param, Some(crate::scene::named_parameters::DrivingValue::Named(name)) if name == &current.name)
+                        })
+                        .then_some(index)
+                })
+                .collect();
+            for set_index in affected {
+                let scope = self.tabs[i].scene.sketch_constraints[set_index].scope;
+                let before = self.tabs[i].scene.sketch_constraints[set_index].clone();
+                self.tabs[i].scene.record_undo_sketch_constraints_before(scope, before);
+                for constraint in &mut self.tabs[i].scene.sketch_constraints[set_index].constraints {
+                    if let Some(crate::scene::named_parameters::DrivingValue::Named(name)) = &mut constraint.driving_param {
+                        if name == &current.name {
+                            *name = typed.clone();
+                        }
+                    }
+                }
+            }
+        }
         self.resolve_named_parameter_edit(i, &resolve_name);
+        if let Some(pd) = pending {
+            self.commit_undo_delta(i, pd);
+        }
         self.refresh_properties();
         Task::none()
     }
 
-    /// Removes Parameters-section row `index` immediately — no confirmation,
-    /// matching AutoCAD's own Parameters Manager delete button. Any
+    /// Removes Parameters-section row `index` immediately. Any
     /// constraint that referenced it gets the same "undefined reference"
     /// resolve-failure treatment a formula's own bad reference already gets
     /// (`build_constraint`) — re-solving surfaces that rather than needing
@@ -1198,8 +1189,13 @@ impl OpenCADStudio {
         let Some(name) = self.tabs[i].scene.named_parameters().iter().nth(index).map(|p| p.name.clone()) else {
             return Task::none();
         };
+        let pending = self.begin_undo(i, "Delete named parameter", 0, true);
+        self.tabs[i].scene.record_undo_named_parameters_before();
         self.tabs[i].scene.named_parameters_mut().remove(&name);
         self.resolve_named_parameter_edit(i, &name);
+        if let Some(pd) = pending {
+            self.commit_undo_delta(i, pd);
+        }
         self.refresh_properties();
         Task::none()
     }
@@ -1225,7 +1221,13 @@ impl OpenCADStudio {
             }
             n += 1;
         };
+        let pending = self.begin_undo(i, "Add named parameter", 0, true);
+        self.tabs[i].scene.record_undo_named_parameters_before();
         let _ = self.tabs[i].scene.named_parameters_mut().set(&name, "1");
+        self.tabs[i].dirty = true;
+        if let Some(pd) = pending {
+            self.commit_undo_delta(i, pd);
+        }
         self.refresh_properties();
         Task::none()
     }
@@ -2540,14 +2542,29 @@ impl OpenCADStudio {
                 self.refresh_properties();
             }
             CmdResult::AddSketchConstraint { kind, refs, driving_param, label } => {
+                if let Err(message) = self.tabs[i]
+                    .scene
+                    .validate_sketch_constraint(kind, &refs, driving_param.as_ref())
+                {
+                    self.tabs[i].active_cmd = None;
+                    self.tabs[i].snap_result = None;
+                    self.command_line.push_error(message);
+                    return Task::none();
+                }
                 let scope = self.tabs[i].current_sketch_scope();
-                // Design doc §5.1/§9: captured before the add so the
-                // constraint-set edit itself (not just the geometry it
-                // triggers) is undoable — pushed as its own history entry
-                // below, adjacent to (not merged into) the entity delta.
-                let constraints_before = self.tabs[i].scene.sketch_constraint_set(scope).cloned();
+                let constraints_before = self
+                    .tabs[i]
+                    .scene
+                    .sketch_constraint_set(scope)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        crate::scene::sketch_constraints::SketchConstraintSet::new(scope)
+                    });
                 let touched: Vec<Handle> = refs.iter().map(|r| r.entity).collect();
                 let pending = self.begin_undo(i, label, touched.len(), true);
+                self.tabs[i]
+                    .scene
+                    .record_undo_sketch_constraints_before(scope, constraints_before);
                 self.tabs[i].scene.sketch_constraint_set_mut(scope).add(kind, refs, driving_param);
                 let changes: Vec<(Handle, crate::scene::ChangeKind)> = touched
                     .into_iter()
@@ -2562,7 +2579,6 @@ impl OpenCADStudio {
                 if let Some(pd) = pending {
                     self.commit_undo_delta(i, pd);
                 }
-                self.push_sketch_constraints_history(i, label, scope, constraints_before);
             }
             CmdResult::AddCoincidentConstraint { point_a, point_b, label } => {
                 let scope = self.tabs[i].current_sketch_scope();
@@ -5466,8 +5482,7 @@ impl OpenCADStudio {
             let groups = self.clipboard_deps.groups.clone();
             self.tabs[i].scene.recreate_groups(groups, &handle_map);
         }
-        // Design doc §12: a constraint entirely between pasted entities
-        // follows them, matching in-drawing COPY (`Scene::copy_entities`).
+        // Constraints wholly within the pasted selection follow it.
         self.tabs[i].scene.duplicate_sketch_constraints_for(&handle_map);
         // Incremental: `add_entity` already tessellated every pasted top-level
         // solid, and existing document solids are still cached — so only newly
@@ -6432,18 +6447,9 @@ mod sketch_constraint_undo_tests {
         }
     }
 
-    /// Design doc §5.1/§9: adding a persistent constraint must itself be
-    /// undoable/redoable — not just the geometry it happens to move. This is
-    /// the scoped-down §5.1(a) alternative (not the §5.1(b) "live XRecord"
-    /// approach, which needs stage 4/save-load): the constraint-set edit is
-    /// pushed as its own `HistorySnapshot::SketchConstraints` entry, adjacent
-    /// to but not merged into the entity `Delta` the solve produced. So a
-    /// compound add-and-solve costs two undo/redo presses, not one — the
-    /// first press (topmost entry, pushed last) removes the constraint
-    /// record while leaving the solved geometry in place; the second
-    /// (the earlier `Delta` entry) reverts the geometry itself.
+    /// Constraint state and solved geometry share one undo/redo transaction.
     #[test]
-    fn adding_a_constraint_is_undoable_and_redoable_in_two_steps() {
+    fn adding_a_constraint_is_undoable_and_redoable_atomically() {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let line = add_line(&mut app, 0.0, 0.0, 10.0, 3.0);
@@ -6462,9 +6468,6 @@ mod sketch_constraint_undo_tests {
             1
         );
 
-        // First undo: pops the (later-pushed) SketchConstraints entry —
-        // removes the constraint record but leaves the already-solved
-        // geometry alone.
         app.undo_steps(1);
         assert_eq!(
             app.tabs[app.active_tab]
@@ -6473,41 +6476,24 @@ mod sketch_constraint_undo_tests {
                 .map(|s| s.constraints.len())
                 .unwrap_or(0),
             0,
-            "first undo should remove the constraint record"
+            "undo should remove the constraint record"
         );
-        assert!(line_angle_deg(&app, line).abs() < 1e-6, "first undo should not yet touch the solved geometry");
-
-        // Second undo: pops the Delta entry — reverts the geometry.
-        app.undo_steps(1);
         assert!(
             (line_angle_deg(&app, line) - original_angle).abs() < 1e-3,
-            "second undo should restore the pre-constraint angle"
-        );
-
-        // Redo replays in the same two-step order, symmetric with undo.
-        app.redo_steps(1);
-        assert!(line_angle_deg(&app, line).abs() < 1e-6, "first redo should re-level the line");
-        assert_eq!(
-            app.tabs[app.active_tab]
-                .scene
-                .sketch_constraint_set(SketchScope::ModelSpace)
-                .map(|s| s.constraints.len())
-                .unwrap_or(0),
-            0,
-            "first redo should not yet restore the constraint record"
+            "undo should restore the pre-constraint angle"
         );
 
         app.redo_steps(1);
+        assert!(line_angle_deg(&app, line).abs() < 1e-6, "redo should re-level the line");
         assert_eq!(
             app.tabs[app.active_tab].scene.sketch_constraint_set(SketchScope::ModelSpace).unwrap().constraints.len(),
             1,
-            "second redo should restore the constraint record"
+            "redo should restore the constraint record"
         );
     }
 
-    /// Design doc §6.2 (stage 8): drawing a `LINE` whose endpoint already
-    /// coincides with an existing entity's point should auto-add a
-    /// Coincident constraint — suppressible by holding Shift.
+    /// A line endpoint landing on an existing point infers Coincident unless
+    /// Shift is held.
     #[test]
     fn drawing_a_line_onto_an_existing_endpoint_infers_a_coincident_constraint() {
         let mut app = OpenCADStudio::new_for_test();
@@ -6556,9 +6542,7 @@ mod sketch_constraint_undo_tests {
         );
     }
 
-    /// Design doc §6.4 (stage 11): the bounded v1 conflict resolver removes
-    /// one flagged constraint per call and re-solves, and the removal itself
-    /// is undoable/redoable via the same stage-9 mechanism.
+    /// Conflict resolution removes one flagged constraint and is undoable.
     #[test]
     fn resolve_one_sketch_conflict_removes_a_flagged_constraint_and_is_undoable() {
         let mut app = OpenCADStudio::new_for_test();
@@ -6587,19 +6571,7 @@ mod sketch_constraint_undo_tests {
         let set = app.tabs[app.active_tab].scene.sketch_constraint_set(SketchScope::ModelSpace).unwrap();
         assert_eq!(set.constraints.len(), 1, "one of the two duplicates should have been removed");
 
-        // Undo restores it. The removal pushes at least its own
-        // `SketchConstraints` entry (stage 9's mechanism); it may or may not
-        // also push a geometry `Delta`, depending on whether the resolve's
-        // own re-solve actually moved anything (here it shouldn't — removing
-        // a duplicate Horizontal changes nothing already-horizontal) — so
-        // undo one step at a time until the constraint reappears, rather
-        // than asserting a fixed step count.
-        for _ in 0..5 {
-            if app.tabs[app.active_tab].scene.sketch_constraint_set(SketchScope::ModelSpace).unwrap().constraints.len() == 2 {
-                break;
-            }
-            app.undo_steps(1);
-        }
+        app.undo_steps(1);
         let set = app.tabs[app.active_tab].scene.sketch_constraint_set(SketchScope::ModelSpace).unwrap();
         assert_eq!(set.constraints.len(), 2, "undo should restore the removed constraint");
     }
@@ -6645,6 +6617,17 @@ mod sketch_constraint_undo_tests {
         };
         let len = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
         assert!((len - 3.0).abs() < 1e-6, "length should track the redefined parameter, got {len}");
+
+        app.undo_steps(1);
+        assert_eq!(app.tabs[app.active_tab].scene.named_parameters().resolve("target_len"), Ok(8.0));
+        let length_after_undo = match app.tabs[app.active_tab].scene.document.get_entity(line) {
+            Some(acadrust::EntityType::Line(line)) => line.length(),
+            other => panic!("expected a Line, got {other:?}"),
+        };
+        assert!((length_after_undo - 8.0).abs() < 1e-6);
+
+        app.redo_steps(1);
+        assert_eq!(app.tabs[app.active_tab].scene.named_parameters().resolve("target_len"), Ok(3.0));
     }
 
     /// End-to-end through the actual `Message` handlers a Properties-panel
@@ -6765,11 +6748,7 @@ mod sketch_constraint_undo_tests {
         assert!(app.command_line.history.iter().any(|e| e.kind == crate::ui::command_line::EntryKind::Error));
     }
 
-    /// Design doc §6.1's manual Coincident UI: two picks landing on two
-    /// different lines' endpoints should resolve to a real `SketchRef` pair
-    /// and add a Coincident constraint — the same `AddCoincidentConstraint`
-    /// → `nearest_sketch_point` → `AddSketchConstraint` path
-    /// `CoincidentConstraintCommand` drives via its two `on_point` calls.
+    /// Two endpoint picks resolve to a Coincident constraint.
     #[test]
     fn coincident_command_resolves_two_picked_points_into_a_constraint() {
         let mut app = OpenCADStudio::new_for_test();

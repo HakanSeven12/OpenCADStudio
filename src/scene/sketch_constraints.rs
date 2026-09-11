@@ -1,15 +1,4 @@
-//! Persistent, parametric geometric constraints — data model.
-//!
-//! Design: `docs/parametric_system_design.md`. This is Stage 1 of that
-//! doc's §8 staged plan: pure data types plus unit tests, no document/scene
-//! integration yet (that's `refresh_sketch_constraints`, wired into
-//! `Scene::bump_entities` in a later stage).
-//!
-//! Distinct from the one-shot "Constraints" ribbon commands
-//! (`crate::modules::draw::constrain`), which solve once and forget. A
-//! [`SketchConstraint`] is a persisted record: it stays attached to its
-//! entities and is meant to be re-solved every time referenced geometry
-//! changes, not applied once.
+//! Persistent sketch-constraint data types and scope management.
 
 use super::named_parameters::DrivingValue;
 use acadrust::types::{Handle, Vector3};
@@ -40,23 +29,32 @@ pub struct SketchRef {
 
 impl SketchRef {
     pub fn whole(entity: Handle) -> Self {
-        Self { entity, marker: None }
+        Self {
+            entity,
+            marker: None,
+        }
     }
 
     pub fn point(entity: Handle, marker: i32) -> Self {
-        Self { entity, marker: Some(marker) }
+        Self {
+            entity,
+            marker: Some(marker),
+        }
     }
 
     /// The circle/arc-center special case (`marker == -3`), broken out as
     /// its own constructor since `-3` alone reads as a magic number
     /// everywhere it would otherwise appear.
     pub fn center(entity: Handle) -> Self {
-        Self { entity, marker: Some(-3) }
+        Self {
+            entity,
+            marker: Some(-3),
+        }
     }
 }
 
 /// The friendly, user-facing constraint types — the "what button did they
-/// click" vocabulary, one layer above the `ocs_gcs` primitives each maps
+/// click" vocabulary, one layer above the `cadkernel_constraints` primitives each maps
 /// onto (that mapping is `constraint_map`, a later stage; see the design
 /// doc §2). Named and grouped the same way the existing one-shot ribbon
 /// tools are (`crate::modules::draw::constrain::tools`), plus the
@@ -102,11 +100,8 @@ pub enum ConstraintKind {
     PointOnCurve,
     /// The distance between one point pair equals the distance between
     /// another — `refs`: `[p1, p2, p3, p4]` (`dist(p1,p2) == dist(p3,p4)`).
-    /// AutoCAD's fourth `Equal` sub-kind (`ACEQUALDISTANCECONSTRAINT`) —
-    /// see the design doc for why `EqualCurvature`, the other missing
-    /// sub-kind, isn't modeled: for the only entity types this system
-    /// solves (Line, Circle), it would be mathematically identical to this
-    /// `Equal`'s existing circle/circle (radius) branch.
+    /// For the supported entity types, equal curvature is already covered
+    /// by the circle/circle radius branch of `Equal`.
     EqualDistance,
     /// Two circles/arcs are mirror images of each other across a line —
     /// `refs`: `[center(a), center(b), whole(mirror_line)]`. Scoped to the
@@ -118,15 +113,12 @@ pub enum ConstraintKind {
     /// `[whole(circle_or_arc)]`. Same DWG class as `Radius`
     /// (`ACRADIUSDIAMETERCONSTRAINT`), distinguished only by the
     /// `RadiusDiameterConstrType` mode byte
-    /// (`dwg_native_constraints.rs`), matching how real AutoCAD represents
-    /// it — not a distinct native object type.
+    /// (`dwg_native_constraints.rs`), rather than a distinct object type.
     Diameter,
     /// The X-only (resp. Y-only) component of the distance between two
     /// points — `refs`: `[p1, p2]`, same shape as `Distance`. Same DWG
     /// class as `Distance` (`ACDISTANCECONSTRAINT`) with its
-    /// `DirectionType` set to a fixed `(1,0,0)`/`(0,1,0)` direction, again
-    /// matching AutoCAD's own representation rather than inventing a new
-    /// class.
+    /// `DirectionType` set to a fixed `(1,0,0)`/`(0,1,0)` direction.
     DistanceX,
     DistanceY,
     /// A line perpendicular to a circle/arc's tangent at their point of
@@ -135,9 +127,7 @@ pub enum ConstraintKind {
     /// passes through the circle's center" (a circle's radius is always
     /// normal to its own tangent), so it solves via the same `PointOnLine`
     /// primitive `PointOnCurve` already uses. Distinct from
-    /// `Perpendicular` (line-to-line only) — AutoCAD's own
-    /// `GeomConstraintType` enum lists `kNormal` and `kPerpendicular`
-    /// separately for exactly this reason. Line-Line has no meaning here
+    /// `Perpendicular` (line-to-line only). Line-Line has no meaning here
     /// (that's plain `Perpendicular`) and isn't buildable.
     Normal,
     /// An arc's arc length (`radius * sweep angle`) — `refs`:
@@ -164,8 +154,7 @@ pub struct SketchConstraint {
     pub refs: Vec<SketchRef>,
     /// The target for a dimensional constraint (a `Distance`'s length, an
     /// `Angle`'s degrees, a `Radius`'s radius) — a literal number or a
-    /// named-parameter reference (`docs/named_parameters_design.md`,
-    /// resolved through `Scene::named_parameters` at solve time by
+    /// named-parameter reference resolved through `Scene::named_parameters` at solve time by
     /// `sketch_solve::build_constraint`). `None` for every purely-geometric
     /// kind (Coincident, Horizontal, Vertical, Parallel, Perpendicular,
     /// Equal, Tangent).
@@ -175,10 +164,7 @@ pub struct SketchConstraint {
     pub enabled: bool,
 }
 
-/// What "one sketch" scopes to, given the app has no dedicated Sketch
-/// grouping (design doc §3.1): the only existing sub-document boundary is a
-/// block record, so model space and each block definition get their own
-/// independent constraint set.
+/// A constraint scope: model space or one block definition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SketchScope {
     ModelSpace,
@@ -189,12 +175,7 @@ pub enum SketchScope {
 }
 
 impl SketchScope {
-    /// The handle a [`SketchConstraintSet`] for this scope is persisted
-    /// under — `CadDocument::ensure_xrecord`/`xrecord`/`xrecord_mut`'s
-    /// `owner` argument (design doc §1.4/§5.2). Model space resolves
-    /// through the document rather than being a fixed handle because a
-    /// document's model-space block record handle is assigned when the
-    /// document is built, not a constant.
+    /// The owner handle under which this scope is persisted.
     pub fn owner_handle(&self, document: &acadrust::CadDocument) -> Handle {
         match self {
             SketchScope::ModelSpace => document.header.model_space_block_handle,
@@ -203,9 +184,8 @@ impl SketchScope {
     }
 }
 
-/// Every persisted constraint for one [`SketchScope`]. Rebuilt-and-solved
-/// wholesale on every trigger (design doc §4.2) — this struct holds only
-/// the constraint records themselves, no solver state.
+/// Every persisted constraint for one [`SketchScope`]. Solver state is rebuilt
+/// on demand and is not stored here.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SketchConstraintSet {
     pub scope: SketchScope,
@@ -215,30 +195,49 @@ pub struct SketchConstraintSet {
     /// independent solve partition in this scope — updated by
     /// `sketch_solve::solve_scope` each time this set is resolved. `None`
     /// until the first resolve (e.g. right after loading from disk, before
-    /// any edit has touched this scope yet). Design doc §6.3's DOF badge
-    /// reads this rather than recomputing it every frame. Not persisted:
+    /// any edit has touched this scope yet). The status badge reads this
+    /// rather than recomputing it every frame. Not persisted:
     /// it's a derived cache, not real constraint state.
     #[serde(skip)]
     pub dof: Option<usize>,
-    /// Cached redundant/conflicting constraints found by the last resolve
-    /// (design doc §6.4, stage 11) — empty whenever the scope isn't
-    /// over-constrained, which is the common case. Also a derived cache, not
+    /// Cached redundant/conflicting constraints found by the last resolve.
+    /// Also a derived cache, not
     /// persisted; a `ConflictResolverPanel` reads this rather than calling
-    /// `ocs_gcs::diagnosis::classify_redundant` itself.
+    /// `cadkernel_constraints::diagnosis::classify_redundant` itself.
     #[serde(skip)]
-    pub conflicts: Vec<(ConstraintId, ocs_gcs::diagnosis::RedundancyKind)>,
+    pub conflicts: Vec<(
+        ConstraintId,
+        cadkernel_constraints::diagnosis::RedundancyKind,
+    )>,
 }
 
 impl SketchConstraintSet {
     pub fn new(scope: SketchScope) -> Self {
-        Self { scope, constraints: Vec::new(), next_id: 0, dof: None, conflicts: Vec::new() }
+        Self {
+            scope,
+            constraints: Vec::new(),
+            next_id: 0,
+            dof: None,
+            conflicts: Vec::new(),
+        }
     }
 
     /// Appends a constraint, assigning it a fresh id unique within this set.
-    pub fn add(&mut self, kind: ConstraintKind, refs: Vec<SketchRef>, driving_param: Option<DrivingValue>) -> ConstraintId {
+    pub fn add(
+        &mut self,
+        kind: ConstraintKind,
+        refs: Vec<SketchRef>,
+        driving_param: Option<DrivingValue>,
+    ) -> ConstraintId {
         let id = self.next_id;
         self.next_id += 1;
-        self.constraints.push(SketchConstraint { id, kind, refs, driving_param, enabled: true });
+        self.constraints.push(SketchConstraint {
+            id,
+            kind,
+            refs,
+            driving_param,
+            enabled: true,
+        });
         id
     }
 
@@ -253,28 +252,27 @@ impl SketchConstraintSet {
         self.constraints.iter().find(|c| c.id == id)
     }
 
-    /// Every enabled constraint referencing `entity`, regardless of which
-    /// of its sub-elements — the query `refresh_sketch_constraints`'
-    /// reverse index (design doc §4.1) is built from.
+    /// Every enabled constraint referencing `entity`.
     pub fn constraints_touching(&self, entity: Handle) -> impl Iterator<Item = &SketchConstraint> {
-        self.constraints.iter().filter(move |c| c.enabled && c.refs.iter().any(|r| r.entity == entity))
+        self.constraints
+            .iter()
+            .filter(move |c| c.enabled && c.refs.iter().any(|r| r.entity == entity))
     }
 
-    /// Drops every constraint that references `entity` at all — the
-    /// dangling-constraint-on-delete policy (design doc §5.3, open question
-    /// 4): entities silently take their constraints with them when erased,
-    /// rather than leaving a dangling reference around. Returns the
-    /// removed constraints' ids, so a caller can log/report what vanished.
+    /// Drops every constraint that references `entity` and returns the
+    /// removed constraint ids.
     pub fn remove_all_touching(&mut self, entity: Handle) -> Vec<ConstraintId> {
-        let (removed, kept): (Vec<_>, Vec<_>) =
-            self.constraints.drain(..).partition(|c| c.refs.iter().any(|r| r.entity == entity));
+        let (removed, kept): (Vec<_>, Vec<_>) = self
+            .constraints
+            .drain(..)
+            .partition(|c| c.refs.iter().any(|r| r.entity == entity));
         self.constraints = kept;
         removed.into_iter().map(|c| c.id).collect()
     }
 }
 
 /// Resolves a [`SketchRef`] to its current world-space point, for building
-/// an `ocs_gcs` `ParamStore` from live document geometry — the constraint
+/// an `cadkernel_constraints` `ParamStore` from live document geometry — the constraint
 /// endpoint's equivalent of `dimension_assoc::resolve_reference`, restricted
 /// to the marker conventions constraint endpoints actually use (whole-entity
 /// `None`, an ordinary `source_points()` index, or the `-3` center case).
@@ -282,11 +280,8 @@ impl SketchConstraintSet {
 /// marker this scheme doesn't (yet) support (e.g. `-2`, or an out-of-range
 /// index).
 ///
-/// `sketch_solve`'s solver-side entity registration reads entity fields
-/// directly rather than through this (it needs raw, not-yet-WCS-resolved
-/// coordinates to seed `ParamId`s) — this is for UI-side consumers instead:
-/// currently `glyph_anchor` (below), eventually Phase B live inference
-/// (design doc §6.2) querying "what point is near the cursor".
+/// Solver-side registration reads raw entity fields directly. This helper is
+/// for UI-side consumers that need the current world-space position.
 pub(crate) fn resolve_point(entity: &acadrust::EntityType, marker: i32) -> Option<Vector3> {
     if marker == -3 {
         return match entity {
@@ -298,7 +293,9 @@ pub(crate) fn resolve_point(entity: &acadrust::EntityType, marker: i32) -> Optio
     if marker < 0 {
         return None;
     }
-    super::dimension_assoc::source_points(entity).get(marker as usize).copied()
+    super::dimension_assoc::source_points(entity)
+        .get(marker as usize)
+        .copied()
 }
 
 /// Below this squared distance (1e-6 world units), two points count as
@@ -306,16 +303,9 @@ pub(crate) fn resolve_point(entity: &acadrust::EntityType, marker: i32) -> Optio
 /// purposes.
 const COINCIDENT_EPSILON_SQ: f64 = 1.0e-12;
 
-/// Design doc §6.1's manual Coincident UI: given a world point (from a
-/// `CadCommand::on_point` pick — trusted to already be OSNAP-snapped onto a
-/// real feature, the same trust `infer_coincident_refs` places in a
-/// just-drawn entity's own coordinates, for the same reason: no camera or
-/// pixel radius is available once a point reaches this far from the click),
-/// finds the closest addressable point (an ordinary `source_points()` index,
-/// or a circle/arc's center) on any entity in `scope` other than `exclude`,
-/// within [`COINCIDENT_EPSILON_SQ`]. `None` means the pick didn't land on a
-/// real point — the caller should ask the user to enable an Endpoint/Center
-/// object snap and try again, not silently constrain nothing.
+/// Finds the addressable entity point nearest a snapped world position.
+/// Returns `None` when no point in the scope is within the coincidence
+/// tolerance.
 pub(crate) fn nearest_sketch_point(
     document: &acadrust::CadDocument,
     scope: SketchScope,
@@ -338,7 +328,10 @@ pub(crate) fn nearest_sketch_point(
         if common.owner_handle != owner || Some(common.handle) == exclude {
             continue;
         }
-        for (marker, point) in super::dimension_assoc::source_points(candidate).into_iter().enumerate() {
+        for (marker, point) in super::dimension_assoc::source_points(candidate)
+            .into_iter()
+            .enumerate()
+        {
             consider(common.handle, marker as i32, point);
         }
         match candidate {
@@ -350,23 +343,13 @@ pub(crate) fn nearest_sketch_point(
     best.map(|(_, r)| r)
 }
 
-/// Design doc §6.2 (stage 8, Phase B live inference): for each of
-/// `new_entity`'s own points, finds an existing entity in `scope` (other
+/// For each point on `new_entity`, finds an existing entity in `scope` (other
 /// than `new_handle` itself) whose corresponding point already coincides,
 /// and returns a `(new, existing)` `SketchRef` pair per match — the caller
 /// adds each as a `Coincident` constraint.
 ///
-/// **Deviation from this doc**: the doc's own §6.2 suggests reusing OSNAP's
-/// screen-space tolerance/query; this instead checks for near-exact
-/// world-space coincidence. The natural hook point is where a committed
-/// entity becomes a document write (`CmdResult::CommitEntity`'s dispatch in
-/// `command_driver.rs`) — well after the cursor's pixel position and camera
-/// are available, with only the entity's final world coordinates left. If
-/// OSNAP's endpoint mode grabbed the point while the user was drawing, the
-/// new entity's coordinate already matches the existing one to floating-point
-/// precision, so a tight world-space epsilon reproduces the same result
-/// without re-deriving OSNAP's screen-space math or threading camera state
-/// into this dispatch site.
+/// Matching uses a tight world-space tolerance because this runs after the
+/// snapped entity has been committed.
 pub(crate) fn infer_coincident_refs(
     document: &acadrust::CadDocument,
     scope: SketchScope,
@@ -385,12 +368,18 @@ pub(crate) fn infer_coincident_refs(
             if common.handle == new_handle || common.owner_handle != owner {
                 continue;
             }
-            for (marker, point) in super::dimension_assoc::source_points(candidate).iter().enumerate() {
+            for (marker, point) in super::dimension_assoc::source_points(candidate)
+                .iter()
+                .enumerate()
+            {
                 let dx = point.x - new_point.x;
                 let dy = point.y - new_point.y;
                 let dz = point.z - new_point.z;
                 if dx * dx + dy * dy + dz * dz <= COINCIDENT_EPSILON_SQ {
-                    pairs.push((SketchRef::point(new_handle, new_marker as i32), SketchRef::point(common.handle, marker as i32)));
+                    pairs.push((
+                        SketchRef::point(new_handle, new_marker as i32),
+                        SketchRef::point(common.handle, marker as i32),
+                    ));
                     break;
                 }
             }
@@ -437,8 +426,12 @@ impl ConstraintKind {
 /// value for a dimensional kind (Distance/Angle/Radius).
 pub(crate) fn glyph_label(constraint: &SketchConstraint) -> String {
     match (constraint.kind, &constraint.driving_param) {
-        (ConstraintKind::Angle, Some(DrivingValue::Literal(value))) => format!("{} {value:.1}°", constraint.kind.glyph_symbol()),
-        (_, Some(DrivingValue::Literal(value))) => format!("{} {value:.2}", constraint.kind.glyph_symbol()),
+        (ConstraintKind::Angle, Some(DrivingValue::Literal(value))) => {
+            format!("{} {value:.1}°", constraint.kind.glyph_symbol())
+        }
+        (_, Some(DrivingValue::Literal(value))) => {
+            format!("{} {value:.2}", constraint.kind.glyph_symbol())
+        }
         // A named reference has no single resolved number to show without
         // threading `ParameterTable` into every glyph-render call site
         // (`src/ui/overlay.rs`) — showing the name itself is enough for now;
@@ -446,7 +439,9 @@ pub(crate) fn glyph_label(constraint: &SketchConstraint) -> String {
         // once a named `driving_param` can actually be authored through the
         // UI (nothing can yet — this arm exists so the match is exhaustive
         // and correct ahead of that UI, not because it's reachable today).
-        (_, Some(DrivingValue::Named(name))) => format!("{} {name}", constraint.kind.glyph_symbol()),
+        (_, Some(DrivingValue::Named(name))) => {
+            format!("{} {name}", constraint.kind.glyph_symbol())
+        }
         (_, None) => constraint.kind.glyph_symbol().to_string(),
     }
 }
@@ -457,16 +452,21 @@ pub(crate) fn glyph_label(constraint: &SketchConstraint) -> String {
 /// back to a representative point on the entity (a line's midpoint, a
 /// circle's rightmost point) since there's no single named point to anchor
 /// on otherwise.
-pub(crate) fn glyph_anchor(document: &acadrust::CadDocument, constraint: &SketchConstraint) -> Option<Vector3> {
+pub(crate) fn glyph_anchor(
+    document: &acadrust::CadDocument,
+    constraint: &SketchConstraint,
+) -> Option<Vector3> {
     let r = constraint.refs.first()?;
     let entity = document.get_entity(r.entity)?;
     if let Some(marker) = r.marker {
         return resolve_point(entity, marker);
     }
     match entity {
-        acadrust::EntityType::Line(l) => {
-            Some(Vector3::new((l.start.x + l.end.x) * 0.5, (l.start.y + l.end.y) * 0.5, (l.start.z + l.end.z) * 0.5))
-        }
+        acadrust::EntityType::Line(l) => Some(Vector3::new(
+            (l.start.x + l.end.x) * 0.5,
+            (l.start.y + l.end.y) * 0.5,
+            (l.start.z + l.end.z) * 0.5,
+        )),
         acadrust::EntityType::Circle(c) => Some(c.point_at_angle_wcs(0.0)),
         _ => None,
     }
@@ -484,16 +484,20 @@ impl super::Scene {
     /// scope — this is the one way to reach a scope's set for both reading
     /// and mutating.
     pub fn sketch_constraint_set_mut(&mut self, scope: SketchScope) -> &mut SketchConstraintSet {
-        if let Some(index) = self.sketch_constraints.iter().position(|s| s.scope == scope) {
+        if let Some(index) = self
+            .sketch_constraints
+            .iter()
+            .position(|s| s.scope == scope)
+        {
             &mut self.sketch_constraints[index]
         } else {
-            self.sketch_constraints.push(SketchConstraintSet::new(scope));
+            self.sketch_constraints
+                .push(SketchConstraintSet::new(scope));
             self.sketch_constraints.last_mut().expect("just pushed")
         }
     }
 
-    /// Design doc §5.3/§12 (open question 3, now resolved): copy/paste's
-    /// handle remapping lives locally in each command that duplicates
+    /// Handle remapping lives in each command that duplicates
     /// entities — `Scene::copy_entities`' `handle_map` (COPY/ARRAY/MIRROR,
     /// `src/scene/modify.rs`) and `OpenCADStudio::finalize_paste`'s own
     /// (clipboard paste, `src/app/command_driver.rs`) — rather than in one
@@ -507,18 +511,28 @@ impl super::Scene {
     /// scope, then triggers a solve for the newly duplicated geometry the
     /// same way any other edit would. A no-op when `handle_map` is empty or
     /// nothing constrained was duplicated.
-    pub fn duplicate_sketch_constraints_for(&mut self, handle_map: &rustc_hash::FxHashMap<Handle, Handle>) {
+    pub fn duplicate_sketch_constraints_for(
+        &mut self,
+        handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
+    ) {
         if handle_map.is_empty() {
             return;
         }
-        let mut to_add: Vec<(usize, ConstraintKind, Vec<SketchRef>, Option<DrivingValue>)> = Vec::new();
+        let mut to_add: Vec<(usize, ConstraintKind, Vec<SketchRef>, Option<DrivingValue>)> =
+            Vec::new();
         for (scope_index, set) in self.sketch_constraints.iter().enumerate() {
             for c in &set.constraints {
                 if !c.enabled || !c.refs.iter().all(|r| handle_map.contains_key(&r.entity)) {
                     continue;
                 }
-                let new_refs: Vec<SketchRef> =
-                    c.refs.iter().map(|r| SketchRef { entity: handle_map[&r.entity], marker: r.marker }).collect();
+                let new_refs: Vec<SketchRef> = c
+                    .refs
+                    .iter()
+                    .map(|r| SketchRef {
+                        entity: handle_map[&r.entity],
+                        marker: r.marker,
+                    })
+                    .collect();
                 to_add.push((scope_index, c.kind, new_refs, c.driving_param.clone()));
             }
         }
@@ -532,7 +546,10 @@ impl super::Scene {
         }
         touched.sort();
         touched.dedup();
-        let changes: Vec<(Handle, super::ChangeKind)> = touched.into_iter().map(|h| (h, super::ChangeKind::Modified)).collect();
+        let changes: Vec<(Handle, super::ChangeKind)> = touched
+            .into_iter()
+            .map(|h| (h, super::ChangeKind::Modified))
+            .collect();
         self.bump_entities(&changes);
     }
 
@@ -547,14 +564,21 @@ impl super::Scene {
         let mut out = Vec::new();
         for set in &self.sketch_constraints {
             for c in &set.constraints {
-                let Some(DrivingValue::Named(n)) = &c.driving_param else { continue };
+                let Some(DrivingValue::Named(n)) = &c.driving_param else {
+                    continue;
+                };
                 if n != name {
                     continue;
                 }
                 let mut entities: Vec<Handle> = c.refs.iter().map(|r| r.entity).collect();
                 entities.sort();
                 entities.dedup();
-                out.push(ParameterUsage { scope: set.scope, constraint_id: c.id, kind: c.kind, entities });
+                out.push(ParameterUsage {
+                    scope: set.scope,
+                    constraint_id: c.id,
+                    kind: c.kind,
+                    entities,
+                });
             }
         }
         out
@@ -582,20 +606,38 @@ mod tests {
     #[test]
     fn add_assigns_increasing_ids_and_get_finds_them() {
         let mut set = SketchConstraintSet::new(SketchScope::ModelSpace);
-        let a = set.add(ConstraintKind::Horizontal, vec![SketchRef::whole(h(1))], None);
-        let b = set.add(ConstraintKind::Distance, vec![SketchRef::whole(h(1))], Some(DrivingValue::Literal(25.0)));
+        let a = set.add(
+            ConstraintKind::Horizontal,
+            vec![SketchRef::whole(h(1))],
+            None,
+        );
+        let b = set.add(
+            ConstraintKind::Distance,
+            vec![SketchRef::whole(h(1))],
+            Some(DrivingValue::Literal(25.0)),
+        );
         assert_ne!(a, b);
         assert_eq!(set.get(a).unwrap().kind, ConstraintKind::Horizontal);
-        assert_eq!(set.get(b).unwrap().driving_param, Some(DrivingValue::Literal(25.0)));
+        assert_eq!(
+            set.get(b).unwrap().driving_param,
+            Some(DrivingValue::Literal(25.0))
+        );
     }
 
     #[test]
     fn remove_drops_only_the_matching_id() {
         let mut set = SketchConstraintSet::new(SketchScope::ModelSpace);
-        let a = set.add(ConstraintKind::Horizontal, vec![SketchRef::whole(h(1))], None);
+        let a = set.add(
+            ConstraintKind::Horizontal,
+            vec![SketchRef::whole(h(1))],
+            None,
+        );
         let b = set.add(ConstraintKind::Vertical, vec![SketchRef::whole(h(2))], None);
         assert!(set.remove(a));
-        assert!(!set.remove(a), "removing twice should report nothing removed the second time");
+        assert!(
+            !set.remove(a),
+            "removing twice should report nothing removed the second time"
+        );
         assert!(set.get(a).is_none());
         assert!(set.get(b).is_some());
     }
@@ -603,8 +645,16 @@ mod tests {
     #[test]
     fn constraints_touching_finds_entity_regardless_of_marker() {
         let mut set = SketchConstraintSet::new(SketchScope::ModelSpace);
-        set.add(ConstraintKind::Coincident, vec![SketchRef::point(h(1), 0), SketchRef::point(h(2), 1)], None);
-        set.add(ConstraintKind::Horizontal, vec![SketchRef::whole(h(3))], None);
+        set.add(
+            ConstraintKind::Coincident,
+            vec![SketchRef::point(h(1), 0), SketchRef::point(h(2), 1)],
+            None,
+        );
+        set.add(
+            ConstraintKind::Horizontal,
+            vec![SketchRef::whole(h(3))],
+            None,
+        );
 
         let touching_1: Vec<_> = set.constraints_touching(h(1)).collect();
         assert_eq!(touching_1.len(), 1);
@@ -616,21 +666,40 @@ mod tests {
     #[test]
     fn constraints_touching_skips_disabled() {
         let mut set = SketchConstraintSet::new(SketchScope::ModelSpace);
-        let id = set.add(ConstraintKind::Horizontal, vec![SketchRef::whole(h(1))], None);
-        set.constraints.iter_mut().find(|c| c.id == id).unwrap().enabled = false;
+        let id = set.add(
+            ConstraintKind::Horizontal,
+            vec![SketchRef::whole(h(1))],
+            None,
+        );
+        set.constraints
+            .iter_mut()
+            .find(|c| c.id == id)
+            .unwrap()
+            .enabled = false;
         assert_eq!(set.constraints_touching(h(1)).count(), 0);
     }
 
     #[test]
     fn remove_all_touching_drops_every_constraint_referencing_the_entity() {
         let mut set = SketchConstraintSet::new(SketchScope::ModelSpace);
-        let coincident = set.add(ConstraintKind::Coincident, vec![SketchRef::point(h(1), 0), SketchRef::point(h(2), 1)], None);
-        let horizontal_other = set.add(ConstraintKind::Horizontal, vec![SketchRef::whole(h(3))], None);
+        let coincident = set.add(
+            ConstraintKind::Coincident,
+            vec![SketchRef::point(h(1), 0), SketchRef::point(h(2), 1)],
+            None,
+        );
+        let horizontal_other = set.add(
+            ConstraintKind::Horizontal,
+            vec![SketchRef::whole(h(3))],
+            None,
+        );
 
         let removed = set.remove_all_touching(h(1));
         assert_eq!(removed, vec![coincident]);
         assert!(set.get(coincident).is_none());
-        assert!(set.get(horizontal_other).is_some(), "unrelated entity's constraint must survive");
+        assert!(
+            set.get(horizontal_other).is_some(),
+            "unrelated entity's constraint must survive"
+        );
     }
 
     #[test]
@@ -644,54 +713,87 @@ mod tests {
     #[test]
     fn ref_center_constructor_matches_the_dash_three_convention() {
         let r = SketchRef::center(h(7));
-        assert_eq!(r, SketchRef { entity: h(7), marker: Some(-3) });
+        assert_eq!(
+            r,
+            SketchRef {
+                entity: h(7),
+                marker: Some(-3)
+            }
+        );
     }
 
     #[test]
     fn sketch_constraint_set_round_trips_through_bincode() {
         let mut set = SketchConstraintSet::new(SketchScope::Block(h(5)));
-        set.add(ConstraintKind::Coincident, vec![SketchRef::point(h(1), 0), SketchRef::point(h(2), 1)], None);
-        set.add(ConstraintKind::Distance, vec![SketchRef::whole(h(3))], Some(DrivingValue::Literal(12.5)));
+        set.add(
+            ConstraintKind::Coincident,
+            vec![SketchRef::point(h(1), 0), SketchRef::point(h(2), 1)],
+            None,
+        );
+        set.add(
+            ConstraintKind::Distance,
+            vec![SketchRef::whole(h(3))],
+            Some(DrivingValue::Literal(12.5)),
+        );
 
         let bytes = bincode::serialize(&set).expect("serialize");
         let restored: SketchConstraintSet = bincode::deserialize(&bytes).expect("deserialize");
 
         assert_eq!(restored.scope, set.scope);
         assert_eq!(restored.constraints.len(), set.constraints.len());
-        assert_eq!(restored.constraints[1].driving_param, Some(DrivingValue::Literal(12.5)));
+        assert_eq!(
+            restored.constraints[1].driving_param,
+            Some(DrivingValue::Literal(12.5))
+        );
         assert_eq!(restored.constraints[0].refs, set.constraints[0].refs);
     }
 
     #[test]
     fn parameter_usage_finds_every_constraint_driven_by_the_named_parameter() {
         let mut scene = super::super::Scene::new();
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-            ConstraintKind::Distance,
-            vec![SketchRef::point(h(1), 0), SketchRef::point(h(1), 1)],
-            Some(DrivingValue::Named("gap".to_string())),
-        );
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-            ConstraintKind::Radius,
-            vec![SketchRef::whole(h(2))],
-            Some(DrivingValue::Named("gap".to_string())),
-        );
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .add(
+                ConstraintKind::Distance,
+                vec![SketchRef::point(h(1), 0), SketchRef::point(h(1), 1)],
+                Some(DrivingValue::Named("gap".to_string())),
+            );
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .add(
+                ConstraintKind::Radius,
+                vec![SketchRef::whole(h(2))],
+                Some(DrivingValue::Named("gap".to_string())),
+            );
         // Unrelated: a literal-driven constraint and one driven by a
         // different name must not show up.
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-            ConstraintKind::Radius,
-            vec![SketchRef::whole(h(3))],
-            Some(DrivingValue::Literal(5.0)),
-        );
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-            ConstraintKind::Distance,
-            vec![SketchRef::point(h(4), 0), SketchRef::point(h(4), 1)],
-            Some(DrivingValue::Named("other".to_string())),
-        );
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .add(
+                ConstraintKind::Radius,
+                vec![SketchRef::whole(h(3))],
+                Some(DrivingValue::Literal(5.0)),
+            );
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .add(
+                ConstraintKind::Distance,
+                vec![SketchRef::point(h(4), 0), SketchRef::point(h(4), 1)],
+                Some(DrivingValue::Named("other".to_string())),
+            );
 
         let usage = scene.parameter_usage("gap");
-        assert_eq!(usage.len(), 2, "exactly the two constraints driven by 'gap', got {usage:?}");
-        assert!(usage.iter().any(|u| u.kind == ConstraintKind::Distance && u.entities == vec![h(1)]));
-        assert!(usage.iter().any(|u| u.kind == ConstraintKind::Radius && u.entities == vec![h(2)]));
+        assert_eq!(
+            usage.len(),
+            2,
+            "exactly the two constraints driven by 'gap', got {usage:?}"
+        );
+        assert!(usage
+            .iter()
+            .any(|u| u.kind == ConstraintKind::Distance && u.entities == vec![h(1)]));
+        assert!(usage
+            .iter()
+            .any(|u| u.kind == ConstraintKind::Radius && u.entities == vec![h(2)]));
 
         assert_eq!(scene.parameter_usage("nonexistent").len(), 0);
     }
@@ -700,11 +802,13 @@ mod tests {
     fn parameter_usage_searches_every_scope_not_just_model_space() {
         let mut scene = super::super::Scene::new();
         let block = h(99);
-        scene.sketch_constraint_set_mut(SketchScope::Block(block)).add(
-            ConstraintKind::Radius,
-            vec![SketchRef::whole(h(1))],
-            Some(DrivingValue::Named("r".to_string())),
-        );
+        scene
+            .sketch_constraint_set_mut(SketchScope::Block(block))
+            .add(
+                ConstraintKind::Radius,
+                vec![SketchRef::whole(h(1))],
+                Some(DrivingValue::Named("r".to_string())),
+            );
         let usage = scene.parameter_usage("r");
         assert_eq!(usage.len(), 1);
         assert_eq!(usage[0].scope, SketchScope::Block(block));
@@ -716,11 +820,13 @@ mod tests {
         // A Distance constraint whose two points are both on the same
         // entity (e.g. a line's own start and end) must list that entity
         // once, not twice.
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-            ConstraintKind::Distance,
-            vec![SketchRef::point(h(1), 0), SketchRef::point(h(1), 1)],
-            Some(DrivingValue::Named("len".to_string())),
-        );
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .add(
+                ConstraintKind::Distance,
+                vec![SketchRef::point(h(1), 0), SketchRef::point(h(1), 1)],
+                Some(DrivingValue::Named("len".to_string())),
+            );
         let usage = scene.parameter_usage("len");
         assert_eq!(usage.len(), 1);
         assert_eq!(usage[0].entities, vec![h(1)]);

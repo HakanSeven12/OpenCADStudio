@@ -1706,16 +1706,8 @@ impl OpenCADStudio {
                     );
                 }
             }
-            // Live sketch-constraint re-solve (design doc §7 open question
-            // 6): previously constrained neighbors only snapped into place
-            // on grip release — this runs the same rebuild-and-solve every
-            // frame so they track the drag live. First touch this gesture
-            // captures the neighbor's original state into the grip's own
-            // undo tracking (mirroring how `edited_handles` itself is
-            // captured above) and hides it from the resident tessellation;
-            // every frame folds it into this frame's `edited_handles` so the
-            // existing mesh/hatch/wire-preview refresh below already covers
-            // it for free.
+            // Re-solve constrained neighbors on each drag frame and include
+            // their original state in the gesture's undo record.
             let solved_by_constraints = self.tabs[i].scene.solve_sketch_constraints_preview(&edited_handles);
             for (handle, _) in &solved_by_constraints {
                 let handle = *handle;

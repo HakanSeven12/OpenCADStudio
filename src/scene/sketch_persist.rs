@@ -1,23 +1,9 @@
-//! Save/load integration for [`super::sketch_constraints::SketchConstraintSet`]
-//! — design doc §5.2/§8 stage 4, the "lazy" persistence model that section
-//! recommends: constraint sets live only in `Scene::sketch_constraints`
-//! in-memory (§8 stage 3) and are materialized into `document.objects` as
-//! XRecords only around a save, and read back out right after a load. The
-//! XRecord round-trip mechanism itself (`CadDocument::ensure_xrecord`/
-//! `xrecord`/`xrecord_mut`) was proven in stage 2
-//! (`tests/sketch_constraints_xrecord_roundtrip.rs`) — this module is just
-//! the app-level wiring: which owner handles to check, and when.
-//!
-//! One named XRecord (keyed [`XRECORD_KEY`]) hangs off each scope's own
-//! owner handle's extension dictionary — model space's `BlockRecord` handle,
-//! or a `SketchScope::Block`'s handle — rather than a single shared
-//! dictionary, since [`super::sketch_constraints::SketchScope::owner_handle`]
-//! already gives that handle directly and `ensure_xrecord`/`xrecord` are
-//! themselves per-owner.
+//! Persists each sketch constraint set in a versioned, chunked XRecord.
 
 use super::sketch_constraints::SketchConstraintSet;
 use super::Scene;
 use acadrust::{CadDocument, Handle};
+use bincode::Options;
 
 const XRECORD_KEY: &str = "OCS_SKETCH_CONSTRAINTS";
 
@@ -35,6 +21,7 @@ const XRECORD_KEY: &str = "OCS_SKETCH_CONSTRAINTS";
 /// around it without touching the vendored crate — `CadDocument::xrecord`'s
 /// `entries: Vec<XRecordEntry>` already supports repeating a code.
 const MAX_CHUNK_BYTES: usize = u8::MAX as usize;
+const MAX_RECORD_BYTES: usize = 8 * 1024 * 1024;
 
 /// Removes a named XRecord from `owner`'s extension dictionary, if present.
 /// The dictionary itself is left in place even if now empty — other code may
@@ -50,32 +37,28 @@ fn remove_xrecord(document: &mut CadDocument, owner: Handle, key: &str) {
     else {
         return;
     };
-    let Some(index) = dictionary.entries.iter().position(|(name, _)| name.eq_ignore_ascii_case(key)) else {
+    let Some(index) = dictionary
+        .entries
+        .iter()
+        .position(|(name, _)| name.eq_ignore_ascii_case(key))
+    else {
         return;
     };
     let (_, record_handle) = dictionary.entries.remove(index);
     document.objects.remove(&record_handle);
 }
 
-/// Prefixed onto every serialized blob so a future schema change can be
-/// detected and gracefully skipped (dropping just that one scope's
-/// constraints, not the whole load) rather than silently misreading bytes
-/// or panicking — design doc §5.2's explicit call-out, and §7's flagged
-/// "no migration path designed yet": bumping this is the signal a real
-/// migration is needed, not a substitute for one.
-///
-/// Bumped 1 -> 2 by `named_parameters_design.md` stage 3:
-/// `SketchConstraint::driving_param` changed from a bare `Option<f64>` to
-/// `Option<named_parameters::DrivingValue>` (an enum, with its own
-/// discriminant), so a version-1 blob's bytes no longer line up with the
-/// current struct shape — exactly the "detected and gracefully skipped"
-/// case this version byte exists for, not something to migrate (no
-/// migration path exists yet, per the call-out above).
+/// Serialized schema version. Unknown versions are skipped without affecting
+/// the rest of the drawing.
 const FORMAT_VERSION: u8 = 2;
 
 fn encode(set: &SketchConstraintSet) -> Option<Vec<u8>> {
     let mut bytes = vec![FORMAT_VERSION];
-    bytes.extend(bincode::serialize(set).ok()?);
+    let body = bincode::serialize(set).ok()?;
+    if body.len() >= MAX_RECORD_BYTES {
+        return None;
+    }
+    bytes.extend(body);
     Some(bytes)
 }
 
@@ -84,7 +67,12 @@ fn decode(bytes: &[u8]) -> Option<SketchConstraintSet> {
     if version != FORMAT_VERSION {
         return None;
     }
-    bincode::deserialize(body).ok()
+    bincode::DefaultOptions::new()
+        .with_fixint_encoding()
+        .allow_trailing_bytes()
+        .with_limit(MAX_RECORD_BYTES as u64)
+        .deserialize(body)
+        .ok()
 }
 
 impl Scene {
@@ -145,16 +133,26 @@ impl Scene {
     /// blank document has nothing to find anyway).
     pub(crate) fn load_sketch_constraints_from_document(&mut self) {
         self.sketch_constraints.clear();
-        let owners: Vec<acadrust::Handle> =
-            self.document.block_records.iter().map(|record| record.handle).collect();
+        let owners: Vec<acadrust::Handle> = self
+            .document
+            .block_records
+            .iter()
+            .map(|record| record.handle)
+            .collect();
         for owner in owners {
-            let Some(record) = self.document.xrecord(owner, XRECORD_KEY) else { continue };
+            let Some(record) = self.document.xrecord(owner, XRECORD_KEY) else {
+                continue;
+            };
             // Concatenate every Chunk entry in order, not just the first —
             // a set materialized past `MAX_CHUNK_BYTES` spans more than one
             // same-code `310` entry (see that constant's doc comment).
             let mut bytes = Vec::new();
             for entry in &record.entries {
                 if let acadrust::objects::XRecordValue::Chunk(chunk) = &entry.value {
+                    if bytes.len().saturating_add(chunk.len()) > MAX_RECORD_BYTES {
+                        bytes.clear();
+                        break;
+                    }
                     bytes.extend_from_slice(chunk);
                 }
             }
@@ -182,11 +180,9 @@ mod tests {
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(10.0, 0.0, 0.0),
         )));
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-            ConstraintKind::Horizontal,
-            vec![SketchRef::whole(a)],
-            None,
-        );
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .add(ConstraintKind::Horizontal, vec![SketchRef::whole(a)], None);
 
         scene.materialize_sketch_constraints_for_save();
         // Simulate the load-time side of a save/reload round trip: drop the
@@ -195,7 +191,9 @@ mod tests {
         scene.sketch_constraints.clear();
         scene.load_sketch_constraints_from_document();
 
-        let set = scene.sketch_constraint_set(SketchScope::ModelSpace).expect("constraint set should have been reloaded");
+        let set = scene
+            .sketch_constraint_set(SketchScope::ModelSpace)
+            .expect("constraint set should have been reloaded");
         assert_eq!(set.constraints.len(), 1);
         assert_eq!(set.constraints[0].kind, ConstraintKind::Horizontal);
         assert_eq!(set.constraints[0].refs, vec![SketchRef::whole(a)]);
@@ -218,16 +216,20 @@ mod tests {
             Vector3::new(10.0, 5.0, 0.0),
             Vector3::new(20.0, 5.0, 0.0),
         )));
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-            ConstraintKind::Coincident,
-            vec![SketchRef::point(a, 1), SketchRef::point(b, 0)],
-            None,
-        );
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-            ConstraintKind::Distance,
-            vec![SketchRef::whole(b)],
-            Some(crate::scene::named_parameters::DrivingValue::Literal(12.5)),
-        );
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .add(
+                ConstraintKind::Coincident,
+                vec![SketchRef::point(a, 1), SketchRef::point(b, 0)],
+                None,
+            );
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .add(
+                ConstraintKind::Distance,
+                vec![SketchRef::whole(b)],
+                Some(crate::scene::named_parameters::DrivingValue::Literal(12.5)),
+            );
 
         scene.materialize_sketch_constraints_for_save();
         let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version)
@@ -237,9 +239,12 @@ mod tests {
             .unwrap_or_else(|e| panic!("reload {ext} bytes: {e}"));
         reloaded_scene.load_sketch_constraints_from_document();
 
-        reloaded_scene.sketch_constraint_set(SketchScope::ModelSpace).cloned().unwrap_or_else(|| {
-            panic!("no ModelSpace constraint set survived the {ext} save/load round trip")
-        })
+        reloaded_scene
+            .sketch_constraint_set(SketchScope::ModelSpace)
+            .cloned()
+            .unwrap_or_else(|| {
+                panic!("no ModelSpace constraint set survived the {ext} save/load round trip")
+            })
     }
 
     #[test]
@@ -248,7 +253,10 @@ mod tests {
         assert_eq!(restored.constraints.len(), 2);
         assert_eq!(restored.constraints[0].kind, ConstraintKind::Coincident);
         assert_eq!(restored.constraints[1].kind, ConstraintKind::Distance);
-        assert_eq!(restored.constraints[1].driving_param, Some(crate::scene::named_parameters::DrivingValue::Literal(12.5)));
+        assert_eq!(
+            restored.constraints[1].driving_param,
+            Some(crate::scene::named_parameters::DrivingValue::Literal(12.5))
+        );
     }
 
     #[test]
@@ -257,7 +265,10 @@ mod tests {
         assert_eq!(restored.constraints.len(), 2);
         assert_eq!(restored.constraints[0].kind, ConstraintKind::Coincident);
         assert_eq!(restored.constraints[1].kind, ConstraintKind::Distance);
-        assert_eq!(restored.constraints[1].driving_param, Some(crate::scene::named_parameters::DrivingValue::Literal(12.5)));
+        assert_eq!(
+            restored.constraints[1].driving_param,
+            Some(crate::scene::named_parameters::DrivingValue::Literal(12.5))
+        );
     }
 
     #[test]
@@ -274,10 +285,22 @@ mod tests {
         // handle"), so look it up from the table by name instead of using
         // the return value directly.
         let _insert_handle = scene
-            .create_block_from_entities(&[a], "OCS_STAGE4_TEST_BLOCK", &acadrust::types::Transform::identity(), &acadrust::types::Transform::identity())
+            .create_block_from_entities(
+                &[a],
+                "OCS_STAGE4_TEST_BLOCK",
+                &acadrust::types::Transform::identity(),
+                &acadrust::types::Transform::identity(),
+            )
             .expect("create a block definition to own the constraint set");
-        let br_handle = scene.document.block_records.get("OCS_STAGE4_TEST_BLOCK").expect("block record should exist").handle;
-        scene.sketch_constraint_set_mut(SketchScope::Block(br_handle)).add(ConstraintKind::Vertical, vec![SketchRef::whole(a)], None);
+        let br_handle = scene
+            .document
+            .block_records
+            .get("OCS_STAGE4_TEST_BLOCK")
+            .expect("block record should exist")
+            .handle;
+        scene
+            .sketch_constraint_set_mut(SketchScope::Block(br_handle))
+            .add(ConstraintKind::Vertical, vec![SketchRef::whole(a)], None);
 
         scene.materialize_sketch_constraints_for_save();
         scene.sketch_constraints.clear();
@@ -300,7 +323,10 @@ mod tests {
         scene.materialize_sketch_constraints_for_save();
 
         let owner = scene.document.header.model_space_block_handle;
-        assert!(scene.document.xrecord(owner, XRECORD_KEY).is_none(), "an empty constraint set should not create an XRecord");
+        assert!(
+            scene.document.xrecord(owner, XRECORD_KEY).is_none(),
+            "an empty constraint set should not create an XRecord"
+        );
     }
 
     #[test]
@@ -316,29 +342,50 @@ mod tests {
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(10.0, 0.0, 0.0),
         )));
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(ConstraintKind::Horizontal, vec![SketchRef::whole(a)], None);
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .add(ConstraintKind::Horizontal, vec![SketchRef::whole(a)], None);
         scene.materialize_sketch_constraints_for_save();
 
         let owner = scene.document.header.model_space_block_handle;
-        assert!(scene.document.xrecord(owner, XRECORD_KEY).is_some(), "sanity: the first save should have materialized an XRecord");
+        assert!(
+            scene.document.xrecord(owner, XRECORD_KEY).is_some(),
+            "sanity: the first save should have materialized an XRecord"
+        );
 
         // Clear every constraint (mirrors deleting the constrained entity, or
         // removing the last constraint by hand) and save again.
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).constraints.clear();
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .constraints
+            .clear();
         scene.materialize_sketch_constraints_for_save();
 
-        assert!(scene.document.xrecord(owner, XRECORD_KEY).is_none(), "the stale XRecord from the earlier non-empty save must be removed, not left behind");
+        assert!(
+            scene.document.xrecord(owner, XRECORD_KEY).is_none(),
+            "the stale XRecord from the earlier non-empty save must be removed, not left behind"
+        );
 
         // And the load path must agree: nothing resurrects on reload.
         scene.sketch_constraints.clear();
         scene.load_sketch_constraints_from_document();
-        assert!(scene.sketch_constraint_set(SketchScope::ModelSpace).is_none(), "no constraints should come back after the set was cleared and re-saved");
+        assert!(
+            scene
+                .sketch_constraint_set(SketchScope::ModelSpace)
+                .is_none(),
+            "no constraints should come back after the set was cleared and re-saved"
+        );
     }
 
     #[test]
     fn decode_rejects_a_mismatched_format_version() {
         let mut bytes = vec![FORMAT_VERSION.wrapping_add(1)];
-        bytes.extend(bincode::serialize(&SketchConstraintSet::new(SketchScope::ModelSpace)).unwrap());
-        assert!(decode(&bytes).is_none(), "a future/unknown format version must be rejected, not misread");
+        bytes.extend(
+            bincode::serialize(&SketchConstraintSet::new(SketchScope::ModelSpace)).unwrap(),
+        );
+        assert!(
+            decode(&bytes).is_none(),
+            "a future/unknown format version must be rejected, not misread"
+        );
     }
 }

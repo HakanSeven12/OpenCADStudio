@@ -1408,8 +1408,8 @@ pub enum CmdResult {
     ReplaceMany(Vec<(Handle, Vec<EntityType>)>, Vec<EntityType>),
     /// Replace several entities as one undo step while keeping the command active.
     ReplaceManyContinue(Vec<(Handle, Vec<EntityType>)>),
-    /// Add a persistent parametric constraint (`docs/parametric_system_design.md`
-    /// §6.1) to the current scope's `SketchConstraintSet` and trigger its
+    /// Add a persistent parametric constraint to the current scope's
+    /// `SketchConstraintSet` and trigger its
     /// first solve; end the command. Unlike `ReplaceMany`/`CommitEntity`,
     /// nothing here is geometry to add or replace directly — the host adds
     /// the constraint record, then re-solves through `Scene::bump_entities`'s
@@ -1419,8 +1419,7 @@ pub enum CmdResult {
         kind: crate::scene::sketch_constraints::ConstraintKind,
         refs: Vec<crate::scene::sketch_constraints::SketchRef>,
         /// The typed target for a dimensional kind (Distance/Angle/Radius) —
-        /// a literal number, or a named-parameter reference
-        /// (`docs/named_parameters_design.md` stage 4, recognized by
+        /// a literal number, or a named-parameter reference recognized by
         /// `DistanceConstraintCommand`/`AngleConstraintCommand::
         /// on_text_input` when the typed token matches a known parameter
         /// name instead of parsing as a number); `None` for a purely
@@ -1429,14 +1428,9 @@ pub enum CmdResult {
         /// Undo-history label, e.g. `"Horizontal constraint"`.
         label: &'static str,
     },
-    /// Add a persistent Coincident constraint between whatever sub-entity
-    /// point resolves nearest each picked point (design doc §6.1/§6.2's
-    /// manual Coincident UI — `CoincidentConstraintCommand`,
-    /// `src/modules/draw/constrain/coincident.rs`). Like
-    /// `ReassociateCenterMark`, a `CadCommand` has no document access to
-    /// resolve a marker itself, so it hands the two raw points back for the
-    /// host to resolve (`sketch_constraints::nearest_sketch_point`) and, if
-    /// both land near a real point, build an `AddSketchConstraint` from.
+    /// Adds a Coincident constraint between the sub-entity points nearest
+    /// the two picked positions. The host resolves the raw points because
+    /// `CadCommand` has no document access.
     AddCoincidentConstraint {
         point_a: DVec3,
         point_b: DVec3,
@@ -2534,14 +2528,8 @@ pub fn all_registered_command_names() -> Vec<&'static str> {
 mod constraint_registry_tests {
     use super::*;
 
-    /// Regression guard: the whole `src/modules/draw/constrain/` family
-    /// (17 command ids, every one of the geometric/dimensional constraint
-    /// commands) predated `inventory::submit!` and was invisible to
-    /// command-line autocomplete and the MCP `commands` listing —
-    /// `docs/command_reference.md`'s own generator flagged this. Each
-    /// constraint module now registers itself; this pins that so the gap
-    /// can't silently reappear (e.g. a new constraint command added
-    /// without its own registration).
+    /// Ensures every constraint command remains discoverable by autocomplete
+    /// and command listings.
     #[test]
     fn every_constraint_command_is_in_the_autocomplete_registry() {
         let names = all_registered_command_names();

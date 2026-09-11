@@ -1057,7 +1057,6 @@ mod tests {
             "CHANGELOG",
             "CUI",
             "ALIASEDIT",
-            "OPTIONS",
         ];
         for cmd in standalone {
             assert!(
@@ -1613,4 +1612,3 @@ mod tests {
         assert_eq!(app.tabs[0].active_cmd.as_ref().map(|c| c.name()), Some("MTP"));
     }
 }
-

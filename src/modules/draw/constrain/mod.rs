@@ -1,5 +1,4 @@
-//! Ribbon tools and typed-value commands for the persistent "Constraints"
-//! group (design doc `docs/parametric_system_design.md` §6.1).
+//! Ribbon tools and typed-value commands for persistent constraints.
 //!
 //! Every one adds a [`crate::scene::sketch_constraints::SketchConstraint`]
 //! to the current scope and lets `Scene::bump_entities` solve it, the same
@@ -29,8 +28,11 @@ mod tools;
 mod value;
 pub use coincident::{coincident_tool, CoincidentConstraintCommand};
 pub use equal_distance::{equal_distance_tool, EqualDistanceConstraintCommand};
-pub use point_on_entity::{center_point_tool, midpoint_tool, point_on_curve_tool, PointOnEntityConstraintCommand};
+pub use point_on_entity::{
+    center_point_tool, midpoint_tool, point_on_curve_tool, PointOnEntityConstraintCommand,
+};
 pub use tools::{
-    concentric, equal, fixed, horizontal, colinear, normal, parallel, perpendicular, symmetric, tangent, vertical,
+    colinear, concentric, equal, fixed, horizontal, normal, parallel, perpendicular, symmetric,
+    tangent, vertical,
 };
 pub use value::{angle_tool, distance_tool, AngleConstraintCommand, DistanceConstraintCommand};

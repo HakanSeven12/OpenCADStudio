@@ -8,7 +8,9 @@ pub mod horizontal {
         ToolDef {
             id: "HCONSTRAINT",
             label: "Horizontal",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/horizontal.svg")),
+            icon: IconKind::Svg(include_bytes!(
+                "../../../../assets/icons/constrain/horizontal.svg"
+            )),
             event: ModuleEvent::Command("HCONSTRAINT".to_string()),
         }
     }
@@ -20,7 +22,9 @@ pub mod vertical {
         ToolDef {
             id: "VCONSTRAINT",
             label: "Vertical",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/vertical.svg")),
+            icon: IconKind::Svg(include_bytes!(
+                "../../../../assets/icons/constrain/vertical.svg"
+            )),
             event: ModuleEvent::Command("VCONSTRAINT".to_string()),
         }
     }
@@ -32,7 +36,9 @@ pub mod parallel {
         ToolDef {
             id: "PCONSTRAINT",
             label: "Parallel",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/parallel.svg")),
+            icon: IconKind::Svg(include_bytes!(
+                "../../../../assets/icons/constrain/parallel.svg"
+            )),
             event: ModuleEvent::Command("PCONSTRAINT".to_string()),
         }
     }
@@ -44,7 +50,9 @@ pub mod perpendicular {
         ToolDef {
             id: "QCONSTRAINT",
             label: "Perpendicular",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/perpendicular.svg")),
+            icon: IconKind::Svg(include_bytes!(
+                "../../../../assets/icons/constrain/perpendicular.svg"
+            )),
             event: ModuleEvent::Command("QCONSTRAINT".to_string()),
         }
     }
@@ -56,7 +64,9 @@ pub mod equal {
         ToolDef {
             id: "ECONSTRAINT",
             label: "Equal",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/equal.svg")),
+            icon: IconKind::Svg(include_bytes!(
+                "../../../../assets/icons/constrain/equal.svg"
+            )),
             event: ModuleEvent::Command("ECONSTRAINT".to_string()),
         }
     }
@@ -68,7 +78,9 @@ pub mod tangent {
         ToolDef {
             id: "TCONSTRAINT",
             label: "Tangent",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/tangent.svg")),
+            icon: IconKind::Svg(include_bytes!(
+                "../../../../assets/icons/constrain/tangent.svg"
+            )),
             event: ModuleEvent::Command("TCONSTRAINT".to_string()),
         }
     }
@@ -80,7 +92,9 @@ pub mod concentric {
         ToolDef {
             id: "NCONSTRAINT",
             label: "Concentric",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/concentric.svg")),
+            icon: IconKind::Svg(include_bytes!(
+                "../../../../assets/icons/constrain/concentric.svg"
+            )),
             event: ModuleEvent::Command("NCONSTRAINT".to_string()),
         }
     }
@@ -92,15 +106,16 @@ pub mod concentric {
 /// always normal to its own tangent), so it's built from the same
 /// `PointOnLine` primitive `PointOnCurve` already uses for a point-on-line
 /// case (`sketch_solve.rs`). Distinct from `Perpendicular`, which only
-/// covers line-to-line — AutoCAD's own `GeomConstraintType` enum lists
-/// `kNormal` and `kPerpendicular` separately for exactly this reason.
+/// covers line-to-line.
 pub mod normal {
     use super::*;
     pub fn tool() -> ToolDef {
         ToolDef {
             id: "NRCONSTRAINT",
             label: "Normal",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/normal.svg")),
+            icon: IconKind::Svg(include_bytes!(
+                "../../../../assets/icons/constrain/normal.svg"
+            )),
             event: ModuleEvent::Command("NRCONSTRAINT".to_string()),
         }
     }
@@ -112,7 +127,9 @@ pub mod colinear {
         ToolDef {
             id: "LCONSTRAINT",
             label: "Colinear",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/colinear.svg")),
+            icon: IconKind::Svg(include_bytes!(
+                "../../../../assets/icons/constrain/colinear.svg"
+            )),
             event: ModuleEvent::Command("LCONSTRAINT".to_string()),
         }
     }
@@ -124,7 +141,9 @@ pub mod fixed {
         ToolDef {
             id: "FXCONSTRAINT",
             label: "Fixed",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/fixed.svg")),
+            icon: IconKind::Svg(include_bytes!(
+                "../../../../assets/icons/constrain/fixed.svg"
+            )),
             event: ModuleEvent::Command("FXCONSTRAINT".to_string()),
         }
     }
@@ -136,7 +155,9 @@ pub mod symmetric {
         ToolDef {
             id: "SYCONSTRAINT",
             label: "Symmetric",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/symmetric.svg")),
+            icon: IconKind::Svg(include_bytes!(
+                "../../../../assets/icons/constrain/symmetric.svg"
+            )),
             event: ModuleEvent::Command("SYCONSTRAINT".to_string()),
         }
     }

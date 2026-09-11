@@ -1397,8 +1397,7 @@ impl PropertiesPanel {
     }
 
     /// One named-parameter row: editable name + formula, with the live-
-    /// resolved value (or error) shown alongside — the "AutoCAD style" the
-    /// Parameters section is modeled on, embedded in the panel instead of
+    /// resolved value (or error) shown alongside, embedded in the panel instead of
     /// the old separate modal. Each field commits on submit (Enter / losing
     /// focus), not per keystroke — `ParameterTable::set` validates
     /// immediately and would otherwise reject a formula mid-type (the same

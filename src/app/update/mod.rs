@@ -6040,24 +6040,6 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::UiScaleChanged(value) => {
-                self.ui_scale = value.clamp(50, 200);
-                self.persist_settings_if_changed();
-                Task::none()
-            }
-
-            Message::RibbonLabelFontSizeChanged(value) => {
-                self.ribbon.set_label_font_size(value);
-                self.save_config();
-                Task::none()
-            }
-
-            Message::RibbonGroupTitleFontSizeChanged(value) => {
-                self.ribbon.set_group_title_font_size(value);
-                self.save_config();
-                Task::none()
-            }
-
             Message::CrosshairColorChanged(value) => {
                 self.crosshair_color_input = value.clone();
                 if value.trim().is_empty() {

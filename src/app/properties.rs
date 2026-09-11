@@ -406,8 +406,7 @@ impl OpenCADStudio {
                                 read_only(t!("Visual Style").as_ref(), tab.visual_style.clone()),
                             ],
                         },
-                        // Document-wide named-parameter table (AutoCAD
-                        // Parameters Manager equivalent), embedded here
+                        // Document-wide named-parameter table embedded here
                         // instead of a separate modal — see `PropValue::
                         // ParamRow`'s doc comment. Belongs on the no-
                         // selection (drawing-level) page, not a per-entity

@@ -1,16 +1,15 @@
-// Stage 2 of docs/parametric_system_design.md's staged plan: prove a
-// SketchConstraintSet, serialized into an XRecord Chunk entry hung off a
+// Proves a SketchConstraintSet serialized into an XRecord entry
 // block record's extension dictionary, survives a real save/reload through
-// both supported file formats byte-for-byte. Everything after this stage
-// (save/load integration, the "lazy" persistence model) is gated on this
-// test passing — see the design doc §8 stage 2 and §7 open question 1.
+// both supported file formats byte-for-byte.
 
-use OpenCADStudio::scene::named_parameters::DrivingValue;
-use OpenCADStudio::scene::sketch_constraints::{ConstraintKind, SketchConstraintSet, SketchRef, SketchScope};
-use OpenCADStudio::scene::Scene;
 use acadrust::entities::EntityType;
 use acadrust::objects::{XRecordEntry, XRecordValue};
 use acadrust::types::{Handle, Vector3};
+use OpenCADStudio::scene::named_parameters::DrivingValue;
+use OpenCADStudio::scene::sketch_constraints::{
+    ConstraintKind, SketchConstraintSet, SketchRef, SketchScope,
+};
+use OpenCADStudio::scene::Scene;
 
 const RECORD_KEY: &str = "OCS_SKETCH_CONSTRAINTS_TEST";
 
@@ -18,16 +17,30 @@ fn sample_set(scope: SketchScope) -> SketchConstraintSet {
     let mut set = SketchConstraintSet::new(scope);
     set.add(
         ConstraintKind::Coincident,
-        vec![SketchRef::point(Handle::new(101), 0), SketchRef::point(Handle::new(102), 1)],
+        vec![
+            SketchRef::point(Handle::new(101), 0),
+            SketchRef::point(Handle::new(102), 1),
+        ],
         None,
     );
-    set.add(ConstraintKind::Distance, vec![SketchRef::whole(Handle::new(103))], Some(DrivingValue::Literal(25.0)));
+    set.add(
+        ConstraintKind::Distance,
+        vec![SketchRef::whole(Handle::new(103))],
+        Some(DrivingValue::Literal(25.0)),
+    );
     set.add(
         ConstraintKind::Angle,
-        vec![SketchRef::whole(Handle::new(104)), SketchRef::whole(Handle::new(105))],
+        vec![
+            SketchRef::whole(Handle::new(104)),
+            SketchRef::whole(Handle::new(105)),
+        ],
         Some(DrivingValue::Literal(45.0)),
     );
-    set.add(ConstraintKind::Radius, vec![SketchRef::whole(Handle::new(106))], Some(DrivingValue::Literal(3.5)));
+    set.add(
+        ConstraintKind::Radius,
+        vec![SketchRef::whole(Handle::new(106))],
+        Some(DrivingValue::Literal(3.5)),
+    );
     set
 }
 
@@ -35,13 +48,22 @@ fn sample_set(scope: SketchScope) -> SketchConstraintSet {
 /// dictionary, round-trips the whole document through `ext` (`"dxf"` or
 /// anything else for DWG), and returns the `SketchConstraintSet` read back
 /// out of the reloaded document.
-fn roundtrip_through(scene: &Scene, owner: Handle, set: &SketchConstraintSet, ext: &str) -> SketchConstraintSet {
+fn roundtrip_through(
+    scene: &Scene,
+    owner: Handle,
+    set: &SketchConstraintSet,
+    ext: &str,
+) -> SketchConstraintSet {
     let mut doc = scene.document.clone();
     let bytes = bincode::serialize(set).expect("serialize SketchConstraintSet");
 
     doc.ensure_xrecord(owner, RECORD_KEY);
-    let record = doc.xrecord_mut(owner, RECORD_KEY).expect("xrecord_mut after ensure_xrecord");
-    record.entries.push(XRecordEntry::new(310, XRecordValue::Chunk(bytes)));
+    let record = doc
+        .xrecord_mut(owner, RECORD_KEY)
+        .expect("xrecord_mut after ensure_xrecord");
+    record
+        .entries
+        .push(XRecordEntry::new(310, XRecordValue::Chunk(bytes)));
 
     let saved = OpenCADStudio::io::save_to_bytes(&doc, ext, doc.version)
         .unwrap_or_else(|e| panic!("save to {ext} bytes: {e}"));
@@ -60,14 +82,18 @@ fn roundtrip_through(scene: &Scene, owner: Handle, set: &SketchConstraintSet, ex
         })
         .unwrap_or_else(|| panic!("no Chunk entry survived the {ext} round-trip"));
 
-    bincode::deserialize::<SketchConstraintSet>(&chunk).unwrap_or_else(|e| panic!("deserialize round-tripped {ext} blob: {e}"))
+    bincode::deserialize::<SketchConstraintSet>(&chunk)
+        .unwrap_or_else(|e| panic!("deserialize round-tripped {ext} blob: {e}"))
 }
 
 #[test]
 fn sketch_constraint_set_survives_a_dxf_roundtrip() {
     let scene = Scene::new();
     let owner = scene.document.header.model_space_block_handle;
-    assert!(!owner.is_null(), "a fresh document must already have a model-space block handle");
+    assert!(
+        !owner.is_null(),
+        "a fresh document must already have a model-space block handle"
+    );
     let original = sample_set(SketchScope::ModelSpace);
 
     let restored = roundtrip_through(&scene, owner, &original, "dxf");

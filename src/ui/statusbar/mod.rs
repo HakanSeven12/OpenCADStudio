@@ -125,13 +125,13 @@ impl StatusBar {
         // Which pills the user has chosen to show on the bar.
         config: &'a StatusBarConfig,
         menu_data: StatusMenuData<'a>,
-        // Remaining degrees of freedom for the current sketch scope's
-        // persistent constraints (design doc §6.3) — `None` when the scope
+        // Remaining degrees of freedom for the current sketch scope.
+        // `None` when the scope
         // has no `SketchConstraintSet` yet (nothing constrained), so the
         // badge stays invisible until it's actually relevant.
         sketch_dof: Option<usize>,
-        // Number of redundant/conflicting constraints `solve_scope` flagged
-        // in the current sketch scope (design doc §6.4, stage 11) — 0 hides
+        // Number of redundant/conflicting constraints in the current scope.
+        // Zero hides
         // the pill entirely, so an ordinarily/fully-constrained drawing sees
         // no new clutter.
         sketch_conflicts: usize,
@@ -274,11 +274,7 @@ impl StatusBar {
                 .into(),
             );
         }
-        // Design doc §6.4 (stage 11): a bounded v1 of the guided conflict
-        // resolver — click removes one flagged constraint at a time. See
-        // `OpenCADStudio::resolve_one_sketch_conflict`'s doc comment for the
-        // full scope-down rationale versus the design doc's named-candidate,
-        // cyclable-preview panel.
+        // Each click removes one flagged constraint.
         if sketch_conflicts > 0 {
             pills.push(
                 tip(
@@ -1082,10 +1078,7 @@ fn status_pill(label: impl Into<String>) -> Element<'static, Message> {
     .into()
 }
 
-/// Like [`status_pill`], but with the theme's `success` accent — design doc
-/// §6.3's "simple color-coded constraint state" cue: used for the DOF badge
-/// when a sketch scope has reached zero remaining degrees of freedom, so
-/// "fully constrained" is visible at a glance without opening anything.
+/// A success-colored status pill used when no degrees of freedom remain.
 fn success_pill(label: impl Into<String>) -> Element<'static, Message> {
     container(text(label.into()).size(12))
         .style(|theme: &Theme| {

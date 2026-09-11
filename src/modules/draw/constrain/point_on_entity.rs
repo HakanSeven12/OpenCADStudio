@@ -24,7 +24,9 @@ pub mod center_point_tool {
         ToolDef {
             id: "CPCONSTRAINT",
             label: "Center Point",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/center_point.svg")),
+            icon: IconKind::Svg(include_bytes!(
+                "../../../../assets/icons/constrain/center_point.svg"
+            )),
             event: ModuleEvent::Command("CPCONSTRAINT".to_string()),
         }
     }
@@ -36,7 +38,9 @@ pub mod midpoint_tool {
         ToolDef {
             id: "MPCONSTRAINT",
             label: "Midpoint",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/midpoint.svg")),
+            icon: IconKind::Svg(include_bytes!(
+                "../../../../assets/icons/constrain/midpoint.svg"
+            )),
             event: ModuleEvent::Command("MPCONSTRAINT".to_string()),
         }
     }
@@ -48,7 +52,9 @@ pub mod point_on_curve_tool {
         ToolDef {
             id: "OCCONSTRAINT",
             label: "Point on Curve",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/point_on_curve.svg")),
+            icon: IconKind::Svg(include_bytes!(
+                "../../../../assets/icons/constrain/point_on_curve.svg"
+            )),
             event: ModuleEvent::Command("OCCONSTRAINT".to_string()),
         }
     }
@@ -63,8 +69,18 @@ pub struct PointOnEntityConstraintCommand {
 }
 
 impl PointOnEntityConstraintCommand {
-    pub fn new(name: &'static str, kind: ConstraintKind, target: Handle, label: &'static str) -> Self {
-        Self { name, kind, target, label }
+    pub fn new(
+        name: &'static str,
+        kind: ConstraintKind,
+        target: Handle,
+        label: &'static str,
+    ) -> Self {
+        Self {
+            name,
+            kind,
+            target,
+            label,
+        }
     }
 }
 
@@ -78,7 +94,12 @@ impl CadCommand for PointOnEntityConstraintCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
-        CmdResult::AddPointOnEntityConstraint { point: pt, target: self.target, kind: self.kind, label: self.label }
+        CmdResult::AddPointOnEntityConstraint {
+            point: pt,
+            target: self.target,
+            kind: self.kind,
+            label: self.label,
+        }
     }
 
     fn on_enter(&mut self) -> CmdResult {
@@ -91,4 +112,6 @@ impl CadCommand for PointOnEntityConstraintCommand {
 }
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["CPCONSTRAINT", "MPCONSTRAINT", "OCCONSTRAINT"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["CPCONSTRAINT", "MPCONSTRAINT", "OCCONSTRAINT"]
+});

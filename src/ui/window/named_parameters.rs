@@ -1,6 +1,4 @@
-//! Named-parameter table editor — an in-canvas modal (Plan B), mirroring
-//! `alias_editor.rs`'s buffered-rows pattern exactly. Opened by PARAMETERS
-//! (`docs/named_parameters_design.md` stage 4). Rows are `(name, formula)`,
+//! Named-parameter table editor using buffered `(name, formula)` rows.
 //! edited in a working buffer (`OpenCADStudio::named_parameter_editor_rows`)
 //! and committed to `Scene::named_parameters` only on Apply — matching the
 //! alias editor's "closing discards unapplied edits" convention, which
@@ -25,9 +23,7 @@ use iced::widget::tooltip::Position as TipPos;
 use iced::widget::{button, column, container, row, scrollable, text, text_input, tooltip, Space};
 use iced::{Background, Element, Length, Theme};
 
-/// Short "Kind handle" label for one referenced entity — the same handle
-/// display (`0x…`) AutoCAD/this app's own conventions use, since entities
-/// have no user-facing name to show instead.
+/// Short "Kind handle" label for an entity without a user-facing name.
 fn entity_label(scene: &Scene, handle: Handle) -> String {
     match scene.document.get_entity(handle) {
         Some(EntityType::Line(_)) => format!("Line {handle}"),
@@ -46,7 +42,12 @@ fn usage_lines(scene: &Scene, name: &str) -> Vec<String> {
         .parameter_usage(name)
         .iter()
         .map(|u| {
-            let entities = u.entities.iter().map(|h| entity_label(scene, *h)).collect::<Vec<_>>().join(", ");
+            let entities = u
+                .entities
+                .iter()
+                .map(|h| entity_label(scene, *h))
+                .collect::<Vec<_>>()
+                .join(", ");
             format!("{:?}: {entities}", u.kind)
         })
         .collect()
@@ -74,14 +75,20 @@ fn used_by_cell<'a>(scene: &Scene, name: &str) -> Element<'a, Message> {
             None => counts.push((kind, 1)),
         }
     }
-    let summary = counts.iter().map(|(k, n)| format!("{k} ×{n}")).collect::<Vec<_>>().join(", ");
+    let summary = counts
+        .iter()
+        .map(|(k, n)| format!("{k} ×{n}"))
+        .collect::<Vec<_>>()
+        .join(", ");
     let mut body = column![].spacing(2);
     for line in &lines {
         body = body.push(text(line.clone()).size(11));
     }
     tooltip(
         text(summary).size(11).style(muted_style),
-        container(body).style(container::bordered_box).padding([4, 8]),
+        container(body)
+            .style(container::bordered_box)
+            .padding([4, 8]),
         TipPos::Top,
     )
     .into()
@@ -107,11 +114,15 @@ pub struct ParamEditorRow {
 const GUTTER: f32 = 16.0;
 
 fn muted_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style { color: Some(theme.palette().background.base.text.scale_alpha(0.68)) }
+    iced::widget::text::Style {
+        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
+    }
 }
 
 fn danger_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style { color: Some(theme.palette().danger.base.color) }
+    iced::widget::text::Style {
+        color: Some(theme.palette().danger.base.color),
+    }
 }
 
 /// Every buffer index sharing a (trimmed) name with at least one other
@@ -130,7 +141,11 @@ pub(crate) fn duplicate_name_rows(rows: &[ParamEditorRow]) -> std::collections::
             by_name.entry(name).or_default().push(idx);
         }
     }
-    by_name.into_values().filter(|idxs| idxs.len() > 1).flatten().collect()
+    by_name
+        .into_values()
+        .filter(|idxs| idxs.len() > 1)
+        .flatten()
+        .collect()
 }
 
 /// Builds a scratch table from every row's *current* text and resolves each
@@ -184,7 +199,11 @@ fn preview(rows: &[ParamEditorRow]) -> Vec<Option<Result<f64, String>>> {
 /// unapplied edits to a row's name in the buffer don't retroactively
 /// relabel what's shown, same as the rest of this editor only takes effect
 /// on Apply.
-pub fn view_window<'a>(rows: &'a [ParamEditorRow], scene: &'a Scene, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+pub fn view_window<'a>(
+    rows: &'a [ParamEditorRow],
+    scene: &'a Scene,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
     let title = text(t!("Named Parameters")).size(15);
     let hint = text(t!(
         "Type a name and a formula (e.g. hole_dia = 12, hole_spacing = 2 * hole_dia + 1.5). Apply to save and re-solve; closing discards unapplied edits."
@@ -192,17 +211,25 @@ pub fn view_window<'a>(rows: &'a [ParamEditorRow], scene: &'a Scene, sizing: cra
     .size(11)
     .style(muted_style);
 
-    let gutter = iced::Padding { top: 0.0, right: GUTTER, bottom: 0.0, left: 0.0 };
+    let gutter = iced::Padding {
+        top: 0.0,
+        right: GUTTER,
+        bottom: 0.0,
+        left: 0.0,
+    };
     const NAME_WIDTH: f32 = 120.0;
     const VALUE_WIDTH: f32 = 100.0;
     const USED_BY_WIDTH: f32 = 160.0;
 
     let head = container(
         row![
-            container(text(t!("Name")).size(11).style(muted_style)).width(Length::Fixed(NAME_WIDTH)),
+            container(text(t!("Name")).size(11).style(muted_style))
+                .width(Length::Fixed(NAME_WIDTH)),
             container(text(t!("Formula")).size(11).style(muted_style)).width(sizing.width),
-            container(text(t!("Value")).size(11).style(muted_style)).width(Length::Fixed(VALUE_WIDTH)),
-            container(text(t!("Used by")).size(11).style(muted_style)).width(Length::Fixed(USED_BY_WIDTH)),
+            container(text(t!("Value")).size(11).style(muted_style))
+                .width(Length::Fixed(VALUE_WIDTH)),
+            container(text(t!("Used by")).size(11).style(muted_style))
+                .width(Length::Fixed(USED_BY_WIDTH)),
             Space::new().width(Length::Fixed(30.0)),
         ]
         .spacing(8),
@@ -213,25 +240,38 @@ pub fn view_window<'a>(rows: &'a [ParamEditorRow], scene: &'a Scene, sizing: cra
     let mut list = column![].spacing(3);
     for (idx, row) in rows.iter().enumerate() {
         let name_box = text_input(t!("name").as_ref(), &row.name)
-            .on_input(move |v| Message::NamedParametersInput { idx, field: ParamField::Name, value: v })
+            .on_input(move |v| Message::NamedParametersInput {
+                idx,
+                field: ParamField::Name,
+                value: v,
+            })
             .size(13)
             .padding([3, 6])
             .width(Length::Fixed(NAME_WIDTH));
         let formula_box = text_input(t!("formula").as_ref(), &row.formula)
-            .on_input(move |v| Message::NamedParametersInput { idx, field: ParamField::Formula, value: v })
+            .on_input(move |v| Message::NamedParametersInput {
+                idx,
+                field: ParamField::Formula,
+                value: v,
+            })
             .size(13)
             .padding([3, 6])
             .width(sizing.width);
         let value_cell: Element<'_, Message> = match results.get(idx).cloned().flatten() {
-            Some(Ok(value)) => container(text(format!("= {value:.4}")).size(12).style(muted_style)).into(),
+            Some(Ok(value)) => {
+                container(text(format!("= {value:.4}")).size(12).style(muted_style)).into()
+            }
             Some(Err(msg)) => container(text(msg).size(11).style(danger_style)).into(),
             None => Space::new().into(),
         };
         let used_by_cell = used_by_cell(scene, row.name.trim());
-        let del = button(crate::ui::icons::themed_danger_text(crate::ui::icons::CLOSE, 12.0))
-            .on_press(Message::NamedParametersRemove(idx))
-            .padding([2, 6])
-            .style(button::danger);
+        let del = button(crate::ui::icons::themed_danger_text(
+            crate::ui::icons::CLOSE,
+            12.0,
+        ))
+        .on_press(Message::NamedParametersRemove(idx))
+        .padding([2, 6])
+        .style(button::danger);
         list = list.push(
             row![
                 name_box,
@@ -272,7 +312,10 @@ pub fn view_window<'a>(rows: &'a [ParamEditorRow], scene: &'a Scene, sizing: cra
     .padding(12)
     .width(sizing.width)
     .height(sizing.height)
-    .style(|theme: &Theme| container::Style { background: Some(Background::Color(theme.palette().background.base.color)), ..Default::default() })
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().background.base.color)),
+        ..Default::default()
+    })
     .into()
 }
 
@@ -281,12 +324,18 @@ mod tests {
     use super::*;
 
     fn row(name: &str, formula: &str) -> ParamEditorRow {
-        ParamEditorRow { name: name.to_string(), formula: formula.to_string() }
+        ParamEditorRow {
+            name: name.to_string(),
+            formula: formula.to_string(),
+        }
     }
 
     #[test]
     fn preview_resolves_a_literal_and_a_cross_row_reference() {
-        let rows = vec![row("hole_dia", "5"), row("hole_spacing", "2 * hole_dia + 1.5")];
+        let rows = vec![
+            row("hole_dia", "5"),
+            row("hole_spacing", "2 * hole_dia + 1.5"),
+        ];
         let results = preview(&rows);
         assert_eq!(results[0], Some(Ok(5.0)));
         assert_eq!(results[1], Some(Ok(11.5)));
@@ -309,7 +358,10 @@ mod tests {
         let results = preview(&rows);
         // Row 0 (a = b) is accepted first (b doesn't exist yet, no cycle);
         // row 1 (b = a) is the one that would close the loop and is rejected.
-        assert!(matches!(results[0], Some(Ok(_))) || matches!(&results[0], Some(Err(e)) if e.contains("not defined")));
+        assert!(
+            matches!(results[0], Some(Ok(_)))
+                || matches!(&results[0], Some(Err(e)) if e.contains("not defined"))
+        );
         assert!(matches!(&results[1], Some(Err(e)) if e.to_lowercase().contains("circular")));
     }
 
@@ -332,27 +384,40 @@ mod tests {
         let results = preview(&rows);
         assert!(matches!(&results[0], Some(Err(e)) if e.contains("duplicate")));
         assert!(matches!(&results[1], Some(Err(e)) if e.contains("duplicate")));
-        assert_eq!(results[2], Some(Ok(3.0)), "an unrelated row's name must not be affected");
+        assert_eq!(
+            results[2],
+            Some(Ok(3.0)),
+            "an unrelated row's name must not be affected"
+        );
     }
 
     #[test]
     fn usage_lines_names_the_constraint_kind_and_its_entities() {
         use crate::scene::sketch_constraints::{ConstraintKind, SketchRef, SketchScope};
         let mut scene = Scene::new();
-        let line = scene.add_entity(acadrust::EntityType::Line(acadrust::entities::Line::from_points(
-            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
-            acadrust::types::Vector3::new(10.0, 0.0, 0.0),
-        )));
-        scene.sketch_constraint_set_mut(SketchScope::ModelSpace).add(
-            ConstraintKind::Distance,
-            vec![SketchRef::point(line, 0), SketchRef::point(line, 1)],
-            Some(crate::scene::named_parameters::DrivingValue::Named("gap".to_string())),
-        );
+        let line = scene.add_entity(acadrust::EntityType::Line(
+            acadrust::entities::Line::from_points(
+                acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+                acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+            ),
+        ));
+        scene
+            .sketch_constraint_set_mut(SketchScope::ModelSpace)
+            .add(
+                ConstraintKind::Distance,
+                vec![SketchRef::point(line, 0), SketchRef::point(line, 1)],
+                Some(crate::scene::named_parameters::DrivingValue::Named(
+                    "gap".to_string(),
+                )),
+            );
 
         let lines = usage_lines(&scene, "gap");
         assert_eq!(lines.len(), 1);
         assert!(lines[0].starts_with("Distance: Line "), "got {lines:?}");
-        assert!(lines[0].contains(&format!("{line}")), "should name the actual entity handle, got {lines:?}");
+        assert!(
+            lines[0].contains(&format!("{line}")),
+            "should name the actual entity handle, got {lines:?}"
+        );
     }
 
     #[test]

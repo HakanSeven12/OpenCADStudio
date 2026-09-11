@@ -1,4 +1,4 @@
-//! CCONSTRAINT — the manual Coincident UI (design doc §6.1's open item):
+//! CCONSTRAINT — manual Coincident constraint input.
 //! unlike the rest of this module's plain select-and-click constraints,
 //! Coincident addresses a *point* on an entity (an endpoint, a circle/arc
 //! center), not the whole entity, so it needs two point picks instead of a
@@ -23,7 +23,9 @@ pub mod coincident_tool {
         ToolDef {
             id: "CCONSTRAINT",
             label: "Coincident",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/constrain/coincident.svg")),
+            icon: IconKind::Svg(include_bytes!(
+                "../../../../assets/icons/constrain/coincident.svg"
+            )),
             event: ModuleEvent::Command("CCONSTRAINT".to_string()),
         }
     }
@@ -59,7 +61,11 @@ impl CadCommand for CoincidentConstraintCommand {
                 self.first = Some(pt);
                 CmdResult::NeedPoint
             }
-            Some(first) => CmdResult::AddCoincidentConstraint { point_a: first, point_b: pt, label: "Coincident constraint" },
+            Some(first) => CmdResult::AddCoincidentConstraint {
+                point_a: first,
+                point_b: pt,
+                label: "Coincident constraint",
+            },
         }
     }
 
@@ -73,4 +79,6 @@ impl CadCommand for CoincidentConstraintCommand {
 }
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["CCONSTRAINT"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["CCONSTRAINT"]
+});

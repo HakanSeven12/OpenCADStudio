@@ -752,10 +752,7 @@ impl Scene {
             .map(|&h| (h, ChangeKind::Added))
             .collect();
         self.bump_entities(&changes);
-        // Design doc §12: a constraint entirely between duplicated entities
-        // follows them (Coincident between two copied points, Parallel
-        // between two copied lines, ...); one straddling a duplicated and a
-        // non-duplicated entity can't sensibly follow, so is left alone.
+        // Constraints wholly within the duplicated selection follow it.
         self.duplicate_sketch_constraints_for(&handle_map);
         self.refresh_meshes_for_handles(&refresh_solid_handles);
         new_handles

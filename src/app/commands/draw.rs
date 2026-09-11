@@ -963,9 +963,7 @@ impl OpenCADStudio {
                 }
             }
 
-            // ── Constraints (persistent: added to the scope's SketchConstraintSet,
-            // solved via Scene::bump_entities, re-solved on every later edit —
-            // see docs/parametric_system_design.md §6.1) ──
+            // ── Persistent constraints ────────────────────────────────────
             "HCONSTRAINT" | "VCONSTRAINT" | "FXCONSTRAINT" => {
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {

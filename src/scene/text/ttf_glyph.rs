@@ -153,9 +153,8 @@ pub fn glyph(family: &str, ch: char) -> Option<Arc<Glyph>> {
     }
 
     let built = sysfont::with_face_data(family, |data, index| {
-        let mut face = ttf_parser::Face::parse(data, index).ok()?;
+        let face = ttf_parser::Face::parse(data, index).ok()?;
         let gid = face.glyph_index(ch)?;
-        pin_default_variations(&mut face);
         let k = cap_scale(&face);
 
         let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * k;
@@ -339,12 +338,11 @@ fn build_fallback(ch: char) -> Option<Arc<Glyph>> {
     let script = crate::scene::text::web_font::script_of(ch)?;
     let bytes = crate::scene::text::web_font::request(script)?;
     let face_count = ttf_parser::fonts_in_collection(&bytes).unwrap_or(1);
-    let (mut face, gid) = (0..face_count).find_map(|face_index| {
+    let (face, gid) = (0..face_count).find_map(|face_index| {
         let face = ttf_parser::Face::parse(&bytes, face_index).ok()?;
         let gid = face.glyph_index(ch)?;
         Some((face, gid))
     })?;
-    pin_default_variations(&mut face);
     let k = cap_scale(&face);
     let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * k;
     let mut fl = OutlineFlattener::new(k);
@@ -361,46 +359,6 @@ fn build_fallback(ch: char) -> Option<Arc<Glyph>> {
     }))
 }
 
-/// A variable font (e.g. macOS's system font, San Francisco — cosmic-text's
-/// own fallback search happily picks it for a codepoint no static font
-/// nearby covers) needs every variation axis pinned before its outline is
-/// readable: `ttf-parser` resolves a variable glyph's contours through its
-/// `gvar` deltas relative to whatever coordinates are currently set on the
-/// `Face`, and an unset `Face` has none — `outline_glyph` then silently
-/// returns `None` (not an error) for such a glyph, which upstream code was
-/// treating as "this glyph has no outline" (e.g. a space) rather than "this
-/// extraction failed", producing a `Some(Glyph { strokes: vec![], .. })`
-/// that renders nothing without ever reporting a problem. Setting each axis
-/// to its own default value (`def_value`) reproduces the font's un-varied,
-/// default instance — the same shape a non-variable static font would give.
-fn pin_default_variations(face: &mut ttf_parser::Face) {
-    if !face.is_variable() {
-        return;
-    }
-    for axis in face.variation_axes() {
-        let _ = face.set_variation(axis.tag, axis.def_value);
-    }
-}
-
-/// Outlines `gid` from an already-parsed, variation-pinned `face` — the
-/// shared last step both [`build_fallback`] candidates below use. `None`
-/// (not just an empty glyph) whenever `outline_glyph` itself reports no
-/// contours, so a caller can tell "this font can't actually render this
-/// glyph" apart from "this glyph is legitimately blank" and keep looking —
-/// see [`pin_default_variations`]'s doc comment for why a resolved glyph ID
-/// doesn't guarantee an outline comes back.
-fn outline_from_face(face: &ttf_parser::Face, gid: ttf_parser::GlyphId, k: f32) -> Option<Arc<Glyph>> {
-    let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * k;
-    let mut fl = OutlineFlattener::new(k);
-    face.outline_glyph(gid, &mut fl);
-    fl.flush();
-    if fl.contours.is_empty() {
-        return None;
-    }
-    let fill_tris = triangulate_contours(&fl.contours);
-    Some(Arc::new(Glyph { strokes: fl.contours, advance, fill_tris }))
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 fn build_fallback(ch: char) -> Option<Arc<Glyph>> {
     use cosmic_text::{Attrs, Buffer, Metrics, Shaping};
@@ -413,54 +371,26 @@ fn build_fallback(ch: char) -> Option<Arc<Glyph>> {
     buf.set_text(&mut fs, &s, &attrs, Shaping::Advanced, None);
     buf.shape_until_scroll(&mut fs, false);
 
-    let mut tried: Vec<fontdb::ID> = Vec::new();
     for run in buf.layout_runs() {
         for g in run.glyphs.iter() {
             if g.glyph_id == 0 {
                 continue; // .notdef — this font doesn't really cover it
             }
-            tried.push(g.font_id);
             let face_index = fs.db_mut().face(g.font_id).map(|f| f.index).unwrap_or(0);
-            let Some(font) = fs.get_font(g.font_id, g.font_weight) else { continue };
-            let Ok(mut face) = ttf_parser::Face::parse(font.data(), face_index) else { continue };
-            pin_default_variations(&mut face);
+            let font = fs.get_font(g.font_id, g.font_weight)?;
+            let face = ttf_parser::Face::parse(font.data(), face_index).ok()?;
             let k = cap_scale(&face);
-            if let Some(glyph) = outline_from_face(&face, ttf_parser::GlyphId(g.glyph_id), k) {
-                return Some(glyph);
-            }
-            // cosmic-text resolved a real glyph here, but this font's outline
-            // couldn't actually be extracted — confirmed (design doc-worthy,
-            // not a guess) on this dev machine for macOS's system font
-            // (San Francisco): it's a variable TrueType font whose `gvar`
-            // outline path needs base `glyf` glyph data `ttf-parser` can't
-            // retrieve for at least some of its accented Latin glyphs, even
-            // after every variation axis is pinned to its default. Rather
-            // than silently rendering nothing, fall through to a direct
-            // database scan below for any other installed font that also
-            // covers `ch` and can actually be outlined.
-        }
-    }
-
-    // Second-chance search: cosmic-text's own fallback chose one font (and
-    // it failed to outline above); look for a different installed font that
-    // also covers `ch`, skipping whatever was already tried. Bounded by the
-    // database size, not attempted per keystroke — `fallback_glyph`'s own
-    // cache means this only runs once per distinct character ever asked
-    // for.
-    let candidates: Vec<(fontdb::ID, u32)> = fs
-        .db()
-        .faces()
-        .filter(|f| !tried.contains(&f.id))
-        .map(|f| (f.id, f.index))
-        .collect();
-    for (id, index) in candidates {
-        let Some(font) = fs.get_font(id, cosmic_text::fontdb::Weight::NORMAL) else { continue };
-        let Ok(mut face) = ttf_parser::Face::parse(font.data(), index) else { continue };
-        let Some(gid) = face.glyph_index(ch) else { continue };
-        pin_default_variations(&mut face);
-        let k = cap_scale(&face);
-        if let Some(glyph) = outline_from_face(&face, gid, k) {
-            return Some(glyph);
+            let gid = ttf_parser::GlyphId(g.glyph_id);
+            let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * k;
+            let mut fl = OutlineFlattener::new(k);
+            face.outline_glyph(gid, &mut fl);
+            fl.flush();
+            let fill_tris = triangulate_contours(&fl.contours);
+            return Some(Arc::new(Glyph {
+                strokes: fl.contours,
+                advance,
+                fill_tris,
+            }));
         }
     }
     None
@@ -526,10 +456,9 @@ fn build_shaped(_family: &str, text: &str) -> Option<ShapedRun> {
             let Some(font) = font_system.get_font(glyph.font_id, glyph.font_weight) else {
                 continue;
             };
-            let Ok(mut face) = ttf_parser::Face::parse(font.data(), face_index) else {
+            let Ok(face) = ttf_parser::Face::parse(font.data(), face_index) else {
                 continue;
             };
-            pin_default_variations(&mut face);
             let scale = (SHAPE_FS / face.units_per_em() as f32) * px_to_9;
             let pen_x = (glyph.x + SHAPE_FS * glyph.x_offset) * px_to_9;
             let pen_y = -(SHAPE_FS * glyph.y_offset) * px_to_9;
@@ -596,10 +525,9 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
             let Some(font) = fs.get_font(g.font_id, g.font_weight) else {
                 continue;
             };
-            let Ok(mut face) = ttf_parser::Face::parse(font.data(), face_index) else {
+            let Ok(face) = ttf_parser::Face::parse(font.data(), face_index) else {
                 continue;
             };
-            pin_default_variations(&mut face);
             let upem_g = face.units_per_em() as f32;
             // Glyph font-units → 9-unit: to pixels (at SHAPE_FS) then to units.
             let scale_g = (SHAPE_FS / upem_g) * px_to_9;

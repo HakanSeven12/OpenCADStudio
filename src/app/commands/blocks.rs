@@ -659,6 +659,13 @@ impl OpenCADStudio {
             // every nested object is copied — the block is not exploded).
             "NCOPY" | "NCOPYALL" => {
                 use crate::modules::draw::modify::explode::explode_entity;
+                if cmd == "NCOPY" && self.tabs[i].scene.selected.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let selection = SelectObjectsCommand::new("NCOPY");
+                    self.command_line.push_info(&selection.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(selection));
+                    return Some(self.finish_dispatch(cmd));
+                }
                 let inserts: Vec<acadrust::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()

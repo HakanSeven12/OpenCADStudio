@@ -10,4 +10,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ocs_plugin_api = { path = "../ocs_plugin_api", features = ["host"] }
-acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "50ebcf0fedbdd2a02599cc51e891fd62f8f9d69d", features = ["serde"] }
+acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "2ecf0c57d387e293d11042aa37637322f2ab9c01", features = ["serde"] }

@@ -31,8 +31,8 @@ glam = { version = "0.33", features = ["bytemuck"] }
 rfd = "0.17"
 clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
-acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "50ebcf0fedbdd2a02599cc51e891fd62f8f9d69d", features = ["serde"] }
-cadkernel = { git = "https://github.com/ramox81/cadkernel.git", rev = "3d5fa1a49ec2351cb0b1690b4c94017dc1d40f19", features = ["acis", "offset"] }
+acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "2ecf0c57d387e293d11042aa37637322f2ab9c01", features = ["serde"] }
+cadkernel = { git = "https://github.com/ramox81/cadkernel.git", rev = "11671a27ffb55f9d71067d84e358451a6309c44e", features = ["acis", "offset"] }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }

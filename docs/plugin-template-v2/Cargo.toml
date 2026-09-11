@@ -5,9 +5,11 @@ edition = "2021"
 description = "Example OpenCAD Studio plugin demonstrating the shared-memory DocumentReader API."
 license = "GPL-3.0-only"
 
+[workspace]
+
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
 ocs_plugin_api = { path = "../../crates/ocs_plugin_api", features = ["host"] }
-acadrust = "0.3.4"
+acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "6d88d702b664685fead738095d778cf6e5a36119" }

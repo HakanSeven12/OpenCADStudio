@@ -13,7 +13,6 @@ use acadrust::types::Vector3;
 use acadrust::EntityType;
 use glam::DVec3;
 
-use crate::modules::draw::modify::spline_ops::spline_to_nurbs;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -29,138 +28,217 @@ pub fn tool() -> ToolDef {
     }
 }
 
+#[derive(Clone, Copy)]
 enum Step {
-    /// Waiting for the user to pick a spline entity.
     SelectSpline,
-    /// Spline selected; waiting for sub-command text input.
-    SubCommand { handle: acadrust::Handle },
+    Options,
+    Refine,
+    Add,
+    Elevate,
+    Move { index: usize, refine: bool },
+    Weight { index: usize },
+    SelectVertex { weight: bool, refine: bool },
 }
 
 pub struct SplineditCommand {
     step: Step,
+    handle: acadrust::Handle,
+    spline: Option<acadrust::entities::Spline>,
+    pending: Option<acadrust::entities::Spline>,
+    history: Vec<(acadrust::Handle, acadrust::entities::Spline)>,
 }
 
 impl SplineditCommand {
     pub fn new() -> Self {
-        Self {
-            step: Step::SelectSpline,
+        Self { step: Step::SelectSpline, handle: acadrust::Handle::NULL, spline: None, pending: None, history: Vec::new() }
+    }
+
+    fn replace(&mut self, spline: acadrust::entities::Spline) -> CmdResult {
+        self.pending = Some(spline.clone());
+        CmdResult::ReplaceManyContinue(vec![(self.handle, vec![EntityType::Spline(spline)])])
+    }
+
+    fn refined(&self, point: Option<DVec3>, degree: Option<usize>) -> Option<acadrust::entities::Spline> {
+        let source = self.spline.as_ref()?;
+        let planar = crate::entities::curve::entity_curve(&EntityType::Spline(source.clone()))?;
+        let cadkernel::geom2d::Curve::Nurbs(mut curve) = planar.curve else { return None; };
+        if let Some(point) = point {
+            let projected = planar.plane.project([point.x, point.y, point.z])?;
+            let nearest = cadkernel::geom2d::closest_point(&cadkernel::geom2d::Curve::Nurbs(curve.clone()), projected);
+            let (start, end) = curve.domain();
+            let parameter = start + nearest.t * (end - start);
+            if parameter <= start || parameter >= end { return None; }
+            curve.insert_knot(parameter);
         }
+        if let Some(degree) = degree {
+            if degree <= curve.degree() || degree > 26 { return None; }
+            curve = curve.elevated(degree - curve.degree())?;
+        }
+        let mut result = crate::modules::draw::modify::spline_ops::nurbs_to_spline(&curve, source);
+        result.control_points = curve.control_points().iter().map(|point| {
+            let world = planar.plane.point_at(*point);
+            Vector3::new(world[0], world[1], world[2])
+        }).collect();
+        Some(result)
     }
 }
 
 impl CadCommand for SplineditCommand {
-    fn name(&self) -> &'static str {
-        "SPLINEDIT"
-    }
-
+    fn name(&self) -> &'static str { "SPLINEDIT" }
     fn prompt(&self) -> String {
-        match &self.step {
+        match self.step {
             Step::SelectSpline => crate::t!("SPLINEDIT  Select spline:").into_owned(),
-            Step::SubCommand { .. } => crate::t!("SPLINEDIT  [CLOSE/OPEN/REVERSE/EXIT]:").into_owned(),
+            Step::Options => crate::t!("SPLINEDIT  [Close/Open/Move vertex/Refine/rEverse/Undo/eXit] <eXit>:").into_owned(),
+            Step::Refine => crate::t!("SPLINEDIT  [Add/Elevate order/Move/Weight/eXit] <eXit>:").into_owned(),
+            Step::Add => crate::t!("SPLINEDIT  Specify a point on the spline <exit>:").into_owned(),
+            Step::Elevate => format!("SPLINEDIT  Enter new order <{}>:", self.spline.as_ref().map_or(4, |s| s.degree + 1)),
+            Step::Move { index, .. } => format!("SPLINEDIT  Vertex {}: specify new location or [Next/Previous/Select point/eXit] <Next>:", index + 1),
+            Step::SelectVertex { .. } => crate::t!("SPLINEDIT  Specify control vertex:").into_owned(),
+            Step::Weight { index } => format!("SPLINEDIT  Vertex {}: enter new weight or [Next/Previous/Select point/eXit] <Next>:", index + 1),
         }
     }
-
-    fn needs_entity_pick(&self) -> bool {
-        matches!(self.step, Step::SelectSpline)
+    fn options(&self) -> Vec<crate::command::CmdOption> {
+        use crate::command::CmdOption;
+        match self.step {
+            Step::Options => vec![CmdOption::new("Close", "C"), CmdOption::new("Open", "O"), CmdOption::new("Move vertex", "M"), CmdOption::new("Refine", "R"), CmdOption::new("Reverse", "E"), CmdOption::new("Undo", "U"), CmdOption::new("Exit", "X")],
+            Step::Refine => vec![CmdOption::new("Add", "A"), CmdOption::new("Elevate order", "E"), CmdOption::new("Move", "M"), CmdOption::new("Weight", "W"), CmdOption::new("Exit", "X")],
+            Step::Move { .. } | Step::Weight { .. } => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Select point", "S"), CmdOption::new("Exit", "X")],
+            _ => Vec::new(),
+        }
     }
-
+    fn needs_entity_pick(&self) -> bool { matches!(self.step, Step::SelectSpline) }
+    fn inject_before_entity_pick(&self) -> bool { true }
+    fn inject_picked_entity(&mut self, entity: EntityType) {
+        self.spline = match entity { EntityType::Spline(spline) => Some(spline), _ => None };
+    }
     fn on_entity_pick(&mut self, handle: acadrust::Handle, _pt: DVec3) -> CmdResult {
-        if handle.is_null() {
-            return CmdResult::NeedPoint;
-        }
-        self.step = Step::SubCommand { handle };
+        if handle.is_null() || self.spline.is_none() { return CmdResult::NeedPoint; }
+        self.handle = handle;
+        self.step = Step::Options;
         CmdResult::NeedPoint
     }
-
-    fn wants_text_input(&self) -> bool {
-        matches!(self.step, Step::SubCommand { .. })
+    fn on_entity_replaced(&mut self, old: acadrust::Handle, new: &[acadrust::Handle]) {
+        if old == self.handle {
+            if let (Some(&handle), Some(replacement)) = (new.first(), self.pending.take()) {
+                if let Some(previous) = self.spline.replace(replacement) { self.history.push((old, previous)); }
+                self.handle = handle;
+            }
+        }
     }
-
+    fn wants_text_input(&self) -> bool { !matches!(self.step, Step::SelectSpline | Step::Add | Step::Move { .. } | Step::SelectVertex { .. }) }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let Step::SubCommand { handle } = &self.step else {
-            return None;
-        };
-        let handle = *handle;
-        match text.trim().to_uppercase().as_str() {
-            "CLOSE" | "C" => Some(CmdResult::ReplaceEntity(
-                handle,
-                vec![SplineOp::Close.into_marker(handle)],
-            )),
-            "OPEN" | "O" => Some(CmdResult::ReplaceEntity(
-                handle,
-                vec![SplineOp::Open.into_marker(handle)],
-            )),
-            "REVERSE" | "R" | "REV" => Some(CmdResult::ReplaceEntity(
-                handle,
-                vec![SplineOp::Reverse.into_marker(handle)],
-            )),
-            "EXIT" | "X" | "" => Some(CmdResult::Cancel),
-            _ => None,
+        let upper = text.trim().to_uppercase();
+        if upper.is_empty() { return Some(self.on_enter()); }
+        match self.step {
+            Step::Options => match upper.as_str() {
+                "R" | "REFINE" => self.step = Step::Refine,
+                "M" | "MOVE" => self.step = Step::Move { index: 0, refine: false },
+                "X" | "EXIT" => return Some(CmdResult::Cancel),
+                "U" | "UNDO" => {
+                    if let Some((handle, spline)) = self.history.pop() {
+                        self.handle = handle;
+                        self.spline = Some(spline);
+                        return Some(CmdResult::UndoDocument);
+                    }
+                }
+                "C" | "CLOSE" | "O" | "OPEN" | "E" | "REVERSE" | "REV" => {
+                    let mut spline = self.spline.clone()?;
+                    let op = match upper.as_str() { "C" | "CLOSE" => "__SPLINEDIT_CLOSE__", "O" | "OPEN" => "__SPLINEDIT_OPEN__", _ => "__SPLINEDIT_REVERSE__" };
+                    apply_to_spline(&mut spline, op);
+                    return Some(self.replace(spline));
+                }
+                _ => {}
+            },
+            Step::Refine => match upper.as_str() {
+                "A" | "ADD" => self.step = Step::Add,
+                "E" | "ELEVATE" => self.step = Step::Elevate,
+                "M" | "MOVE" => self.step = Step::Move { index: 0, refine: true },
+                "W" | "WEIGHT" => self.step = Step::Weight { index: 0 },
+                "X" | "EXIT" => self.step = Step::Options,
+                _ => {}
+            },
+            Step::Elevate => {
+                if let Some(spline) = upper.parse::<usize>().ok().and_then(|degree| self.refined(None, Some(degree))) {
+                    self.step = Step::Refine;
+                    return Some(self.replace(spline));
+                }
+            }
+            Step::Move { index, .. } | Step::Weight { index } => {
+                let count = self.spline.as_ref().map_or(0, |s| s.control_points.len());
+                if count == 0 { return Some(CmdResult::NeedPoint); }
+                let next = match upper.as_str() { "N" | "NEXT" => Some((index + 1) % count), "P" | "PREVIOUS" => Some((index + count - 1) % count), _ => None };
+                if let Some(next) = next {
+                    self.step = match self.step { Step::Move { refine, .. } => Step::Move { index: next, refine }, _ => Step::Weight { index: next } };
+                } else if matches!(upper.as_str(), "S" | "SELECT") {
+                    self.step = match self.step {
+                        Step::Move { refine, .. } => Step::SelectVertex { weight: false, refine },
+                        _ => Step::SelectVertex { weight: true, refine: true },
+                    };
+                } else if matches!(upper.as_str(), "X" | "EXIT") {
+                    self.step = match self.step { Step::Move { refine: false, .. } => Step::Options, _ => Step::Refine };
+                } else if matches!(self.step, Step::Weight { .. }) {
+                    if let Some(weight) = upper.replace(',', ".").parse::<f64>().ok().filter(|weight| weight.is_finite() && *weight > 0.0) {
+                        let mut spline = self.spline.clone()?;
+                        spline.weights.resize(count, 1.0);
+                        spline.weights[index] = weight;
+                        spline.flags.rational = true;
+                        spline.fit_points.clear();
+                        return Some(self.replace(spline));
+                    }
+                }
+            }
+            _ => {}
         }
+        Some(CmdResult::NeedPoint)
     }
-
-    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
-        CmdResult::NeedPoint
+    fn on_point(&mut self, point: DVec3) -> CmdResult {
+        if !point.is_finite() { return CmdResult::NeedPoint; }
+        match self.step {
+            Step::SelectVertex { weight, refine } => {
+                if let Some(index) = self.spline.as_ref().and_then(|spline| spline.control_points.iter().enumerate()
+                    .min_by(|(_, a), (_, b)| {
+                        let distance = |p: &Vector3| point.distance_squared(DVec3::new(p.x, p.y, p.z));
+                        distance(a).total_cmp(&distance(b))
+                    }).map(|(index, _)| index)) {
+                    self.step = if weight { Step::Weight { index } } else { Step::Move { index, refine } };
+                }
+                CmdResult::NeedPoint
+            }
+            Step::Add => self.refined(Some(point), None).map_or(CmdResult::NeedPoint, |spline| self.replace(spline)),
+            Step::Move { index, .. } => {
+                let Some(mut spline) = self.spline.clone() else { return CmdResult::NeedPoint; };
+                let Some(vertex) = spline.control_points.get_mut(index) else { return CmdResult::NeedPoint; };
+                *vertex = Vector3::new(point.x, point.y, point.z);
+                spline.fit_points.clear();
+                self.replace(spline)
+            }
+            _ => CmdResult::NeedPoint,
+        }
     }
     fn on_enter(&mut self) -> CmdResult {
-        CmdResult::Cancel
+        match self.step {
+            Step::SelectSpline | Step::Options => CmdResult::Cancel,
+            Step::Refine => { self.step = Step::Options; CmdResult::NeedPoint }
+            Step::Add | Step::SelectVertex { .. } => { self.step = Step::Refine; CmdResult::NeedPoint }
+            Step::Elevate => {
+                let degree = self.spline.as_ref().map_or(4, |s| s.degree as usize + 1);
+                self.on_text_input(&degree.to_string()).unwrap_or(CmdResult::NeedPoint)
+            }
+            Step::Move { .. } | Step::Weight { .. } => self.on_text_input("N").unwrap_or(CmdResult::NeedPoint),
+        }
     }
-    fn on_preview_wires(&mut self, _pt: DVec3) -> Vec<WireModel> {
-        vec![]
-    }
+    fn on_preview_wires(&mut self, _pt: DVec3) -> Vec<WireModel> { vec![] }
 }
-
-// ── Spline operation helpers ───────────────────────────────────────────────
-//
-// Because `CmdResult::ReplaceEntity` takes `Vec<EntityType>` and we need the
-// host to apply it to the actual document, we use a small "deferred op" trick:
-// the host applies the spline transform in `apply_cmd_result` by detecting
-// that we replaced an entity with zero new entities (delete) or one new one.
-//
-// Here we actually build the modified entity without accessing the document —
-// we only have the handle.  The real transformation (close/open/reverse) is
-// applied in the Scene via `apply_spline_op`.
-
-enum SplineOp {
-    Close,
-    Open,
-    Reverse,
-}
-
-impl SplineOp {
-    /// Return a placeholder that encodes the op in a comment field.
-    /// The host `cmd_result.rs` detects SPLINEDIT replaces and calls
-    /// `Scene::apply_spline_op`.
-    fn into_marker(self, _handle: acadrust::Handle) -> EntityType {
-        // We can't build the modified spline here without the document.
-        // Return a sentinel — the actual transformation is handled by the
-        // apply_spline_op path in Scene.  We use an XLine as a sentinel
-        // that the host will never actually commit (it detects the SPLINEDIT
-        // replace path and calls apply_spline_op instead).
-        //
-        // In practice: use ReplaceMany with empty new entities + a SplineOp
-        // side-channel via the xattach_path mechanism isn't clean.
-        //
-        // Simpler: encode op in the sentinel entity's layer field.
-        let mut sentinel = acadrust::entities::XLine::new(
-            acadrust::types::Vector3::zero(),
-            acadrust::types::Vector3::new(1.0, 0.0, 0.0),
-        );
-        sentinel.common.layer = match self {
-            SplineOp::Close => "__SPLINEDIT_CLOSE__".to_string(),
-            SplineOp::Open => "__SPLINEDIT_OPEN__".to_string(),
-            SplineOp::Reverse => "__SPLINEDIT_REVERSE__".to_string(),
-        };
-        EntityType::XLine(sentinel)
-    }
-}
-
 /// Apply a spline operation (CLOSE/OPEN/REVERSE) to a spline entity.
 /// Called from `cmd_result.rs` when the ReplaceEntity sentinel is detected.
 pub fn apply_spline_op(doc: &mut acadrust::CadDocument, handle: acadrust::Handle, op: &str) {
     let Some(EntityType::Spline(spline)) = doc.get_entity_mut(handle) else {
         return;
     };
+    apply_to_spline(spline, op);
+}
+
+fn apply_to_spline(spline: &mut acadrust::entities::Spline, op: &str) {
     match op {
         "__SPLINEDIT_CLOSE__" => {
             if spline.control_points.len() >= 2 {
@@ -193,40 +271,7 @@ pub fn apply_spline_op(doc: &mut acadrust::CadDocument, handle: acadrust::Handle
             }
         }
         "__SPLINEDIT_REVERSE__" => {
-            spline.fit_points.reverse();
-            let begin = spline.begin_tangent;
-            spline.begin_tangent = spline.end_tangent;
-            spline.end_tangent = begin;
-            // The knots mirror within the domain rather than being
-            // regenerated. Rebuilding a clamped *uniform* vector here changed
-            // the shape of any spline whose knots were unevenly spaced —
-            // which is most of them once a modeller has been near one.
-            match spline_to_nurbs(spline).map(|curve| curve.reversed()) {
-                Some(reversed) => {
-                    let elevation = spline
-                        .control_points
-                        .first()
-                        .or_else(|| spline.fit_points.first())
-                        .map(|p| p.z)
-                        .unwrap_or(0.0);
-                    spline.degree = reversed.degree() as i32;
-                    spline.knots = reversed.knots().to_vec();
-                    spline.control_points = reversed
-                        .control_points()
-                        .iter()
-                        .map(|p| Vector3::new(p[0], p[1], elevation))
-                        .collect();
-                    spline.weights = if reversed.is_rational() {
-                        reversed.weights().to_vec()
-                    } else {
-                        Vec::new()
-                    };
-                }
-                // Nothing the kernel can read — a spline with too few points
-                // to describe a curve. Reversing its stored points is still
-                // the honest answer.
-                None => spline.control_points.reverse(),
-            }
+            *spline = super::reverse::reverse_spline(spline);
         }
         _ => {}
     }

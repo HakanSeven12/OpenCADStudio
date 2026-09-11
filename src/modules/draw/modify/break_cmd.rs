@@ -382,12 +382,34 @@ impl CadCommand for BreakInteractiveCommand {
         } else if self.p1.is_none() {
             crate::t!("BREAK  Specify first break point:").into_owned()
         } else {
-            crate::t!("BREAK  Specify second break point:").into_owned()
+            crate::t!("BREAK  Specify second break point or [First point]:").into_owned()
         }
     }
 
     fn needs_entity_pick(&self) -> bool {
         self.target.is_none()
+    }
+
+    fn options(&self) -> Vec<crate::command::CmdOption> {
+        if self.target.is_some() && self.p1.is_some() {
+            vec![crate::command::CmdOption::new("First point", "F")]
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        let handle = self.target?;
+        match text.trim().to_ascii_uppercase().as_str() {
+            "F" | "FIRST" => {
+                self.p1 = None;
+                Some(CmdResult::NeedPoint)
+            }
+            "@" => self.p1.map(|point| CmdResult::BreakEntity {
+                handle, p1: point, p2: point,
+            }),
+            _ => None,
+        }
     }
 
     fn on_entity_pick(&mut self, handle: Handle, pt: DVec3) -> CmdResult {

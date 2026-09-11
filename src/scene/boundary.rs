@@ -628,6 +628,14 @@ pub(crate) fn boundary_entities_from_sources(
 }
 
 impl Scene {
+    pub(crate) fn replace_hatch_association(&mut self,handle:Handle,paths:Vec<acadrust::entities::BoundaryPath>) {
+        let Some(EntityType::Hatch(hatch))=self.document.get_entity_mut(handle) else{return;};
+        hatch.paths=paths;
+        hatch.is_associative=true;
+        self.associative_hatch_source_cache.borrow_mut().take();
+        self.refresh_fill_model(handle);
+    }
+
     pub(crate) fn edit_hatch_boundary_handles(
         &mut self,
         hatch_handle: Handle,

@@ -182,18 +182,14 @@ fn boundary_centroid(h: &Hatch) -> Option<(f64, f64)> {
     (n > 0.0).then(|| (sx / n, sy / n))
 }
 
-/// Scale the stored, final hatch-pattern geometry around the pattern origin.
+/// Scale a catalog pattern about its intrinsic coordinate origin.
 /// Pattern lines loaded from DXF/DWG are rendered prebaked, so their metadata
 /// scale is not applied again by the renderer.
 pub(crate) fn scale_pattern_geometry(
     pattern: &mut acadrust::entities::HatchPattern,
     factor: f64,
 ) {
-    let (origin_x, origin_y) = pattern
-        .lines
-        .first()
-        .map(|line| (line.base_point.x, line.base_point.y))
-        .unwrap_or((0.0, 0.0));
+    let (origin_x, origin_y) = (0.0, 0.0);
     for line in pattern.lines.iter_mut() {
         line.base_point.x = origin_x + (line.base_point.x - origin_x) * factor;
         line.base_point.y = origin_y + (line.base_point.y - origin_y) * factor;
@@ -205,18 +201,14 @@ pub(crate) fn scale_pattern_geometry(
     }
 }
 
-/// Rotate the stored, final hatch-pattern geometry around the pattern origin.
+/// Rotate a catalog pattern about its intrinsic coordinate origin.
 /// This keeps the line angle, base point and world-space offset in sync.
 pub(crate) fn rotate_pattern_geometry(
     pattern: &mut acadrust::entities::HatchPattern,
     angle: f64,
 ) {
     let (sin, cos) = angle.sin_cos();
-    let (origin_x, origin_y) = pattern
-        .lines
-        .first()
-        .map(|line| (line.base_point.x, line.base_point.y))
-        .unwrap_or((0.0, 0.0));
+    let (origin_x, origin_y) = (0.0, 0.0);
     for line in pattern.lines.iter_mut() {
         line.angle += angle;
         let (x, y) = (
@@ -613,7 +605,7 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
                 _ => h.pattern_type,
             };
             if requested != h.pattern_type {
-                let old_origin = h.pattern.lines.first().map(|line| line.base_point);
+                let old_origin = h.pattern_origin();
                 h.pattern_type = requested;
                 h.is_solid = false;
                 match requested {
@@ -629,15 +621,7 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
                                 crate::scene::model::hatch_patterns::build_dxf_pattern(entry);
                             scale_pattern_geometry(&mut pattern, h.pattern_scale);
                             rotate_pattern_geometry(&mut pattern, h.pattern_angle);
-                            if let (Some(old), Some(new)) =
-                                (old_origin, pattern.lines.first().map(|line| line.base_point))
-                            {
-                                translate_pattern_geometry(
-                                    &mut pattern,
-                                    old.x - new.x,
-                                    old.y - new.y,
-                                );
-                            }
+                            translate_pattern_geometry(&mut pattern, old_origin.x, old_origin.y);
                             h.pattern = pattern;
                         }
                     }
@@ -695,7 +679,7 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
         "pattern_angle" => {
             let angle = v.to_radians();
             let delta = angle - h.pattern_angle;
-            rotate_pattern_geometry(&mut h.pattern, delta);
+            h.rotate_pattern_about_origin(delta);
             h.pattern_angle = angle;
         }
         // The stored pattern lines are the FINAL rendered geometry (offsets,
@@ -706,7 +690,7 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
             let old = h.pattern_scale;
             if old > 1e-12 {
                 let k = v / old;
-                scale_pattern_geometry(&mut h.pattern, k);
+                h.scale_pattern_about_origin(k);
             }
             h.pattern_scale = v;
         }
@@ -724,19 +708,17 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
         }
         // Origin rows are relative offsets and return to zero after commit.
         "origin_x" => {
-            for line in h.pattern.lines.iter_mut() {
-                line.base_point.x += v;
-            }
+            let origin = h.pattern_origin();
+            h.set_pattern_origin(acadrust::types::Vector2::new(origin.x + v, origin.y));
         }
         "origin_y" => {
-            for line in h.pattern.lines.iter_mut() {
-                line.base_point.y += v;
-            }
+            let origin = h.pattern_origin();
+            h.set_pattern_origin(acadrust::types::Vector2::new(origin.x, origin.y + v));
         }
         "iso_pen_width" if v > 0.0 => {
             let old = h.pattern_scale;
             if old > 1e-12 {
-                scale_pattern_geometry(&mut h.pattern, v / old);
+                h.scale_pattern_about_origin(v / old);
             }
             h.pattern_scale = v;
         }
@@ -876,10 +858,8 @@ impl Grippable for Hatch {
                     GripApply::Absolute(point) => (point.x - gx, point.y - gy),
                     GripApply::Translate(delta) => (delta.x, delta.y),
                 };
-                for line in self.pattern.lines.iter_mut() {
-                    line.base_point.x += dx;
-                    line.base_point.y += dy;
-                }
+                let origin = self.pattern_origin();
+                self.set_pattern_origin(acadrust::types::Vector2::new(origin.x + dx, origin.y + dy));
                 return;
             }
             id += 1;
@@ -1005,11 +985,11 @@ impl Grippable for Hatch {
     fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
         use crate::scene::model::object::GripMenuAction as A;
         if grip_id == 0 && matches!(action, A::OriginPoint) {
-            if let (Some((gx, gy)), Some((ox, oy))) = (
+            if let (Some((gx, gy)), Some((_ox, _oy))) = (
                 boundary_centroid(self),
                 self.pattern.lines.first().map(|line| (line.base_point.x, line.base_point.y)),
             ) {
-                translate_pattern_geometry(&mut self.pattern, gx - ox, gy - oy);
+                self.set_pattern_origin(acadrust::types::Vector2::new(gx, gy));
             }
         }
     }
@@ -1038,14 +1018,14 @@ impl Grippable for Hatch {
             A::HatchAngle => {
                 let angle = value.to_radians();
                 let delta = angle - self.pattern_angle;
-                rotate_pattern_geometry(&mut self.pattern, delta);
+                self.rotate_pattern_about_origin(delta);
                 self.pattern_angle = angle;
             }
             A::HatchScale => {
                 if value > 0.0 {
                     if self.pattern_scale > 1e-12 {
                         let factor = value / self.pattern_scale;
-                        scale_pattern_geometry(&mut self.pattern, factor);
+                        self.scale_pattern_about_origin(factor);
                     }
                     self.pattern_scale = value;
                 }

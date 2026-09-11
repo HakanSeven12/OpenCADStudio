@@ -3321,10 +3321,20 @@ impl OpenCADStudio {
                     Some(frags) => {
                         let label = self.history_label_from_active_cmd(i, "BREAK");
                         self.push_undo_snapshot(i, label);
-                        self.tabs[i].scene.erase_entities(&[handle]);
                         let count = frags.len();
-                        for e in frags {
-                            self.tabs[i].scene.add_entity(e);
+                        let owner = self.tabs[i].scene.document.get_entity(handle)
+                            .map(|entity| entity.common().owner_handle);
+                        let mut fragments = frags.into_iter();
+                        if let Some(mut first) = fragments.next() {
+                            first.common_mut().handle = handle;
+                            self.tabs[i].scene.update_entity(first);
+                            for mut fragment in fragments {
+                                fragment.common_mut().handle = Handle::NULL;
+                                if let Some(owner) = owner { fragment.common_mut().owner_handle = owner; }
+                                self.tabs[i].scene.add_entity(fragment);
+                            }
+                        } else {
+                            self.tabs[i].scene.erase_entities(&[handle]);
                         }
                         self.tabs[i].dirty = true;
                         self.tabs[i].scene.clear_preview_wire();

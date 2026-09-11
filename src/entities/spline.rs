@@ -42,7 +42,6 @@ pub(crate) fn fit_geometry_bounds(spline: &Spline) -> Option<cadkernel::brep::Aa
             Some([spline.end_tangent.x,spline.end_tangent.y,spline.end_tangent.z]),
             parameterization)?
     };
-    let curve = curve.compact_knots(spline.control_tolerance.max(1e-9))?;
     cadkernel::brep::Aabb::around(curve.control_points().iter().copied())
 }
 fn to_render(spl: &Spline) -> RenderEntity {

@@ -1,5 +1,62 @@
 use super::*;
 
+// Sort tables belong to the block's extension dictionary. Reserve real handles
+// and reconnect older unattached tables without losing their existing entries.
+fn ensure_draw_order_table(
+    doc: &mut acadrust::CadDocument,
+    block: acadrust::Handle,
+) -> acadrust::Handle {
+    use acadrust::objects::{Dictionary, ObjectType, SortEntitiesTable};
+
+    // Older commands inserted objects using the unreserved next-handle value.
+    // Repair the allocator floor before creating anything beside those objects.
+    if let Some(maximum) = doc.objects.keys().map(|handle| handle.value()).max() {
+        doc.header.handle_seed = doc.header.handle_seed.max(maximum.saturating_add(1));
+    }
+    let dictionary = doc.extension_dictionary_handle(block).filter(|handle| {
+        matches!(doc.objects.get(handle), Some(ObjectType::Dictionary(_)))
+    });
+    let named_table = dictionary.and_then(|handle| match doc.objects.get(&handle) {
+        Some(ObjectType::Dictionary(value)) => value.get(SortEntitiesTable::DICTIONARY_KEY),
+        _ => None,
+    }).filter(|handle| matches!(doc.objects.get(handle),
+        Some(ObjectType::SortEntitiesTable(table)) if table.block_owner_handle == block));
+    let existing = named_table.or_else(|| doc.objects.iter().find_map(|(handle, object)| {
+        match object {
+            ObjectType::SortEntitiesTable(table) if table.block_owner_handle == block => Some(*handle),
+            _ => None,
+        }
+    }));
+    let dictionary = dictionary.unwrap_or_else(|| {
+        let handle = doc.allocate_handle();
+        let mut value = Dictionary::new();
+        value.handle = handle;
+        value.owner = block;
+        value.hard_owner = true;
+        doc.objects.insert(handle, ObjectType::Dictionary(value));
+        handle
+    });
+    let handle = existing.unwrap_or_else(|| {
+        let handle = doc.allocate_handle();
+        let mut table = SortEntitiesTable::for_block(block);
+        table.handle = handle;
+        doc.objects.insert(handle, ObjectType::SortEntitiesTable(table));
+        handle
+    });
+    if let Some(ObjectType::SortEntitiesTable(table)) = doc.objects.get_mut(&handle) {
+        table.owner_handle = dictionary;
+    }
+    if let Some(ObjectType::Dictionary(value)) = doc.objects.get_mut(&dictionary) {
+        if let Some((_, entry)) = value.entries.iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case(SortEntitiesTable::DICTIONARY_KEY)) {
+            *entry = handle;
+        } else {
+            value.add_entry(SortEntitiesTable::DICTIONARY_KEY, handle);
+        }
+    }
+    handle
+}
+
 impl OpenCADStudio {
     pub(crate) fn dispatch_view(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
@@ -821,17 +878,15 @@ impl OpenCADStudio {
 
             // HATCHTOBACK ÔÇö move every hatch object in the active space to the back of the draw order.
             "HATCHTOBACK" => {
-                use acadrust::objects::{ObjectType, SortEntitiesTable};
+                use acadrust::objects::ObjectType;
                 let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
                 let doc_ref = &self.tabs[i].scene.document;
 
-                // 1. Single scan over objects to find existing SortEntitiesTable handle & overrides.
-                let mut existing_table_handle = None;
+                // 1. Read existing SortEntitiesTable overrides.
                 let mut overrides: Option<rustc_hash::FxHashMap<u64, u64>> = None;
-                for (h, obj) in &doc_ref.objects {
+                for obj in doc_ref.objects.values() {
                     if let ObjectType::SortEntitiesTable(t) = obj {
                         if t.block_owner_handle == block_handle {
-                            existing_table_handle = Some(*h);
                             if !t.is_empty() {
                                 overrides = Some(
                                     t.entries()
@@ -898,24 +953,9 @@ impl OpenCADStudio {
                     &locked_layers,
                 );
 
-                // 4. Ultra-fast targeted Delta Undo (snapshots ONLY the SortEntitiesTable, zero full-drawing clone).
-                let pending_delta = self.begin_undo(i, "DRAWORDER", hatches_to_move.len(), true);
-
-                // 5. Update or insert SortEntitiesTable directly.
-                let table_before = existing_table_handle
-                    .and_then(|h| self.tabs[i].scene.document.objects.get(&h).cloned());
-                let th = existing_table_handle.unwrap_or_else(|| {
-                    let nh = acadrust::Handle::new(self.tabs[i].scene.document.next_handle());
-                    let mut table = SortEntitiesTable::for_block(block_handle);
-                    table.handle = nh;
-                    self.tabs[i]
-                        .scene
-                        .document
-                        .objects
-                        .insert(nh, ObjectType::SortEntitiesTable(table));
-                    nh
-                });
-                self.tabs[i].scene.record_undo_object_before(th, table_before);
+                // Dictionary ownership and handle allocation are part of this undo step.
+                let pending_delta = self.begin_undo(i, "DRAWORDER", hatches_to_move.len(), false);
+                let th = ensure_draw_order_table(&mut self.tabs[i].scene.document, block_handle);
 
                 if let Some(ObjectType::SortEntitiesTable(table)) =
                     self.tabs[i].scene.document.objects.get_mut(&th)
@@ -988,7 +1028,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
             cmd if cmd.starts_with("DRAWORDER ") => {
-                use acadrust::objects::{ObjectType, SortEntitiesTable};
+                use acadrust::objects::ObjectType;
                 let parts: Vec<&str> = cmd.split_whitespace().collect();
                 let option = parts.get(1).unwrap_or(&"").to_uppercase();
                 let i = self.active_tab;
@@ -1003,25 +1043,29 @@ impl OpenCADStudio {
                     self.command_line
                         .push_error(crate::t!("DRAWORDER: select entities first.").as_ref());
                 } else {
-                    // Parse relative target handle for ABOVE/UNDER.
-                    let relative_target: Option<(bool, acadrust::Handle)> = match option.as_str() {
-                        "A" | "ABOVE" => {
-                            let h_val = parts.get(2).and_then(|s| u64::from_str_radix(s, 16).ok());
-                            h_val.map(|v| (true, acadrust::Handle::new(v)))
-                        }
-                        "U" | "UNDER" | "BELOW" => {
-                            let h_val = parts.get(2).and_then(|s| u64::from_str_radix(s, 16).ok());
-                            h_val.map(|v| (false, acadrust::Handle::new(v)))
-                        }
+                    let relative_above = match option.as_str() {
+                        "A" | "ABOVE" => Some(true),
+                        "U" | "UNDER" | "BELOW" => Some(false),
                         _ => None,
                     };
+                    let references: Vec<_> = parts.iter().skip(2).filter_map(|text| {
+                        u64::from_str_radix(text.trim_start_matches("0x").trim_start_matches("0X"), 16)
+                            .ok().map(acadrust::Handle::new)
+                    }).filter(|handle| !selected.contains(handle)).collect();
+                    let relative_assignments = relative_above.and_then(|above| {
+                        assign_relative_group_keys(
+                            &self.tabs[i].scene.document,
+                            self.tabs[i].scene.current_layout_block_handle_pub(),
+                            &selected, &references, above,
+                        )
+                    });
                     let to_front_opt = match option.as_str() {
                         "F" | "FRONT" => Some(true),
                         "B" | "BACK" => Some(false),
                         _ => None,
                     };
 
-                    if relative_target.is_some() || to_front_opt.is_some() {
+                    if relative_assignments.is_some() || to_front_opt.is_some() {
                         self.push_undo_snapshot(i, "DRAWORDER");
                         let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
 
@@ -1098,63 +1142,14 @@ impl OpenCADStudio {
                         };
 
                         let doc = &mut self.tabs[i].scene.document;
-                        let table_handle = doc.objects.iter().find_map(|(h, obj)| {
-                            if let ObjectType::SortEntitiesTable(t) = obj {
-                                if t.block_owner_handle == block_handle {
-                                    Some(*h)
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        });
-                        let th = table_handle.unwrap_or_else(|| {
-                            let nh = acadrust::Handle::new(doc.next_handle());
-                            let mut table = SortEntitiesTable::for_block(block_handle);
-                            table.handle = nh;
-                            doc.objects.insert(nh, ObjectType::SortEntitiesTable(table));
-                            nh
-                        });
+                        let th = ensure_draw_order_table(doc, block_handle);
                         if let Some(ObjectType::SortEntitiesTable(table)) = doc.objects.get_mut(&th)
                         {
-                            if let Some((above, target)) = relative_target {
-                                // move_above/move_below recompute target±1 per
-                                // call, so looping them over N selected entities
-                                // ties the whole group onto one key. Read the
-                                // reference key once and hand out per-index
-                                // keys instead, keeping the moved entities a
-                                // distinct, selection-ordered block adjacent to
-                                // the reference.
-                                let target_sort = match table.get_sort_handle(target) {
-                                    Some(h) => h.value(),
-                                    None => {
-                                        // A reference object that was never
-                                        // reordered isn't in the table yet;
-                                        // seed it with its own handle as the
-                                        // implicit sort key.
-                                        table.add_entry(target, target);
-                                        table
-                                            .get_sort_handle(target)
-                                            .map_or(target.value(), |h| h.value())
-                                    }
-                                };
-                                for (k, h) in selected.iter().enumerate() {
-                                    let offset = 1 + k as u64;
-                                    let sort = if above {
-                                        target_sort.saturating_add(offset)
-                                    } else {
-                                        target_sort.saturating_sub(offset).max(1)
-                                    };
-                                    table.add_entry(*h, acadrust::Handle::new(sort));
+                            if let Some(assignments) = &relative_assignments {
+                                for (handle, sort) in assignments {
+                                    table.add_entry(*handle, acadrust::Handle::new(*sort));
                                 }
-                                let rel = if above { "above" } else { "below" };
-                                self.command_line.push_info(crate::tf!(
-                                    "DRAWORDER: moved {} entities {} {:x}.",
-                                    selected.len(),
-                                    rel,
-                                    target.value()
-                                ).as_ref());
+                                self.command_line.push_info(crate::t!("DRAWORDER: selection reordered relative to reference objects.").as_ref());
                             } else if let Some(to_front) = to_front_opt {
                                 if to_front {
                                     let (_, max_eff) = fb_baseline.unwrap_or((1, 0));
@@ -1285,11 +1280,12 @@ enum DrawOrderStep {
 ///    - `Front` / `F`: moves selection to front.
 ///    - `Back` / `B` / Enter: moves selection to back.
 ///    - `Above` / `A` / `Under` / `U`: advances to reference object pick.
-/// 3. Reference object pick: user can click the reference entity in the viewport
-///    or type its hex handle on the command line.
+/// 3. Gather reference objects, excluding the moved selection; Enter applies.
+///    Typed hexadecimal handles may also be accumulated before confirming.
 pub(crate) struct DrawOrderCommand {
     selected: Vec<acadrust::Handle>,
     step: DrawOrderStep,
+    references: Vec<acadrust::Handle>,
 }
 
 impl DrawOrderCommand {
@@ -1299,13 +1295,14 @@ impl DrawOrderCommand {
         } else {
             DrawOrderStep::ChooseVerb
         };
-        Self { selected, step }
+        Self { selected, step, references: Vec::new() }
     }
 
     pub(crate) fn for_reference_pick(selected: Vec<acadrust::Handle>, above: bool) -> Self {
         Self {
             selected,
             step: DrawOrderStep::PickReference { above },
+            references: Vec::new(),
         }
     }
 }
@@ -1324,10 +1321,10 @@ impl CadCommand for DrawOrderCommand {
                 crate::t!("DRAWORDER  [Above / Under / Front / Back] <Back>:").into_owned()
             }
             DrawOrderStep::PickReference { above: true } => {
-                crate::t!("DRAWORDER  Select reference object (move selection above):").into_owned()
+                format!("DRAWORDER  Select reference objects to move above ({} selected, Enter when done):", self.references.len())
             }
             DrawOrderStep::PickReference { above: false } => {
-                crate::t!("DRAWORDER  Select reference object (move selection under):").into_owned()
+                format!("DRAWORDER  Select reference objects to move under ({} selected, Enter when done):", self.references.len())
             }
         }
     }
@@ -1345,7 +1342,7 @@ impl CadCommand for DrawOrderCommand {
     }
 
     fn input_kind(&self) -> crate::command::InputKind {
-        if matches!(self.step, DrawOrderStep::SelectObjects) {
+        if matches!(self.step, DrawOrderStep::SelectObjects | DrawOrderStep::PickReference { .. }) {
             crate::command::InputKind::Point
         } else {
             crate::command::InputKind::SingleToken
@@ -1353,11 +1350,15 @@ impl CadCommand for DrawOrderCommand {
     }
 
     fn is_selection_gathering(&self) -> bool {
-        matches!(self.step, DrawOrderStep::SelectObjects)
+        matches!(self.step, DrawOrderStep::SelectObjects | DrawOrderStep::PickReference { .. })
     }
 
     fn on_selection_complete(&mut self, handles: Vec<acadrust::Handle>) -> crate::command::CmdResult {
-        self.selected = handles;
+        if matches!(self.step, DrawOrderStep::PickReference { .. }) {
+            self.references = handles.into_iter().filter(|handle| !self.selected.contains(handle)).collect();
+        } else {
+            self.selected = handles;
+        }
         crate::command::CmdResult::NeedPoint
     }
 
@@ -1376,7 +1377,12 @@ impl CadCommand for DrawOrderCommand {
                 let handles = std::mem::take(&mut self.selected);
                 crate::command::CmdResult::Relaunch("DRAWORDER BACK".into(), handles)
             }
-            DrawOrderStep::PickReference { .. } => crate::command::CmdResult::Cancel,
+            DrawOrderStep::PickReference { above } => {
+                if self.references.is_empty() { return crate::command::CmdResult::Cancel; }
+                let option = if above { "ABOVE" } else { "UNDER" };
+                let references = self.references.iter().map(|handle| format!("{:x}", handle.value())).collect::<Vec<_>>().join(" ");
+                crate::command::CmdResult::Relaunch(format!("DRAWORDER {option} {references}"), std::mem::take(&mut self.selected))
+            }
         }
     }
 
@@ -1409,47 +1415,63 @@ impl CadCommand for DrawOrderCommand {
                     _ => Some(crate::command::CmdResult::NeedPoint),
                 }
             }
-            DrawOrderStep::PickReference { above } => {
-                let hex_str = t.trim_start_matches("0x").trim_start_matches("0X");
-                if let Ok(val) = u64::from_str_radix(hex_str, 16) {
-                    let opt = if above { "A" } else { "U" };
-                    let cmd = format!("DRAWORDER {} {:x}", opt, val);
-                    let handles = std::mem::take(&mut self.selected);
-                    Some(crate::command::CmdResult::Relaunch(cmd, handles))
-                } else {
-                    Some(crate::command::CmdResult::NeedPoint)
+            DrawOrderStep::PickReference { .. } => {
+                for text in t.split_whitespace() {
+                    let hex = text.trim_start_matches("0x").trim_start_matches("0X");
+                    if let Ok(value) = u64::from_str_radix(hex, 16) {
+                        let handle = acadrust::Handle::new(value);
+                        if !handle.is_null() && !self.selected.contains(&handle) && !self.references.contains(&handle) {
+                            self.references.push(handle);
+                        }
+                    }
                 }
+                Some(crate::command::CmdResult::NeedPoint)
             }
         }
     }
 
-    fn needs_entity_pick(&self) -> bool {
-        matches!(self.step, DrawOrderStep::PickReference { .. })
-    }
-
-    fn on_entity_pick(
-        &mut self,
-        handle: acadrust::Handle,
-        _pt: glam::DVec3,
-    ) -> crate::command::CmdResult {
-        if handle.is_null() {
-            return crate::command::CmdResult::NeedPoint;
+    fn on_entity_pick(&mut self, handle: acadrust::Handle, _pt: glam::DVec3) -> crate::command::CmdResult {
+        if matches!(self.step, DrawOrderStep::PickReference { .. }) && !handle.is_null()
+            && !self.selected.contains(&handle) && !self.references.contains(&handle) {
+            self.references.push(handle);
         }
-        if let DrawOrderStep::PickReference { above } = self.step {
-            let opt = if above { "A" } else { "U" };
-            let cmd = format!("DRAWORDER {} {:x}", opt, handle.value());
-            let handles = std::mem::take(&mut self.selected);
-            crate::command::CmdResult::Relaunch(cmd, handles)
-        } else {
-            crate::command::CmdResult::NeedPoint
-        }
+        crate::command::CmdResult::NeedPoint
     }
-
     fn on_point(&mut self, _pt: glam::DVec3) -> crate::command::CmdResult {
         crate::command::CmdResult::NeedPoint
     }
 }
 
+/// Insert the selected block next to the extremal reference in effective draw
+/// order. Renumber the ordered siblings to avoid ties or saturated sort keys.
+fn assign_relative_group_keys(
+    document: &acadrust::CadDocument,
+    block: acadrust::Handle,
+    selected: &[acadrust::Handle],
+    references: &[acadrust::Handle],
+    above: bool,
+) -> Option<Vec<(acadrust::Handle, u64)>> {
+    use acadrust::objects::ObjectType;
+    let overrides: std::collections::HashMap<_, _> = document.objects.values().find_map(|object| {
+        if let ObjectType::SortEntitiesTable(table) = object {
+            (table.block_owner_handle == block).then(|| table.entries().map(|entry| (entry.entity_handle, entry.sort_handle.value())).collect())
+        } else { None }
+    }).unwrap_or_default();
+    let mut ordered: Vec<_> = document.entities().filter(|entity| {
+        let owner = entity.common().owner_handle;
+        owner == block || owner.is_null()
+    }).map(|entity| entity.common().handle).collect();
+    ordered.sort_by_key(|handle| (overrides.get(handle).copied().unwrap_or(handle.value()), handle.value()));
+    let selected_set: std::collections::HashSet<_> = selected.iter().copied().collect();
+    let reference_set: std::collections::HashSet<_> = references.iter().copied().collect();
+    let moved: Vec<_> = ordered.iter().copied().filter(|handle| selected_set.contains(handle)).collect();
+    if moved.is_empty() { return None; }
+    ordered.retain(|handle| !selected_set.contains(handle));
+    let indices: Vec<_> = ordered.iter().enumerate().filter_map(|(index, handle)| reference_set.contains(handle).then_some(index)).collect();
+    let insertion = if above { indices.into_iter().max()? + 1 } else { indices.into_iter().min()? };
+    ordered.splice(insertion..insertion, moved);
+    Some(ordered.into_iter().enumerate().map(|(index, handle)| (handle, index as u64 + 1)).collect())
+}
 /// Sort-key assignments sending `group` to the back of the active space.
 ///
 /// Normal case: the floor is the lowest effective sort key among non-moved
@@ -2097,9 +2119,110 @@ mod tests {
         assert!(hatch2_sort < ref_sort, "hatch 2 ({hatch2_sort}) must be under reference ({ref_sort})");
         assert_ne!(hatch1_sort, hatch2_sort, "multi-select UNDER must not tie selected entities");
         assert!(
-            hatch1_sort > hatch2_sort,
+            hatch1_sort < hatch2_sort,
             "selection order must be preserved within the moved group ({hatch1_sort}, {hatch2_sort})"
         );
+    }
+
+    #[test]
+    fn relative_group_uses_extremal_references_and_preserves_internal_order() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let moved_first = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let reference_low = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let middle = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let reference_high = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let moved_last = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let block = app.tabs[i].scene.current_layout_block_handle_pub();
+        let selected = [moved_first, moved_last];
+        let references = [reference_low, reference_high];
+
+        let ordered = |above| {
+            let mut assignments = assign_relative_group_keys(
+                &app.tabs[i].scene.document,
+                block,
+                &selected,
+                &references,
+                above,
+            )
+            .expect("references belong to the active block");
+            assignments.sort_by_key(|(_, sort)| *sort);
+            assignments.into_iter().map(|(handle, _)| handle).collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            ordered(true),
+            vec![reference_low, middle, reference_high, moved_first, moved_last]
+        );
+        assert_eq!(
+            ordered(false),
+            vec![moved_first, moved_last, reference_low, middle, reference_high]
+        );
+    }
+
+    #[test]
+    fn relative_group_rejects_unusable_references_without_creating_a_table() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let moved = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        app.tabs[i].scene.replace_selection(std::iter::once(moved).collect());
+
+        let _ = app.run_command_line("DRAWORDER ABOVE deadbeef");
+
+        assert!(!app.tabs[i].scene.document.objects.values().any(|object| {
+            matches!(object, ObjectType::SortEntitiesTable(_))
+        }));
+    }
+
+    #[test]
+    fn draw_order_table_reattaches_orphan_and_advances_object_handles() {
+        use acadrust::objects::SortEntitiesTable;
+
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let block = app.tabs[i].scene.current_layout_block_handle_pub();
+        let entity = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
+        let orphan_handle = acadrust::Handle::new(0x10_0000);
+        let mut orphan = SortEntitiesTable::for_block(block);
+        orphan.handle = orphan_handle;
+        orphan.add_entry(entity, acadrust::Handle::new(7));
+        app.tabs[i]
+            .scene
+            .document
+            .objects
+            .insert(orphan_handle, ObjectType::SortEntitiesTable(orphan));
+
+        let resolved = ensure_draw_order_table(&mut app.tabs[i].scene.document, block);
+        assert_eq!(resolved, orphan_handle);
+        let dictionary_handle = app.tabs[i]
+            .scene
+            .document
+            .extension_dictionary_handle(block)
+            .expect("block extension dictionary");
+        let ObjectType::Dictionary(dictionary) = app.tabs[i]
+            .scene
+            .document
+            .objects
+            .get(&dictionary_handle)
+            .expect("dictionary object")
+        else {
+            panic!("extension object must be a dictionary");
+        };
+        assert_eq!(dictionary.get(SortEntitiesTable::DICTIONARY_KEY), Some(orphan_handle));
+        let ObjectType::SortEntitiesTable(table) = app.tabs[i]
+            .scene
+            .document
+            .objects
+            .get(&orphan_handle)
+            .expect("sort table")
+        else {
+            panic!("orphan must remain a sort table");
+        };
+        assert_eq!(table.owner_handle, dictionary_handle);
+        assert!(table.entries().any(|entry| {
+            entry.entity_handle == entity && entry.sort_handle.value() == 7
+        }));
+        assert!(app.tabs[i].scene.document.allocate_handle().value() > orphan_handle.value());
     }
 
     #[test]
@@ -2210,18 +2333,18 @@ mod tests {
             _ => panic!("Expected Relaunch for shortcut B"),
         }
 
-        // 3. Shortcut 'A' -> Advances to PickReference (above)
+        // 3. Shortcut 'A' -> Advances to reference gathering (above)
         let mut cmd = DrawOrderCommand::new(vec![h_hatch]);
         assert!(!cmd.needs_entity_pick());
         let res = cmd.on_text_input("A");
         assert!(matches!(res, Some(crate::command::CmdResult::NeedPoint)));
-        assert!(cmd.needs_entity_pick(), "Needs entity pick after choosing 'A'");
+        assert!(cmd.is_selection_gathering());
 
-        // 4. Shortcut 'U' -> Advances to PickReference (under)
+        // 4. Shortcut 'U' -> Advances to reference gathering (under)
         let mut cmd = DrawOrderCommand::new(vec![h_hatch]);
         let res = cmd.on_text_input("U");
         assert!(matches!(res, Some(crate::command::CmdResult::NeedPoint)));
-        assert!(cmd.needs_entity_pick(), "Needs entity pick after choosing 'U'");
+        assert!(cmd.is_selection_gathering());
     }
 
     #[test]
@@ -2233,14 +2356,15 @@ mod tests {
         let h_ref = app.tabs[i].scene.add_entity_clone(EntityType::Line(Default::default()));
         let h_hatch = app.tabs[i].scene.add_entity_clone(EntityType::Hatch(Default::default()));
 
-        // Above with viewport pick
+        // Above with a gathered viewport selection
         let mut cmd = DrawOrderCommand::new(vec![h_hatch]);
         let _ = cmd.on_text_input("A");
-        assert!(cmd.needs_entity_pick());
-        let pick_res = cmd.on_entity_pick(h_ref, glam::DVec3::ZERO);
+        assert!(cmd.is_selection_gathering());
+        let _ = cmd.on_selection_complete(vec![h_hatch, h_ref]);
+        let pick_res = cmd.on_enter();
         match pick_res {
             crate::command::CmdResult::Relaunch(relaunch_cmd, handles) => {
-                assert_eq!(relaunch_cmd, format!("DRAWORDER A {:x}", h_ref.value()));
+                assert_eq!(relaunch_cmd, format!("DRAWORDER ABOVE {:x}", h_ref.value()));
                 assert_eq!(handles, vec![h_hatch]);
                 app.tabs[i].scene.replace_selection(handles.into_iter().collect());
                 let _ = app.run_command_line(&relaunch_cmd);
@@ -2253,14 +2377,15 @@ mod tests {
         let ref_sort = entries.get(&h_ref.value()).copied().unwrap_or(h_ref.value());
         assert!(hatch_sort > ref_sort, "Hatch must be above reference after viewport pick");
 
-        // Under with viewport pick
+        // Under with a gathered viewport selection
         let mut cmd = DrawOrderCommand::new(vec![h_hatch]);
         let _ = cmd.on_text_input("U");
-        assert!(cmd.needs_entity_pick());
-        let pick_res = cmd.on_entity_pick(h_ref, glam::DVec3::ZERO);
+        assert!(cmd.is_selection_gathering());
+        let _ = cmd.on_selection_complete(vec![h_hatch, h_ref]);
+        let pick_res = cmd.on_enter();
         match pick_res {
             crate::command::CmdResult::Relaunch(relaunch_cmd, handles) => {
-                assert_eq!(relaunch_cmd, format!("DRAWORDER U {:x}", h_ref.value()));
+                assert_eq!(relaunch_cmd, format!("DRAWORDER UNDER {:x}", h_ref.value()));
                 assert_eq!(handles, vec![h_hatch]);
                 app.tabs[i].scene.replace_selection(handles.into_iter().collect());
                 let _ = app.run_command_line(&relaunch_cmd);
@@ -2287,9 +2412,10 @@ mod tests {
         let _ = cmd.on_text_input("Above");
         let hex_input = format!("0x{:x}", h_ref.value());
         let typed_res = cmd.on_text_input(&hex_input);
-        match typed_res {
-            Some(crate::command::CmdResult::Relaunch(relaunch_cmd, handles)) => {
-                assert_eq!(relaunch_cmd, format!("DRAWORDER A {:x}", h_ref.value()));
+        assert!(matches!(typed_res, Some(crate::command::CmdResult::NeedPoint)));
+        match cmd.on_enter() {
+            crate::command::CmdResult::Relaunch(relaunch_cmd, handles) => {
+                assert_eq!(relaunch_cmd, format!("DRAWORDER ABOVE {:x}", h_ref.value()));
                 assert_eq!(handles, vec![h_hatch]);
                 app.tabs[i].scene.replace_selection(handles.into_iter().collect());
                 let _ = app.run_command_line(&relaunch_cmd);
@@ -2370,6 +2496,6 @@ mod tests {
         assert!(app.tabs[i]
             .active_cmd
             .as_ref()
-            .is_some_and(|command| command.name() == "DRAWORDER" && command.needs_entity_pick()));
+            .is_some_and(|command| command.name() == "DRAWORDER" && command.is_selection_gathering()));
     }
 }

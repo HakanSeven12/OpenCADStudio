@@ -645,98 +645,221 @@ impl OpenCADStudio {
             // ── SETBYLAYER — clear color/linetype/lineweight overrides ────
             // Resets the selected entities' direct property overrides back to
             // ByLayer so they follow their layer again.
+            "SETBYLAYERMODE" => {
+                let command = crate::modules::draw::modify::setbylayer::ModeCommand;
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+            value if value.starts_with("SETBYLAYERMODE ") => {
+                if let Ok(mode) = value.trim_start_matches("SETBYLAYERMODE ").trim().parse::<u8>() {
+                    crate::modules::draw::modify::setbylayer::set_mode(mode);
+                } else { self.command_line.push_error("SETBYLAYERMODE requires an integer from 0 to 255."); }
+            }
             "SETBYLAYER" => {
-                let handles: Vec<_> = self.tabs[i]
+                let command = crate::modules::draw::modify::setbylayer::SetByLayerCommand::new(
+                    self.tabs[i].scene.selected.iter().copied().collect(),
+                );
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+            cmd if cmd.starts_with("SETBYLAYER_APPLY ") => {
+                let flags: Vec<_> = cmd.split_whitespace().skip(1).collect();
+                if flags.len() != 2 || flags.iter().any(|flag| !matches!(*flag, "0" | "1")) {
+                    return Some(Task::none());
+                }
+                let mask = crate::modules::draw::modify::setbylayer::mode();
+                let change_byblock = flags[0] == "1";
+                let include_blocks = flags[1] == "1";
+                let mut handles: Vec<_> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .into_iter()
                     .map(|(h, _)| h)
                     .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
                     .collect();
+                if include_blocks {
+                    let mut visited: std::collections::HashSet<_> = handles.iter().copied().collect();
+                    let mut index = 0;
+                    while index < handles.len() {
+                        let children = match self.tabs[i].scene.document.get_entity(handles[index]) {
+                            Some(acadrust::EntityType::Insert(insert)) => self.tabs[i].scene.document
+                                .block_records.get(&insert.block_name)
+                                .map(|block| block.entity_handles.clone()).unwrap_or_default(),
+                            _ => Vec::new(),
+                        };
+                        for child in children {
+                            if visited.insert(child) && !self.tabs[i].scene.is_layer_locked(child) {
+                                handles.push(child);
+                            }
+                        }
+                        index += 1;
+                    }
+                }
                 if handles.is_empty() {
                     self.command_line
                         .push_error(crate::t!("SETBYLAYER: select entities first.").as_ref());
                 } else {
+                    let has_changes = handles.iter().any(|handle| {
+                        self.tabs[i].scene.document.get_entity(*handle).is_some_and(|entity| {
+                            let mut common = entity.common().clone();
+                            crate::modules::draw::modify::setbylayer::apply_mask(
+                                &mut common, mask, change_byblock,
+                            )
+                        })
+                    });
+                    if !has_changes {
+                        self.command_line.push_output(
+                            crate::t!("SETBYLAYER: no properties required changes.").as_ref(),
+                        );
+                        return Some(Task::none());
+                    }
                     self.push_undo_snapshot(i, "SETBYLAYER");
-                    let mut changed = 0usize;
+                    let mut changed = Vec::new();
                     for handle in &handles {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*handle) {
-                            let common = entity.common_mut();
-                            common.color = acadrust::types::Color::ByLayer;
-                            common.color_name = None;
-                            common.color_book_handle = None;
-                            common.linetype = "ByLayer".to_string();
-                            common.line_weight = acadrust::types::LineWeight::ByLayer;
-                            changed += 1;
+                            if crate::modules::draw::modify::setbylayer::apply_mask(
+                                entity.common_mut(), mask, change_byblock,
+                            ) {
+                                changed.push(*handle);
+                            }
                         }
                     }
                     self.tabs[i].dirty = true;
-                    let changes: Vec<_> = handles
-                        .into_iter()
+                    let changes: Vec<_> = changed
+                        .iter()
+                        .copied()
                         .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                         .collect();
                     self.tabs[i].scene.bump_entities(&changes);
+                    self.refresh_properties();
                     self.command_line.push_output(crate::tf!(
-                        "SETBYLAYER: reset {changed} entity/entities to ByLayer."
+                        "SETBYLAYER: reset {} entity/entities to ByLayer.",
+                        changed.len()
                     ).as_ref());
                 }
             }
 
-            // ── OVERKILL — delete duplicate (identical) objects ──────────
-            // Removes objects that are identical in geometry AND properties to
-            // another object (compared with the handle ignored). Operates on
-            // the current selection, or the whole drawing when nothing is
-            // selected. Conservative: only exact duplicates are removed.
-            "OVERKILL" => {
-                use acadrust::Handle;
-                let selected: std::collections::HashSet<u64> = self.tabs[i]
-                    .scene
-                    .selected_entities()
-                    .into_iter()
-                    .map(|(h, _)| h.value())
-                    .collect();
-                // Capture (handle, type-name, handle-normalized clone) for each
-                // candidate while the document is borrowed immutably.
-                let candidates: Vec<(Handle, String, acadrust::EntityType)> = self.tabs[i]
-                    .scene
-                    .document
-                    .entities()
-                    .filter(|e| {
-                        (selected.is_empty() || selected.contains(&e.common().handle.value()))
-                            && !self.tabs[i].scene.is_layer_locked(e.common().handle)
-                    })
-                    .map(|e| {
-                        let key = crate::entities::names::dxf_name(e).to_string();
-                        let mut norm = e.clone();
-                        norm.common_mut().handle = Handle::NULL;
-                        (e.common().handle, key, norm)
-                    })
-                    .collect();
-                // Bucket by (type, layer) so only like objects are compared.
-                let mut kept: Vec<(String, acadrust::EntityType)> = Vec::new();
-                let mut dups: Vec<Handle> = Vec::new();
-                for (h, key, norm) in &candidates {
-                    let bucket = format!("{key}\u{0}{}", norm.common().layer);
-                    if kept.iter().any(|(b, e)| b == &bucket && e == norm) {
-                        dups.push(*h);
-                    } else {
-                        kept.push((bucket, norm.clone()));
+            // OVERKILL gathers objects, exposes cleanup settings, then applies one undo group.
+            "OVERKILL" | "-OVERKILL" => {
+                let handles=self.tabs[i].scene.selected_entities().iter().map(|(h,_)|*h).collect();
+                let command=crate::modules::draw::modify::overkill::OverkillCommand::new(handles);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd=Some(Box::new(command));
+            }
+            value if value.starts_with("OVERKILL_APPLY ") => {
+                use crate::modules::draw::modify::overkill::{normalized,optimize};
+                let values:Vec<_>=value.split_whitespace().skip(1).collect();
+                if values.len()!=6 { return Some(self.finish_dispatch(cmd)); }
+                let tolerance=values[0].parse::<f64>().unwrap_or(1e-6);
+                let ignore=values[1].parse::<u16>().unwrap_or(0);
+                let optimize_plines=values[2]=="1";
+                let overlap=values[3]=="1";
+                let end_to_end=values[4]=="1";
+                let preserve_associative=values[5]=="1";
+                let mut candidates:Vec<_>=self.tabs[i].scene.selected_entities().into_iter()
+                    .filter(|(h,e)|!self.tabs[i].scene.is_layer_locked(*h)
+                        && (!preserve_associative||e.common().reactors.is_empty()))
+                    .map(|(h,e)|(h,e.clone())).collect();
+                candidates.sort_by_key(|(h,_)|h.value());
+                let mut changed=std::collections::HashSet::new();
+                if optimize_plines { for (h,e) in &mut candidates {
+                    let before=e.clone(); optimize(e,tolerance); if *e!=before {changed.insert(*h);}
+                } }
+                let mut removed=std::collections::HashSet::new();
+                // Iterate to a fixed point: a bridge can join two previously disjoint intervals.
+                loop {
+                    let mut progress=false;
+                    for a in 0..candidates.len() {
+                        if removed.contains(&candidates[a].0) {continue;}
+                        for b in a+1..candidates.len() {
+                            if removed.contains(&candidates[b].0) {continue;}
+                            let left=normalized(&candidates[a].1,ignore);
+                            let right=normalized(&candidates[b].1,ignore);
+                            if left==right {
+                                removed.insert(candidates[b].0);progress=true;continue;
+                            }
+                            if overlap {
+                                let contained = |circle: &acadrust::entities::Circle, arc: &acadrust::entities::Arc| {
+                                    circle.common == arc.common && circle.thickness == arc.thickness
+                                        && cadkernel::space::arc_union::circle_contains_arc(
+                                            [circle.center.x,circle.center.y,circle.center.z],
+                                            [circle.normal.x,circle.normal.y,circle.normal.z],circle.radius,
+                                            cadkernel::space::arc_union::CircularArc { center:[arc.center.x,arc.center.y,arc.center.z],
+                                                normal:[arc.normal.x,arc.normal.y,arc.normal.z],radius:arc.radius,start:arc.start_angle,end:arc.end_angle })
+                                };
+                                match (&left,&right) {
+                                    (acadrust::EntityType::Circle(circle),acadrust::EntityType::Arc(arc)) if contained(circle,arc) => {
+                                        removed.insert(candidates[b].0);progress=true;continue;
+                                    }
+                                    (acadrust::EntityType::Arc(arc),acadrust::EntityType::Circle(circle)) if contained(circle,arc) => {
+                                        removed.insert(candidates[a].0);progress=true;break;
+                                    }
+                                    _ => {},
+                                }
+                            }
+                            if let (acadrust::EntityType::Arc(l),acadrust::EntityType::Arc(r))=(&left,&right) {
+                                use cadkernel::space::arc_union::{CircularArc,ArcUnionKind,circular_arc_union};
+                                if l.common!=r.common || l.thickness!=r.thickness {continue;}
+                                let arc=|v:&acadrust::entities::Arc|CircularArc{center:[v.center.x,v.center.y,v.center.z],normal:[v.normal.x,v.normal.y,v.normal.z],radius:v.radius,start:v.start_angle,end:v.end_angle};
+                                let Some(union)=circular_arc_union(arc(l),arc(r),tolerance) else {continue;};
+                                let allowed=match union.kind {ArcUnionKind::Duplicate=>true,ArcUnionKind::Overlap=>overlap,ArcUnionKind::EndToEnd=>end_to_end};
+                                if !allowed {continue;}
+                                if let acadrust::EntityType::Arc(source)=&candidates[a].1 {
+                                    let replacement=if union.full_circle {
+                                        let mut circle=acadrust::entities::Circle::new();
+                                        circle.common=source.common.clone();circle.center=source.center.clone();circle.normal=source.normal.clone();circle.radius=source.radius;circle.thickness=source.thickness;
+                                        acadrust::EntityType::Circle(circle)
+                                    } else {
+                                        let mut arc=source.clone();arc.start_angle=union.start;arc.end_angle=union.end;acadrust::EntityType::Arc(arc)
+                                    };
+                                    candidates[a].1=replacement;
+                                }
+                                changed.insert(candidates[a].0);removed.insert(candidates[b].0);progress=true;
+                                continue;
+                            }
+                            let (acadrust::EntityType::Line(l),acadrust::EntityType::Line(r))=(&left,&right)
+                                else {continue;};
+                            if l.common!=r.common||l.thickness!=r.thickness||l.normal!=r.normal {continue;}
+                            let point=|p:acadrust::types::Vector3|[p.x,p.y,p.z];
+                            let Some(union)=cadkernel::space::line_union(
+                                [point(l.start),point(l.end)],[point(r.start),point(r.end)],tolerance)
+                                else {continue;};
+                            let allowed=match union.kind {
+                                cadkernel::space::LineUnionKind::Duplicate=>true,
+                                cadkernel::space::LineUnionKind::Overlap=>overlap,
+                                cadkernel::space::LineUnionKind::EndToEnd=>end_to_end,
+                            };
+                            if !allowed {continue;}
+                            if let acadrust::EntityType::Line(line)=&mut candidates[a].1 {
+                                line.start=acadrust::types::Vector3::new(union.start[0],union.start[1],union.start[2]);
+                                line.end=acadrust::types::Vector3::new(union.end[0],union.end[1],union.end[2]);
+                            }
+                            changed.insert(candidates[a].0);removed.insert(candidates[b].0);progress=true;
+                        }
                     }
+                    if !progress {break;}
                 }
-                if dups.is_empty() {
-                    self.command_line
-                        .push_output(crate::t!("OVERKILL: no duplicate objects found.").as_ref());
+                if !changed.is_empty()||!removed.is_empty() {
+                    self.push_undo_snapshot(i,"OVERKILL");
+                    let updates:Vec<_>=candidates.into_iter().filter(|(h,_)|changed.contains(h)&&!removed.contains(h)).collect();
+                    let updated_count = updates.len();
+                    let mut changes = Vec::new();
+                    for (handle, entity) in updates {
+                        if let Some(target) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                            *target = entity;
+                            changes.push((handle, crate::scene::ChangeKind::Modified));
+                        }
+                    }
+                    self.tabs[i].scene.bump_entities(&changes);
+                    let mut handles:Vec<_>=removed.iter().copied().collect();
+                    handles.sort_by_key(|handle| handle.value());
+                    self.tabs[i].scene.erase_entities(&handles);
+                    self.tabs[i].dirty=true;self.refresh_properties();
+                    self.command_line.push_output(&format!("OVERKILL: removed {} objects; updated {} objects.",removed.len(),updated_count));
                 } else {
-                    let n = dups.len();
-                    self.push_undo_snapshot(i, "OVERKILL");
-                    self.tabs[i].scene.erase_entities(&dups);
-                    self.tabs[i].dirty = true;
-                    self.refresh_properties();
-                    self.command_line
-                        .push_output(crate::tf!("OVERKILL: deleted {n} duplicate object(s).").as_ref());
+                    self.command_line.push_output("OVERKILL: no objects required changes.");
                 }
             }
-
             // ── PICKADD / PICKDRAG — selection UX (#226, app settings) ───
             // Bare form reports; `<name> 0|1` sets and persists. Defaults keep
             // today's behaviour (PICKADD 1, PICKDRAG 0).
@@ -2984,6 +3107,21 @@ mod tests {
     }
 
     #[test]
+    fn selection_commands_gather_instead_of_using_the_whole_drawing() {
+        for command in ["SETBYLAYER", "OVERKILL"] {
+            let mut app = fresh_app();
+            let _ = app.run_command_line(command);
+            assert!(
+                app.tabs[app.active_tab]
+                    .active_cmd
+                    .as_ref()
+                    .is_some_and(|active| active.is_selection_gathering()),
+                "{command} should gather an explicit selection"
+            );
+        }
+    }
+
+    #[test]
     fn test_cad_selection_and_model_space_sysvars() {
         let mut app = fresh_app();
 
@@ -3195,4 +3333,3 @@ mod scale_validation_tests {
         }
     }
 }
-

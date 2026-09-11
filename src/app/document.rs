@@ -240,6 +240,17 @@ impl DocumentTab {
             .and_then(|index| self.block_edits.get_mut(index))
     }
 
+    /// The [`crate::scene::sketch_constraints::SketchScope`] a new persistent
+    /// constraint should attach to right now — whatever's actually being
+    /// edited: the open block definition if a BEDIT session is active, model
+    /// space otherwise.
+    pub(super) fn current_sketch_scope(&self) -> crate::scene::sketch_constraints::SketchScope {
+        match self.active_block_edit_session() {
+            Some(session) => crate::scene::sketch_constraints::SketchScope::Block(session.br_handle),
+            None => crate::scene::sketch_constraints::SketchScope::ModelSpace,
+        }
+    }
+
     /// The active WCS↔UCS converter for this tab — identity when no UCS is set.
     /// Every consumer that needs UCS-relative coordinates goes through this.
     pub(super) fn ucs_xform(&self) -> super::helpers::UcsXform {
@@ -644,7 +655,11 @@ impl DocumentTab {
 /// full entity store.
 #[derive(Clone)]
 pub(super) enum HistorySnapshot {
-    Delta(DeltaSnapshot),
+    // Boxed: `DeltaSnapshot` grew past the other variants once
+    // `sketch_constraints` (ERASE-undo fix) was added, and every undo/redo
+    // stack slot costs as much as this enum's largest variant regardless of
+    // which one it actually holds.
+    Delta(Box<DeltaSnapshot>),
     ObjectVisibility(ObjectVisibilitySnapshot),
 }
 
@@ -676,6 +691,18 @@ impl HistorySnapshot {
                     d.active_layer
                         .as_ref()
                         .map_or(0, |(before, after)| before.len().saturating_add(after.len())),
+                )
+                .saturating_add(
+                    d.sketch_constraints
+                        .iter()
+                        .map(|entry| entry.before.constraints.len().saturating_add(entry.after.constraints.len()))
+                        .sum::<usize>()
+                        .saturating_mul(96),
+                )
+                .saturating_add(
+                    d.named_parameters
+                        .as_ref()
+                        .map_or(0, |(before, after)| before.len().saturating_add(after.len()).saturating_mul(128)),
                 )
                 .saturating_add(d.label.len()),
             HistorySnapshot::ObjectVisibility(v) => v
@@ -733,6 +760,17 @@ pub(super) struct DeltaSnapshot {
     /// Opposite non-entity document state. `apply_delta_state` swaps this with
     /// the live structure, so the same allocation shuttles between undo/redo.
     pub(super) structure: Option<StructureSnapshot>,
+    /// Sketch-constraint scopes this same command changed alongside its
+    /// entities (e.g. ERASE removing a constraint set's touched constraints)
+    /// — `sketch_constraints` lives on `Scene`, not in `document`/
+    /// `document.objects`, so it needs its own channel here rather than
+    /// riding along with `entities`/`structure`. Almost always empty.
+    pub(super) sketch_constraints: Vec<SketchConstraintsEntryDelta>,
+    /// Drawing-wide parameter table changed by this transaction.
+    pub(super) named_parameters: Option<(
+        crate::scene::named_parameters::ParameterTable,
+        crate::scene::named_parameters::ParameterTable,
+    )>,
     pub(super) label: String,
 }
 
@@ -791,6 +829,15 @@ pub(super) struct ObjectEntryDelta {
     pub(super) handle: Handle,
     pub(super) before: Option<acadrust::objects::ObjectType>,
     pub(super) after: Option<acadrust::objects::ObjectType>,
+}
+
+/// One sketch-constraint scope's before/after image within an entity delta.
+/// This keeps constraint cleanup atomic with edits such as entity erasure.
+#[derive(Clone)]
+pub(super) struct SketchConstraintsEntryDelta {
+    pub(super) scope: crate::scene::sketch_constraints::SketchScope,
+    pub(super) before: crate::scene::sketch_constraints::SketchConstraintSet,
+    pub(super) after: crate::scene::sketch_constraints::SketchConstraintSet,
 }
 
 #[derive(Default)]

@@ -218,7 +218,10 @@ impl OpenCADStudio {
                         self.apply_cmd_result(crate::command::CmdResult::JoinEntities(selected));
                     return Some(task);
                 }
-                let cmd = JoinCommand::new();
+                let mut cmd = JoinCommand::new();
+                if let Some(handle) = selected.first() {
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity(*handle).cloned() { cmd = cmd.with_source(*handle, entity); }
+                }
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
@@ -294,6 +297,7 @@ impl OpenCADStudio {
                     header.surface_u_density,
                     header.surface_v_density,
                 )
+                .with_entities(self.tabs[i].scene.document.entities().cloned())
                 .with_preselection(&preselected);
                 self.command_line.push_info(&cmd_obj.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
@@ -329,7 +333,17 @@ impl OpenCADStudio {
 
             "SPLINEDIT" => {
                 use crate::modules::draw::modify::splinedit::SplineditCommand;
-                let cmd_obj = SplineditCommand::new();
+                let mut cmd_obj = SplineditCommand::new().with_delete_source(self.delete_objects != 0);
+                let selected: Vec<_> = self.tabs[i].scene.selected.iter().copied().collect();
+                if let [handle] = selected.as_slice() {
+                    if let Some(entity @ acadrust::EntityType::Spline(_)) =
+                        self.tabs[i].scene.document.get_entity(*handle).cloned()
+                    {
+                        if self.reject_locked_edit(i, *handle) { return Some(Task::none()); }
+                        cmd_obj.inject_picked_entity(entity);
+                        cmd_obj.on_entity_pick(*handle, glam::DVec3::ZERO);
+                    }
+                }
                 self.command_line.push_info(&cmd_obj.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }

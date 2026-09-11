@@ -13,6 +13,7 @@ impl OpenCADStudio {
             Some(K::About) => crate::tr!("modal", "about"),
             Some(K::Shortcuts) => crate::tr!("modal", "keyboard-shortcuts"),
             Some(K::Aliases) => crate::tr!("modal", "command-aliases"),
+            Some(K::NamedParameters) => crate::t!("Named Parameters").into_owned(),
             Some(K::Options) => crate::tr!("action", "options"),
             Some(K::FindReplace) => crate::tr!("modal", "find-replace"),
             Some(K::PluginManager) => crate::tr!("modal", "plugin-manager"),
@@ -173,6 +174,21 @@ impl OpenCADStudio {
                     },
                 )
             }
+            super::super::ModalKind::NamedParameters => {
+                let scene = &self.tabs[self.active_tab].scene;
+                sized_flow(
+                    ex,
+                    820,
+                    520,
+                    |flow| {
+                        crate::ui::window::named_parameters::view_window(
+                            &self.named_parameter_editor_rows,
+                            scene,
+                            flow,
+                        )
+                    },
+                )
+            }
             super::super::ModalKind::Options => sized_flow(
                 ex,
                 880,
@@ -181,6 +197,8 @@ impl OpenCADStudio {
                     crate::ui::window::options::view_window(
                         &self.default_save_format,
                         self.file_assoc_enabled,
+                        self.write_dwg_native_constraints,
+                        self.show_constraint_values,
                         &self.ui_theme,
                         &self.theme_color_inputs,
                         self.language,

@@ -2691,6 +2691,12 @@ impl Scene {
         self.solid_models = HashMap::default();
         *self.camera.borrow_mut() = Camera::default();
         self.camera_generation += 1;
+        // A brand-new/replaced document has none of these yet — without
+        // resetting them, a "new"/"open" (e.g. via automation, which reuses
+        // this same reset) would leak the previous document's constraints
+        // and named parameters into the fresh one.
+        self.sketch_constraints.clear();
+        self.named_parameters = crate::scene::named_parameters::ParameterTable::new();
         self.bump_geometry();
     }
 }

@@ -1718,7 +1718,7 @@ pub(crate) fn set_wire_aabb(w: &mut WireModel, entity_box: [f32; 4]) {
     w.aabb = out;
 }
 
-fn entity_bounds(e: &acadrust::EntityType) -> ([f64; 3], [f64; 3]) {
+pub(crate) fn entity_bounds(e: &acadrust::EntityType) -> ([f64; 3], [f64; 3]) {
     if let acadrust::EntityType::Region(region) = e {
         if region.wires.is_empty() {
             if let Some(bounds) = super::solid3d_tess::kernel_region_body(region)

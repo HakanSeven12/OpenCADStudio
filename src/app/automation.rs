@@ -213,14 +213,8 @@ fn entity_json(e: &acadrust::EntityType, detail: &str) -> Value {
         _ => {}
     }
     if detail == "full" {
-        let bounds = e.as_entity().bounding_box();
-        map.insert(
-            "bounds".into(),
-            json!({
-                "min":[bounds.min.x,bounds.min.y,bounds.min.z],
-                "max":[bounds.max.x,bounds.max.y,bounds.max.z]
-            }),
-        );
+        let (min, max) = crate::scene::convert::tess::entity_bounds(e);
+        map.insert("bounds".into(), json!({ "min": min, "max": max }));
         if let Ok(Value::Object(wrapper)) = serde_json::to_value(e) {
             if let Some((_, properties)) = wrapper.into_iter().next() {
                 map.insert("properties".into(), properties);
@@ -652,11 +646,11 @@ impl OpenCADStudio {
                 continue;
             }
             if let Some(bounds) = bounds {
-                let entity_bounds = e.as_entity().bounding_box();
-                if entity_bounds.max.x < bounds[0]
-                    || entity_bounds.max.y < bounds[1]
-                    || entity_bounds.min.x > bounds[2]
-                    || entity_bounds.min.y > bounds[3]
+                let (min, max) = crate::scene::convert::tess::entity_bounds(e);
+                if max[0] < bounds[0]
+                    || max[1] < bounds[1]
+                    || min[0] > bounds[2]
+                    || min[1] > bounds[3]
                 {
                     continue;
                 }

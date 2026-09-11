@@ -175,7 +175,7 @@ fn boundary_loops(
     }).collect()
 }
 
-fn boundary_region(
+pub(crate) fn boundary_region(
     sources: &FxHashMap<Handle, BoundarySource>, rings: &[Vec<[f64; 2]>], plane: WorkingPlane,
 ) -> Option<EntityType> {
     let loops = boundary_loops(sources, rings)?;

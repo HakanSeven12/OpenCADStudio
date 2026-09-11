@@ -1159,11 +1159,14 @@ pub struct BoundaryCommand {
     gap_tolerance: f64,
     plane: WorkingPlane,
     missed: bool,
+    output_region: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum BoundaryMode {
     PickInside,
+    Advanced,
+    ObjectType,
     SelectObjects,
     GapTolerance { return_to_selection: bool },
 }
@@ -1194,6 +1197,7 @@ impl BoundaryCommand {
             gap_tolerance: 1.0e-6,
             plane,
             missed: false,
+            output_region: false,
         };
         if !selected_objects.is_empty() {
             command.set_boundary_set(selected_objects);
@@ -1299,6 +1303,15 @@ impl BoundaryCommand {
         } else {
             &self.sources
         };
+        if self.output_region {
+            return self.point_regions.iter().filter_map(|rings| {
+                crate::scene::model::presspull_model::boundary_region(
+                    sources,
+                    rings,
+                    self.plane,
+                )
+            }).collect();
+        }
         crate::scene::boundary_polyline_entities(
             &self.point_regions,
             self.plane,
@@ -1321,8 +1334,10 @@ impl CadCommand for BoundaryCommand {
         };
         match self.mode {
             BoundaryMode::PickInside => {
-                t!("BOUNDARY  Pick internal point:%{miss}", miss = miss).into_owned()
+                format!("BOUNDARY  Specify internal point or [Advanced options]:{miss}")
             }
+            BoundaryMode::Advanced=>"BOUNDARY  Enter an option [Object type]:".into(),
+            BoundaryMode::ObjectType=>format!("BOUNDARY  Enter type of boundary object [Region/Polyline] <{}>:",if self.output_region{"Region"}else{"Polyline"}),
             BoundaryMode::SelectObjects => {
                 t!("%{cmd}  Select objects:", cmd = self.name()).into_owned()
             }
@@ -1336,6 +1351,8 @@ impl CadCommand for BoundaryCommand {
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
+        if self.mode==BoundaryMode::Advanced {return vec![CmdOption::new("Object type","O")];}
+        if self.mode==BoundaryMode::ObjectType {return vec![CmdOption::new("Region","R"),CmdOption::new("Polyline","P")];}
         if matches!(self.mode, BoundaryMode::GapTolerance { .. }) {
             return Vec::new();
         }
@@ -1348,6 +1365,7 @@ impl CadCommand for BoundaryCommand {
             t!(self.island_label())
         );
         let mut options = vec![
+            CmdOption::new("Advanced options", "A"),
             CmdOption::new(t!("Boundary").as_ref(), "O"),
             CmdOption::new(&island, "S"),
             CmdOption::new(t!("Tolerance").as_ref(), "G"),
@@ -1373,6 +1391,8 @@ impl CadCommand for BoundaryCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
+        if self.mode==BoundaryMode::ObjectType {self.mode=BoundaryMode::Advanced;return CmdResult::NeedPoint;}
+        if self.mode==BoundaryMode::Advanced {self.mode=BoundaryMode::PickInside;return CmdResult::NeedPoint;}
         if let BoundaryMode::GapTolerance { return_to_selection } = self.mode {
             self.mode = if return_to_selection {
                 BoundaryMode::SelectObjects
@@ -1414,6 +1434,18 @@ impl CadCommand for BoundaryCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if self.mode==BoundaryMode::Advanced {
+            if matches!(text.trim().to_ascii_uppercase().as_str(),"O"|"OBJECT"|"OBJECT TYPE") {self.mode=BoundaryMode::ObjectType;}
+            return Some(CmdResult::NeedPoint);
+        }
+        if self.mode==BoundaryMode::ObjectType {
+            match text.trim().to_ascii_uppercase().as_str(){
+                "R"|"REGION"=>self.output_region=true,
+                "P"|"POLYLINE"=>self.output_region=false,
+                _=>return Some(CmdResult::NeedPoint),
+            }
+            self.mode=BoundaryMode::Advanced;return Some(CmdResult::NeedPoint);
+        }
         if let BoundaryMode::GapTolerance { return_to_selection } = self.mode {
             if let Ok(value) = text.trim().parse::<f64>() {
                 if value.is_finite() && value > 0.0 {
@@ -1429,6 +1461,7 @@ impl CadCommand for BoundaryCommand {
             return Some(CmdResult::NeedPoint);
         }
         match text.trim().to_ascii_uppercase().as_str() {
+            "A"|"ADVANCED"=>self.mode=BoundaryMode::Advanced,
             "O" | "OBJECT" | "OBJECTS" => {
                 self.mode = BoundaryMode::SelectObjects;
                 self.missed = false;
@@ -1544,6 +1577,7 @@ inventory::submit!(crate::command::CommandRegistration { names: &["HATCH"] });  
 #[cfg(test)]
 mod tests {
     use super::*;
+    use acadrust::EntityType;
 
     fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<[f64; 2]> {
         vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
@@ -1615,5 +1649,28 @@ mod tests {
         assert_eq!(rings.len(), 2, "outer band = a with b as its only hole");
         assert!((rings[0][0][0] - (-30.0)).abs() < 1e-9, "outer ring is a");
         assert!((rings[1][0][0] - (-15.0)).abs() < 1e-9, "hole is direct child b");
+    }
+
+    #[test]
+    fn boundary_region_keeps_a_selected_hole_in_one_entity() {
+        let rings = vec![rect(-10.0, -10.0, 10.0, 10.0), rect(-2.0, -2.0, 2.0, 2.0)];
+        let segments: Vec<Line> = rings.iter().flat_map(|ring| {
+            ring.iter().copied().zip(ring.iter().copied().cycle().skip(1))
+                .take(ring.len()).map(|(start, end)| Line { start, end })
+        }).collect();
+        let mut sources = rustc_hash::FxHashMap::default();
+        sources.insert(Handle::new(1), crate::scene::BoundarySource {
+            curves: segments.iter().cloned().map(Curve::Line).collect(),
+            segments,
+        });
+        let mut command = BoundaryCommand::new(sources, Vec::new(), WorkingPlane::default());
+        command.point_regions = vec![rings];
+        command.output_region = true;
+
+        let entities = command.make_entities();
+        let [EntityType::Region(region)] = entities.as_slice() else {
+            panic!("expected one region");
+        };
+        assert_eq!(region.wires.len(), 2);
     }
 }

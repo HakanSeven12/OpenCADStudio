@@ -113,7 +113,8 @@ impl SplineditCommand {
                 source.control_points.iter().map(|point| [point.x, point.y, point.z]).collect(),
                 source.knots.clone(), weights)?
                 .with_periodicity(source.flags.closed || source.flags.periodic)
-                .elevated(degree - current)?;
+                .elevated(degree - current)?
+                .compact_knots(source.control_tolerance.max(1e-9))?;
             let mut result = source.clone();
             result.degree = curve.degree() as i32;
             result.control_points = curve.control_points().iter().map(|point| Vector3::new(point[0], point[1], point[2])).collect();

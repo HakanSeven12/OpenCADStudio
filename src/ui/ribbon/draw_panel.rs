@@ -127,13 +127,27 @@ struct Panel {
 }
 
 const PANELS: &[Panel] = &[
-    Panel { id: PANEL_ID, title_id: TITLE_ID, title: "Draw", tools: TOOLS },
-    Panel { id: "modify_extension", title_id: "modify_extension_title", title: "Modify", tools: super::modify_panel::TOOLS },
+    Panel {
+        id: PANEL_ID,
+        title_id: TITLE_ID,
+        title: "Draw",
+        tools: TOOLS,
+    },
+    Panel {
+        id: "modify_extension",
+        title_id: "modify_extension_title",
+        title: "Modify",
+        tools: super::modify_panel::TOOLS,
+    },
 ];
 
 fn panel_for_dropdown(id: &str) -> Option<Panel> {
     PANELS.iter().copied().find(|panel| {
-        panel.id == id || panel.tools.iter().any(|tool| tool.command == id && !tool.options.is_empty())
+        panel.id == id
+            || panel
+                .tools
+                .iter()
+                .any(|tool| tool.command == id && !tool.options.is_empty())
     })
 }
 
@@ -146,7 +160,10 @@ pub(super) fn parent_panel(id: &str) -> Option<&'static str> {
 }
 
 pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Element<'a, Message> {
-    let Some(panel) = PANELS.iter().find(|panel| panel.title == title && !panel.tools.is_empty()) else {
+    let Some(panel) = PANELS
+        .iter()
+        .find(|panel| panel.title == title && !panel.tools.is_empty())
+    else {
         return container(text(t!(title)).size(9).style(muted_text_style))
             .padding([1, 4])
             .into();
@@ -160,9 +177,12 @@ pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Ele
     PosReport::new(
         panel.id,
         button(
-            row![PosReport::new(panel.title_id, text(t!(title)).size(9)), arrow]
-                .spacing(4)
-                .align_y(iced::Center),
+            row![
+                PosReport::new(panel.title_id, text(t!(title)).size(9)),
+                arrow
+            ]
+            .spacing(4)
+            .align_y(iced::Center),
         )
         .on_press(Message::ToggleRibbonDropdown(panel.id.to_string()))
         .style(move |theme: &Theme, status| tool_btn_style(theme, expanded, status))
@@ -225,8 +245,6 @@ pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element
         || tools.len().div_ceil(cols) as f32 * (CELL + GAP) - GAP + 12.0,
         |tool| tool.options.len() as f32 * OPTION_HEIGHT,
     );
-    let ordered: Vec<&Tool> = tools.iter().filter(|tool| tool.options.is_empty())
-        .chain(tools.iter().filter(|tool| !tool.options.is_empty())).collect();
     let contents: Element<'static, Message> = if let Some(tool) = option_tool {
         column(
             tool.options
@@ -248,13 +266,17 @@ pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element
         .into()
     } else {
         column(
-            ordered
+            tools
                 .chunks(cols)
                 .map(|tools| {
                     row(tools
                         .iter()
                         .map(|tool| {
-                            tool_button(tool, ribbon.active_tool.as_deref() == Some(tool.command), panel.id)
+                            tool_button(
+                                tool,
+                                ribbon.active_tool.as_deref() == Some(tool.command),
+                                panel.id,
+                            )
                         })
                         .collect::<Vec<_>>())
                     .spacing(GAP)
@@ -274,4 +296,30 @@ pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element
             style
         });
     dropdown_backdrop(position_ribbon_dropdown(panel.into(), false, left, top))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parent_panel, PANEL_ID, TOOLS};
+
+    #[test]
+    fn extension_submenus_resolve_to_their_parent_panel() {
+        assert_eq!(parent_panel("REVCLOUD"), Some(PANEL_ID));
+        assert_eq!(parent_panel("DRAWORDER_FRONT"), Some("modify_extension"));
+        assert_eq!(parent_panel("unknown"), None);
+    }
+
+    #[test]
+    fn split_tools_follow_plain_tools() {
+        let first_split = TOOLS
+            .iter()
+            .position(|tool| !tool.options.is_empty())
+            .unwrap_or(TOOLS.len());
+        assert!(TOOLS[..first_split]
+            .iter()
+            .all(|tool| tool.options.is_empty()));
+        assert!(TOOLS[first_split..]
+            .iter()
+            .all(|tool| !tool.options.is_empty()));
+    }
 }

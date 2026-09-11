@@ -713,6 +713,19 @@ mod tests {
         app
     }
 
+    #[test]
+    fn ncopy_without_preselection_gathers_objects() {
+        let mut app = fresh_app();
+        let _ = app.run_command_line("NCOPY");
+        assert_eq!(
+            app.tabs[app.active_tab]
+                .active_cmd
+                .as_ref()
+                .map(|active| active.name()),
+            Some("SELECT")
+        );
+    }
+
     /// Run one command line and return only the command-line text it appended.
     fn run_capture(app: &mut OpenCADStudio, cmd: &str) -> String {
         let start = app.command_line.history.len();

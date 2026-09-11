@@ -1600,6 +1600,17 @@ mod tests {
         assert!(!is_active_tool("BLOCKPALETTE", &None, &off));
     }
 
+    #[test]
+    fn escape_returns_from_an_extension_submenu_then_closes_the_panel() {
+        let mut ribbon = Ribbon::default();
+        ribbon.open_dropdown = Some("DRAWORDER_FRONT".to_string());
+
+        assert!(ribbon.escape_extension());
+        assert_eq!(ribbon.open_dropdown.as_deref(), Some("modify_extension"));
+        assert!(ribbon.escape_extension());
+        assert_eq!(ribbon.open_dropdown, None);
+    }
+
     /// Reproducible element-construction benchmark for the ribbon view. Run with:
     /// `cargo test --lib --release -- --ignored --nocapture bench_ribbon_view_construction`
     ///

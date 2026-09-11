@@ -2341,4 +2341,35 @@ mod tests {
         let line_sort = entries.get(&h_line.value()).copied().unwrap_or(h_line.value());
         assert!(hatch_sort > line_sort);
     }
+
+    #[test]
+    fn draworder_mode_aliases_route_directly() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let line = app.tabs[i]
+            .scene
+            .add_entity_clone(EntityType::Line(Default::default()));
+        let hatch = app.tabs[i]
+            .scene
+            .add_entity_clone(EntityType::Hatch(Default::default()));
+
+        app.tabs[i]
+            .scene
+            .replace_selection(std::iter::once(hatch).collect());
+        let _ = app.run_command_line("DRAWORDER_FRONT");
+        let entries = effective_sort_map(&app);
+        assert!(
+            entries.get(&hatch.value()).copied().unwrap_or(hatch.value())
+                > entries.get(&line.value()).copied().unwrap_or(line.value())
+        );
+
+        app.tabs[i]
+            .scene
+            .replace_selection(std::iter::once(hatch).collect());
+        let _ = app.run_command_line("DRAWORDER_ABOVE");
+        assert!(app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|command| command.name() == "DRAWORDER" && command.needs_entity_pick()));
+    }
 }

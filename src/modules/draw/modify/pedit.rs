@@ -37,6 +37,7 @@ enum Mode {
     AwaitWidth,
     AwaitLinetype,
     PolyVertex(usize),
+    PolyRange { start: usize, end: usize, split: bool },
     PolyMove(usize),
     PolyInsert(usize),
     PolyWidthStart(usize, f64),
@@ -229,7 +230,8 @@ impl CadCommand for PeditCommand {
                 vertex = index + 1
             )
             .into_owned(),
-            Mode::PolyVertex(index) => format!("PEDIT  Vertex {} [Next/Previous/Insert/Move/Width/eXit] <Next>:", index + 1),
+            Mode::PolyVertex(index) => format!("PEDIT  Vertex {} [Next/Previous/Break/Insert/Move/Straighten/Width/eXit] <Next>:", index + 1),
+            Mode::PolyRange { end, .. } => format!("PEDIT  Vertex {} [Next/Previous/Go/eXit] <Next>:", end + 1),
             Mode::PolyMove(index) => format!("PEDIT  Specify new location for vertex {}:", index + 1),
             Mode::PolyWidthStart(_, width) => format!("PEDIT  Specify starting width for next segment <{width}>:"),
             Mode::PolyWidthEnd(_, width) => format!("PEDIT  Specify ending width for next segment <{width}>:"),
@@ -292,7 +294,8 @@ impl CadCommand for PeditCommand {
                 vec![CmdOption::new(t!("Yes").as_ref(), "Y"), CmdOption::new(t!("No").as_ref(), "N")]
             }
             Mode::JoinGather(_) => vec![CmdOption::enter(t!("Join").as_ref())],
-            Mode::PolyVertex(_) => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Insert", "I"), CmdOption::new("Move", "M"), CmdOption::new("Width", "W"), CmdOption::new("Exit", "X")],
+            Mode::PolyVertex(_) => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Break", "B"), CmdOption::new("Straighten", "S"), CmdOption::new("Insert", "I"), CmdOption::new("Move", "M"), CmdOption::new("Width", "W"), CmdOption::new("Exit", "X")],
+            Mode::PolyRange { .. } => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Go", "G"), CmdOption::new("Exit", "X")],
             Mode::AwaitLinetype => vec![CmdOption::new("On", "ON"), CmdOption::new("Off", "OFF")],
             Mode::MeshVertexMove(_) => vec![],
             _ => vec![],
@@ -369,6 +372,8 @@ impl CadCommand for PeditCommand {
 
     fn inject_picked_entity(&mut self, entity: EntityType) {
         self.entities.insert(entity.common().handle.value(), entity);
+        let count = self.vertex_count();
+        if let Mode::PolyVertex(index) = &mut self.mode { *index = (*index).min(count.saturating_sub(1)); }
     }
 
     fn on_pedit_applied(&mut self) {
@@ -461,10 +466,26 @@ impl CadCommand for PeditCommand {
             }
             Mode::JoinGather(_) => None,
             Mode::PolyMove(_) | Mode::PolyInsert(_) => None,
+            Mode::PolyRange { start, end, split } => {
+                match up.as_str() {
+                    "N" | "NEXT" => { if *end + 1 < vertex_count { *end += 1; } }
+                    "P" | "PREVIOUS" => { *end = end.saturating_sub(1); }
+                    "X" | "EXIT" => self.mode = Mode::PolyVertex(*start),
+                    "G" | "GO" => {
+                        let (first, last, split) = ((*start).min(*end), (*start).max(*end), *split);
+                        self.mode = Mode::PolyVertex(first);
+                        return Some(CmdResult::PeditOp { handle: self.target?, op: PeditOp::VertexRange { first, last, split } });
+                    }
+                    _ => {}
+                }
+                Some(CmdResult::NeedPoint)
+            }
             Mode::PolyVertex(index) => {
                 match up.as_str() {
                     "N" | "NEXT" => { if *index + 1 < vertex_count { *index += 1; } }
                     "P" | "PREVIOUS" => { *index = index.saturating_sub(1); }
+                    "B" | "BREAK" => self.mode = Mode::PolyRange { start: *index, end: *index, split: true },
+                    "S" | "STRAIGHTEN" => self.mode = Mode::PolyRange { start: *index, end: *index, split: false },
                     "I" | "INSERT" => self.mode = Mode::PolyInsert(*index),
                     "M" | "MOVE" => self.mode = Mode::PolyMove(*index),
                     "W" | "WIDTH" => self.mode = Mode::PolyWidthStart(*index, current_width),
@@ -672,7 +693,7 @@ impl CadCommand for PeditCommand {
             }
             Mode::MultipleConvert => self.on_text_input("Y").unwrap_or(CmdResult::NeedPoint),
             Mode::PolyWidthStart(_, width) | Mode::PolyWidthEnd(_, width) => { let value = width.to_string(); self.on_text_input(&value).unwrap_or(CmdResult::NeedPoint) }
-            Mode::PolyVertex(_) => self.on_text_input("N").unwrap_or(CmdResult::NeedPoint),
+            Mode::PolyVertex(_) | Mode::PolyRange { .. } => self.on_text_input("N").unwrap_or(CmdResult::NeedPoint),
             Mode::PolyMove(_) | Mode::PolyInsert(_) => { self.mode = Mode::Options; CmdResult::NeedPoint }
             Mode::AwaitLinetype => { self.mode = Mode::Options; CmdResult::NeedPoint }
             Mode::JoinGather(list) if list.len() >= 2 => CmdResult::JoinEntities(list.clone()),
@@ -711,6 +732,7 @@ pub enum PeditOp {
     SetClosed(bool),
     SetWidth(f64),
     SetVertexWidth { index: usize, start: f64, end: f64 },
+    VertexRange { first: usize, last: usize, split: bool },
     SetLinetypeGeneration(bool),
     EditVertex { index: usize, point: DVec3, insert: bool },
     Reverse,
@@ -731,9 +753,47 @@ pub enum PeditOp {
 
 // ── Apply logic (pure entity edits; driver handles convert/break/marker) ──
 
+/// Edit complete vertex records; no curve interpolation or geometric splitting
+/// is needed because both range boundaries are existing vertices.
+pub fn edit_vertex_range(entity: &EntityType, first: usize, last: usize, split: bool) -> Option<Vec<EntityType>> {
+    macro_rules! edit {
+        ($polyline:expr, $closed:expr, $variant:ident, $set_open:expr) => {{
+            let polyline = $polyline;
+            if first > last || last >= polyline.vertices.len() { return None; }
+            if split && first == last && (first == 0 || last + 1 == polyline.vertices.len()) { return None; }
+            if !split {
+                if first == last { return None; }
+                let mut result = polyline.clone();
+                result.vertices.drain(first + 1..last);
+                result.vertices[first].bulge = 0.0;
+                Some(vec![EntityType::$variant(result)])
+            } else {
+                let mut vertices = polyline.vertices.clone();
+                if $closed { vertices.push(vertices.first()?.clone()); }
+                let mut results = Vec::new();
+                for part in [&vertices[..=first], &vertices[last..]] {
+                    if part.len() < 2 { continue; }
+                    let mut result = polyline.clone();
+                    result.vertices = part.to_vec();
+                    ($set_open)(&mut result);
+                    results.push(EntityType::$variant(result));
+                }
+                (!results.is_empty()).then_some(results)
+            }
+        }};
+    }
+    match entity {
+        EntityType::LwPolyline(polyline) => edit!(polyline, polyline.is_closed, LwPolyline,
+            |value: &mut acadrust::entities::LwPolyline| { value.is_closed = false; }),
+        EntityType::Polyline2D(polyline) => edit!(polyline, polyline.flags.is_closed(), Polyline2D,
+            |value: &mut acadrust::entities::Polyline2D| { value.flags.set_closed(false); }),
+        _ => None,
+    }
+}
+
 pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
     match op {
-        PeditOp::Multiple(_, _) => false,
+        PeditOp::Multiple(_, _) | PeditOp::VertexRange { .. } => false,
         PeditOp::SetVertexWidth { index, start, end } => {
             if !start.is_finite() || !end.is_finite() || *start < 0.0 || *end < 0.0 { return false; }
             match entity {

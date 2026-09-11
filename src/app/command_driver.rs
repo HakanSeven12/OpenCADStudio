@@ -3247,6 +3247,24 @@ impl OpenCADStudio {
                         self.tabs[i].dirty = true;
                         self.refresh_properties();
                     }
+                    PeditOp::VertexRange { first, last, split } => {
+                        let pieces = self.tabs[i].scene.document.get_entity(handle).and_then(|entity| {
+                            crate::modules::draw::modify::pedit::edit_vertex_range(entity, *first, *last, *split)
+                        });
+                        if let Some(mut pieces) = pieces {
+                            self.push_undo_snapshot(i, "PEDIT");
+                            let source = pieces.remove(0);
+                            self.tabs[i].scene.update_entity(source);
+                            for piece in pieces { self.tabs[i].scene.add_entity(piece); }
+                            let updated = self.tabs[i].scene.document.get_entity(handle).cloned();
+                            if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+                                if let Some(entity) = updated { command.inject_picked_entity(entity); }
+                                command.on_pedit_applied();
+                            }
+                            self.tabs[i].dirty = true;
+                            self.refresh_properties();
+                        } else { self.command_line.push_error("PEDIT: invalid vertex range."); }
+                    }
                     // The convert replaces the entity (new handle).
                     PeditOp::ConvertToPolyline => {
                         let converted = self.tabs[i]

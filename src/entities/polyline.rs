@@ -900,7 +900,7 @@ pub(crate) fn polyline3d_control_vertex_count(pl: &Polyline3D) -> usize {
     polyline3d_control_indices(pl).len()
 }
 
-fn polyline3d_controls(pl: &Polyline3D) -> Vec<acadrust::entities::Vertex3DPolyline> {
+pub(crate) fn polyline3d_controls(pl: &Polyline3D) -> Vec<acadrust::entities::Vertex3DPolyline> {
     polyline3d_control_indices(pl)
         .into_iter()
         .filter_map(|index| pl.vertices.get(index).cloned())

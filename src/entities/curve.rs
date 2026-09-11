@@ -114,9 +114,14 @@ pub fn entity_spatial_measurement(entity: &EntityType) -> Option<cadkernel::spac
     let curve = match entity {
         EntityType::Polyline3D(polyline) => {
             if polyline.flags.spline_fit {
-                let degree = match polyline.smooth_type as i16 { 5 => 2, 6 => 3, _ => return None };
-                let controls: Vec<_> = polyline.vertices.iter().filter(|vertex| vertex.flags & 16 != 0)
-                    .map(|vertex| [vertex.position.x, vertex.position.y, vertex.position.z]).collect();
+                use acadrust::entities::polyline3d::SmoothSurfaceType;
+                let degree = match polyline.smooth_type {
+                    SmoothSurfaceType::QuadraticBSpline => 2,
+                    SmoothSurfaceType::CubicBSpline | SmoothSurfaceType::Bezier => 3,
+                    SmoothSurfaceType::None => return None,
+                };
+                let controls: Vec<_> = crate::entities::polyline::polyline3d_controls(polyline)
+                    .into_iter().map(|vertex| xyz(vertex.position)).collect();
                 let curve = NurbsCurve3::from_control_polygon(degree, &controls, polyline.is_closed())?;
                 return ArcLengthCurve3::from_nurbs(curve);
             }
@@ -127,7 +132,7 @@ pub fn entity_spatial_measurement(entity: &EntityType) -> Option<cadkernel::spac
         }
         EntityType::Spline(spline) => {
             if crate::entities::spline::uses_fit_method(spline) {
-                let points: Vec<_> = spline.fit_points.iter().copied().map(xyz).collect();
+                let mut points: Vec<_> = spline.fit_points.iter().copied().map(xyz).collect();
                 let parameterization = match spline.knot_parameterization {
                     1 => Parameterization::Centripetal, 2 => Parameterization::Uniform,
                     _ => Parameterization::Chord,
@@ -135,9 +140,15 @@ pub fn entity_spatial_measurement(entity: &EntityType) -> Option<cadkernel::spac
                 if spline.flags.periodic {
                     NurbsCurve3::interpolate_periodic(&points, parameterization)?
                 } else {
-                    if spline.flags.closed { return None; }
-                    NurbsCurve3::interpolate_fit(&points, Some(xyz(spline.begin_tangent)),
-                        Some(xyz(spline.end_tangent)), parameterization)?
+                    if spline.flags.closed && points.first() != points.last() {
+                        if let Some(first) = points.first().copied() { points.push(first); }
+                    }
+                    let tangent = |value: Vector3| {
+                        let value = xyz(value);
+                        (Vec3::from(value).length_squared() > 1e-18).then_some(value)
+                    };
+                    NurbsCurve3::interpolate_fit(&points, tangent(spline.begin_tangent),
+                        tangent(spline.end_tangent), parameterization)?
                 }
             } else {
                 let controls: Vec<_> = spline.control_points.iter().copied().map(xyz).collect();
@@ -728,6 +739,42 @@ mod tests {
         // nothing; the geometry is what is checked.
         spline.fit_points[2].z = 9.0;
         assert!(entity_curve(&EntityType::Spline(spline)).is_none());
+    }
+
+    #[test]
+    fn spatial_polyline_measurement_uses_unflagged_fit_controls() {
+        use acadrust::entities::polyline3d::SmoothSurfaceType;
+        use acadrust::entities::{Polyline3D, Vertex3DPolyline};
+
+        let mut polyline = Polyline3D::new();
+        polyline.flags.spline_fit = true;
+        polyline.smooth_type = SmoothSurfaceType::Bezier;
+        polyline.vertices = vec![
+            Vertex3DPolyline::from_xyz(0.0, 0.0, 0.0),
+            Vertex3DPolyline::from_xyz(1.0, 2.0, 1.0),
+            Vertex3DPolyline::from_xyz(3.0, 1.0, 3.0),
+            Vertex3DPolyline::from_xyz(5.0, 4.0, 2.0),
+        ];
+
+        let curve = entity_spatial_measurement(&EntityType::Polyline3D(polyline)).unwrap();
+        assert!(curve.length().is_finite() && curve.length() > 0.0);
+    }
+
+    #[test]
+    fn spatial_fit_spline_accepts_unset_tangents_and_closes() {
+        let mut spline = SplineEnt::default();
+        spline.degree = 3;
+        spline.flags.closed = true;
+        spline.fit_points = vec![
+            v3(0.0, 0.0, 0.0),
+            v3(2.0, 0.0, 1.0),
+            v3(2.0, 2.0, 3.0),
+            v3(0.0, 2.0, 1.0),
+        ];
+
+        let curve = entity_spatial_measurement(&EntityType::Spline(spline)).unwrap();
+        assert!(curve.is_closed());
+        assert!(curve.length().is_finite() && curve.length() > 0.0);
     }
 
     fn hints(snap: &CurveSnap, want: SnapHint) -> Vec<glam::DVec3> {

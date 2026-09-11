@@ -165,7 +165,9 @@ impl XLineCommand {
                 let base = self.base?;
                 let first = self.reference?.1;
                 let last = (pt - base).try_normalize()?;
-                (base, first + last)
+                let direction = cadkernel::space::curve::angle_bisector(
+                    first.to_array(), last.to_array(), self.plane.z.to_array())?;
+                (base, DVec3::from_array(direction))
             }
             XLineMode::OffsetSide => {
                 let (base, dir) = self.reference?;

@@ -208,6 +208,8 @@ pub struct FillPlane {
 /// A hatched region defined by a closed polygon boundary.
 #[derive(Clone, Debug)]
 pub struct HatchModel {
+    /// Recorded hatch origin in its fill plane, independent of intrinsic PAT line bases.
+    pub pattern_origin: Option<[f64; 2]>,
     pub render_instance: Option<super::instance_model::RenderInstance>,
     /// World XY anchor (in the same offset-relative coordinate space as
     /// the rest of the scene — `world_offset` already subtracted, but

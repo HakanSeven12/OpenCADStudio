@@ -4545,11 +4545,6 @@ impl OpenCADStudio {
                                     if let Some(entry) =
                                         crate::scene::model::hatch_patterns::find(&name)
                                     {
-                                        let old_origin = hatch
-                                            .pattern
-                                            .lines
-                                            .first()
-                                            .map(|line| line.base_point);
                                         let mut pattern = crate::scene::model::hatch_patterns::build_dxf_pattern(entry);
                                         crate::entities::hatch::scale_pattern_geometry(
                                             &mut pattern,
@@ -4559,16 +4554,8 @@ impl OpenCADStudio {
                                             &mut pattern,
                                             (angle as f64).to_radians(),
                                         );
-                                        if let (Some(old), Some(new)) = (
-                                            old_origin,
-                                            pattern.lines.first().map(|line| line.base_point),
-                                        ) {
-                                            crate::entities::hatch::translate_pattern_geometry(
-                                                &mut pattern,
-                                                old.x - new.x,
-                                                old.y - new.y,
-                                            );
-                                        }
+                                        let origin = hatch.pattern_origin();
+                                        crate::entities::hatch::translate_pattern_geometry(&mut pattern, origin.x, origin.y);
                                         hatch.pattern = pattern;
                                         hatch.is_solid = matches!(
                                             entry.gpu,
@@ -4582,30 +4569,16 @@ impl OpenCADStudio {
                                     let requested_scale = scale.max(1.0e-6) as f64;
                                     if hatch.pattern_scale > 1.0e-12 {
                                         let factor = requested_scale / hatch.pattern_scale;
-                                        crate::entities::hatch::scale_pattern_geometry(
-                                            &mut hatch.pattern,
-                                            factor,
-                                        );
+                                        hatch.scale_pattern_about_origin(factor);
                                     }
                                     let requested_angle = (angle as f64).to_radians();
                                     let delta = requested_angle - hatch.pattern_angle;
-                                    crate::entities::hatch::rotate_pattern_geometry(
-                                        &mut hatch.pattern,
-                                        delta,
-                                    );
+                                    hatch.rotate_pattern_about_origin(delta);
                                 }
                                 hatch.pattern_scale = scale.max(1.0e-6) as f64;
                                 hatch.pattern_angle = (angle as f64).to_radians();
                                 if let Some((x, y)) = origin {
-                                    if let Some(current) =
-                                        hatch.pattern.lines.first().map(|line| line.base_point)
-                                    {
-                                        crate::entities::hatch::translate_pattern_geometry(
-                                            &mut hatch.pattern,
-                                            x - current.x,
-                                            y - current.y,
-                                        );
-                                    }
+                                    hatch.set_pattern_origin(acadrust::types::Vector2::new(x, y));
                                 }
                                 if disassociate {
                                     for path in &mut hatch.paths {

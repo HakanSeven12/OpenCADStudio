@@ -1674,6 +1674,7 @@ impl Scene {
                 let fill_plane_boundary = Some(Arc::new(fill_plane.1));
                 let fill_plane = Some(fill_plane.0);
                 models.push(HatchModel {
+                    pattern_origin: None,
                     render_instance,
                     boundary: Arc::new(boundary),
                     boundary_wcs: None,
@@ -2107,6 +2108,7 @@ impl Scene {
 
         let storage = crate::entities::curve::ocs_plane(dxf.normal, dxf.elevation);
         Some(HatchModel {
+            pattern_origin: Some([dxf.pattern_origin().x, dxf.pattern_origin().y]),
             render_instance: None,
             boundary: std::sync::Arc::new(boundary_f32),
             boundary_wcs: None,
@@ -2429,6 +2431,7 @@ impl Scene {
             })
             .collect();
         HatchModel {
+            pattern_origin: None,
             render_instance: None,
             boundary: std::sync::Arc::new(boundary),
             boundary_wcs: None,
@@ -2663,6 +2666,9 @@ impl Scene {
         // carries `world_origin: [0, 0]`, which after the world_offset removal
         // leaves the fill mis-placed and effectively invisible until a later
         // edit rebuilds it from the DXF — so keep the seed, don't overwrite it.
+        if let Some(origin) = model.pattern_origin {
+            dxf.record_pattern_origin(Vector2::new(origin[0], origin[1]));
+        }
         let mut entity = EntityType::Hatch(dxf);
 
         if let Some(layer) = layer {

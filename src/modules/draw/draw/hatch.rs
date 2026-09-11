@@ -387,6 +387,7 @@ impl HatchCommand {
                 }
             }
             return HatchModel {
+                pattern_origin: source.pattern_origin,
                 render_instance: None,
                 boundary: std::sync::Arc::new(rel),
                 pattern,
@@ -445,6 +446,7 @@ impl HatchCommand {
             }
         }
         HatchModel {
+            pattern_origin: Some(self.default_origin),
             render_instance: None,
             boundary: std::sync::Arc::new(rel),
             pattern,
@@ -969,6 +971,7 @@ impl GradientCommand {
             1.0e-6,
         );
         HatchModel {
+            pattern_origin: None,
             render_instance: None,
             boundary: std::sync::Arc::new(rel),
             pattern: HatchPattern::Gradient {

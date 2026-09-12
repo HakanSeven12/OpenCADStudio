@@ -1631,10 +1631,12 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         .collect();
 
     // Flow lines into the next column when the active column's configured
-    // height is exhausted. Explicit `\N` breaks remain authoritative. Dynamic
-    // auto-height balances the content; static/manual columns use their stored
-    // height (falling back to the entity rectangle height).
-    if cols.active() {
+    // height is exhausted. An explicit `\N` already defines the dynamic flow;
+    // balancing it again would consume another column before that break.
+    // Static/manual columns use their stored height (falling back to the entity
+    // rectangle height).
+    let has_explicit_column_break = sub_lines.iter().any(|line| line.starts_column);
+    if cols.active() && !(cols.auto_height && has_explicit_column_break) {
         let mut pending_after = 0.0_f32;
         let total_advance: f32 = sub_lines
             .iter()
@@ -2661,6 +2663,48 @@ mod tests {
             stroke_point_count(&layout) > 0,
             "style font derived from arial.ttf should produce drawable block text"
         );
+    }
+
+    #[test]
+    fn explicit_column_break_is_not_balanced_twice() {
+        let layout = layout_mtext(&MTextRenderOpts {
+            columns: MTextColumns {
+                count: 3,
+                width: 10.0,
+                gutter: 2.0,
+                auto_height: true,
+                ..Default::default()
+            },
+            value: "one\\Ptwo\\Nthree",
+            insertion: [0.0, 0.0, 0.0],
+            height: 1.0,
+            rect_w: 34.0,
+            rotation: 0.0,
+            style: &style("txt"),
+            attach_h_anchor: 0.0,
+            v_anchor: MTextVAnchor::Top,
+            line_spacing_factor: 1.0,
+            exact_line_spacing: false,
+            rectangle_height: 0.0,
+            vertical_text: false,
+            want_glyph_boxes: false,
+        });
+
+        let origin_x = |text: &str| {
+            layout
+                .strokes
+                .iter()
+                .find_map(|stroke| {
+                    stroke
+                        .run
+                        .as_ref()
+                        .filter(|run| run.text == text)
+                        .map(|_| stroke.origin[0])
+                })
+                .unwrap()
+        };
+        assert!((origin_x("two") - origin_x("one")).abs() < 1e-6);
+        assert!((origin_x("three") - 12.0).abs() < 1e-6);
     }
 }
 

@@ -136,3 +136,7 @@ iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00
 
 [profile.release]
 strip = true
+
+[[bench]]
+name = "performance_benchmarks"
+harness = false

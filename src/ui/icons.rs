@@ -159,7 +159,8 @@ thread_local! {
 /// trigger a `RefCell` panic on the second `borrow_mut`, because
 /// no `borrow_mut` is held while parsing runs. (The same
 /// `thread_local!` + `RefCell` shape is used by `SEMANTIC_CACHE`.)
-fn themed_handle(bytes: &'static [u8]) -> svg::Handle {
+#[doc(hidden)]
+pub fn themed_handle(bytes: &'static [u8]) -> svg::Handle {
     let key = (bytes.as_ptr() as usize, bytes.len());
     if let Some(handle) = THEMED_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
         return handle;

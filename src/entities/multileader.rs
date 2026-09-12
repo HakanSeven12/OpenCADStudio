@@ -2293,11 +2293,18 @@ impl MultiLeaderTess for MultiLeader {
                 // Run-less stroke groups are decoration geometry (underline /
                 // overline / strike-through, stacked-fraction bars) — they have
                 // no glyphs to replace them, so they must be drawn as lines.
+                // Web runs that require bidi or joined-script shaping keep their
+                // already shaped vector geometry because the per-glyph SDF path has no
+                // cluster-position data.
                 let mut deco_pts: Vec<[f32; 3]> = Vec::new();
                 let mut deco_fill: Vec<[f32; 3]> = Vec::new();
                 if let Ok(mut atlas) = crate::scene::text::sdf_atlas::text_atlas().lock() {
                     for ts in &layout.strokes {
-                        let Some(run) = &ts.run else {
+                        let is_shaped = ts
+                            .run
+                            .as_ref()
+                            .is_some_and(|r| crate::scene::text::web_font::requires_shaping(&r.text));
+                        if ts.run.is_none() || is_shaped {
                             for stroke in &ts.strokes {
                                 if stroke.len() < 2 {
                                     continue;
@@ -2321,7 +2328,8 @@ impl MultiLeaderTess for MultiLeader {
                                 ]);
                             }
                             continue;
-                        };
+                        }
+                        let run = ts.run.as_ref().unwrap();
                         let quads = crate::scene::text::glyph_quads::layout_glyph_quads(
                             &mut atlas,
                             run.height,
@@ -2349,7 +2357,7 @@ impl MultiLeaderTess for MultiLeader {
                         );
                     }
                 }
-                if !sdf_verts.is_empty() || !deco_pts.is_empty() {
+                if !sdf_verts.is_empty() || !deco_pts.is_empty() || !deco_fill.is_empty() {
                     // Pick box from the glyph quads (f64 accumulate → f32).
                     let (mut nx, mut ny, mut xx, mut xy) =
                         (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
@@ -2362,6 +2370,12 @@ impl MultiLeaderTess for MultiLeader {
                         xy = xy.max(y);
                     }
                     for p in deco_pts.iter().filter(|p| p[0].is_finite()) {
+                        nx = nx.min(p[0] as f64);
+                        xx = xx.max(p[0] as f64);
+                        ny = ny.min(p[1] as f64);
+                        xy = xy.max(p[1] as f64);
+                    }
+                    for p in deco_fill.iter().filter(|p| p[0].is_finite()) {
                         nx = nx.min(p[0] as f64);
                         xx = xx.max(p[0] as f64);
                         ny = ny.min(p[1] as f64);
@@ -2616,5 +2630,53 @@ impl MultiLeaderTess for MultiLeader {
         }
 
         wires
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acadrust::CadDocument;
+
+    #[test]
+    fn test_mleader_arabic_text_tessellation() {
+        let doc = CadDocument::default();
+        let mut ml = MultiLeader::default();
+        ml.content_type = LeaderContentType::MText;
+        ml.context.text_string = "عربي".to_string();
+        ml.context.text_height = 10.0;
+        ml.path_type = MultiLeaderPathType::StraightLineSegments;
+
+        let wires = ml.tessellate(
+            &doc,
+            acadrust::Handle::default(),
+            false,
+            [1.0, 1.0, 1.0, 1.0],
+            1.0,
+            1.0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            [0.0, 0.0, 0.0, 1.0],
+        );
+
+        // Find the text wire model:
+        // Arabic text requires shaping, so it should emit vector fill_tris
+        // instead of unshaped SDF glyph quads (text_verts).
+        let text_wire = wires
+            .iter()
+            .find(|w| !w.fill_tris.is_empty() || !w.text_verts.is_empty())
+            .expect("Should produce a text wire for mleader");
+
+        assert!(
+            text_wire.text_verts.is_empty(),
+            "Arabic text must not be emitted as unshaped SDF glyph quads"
+        );
+        assert!(
+            !text_wire.fill_tris.is_empty(),
+            "Arabic text must emit shaped vector fill triangles"
+        );
     }
 }

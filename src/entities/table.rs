@@ -1476,7 +1476,11 @@ pub fn tessellate_table(
         rustc_hash::FxHashSet::default();
     let sel_col = WireModel::SELECTED;
 
-    let mut add_edge = |a: Vec3, b: Vec3, col: [f32; 4], lw: f32| {
+    let mut add_edge = |a: Vec3,
+                        b: Vec3,
+                        col: [f32; 4],
+                        lw: f32,
+                        borders: &mut HashMap<([u8; 4], u32), ([f32; 4], f32, Vec<[f32; 3]>)>| {
         let k = (
             (a.x * 1000.0) as i32,
             (a.y * 1000.0) as i32,
@@ -1627,19 +1631,19 @@ pub fn tessellate_table(
             };
             let (tv, tc, tw) = edge(0);
             if tv {
-                add_edge(tl, tr, tc, tw);
+                add_edge(tl, tr, tc, tw, &mut borders);
             }
             let (rv, rc, rw) = edge(1);
             if rv {
-                add_edge(tr, br_, rc, rw);
+                add_edge(tr, br_, rc, rw, &mut borders);
             }
             let (bv, bc, bw) = edge(2);
             if bv {
-                add_edge(bl, br_, bc, bw);
+                add_edge(bl, br_, bc, bw, &mut borders);
             }
             let (lv, lc, lw) = edge(3);
             if lv {
-                add_edge(tl, bl, lc, lw);
+                add_edge(tl, bl, lc, lw, &mut borders);
             }
 
             let value_contents: Vec<_> = cell
@@ -1960,6 +1964,41 @@ pub fn tessellate_table(
                         let Some(run) = &stroke.run else {
                             continue;
                         };
+                        if crate::scene::text::web_font::requires_shaping(&run.text) {
+                            if !stroke.fill_tris.is_empty() {
+                                let entry = fills
+                                    .entry(key4(tcol))
+                                    .or_insert_with(|| (tcol, Vec::new()));
+                                for &[x, y] in &stroke.fill_tris {
+                                    entry.1.push([
+                                        stroke.origin[0] as f32 + x,
+                                        stroke.origin[1] as f32 + y,
+                                        to.z as f32,
+                                    ]);
+                                }
+                            }
+                            if !stroke.strokes.is_empty() {
+                                let entry = borders
+                                    .entry((key4(tcol), (line_weight_px * 100.0) as u32))
+                                    .or_insert_with(|| (tcol, line_weight_px, Vec::new()));
+                                for s in &stroke.strokes {
+                                    if s.len() < 2 {
+                                        continue;
+                                    }
+                                    if !entry.2.is_empty() {
+                                        entry.2.push([f32::NAN; 3]);
+                                    }
+                                    for &[x, y] in s {
+                                        entry.2.push([
+                                            stroke.origin[0] as f32 + x,
+                                            stroke.origin[1] as f32 + y,
+                                            to.z as f32,
+                                        ]);
+                                    }
+                                }
+                            }
+                            continue;
+                        }
                         let quads = crate::scene::text::glyph_quads::layout_glyph_quads(
                             &mut atlas,
                             run.height,

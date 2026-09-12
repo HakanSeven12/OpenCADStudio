@@ -281,10 +281,38 @@ pub fn text_run_placement_at_scale(
         // box one way while the strokes run the other (the bounds advance is
         // always positive — it uses |width_factor|). Left keeps its 0 reference.
         let sign = width_factor.signum();
+        let is_rtl = {
+            let mut strong_rtl = false;
+            for ch in value_for_bounds.chars() {
+                match unicode_bidi::bidi_class(ch) {
+                    unicode_bidi::BidiClass::R | unicode_bidi::BidiClass::AL => {
+                        strong_rtl = true;
+                        break;
+                    }
+                    unicode_bidi::BidiClass::L => {
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            strong_rtl
+        };
         let ax = match t.horizontal_alignment {
-            HA::Left => 0.0,
+            HA::Left => {
+                if is_rtl {
+                    b.advance * sign
+                } else {
+                    0.0
+                }
+            }
             HA::Center | HA::Middle => b.advance * 0.5 * sign,
-            HA::Right => b.advance * sign,
+            HA::Right => {
+                if is_rtl {
+                    0.0
+                } else {
+                    b.advance * sign
+                }
+            }
             HA::Aligned | HA::Fit => 0.0,
         };
         // Vertical anchor uses the inked extent (cap / baseline geometry).
@@ -681,6 +709,27 @@ impl Grippable for Text {
         {
             self.rotation = value.to_radians();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_arabic_text_placement() {
+        let mut t = Text::default();
+        t.value = "بسم الله".to_string();
+        t.height = 2.5;
+        t.insertion_point = acadrust::types::Vector3::new(10.0, 20.0, 0.0);
+        t.horizontal_alignment = HA::Left;
+
+        let doc = acadrust::CadDocument::default();
+        let placement = text_run_placement_at_scale(&t, &doc, 1.0);
+
+        // For Arabic text with default HA::Left, origin should be shifted left
+        // so the right edge of the text sits at the insertion point (X = 10.0).
+        assert!(placement.origin[0] < 10.0, "Arabic text origin must be to the left of insertion point: origin_x={}", placement.origin[0]);
     }
 }
 

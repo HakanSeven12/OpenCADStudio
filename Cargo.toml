@@ -49,6 +49,7 @@ sha2 = "0.10"
 fontdb = "0.23"
 ttf-parser = "0.25"
 cosmic-text = "0.15"
+unicode-bidi = "0.3"
 lyon_tessellation = "1.0.20"
 
 [dev-dependencies]

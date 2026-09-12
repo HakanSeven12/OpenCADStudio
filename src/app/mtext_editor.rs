@@ -640,16 +640,16 @@ fn vertical_caret_target(
     let anchor = boxes
         .iter()
         .find(|item| item.vis == caret)
-        .map(|item| (item.xmin, item.ymin, item.ymax))
+        .map(|item| ((if item.is_rtl { item.xmax } else { item.xmin }), item.ymin, item.ymax))
         .or_else(|| {
             caret.checked_sub(1).and_then(|previous| {
                 boxes
                     .iter()
                     .find(|item| item.vis == previous)
-                    .map(|item| (item.xmax, item.ymin, item.ymax))
+                    .map(|item| ((if item.is_rtl { item.xmin } else { item.xmax }), item.ymin, item.ymax))
             })
         })
-        .or_else(|| boxes.first().map(|item| (item.xmin, item.ymin, item.ymax)));
+        .or_else(|| boxes.first().map(|item| ((if item.is_rtl { item.xmax } else { item.xmin }), item.ymin, item.ymax)));
     let Some((anchor_x, anchor_y, anchor_top)) = anchor else {
         return caret.min(visible_count);
     };

@@ -491,10 +491,7 @@ fn build_shaped(_family: &str, text: &str) -> Option<ShapedRun> {
 fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
     use cosmic_text::{Attrs, Buffer, Family, Metrics, Shaping};
 
-    // Cap height / units-per-em of the requested family set the normalization:
-    // its capital letters become CAP_UNITS tall, and every fallback glyph is
-    // scaled into the same pixel-per-unit so sizes stay consistent.
-    let (upem_p, cap_p) = sysfont::with_face_data(family, |data, idx| {
+    let mut primary_metrics = sysfont::with_face_data(family, |data, idx| {
         let f = ttf_parser::Face::parse(data, idx).ok()?;
         let upem = f.units_per_em() as f32;
         let cap = f
@@ -504,17 +501,49 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
             .unwrap_or(0.7 * upem);
         Some((upem, cap))
     })
-    .flatten()?;
-    // Pixel (at SHAPE_FS) → 9-unit cap-height factor.
-    let px_to_9 = CAP_UNITS * upem_p / (SHAPE_FS * cap_p);
+    .flatten();
 
     let mut fs = font_system().lock().unwrap();
-    let attrs = Attrs::new().family(Family::Name(family));
+    let attrs = if family.is_empty() {
+        Attrs::new()
+    } else {
+        Attrs::new().family(Family::Name(family))
+    };
     let mut buf = Buffer::new(&mut fs, Metrics::new(SHAPE_FS, SHAPE_FS));
     // No wrapping: a run is a single line.
     buf.set_size(&mut fs, None, None);
     buf.set_text(&mut fs, text, &attrs, Shaping::Advanced, None);
     buf.shape_until_scroll(&mut fs, false);
+
+    if primary_metrics.is_none() {
+        for run in buf.layout_runs() {
+            for g in run.glyphs.iter() {
+                if g.glyph_id == 0 {
+                    continue;
+                }
+                let face_index = fs.db_mut().face(g.font_id).map(|f| f.index).unwrap_or(0);
+                if let Some(font) = fs.get_font(g.font_id, g.font_weight) {
+                    if let Ok(face) = ttf_parser::Face::parse(font.data(), face_index) {
+                        let upem = face.units_per_em() as f32;
+                        let cap = face
+                            .capital_height()
+                            .filter(|&c| c > 0)
+                            .map(|c| c as f32)
+                            .unwrap_or(0.7 * upem);
+                        primary_metrics = Some((upem, cap));
+                        break;
+                    }
+                }
+            }
+            if primary_metrics.is_some() {
+                break;
+            }
+        }
+    }
+
+    let (upem_p, cap_p) = primary_metrics.unwrap_or((1000.0, 700.0));
+    // Pixel (at SHAPE_FS) → 9-unit cap-height factor.
+    let px_to_9 = CAP_UNITS * upem_p / (SHAPE_FS * cap_p);
 
     let mut glyphs: Vec<PlacedGlyph> = Vec::new();
     let mut advance = 0.0_f32;

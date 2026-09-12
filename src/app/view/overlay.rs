@@ -141,10 +141,18 @@ impl MTextPreview {
             let d = dy * 1000.0 + dx; // prefer the correct line first
             if d < best_d {
                 best_d = d;
-                best = b.vis;
-                // After the glyph centre → caret sits after this char.
-                if wx > (b.xmin + b.xmax) * 0.5 {
-                    best = b.vis + 1;
+                if b.is_rtl {
+                    if wx < (b.xmin + b.xmax) * 0.5 {
+                        best = b.vis + 1;
+                    } else {
+                        best = b.vis;
+                    }
+                } else {
+                    best = b.vis;
+                    // After the glyph centre → caret sits after this char.
+                    if wx > (b.xmin + b.xmax) * 0.5 {
+                        best = b.vis + 1;
+                    }
                 }
             }
         }
@@ -280,14 +288,21 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
             );
         } else if collapsed {
             let bar = if let Some(b) = self.boxes.iter().find(|b| b.vis == self.caret) {
-                Some((b.xmin, b.ymin, b.ymax)) // left edge of the caret's glyph
+                let cx = if b.is_rtl { b.xmax } else { b.xmin };
+                Some((cx, b.ymin, b.ymax))
             } else if self.caret > 0 {
                 self.boxes
                     .iter()
                     .find(|b| b.vis == self.caret - 1)
-                    .map(|b| (b.xmax, b.ymin, b.ymax)) // after the last glyph
+                    .map(|b| {
+                        let cx = if b.is_rtl { b.xmin } else { b.xmax };
+                        (cx, b.ymin, b.ymax)
+                    })
             } else {
-                self.boxes.first().map(|b| (b.xmin, b.ymin, b.ymax))
+                self.boxes.first().map(|b| {
+                    let cx = if b.is_rtl { b.xmax } else { b.xmin };
+                    (cx, b.ymin, b.ymax)
+                })
             };
             if let Some((cx, y0, y1)) = bar {
                 let p0 = map(cx, y0);

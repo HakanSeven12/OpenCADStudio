@@ -167,29 +167,21 @@ pub fn primary_script() -> Script {
 }
 
 pub fn requires_shaping(text: &str) -> bool {
-    #[cfg(target_arch = "wasm32")]
-    {
-        return text.chars().any(|ch| {
-            matches!(
-                ch as u32,
-                0x0590..=0x05FF
-                    | 0x0600..=0x06FF
-                    | 0x0750..=0x077F
-                    | 0x08A0..=0x08FF
-                    | 0x0900..=0x097F
-                    | 0x0E00..=0x0E7F
-                    | 0xA8E0..=0xA8FF
-                    | 0xFB1D..=0xFB4F
-                    | 0xFB50..=0xFDFF
-                    | 0xFE70..=0xFEFF
-            )
-        });
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = text;
-        false
-    }
+    text.chars().any(|ch| {
+        matches!(
+            ch as u32,
+            0x0590..=0x05FF
+                | 0x0600..=0x06FF
+                | 0x0750..=0x077F
+                | 0x08A0..=0x08FF
+                | 0x0900..=0x097F
+                | 0x0E00..=0x0E7F
+                | 0xA8E0..=0xA8FF
+                | 0xFB1D..=0xFB4F
+                | 0xFB50..=0xFDFF
+                | 0xFE70..=0xFEFF
+        )
+    })
 }
 
 #[cfg(target_arch = "wasm32")]

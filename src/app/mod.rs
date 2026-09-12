@@ -1910,9 +1910,12 @@ pub enum Message {
     WebFieldCopy,
     /// Web only: the focused field's text — write it to the clipboard.
     WebFieldCopyText(Option<String>),
-    /// Pick from the one-shot snap override menu (Shift+RMB): only this snap
-    /// applies to the next point pick, then the configuration restores (#337).
+    /// Pick from the one-shot snap override menu (Shift+RMB): only this
+    /// snap applies to the next point pick, then the configuration restores (#337).
     SnapOverridePick(crate::snap::SnapType),
+    /// Mid Between 2 Points from the snap menu: modal 2-pick modifier over
+    /// the active point prompt.
+    SnapOverrideMtp,
     /// Close the one-shot snap override menu without picking.
     SnapOverrideClose,
     /// Open a path from the Start tab's recent-documents list (skips the

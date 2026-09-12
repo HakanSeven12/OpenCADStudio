@@ -1552,6 +1552,23 @@ mod tests {
     }
 
     #[test]
+    fn mtp_snap_override_starts_the_existing_modifier() {
+        use crate::app::Message;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+
+        let _ = app.update(Message::CommandInput("LINE".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.update(Message::SnapOverrideMtp);
+
+        assert_eq!(app.tabs[0].active_cmd.as_ref().map(|c| c.name()), Some("MTP"));
+        assert_eq!(
+            app.tabs[0].suspended_cmd.as_ref().map(|c| c.name()),
+            Some("LINE")
+        );
+    }
+
+    #[test]
     fn test_mtp_escape_restores_parent() {
         use crate::app::Message;
         let mut app = OpenCADStudio::new_for_test();

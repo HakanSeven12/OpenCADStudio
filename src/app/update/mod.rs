@@ -680,6 +680,29 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::SnapOverrideMtp => {
+                self.snap_override_popup = None;
+                self.tabs[self.active_tab]
+                    .scene
+                    .selection
+                    .borrow_mut()
+                    .context_menu = None;
+                // Same guard as typed MTP/M2P: point step, not entity pick.
+                let i = self.active_tab;
+                let allowed = self.tabs[i].active_cmd.as_ref().is_some_and(|c| {
+                    (!c.input_kind().wants_text() || c.point_step_accepts_keywords())
+                        && !c.needs_entity_pick()
+                });
+                if allowed {
+                    self.start_mtp_modifier(i);
+                } else {
+                    self.command_line.push_info(
+                        crate::t!("MTP needs an active point prompt.").as_ref(),
+                    );
+                }
+                Task::none()
+            }
+
             Message::SnapOverrideClose => {
                 self.snap_override_popup = None;
                 Task::none()

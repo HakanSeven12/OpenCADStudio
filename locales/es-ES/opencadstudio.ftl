@@ -181,6 +181,21 @@ viewport =
 
     .preparing-layout = Preparando presentación…
 
+gpu =
+    .title = Aviso de gráficos
+    .software-headline = No se encontró ningún controlador de GPU operativo, por lo que el dibujo se renderiza por software en la CPU ({ $adapter }).
+    .software-consequences = Los dibujos grandes se navegarán con lentitud y el renderizado puede ser incompleto o inestable.
+    .no-renderer-headline = No hay ningún renderizador de GPU disponible en este sistema, por lo que el área de dibujo no se puede mostrar. El resto de la interfaz sigue funcionando.
+    .hint-linux = Compruebe el controlador gráfico: la causa habitual es una actualización del controlador a la que todavía no ha seguido un reinicio.
+    .hint-windows = Actualice o reinstale el controlador gráfico. Las sesiones de Escritorio remoto y las máquinas virtuales pueden no ofrecer aceleración por GPU.
+    .hint-macos = Este Mac no expone ninguna GPU utilizable a la aplicación; las máquinas virtuales normalmente no lo hacen.
+    .hint-web = Active la aceleración por hardware en la configuración del navegador o actualice el controlador gráfico y, después, recargue la página.
+    .pill-software = ⚠ Renderizado por software
+    .pill-no-renderer = ⚠ Sin renderizador de GPU
+    .pill-tip = Haga clic para ver detalles
+    .silence = No volver a mostrar para este dispositivo
+    .command-line-no-renderer = No hay ningún renderizador de GPU disponible: el área de dibujo no se puede mostrar. Compruebe el controlador gráfico.
+
 recovery =
     .opened-with-repairs = Dibujo abierto con un informe de recuperación
     .open-failed = No se pudo abrir el dibujo
@@ -1165,6 +1180,7 @@ common =
     .start-a-new-editor-process = Iniciar un nuevo proceso del editor.
     .open-read-only-saving-is-disabled = Sesión de solo lectura (--read-only): el guardado está deshabilitado.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = Motor de GPU (dx12, vulkan, gl, metal). Establece WGPU_BACKEND.
+    .gpu-unavailable-rendering-in-software-on-the-cpu = GPU no disponible — se renderiza por software en la CPU (__ocs_fmt_0__). Los dibujos grandes se navegarán con lentitud; compruebe el controlador gráfico (la causa habitual es una actualización del controlador sin reiniciar).
     .safe-mode-use-the-gl-backend = Modo seguro: usar el motor GL.
     .use-the-renderer-for-gpus-without-shader-storage-buffers = Usar el renderizador para GPU sin búferes de almacenamiento de sombreadores.
     .run-the-headless-json-automation-server-stdin-stdout-or-port = Ejecutar el servidor de automatización JSON sin interfaz (stdin/stdout o --port).

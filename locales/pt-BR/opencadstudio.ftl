@@ -181,6 +181,21 @@ viewport =
 
     .preparing-layout = Preparando layout…
 
+gpu =
+    .title = Aviso de gráficos
+    .software-headline = Nenhum driver de GPU funcional foi encontrado, então o desenho está sendo renderizado por software na CPU ({ $adapter }).
+    .software-consequences = Desenhos grandes terão navegação lenta, e a renderização pode ficar incompleta ou instável.
+    .no-renderer-headline = Nenhum renderizador de GPU está disponível neste sistema, então a área de desenho não pode ser exibida. O restante da interface continua funcionando.
+    .hint-linux = Verifique o driver gráfico — a causa habitual é uma atualização do driver ainda não seguida de uma reinicialização.
+    .hint-windows = Atualize ou reinstale o driver gráfico. Sessões de Área de Trabalho Remota e máquinas virtuais podem não oferecer aceleração por GPU.
+    .hint-macos = Este Mac não expõe nenhuma GPU utilizável ao aplicativo; máquinas virtuais normalmente não expõem.
+    .hint-web = Ative a aceleração de hardware nas configurações do navegador ou atualize o driver gráfico e recarregue a página.
+    .pill-software = ⚠ Renderização por software
+    .pill-no-renderer = ⚠ Sem renderizador de GPU
+    .pill-tip = Clique para ver detalhes
+    .silence = Não mostrar novamente para este dispositivo
+    .command-line-no-renderer = Nenhum renderizador de GPU disponível — a área de desenho não pode ser exibida. Verifique o driver gráfico.
+
 recovery =
     .opened-with-repairs = Desenho aberto com um relatório de recuperação
     .open-failed = Não foi possível abrir o desenho
@@ -1165,6 +1180,7 @@ common =
     .start-a-new-editor-process = Iniciar um novo processo do editor.
     .open-read-only-saving-is-disabled = Sessão somente leitura (--read-only): o salvamento está desativado.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = Backend da GPU (dx12, vulkan, gl, metal). Define WGPU_BACKEND.
+    .gpu-unavailable-rendering-in-software-on-the-cpu = GPU indisponível — renderizando por software na CPU (__ocs_fmt_0__). Desenhos grandes terão navegação lenta; verifique o driver gráfico (a causa habitual é uma atualização do driver sem reinicialização).
     .safe-mode-use-the-gl-backend = Modo seguro: usar o backend GL.
     .use-the-renderer-for-gpus-without-shader-storage-buffers = Usar o renderizador para GPUs sem buffers de armazenamento de shaders.
     .run-the-headless-json-automation-server-stdin-stdout-or-port = Executar o servidor de automação JSON sem interface (stdin/stdout ou --port).

@@ -181,6 +181,21 @@ viewport =
 
     .preparing-layout = Příprava rozvržení…
 
+gpu =
+    .title = Upozornění na grafiku
+    .software-headline = Nebyl nalezen funkční ovladač GPU, výkres se proto vykresluje softwarově na CPU ({ $adapter }).
+    .software-consequences = Navigace ve velkých výkresech bude pomalá a vykreslování může být neúplné nebo nestabilní.
+    .no-renderer-headline = V tomto systému není k dispozici žádný GPU renderer, oblast výkresu proto nelze zobrazit. Zbytek rozhraní dál funguje.
+    .hint-linux = Zkontrolujte grafický ovladač — obvyklou příčinou je aktualizace ovladače, po které ještě nenásledoval restart.
+    .hint-windows = Aktualizujte nebo přeinstalujte grafický ovladač. Relace Vzdálené plochy a virtuální počítače nemusí GPU akceleraci poskytovat.
+    .hint-macos = Tento Mac aplikaci nenabízí žádné použitelné GPU; virtuální počítače je obvykle nenabízejí.
+    .hint-web = Zapněte hardwarovou akceleraci v nastavení prohlížeče nebo aktualizujte grafický ovladač a poté stránku znovu načtěte.
+    .pill-software = ⚠ Softwarové vykreslování
+    .pill-no-renderer = ⚠ Bez GPU rendereru
+    .pill-tip = Kliknutím zobrazíte podrobnosti
+    .silence = Pro toto zařízení už nezobrazovat
+    .command-line-no-renderer = Není k dispozici žádný GPU renderer — oblast výkresu nelze zobrazit. Zkontrolujte grafický ovladač.
+
 recovery =
     .opened-with-repairs = Výkres byl otevřen se zprávou o obnovení
     .open-failed = Výkres se nepodařilo otevřít
@@ -1164,6 +1179,7 @@ common =
     .start-a-new-editor-process = Spustit nový proces editoru.
     .open-read-only-saving-is-disabled = Relace pouze pro čtení (--read-only): ukládání je zakázáno.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = Backend GPU (dx12, vulkan, gl, metal). Nastaví WGPU_BACKEND.
+    .gpu-unavailable-rendering-in-software-on-the-cpu = GPU není k dispozici — vykresluje se softwarově na CPU (__ocs_fmt_0__). Navigace ve velkých výkresech bude pomalá; zkontrolujte grafický ovladač (obvyklou příčinou je aktualizace ovladače bez restartu).
     .safe-mode-use-the-gl-backend = Nouzový režim: použít backend GL.
     .use-the-renderer-for-gpus-without-shader-storage-buffers = Použít vykreslovač pro GPU bez úložných bufferů shaderů.
     .run-the-headless-json-automation-server-stdin-stdout-or-port = Spustit automatizační server JSON bez rozhraní (stdin/stdout nebo --port).

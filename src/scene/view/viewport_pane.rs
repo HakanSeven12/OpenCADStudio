@@ -81,6 +81,9 @@ impl<'a, Msg: std::fmt::Debug + Clone> shader::Program<Msg> for ViewportPane<'a>
         _cursor: mouse::Cursor,
         bounds: Rectangle,
     ) -> Self::Primitive {
+        // Every renderer calls this; only wgpu goes on to `prepare` the
+        // primitive. The count is how the app notices when nobody does.
+        crate::scene::pipeline::note_scene_draw();
         match self.pane {
             Some(idx) => self.scene.build_viewport_for_pane(
                 bounds,

@@ -180,6 +180,21 @@ viewport =
 
     .preparing-layout = 正在准备布局…
 
+gpu =
+    .title = 图形警告
+    .software-headline = 未找到可用的 GPU 驱动程序，因此图形正在 CPU 上以软件方式渲染 ({ $adapter })。
+    .software-consequences = 大型图形的浏览会很慢，渲染也可能不完整或不稳定。
+    .no-renderer-headline = 此系统没有可用的 GPU 渲染器，因此无法显示绘图区域。界面的其余部分仍可正常使用。
+    .hint-linux = 请检查显卡驱动程序——通常原因是更新驱动后尚未重启。
+    .hint-windows = 请更新或重新安装显卡驱动程序。远程桌面会话和虚拟机可能不提供 GPU 加速。
+    .hint-macos = 这台 Mac 没有向应用程序提供可用的 GPU；虚拟机通常不会提供。
+    .hint-web = 请在浏览器设置中启用硬件加速或更新显卡驱动程序，然后重新加载页面。
+    .pill-software = ⚠ 软件渲染
+    .pill-no-renderer = ⚠ 无 GPU 渲染器
+    .pill-tip = 点击查看详情
+    .silence = 此设备不再显示
+    .command-line-no-renderer = 没有可用的 GPU 渲染器——无法显示绘图区域。请检查显卡驱动程序。
+
 recovery =
     .opened-with-repairs = 图形已打开，并生成修复报告
     .open-failed = 无法打开图形
@@ -1152,6 +1167,7 @@ common =
     .start-a-new-editor-process = 启动新的编辑器进程。
     .open-read-only-saving-is-disabled = 只读会话(-只读-只读):保存是禁用.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPU 后端（dx12, vulkan, gl, metal）。设置 WGPU_BACKEND。
+    .gpu-unavailable-rendering-in-software-on-the-cpu = GPU 不可用 — 正在 CPU 上以软件方式渲染 (__ocs_fmt_0__)。大型图形的浏览会很慢；请检查显卡驱动程序（通常原因是更新驱动后未重启）。
     .safe-mode-use-the-gl-backend = 安全模式：使用 GL 后端。
     .use-the-renderer-for-gpus-without-shader-storage-buffers = 使用适用于不支持着色器存储缓冲区的 GPU 的渲染器。
     .run-the-headless-json-automation-server-stdin-stdout-or-port = 运行无界面的 JSON 自动化服务器（stdin/stdout 或 --port）。

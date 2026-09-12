@@ -181,6 +181,21 @@ viewport =
 
     .preparing-layout = Préparation de la présentation…
 
+gpu =
+    .title = Avertissement graphique
+    .software-headline = Aucun pilote GPU fonctionnel n’a été trouvé : le dessin est rendu par logiciel sur le CPU ({ $adapter }).
+    .software-consequences = La navigation dans les grands dessins sera lente et le rendu peut être incomplet ou instable.
+    .no-renderer-headline = Aucun moteur de rendu GPU n’est disponible sur ce système : la zone de dessin ne peut pas être affichée. Le reste de l’interface continue de fonctionner.
+    .hint-linux = Vérifiez le pilote graphique — la cause habituelle est une mise à jour du pilote qui n’a pas encore été suivie d’un redémarrage.
+    .hint-windows = Mettez à jour ou réinstallez le pilote graphique. Les sessions Bureau à distance et les machines virtuelles peuvent ne pas offrir d’accélération GPU.
+    .hint-macos = Ce Mac n’expose aucun GPU utilisable à l’application ; les machines virtuelles n’en proposent généralement pas.
+    .hint-web = Activez l’accélération matérielle dans les paramètres du navigateur ou mettez à jour le pilote graphique, puis rechargez la page.
+    .pill-software = ⚠ Rendu logiciel
+    .pill-no-renderer = ⚠ Pas de rendu GPU
+    .pill-tip = Cliquer pour les détails
+    .silence = Ne plus afficher pour cet appareil
+    .command-line-no-renderer = Aucun moteur de rendu GPU n’est disponible — la zone de dessin ne peut pas être affichée. Vérifiez le pilote graphique.
+
 recovery =
     .opened-with-repairs = Dessin ouvert avec un rapport de récupération
     .open-failed = Impossible d'ouvrir le dessin
@@ -1165,6 +1180,7 @@ common =
     .start-a-new-editor-process = Démarrer un nouveau processus d’édition.
     .open-read-only-saving-is-disabled = Session en lecture seule (--lecture seule) : l'enregistrement est désactivé.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = Moteur GPU (dx12, vulkan, gl, metal). Définit WGPU_BACKEND.
+    .gpu-unavailable-rendering-in-software-on-the-cpu = GPU indisponible — rendu logiciel sur le CPU (__ocs_fmt_0__). La navigation dans les grands dessins sera lente ; vérifiez le pilote graphique (une mise à jour du pilote sans redémarrage en est la cause habituelle).
     .safe-mode-use-the-gl-backend = Mode sans échec : utiliser le moteur GL.
     .use-the-renderer-for-gpus-without-shader-storage-buffers = Utiliser le moteur de rendu pour les GPU sans tampons de stockage de shaders.
     .run-the-headless-json-automation-server-stdin-stdout-or-port = Exécuter le serveur d’automatisation JSON sans interface (stdin/stdout ou --port).

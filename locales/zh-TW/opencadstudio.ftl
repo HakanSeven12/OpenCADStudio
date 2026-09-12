@@ -180,6 +180,21 @@ viewport =
 
     .preparing-layout = 正在準備配置…
 
+gpu =
+    .title = 圖形警告
+    .software-headline = 找不到可用的 GPU 驅動程式，因此圖面正在 CPU 上以軟體方式算繪 ({ $adapter })。
+    .software-consequences = 大型圖面的瀏覽會很慢，算繪也可能不完整或不穩定。
+    .no-renderer-headline = 此系統沒有可用的 GPU 算繪器，因此無法顯示繪圖區域。介面的其餘部分仍可正常運作。
+    .hint-linux = 請檢查顯示卡驅動程式——通常原因是更新驅動程式後尚未重新啟動。
+    .hint-windows = 請更新或重新安裝顯示卡驅動程式。遠端桌面工作階段與虛擬機器可能不提供 GPU 加速。
+    .hint-macos = 這台 Mac 沒有向應用程式提供可用的 GPU；虛擬機器通常不會提供。
+    .hint-web = 請在瀏覽器設定中啟用硬體加速或更新顯示卡驅動程式，然後重新載入頁面。
+    .pill-software = ⚠ 軟體算繪
+    .pill-no-renderer = ⚠ 無 GPU 算繪器
+    .pill-tip = 按一下查看詳細資料
+    .silence = 此裝置不再顯示
+    .command-line-no-renderer = 沒有可用的 GPU 算繪器——無法顯示繪圖區域。請檢查顯示卡驅動程式。
+
 recovery =
     .opened-with-repairs = 圖形已開啟，並產生修復報告
     .open-failed = 無法開啟圖形
@@ -1164,6 +1179,7 @@ common =
     .start-a-new-editor-process = 啟動新的編輯器程序。
     .open-read-only-saving-is-disabled = 只讀會話(-只讀-只讀):儲存是禁用.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPU 後端（dx12, vulkan, gl, metal）。設定 WGPU_BACKEND。
+    .gpu-unavailable-rendering-in-software-on-the-cpu = GPU 無法使用 — 正在 CPU 上以軟體方式算繪 (__ocs_fmt_0__)。大型圖面的瀏覽會很慢；請檢查顯示卡驅動程式（通常原因是更新驅動程式後未重新啟動）。
     .safe-mode-use-the-gl-backend = 安全模式：使用 GL 後端。
     .use-the-renderer-for-gpus-without-shader-storage-buffers = 使用適用於不支援著色器儲存緩衝區的 GPU 的算繪器。
     .run-the-headless-json-automation-server-stdin-stdout-or-port = 執行無介面的 JSON 自動化伺服器（stdin/stdout 或 --port）。

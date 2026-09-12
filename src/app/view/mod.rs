@@ -2225,6 +2225,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         status_menu_data,
                         tab.scene.sketch_constraint_set(tab.current_sketch_scope()).and_then(|s| s.dof),
                         tab.scene.sketch_constraint_set(tab.current_sketch_scope()).map(|s| s.conflicts.len()).unwrap_or(0),
+                        &self.gpu_status,
                     )
                 })
                 .width(Fill)
@@ -2479,6 +2480,18 @@ impl OpenCADStudio {
         } else {
             Subscription::none()
         };
+        // Graphics verdict: a device appears inside the first frame and a
+        // dropped scene shows up as draws without one, but neither arrives
+        // as a message. Tick until the verdict is in — one frame on a
+        // working GPU, three on none — then stop. The Start page draws no
+        // viewport, so there is nothing to learn there.
+        let gpu_probe = if matches!(self.gpu_status, crate::scene::pipeline::GpuStatus::Unknown)
+            && !self.tabs[self.active_tab].is_start
+        {
+            window::frames().map(Message::Tick)
+        } else {
+            Subscription::none()
+        };
         let thumbnail_capture = if self.thumbnail_capture_clean {
             window::frames().map(|_| Message::ThumbnailCaptureFrame)
         } else {
@@ -2685,6 +2698,7 @@ impl OpenCADStudio {
             grip_dwell,
             hover_dwell,
             nav_settle,
+            gpu_probe,
             thumbnail_capture,
             caret_blink,
             web_fonts,

@@ -5650,9 +5650,228 @@ fn install_gpu_error_handler(device: &wgpu::Device) {
     }));
 }
 
+/// The adapter wgpu ended up drawing on.
+///
+/// iced chooses it and names it only under `RUST_LOG`, so a fallback to a
+/// software rasterizer used to be invisible: an NVIDIA userspace update
+/// applied without a reboot left the Vulkan ICD unable to talk to the loaded
+/// kernel module, wgpu quietly took Mesa's `llvmpipe`, and a day of pan/zoom
+/// on the CPU read as a regression in the drawing code. `record_gpu_adapter`
+/// now reports one `[gpu] adapter:` line per device and keeps a copy for the
+/// app, which turns it into a [`GpuStatus`] the user can see.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GpuAdapter {
+    pub name: String,
+    pub backend: wgpu::Backend,
+    pub device_type: wgpu::DeviceType,
+}
+
+impl GpuAdapter {
+    /// A software rasterizer: every frame is drawn by the CPU, which on a
+    /// large drawing is the difference between interactive and unusable.
+    ///
+    /// `DeviceType::Cpu` is what Vulkan says for llvmpipe, DX12 for WARP and
+    /// GL for anything whose renderer string gives it away. WebGPU never says
+    /// it — wgpu reports every browser adapter as `Other` (gfx-rs/wgpu#8819)
+    /// — so the names browsers give their fallbacks are matched as well, the
+    /// same way wgpu's own GL backend classifies them.
+    pub fn is_software(&self) -> bool {
+        if self.device_type == wgpu::DeviceType::Cpu {
+            return true;
+        }
+        let name = self.name.to_ascii_lowercase();
+        SOFTWARE_RASTERIZER_NAMES
+            .iter()
+            .any(|marker| name.contains(marker))
+    }
+}
+
+/// Renderer names that mean "no GPU", lower-cased: Mesa's llvmpipe (also
+/// exposed as lavapipe under Vulkan), Google's SwiftShader (Chrome's WebGL /
+/// WebGPU fallback), and Microsoft's WARP, which DXGI names as a driver.
+const SOFTWARE_RASTERIZER_NAMES: [&str; 5] = [
+    "llvmpipe",
+    "lavapipe",
+    "softpipe",
+    "swiftshader",
+    "microsoft basic render",
+];
+
+/// What is drawing the scene, as far as the app can tell.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GpuStatus {
+    /// No scene frame has completed yet, so nothing is known.
+    Unknown,
+    /// A GPU, through wgpu. The normal case; nothing to say.
+    Hardware(GpuAdapter),
+    /// A CPU rasterizer, through wgpu — llvmpipe, WARP, SwiftShader. Every
+    /// frame works, slowly, and the driver that should be here is not.
+    Software(GpuAdapter),
+    /// wgpu found no adapter at all. iced then draws the interface with
+    /// tiny-skia and drops the scene primitive with a `log::warn!` nobody
+    /// sees, so the viewport stays blank while everything else works.
+    NoRenderer,
+}
+
+impl GpuStatus {
+    /// True when the user should be told: the scene is slow or missing.
+    pub fn is_degraded(&self) -> bool {
+        matches!(self, Self::Software(_) | Self::NoRenderer)
+    }
+
+    /// A stable name for "this situation", so the popup can be silenced for
+    /// one adapter without silencing the next one.
+    pub fn identity(&self) -> Option<String> {
+        match self {
+            Self::Software(adapter) => Some(format!("software:{}", adapter.name)),
+            Self::NoRenderer => Some("no-renderer".to_string()),
+            Self::Unknown | Self::Hardware(_) => None,
+        }
+    }
+}
+
+/// The adapter of the most recently created device.
+static GPU_ADAPTER: std::sync::Mutex<Option<GpuAdapter>> = std::sync::Mutex::new(None);
+
+/// How many times the viewport has asked the scene for a primitive. Counted
+/// in `ViewportPane::draw`, which every renderer calls; only wgpu goes on to
+/// `prepare` and build a device. Draws without a device are therefore the
+/// evidence that the scene is being dropped.
+static SCENE_DRAWS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Draws the viewport may request before a still-missing device counts as
+/// `NoRenderer`. Under wgpu the device exists before the first draw's frame
+/// ends, so one would do; the margin covers a frame that was drawn but never
+/// presented (an outdated surface, an occluded window).
+const SCENE_DRAWS_BEFORE_NO_RENDERER: u32 = 3;
+
+/// Bumped whenever the verdict of [`gpu_status`] can have changed: a device
+/// was created, or the draw count reached its threshold. The app compares it
+/// against what it last saw, so the per-message check is one atomic load.
+static GPU_STATUS_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Called by the viewport's `shader::Program::draw`, whichever renderer runs it.
+pub(crate) fn note_scene_draw() {
+    use std::sync::atomic::Ordering;
+    if SCENE_DRAWS.fetch_add(1, Ordering::Relaxed) + 1 == SCENE_DRAWS_BEFORE_NO_RENDERER {
+        GPU_STATUS_GENERATION.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// One line for whoever reads logs: stderr natively, the browser console on
+/// the web, where wasm has no stderr to write to.
+pub(crate) fn report_gpu_line(line: &str) {
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(line));
+    #[cfg(not(target_arch = "wasm32"))]
+    eprintln!("{line}");
+}
+
+fn record_gpu_adapter(device: &wgpu::Device) {
+    let info = device.adapter_info();
+    report_gpu_line(&format!(
+        "[gpu] adapter: {} ({:?}, {:?}, driver: {} {})",
+        info.name, info.backend, info.device_type, info.driver, info.driver_info
+    ));
+    let adapter = GpuAdapter {
+        name: info.name,
+        backend: info.backend,
+        device_type: info.device_type,
+    };
+    if let Ok(mut slot) = GPU_ADAPTER.lock() {
+        *slot = Some(adapter);
+    }
+    GPU_STATUS_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The verdict from what has been recorded so far. Pure, so it can be tested
+/// without a device: `adapter` is the last device's adapter, `scene_draws`
+/// how often the viewport asked to be drawn.
+fn gpu_status_from(adapter: Option<GpuAdapter>, scene_draws: u32) -> GpuStatus {
+    match adapter {
+        Some(adapter) if adapter.is_software() => GpuStatus::Software(adapter),
+        Some(adapter) => GpuStatus::Hardware(adapter),
+        None if scene_draws >= SCENE_DRAWS_BEFORE_NO_RENDERER => GpuStatus::NoRenderer,
+        None => GpuStatus::Unknown,
+    }
+}
+
+/// The current verdict.
+pub(crate) fn gpu_status() -> GpuStatus {
+    let adapter = GPU_ADAPTER.lock().ok().and_then(|slot| slot.clone());
+    gpu_status_from(adapter, SCENE_DRAWS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// The verdict, but only when it may have moved since `seen` — the app calls
+/// this after every message, and almost every call is one atomic load.
+pub(crate) fn gpu_status_if_changed(seen: &mut u64) -> Option<GpuStatus> {
+    let generation = GPU_STATUS_GENERATION.load(std::sync::atomic::Ordering::Relaxed);
+    if generation == *seen {
+        return None;
+    }
+    *seen = generation;
+    Some(gpu_status())
+}
+
+#[cfg(test)]
+mod gpu_status_tests {
+    use super::*;
+
+    fn adapter(name: &str, device_type: wgpu::DeviceType) -> GpuAdapter {
+        GpuAdapter {
+            name: name.to_string(),
+            backend: wgpu::Backend::Vulkan,
+            device_type,
+        }
+    }
+
+    #[test]
+    fn software_is_the_device_type_or_a_known_fallback_name() {
+        assert!(adapter("llvmpipe (LLVM 21.1.8, 256 bits)", wgpu::DeviceType::Cpu).is_software());
+        // WebGPU reports every adapter as Other, so the name has to carry it.
+        assert!(adapter(
+            "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)",
+            wgpu::DeviceType::Other
+        )
+        .is_software());
+        assert!(adapter("Microsoft Basic Render Driver", wgpu::DeviceType::Other).is_software());
+        assert!(!adapter("NVIDIA GeForce GT 1030", wgpu::DeviceType::DiscreteGpu).is_software());
+        assert!(!adapter("Apple M2", wgpu::DeviceType::IntegratedGpu).is_software());
+        assert!(!adapter("", wgpu::DeviceType::Other).is_software());
+    }
+
+    #[test]
+    fn the_verdict_needs_either_a_device_or_enough_dropped_draws() {
+        assert_eq!(gpu_status_from(None, 0), GpuStatus::Unknown);
+        assert_eq!(
+            gpu_status_from(None, SCENE_DRAWS_BEFORE_NO_RENDERER - 1),
+            GpuStatus::Unknown
+        );
+        assert_eq!(
+            gpu_status_from(None, SCENE_DRAWS_BEFORE_NO_RENDERER),
+            GpuStatus::NoRenderer
+        );
+        let gpu = adapter("NVIDIA GeForce GT 1030", wgpu::DeviceType::DiscreteGpu);
+        assert_eq!(gpu_status_from(Some(gpu.clone()), 100), GpuStatus::Hardware(gpu));
+        let cpu = adapter("llvmpipe", wgpu::DeviceType::Cpu);
+        assert_eq!(gpu_status_from(Some(cpu.clone()), 0), GpuStatus::Software(cpu));
+    }
+
+    #[test]
+    fn only_degraded_verdicts_carry_an_identity() {
+        assert!(GpuStatus::Unknown.identity().is_none());
+        assert!(GpuStatus::Hardware(adapter("x", wgpu::DeviceType::DiscreteGpu)).identity().is_none());
+        assert_eq!(GpuStatus::NoRenderer.identity().as_deref(), Some("no-renderer"));
+        let software = GpuStatus::Software(adapter("llvmpipe", wgpu::DeviceType::Cpu));
+        assert!(software.is_degraded());
+        assert_eq!(software.identity().as_deref(), Some("software:llvmpipe"));
+    }
+}
+
 impl iced::widget::shader::Pipeline for MultiPipeline {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         install_gpu_error_handler(device);
+        record_gpu_adapter(device);
         Self {
             block_geometry: Default::default(),
             inners: vec![Pipeline::new(device, queue, format)],

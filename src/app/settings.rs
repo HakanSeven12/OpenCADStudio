@@ -238,6 +238,11 @@ pub struct UserSettings {
     pub default_assoc_prompted: bool,
     /// App version whose donation prompt has been displayed.
     pub donation_prompt_version: String,
+    /// The graphics verdict (`GpuStatus::identity()`) whose warning popup the
+    /// user chose not to see again. Empty = always show. Keyed by verdict so
+    /// silencing "software rendering on llvmpipe" does not silence a later,
+    /// different failure.
+    pub gpu_warning_silenced: String,
     /// Ids of plugins the user turned off in the Plugin Manager. Disabled
     /// plugins keep their manifest listed but drop their ribbon tab and command
     /// dispatch.
@@ -398,6 +403,7 @@ impl Default for UserSettings {
             otrack: false,
             default_assoc_prompted: false,
             donation_prompt_version: String::new(),
+            gpu_warning_silenced: String::new(),
             disabled_plugins: Vec::new(),
             plugin_repos: Vec::new(),
             literal_spaces: false,

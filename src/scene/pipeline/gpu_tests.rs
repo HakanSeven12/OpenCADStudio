@@ -5,6 +5,43 @@ use iced::futures::executor::block_on;
 
 #[test]
 #[ignore = "requires a GPU adapter"]
+fn the_adapter_is_reported_once_per_device() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        .expect("GPU adapter");
+    let (device, _queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .expect("GPU device");
+    let mut seen = 0;
+    // Drain whatever an earlier test on this process recorded.
+    let _ = gpu_status_if_changed(&mut seen);
+
+    record_gpu_adapter(&device);
+    let info = adapter.get_info();
+    let status = gpu_status_if_changed(&mut seen).expect("a new device moves the verdict");
+    let reported = match &status {
+        GpuStatus::Hardware(reported) | GpuStatus::Software(reported) => reported,
+        other => panic!("a device must yield an adapter verdict, got {other:?}"),
+    };
+    assert_eq!(reported.name, info.name);
+    assert_eq!(reported.backend, info.backend);
+    assert_eq!(reported.device_type, info.device_type);
+    assert_eq!(
+        matches!(status, GpuStatus::Software(_)),
+        info.device_type == wgpu::DeviceType::Cpu,
+        "{status:?}"
+    );
+    assert!(
+        gpu_status_if_changed(&mut seen).is_none(),
+        "nothing changed, so the per-message check must stay silent"
+    );
+    assert_eq!(gpu_status(), status);
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
 fn block_edits_preserve_cache_coordinates_and_arena_partition() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))

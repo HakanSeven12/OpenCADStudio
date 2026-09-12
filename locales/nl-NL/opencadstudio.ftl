@@ -181,6 +181,21 @@ viewport =
 
     .preparing-layout = Lay-out voorbereiden…
 
+gpu =
+    .title = Grafische waarschuwing
+    .software-headline = Er is geen werkend GPU-stuurprogramma gevonden, dus de tekening wordt in software op de CPU gerenderd ({ $adapter }).
+    .software-consequences = Grote tekeningen navigeren traag en de weergave kan onvolledig of instabiel zijn.
+    .no-renderer-headline = Op dit systeem is geen GPU-renderer beschikbaar, dus het tekengebied kan niet worden weergegeven. De rest van de interface blijft werken.
+    .hint-linux = Controleer het grafische stuurprogramma — de gebruikelijke oorzaak is een stuurprogramma-update waarop nog geen herstart is gevolgd.
+    .hint-windows = Werk het grafische stuurprogramma bij of installeer het opnieuw. Extern bureaublad-sessies en virtuele machines bieden mogelijk geen GPU-versnelling.
+    .hint-macos = Deze Mac stelt geen bruikbare GPU beschikbaar aan de toepassing; virtuele machines doen dat meestal niet.
+    .hint-web = Schakel hardwareversnelling in bij de browserinstellingen of werk het grafische stuurprogramma bij, en laad de pagina opnieuw.
+    .pill-software = ⚠ Softwarerendering
+    .pill-no-renderer = ⚠ Geen GPU-renderer
+    .pill-tip = Klik voor details
+    .silence = Niet meer tonen voor dit apparaat
+    .command-line-no-renderer = Geen GPU-renderer beschikbaar — het tekengebied kan niet worden weergegeven. Controleer het grafische stuurprogramma.
+
 recovery =
     .opened-with-repairs = Tekening geopend met een herstelrapport
     .open-failed = Tekening kon niet worden geopend
@@ -1163,6 +1178,7 @@ common =
     .start-a-new-editor-process = Een nieuw editorproces starten.
     .open-read-only-saving-is-disabled = Alleen-lezen sessie (---lezen-alleen): opslaan is uitgeschakeld.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPU-backend (dx12, vulkan, gl, metal). Stelt WGPU_BACKEND in.
+    .gpu-unavailable-rendering-in-software-on-the-cpu = GPU niet beschikbaar — er wordt in software op de CPU gerenderd (__ocs_fmt_0__). Grote tekeningen navigeren traag; controleer het grafische stuurprogramma (een stuurprogramma-update zonder herstart is de gebruikelijke oorzaak).
     .safe-mode-use-the-gl-backend = Veilige modus: gebruik de GL-backend.
     .use-the-renderer-for-gpus-without-shader-storage-buffers = Gebruik de renderer voor GPU’s zonder shaderopslagbuffers.
     .run-the-headless-json-automation-server-stdin-stdout-or-port = Start de JSON-automatiseringsserver zonder interface (stdin/stdout of --port).

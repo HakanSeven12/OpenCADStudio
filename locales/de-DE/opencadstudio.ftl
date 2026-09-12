@@ -181,6 +181,21 @@ viewport =
 
     .preparing-layout = Layout wird vorbereitet…
 
+gpu =
+    .title = Grafikwarnung
+    .software-headline = Es wurde kein funktionierender GPU-Treiber gefunden, daher wird die Zeichnung per Software auf der CPU gerendert ({ $adapter }).
+    .software-consequences = Große Zeichnungen lassen sich nur langsam navigieren, und die Darstellung kann unvollständig oder instabil sein.
+    .no-renderer-headline = Auf diesem System ist kein GPU-Renderer verfügbar, daher kann der Zeichenbereich nicht angezeigt werden. Der Rest der Oberfläche funktioniert weiterhin.
+    .hint-linux = Prüfen Sie den Grafiktreiber — die häufigste Ursache ist eine Treiberaktualisierung, auf die noch kein Neustart gefolgt ist.
+    .hint-windows = Aktualisieren oder installieren Sie den Grafiktreiber neu. Remotedesktop-Sitzungen und virtuelle Maschinen bieten möglicherweise keine GPU-Beschleunigung.
+    .hint-macos = Dieser Mac stellt der Anwendung keine nutzbare GPU zur Verfügung; virtuelle Maschinen tun das in der Regel nicht.
+    .hint-web = Aktivieren Sie die Hardwarebeschleunigung in den Browsereinstellungen oder aktualisieren Sie den Grafiktreiber, und laden Sie die Seite neu.
+    .pill-software = ⚠ Software-Rendering
+    .pill-no-renderer = ⚠ Kein GPU-Renderer
+    .pill-tip = Für Details klicken
+    .silence = Für dieses Gerät nicht mehr anzeigen
+    .command-line-no-renderer = Kein GPU-Renderer verfügbar — der Zeichenbereich kann nicht angezeigt werden. Prüfen Sie den Grafiktreiber.
+
 recovery =
     .opened-with-repairs = Zeichnung mit einem Wiederherstellungsbericht geöffnet
     .open-failed = Zeichnung konnte nicht geöffnet werden
@@ -1165,6 +1180,7 @@ common =
     .start-a-new-editor-process = Einen neuen Editorprozess starten.
     .open-read-only-saving-is-disabled = Schreibgeschütze Sitzung (--read-only): Speichern ist deaktiviert.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPU-Backend (dx12, vulkan, gl, metal). Setzt WGPU_BACKEND.
+    .gpu-unavailable-rendering-in-software-on-the-cpu = GPU nicht verfügbar — es wird per Software auf der CPU gerendert (__ocs_fmt_0__). Große Zeichnungen lassen sich nur langsam navigieren; prüfen Sie den Grafiktreiber (eine Treiberaktualisierung ohne Neustart ist die häufigste Ursache).
     .safe-mode-use-the-gl-backend = Abgesicherter Modus: GL-Backend verwenden.
     .use-the-renderer-for-gpus-without-shader-storage-buffers = Renderer für GPUs ohne Shader-Speicherpuffer verwenden.
     .run-the-headless-json-automation-server-stdin-stdout-or-port = JSON-Automatisierungsserver ohne Oberfläche starten (stdin/stdout oder --port).

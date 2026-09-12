@@ -50,6 +50,7 @@ impl OpenCADStudio {
             Some(K::SaveDialog) => crate::tr!("modal", "save-drawing-as"),
             Some(K::Recovery) => crate::tr!("modal", "recovery-report"),
             Some(K::RecoveryPrompt) => crate::tr!("modal", "recovery-prompt"),
+            Some(K::GpuWarning) => crate::tr!("gpu", "title"),
             None => String::new(),
         }
     }
@@ -1378,6 +1379,9 @@ impl OpenCADStudio {
             super::super::ModalKind::DonationPrompt => {
                 sized_flow(ex, 540, 360, donation_dialog_window)
             }
+            super::super::ModalKind::GpuWarning => {
+                sized_flow(ex, 520, 400, |flow| gpu_warning_window(&self.gpu_status, flow))
+            }
             super::super::ModalKind::AecDropWarning => {
                 let src_label = self
                     .tabs
@@ -1910,6 +1914,57 @@ fn layer_delete_warning_window(
                 ),
                 iced::widget::Space::new().width(8),
                 dialog_button(t!("Cancel"), Message::CloseModal, button::secondary),
+            ],
+        ]
+        .spacing(0),
+    )
+    .style(dialog_body_style)
+    .center_x(sizing.width)
+    .center_y(sizing.height)
+    .padding([24, 28])
+    .into()
+}
+
+/// What the graphics verdict means and what usually fixes it. Two
+/// situations share the dialog — a software rasterizer (slow, but drawing)
+/// and no renderer at all (a blank viewport) — and the remedy hint is per
+/// platform. "OK" closes it for this session; the status-bar pill brings it
+/// back. "Don't show again" silences this verdict only, so a different
+/// failure on the same machine still prompts.
+fn gpu_warning_window(
+    status: &crate::scene::pipeline::GpuStatus,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'static, Message> {
+    use crate::scene::pipeline::GpuStatus;
+    let (headline, consequences) = match status {
+        GpuStatus::Software(adapter) => (
+            crate::tr!("gpu", "software-headline", adapter = adapter.name.clone()),
+            Some(crate::tr!("gpu", "software-consequences")),
+        ),
+        _ => (crate::tr!("gpu", "no-renderer-headline"), None),
+    };
+    let mut body = column![text(headline).size(13)].spacing(8);
+    if let Some(consequences) = consequences {
+        body = body.push(text(consequences).size(13));
+    }
+    body = body.push(
+        text(crate::app::startup::gpu_platform_hint())
+            .size(13)
+            .style(dialog_muted_text_style),
+    );
+
+    container(
+        column![
+            body,
+            Space::new().height(20),
+            row![
+                dialog_button(t!("OK"), Message::CloseModal, button::primary),
+                Space::new().width(8),
+                dialog_button(
+                    crate::tr!("gpu", "silence"),
+                    Message::GpuWarningSilence,
+                    button::secondary
+                ),
             ],
         ]
         .spacing(0),

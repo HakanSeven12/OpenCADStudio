@@ -288,6 +288,7 @@ impl OpenCADStudio {
             }
         }
         let task = self.update_inner(msg);
+        self.refresh_gpu_status();
         self.show_next_startup_modal();
         self.sync_open_command_history();
         // Close the document-level first-touch transaction started by
@@ -6574,6 +6575,16 @@ impl OpenCADStudio {
 
             Message::AboutOpen => {
                 self.active_modal = Some(super::ModalKind::About);
+                Task::none()
+            }
+
+            Message::GpuWarningOpen => {
+                self.active_modal = Some(super::ModalKind::GpuWarning);
+                Task::none()
+            }
+            Message::GpuWarningSilence => {
+                self.gpu_warning_silenced = self.gpu_status.identity().unwrap_or_default();
+                self.close_active_modal();
                 Task::none()
             }
 

@@ -181,6 +181,21 @@ viewport =
 
     .preparing-layout = 배치 준비 중…
 
+gpu =
+    .title = 그래픽 경고
+    .software-headline = 작동하는 GPU 드라이버를 찾을 수 없어 도면을 CPU에서 소프트웨어로 렌더링하고 있습니다 ({ $adapter }).
+    .software-consequences = 큰 도면은 탐색이 느려지고 렌더링이 불완전하거나 불안정할 수 있습니다.
+    .no-renderer-headline = 이 시스템에서는 사용할 수 있는 GPU 렌더러가 없어 도면 영역을 표시할 수 없습니다. 나머지 인터페이스는 계속 작동합니다.
+    .hint-linux = 그래픽 드라이버를 확인하세요. 드라이버를 업데이트한 뒤 아직 재부팅하지 않은 것이 일반적인 원인입니다.
+    .hint-windows = 그래픽 드라이버를 업데이트하거나 다시 설치하세요. 원격 데스크톱 세션과 가상 머신에서는 GPU 가속을 제공하지 않을 수 있습니다.
+    .hint-macos = 이 Mac은 애플리케이션에 사용 가능한 GPU를 제공하지 않습니다. 가상 머신은 보통 제공하지 않습니다.
+    .hint-web = 브라우저 설정에서 하드웨어 가속을 켜거나 그래픽 드라이버를 업데이트한 다음 페이지를 새로 고치세요.
+    .pill-software = ⚠ 소프트웨어 렌더링
+    .pill-no-renderer = ⚠ GPU 렌더러 없음
+    .pill-tip = 자세한 내용을 보려면 클릭
+    .silence = 이 장치에서는 다시 표시하지 않음
+    .command-line-no-renderer = 사용할 수 있는 GPU 렌더러가 없습니다 — 도면 영역을 표시할 수 없습니다. 그래픽 드라이버를 확인하세요.
+
 recovery =
     .opened-with-repairs = 복구 보고서와 함께 도면을 열었습니다
     .open-failed = 도면을 열 수 없습니다
@@ -1164,6 +1179,7 @@ common =
     .start-a-new-editor-process = 새 편집기 프로세스를 시작합니다.
     .open-read-only-saving-is-disabled = 읽기 전용 세션(--read-only): 저장이 비활성화됩니다.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPU 백엔드(dx12, vulkan, gl, metal). WGPU_BACKEND를 설정합니다.
+    .gpu-unavailable-rendering-in-software-on-the-cpu = GPU를 사용할 수 없음 — CPU에서 소프트웨어로 렌더링 중입니다 (__ocs_fmt_0__). 큰 도면은 탐색이 느려집니다. 그래픽 드라이버를 확인하세요 (재부팅 없이 드라이버를 업데이트한 것이 일반적인 원인입니다).
     .safe-mode-use-the-gl-backend = 안전 모드: GL 백엔드를 사용합니다.
     .use-the-renderer-for-gpus-without-shader-storage-buffers = 셰이더 저장 버퍼가 없는 GPU용 렌더러를 사용합니다.
     .run-the-headless-json-automation-server-stdin-stdout-or-port = 화면 없이 JSON 자동화 서버를 실행합니다(stdin/stdout 또는 --port).

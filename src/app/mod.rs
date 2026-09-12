@@ -727,6 +727,14 @@ pub(super) struct OpenCADStudio {
     /// of OS windows).
     active_modal: Option<ModalKind>,
     pending_startup_modals: std::collections::VecDeque<ModalKind>,
+    /// What is drawing the scene, once the first frame has told us. Drives
+    /// the graphics warning (popup, status-bar pill, command line).
+    gpu_status: crate::scene::pipeline::GpuStatus,
+    /// The pipeline's status generation this app has already looked at.
+    gpu_status_generation: u64,
+    /// `GpuStatus::identity()` of the verdict whose popup the user silenced
+    /// with "Don't show again for this device". Persisted in the settings.
+    gpu_warning_silenced: String,
     /// Plot modal geometry preserved while the Plot Style editor is open as
     /// a child dialog. None means Plotstyle was opened directly (e.g. command).
     plotstyle_parent_plot_geometry: Option<(iced::Vector, iced::Vector)>,
@@ -1739,6 +1747,10 @@ pub enum ModalKind {
     /// Add / remove the annotation scales a single selected object has a
     /// per-object representation for.
     AnnoObjectScale,
+    /// The scene is drawn by a software rasterizer, or not at all: what that
+    /// means and what usually fixes it. Queued once per verdict; the status
+    /// bar's ⚠ pill reopens it.
+    GpuWarning,
 }
 
 /// A property group controlled by a layer state's restore mask.
@@ -2861,6 +2873,12 @@ pub enum Message {
     PropConstraintLinkClick(Vec<acadrust::Handle>),
     // ── About window ────────────────────────────────────────────────────
     AboutOpen,
+    // ── Graphics warning ────────────────────────────────────────────────
+    /// The status bar's ⚠ pill: reopen the graphics warning.
+    GpuWarningOpen,
+    /// "Don't show again for this device": close the warning and remember
+    /// the verdict it described, so only a different one prompts again.
+    GpuWarningSilence,
     /// Close whatever in-canvas modal dialog is open (Plan B).
     CloseModal,
     // ── Attribute editor dialog ───────────────────────────────────────────
@@ -3613,6 +3631,9 @@ impl OpenCADStudio {
             recent_colors: Vec::new(),
             active_modal: None,
             pending_startup_modals: std::collections::VecDeque::new(),
+            gpu_status: crate::scene::pipeline::GpuStatus::Unknown,
+            gpu_status_generation: 0,
+            gpu_warning_silenced: String::new(),
             plotstyle_parent_plot_geometry: None,
             find_replace: FindReplaceState::default(),
             aec_drop_acknowledged: false,

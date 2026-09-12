@@ -181,6 +181,21 @@ viewport =
 
     .preparing-layout = Elrendezés előkészítése…
 
+gpu =
+    .title = Grafikai figyelmeztetés
+    .software-headline = Nem található működő GPU-illesztőprogram, ezért a rajz szoftveresen, a CPU-n jelenik meg ({ $adapter }).
+    .software-consequences = A nagy rajzokban a navigáció lassú lesz, a megjelenítés pedig hiányos vagy instabil lehet.
+    .no-renderer-headline = Ezen a rendszeren nem érhető el GPU-renderelő, ezért a rajzterület nem jeleníthető meg. A felület többi része tovább működik.
+    .hint-linux = Ellenőrizze a grafikus illesztőprogramot — a szokásos ok egy olyan illesztőprogram-frissítés, amelyet még nem követett újraindítás.
+    .hint-windows = Frissítse vagy telepítse újra a grafikus illesztőprogramot. A Távoli asztal munkamenetei és a virtuális gépek nem feltétlenül nyújtanak GPU-gyorsítást.
+    .hint-macos = Ez a Mac nem biztosít használható GPU-t az alkalmazásnak; a virtuális gépek általában nem biztosítanak.
+    .hint-web = Kapcsolja be a hardveres gyorsítást a böngésző beállításaiban, vagy frissítse a grafikus illesztőprogramot, majd töltse újra az oldalt.
+    .pill-software = ⚠ Szoftveres megjelenítés
+    .pill-no-renderer = ⚠ Nincs GPU-renderelő
+    .pill-tip = Kattintson a részletekért
+    .silence = Ne jelenjen meg többé ennél az eszköznél
+    .command-line-no-renderer = Nem érhető el GPU-renderelő — a rajzterület nem jeleníthető meg. Ellenőrizze a grafikus illesztőprogramot.
+
 recovery =
     .opened-with-repairs = A rajz helyreállítási jelentéssel nyílt meg
     .open-failed = A rajz nem nyitható meg
@@ -1164,6 +1179,7 @@ common =
     .start-a-new-editor-process = Új szerkesztőfolyamat indítása.
     .open-read-only-saving-is-disabled = Csak olvasható munkamenet (--csak olvasható): a mentés le van tiltva.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPU-háttérrendszer (dx12, vulkan, gl, metal). Beállítja a WGPU_BACKEND értékét.
+    .gpu-unavailable-rendering-in-software-on-the-cpu = A GPU nem érhető el — a megjelenítés szoftveresen, a CPU-n történik (__ocs_fmt_0__). A nagy rajzokban a navigáció lassú lesz; ellenőrizze a grafikus illesztőprogramot (a szokásos ok egy újraindítás nélküli illesztőprogram-frissítés).
     .safe-mode-use-the-gl-backend = Csökkentett mód: a GL-háttérrendszer használata.
     .use-the-renderer-for-gpus-without-shader-storage-buffers = Árnyalótároló puffer nélküli GPU-khoz való megjelenítő használata.
     .run-the-headless-json-automation-server-stdin-stdout-or-port = Felület nélküli JSON-automatizálási kiszolgáló indítása (stdin/stdout vagy --port).

@@ -181,6 +181,21 @@ viewport =
 
     .preparing-layout = جارٍ إعداد التخطيط…
 
+gpu =
+    .title = تحذير الرسومات
+    .software-headline = لم يُعثر على برنامج تشغيل GPU يعمل، لذا يتم رسم المخطط برمجيًا على المعالج CPU ({ $adapter }).
+    .software-consequences = سيكون التنقل في الرسومات الكبيرة بطيئًا، وقد يكون الرسم غير مكتمل أو غير مستقر.
+    .no-renderer-headline = لا يتوفر أي معالج رسم GPU على هذا النظام، لذا لا يمكن عرض منطقة الرسم. تستمر بقية الواجهة في العمل.
+    .hint-linux = تحقق من برنامج تشغيل الرسومات — السبب المعتاد هو تحديث لبرنامج التشغيل لم تتبعه إعادة تشغيل بعد.
+    .hint-windows = حدّث برنامج تشغيل الرسومات أو أعد تثبيته. قد لا توفر جلسات سطح المكتب البعيد والأجهزة الافتراضية تسريع GPU.
+    .hint-macos = لا يوفر هذا الجهاز Mac أي GPU قابلة للاستخدام للتطبيق؛ والأجهزة الافتراضية عادةً لا توفرها.
+    .hint-web = فعّل تسريع الأجهزة من إعدادات المتصفح أو حدّث برنامج تشغيل الرسومات، ثم أعد تحميل الصفحة.
+    .pill-software = ⚠ رسم برمجي
+    .pill-no-renderer = ⚠ لا يوجد معالج رسم GPU
+    .pill-tip = انقر لعرض التفاصيل
+    .silence = عدم الإظهار مرة أخرى لهذا الجهاز
+    .command-line-no-renderer = لا يتوفر معالج رسم GPU — لا يمكن عرض منطقة الرسم. تحقق من برنامج تشغيل الرسومات.
+
 recovery =
     .opened-with-repairs = فُتح الرسم مع تقرير استرداد
     .open-failed = تعذر فتح الرسم
@@ -1177,6 +1192,7 @@ common =
     .start-a-new-editor-process = بدء عملية محرر جديدة.
     .open-read-only-saving-is-disabled = جلسة للقراءة فقط (--read-only): الحفظ معطّل.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = واجهة GPU الخلفية (dx12, vulkan, gl, metal). تضبط WGPU_BACKEND.
+    .gpu-unavailable-rendering-in-software-on-the-cpu = وحدة GPU غير متاحة — يتم الرسم برمجيًا على المعالج CPU (__ocs_fmt_0__). سيكون التنقل في الرسومات الكبيرة بطيئًا؛ تحقق من برنامج تشغيل الرسومات (السبب المعتاد هو تحديث برنامج التشغيل دون إعادة التشغيل).
     .safe-mode-use-the-gl-backend = الوضع الآمن: استخدام واجهة GL الخلفية.
     .use-the-renderer-for-gpus-without-shader-storage-buffers = استخدام العارض لوحدات GPU التي لا تدعم مخازن تظليل التخزين.
     .run-the-headless-json-automation-server-stdin-stdout-or-port = تشغيل خادم أتمتة JSON دون واجهة (stdin/stdout أو --port).

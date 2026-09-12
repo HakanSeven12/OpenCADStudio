@@ -181,6 +181,21 @@ viewport =
 
     .preparing-layout = レイアウトを準備中…
 
+gpu =
+    .title = グラフィックスの警告
+    .software-headline = 動作する GPU ドライバーが見つからないため、図面は CPU 上でソフトウェア描画されています ({ $adapter })。
+    .software-consequences = 大きな図面では操作が遅くなり、描画が不完全または不安定になることがあります。
+    .no-renderer-headline = このシステムでは GPU レンダラーを利用できないため、図面領域を表示できません。その他のインターフェースは引き続き動作します。
+    .hint-linux = グラフィックスドライバーを確認してください。ドライバー更新後にまだ再起動していないことが主な原因です。
+    .hint-windows = グラフィックスドライバーを更新または再インストールしてください。リモートデスクトップセッションや仮想マシンでは GPU アクセラレーションを利用できない場合があります。
+    .hint-macos = この Mac はアプリケーションに利用可能な GPU を提供していません。仮想マシンでは通常提供されません。
+    .hint-web = ブラウザーの設定でハードウェアアクセラレーションを有効にするか、グラフィックスドライバーを更新してから、ページを再読み込みしてください。
+    .pill-software = ⚠ ソフトウェア描画
+    .pill-no-renderer = ⚠ GPU レンダラーなし
+    .pill-tip = クリックして詳細を表示
+    .silence = このデバイスでは今後表示しない
+    .command-line-no-renderer = GPU レンダラーを利用できません — 図面領域を表示できません。グラフィックスドライバーを確認してください。
+
 recovery =
     .opened-with-repairs = 修復レポートとともに図面を開きました
     .open-failed = 図面を開けませんでした
@@ -1155,6 +1170,7 @@ common =
     .start-a-new-editor-process = エディターの新しいプロセスを起動します。
     .open-read-only-saving-is-disabled = 読み取り専用セッション (--read-only): 保存は無効です。
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPUバックエンド（dx12, vulkan, gl, metal）。WGPU_BACKENDを設定します。
+    .gpu-unavailable-rendering-in-software-on-the-cpu = GPU が利用できません — CPU 上でソフトウェア描画しています (__ocs_fmt_0__)。大きな図面では操作が遅くなります。グラフィックドライバーを確認してください (再起動せずにドライバーを更新したことが主な原因です)。
     .safe-mode-use-the-gl-backend = セーフモード: GLバックエンドを使用します。
     .use-the-renderer-for-gpus-without-shader-storage-buffers = シェーダーストレージバッファー非対応GPU用のレンダラーを使用します。
     .run-the-headless-json-automation-server-stdin-stdout-or-port = 画面なしでJSON自動化サーバーを起動します（stdin/stdoutまたは--port）。

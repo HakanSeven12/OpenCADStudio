@@ -181,6 +181,21 @@ viewport =
 
     .preparing-layout = Asettelua valmistellaan…
 
+gpu =
+    .title = Grafiikkavaroitus
+    .software-headline = Toimivaa GPU-ajuria ei löytynyt, joten piirustus piirretään ohjelmallisesti suorittimella ({ $adapter }).
+    .software-consequences = Suurten piirustusten selaaminen on hidasta, ja piirto voi olla puutteellista tai epävakaata.
+    .no-renderer-headline = Tässä järjestelmässä ei ole käytettävissä GPU-piirtäjää, joten piirustusaluetta ei voida näyttää. Muu käyttöliittymä toimii edelleen.
+    .hint-linux = Tarkista näytönohjaimen ajuri — tavallinen syy on ajuripäivitys, jonka jälkeen konetta ei ole vielä käynnistetty uudelleen.
+    .hint-windows = Päivitä tai asenna näytönohjaimen ajuri uudelleen. Etätyöpöytäistunnot ja virtuaalikoneet eivät välttämättä tarjoa GPU-kiihdytystä.
+    .hint-macos = Tämä Mac ei tarjoa sovellukselle käyttökelpoista GPU:ta; virtuaalikoneet eivät yleensä tarjoa.
+    .hint-web = Ota laitteistokiihdytys käyttöön selaimen asetuksissa tai päivitä näytönohjaimen ajuri ja lataa sivu uudelleen.
+    .pill-software = ⚠ Ohjelmallinen piirto
+    .pill-no-renderer = ⚠ Ei GPU-piirtäjää
+    .pill-tip = Napsauta nähdäksesi tiedot
+    .silence = Älä näytä uudelleen tälle laitteelle
+    .command-line-no-renderer = GPU-piirtäjää ei ole käytettävissä — piirustusaluetta ei voida näyttää. Tarkista näytönohjaimen ajuri.
+
 recovery =
     .opened-with-repairs = Piirustus avattiin palautusraportin kanssa
     .open-failed = Piirustusta ei voitu avata
@@ -1164,6 +1179,7 @@ common =
     .start-a-new-editor-process = Käynnistä uusi editoriprosessi.
     .open-read-only-saving-is-disabled = Vain luku -istunto (--vain luku): tallennus ei ole käytössä.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPU-taustajärjestelmä (dx12, vulkan, gl, metal). Asettaa WGPU_BACKEND-arvon.
+    .gpu-unavailable-rendering-in-software-on-the-cpu = GPU ei ole käytettävissä — piirto tehdään ohjelmallisesti suorittimella (__ocs_fmt_0__). Suurten piirustusten selaaminen on hidasta; tarkista näytönohjaimen ajuri (tavallinen syy on ajuripäivitys ilman uudelleenkäynnistystä).
     .safe-mode-use-the-gl-backend = Vikasietotila: käytä GL-taustajärjestelmää.
     .use-the-renderer-for-gpus-without-shader-storage-buffers = Käytä piirtäjää GPU:ille, joissa ei ole varjostimien tallennuspuskureita.
     .run-the-headless-json-automation-server-stdin-stdout-or-port = Käynnistä JSON-automaatiopalvelin ilman käyttöliittymää (stdin/stdout tai --port).

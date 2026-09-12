@@ -181,6 +181,21 @@ viewport =
 
     .preparing-layout = Przygotowywanie układu…
 
+gpu =
+    .title = Ostrzeżenie graficzne
+    .software-headline = Nie znaleziono działającego sterownika GPU, więc rysunek jest renderowany programowo na CPU ({ $adapter }).
+    .software-consequences = Nawigacja w dużych rysunkach będzie powolna, a renderowanie może być niekompletne lub niestabilne.
+    .no-renderer-headline = W tym systemie nie jest dostępny żaden renderer GPU, więc obszar rysunku nie może zostać wyświetlony. Reszta interfejsu nadal działa.
+    .hint-linux = Sprawdź sterownik graficzny — zwykłą przyczyną jest aktualizacja sterownika, po której nie nastąpiło jeszcze ponowne uruchomienie.
+    .hint-windows = Zaktualizuj lub zainstaluj ponownie sterownik graficzny. Sesje Pulpitu zdalnego i maszyny wirtualne mogą nie zapewniać akceleracji GPU.
+    .hint-macos = Ten Mac nie udostępnia aplikacji żadnego użytecznego GPU; maszyny wirtualne zwykle tego nie robią.
+    .hint-web = Włącz akcelerację sprzętową w ustawieniach przeglądarki lub zaktualizuj sterownik graficzny, a następnie odśwież stronę.
+    .pill-software = ⚠ Renderowanie programowe
+    .pill-no-renderer = ⚠ Brak renderera GPU
+    .pill-tip = Kliknij, aby zobaczyć szczegóły
+    .silence = Nie pokazuj ponownie dla tego urządzenia
+    .command-line-no-renderer = Brak dostępnego renderera GPU — obszar rysunku nie może zostać wyświetlony. Sprawdź sterownik graficzny.
+
 recovery =
     .opened-with-repairs = Rysunek otwarto z raportem odzyskiwania
     .open-failed = Nie można otworzyć rysunku
@@ -1164,6 +1179,7 @@ common =
     .start-a-new-editor-process = Uruchom nowy proces edytora.
     .open-read-only-saving-is-disabled = Sesja tylko do odczytu (--tylko do odczytu): zapisywanie jest wyłączone.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = Zaplecze GPU (dx12, vulkan, gl, metal). Ustawia WGPU_BACKEND.
+    .gpu-unavailable-rendering-in-software-on-the-cpu = GPU niedostępny — renderowanie programowe na CPU (__ocs_fmt_0__). Nawigacja w dużych rysunkach będzie powolna; sprawdź sterownik graficzny (zwykłą przyczyną jest aktualizacja sterownika bez ponownego uruchomienia).
     .safe-mode-use-the-gl-backend = Tryb bezpieczny: użyj zaplecza GL.
     .use-the-renderer-for-gpus-without-shader-storage-buffers = Użyj renderera dla GPU bez buforów pamięci shaderów.
     .run-the-headless-json-automation-server-stdin-stdout-or-port = Uruchom serwer automatyzacji JSON bez interfejsu (stdin/stdout lub --port).

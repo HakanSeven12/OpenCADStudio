@@ -3576,6 +3576,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Start a new editor process." => Some(("common", "start-a-new-editor-process")),
         "Open read-only: saving is disabled." => Some(("common", "open-read-only-saving-is-disabled")),
         "GPU backend (dx12, vulkan, gl, metal). Sets WGPU_BACKEND." => Some(("common", "gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend")),
+        "GPU unavailable — rendering in software on the CPU ({adapter}). Large drawings will navigate slowly; check the graphics driver (a driver update without a reboot is the usual cause)." => Some(("common", "gpu-unavailable-rendering-in-software-on-the-cpu")),
         "Safe mode: use the GL backend." => Some(("common", "safe-mode-use-the-gl-backend")),
         "Use the renderer for GPUs without shader storage buffers." => Some(("common", "use-the-renderer-for-gpus-without-shader-storage-buffers")),
         "Run the headless JSON automation server (stdin/stdout, or --port)." => Some(("common", "run-the-headless-json-automation-server-stdin-stdout-or-port")),

@@ -4610,6 +4610,8 @@ plugins =
     .no-releases = без релизов
 
 ui =
+    .build = Сборка
+    .commit-date = Дата коммита
     .count-steps-available = __ocs_arg_count__ доступные шаги
     .label-history = __ocs_arg_label__ История
     .n-vp = __ocs_arg_n__ вид. экранов
@@ -4709,6 +4711,7 @@ ui =
     .quick-select-menu-period-title-case = Быстрый выбор...
     .reading-file = Чтение файла...
     .redo = Повторить
+    .release = Релиз
     .repeat-last = Повторить __ocs_arg_last__
     .replace-all = Заменить все
     .replace-with = Заменить на:

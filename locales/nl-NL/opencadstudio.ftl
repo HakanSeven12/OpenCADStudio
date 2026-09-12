@@ -4607,6 +4607,8 @@ plugins =
     .no-releases = geen releases
 
 ui =
+    .build = Build
+    .commit-date = Commitdatum
     .count-steps-available = __ocs_arg_count__ stappen beschikbaar
     .label-history = __ocs_arg_label__ geschiedenis
     .n-vp = __ocs_arg_n__ weergavevenster
@@ -4706,6 +4708,7 @@ ui =
     .quick-select-menu-period-title-case = Snel selecteren...
     .reading-file = Bestand wordt gelezen...
     .redo = Opnieuw
+    .release = Release
     .repeat-last = __ocs_arg_last__ herhalen
     .replace-all = Alles vervangen
     .replace-with = Vervangen door:

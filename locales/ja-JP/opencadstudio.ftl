@@ -4597,6 +4597,8 @@ plugins =
     .no-releases = リリースなし
 
 ui =
+    .build = ビルド
+    .commit-date = コミット日
     .count-steps-available = __ocs_arg_count__ ステップ利用可能
     .label-history = __ocs_arg_label__ の履歴
     .n-vp = __ocs_arg_n__ 個の VP
@@ -4696,6 +4698,7 @@ ui =
     .quick-select-menu-period-title-case = クイック選択...
     .reading-file = ファイルを読み込み中…
     .redo = やり直し
+    .release = リリース
     .repeat-last = __ocs_arg_last__ を繰り返し
     .replace-all = すべて置換
     .replace-with = 置換後:

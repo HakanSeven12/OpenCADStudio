@@ -73,10 +73,23 @@ pub(crate) fn architecture_name() -> &'static str {
     }
 }
 
+/// Build card text: the metadata suffix without its leading `+`
+/// (`194.gef189d77`, `gef189d77.dirty`), or "Release" for a clean build on
+/// the release tag.
+fn build_label() -> std::borrow::Cow<'static, str> {
+    match env!("OCS_BUILD_METADATA").strip_prefix('+') {
+        Some(suffix) => std::borrow::Cow::Borrowed(suffix),
+        None => t!("Release"),
+    }
+}
+
 pub fn view_window(
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'static, Message> {
-    let version = format!("v{}", env!("OCS_APP_VERSION"));
+    // The hero carries the full build identity (`2026.36+194.gef189d77`);
+    // the cards split it into the release version and the build details.
+    let version = format!("v{}", env!("OCS_FULL_VERSION"));
+    let build = build_label();
     let content_width = if matches!(sizing.width, Length::Fill) {
         Fill
     } else {
@@ -113,9 +126,17 @@ pub fn view_window(
     .style(surface_style);
 
     let metadata = row![
-        info_card(t!("Version"), version, card_width),
+        info_card(t!("Version"), env!("OCS_APP_VERSION"), card_width),
         info_card(t!("Platform"), platform_name(), card_width),
         info_card(t!("Arch"), architecture_name(), card_width),
+    ]
+    .spacing(8)
+    .width(content_width);
+
+    let build_info = row![
+        info_card(t!("Build"), build, card_width),
+        info_card(t!("Commit date"), env!("OCS_COMMIT_DATE"), card_width),
+        info_card(t!("Profile"), env!("OCS_BUILD_PROFILE"), card_width),
     ]
     .spacing(8)
     .width(content_width);
@@ -129,6 +150,7 @@ pub fn view_window(
         column![
             hero,
             metadata,
+            build_info,
             row![Space::new().width(content_width), copy]
                 .width(sizing.width)
                 .align_y(iced::Center),

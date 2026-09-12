@@ -4608,6 +4608,8 @@ plugins =
     .no-releases = nincs kiadás
 
 ui =
+    .build = Build
+    .commit-date = Commit dátuma
     .count-steps-available = __ocs_arg_count__ lépcsők állnak rendelkezésre
     .label-history = __ocs_arg_label__ története
     .n-vp = __ocs_arg_n__ VP
@@ -4707,6 +4709,7 @@ ui =
     .quick-select-menu-period-title-case = Gyors kiválasztás...
     .reading-file = Fájl olvasása…
     .redo = Újra
+    .release = Kiadás
     .repeat-last = Ismételje meg a __ocs_arg_last__
     .replace-all = Cserélje ki az összeset
     .replace-with = Csere erre:

@@ -4621,6 +4621,8 @@ plugins =
     .no-releases = لا توجد إصدارات
 
 ui =
+    .build = البناء
+    .commit-date = تاريخ الإيداع
     .count-steps-available = تتوفر __ocs_arg_count__ خطوات
     .label-history = سجل __ocs_arg_label__
     .n-vp = __ocs_arg_n__ منفذ عرض
@@ -4720,6 +4722,7 @@ ui =
     .quick-select-menu-period-title-case = تحديد سريع...
     .reading-file = يجري قراءة الملف…
     .redo = إعادة
+    .release = إصدار
     .repeat-last = تكرار __ocs_arg_last__
     .replace-all = استبدال الكل
     .replace-with = الاستبدال بـ:

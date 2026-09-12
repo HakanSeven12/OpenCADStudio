@@ -4609,6 +4609,8 @@ plugins =
     .no-releases = καμία έκδοση
 
 ui =
+    .build = Build
+    .commit-date = Ημερομηνία commit
     .count-steps-available = __ocs_arg_count__ διαθέσιμα βήματα
     .label-history = Ιστορικό: __ocs_arg_label__
     .n-vp = __ocs_arg_n__ ΘΠ
@@ -4708,6 +4710,7 @@ ui =
     .quick-select-menu-period-title-case = Γρήγορη επιλογή...
     .reading-file = Ανάγνωση αρχείου…
     .redo = Επανάληψη
+    .release = Έκδοση
     .repeat-last = Επανάληψη __ocs_arg_last__
     .replace-all = Αντικατάσταση όλων
     .replace-with = Αντικατάσταση με:

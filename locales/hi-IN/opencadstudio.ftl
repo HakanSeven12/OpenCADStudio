@@ -4597,6 +4597,8 @@ plugins =
     .no-releases = कोई विज्ञप्ति नहीं
 
 ui =
+    .build = बिल्ड
+    .commit-date = कमिट तिथि
     .count-steps-available = __ocs_arg_count__ उपलब्ध चरणों
     .label-history = __ocs_arg_label__ इतिहास
     .n-vp = __ocs_arg_n__ व्यूपोर्ट
@@ -4696,6 +4698,7 @@ ui =
     .quick-select-menu-period-title-case = त्वरित चयन...
     .reading-file = फ़ाइल पढ़ना...
     .redo = रेडो
+    .release = रिलीज़
     .repeat-last = दोहराएँ __ocs_arg_last__
     .replace-all = सबको बदल दें
     .replace-with = इसके साथ बदलें:

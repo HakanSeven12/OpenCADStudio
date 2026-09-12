@@ -4609,6 +4609,8 @@ plugins =
     .no-releases = sin versiones
 
 ui =
+    .build = Compilación
+    .commit-date = Fecha del commit
     .count-steps-available = __ocs_arg_count__ pasos disponibles
     .label-history = Historial de __ocs_arg_label__
     .n-vp = __ocs_arg_n__ VG
@@ -4708,6 +4710,7 @@ ui =
     .quick-select-menu-period-title-case = Selección rápida...
     .reading-file = Leyendo archivo…
     .redo = Rehacer
+    .release = Versión oficial
     .repeat-last = Repetir __ocs_arg_last__
     .replace-all = Reemplazar todo
     .replace-with = Reemplazar por:

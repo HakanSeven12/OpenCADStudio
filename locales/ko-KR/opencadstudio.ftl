@@ -4608,6 +4608,8 @@ plugins =
     .no-releases = 릴리스 없음
 
 ui =
+    .build = 빌드
+    .commit-date = 커밋 날짜
     .count-steps-available = __ocs_arg_count__ 단계 사용 가능
     .label-history = __ocs_arg_label__ 역사
     .n-vp = __ocs_arg_n__ VP
@@ -4707,6 +4709,7 @@ ui =
     .quick-select-menu-period-title-case = 빠른 선택...
     .reading-file = 파일을 읽는 중…
     .redo = 다시 실행
+    .release = 릴리스
     .repeat-last = __ocs_arg_last__ 반복
     .replace-all = 모두 바꾸기
     .replace-with = 다음으로 교체:

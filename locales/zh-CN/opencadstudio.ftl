@@ -4592,6 +4592,8 @@ plugins =
     .no-releases = 无发布版本
 
 ui =
+    .build = 构建
+    .commit-date = 提交日期
     .count-steps-available = 可用 __ocs_arg_count__ 步
     .label-history = __ocs_arg_label__ 历史
     .n-vp = __ocs_arg_n__ 个视口
@@ -4691,6 +4693,7 @@ ui =
     .quick-select-menu-period-title-case = 快速选择...
     .reading-file = 正在读取文件…
     .redo = 重做
+    .release = 正式版
     .repeat-last = 重复 __ocs_arg_last__
     .replace-all = 全部替换
     .replace-with = 替换为：

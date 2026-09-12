@@ -4606,6 +4606,8 @@ plugins =
     .no-releases = žádná vydání
 
 ui =
+    .build = Sestavení
+    .commit-date = Datum commitu
     .count-steps-available = K dispozici jsou kroky __ocs_arg_count__
     .label-history = Historie __ocs_arg_label__
     .n-vp = __ocs_arg_n__ VP
@@ -4705,6 +4707,7 @@ ui =
     .quick-select-menu-period-title-case = Rychlý výběr...
     .reading-file = Čtení souboru…
     .redo = Znovu
+    .release = Vydání
     .repeat-last = Opakujte __ocs_arg_last__
     .replace-all = Nahradit vše
     .replace-with = Nahradit za:

@@ -4608,6 +4608,8 @@ plugins =
     .no-releases = ei julkaisuja
 
 ui =
+    .build = Koontiversio
+    .commit-date = Commitin päivämäärä
     .count-steps-available = __ocs_arg_count__ portaat saatavilla
     .label-history = __ocs_arg_label__ historia
     .n-vp = __ocs_arg_n__ VP
@@ -4705,6 +4707,7 @@ ui =
     .quick-select-menu-period-title-case = Pikavalinta...
     .reading-file = Luetaan tiedostoa…
     .redo = Toista
+    .release = Julkaisu
     .repeat-last = Toista __ocs_arg_last__
     .replace-all = Korvaa kaikki
     .replace-with = Korvaa seuraavalla:

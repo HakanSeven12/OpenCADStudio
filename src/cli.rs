@@ -20,7 +20,14 @@ use clap::Parser;
 #[derive(Parser, Debug, Default)]
 #[command(
     name = "OpenCADStudio",
-    version,
+    version = env!("OCS_FULL_VERSION"),
+    long_version = concat!(
+        env!("OCS_FULL_VERSION"),
+        "\nrevision: ", env!("OCS_GIT_REV"),
+        "\ncommit date: ", env!("OCS_COMMIT_DATE"),
+        "\nprofile: ", env!("OCS_BUILD_PROFILE"),
+        "\nfeatures: ", env!("OCS_BUILD_FEATURES"),
+    ),
     about = crate::t!("Open CAD Studio — 2D/3D CAD editor").into_owned(),
     long_about = None,
 )]

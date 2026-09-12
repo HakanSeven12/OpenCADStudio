@@ -53,6 +53,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.source.outputs.commit }}
+          # Full history so build.rs can measure the distance from the
+          # release tag; a shallow clone would label the build `+g<hash>`.
+          fetch-depth: 0
 
       - name: Validate release version
         env:

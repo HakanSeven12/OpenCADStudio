@@ -4609,6 +4609,8 @@ plugins =
     .no-releases = няма версии
 
 ui =
+    .build = Компилация
+    .commit-date = Дата на комита
     .count-steps-available = налични __ocs_arg_count__ стъпки
     .label-history = история на __ocs_arg_label__
     .n-vp = __ocs_arg_n__ VP
@@ -4708,6 +4710,7 @@ ui =
     .quick-select-menu-period-title-case = Бърз избор...
     .reading-file = Четене на файл…
     .redo = Повтори
+    .release = Издание
     .repeat-last = Повтори __ocs_arg_last__
     .replace-all = Замени всички
     .replace-with = Замени с:

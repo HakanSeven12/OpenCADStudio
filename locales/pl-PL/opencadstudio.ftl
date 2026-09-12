@@ -4608,6 +4608,8 @@ plugins =
     .no-releases = żadnych wydań
 
 ui =
+    .build = Kompilacja
+    .commit-date = Data commita
     .count-steps-available = Dostępne stopnie __ocs_arg_count__
     .label-history = Historia __ocs_arg_label__
     .n-vp = __ocs_arg_n__ VP
@@ -4707,6 +4709,7 @@ ui =
     .quick-select-menu-period-title-case = Szybki wybór...
     .reading-file = Czytanie pliku…
     .redo = Powtórz
+    .release = Wydanie
     .repeat-last = Powtórz __ocs_arg_last__
     .replace-all = Zamień wszystko
     .replace-with = Zamień na:

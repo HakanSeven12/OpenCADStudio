@@ -4610,6 +4610,8 @@ plugins =
     .no-releases = no releases
 
 ui =
+    .build = Build
+    .commit-date = Commit date
     .count-steps-available = __ocs_arg_count__ steps available
     .label-history = __ocs_arg_label__ history
     .n-vp = __ocs_arg_n__ VP
@@ -4709,6 +4711,7 @@ ui =
     .quick-select-menu-period-title-case = Quick Select...
     .reading-file = Reading file…
     .redo = Redo
+    .release = Release
     .repeat-last = Repeat __ocs_arg_last__
     .replace-all = Replace All
     .replace-with = Replace with:

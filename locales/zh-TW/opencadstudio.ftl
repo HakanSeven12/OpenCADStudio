@@ -4604,6 +4604,8 @@ plugins =
     .no-releases = 無發行版本
 
 ui =
+    .build = 組建
+    .commit-date = 提交日期
     .count-steps-available = 可用 __ocs_arg_count__ 步
     .label-history = __ocs_arg_label__ 歷史
     .n-vp = __ocs_arg_n__ 個視口
@@ -4703,6 +4705,7 @@ ui =
     .quick-select-menu-period-title-case = 快速選擇...
     .reading-file = 正在讀取檔案…
     .redo = 重做
+    .release = 正式版
     .repeat-last = 重復 __ocs_arg_last__
     .replace-all = 全部替換
     .replace-with = 替換為：

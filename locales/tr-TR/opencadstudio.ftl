@@ -4546,6 +4546,8 @@ plugins =
     .no-releases = sürüm yok
 
 ui =
+    .build = Derleme
+    .commit-date = Commit tarihi
     .count-steps-available = __ocs_arg_count__ adım kullanılabilir
     .label-history = __ocs_arg_label__ geçmişi
     .n-vp = __ocs_arg_n__ görünüm alanı
@@ -4635,6 +4637,7 @@ ui =
     .quick-select-menu-period-title-case = Hızlı Seçim...
     .reading-file = Dosya okunuyor…
     .redo = Yinele
+    .release = Sürüm
     .repeat-last = __ocs_arg_last__ komutunu yinele
     .replace-all = Tümünü Değiştir
     .replace-with = Şununla değiştir:

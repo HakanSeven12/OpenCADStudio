@@ -23,10 +23,6 @@ PLOT_TOP = 108
 PLOT_BOTTOM = 350
 
 
-# Isolated historical spike replaced by its neighboring-release mean.
-DOWNLOAD_OVERRIDES = {"v0.4.1": 61}
-
-
 THEMES = {
     "light": {
         "background": "#ffffff",
@@ -127,7 +123,7 @@ def fetch_release_downloads(
                 (
                     tag,
                     datetime.fromisoformat(published_at.replace("Z", "+00:00")),
-                    DOWNLOAD_OVERRIDES.get(tag, downloads),
+                    downloads,
                 )
             )
         url = next_link(link)
@@ -182,7 +178,7 @@ def render_svg(
         total_downloads = sum(downloads for _, _, downloads in releases)
         title = f"{repository.split('/')[-1]} Release Downloads"
         subtitle = (
-            f"{total_downloads:,} cleaned asset downloads across {len(releases)} releases "
+            f"{total_downloads:,} asset downloads across {len(releases)} releases "
             f"· Latest excluded · Updated {now:%d %b %Y}"
         )
         legend = "Release downloads"

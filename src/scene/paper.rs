@@ -195,7 +195,6 @@ impl Scene {
                 continue;
             };
             if !vp.status.is_on
-                || vp.common.invisible
                 || self.entity_temporarily_hidden(handle)
             {
                 continue;

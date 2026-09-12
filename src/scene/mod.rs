@@ -10909,28 +10909,55 @@ vis_index={:.1} visible_probe={:.1}",
             None,
             None,
         );
-        let wire_points = wires.iter().flat_map(|wire| wire.key_vertices.iter().copied());
-        let mesh_points = self.meshes.iter().filter_map(|(&handle, set)| {
-            let entity = self.document.get_entity(handle)?;
-            if !self.mesh_entity_visible(handle)
-                || !self.belongs_to_visible_block(handle, entity.common().owner_handle, model_block)
-            {
-                return None;
+        let mut min = [f64::INFINITY; 3];
+        let mut max = [f64::NEG_INFINITY; 3];
+        let mut has_points = false;
+
+        for wire in wires.iter() {
+            for &[x, y, z] in &wire.key_vertices {
+                if (x as f32).is_finite() && (y as f32).is_finite() && (z as f32).is_finite() {
+                    min[0] = min[0].min(x);
+                    min[1] = min[1].min(y);
+                    min[2] = min[2].min(z);
+                    max[0] = max[0].max(x);
+                    max[1] = max[1].max(y);
+                    max[2] = max[2].max(z);
+                    has_points = true;
+                }
             }
-            let [ax, ay, bx, by] = set.world_aabb;
-            let [az, bz] = set.z_aabb;
-            Some([
-                [ax as f64, ay as f64, az as f64],
-                [bx as f64, by as f64, bz as f64],
-            ])
-        }).flatten();
-        let points = wire_points.chain(mesh_points).filter(|point| {
-            point.iter().all(|coordinate| (*coordinate as f32).is_finite())
-        });
-        if let Some(bounds) = cadkernel::brep::bounds::Aabb::around(points) {
+        }
+
+        if !self.meshes.is_empty() {
+            for (&handle, set) in &self.meshes {
+                let Some(entity) = self.document.get_entity(handle) else {
+                    continue;
+                };
+                if !self.mesh_entity_visible(handle)
+                    || !self.belongs_to_visible_block(handle, entity.common().owner_handle, model_block)
+                {
+                    continue;
+                }
+                let [ax, ay, bx, by] = set.world_aabb;
+                let [az, bz] = set.z_aabb;
+                let (ax, ay, bx, by, az, bz) = (ax as f64, ay as f64, bx as f64, by as f64, az as f64, bz as f64);
+                if (ax as f32).is_finite() && (ay as f32).is_finite() && (az as f32).is_finite()
+                    && (bx as f32).is_finite() && (by as f32).is_finite() && (bz as f32).is_finite()
+                {
+                    min[0] = min[0].min(ax.min(bx));
+                    min[1] = min[1].min(ay.min(by));
+                    min[2] = min[2].min(az.min(bz));
+                    max[0] = max[0].max(ax.max(bx));
+                    max[1] = max[1].max(ay.max(by));
+                    max[2] = max[2].max(az.max(bz));
+                    has_points = true;
+                }
+            }
+        }
+
+        if has_points {
             return Some((
-                glam::Vec3::from_array(bounds.min.map(|v| v as f32)),
-                glam::Vec3::from_array(bounds.max.map(|v| v as f32)),
+                glam::Vec3::new(min[0] as f32, min[1] as f32, min[2] as f32),
+                glam::Vec3::new(max[0] as f32, max[1] as f32, max[2] as f32),
             ));
         }
         // Last resort: saved EXTMIN/EXTMAX before the wire cache is built.
@@ -12354,6 +12381,53 @@ mod layout_cache_tests {
             );
             assert!(!source.is_empty());
         }
+    }
+
+    #[test]
+    fn model_space_extents_mixed_entities_accuracy() {
+        use acadrust::types::{Vector2, Vector3};
+        let mut s = Scene::new();
+        // Line from (0, 0, 10) to (50, 100, 20)
+        let mut line = acadrust::entities::Line::new();
+        line.start = Vector3::new(0.0, 0.0, 10.0);
+        line.end = Vector3::new(50.0, 100.0, 20.0);
+        s.add_entity(EntityType::Line(line));
+
+        // Circle at (200, 200, 0) with radius 50
+        let mut circle = acadrust::entities::Circle::new();
+        circle.center = Vector3::new(200.0, 200.0, 0.0);
+        circle.radius = 50.0;
+        s.add_entity(EntityType::Circle(circle));
+
+        // Arc at (-100, -50, -5) with radius 25, angles 0 to PI
+        let mut arc = acadrust::entities::Arc::new();
+        arc.center = Vector3::new(-100.0, -50.0, -5.0);
+        arc.radius = 25.0;
+        arc.start_angle = 0.0;
+        arc.end_angle = std::f64::consts::PI;
+        s.add_entity(EntityType::Arc(arc));
+
+        // LwPolyline from (300, -200) to (400, -100)
+        let mut pl = acadrust::entities::LwPolyline::new();
+        pl.vertices = vec![
+            acadrust::entities::LwVertex::new(Vector2::new(300.0, -200.0)),
+            acadrust::entities::LwVertex::new(Vector2::new(400.0, -100.0)),
+        ];
+        s.add_entity(EntityType::LwPolyline(pl));
+
+        let bounds = s.model_space_extents().expect("Extents must exist");
+        // Key vertices come from entities with distinct vertex positions (Line, LwPolyline).
+        // Line vertices: (0, 0, 10), (50, 100, 20)
+        // LwPolyline vertices: (300, -200, 0), (400, -100, 0)
+        // Min X = 0.0, Max X = 400.0
+        // Min Y = -200.0, Max Y = 100.0
+        // Min Z = 0.0, Max Z = 20.0
+        assert!((bounds.0.x - 0.0).abs() < 1e-3, "min.x mismatch: {}", bounds.0.x);
+        assert!((bounds.1.x - 400.0).abs() < 1e-3, "max.x mismatch: {}", bounds.1.x);
+        assert!((bounds.0.y - (-200.0)).abs() < 1e-3, "min.y mismatch: {}", bounds.0.y);
+        assert!((bounds.1.y - 100.0).abs() < 1e-3, "max.y mismatch: {}", bounds.1.y);
+        assert!((bounds.0.z - 0.0).abs() < 1e-3, "min.z mismatch: {}", bounds.0.z);
+        assert!((bounds.1.z - 20.0).abs() < 1e-3, "max.z mismatch: {}", bounds.1.z);
     }
 
     #[test]

@@ -1729,6 +1729,11 @@ pub fn box_hit<'a, W: WireSource + ?Sized>(
         let mut seen = HashSet::default();
 
         for wire in wires.iter() {
+            let name = wire.name.as_str();
+            if disqualified.contains(name) {
+                continue;
+            }
+
             let aabb_pts: Vec<[f32; 3]>;
             let empty_pts: [[f32; 3]; 0] = [];
             let pts: &[[f32; 3]] = if !wire.points.is_empty() {
@@ -1755,13 +1760,13 @@ pub fn box_hit<'a, W: WireSource + ?Sized>(
                 &[]
             };
             let mut all_inside = true;
-            let mut prev: Option<Point> = None;
+            let mut has_points = false;
 
             for (i, &[px, py, pz]) in pts.iter().enumerate() {
                 if px.is_nan() {
-                    prev = None;
                     continue;
                 }
+                has_points = true;
                 let world = if !wire.points.is_empty() {
                     wire_point_world(wire, i, view_rot, eye)
                 } else {
@@ -1770,28 +1775,29 @@ pub fn box_hit<'a, W: WireSource + ?Sized>(
                 let sp = world_to_screen(world, view_rot, eye, bounds);
                 if !inside(sp) {
                     all_inside = false;
-                }
-                prev = Some(sp);
-            }
-
-            let glyphs_present = !wire.text_verts.is_empty();
-            let mut glyphs_inside = true;
-            for start in (0..wire.text_verts.len()).step_by(6) {
-                let Some(screen) = projected_text_quad(wire, start, view_rot, eye, bounds) else {
-                    continue;
-                };
-                if !screen.iter().copied().all(inside) {
-                    glyphs_inside = false;
                     break;
                 }
             }
 
-            let has_geom = prev.is_some() || glyphs_present;
+            let glyphs_present = !wire.text_verts.is_empty();
+            let mut glyphs_inside = true;
+            if all_inside && glyphs_present {
+                for start in (0..wire.text_verts.len()).step_by(6) {
+                    let Some(screen) = projected_text_quad(wire, start, view_rot, eye, bounds) else {
+                        continue;
+                    };
+                    if !screen.iter().copied().all(inside) {
+                        glyphs_inside = false;
+                        break;
+                    }
+                }
+            }
+
+            let has_geom = has_points || glyphs_present;
             if !has_geom {
                 continue;
             }
 
-            let name = wire.name.as_str();
             if all_inside && glyphs_inside {
                 if seen.insert(name) {
                     qualified.push(name);

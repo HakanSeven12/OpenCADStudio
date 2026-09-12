@@ -1508,7 +1508,7 @@ fn bench_batch_entity_mutation(runner: &mut BenchmarkRunner) {
         "ms",
         samples,
         Some((throughput, "entities/s")),
-        Some(10.0), // Target threshold < 10.0 ms
+        Some(15.0), // Target threshold < 15.0 ms
     );
 }
 

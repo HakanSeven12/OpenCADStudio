@@ -1,5 +1,7 @@
 use acadrust::entities::{LwPolyline, LwVertex};
-use cadkernel::geom2d::{signed_area, Curve, Polyline, PolylineVertex, Vec2};
+use cadkernel::geom2d::{
+    signed_area, Curve, Polyline, PolylineVertex, RectangleFrame, Tolerance, Vec2,
+};
 
 use crate::t;
 
@@ -884,31 +886,19 @@ fn set_revision_cloud_arc_length(pline: &mut LwPolyline, requested: f64) {
     pline.vertices = cloud_vertices(&points, magnitude * sign, width_ratios);
 }
 
+pub(crate) fn rectangle_frame(
+    pline: &LwPolyline,
+) -> Option<(RectangleFrame, cadkernel::space::Plane)> {
+    let planar = crate::entities::curve::lwpolyline_curve(pline)?;
+    let Curve::Polyline(polyline) = &planar.curve else {
+        return None;
+    };
+    let rectangle = polyline.rectangle_frame(Tolerance::default())?;
+    Some((rectangle, planar.plane))
+}
+
 pub(crate) fn is_rectangle(pline: &LwPolyline) -> bool {
-    if pline.common.extended_data.get_record("OCS_RECTANGLE").is_some() {
-        return true;
-    }
-    if !pline.is_closed
-        || pline.vertices.len() != 4
-        || pline.vertices.iter().any(|vertex| vertex.bulge.abs() > 1.0e-9)
-    {
-        return false;
-    }
-    let edges: Vec<Vec2> = (0..4)
-        .map(|index| {
-            let from = pline.vertices[index].location;
-            let to = pline.vertices[(index + 1) % 4].location;
-            Vec2::new(to.x - from.x, to.y - from.y)
-        })
-        .collect();
-    let lengths: Vec<f64> = edges.iter().map(|edge| edge.length()).collect();
-    if lengths.iter().any(|length| *length <= 1.0e-12) {
-        return false;
-    }
-    let tolerance = 1.0e-9;
-    edges[0].dot(edges[1]).abs() <= tolerance * lengths[0] * lengths[1]
-        && edges[0].cross(edges[2]).abs() <= tolerance * lengths[0] * lengths[2]
-        && edges[1].cross(edges[3]).abs() <= tolerance * lengths[1] * lengths[3]
+    rectangle_frame(pline).is_some()
 }
 
 fn properties(pline: &LwPolyline) -> Vec<PropSection> {
@@ -1203,7 +1193,14 @@ impl crate::entities::traits::Grippable for LwPolyline {
             // Vertex grip. Break only where a split is possible: any vertex
             // of a closed polyline, interior vertices of an open one.
             let breakable = n >= 3 && (self.is_closed || (grip_id > 0 && grip_id < n - 1));
-            let mut items = vec![
+            let mut items = Vec::new();
+            if is_rectangle(self) {
+                items.push(GripMenuItem {
+                    label: "Resize",
+                    action: GripMenuAction::RectangleResize,
+                });
+            }
+            items.extend([
                 GripMenuItem {
                     label: "Stretch",
                     action: GripMenuAction::Stretch,
@@ -1216,7 +1213,7 @@ impl crate::entities::traits::Grippable for LwPolyline {
                     label: "Remove Vertex",
                     action: GripMenuAction::RemoveVertex,
                 },
-            ];
+            ]);
             if breakable {
                 items.push(GripMenuItem {
                     label: "Break",
@@ -1242,7 +1239,19 @@ impl crate::entities::traits::Grippable for LwPolyline {
                 action: GripMenuAction::ConvertToArc,
             }
         };
-        vec![
+        let mut items = Vec::new();
+        if is_rectangle(self) && seg < 4 {
+            // Moving an edge changes the dimension perpendicular to it.
+            items.push(GripMenuItem {
+                label: if seg % 2 == 0 { "Height" } else { "Width" },
+                action: if seg % 2 == 0 {
+                    GripMenuAction::RectangleHeight
+                } else {
+                    GripMenuAction::RectangleWidth
+                },
+            });
+        }
+        items.extend([
             GripMenuItem {
                 label: "Stretch",
                 action: GripMenuAction::Stretch,
@@ -1252,7 +1261,93 @@ impl crate::entities::traits::Grippable for LwPolyline {
                 action: GripMenuAction::AddVertex,
             },
             convert,
-        ]
+        ]);
+        items
+    }
+
+    fn grip_menu_value_prompt(
+        &self,
+        grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+    ) -> Option<&'static str> {
+        use crate::scene::model::object::GripMenuAction as A;
+        let n = self.vertices.len();
+        (is_rectangle(self)
+            && n == 4
+            && (n..n + 4).contains(&grip_id)
+            && matches!(action, A::RectangleWidth | A::RectangleHeight))
+        .then_some(match action {
+            A::RectangleWidth => "New width",
+            _ => "New height",
+        })
+    }
+
+    fn grip_menu_point_value(
+        &self,
+        grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+        point: glam::DVec3,
+    ) -> Option<f64> {
+        use crate::scene::model::object::GripMenuAction as A;
+        let (frame, plane) = rectangle_frame(self)?;
+        let seg = grip_id.checked_sub(4)?;
+        if seg >= 4 {
+            return None;
+        }
+        let axis = match (seg % 2, action) {
+            (0, A::RectangleHeight) => Vec2::from(frame.height_axis),
+            (1, A::RectangleWidth) => Vec2::from(frame.width_axis),
+            _ => return None,
+        };
+        let opposite_mid = {
+            let a = self.vertices[(seg + 2) % 4].location;
+            let b = self.vertices[(seg + 3) % 4].location;
+            Vec2::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5)
+        };
+        let point = Vec2::from(plane.project(point.to_array())?);
+        let value = (point - opposite_mid).dot(axis).abs();
+        (value > Tolerance::default().linear()).then_some(value)
+    }
+
+    fn apply_grip_menu_value(
+        &mut self,
+        grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+        value: f64,
+    ) {
+        use crate::scene::model::object::GripMenuAction as A;
+        if value <= Tolerance::default().linear() {
+            return;
+        }
+        let Some((frame, _)) = rectangle_frame(self) else {
+            return;
+        };
+        let Some(seg) = grip_id.checked_sub(4) else {
+            return;
+        };
+        if seg >= 4 {
+            return;
+        }
+        let axis = match (seg % 2, action) {
+            (0, A::RectangleHeight) => frame.height_axis,
+            (1, A::RectangleWidth) => frame.width_axis,
+            _ => return,
+        };
+        let i0 = seg;
+        let i1 = (seg + 1) % 4;
+        let o0 = (seg + 3) % 4;
+        let o1 = (seg + 2) % 4;
+        let selected_mid = (self.vertices[i0].location + self.vertices[i1].location) * 0.5;
+        let opposite_mid = (self.vertices[o0].location + self.vertices[o1].location) * 0.5;
+        let delta = selected_mid - opposite_mid;
+        let signed_distance = delta.x * axis[0] + delta.y * axis[1];
+        if signed_distance.abs() <= Tolerance::default().linear() {
+            return;
+        }
+        let direction = acadrust::types::Vector2::new(axis[0], axis[1])
+            * signed_distance.signum();
+        self.vertices[i0].location = self.vertices[o0].location + direction * value;
+        self.vertices[i1].location = self.vertices[o1].location + direction * value;
     }
     fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
         use crate::scene::model::object::GripMenuAction as A;
@@ -1440,9 +1535,10 @@ impl crate::entities::traits::MassPropsCalc for acadrust::entities::LwPolyline {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entities::traits::PropertyEditable;
+    use crate::entities::traits::{Grippable, PropertyEditable};
+    use crate::scene::model::object::GripMenuAction;
     use acadrust::entities::{LwPolyline, LwVertex};
-    use acadrust::Vector2;
+    use acadrust::{Vector2, Vector3};
 
     fn make_test_lwpolyline(count: usize, constant_width: f64) -> LwPolyline {
         let mut pl = LwPolyline::default();
@@ -1451,6 +1547,71 @@ mod tests {
             pl.vertices.push(LwVertex::new(Vector2::new(i as f64 * 10.0, 0.0)));
         }
         pl
+    }
+
+    fn make_test_rectangle() -> LwPolyline {
+        let mut pl = LwPolyline::default();
+        pl.is_closed = true;
+        pl.vertices = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]
+            .into_iter()
+            .map(|(x, y)| LwVertex::new(Vector2::new(x, y)))
+            .collect();
+        pl
+    }
+
+    #[test]
+    fn rectangle_midpoint_offers_dimension_before_stretch() {
+        let pl = make_test_rectangle();
+        let bottom = pl.grip_menu(4);
+        assert_eq!(bottom[0].action, GripMenuAction::RectangleHeight);
+        assert_eq!(bottom[1].action, GripMenuAction::Stretch);
+
+        let right = pl.grip_menu(5);
+        assert_eq!(right[0].action, GripMenuAction::RectangleWidth);
+        assert_eq!(right[1].action, GripMenuAction::Stretch);
+    }
+
+    #[test]
+    fn rectangle_corner_offers_resize_before_stretch() {
+        let pl = make_test_rectangle();
+        let corner = pl.grip_menu(0);
+        assert_eq!(corner[0].action, GripMenuAction::RectangleResize);
+        assert_eq!(corner[1].action, GripMenuAction::Stretch);
+    }
+
+    #[test]
+    fn rectangle_dimension_edit_keeps_opposite_edge_fixed() {
+        let mut pl = make_test_rectangle();
+        pl.apply_grip_menu_value(6, GripMenuAction::RectangleHeight, 8.0);
+        assert_eq!(pl.vertices[0].location, Vector2::new(0.0, 0.0));
+        assert_eq!(pl.vertices[1].location, Vector2::new(10.0, 0.0));
+        assert_eq!(pl.vertices[2].location, Vector2::new(10.0, 8.0));
+        assert_eq!(pl.vertices[3].location, Vector2::new(0.0, 8.0));
+        assert!(is_rectangle(&pl));
+    }
+
+    #[test]
+    fn rectangle_point_preview_reports_full_dimension() {
+        let pl = make_test_rectangle();
+        let value = pl.grip_menu_point_value(
+            5,
+            GripMenuAction::RectangleWidth,
+            glam::DVec3::new(14.0, 2.5, 0.0),
+        );
+        assert_eq!(value, Some(14.0));
+    }
+
+    #[test]
+    fn rectangle_point_preview_uses_entity_plane() {
+        let mut pl = make_test_rectangle();
+        pl.normal = Vector3::new(0.0, 1.0, 0.0);
+        pl.elevation = 5.0;
+        let (_, plane) = rectangle_frame(&pl).expect("rectangle frame");
+        let point = glam::DVec3::from_array(plane.point_at([14.0, 2.5]));
+
+        let value = pl.grip_menu_point_value(5, GripMenuAction::RectangleWidth, point);
+
+        assert_eq!(value, Some(14.0));
     }
 
     #[test]

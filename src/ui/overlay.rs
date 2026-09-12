@@ -2685,6 +2685,8 @@ pub struct DynBox {
     /// User has typed a value (the box no longer tracks the cursor).
     pub locked: bool,
     pub role: DynRole,
+    /// Optional exact viewport position, used by rotated rectangle dimensions.
+    pub center: Option<Point>,
 }
 
 pub fn dynamic_input_overlay<'a>(
@@ -3038,7 +3040,7 @@ impl DynInputCanvas {
 
         // ── Box placement by role ──
         for b in &self.boxes {
-            let center = match b.role {
+            let center = b.center.unwrap_or_else(|| match b.role {
                 DynRole::Angle => self.label_screen.unwrap_or_else(|| {
                     let a_mid = a_ref + sweep * 0.5;
                     let r = (len - DYN_BOX_H * 2.0).max(len * 0.5);
@@ -3049,10 +3051,18 @@ impl DynInputCanvas {
                 }),
                 DynRole::X | DynRole::Width => Point {
                     x: (base.x + cursor.x) * 0.5,
-                    y: base.y + 14.0,
+                    y: if self.guide == DynGuide::RectSides {
+                        base.y - (cursor.y - base.y).signum() * 14.0
+                    } else {
+                        base.y + 14.0
+                    },
                 },
                 DynRole::Y | DynRole::Height => Point {
-                    x: corner.x + 18.0,
+                    x: if self.guide == DynGuide::RectSides {
+                        corner.x + (cursor.x - base.x).signum() * 18.0
+                    } else {
+                        corner.x + 18.0
+                    },
                     y: (base.y + cursor.y) * 0.5,
                 },
                 // Perpendicular measure: on the measured segment / dim line.
@@ -3071,7 +3081,7 @@ impl DynInputCanvas {
                     x: base.x + dx * len * 0.5 + nx * 16.0,
                     y: base.y + dy * len * 0.5 + ny * 16.0,
                 },
-            };
+            });
             Self::draw_box(frame, b, center, bounds, theme);
         }
         // Keep the tracking hint near the crosshair in guided layouts.

@@ -984,6 +984,12 @@ bg={bg_ms:.1}ms n={view_count}"
                         crate::scene::pick::grip::GripEditMode::ArcLength => {
                             crate::scene::model::object::GripMenuAction::ArcLength
                         }
+                        crate::scene::pick::grip::GripEditMode::RectangleWidth => {
+                            crate::scene::model::object::GripMenuAction::RectangleWidth
+                        }
+                        crate::scene::pick::grip::GripEditMode::RectangleHeight => {
+                            crate::scene::model::object::GripMenuAction::RectangleHeight
+                        }
                         _ => return None,
                     };
                     let original = self
@@ -998,6 +1004,64 @@ bg={bg_ms:.1}ms n={view_count}"
                         w,
                     )
                 });
+                let rectangle_values = tab
+                    .active_grip
+                    .as_ref()
+                    .and_then(|grip| grip.rectangle_frame)
+                    .map(|(opposite, width_axis, height_axis)| {
+                        let delta = w - opposite;
+                        (delta.dot(width_axis).abs(), delta.dot(height_axis).abs())
+                    });
+                let rectangle_label_screens = tab
+                    .active_grip
+                    .as_ref()
+                    .and_then(|grip| grip.rectangle_frame)
+                    .and_then(|(opposite, width_axis, height_axis)| {
+                        let delta = w - opposite;
+                        let width = delta.dot(width_axis);
+                        let height = delta.dot(height_axis);
+                        let width_center = opposite + width_axis * (width * 0.5);
+                        let height_center = opposite
+                            + width_axis * width
+                            + height_axis * (height * 0.5);
+                        let rectangle_center = opposite
+                            + width_axis * (width * 0.5)
+                            + height_axis * (height * 0.5);
+                        let (vw, vh) = tab.scene.selection.borrow().vp_size;
+                        let (camera, bounds) = tab
+                            .scene
+                            .viewport_edit_frame((vw, vh))
+                            .unwrap_or_else(|| {
+                                (
+                                    tab.scene.camera.borrow().clone(),
+                                    tab.scene.active_model_tile_bounds(vw, vh),
+                                )
+                            });
+                        let project = |point| {
+                            camera.project(point, bounds).map(|screen| iced::Point::new(
+                                bounds.x + screen.x,
+                                bounds.y + screen.y,
+                            ))
+                        };
+                        let center = project(rectangle_center)?;
+                        let offset_from_center = |side: iced::Point, pixels: f32| {
+                            let dx = side.x - center.x;
+                            let dy = side.y - center.y;
+                            let length = dx.hypot(dy);
+                            if length > 1.0e-3 {
+                                iced::Point::new(
+                                    side.x + dx / length * pixels,
+                                    side.y + dy / length * pixels,
+                                )
+                            } else {
+                                side
+                            }
+                        };
+                        Some((
+                            offset_from_center(project(width_center)?, 14.0),
+                            offset_from_center(project(height_center)?, 18.0),
+                        ))
+                    });
                 let boxes: Vec<crate::ui::overlay::DynBox> = tab
                     .dyn_fields
                     .iter()
@@ -1005,6 +1069,14 @@ bg={bg_ms:.1}ms n={view_count}"
                     .map(|(idx, f)| {
                         let value = match (&f.buffer, live) {
                             (Some(b), _) => b.clone(),
+                            (None, _) if rectangle_values.is_some() => {
+                                let (width, height) = rectangle_values.unwrap();
+                                match f.role {
+                                    crate::command::DynRole::Width => format!("{width:.4}"),
+                                    crate::command::DynRole::Height => format!("{height:.4}"),
+                                    _ => String::new(),
+                                }
+                            }
                             // An angle step with a command-supplied live value
                             // (ARC span / direction) shows it in degrees.
                             (None, Some(lv)) if f.component == DynComponent::Angle => {
@@ -1033,6 +1105,13 @@ bg={bg_ms:.1}ms n={view_count}"
                             active: idx == tab.dyn_active,
                             locked: f.locked(),
                             role: f.role,
+                            center: rectangle_label_screens.and_then(|(width, height)| {
+                                match f.role {
+                                    crate::command::DynRole::Width => Some(width),
+                                    crate::command::DynRole::Height => Some(height),
+                                    _ => None,
+                                }
+                            }),
                         }
                     })
                     .collect();
@@ -1772,6 +1851,8 @@ bg={bg_ms:.1}ms n={view_count}"
                 crate::scene::pick::grip::GripEditMode::Lengthen
                     | crate::scene::pick::grip::GripEditMode::Radius
                     | crate::scene::pick::grip::GripEditMode::ArcLength
+                    | crate::scene::pick::grip::GripEditMode::RectangleWidth
+                    | crate::scene::pick::grip::GripEditMode::RectangleHeight
             )
         });
         let dyn_capturing =

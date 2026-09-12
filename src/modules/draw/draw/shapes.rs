@@ -272,7 +272,7 @@ fn make_rect_pline(
     style: RectStyle,
 ) -> Option<EntityType> {
     let (geometry, elevation) = rectangle_polyline(corners, plane, style)?;
-    let mut polyline = LwPolyline {
+    let polyline = LwPolyline {
         vertices: geometry
             .vertices
             .iter()
@@ -289,9 +289,6 @@ fn make_rect_pline(
         thickness: style.thickness,
         ..Default::default()
     };
-    let mut marker = acadrust::xdata::ExtendedDataRecord::new("OCS_RECTANGLE");
-    marker.add_value(acadrust::xdata::XDataValue::Integer16(1));
-    polyline.common.extended_data.add_record(marker);
     Some(plane.place_entity(EntityType::LwPolyline(polyline)))
 }
 

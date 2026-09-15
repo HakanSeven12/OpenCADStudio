@@ -104,17 +104,27 @@ through the existing Plugin Manager with zero OCS core changes.
         under `Mode::Eval`, which only accepts one expression). Fixed by
         `vm.import("ocs", 0)` + `scope.globals.set_item` before compiling —
         `ocs` is now pre-bound, no import needed or possible.
-      - **Confirmed broken, host-side, not this plugin**: `ocs.selection()`
-        always returns `[]`. Instrumented the plugin directly —
-        `HostApi::try_recv_notification()` returns nothing at all, ever, even
-        a full second after a `select` automation op, despite the runner
-        authenticating as V4 and dispatch working normally. The host's
-        `SelectionChangedV4` broadcast (`notify_plugins_selection_changed` /
-        `publish_selection_changed_v4` in `src/plugin/v4_support.rs`) isn't
-        reaching the plugin's IPC channel when selection changes via
-        automation. Not root-caused further (needs host-side
-        instrumentation); documented as a known limitation in
-        `opencad-python`'s `PLUGIN.md`.
+      - **Found and fixed a second real bug, this one plugin-side, not the
+        host's**: `ocs.selection()` always returned `[]`. Root cause (found by
+        temporarily instrumenting *this* host, now reverted — no host changes
+        were needed): `ocs_plugin_api::runner`'s own V4 event loop (`run_v4`
+        in `runner.rs`) drains `HostApi::try_recv_notification()` on every
+        iteration and forwards each notification to
+        `BuiltinPlugin::on_notification` — *before* a `Dispatch` request ever
+        reaches `dispatch()`. Polling `try_recv_notification()` from inside
+        `dispatch` (what the plugin did) therefore always sees an empty
+        queue; the host's `SelectionChangedV4` broadcast
+        (`notify_plugins_selection_changed` /
+        `publish_selection_changed_v4` in `src/plugin/v4_support.rs`) was
+        firing correctly the whole time. Fix: override `on_notification` and
+        stash the selection in a process-wide cache instead
+        (`opencad-python`'s `selection_cache.rs`); `dispatch` and
+        `ocs.selection()` just read that. Verified end-to-end: select an
+        entity, then `PY_EVAL ocs.selection()` returns its handle.
+      - Worth folding into this doc's guidance for anyone writing a V4+
+        plugin: **notifications must be consumed via `on_notification`, not
+        by polling `try_recv_notification()` from `dispatch`** — the stock
+        runner loop already drains that queue for you.
       - **Testing pitfall worth remembering**: `--mcp` doesn't run headless —
         it's a thin JSON-RPC client that reuses any already-running OCS
         instance it finds under `$HOME/Library/Application Support/

@@ -148,7 +148,7 @@ concrete types:
 | Undo / dirty | `push_undo`, `set_dirty` |
 | Tab | `tab_index()` |
 | Document identity (V5) | `document_path(tab_id)` returns the saved path for a document tab. |
-| Notifications (V4) | `on_notification` receives `HostNotification::SelectionChangedV4 { tab_id, handles }` when the active tab's selection changes, plus `DocumentChangedV4` / `DocumentTabClosed`. |
+| Notifications (V4) | `on_notification` receives `HostNotification::SelectionChangedV4 { tab_id, handles }` when the active tab's selection changes, plus `DocumentChangedV4` / `DocumentTabClosed`. **`on_notification` is the only place to observe these for a stock out-of-process plugin** — `ocs_plugin_api::runner`'s own event loop drains `HostApi::try_recv_notification()` on every iteration and forwards each notification to `on_notification` *before* a `Dispatch` request ever reaches `dispatch()`, so polling `try_recv_notification()` from inside `dispatch` always finds an empty queue. Since `dispatch` only gets `&self` (no mutation) while `on_notification` gets `&mut self`, a plugin that needs both has to bridge them with its own interior-mutable state (a process-wide `static Mutex`/`OnceLock` is simplest, matching the "keep state inside the plugin crate" guidance above). |
 
 ### `export_plugin!` — the C-ABI export
 

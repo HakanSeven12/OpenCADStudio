@@ -10245,7 +10245,7 @@ vis_index={:.1} visible_probe={:.1}",
     }
 
     fn rebuild_dependency_index(&self) -> SceneDependencyIndex {
-        let layout_blocks: HashSet<Handle> = self
+        let mut layout_blocks: HashSet<Handle> = self
             .document
             .objects
             .values()
@@ -10256,6 +10256,14 @@ vis_index={:.1} visible_probe={:.1}",
                 _ => None,
             })
             .collect();
+        // DWG imports may have model/paper block records without matching
+        // Layout objects. They still own directly rendered entities, so their
+        // layer dependencies must resolve to those entity handles.
+        layout_blocks.extend(self.document.block_records.iter().filter_map(|record| {
+            let name = normalize_name(&record.name);
+            (name.starts_with("*MODEL_SPACE") || name.starts_with("*PAPER_SPACE"))
+                .then_some(record.handle)
+        }));
         let block_names: HashMap<Handle, String> = self
             .document
             .block_records
@@ -11629,6 +11637,33 @@ mod journal_tests {
             "the table is case-insensitive, which is what lets the memo key on \
              the raw name",
         );
+    }
+
+    #[test]
+    fn imported_model_space_hatch_without_layout_object_is_a_layer_target() {
+        use acadrust::entities::Hatch;
+        use acadrust::objects::ObjectType;
+        use acadrust::tables::layer::Layer;
+
+        let mut scene = Scene::new();
+        scene.document.layers.add_or_replace(Layer::new("Shadows"));
+        let mut hatch = Hatch::new();
+        hatch.common.layer = "Shadows".to_string();
+        let handle = scene.add_entity(EntityType::Hatch(hatch));
+        let model = scene.model_space_block_handle();
+        assert_eq!(scene.document.get_entity(handle).unwrap().common().owner_handle, model);
+        scene.document.objects.retain(|_, object| !matches!(object, ObjectType::Layout(_)));
+        scene.invalidate_dependency_index();
+
+        let targets = scene.dependency_targets(DependencyKind::Layer, &["Shadows".to_string()]);
+        assert!(targets.render_handles.contains(&handle));
+        assert!(targets.source_handles.contains(&handle));
+        assert!(!targets.touches_block_definition);
+
+        scene.document.layers.get_mut("Shadows").unwrap().flags.off = true;
+        let epoch = scene.geometry_epoch;
+        scene.invalidate_layer_dependencies(&["Shadows".to_string()]);
+        assert_ne!(scene.geometry_epoch, epoch, "the cached hatch needs an entity delta");
     }
 
     /// The loader's handed-over draw depths must equal a local rebuild.

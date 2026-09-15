@@ -8,8 +8,9 @@
 // The function is async so the UI remains responsive while the job is queued.
 //
 // The web build has no system printers: `preview_page_pdf` /
-// `preview_pages_pdf` render the same PDF bytes and open them in a browser
-// tab, where the browser's own print dialog takes over.
+// `preview_pages_pdf` render the same PDF bytes, rasterise them, and show
+// the pages in an in-page overlay — the way AutoCAD previews plot output on
+// screen rather than handing a file to an external viewer.
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::io::pdf_export;
@@ -238,9 +239,7 @@ mod printer_buffer_tests {
 /// Build the platform printer-properties command.
 #[cfg(not(target_arch = "wasm32"))]
 fn printer_properties_command(printer: Option<&str>) -> (&'static str, Vec<String>) {
-    let named = printer
-        .map(str::trim)
-        .filter(|name| !name.is_empty());
+    let named = printer.map(str::trim).filter(|name| !name.is_empty());
 
     #[cfg(target_os = "windows")]
     let command = match named {
@@ -337,7 +336,7 @@ pub fn open_in_viewer(path: &std::path::Path) -> Result<(), String> {
 }
 
 /// Render a page and show it the way each platform previews: the OS PDF
-/// viewer on desktop, a new browser tab on the web.
+/// viewer on desktop, an in-page rasterised overlay on the web.
 pub fn preview_page_pdf(page: &crate::io::pdf_export::PdfPageInput) -> Result<(), String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -348,34 +347,59 @@ pub fn preview_page_pdf(page: &crate::io::pdf_export::PdfPageInput) -> Result<()
     #[cfg(target_arch = "wasm32")]
     {
         let bytes = crate::io::pdf_export::render_pdf_bytes(std::slice::from_ref(page), None)?;
-        crate::sys::open_bytes_in_new_tab("plot_preview.pdf", &bytes);
-        Ok(())
+        web_preview_overlay(&bytes)
     }
 }
 
 /// Web-only multi-page variant used by print-all: render every layout into
-/// one PDF and open it in a browser tab.
+/// one PDF and preview the first pages in the overlay.
 #[cfg(target_arch = "wasm32")]
 pub fn preview_pages_pdf(pages: &[crate::io::pdf_export::PdfPageInput]) -> Result<(), String> {
     let bytes = crate::io::pdf_export::render_pdf_bytes(pages, None)?;
-    crate::sys::open_bytes_in_new_tab("plot_preview.pdf", &bytes);
+    web_preview_overlay(&bytes)
+}
+
+/// Web preview: rasterise the plotted PDF (the same hayro pipeline that draws
+/// PDF underlays) and show the pages in an in-page overlay. The browser gets
+/// plain PNGs, so neither popup permission nor a PDF viewer plugin is needed.
+#[cfg(target_arch = "wasm32")]
+fn web_preview_overlay(bytes: &[u8]) -> Result<(), String> {
+    const PREVIEW_DPI: f32 = 150.0;
+    const MAX_PREVIEW_PAGES: usize = 12;
+    let pages = crate::scene::model::pdf_raster::rasterize_bytes_pages(
+        std::sync::Arc::new(bytes.to_vec()),
+        PREVIEW_DPI,
+        MAX_PREVIEW_PAGES,
+    );
+    let mut pngs = Vec::with_capacity(pages.len());
+    for page in &pages {
+        let encoded =
+            image::RgbaImage::from_raw(page.width, page.height, page.pixels.as_ref().clone())
+                .and_then(|img| {
+                    let mut out = Vec::new();
+                    img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+                        .ok()?;
+                    Some(out)
+                });
+        if let Some(png) = encoded {
+            pngs.push(png);
+        }
+    }
+    crate::sys::show_pdf_preview("plot_preview.pdf", bytes, &pngs);
     Ok(())
 }
 
 /// Dispatch a PDF to a specific printer with [`PrintOptions`].
 #[cfg(not(target_arch = "wasm32"))]
-fn dispatch_to_printer_opts(
-    path: &std::path::Path,
-    opts: &PrintOptions,
-) -> Result<String, String> {
+fn dispatch_to_printer_opts(path: &std::path::Path, opts: &PrintOptions) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
         use std::ffi::OsStr;
         use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Foundation::{GetLastError, ERROR_NO_ASSOCIATION};
         use windows_sys::Win32::UI::Shell::{
-            ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC,
-            SE_ERR_NOASSOC,
+            ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SE_ERR_NOASSOC,
+            SHELLEXECUTEINFOW,
         };
         use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
@@ -385,7 +409,10 @@ fn dispatch_to_printer_opts(
             Some(p) if !p.is_empty() => (wide("printto"), Some(wide(p)), p.to_string()),
             _ => (wide("print"), None, "default printer".to_string()),
         };
-        let params_ptr = params.as_ref().map(|v| v.as_ptr()).unwrap_or(std::ptr::null());
+        let params_ptr = params
+            .as_ref()
+            .map(|v| v.as_ptr())
+            .unwrap_or(std::ptr::null());
         for _ in 0..opts.copies.max(1) {
             let mut info = SHELLEXECUTEINFOW {
                 cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
@@ -436,20 +463,17 @@ fn dispatch_to_printer_opts(
             };
             cmd.arg("-o").arg(format!("print-quality={pq}"));
         }
-        let lp_result = cmd
-            .arg("--")
-            .arg(path_str.as_ref())
-            .output();
+        let lp_result = cmd.arg("--").arg(path_str.as_ref()).output();
         if let Ok(out) = &lp_result {
             if !out.status.success() {
                 // Continue to the lpr fallback below.
             } else {
-            let msg = String::from_utf8_lossy(&out.stdout);
-            let printer = msg
-                .split_whitespace()
-                .find(|w| w.contains('-'))
-                .unwrap_or("printer")
-                .to_string();
+                let msg = String::from_utf8_lossy(&out.stdout);
+                let printer = msg
+                    .split_whitespace()
+                    .find(|w| w.contains('-'))
+                    .unwrap_or("printer")
+                    .to_string();
                 return Ok(printer);
             }
         }
@@ -515,9 +539,7 @@ mod printer_properties_tests {
     fn macos_opens_print_settings() {
         let expected = (
             "open",
-            vec![
-                "x-apple.systempreferences:com.apple.Print-Scan-Settings.extension".to_string(),
-            ],
+            vec!["x-apple.systempreferences:com.apple.Print-Scan-Settings.extension".to_string()],
         );
         assert_eq!(
             printer_properties_command(Some("  Office LaserJet  ")),

@@ -181,14 +181,19 @@ through the existing Plugin Manager with zero OCS core changes.
         ran the actual geometric solver and adjusted both lines to be
         genuinely parallel — checked numerically (direction-vector cross
         product ≈ 0 after), a real persistent constraint object.
-      - **Real gap surfaced, not closed**: constraint commands read a prior
-        *selection*, not picks fed as command tokens — feeding handles as
-        trailing `PCONSTRAINT` tokens starts the command but ends in
-        "Command cancelled", not a constraint. There's no `ocs`-level way to
-        set the document selection from a script yet (the working test used
-        the automation `select` op directly, unreachable from
-        `PY_EVAL`/`PY_RUN`). An `ocs.select(handles)` would close this —
-        natural next step, not built yet.
+      - **Gap found, then closed same session**: constraint commands read a
+        prior *selection*, not picks fed as command tokens — feeding handles
+        as trailing `PCONSTRAINT` tokens starts the command but ends in
+        "Command cancelled", not a constraint. Added `HostApi::set_selection`
+        (same shape as `run_command`: new `PluginRequest::SetSelection`,
+        default-`Err` trait method, no forced version bump; validates every
+        handle exists before changing anything) and `ocs.select(handles)` on
+        top of it. Re-verified **fully scripted, no automation-API help**: a
+        plain `.py` file via `PY_RUN` calling `ocs.select([h1, h2])` then
+        `ocs.command("PCONSTRAINT")` produces the same genuinely-parallel
+        result as before, now reachable entirely from a script. Confirmed no
+        regressions via the full `cargo test --lib` suite both times (1040
+        passed, 1 pre-existing unrelated font-fallback failure).
 
 ### 1.4 — Usability
 

@@ -42,7 +42,7 @@ impl OpenCADStudio {
     }
 
     pub(super) fn dispatch_command(&mut self, cmd: &str) -> Task<Message> {
-        self.dispatch_command_inner(cmd, false)
+        self.dispatch_command_inner(cmd, false, true)
     }
 
     /// Dispatch a verb typed at the interactive command line, falling back to
@@ -54,10 +54,29 @@ impl OpenCADStudio {
     /// callers (ribbon, plugins, headless automation) use `dispatch_command`
     /// and never get silent substitution.
     pub(super) fn dispatch_command_or_suggest(&mut self, cmd: &str) -> Task<Message> {
-        self.dispatch_command_inner(cmd, true)
+        self.dispatch_command_inner(cmd, true, true)
     }
 
-    fn dispatch_command_inner(&mut self, cmd: &str, allow_suggest: bool) -> Task<Message> {
+    /// Used only by `HostApi::run_command` (a plugin asking the host to run
+    /// a command line — see `plugin_host.rs`). Must not attempt plugin
+    /// dispatch: this call is already running as a nested request from
+    /// inside *some* plugin's own `dispatch()`, whose single-threaded runner
+    /// process is blocked waiting for this exact call to return. Routing
+    /// back through `try_dispatch` can hand that same plugin a second
+    /// `Dispatch` it has no thread free to answer — both sides wait on each
+    /// other forever. So `ocs.command()` (or any future equivalent) can only
+    /// reach built-in commands, never another plugin's — a real, narrower
+    /// scope than the normal command line, not an oversight.
+    pub(super) fn dispatch_command_no_plugin_reentry(&mut self, cmd: &str) -> Task<Message> {
+        self.dispatch_command_inner(cmd, false, false)
+    }
+
+    fn dispatch_command_inner(
+        &mut self,
+        cmd: &str,
+        allow_suggest: bool,
+        try_plugins: bool,
+    ) -> Task<Message> {
         let i = self.active_tab;
         // Expand a command alias ("L" → "LINE") on the leading token before any
         // routing, so every path below (Start-tab gate, plugins, all dispatch
@@ -159,7 +178,7 @@ impl OpenCADStudio {
             return Task::none();
         }
 
-        if crate::plugin::try_dispatch(self, i, cmd) {
+        if try_plugins && crate::plugin::try_dispatch(self, i, cmd) {
             // try_dispatch returns true for both finished commands and interactive
             // commands that it just installed. If no command is now active, the
             // tool was a one-shot and we must turn the ribbon highlight off here —
@@ -198,7 +217,10 @@ impl OpenCADStudio {
             .next()
             {
                 if !top.eq_ignore_ascii_case(cmd) {
-                    return self.dispatch_command_inner(&top, false);
+                    // Reachable only via dispatch_command_or_suggest (allow_suggest
+                    // is only ever true there), which always tries plugins — this
+                    // recursive call keeps that.
+                    return self.dispatch_command_inner(&top, false, true);
                 }
             }
         }

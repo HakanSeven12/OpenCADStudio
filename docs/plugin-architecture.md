@@ -148,7 +148,9 @@ concrete types:
 | Undo / dirty | `push_undo`, `set_dirty` |
 | Tab | `tab_index()` |
 | Document identity (V5) | `document_path(tab_id)` returns the saved path for a document tab. |
-| Notifications (V4) | `on_notification` receives `HostNotification::SelectionChangedV4 { tab_id, handles }` when the active tab's selection changes, plus `DocumentChangedV4` / `DocumentTabClosed`. |
+| Run a command (added after API v5) | `run_command(cmd: &str) -> Result<(), String>` runs a full command line — built-in or plugin — to completion exactly as if typed, including inline point/keyword/handle tokens an interactive command needs (`"LINE 0,0 10,10"`). Default implementation returns `Err`, so it doesn't force older hosts or in-process test doubles to implement command replay; a host opts in by overriding it. **A plugin cannot use this to invoke itself or any other plugin's command** — only built-ins. The call is a nested plugin→host request arriving *while* the plugin's own `dispatch()` is still running (its single runner thread is blocked waiting for this call to return), so routing back through the normal plugin-dispatch pass would hand that same plugin (or any plugin) a second `Dispatch` it has no free thread to answer, deadlocking both sides — confirmed by hitting exactly that deadlock before the host-side fix (`commands::dispatch_command_no_plugin_reentry` / `command_driver::run_command_line_no_plugin_reentry` skip plugin dispatch entirely for this path). Verified end-to-end: a simple two-point `LINE` completes synchronously and commits. Constraint commands (`PCONSTRAINT`, ...) need `set_selection` (below) called first — they read a prior *selection* (`"Select objects:"`), not picks fed as command-line tokens. |
+| Set selection (added after API v5) | `set_selection(handles: &[Handle]) -> Result<(), String>` replaces the active tab's selection with exactly these entities, clearing any existing one first; validates every handle exists *before* changing anything (errors instead of partially applying). Default implementation returns `Err`, same opt-in pattern as `run_command`. Exists specifically to unblock scripted constraints: `set_selection([line1, line2])` then `run_command("PCONSTRAINT")` runs the real geometric solver — verified end-to-end (not a fake): both lines' coordinates visibly changed to make them genuinely parallel (checked numerically, direction-vector cross product ≈ 0 after, nonzero before), and it's a real persistent constraint object, not a one-time computed geometric fact. |
+| Notifications (V4) | `on_notification` receives `HostNotification::SelectionChangedV4 { tab_id, handles }` when the active tab's selection changes, plus `DocumentChangedV4` / `DocumentTabClosed`. **`on_notification` is the only place to observe these for a stock out-of-process plugin** — `ocs_plugin_api::runner`'s own event loop drains `HostApi::try_recv_notification()` on every iteration and forwards each notification to `on_notification` *before* a `Dispatch` request ever reaches `dispatch()`, so polling `try_recv_notification()` from inside `dispatch` always finds an empty queue. Since `dispatch` only gets `&self` (no mutation) while `on_notification` gets `&mut self`, a plugin that needs both has to bridge them with its own interior-mutable state (a process-wide `static Mutex`/`OnceLock` is simplest, matching the "keep state inside the plugin crate" guidance above). |
 
 ### `export_plugin!` — the C-ABI export
 
@@ -176,11 +178,14 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ocs_plugin_api = { git = "https://github.com/HakanSeven12/OpenCADStudio", features = ["host"] }
-
-# Match the host's acadrust so the loaded library is binary-compatible.
-[patch.crates-io]
-acadrust = { git = "https://github.com/HakanSeven12/acadrust", branch = "main" }
 ```
+
+`ocs_plugin_api`'s own `Cargo.toml` already pins the `host`-feature `acadrust`
+dependency to an exact git rev (currently
+`{ git = "https://github.com/HakanSeven12/cadcodec.git", rev = "568a12c" }`,
+not published to crates.io), so a plugin that only depends on `ocs_plugin_api`
+picks up the matching `acadrust` automatically — no `[patch.crates-io]` needed
+or possible. What still needs to match the host exactly is the compiler:
 
 Your release build must also use the same `rustc` as the host. Record it in
 `plugin.toml` (see below) and pin the toolchain in your CI matrix so every
@@ -202,11 +207,12 @@ struct ExampleModule;
 impl CadModule for ExampleModule {
     fn id(&self) -> &'static str { "example" }
     fn title(&self) -> &'static str { "Example" }
-    fn ribbon_groups(&self) -> Vec<RibbonGroup> {
-        vec![RibbonGroup { title: "Demo", tools: vec![RibbonItem::LargeTool(ToolDef {
+    fn ribbon_groups(&self) -> &[RibbonGroup] {
+        static GROUPS: std::sync::OnceLock<Vec<RibbonGroup>> = std::sync::OnceLock::new();
+        GROUPS.get_or_init(|| vec![RibbonGroup { title: "Demo", tools: vec![RibbonItem::LargeTool(ToolDef {
             id: "EX_HELLO", label: "Hello", icon: IconKind::Glyph("◆"),
             event: ModuleEvent::Command("EX_HELLO".to_string()),
-        })]}]
+        })]}])
     }
 }
 

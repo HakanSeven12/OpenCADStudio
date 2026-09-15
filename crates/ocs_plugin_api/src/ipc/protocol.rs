@@ -138,6 +138,16 @@ pub enum PluginRequest {
     GetTabId,
     /// V5: ask the host for the filesystem path of the document in `tab_id`.
     DocumentPath { tab_id: u64 },
+    /// Run a full command line (built-in or plugin) to completion, exactly
+    /// as if typed — including any inline point/keyword/handle tokens an
+    /// interactive command needs (e.g. `"LINE 0,0 10,10"` or
+    /// `"PCONSTRAINT 2F 30"`). Not supported by every host; see
+    /// [`crate::host::HostApi::run_command`].
+    RunCommand { cmd: String },
+    /// Replace the active tab's selection with exactly these entities
+    /// (clearing any existing selection first). Not supported by every
+    /// host; see [`crate::host::HostApi::set_selection`].
+    SetSelection { handles: Vec<Handle> },
 }
 
 /// Responses the host sends back for `PluginRequest`.

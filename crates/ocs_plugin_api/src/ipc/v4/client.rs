@@ -730,6 +730,31 @@ impl HostApi for V4PluginHostApi {
             }
         }
     }
+
+    fn run_command(&mut self, cmd: &str) -> Result<(), String> {
+        match self.request(PluginRequest::RunCommand {
+            cmd: cmd.to_string(),
+        }) {
+            Ok(PluginResponse::Ok) => {
+                self.document_cache = OnceCell::new();
+                Ok(())
+            }
+            Ok(PluginResponse::Error(e)) => Err(e),
+            Ok(other) => Err(format!("unexpected RunCommand response: {other:?}")),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    fn set_selection(&mut self, handles: &[Handle]) -> Result<(), String> {
+        match self.request(PluginRequest::SetSelection {
+            handles: handles.to_vec(),
+        }) {
+            Ok(PluginResponse::Ok) => Ok(()),
+            Ok(PluginResponse::Error(e)) => Err(e),
+            Ok(other) => Err(format!("unexpected SetSelection response: {other:?}")),
+            Err(e) => Err(e.to_string()),
+        }
+    }
 }
 
 #[cfg(test)]

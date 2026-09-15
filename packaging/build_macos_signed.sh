@@ -93,8 +93,21 @@ sed "s/__VERSION__/$VERSION/g" packaging/Info.plist > "$APP/Contents/Info.plist"
 
 echo "==> codesign"
 if [ "$DEVELOPER_ID" = "-" ]; then
-    # CI-parity ad-hoc signature; cannot be notarized.
-    codesign --force --deep --sign - --timestamp=none "$APP"
+    # CI-parity ad-hoc signature; cannot be notarized. Still sign nested
+    # code individually, in the same order as the Developer ID path below,
+    # rather than one `--deep` pass over the outer bundle: `--deep` re-signs
+    # every nested binary with the *outer* invocation's own arguments, which
+    # here carried no --entitlements at all — so the appex ended up ad-hoc
+    # signed but missing its sandbox entitlement, and PlugInKit silently
+    # dropped it ("rejecting ... plug-ins must be sandboxed" in the system
+    # log, no error surfaced anywhere else) (#365). Ad-hoc signing itself is
+    # not the blocker here — carrying the entitlements through is.
+    codesign --force --sign - --timestamp=none \
+        "$APP/Contents/MacOS/OpenCADStudio-App"
+    codesign --force --sign - --timestamp=none \
+        --entitlements crates/dwg-thumbnailer/macos/entitlements.plist \
+        "$APP/Contents/PlugIns/DWGThumbnail.appex"
+    codesign --force --sign - --timestamp=none "$APP"
 else
     # Sign nested code before the outer bundle. The sandbox entitlement is
     # required for the QuickLook extension. Use hardened runtime

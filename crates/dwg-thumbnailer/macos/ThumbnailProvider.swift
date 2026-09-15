@@ -39,9 +39,19 @@ final class ThumbnailProvider: QLThumbnailProvider {
             return
         }
 
-        let size = CGSize(width: cg.width, height: cg.height)
-        let reply = QLThumbnailReply(contextSize: size) { (ctx: CGContext) -> Bool in
-            ctx.draw(cg, in: CGRect(origin: .zero, size: size))
+        // The embedded DWG preview bitmap is often much smaller than the
+        // requested icon size. Scale it up (or down) to fit request.maximumSize
+        // and center it — otherwise QuickLook draws it at its native pixel size
+        // anchored at the CGContext origin (bottom-left), producing a small
+        // thumbnail stuck in the corner instead of filling the icon (#365).
+        let maxSize = request.maximumSize
+        let nativeSize = CGSize(width: cg.width, height: cg.height)
+        let scale = min(maxSize.width / nativeSize.width, maxSize.height / nativeSize.height)
+        let drawSize = CGSize(width: nativeSize.width * scale, height: nativeSize.height * scale)
+        let origin = CGPoint(x: (maxSize.width - drawSize.width) / 2, y: (maxSize.height - drawSize.height) / 2)
+
+        let reply = QLThumbnailReply(contextSize: maxSize) { (ctx: CGContext) -> Bool in
+            ctx.draw(cg, in: CGRect(origin: origin, size: drawSize))
             return true
         }
         handler(reply, nil)

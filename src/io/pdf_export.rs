@@ -305,7 +305,13 @@ fn emit_image(
             // One shared factor from the denser axis preserves the pixel aspect ratio.
             let (w, h) = downsample_target(width, height, dpi_x.max(dpi_y), target);
             // Skip token reductions (< 5%): a Lanczos pass costs more than it saves.
-            if (w != width || h != height) && w as f64 / (width as f64) < 0.95 {
+            let needs_resample = (w != width || h != height) && w as f64 / (width as f64) < 0.95;
+            // The same Arc placed repeatedly (a title block on every layout)
+            // resamples once: an existing XObject at the target dims means
+            // only the draw transform below is new work.
+            let already_embedded =
+                resources.contains_key(&(std::sync::Arc::as_ptr(&image.pixels) as usize, w, h));
+            if needs_resample && !already_embedded {
                 if let Some(resized) = image::RgbaImage::from_raw(
                     width,
                     height,
@@ -319,6 +325,9 @@ fn emit_image(
                     height = h;
                     pixels = std::borrow::Cow::Owned(resized);
                 }
+            } else if already_embedded {
+                width = w;
+                height = h;
             }
         }
     }

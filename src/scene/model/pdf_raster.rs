@@ -130,6 +130,85 @@ pub fn rasterize_bytes_pages(bytes: Arc<Vec<u8>>, dpi: f32, max_pages: usize) ->
         .collect()
 }
 
+/// Upper bound on one previewed page's pixel edge. Rasteriser dimensions
+/// saturate far above this, so the clamp must happen here: a page sized by a
+/// hostile (or merely mistyped) paper width would otherwise allocate until
+/// the tab aborts.
+pub const PREVIEW_MAX_PAGE_EDGE_PX: f64 = 4096.0;
+
+/// Total pixel budget for one preview. Bounds both the wasm-heap RGBA pages
+/// and the browser's decoded-image memory behind the overlay. Memory scales
+/// with DPI², so a multipage preview lowers its DPI instead of its content.
+pub const PREVIEW_PIXEL_BUDGET: f64 = 64.0 * 1024.0 * 1024.0;
+
+/// DPI that keeps every page edge within [`PREVIEW_MAX_PAGE_EDGE_PX`].
+fn page_edge_clamped_dpi(page_pt: (f32, f32), dpi: f32) -> f32 {
+    let (w_pt, h_pt) = (page_pt.0 as f64, page_pt.1 as f64);
+    let clamp = |edge_pt: f64| -> f64 {
+        if edge_pt <= 0.0 {
+            dpi as f64
+        } else {
+            (PREVIEW_MAX_PAGE_EDGE_PX * 72.0 / edge_pt).min(dpi as f64)
+        }
+    };
+    clamp(w_pt).min(clamp(h_pt)).max(1.0) as f32
+}
+
+/// Rasterise the first `max_pages` pages of freshly generated PDF bytes for
+/// preview under a total pixel budget: the DPI starts at `max_dpi` and drops
+/// uniformly (never below a legibility floor of 24) until the whole set fits,
+/// with a per-page edge clamp for absurd sheet sizes. Returns the pages and
+/// the PDF's true page count so the caller can say "first N of M".
+pub fn rasterize_preview_pages(
+    bytes: Arc<Vec<u8>>,
+    max_dpi: f32,
+    max_pages: usize,
+) -> (Vec<Arc<PdfPage>>, usize) {
+    let Ok(pdf) = Pdf::new(bytes) else {
+        return (Vec::new(), 0);
+    };
+    let total = pdf.pages().len();
+    let count = total.min(max_pages);
+    // Point sizes come from the page tree — no allocation before the clamp.
+    let sizes: Vec<(f32, f32)> = (0..count)
+        .map(|index| {
+            pdf.pages()
+                .get(index)
+                .map(|page| page.base_dimensions())
+                .unwrap_or((595.0, 842.0))
+        })
+        .collect();
+    let pixels_at_max: f64 = sizes
+        .iter()
+        .map(|&(w_pt, h_pt)| {
+            let dpi = page_edge_clamped_dpi((w_pt, h_pt), max_dpi) as f64;
+            let w = (w_pt as f64 / 72.0 * dpi).max(1.0);
+            let h = (h_pt as f64 / 72.0 * dpi).max(1.0);
+            w * h
+        })
+        .sum();
+    let dpi = if pixels_at_max <= PREVIEW_PIXEL_BUDGET {
+        max_dpi
+    } else {
+        ((max_dpi as f64) * (PREVIEW_PIXEL_BUDGET / pixels_at_max).sqrt())
+            .clamp(24.0, max_dpi as f64) as f32
+    };
+    let pages = sizes
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &size)| {
+            let page = raster_page(&pdf, index, page_edge_clamped_dpi(size, dpi))?;
+            Some(Arc::new(PdfPage {
+                pixels: page.pixels,
+                width: page.width,
+                height: page.height,
+                dpi,
+            }))
+        })
+        .collect();
+    (pages, total)
+}
+
 fn source_bytes(path: &str) -> Option<Arc<Vec<u8>>> {
     if let Some(bytes) = source_cache()
         .lock()
@@ -189,5 +268,40 @@ mod tests {
 
         let capped = rasterize_bytes_pages(bytes, 72.0, 2);
         assert_eq!(capped.len(), 2);
+    }
+
+    #[test]
+    fn preview_pages_keep_full_dpi_for_small_sets() {
+        let mut document = PdfDocument::new("small set");
+        for _ in 0..3 {
+            document
+                .pages
+                .push(OutputPage::new(Mm(50.8), Mm(25.4), Vec::new()));
+        }
+        let bytes = Arc::new(document.save(&PdfSaveOptions::default(), &mut Vec::new()));
+
+        let (pages, total) = rasterize_preview_pages(bytes, 72.0, 12);
+        assert_eq!((total, pages.len()), (3, 3));
+        assert_eq!((pages[0].width, pages[0].height), (144, 72));
+        assert_eq!(pages[0].dpi, 72.0);
+    }
+
+    #[test]
+    fn preview_pages_clamp_absurd_sheet_sizes_before_allocating() {
+        // 2 m × 2 m sheet: naive 150 DPI would be ~139 Mpx for one page; the
+        // edge clamp bounds each side instead of letting the rasteriser
+        // allocate it (which saturates its u16 dims and aborts the tab).
+        let mut document = PdfDocument::new("huge sheet");
+        document
+            .pages
+            .push(OutputPage::new(Mm(2000.0), Mm(2000.0), Vec::new()));
+        let bytes = Arc::new(document.save(&PdfSaveOptions::default(), &mut Vec::new()));
+
+        let (pages, total) = rasterize_preview_pages(bytes, 150.0, 12);
+        assert_eq!((total, pages.len()), (1, 1));
+        assert!(pages[0].width <= 4096 && pages[0].height <= 4096);
+        assert!(pages[0].width >= 4000 && pages[0].height >= 4000);
+        let pixels = pages[0].width as f64 * pages[0].height as f64;
+        assert!(pixels <= 4096.0 * 4096.0, "clamped, not {pixels} px");
     }
 }

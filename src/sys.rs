@@ -377,7 +377,7 @@ pub fn download_bytes(name: &str, bytes: &[u8]) {
 /// browser hosts routinely withhold. A Download button still hands out the
 /// vector PDF, Close drops the overlay. Web only.
 #[cfg(target_arch = "wasm32")]
-pub fn show_pdf_preview(name: &str, pdf_bytes: &[u8], page_pngs: &[Vec<u8>]) {
+pub fn show_pdf_preview(name: &str, pdf_bytes: &[u8], page_pngs: &[Vec<u8>], total_pages: usize) {
     use wasm_bindgen::JsCast;
     let Some(window) = web_sys::window() else {
         return;
@@ -385,6 +385,20 @@ pub fn show_pdf_preview(name: &str, pdf_bytes: &[u8], page_pngs: &[Vec<u8>]) {
     let Some(document) = window.document() else {
         return;
     };
+    // One preview at a time: a replotted preview replaces its predecessor and
+    // revokes its blob URLs, so repeated previews cannot stack overlays or
+    // leak the images underneath.
+    const OVERLAY_ID: &str = "ocs-plot-preview";
+    if let Some(previous) = document.get_element_by_id(OVERLAY_ID) {
+        previous.remove();
+    }
+    for url in preview_urls()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .drain(..)
+    {
+        let _ = web_sys::Url::revoke_object_url(&url);
+    }
     if page_pngs.is_empty() {
         // Rasterisation produced nothing: deliver the PDF itself rather than
         // show an empty frame.
@@ -396,6 +410,7 @@ pub fn show_pdf_preview(name: &str, pdf_bytes: &[u8], page_pngs: &[Vec<u8>]) {
         return;
     };
     let backdrop: web_sys::HtmlElement = el.unchecked_into();
+    backdrop.set_id(OVERLAY_ID);
     backdrop
         .set_attribute(
             "style",
@@ -433,6 +448,10 @@ pub fn show_pdf_preview(name: &str, pdf_bytes: &[u8], page_pngs: &[Vec<u8>]) {
         download_bytes(name, pdf_bytes);
         return;
     }
+    preview_urls()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .extend(urls.iter().cloned());
 
     // Sticky action bar so Download/Close stay reachable while pages scroll.
     let bar: web_sys::HtmlElement = document
@@ -451,11 +470,19 @@ pub fn show_pdf_preview(name: &str, pdf_bytes: &[u8], page_pngs: &[Vec<u8>]) {
         .unwrap_or_else(|| backdrop.clone());
     if let Ok(el) = document.create_element("span") {
         let label: web_sys::HtmlElement = el.unchecked_into();
-        label.set_inner_text(&format!(
-            "Plot preview — {} page{}",
-            urls.len(),
-            if urls.len() == 1 { "" } else { "s" }
-        ));
+        label.set_inner_text(&if total_pages > urls.len() {
+            format!(
+                "Plot preview — first {} of {} pages",
+                urls.len(),
+                total_pages
+            )
+        } else {
+            format!(
+                "Plot preview — {} page{}",
+                urls.len(),
+                if urls.len() == 1 { "" } else { "s" }
+            )
+        });
         bar.append_child(&label).ok();
     }
     let button = |text: &str| -> Option<web_sys::HtmlElement> {
@@ -473,18 +500,26 @@ pub fn show_pdf_preview(name: &str, pdf_bytes: &[u8], page_pngs: &[Vec<u8>]) {
     if let Some(dl) = button("Download PDF") {
         let name = name.to_string();
         let bytes = pdf_bytes.to_vec();
-        let click = wasm_bindgen::closure::Closure::once_into_js(move || {
-            download_bytes(&name, &bytes);
-        });
-        let click: js_sys::Function = click.unchecked_into();
+        // A plain FnMut stays usable for every click; the one-shot variant
+        // throws on the second click, and users click Download twice.
+        let closure: wasm_bindgen::closure::Closure<dyn FnMut()> =
+            wasm_bindgen::closure::Closure::new(move || {
+                download_bytes(&name, &bytes);
+            });
+        let click: js_sys::Function = closure.as_ref().unchecked_ref::<js_sys::Function>().clone();
+        closure.forget();
         dl.set_onclick(Some(&click));
         bar.append_child(&dl).ok();
     }
     if let Some(close) = button("Close") {
         let backdrop = backdrop.clone();
         let click = wasm_bindgen::closure::Closure::once_into_js(move || {
-            for url in &urls {
-                let _ = web_sys::Url::revoke_object_url(url);
+            for url in preview_urls()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .drain(..)
+            {
+                let _ = web_sys::Url::revoke_object_url(&url);
             }
             backdrop.remove();
         });
@@ -498,6 +533,14 @@ pub fn show_pdf_preview(name: &str, pdf_bytes: &[u8], page_pngs: &[Vec<u8>]) {
     if let Some(body) = document.body() {
         body.append_child(&backdrop).ok();
     }
+}
+
+/// Blob URLs owned by the live preview overlay, revoked when it is closed or
+/// replaced. They live outside the wasm heap and are not GC'd on their own.
+#[cfg(target_arch = "wasm32")]
+fn preview_urls() -> &'static std::sync::Mutex<Vec<String>> {
+    static URLS: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> = std::sync::OnceLock::new();
+    URLS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
 }
 
 /// Short platform string for bug reports: OS + architecture on the desktop,

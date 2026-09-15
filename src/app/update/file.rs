@@ -3266,8 +3266,9 @@ impl OpenCADStudio {
         // PDF and open it in a browser tab for the browser print dialog.
         #[cfg(target_arch = "wasm32")]
         {
+            let stem = self.active_stem("_layouts");
             let work = move || {
-                crate::io::print_to_printer::preview_pages_pdf(&pages)
+                crate::io::print_to_printer::preview_pages_pdf(&stem, &pages)
                     .map(|_| crate::t!("Opened plot preview.").into_owned())
                     .map_err(|e| crate::tf!("Preview failed: {e}").into_owned())
             };
@@ -3523,9 +3524,10 @@ impl OpenCADStudio {
         // in a browser tab, where the browser's own print dialog takes over.
         #[cfg(target_arch = "wasm32")]
         {
+            let stem = self.active_stem("");
             background_task(
                 move || {
-                    crate::io::print_to_printer::preview_page_pdf(&page)
+                    crate::io::print_to_printer::preview_page_pdf(&stem, &page)
                         .map(|_| crate::t!("Opened plot preview.").into_owned())
                         .map_err(|e| crate::tf!("Preview failed: {e}").into_owned())
                 },
@@ -3629,6 +3631,18 @@ impl OpenCADStudio {
             .map(|d| d.as_secs())
             .unwrap_or(0);
         dir.join(format!("{stem}_{ts}.pdf"))
+    }
+
+    /// File stem of the active drawing for default output names, with an
+    /// optional suffix (e.g. "_layouts" for print-all). Falls back to
+    /// "drawing" when the tab has never been saved.
+    fn active_stem(&self, suffix: &str) -> String {
+        self.tabs[self.active_tab]
+            .current_path
+            .as_deref()
+            .and_then(|path| path.file_stem())
+            .map(|stem| format!("{}{}", stem.to_string_lossy(), suffix))
+            .unwrap_or_else(|| format!("drawing{suffix}"))
     }
 
     /// Open the full Plot / Print dialog, seeding its state from the active
@@ -4454,8 +4468,9 @@ impl OpenCADStudio {
             // Preview renders to a temp PDF and opens it — never a save dialog,
             // whatever the output target is.
             if preview {
+                let stem = self.active_stem("");
                 let work = move || {
-                    crate::io::print_to_printer::preview_page_pdf(&page)
+                    crate::io::print_to_printer::preview_page_pdf(&stem, &page)
                         .map(|_| crate::t!("Opened plot preview.").into_owned())
                         .map_err(|e| crate::tf!("Preview failed: {e}").into_owned())
                 };
@@ -4479,8 +4494,9 @@ impl OpenCADStudio {
         let page = self.layout_plot_page();
 
         if preview {
+            let stem = self.active_stem("");
             let work = move || {
-                crate::io::print_to_printer::preview_page_pdf(&page)
+                crate::io::print_to_printer::preview_page_pdf(&stem, &page)
                     .map(|_| crate::t!("Opened plot preview.").into_owned())
                     .map_err(|e| crate::tf!("Preview failed: {e}").into_owned())
             };

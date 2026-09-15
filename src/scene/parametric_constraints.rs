@@ -871,8 +871,26 @@ impl super::Scene {
     ) -> bool {
         self.is_parametric_constraint_visible(scope, id)
             && (self.shown_parametric_constraints.contains(&(scope, id))
-                || display_mode & 1 != 0
                 || (display_mode & 2 != 0 && related_entity_selected))
+    }
+
+    /// Record the session-only display state for a constraint that was just
+    /// applied. `CONSTRAINTBARDISPLAY` bit 1 applies only at creation time; it
+    /// must not make every constraint loaded from a drawing permanently
+    /// visible. Bit 2 is evaluated independently from the current selection in
+    /// [`should_display_parametric_constraint`](Self::should_display_parametric_constraint).
+    pub fn note_parametric_constraint_applied(
+        &mut self,
+        scope: ParametricScope,
+        id: ConstraintId,
+        display_mode: i16,
+    ) {
+        self.hidden_parametric_constraints.remove(&(scope, id));
+        if display_mode & 1 != 0 {
+            self.shown_parametric_constraints.insert((scope, id));
+        } else {
+            self.shown_parametric_constraints.remove(&(scope, id));
+        }
     }
 
     pub fn set_parametric_constraint_visibility(

@@ -1165,10 +1165,15 @@ impl OpenCADStudio {
                             .record_undo_parametric_constraints_before(scope, before);
                         let count = inferred.len();
                         for (kind, refs) in inferred {
-                            self.tabs[i]
+                            let id = self.tabs[i]
                                 .scene
                                 .parametric_constraint_set_mut(scope)
                                 .add(kind, refs, None);
+                            self.tabs[i].scene.note_parametric_constraint_applied(
+                                scope,
+                                id,
+                                self.constraint_bar_display,
+                            );
                         }
                         let changes: Vec<_> = handles
                             .iter()
@@ -1281,10 +1286,15 @@ impl OpenCADStudio {
                         .scene
                         .record_undo_parametric_constraints_before(scope, before);
                     for (_, kind, refs, value) in conversions {
-                        self.tabs[i].scene.parametric_constraint_set_mut(scope).add(
+                        let id = self.tabs[i].scene.parametric_constraint_set_mut(scope).add(
                             kind,
                             refs,
                             Some(value),
+                        );
+                        self.tabs[i].scene.note_parametric_constraint_applied(
+                            scope,
+                            id,
+                            self.constraint_bar_display,
                         );
                     }
                     self.tabs[i].scene.erase_entities(&dimensions);

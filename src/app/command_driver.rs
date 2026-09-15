@@ -1685,10 +1685,15 @@ impl OpenCADStudio {
         let mut touched = Vec::new();
         for (kind, refs) in inferred {
             touched.extend(refs.iter().map(|reference| reference.entity));
-            self.tabs[i]
+            let id = self.tabs[i]
                 .scene
                 .parametric_constraint_set_mut(scope)
                 .add(kind, refs, None);
+            self.tabs[i].scene.note_parametric_constraint_applied(
+                scope,
+                id,
+                self.constraint_bar_display,
+            );
         }
         touched.sort_unstable_by_key(|handle| handle.value());
         touched.dedup();
@@ -3051,10 +3056,15 @@ impl OpenCADStudio {
                     .scene
                     .record_undo_parametric_constraints_before(scope, constraints_before);
                 let retain_size = self.constraint_solve_mode && driving_param.is_none();
-                self.tabs[i].scene.parametric_constraint_set_mut(scope).add(
+                let id = self.tabs[i].scene.parametric_constraint_set_mut(scope).add(
                     kind,
                     refs,
                     driving_param,
+                );
+                self.tabs[i].scene.note_parametric_constraint_applied(
+                    scope,
+                    id,
+                    self.constraint_bar_display,
                 );
                 let changes: Vec<(Handle, crate::scene::ChangeKind)> = touched
                     .into_iter()
@@ -3156,10 +3166,15 @@ impl OpenCADStudio {
                 self.tabs[i]
                     .scene
                     .record_undo_parametric_constraints_before(scope, constraints_before);
-                self.tabs[i]
+                let id = self.tabs[i]
                     .scene
                     .parametric_constraint_set_mut(scope)
                     .add(kind, refs, None);
+                self.tabs[i].scene.note_parametric_constraint_applied(
+                    scope,
+                    id,
+                    self.constraint_bar_display,
+                );
                 let changes: Vec<_> = touched
                     .iter()
                     .copied()
@@ -3215,10 +3230,15 @@ impl OpenCADStudio {
                         .scene
                         .record_undo_parametric_constraints_before(scope, constraints_before);
                     for refs in inferred {
-                        self.tabs[i]
+                        let id = self.tabs[i]
                             .scene
                             .parametric_constraint_set_mut(scope)
                             .add(ConstraintKind::Coincident, refs, None);
+                        self.tabs[i].scene.note_parametric_constraint_applied(
+                            scope,
+                            id,
+                            self.constraint_bar_display,
+                        );
                     }
                     let changes: Vec<_> = handles
                         .iter()

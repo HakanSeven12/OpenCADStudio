@@ -28,8 +28,16 @@ const CONSTRAINT_GLYPH_PAD_Y: f32 = 4.0;
 const CONSTRAINT_GLYPH_GAP: f32 = 6.0;
 const CONSTRAINT_GLYPH_ROW_GAP: f32 = 4.0;
 const CONSTRAINT_HOVER_MARKER_RADIUS: f32 = 7.0;
+const COINCIDENT_GLYPH_SIZE: f32 = 9.0;
+
+fn is_compact_coincident_glyph(label: &str) -> bool {
+    matches!(label, "≡" | "∈")
+}
 
 fn constraint_glyph_size(label: &str) -> Size {
+    if is_compact_coincident_glyph(label) {
+        return Size::new(COINCIDENT_GLYPH_SIZE, COINCIDENT_GLYPH_SIZE);
+    }
     let w = label.chars().count() as f32 * CONSTRAINT_GLYPH_SIZE * 0.62
         + CONSTRAINT_GLYPH_PAD_X * 2.0;
     let h = CONSTRAINT_GLYPH_SIZE + CONSTRAINT_GLYPH_PAD_Y * 2.0;
@@ -59,9 +67,14 @@ fn constraint_glyph_box(
     tangent_offset: f32,
 ) -> (Point, Size) {
     let size = constraint_glyph_size(label);
+    let gap = if is_compact_coincident_glyph(label) {
+        1.0
+    } else {
+        CONSTRAINT_GLYPH_GAP
+    };
     let distance = outward[0].abs() * size.width * 0.5
         + outward[1].abs() * size.height * 0.5
-        + CONSTRAINT_GLYPH_GAP;
+        + gap;
     let tangent = [-outward[1], outward[0]];
     (
         Point::new(
@@ -1785,19 +1798,32 @@ impl canvas::Program<Message> for SelectionCanvas {
             let conflict_bg = theme.palette().danger.base.color;
             let conflict_fg = theme.palette().danger.base.text;
             let selected_ring = theme.palette().primary.strong.color;
+            let coincident_bg = Color::from_rgb8(35, 145, 230);
             for ((anchor, outward, label, is_conflicting, is_selected, _), tangent_offset) in
                 self.constraint_glyphs.iter().zip(offsets)
             {
                 if !anchor.x.is_finite() || !anchor.y.is_finite() {
                     continue;
                 }
-                let (bg, fg) = if *is_conflicting { (conflict_bg, conflict_fg) } else { (normal_bg, normal_fg) };
+                let compact_coincident = is_compact_coincident_glyph(label);
+                let (bg, fg) = if *is_conflicting {
+                    (conflict_bg, conflict_fg)
+                } else if compact_coincident {
+                    (coincident_bg, normal_fg)
+                } else {
+                    (normal_bg, normal_fg)
+                };
                 let (top_left, size) =
                     constraint_glyph_box(*anchor, *outward, label, tangent_offset);
                 let pill = canvas::Path::rounded_rectangle(
                     top_left,
                     size,
-                    (size.height * 0.5).into(),
+                    (if compact_coincident {
+                        1.0
+                    } else {
+                        size.height * 0.5
+                    })
+                    .into(),
                 );
                 frame.fill(&pill, bg);
                 if *is_selected {
@@ -1806,23 +1832,25 @@ impl canvas::Program<Message> for SelectionCanvas {
                         canvas::Stroke::default().with_color(selected_ring).with_width(2.0),
                     );
                 }
-                let glyph_center = Point::new(
-                    top_left.x + size.width * 0.5,
-                    top_left.y + size.height * 0.5,
-                );
-                if label == "T" {
-                    draw_tangent_constraint_glyph(&mut frame, glyph_center, fg);
-                } else {
-                    frame.fill_text(canvas::Text {
-                        content: label.clone(),
-                        position: glyph_center,
-                        color: fg,
-                        size: iced::Pixels(CONSTRAINT_GLYPH_SIZE),
-                        align_x: iced::alignment::Horizontal::Center.into(),
-                        align_y: iced::alignment::Vertical::Center,
-                        shaping: iced::advanced::text::Shaping::Advanced,
-                        ..Default::default()
-                    });
+                if !compact_coincident {
+                    let glyph_center = Point::new(
+                        top_left.x + size.width * 0.5,
+                        top_left.y + size.height * 0.5,
+                    );
+                    if label == "T" {
+                        draw_tangent_constraint_glyph(&mut frame, glyph_center, fg);
+                    } else {
+                        frame.fill_text(canvas::Text {
+                            content: label.clone(),
+                            position: glyph_center,
+                            color: fg,
+                            size: iced::Pixels(CONSTRAINT_GLYPH_SIZE),
+                            align_x: iced::alignment::Horizontal::Center.into(),
+                            align_y: iced::alignment::Vertical::Center,
+                            shaping: iced::advanced::text::Shaping::Advanced,
+                            ..Default::default()
+                        });
+                    }
                 }
             }
             if let Some(index) = hovered {

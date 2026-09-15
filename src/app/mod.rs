@@ -63,10 +63,10 @@ pub struct GripHover {
     pub started: iced::time::Instant,
 }
 
-/// Cursor dwell awaiting a rollover hit-test. Refreshed on every idle
-/// move; `HoverDwellTick` runs the pick once `last_move_at.elapsed()`
-/// crosses `HOVER_DWELL_MS`. `point` and `tile_size` are tile-local so
-/// the deferred pick uses the same projection the move handler would
+/// Cursor state awaiting a rollover hit-test. Ordinary cursor movement
+/// queues the pick for the next render frame; navigation may retain a
+/// short settle delay. `point` and `tile_size` are tile-local so the
+/// queued pick uses the same projection the move handler would
 /// have — picking with the full canvas bounds in a tiled layout matches
 /// the wrong entity under the cursor.
 #[derive(Clone, Debug)]
@@ -77,7 +77,9 @@ pub struct HoverDwell {
     pub tab: usize,
 }
 
-/// How long the cursor must sit still before the idle rollover pick runs.
+/// How long a stationary cursor waits after navigation before rollover resumes.
+/// Ordinary pointer movement backdates its timestamp and therefore acquires on
+/// the next render frame without this delay.
 pub const HOVER_DWELL_MS: u128 = 500;
 /// Dense resident sets also retain the previous rollover while moving; this
 /// threshold gates that extra redraw-avoidance behavior.
@@ -634,10 +636,9 @@ pub(super) struct OpenCADStudio {
     /// drag. The edited entities are shown in the overlay until commit.
     grip_preview_handles: Vec<acadrust::Handle>,
     /// Pending rollover hit-test. Each idle cursor move stashes
-    /// `(last_move_at, point, tab)` here and clears the live highlight;
-    /// `HoverDwellTick` runs the pick once the cursor has been still for
-    /// `HOVER_DWELL_MS`. Skipping the pick mid-stroke avoids the per-frame
-    /// O(N) wire+hatch+mesh sweep that froze the cursor on large drawings.
+    /// `(last_move_at, point, tab)` here and queues an immediate frame tick.
+    /// The interaction index keeps the exact wire+hatch+mesh sweep bounded to
+    /// nearby candidates on large drawings.
     hover_dwell: Option<HoverDwell>,
     /// Constraint kind shown after the ordinary rollover dwell while the
     /// cursor remains over one of its viewport indicators.

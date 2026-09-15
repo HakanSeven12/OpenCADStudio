@@ -1872,12 +1872,10 @@ impl OpenCADStudio {
             self.tabs[i].last_cursor_world = world;
         }
 
-        // Rollover highlight: when idle (no active command, no
-        // drag), defer the pick until the cursor stops. The full
-        // pick (wires + hatches + block hatches + shaded meshes) is
-        // O(N) per frame and stalls the cursor on large drawings,
-        // so each move resets the dwell timer — `HoverDwellTick` runs the hit-test only
-        // once the cursor has been still for `HOVER_DWELL_MS`.
+        // Rollover highlight: when idle (no active command, no drag), queue
+        // the exact pick for the first render frame after this cursor event.
+        // The interaction index narrows wires, hatches, inserts and shaded
+        // meshes to nearby candidates before the detailed hit-test runs.
         let deferred_command_hover = self.tabs[i].active_cmd.as_ref().is_some_and(|command| {
             command.needs_entity_pick() && command.entity_pick_deferred_hover()
         });
@@ -1889,7 +1887,11 @@ impl OpenCADStudio {
                 self.tabs[i].scene.set_hover_highlight(None);
             }
             self.hover_dwell = Some(crate::app::HoverDwell {
-                last_move_at: Instant::now(),
+                // Cursor rollover is immediate: make the existing frame-driven
+                // acquisition eligible on its first tick. Navigation uses a
+                // fresh timestamp and retains its separate settle window.
+                last_move_at: Instant::now()
+                    - std::time::Duration::from_millis(crate::app::HOVER_DWELL_MS as u64),
                 point: p,
                 tile_size: vp_size,
                 tab: i,

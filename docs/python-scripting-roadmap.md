@@ -58,10 +58,11 @@ through the existing Plugin Manager with zero OCS core changes.
 - [x] `ocs.selection()` → list of entity handles. Implemented as a cache, not
       a live query — `HostApi` has no synchronous "current selection" call
       (only a best-effort `SelectionChanged`/`SelectionChangedV4`
-      notification), so `dispatch` drains pending notifications into a
-      per-tab `ensure_plugin_state` cache at the start of every `PY_`
-      command, and `ocs.selection()` reads that. Documented as a real
-      limitation in `PLUGIN.md`, not silently papered over.
+      notification). Populated via `BuiltinPlugin::on_notification` into a
+      process-wide static (`selection_cache.rs`) — see the host-runtime
+      verification note below for why `dispatch`-time polling doesn't work.
+      Documented as a real limitation in `PLUGIN.md`, not silently papered
+      over.
 - [x] `ocs.get(handle)` → read-only geometry/property access, via
       `HostApi::document_reader()` (zero-copy) + `for_each_entity`, matching
       by handle. Returns `{handle, kind, layer, point}` or `None`.
@@ -139,13 +140,26 @@ through the existing Plugin Manager with zero OCS core changes.
 
 ### 1.3 — Write access + scripts
 
-- [ ] `ocs.add_line/add_circle/...`, wrapped so a whole script is **one**
-      `host.push_undo` group, not one per call.
-- [ ] `PY_RUN <path.py>` to run a file; reuse the same path for the CLI/
-      automation surface (`src/app/control/transport.rs`'s `run` op can already
-      invoke `PY_RUN "..."` with no transport changes needed).
-- [ ] `ocs.command("ALIGNLEFT")` to invoke existing built-in commands by name
-      — lets a script compose primitives instead of reimplementing them.
+- [x] `ocs.add_line(x1, y1, x2, y2)` / `ocs.add_circle(x, y, radius)` — 2D
+      only for now (z=0, layer `"0"`), wrapped so a whole script is **one**
+      `host.push_undo` group, not one per call (`host_ctx::ensure_undo_started`,
+      called lazily by the first write). Verified end-to-end: a `PY_RUN`
+      script that calls `ocs.add_line` twice undoes both lines in one `undo`.
+      Take `rustpython_vm::function::ArgIntoFloat`, not a bare `f64` — found
+      by actually running `ocs.add_line(0, 0, 10, 10)` (plain ints, the
+      natural way to write it) and hitting a `TypeError`: unlike CPython's
+      C-function argument parsing, a bare `f64` `#[pyfunction]` parameter in
+      RustPython does not implicitly coerce an `int`.
+- [x] `PY_RUN <path.py>` to run a file (`Mode::Exec`, so statements are
+      allowed, unlike `PY_EVAL`'s `Mode::Eval`). Same error reporting as
+      `PY_EVAL`: a missing file or a raised exception is never a silent
+      no-op. Reusing the automation `run` op needed no transport changes, as
+      expected — `{"op":"run","cmd":"PY_RUN <path>"}` just works.
+- [ ] `ocs.command("ALIGNLEFT")` to invoke existing built-in commands by
+      name — **not implemented**. There's no `HostApi` method for it in
+      `ocs_plugin_api` today (checked, not assumed); it would need a host API
+      addition. Documented as a real gap in `PLUGIN.md` rather than attempting
+      a workaround.
 
 ### 1.4 — Usability
 

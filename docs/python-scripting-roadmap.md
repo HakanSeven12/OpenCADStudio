@@ -55,12 +55,46 @@ through the existing Plugin Manager with zero OCS core changes.
 
 ### 1.2 — Minimal `ocs` module (read-only)
 
-- [ ] `ocs.selection()` → list of entity handles.
-- [ ] `ocs.get(handle)` → read-only geometry/property access.
-- [ ] `PY` command (`command_prefixes = ["PY_"]`): evaluate one inline
-      expression, print the result via `host.push_output`.
-- [ ] Errors: map RustPython tracebacks to `host.push_error` — a script bug
-      must never look like a silent no-op.
+- [x] `ocs.selection()` → list of entity handles. Implemented as a cache, not
+      a live query — `HostApi` has no synchronous "current selection" call
+      (only a best-effort `SelectionChanged`/`SelectionChangedV4`
+      notification), so `dispatch` drains pending notifications into a
+      per-tab `ensure_plugin_state` cache at the start of every `PY_`
+      command, and `ocs.selection()` reads that. Documented as a real
+      limitation in `PLUGIN.md`, not silently papered over.
+- [x] `ocs.get(handle)` → read-only geometry/property access, via
+      `HostApi::document_reader()` (zero-copy) + `for_each_entity`, matching
+      by handle. Returns `{handle, kind, layer, point}` or `None`.
+- [x] `PY_EVAL <expr>` command (`command_prefixes = ["PY_"]`): evaluate one
+      inline expression, print the result via `host.push_output`. Runs a
+      fresh, stdlib-free `Interpreter` per call with only the `ocs` native
+      module registered (`Interpreter::builder(...).add_native_module(...)`)
+      — no `import os`/`socket`/etc. is even possible since no stdlib is
+      loaded, which happens to satisfy most of §1.5's sandboxing goal already
+      as a side effect of keeping this phase minimal, not a deliberate
+      Phase 1.5 pass yet.
+- [x] Errors: both compile errors (`CompileError`, which implements
+      `Display` directly — no `into_pyexception` needed) and runtime
+      exceptions (formatted as `"<TypeName>: <message>"`, no traceback yet)
+      go to `host.push_error`.
+- [ ] Bridging `host: &mut dyn HostApi` into the `#[pymodule]` native
+      functions needed a thread-local raw-pointer scratch slot
+      (`host_ctx.rs`) with a documented safety argument, since
+      `add_native_module` wants `&'static PyModuleDef` — there's no closure
+      capture available to a native pyfunction. Worth a second pair of eyes;
+      it's sound as written (guard clears the slot before the real borrow
+      ends, single-threaded, non-reentrant) but is the one genuinely
+      load-bearing `unsafe` block in the plugin so far.
+- [ ] Verified: `cargo build`/`--release` clean, zero warnings, against the
+      real `ocs_plugin_api`/`rustpython-vm` 0.5.0 APIs (not guessed — traced
+      through the actual crate sources for `HostApi`, `DocumentReader`,
+      `InterpreterBuilder`, `ToPyObject`/`DictKey` impls, etc.). **Not yet
+      verified**: an actual end-to-end run inside the real OCS host (build
+      the host, install the plugin, drive `PY_EVAL`/`ocs.selection()`/
+      `ocs.get()` via the `--serve` automation API or the GUI). That's a much
+      bigger lift (full native app build) than building the plugin alone —
+      flagged as the next thing to do before trusting this beyond "compiles
+      against the real contract."
 
 ### 1.3 — Write access + scripts
 

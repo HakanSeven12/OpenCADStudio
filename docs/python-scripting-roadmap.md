@@ -85,16 +85,47 @@ through the existing Plugin Manager with zero OCS core changes.
       it's sound as written (guard clears the slot before the real borrow
       ends, single-threaded, non-reentrant) but is the one genuinely
       load-bearing `unsafe` block in the plugin so far.
-- [ ] Verified: `cargo build`/`--release` clean, zero warnings, against the
+- [x] Verified: `cargo build`/`--release` clean, zero warnings, against the
       real `ocs_plugin_api`/`rustpython-vm` 0.5.0 APIs (not guessed — traced
       through the actual crate sources for `HostApi`, `DocumentReader`,
-      `InterpreterBuilder`, `ToPyObject`/`DictKey` impls, etc.). **Not yet
-      verified**: an actual end-to-end run inside the real OCS host (build
-      the host, install the plugin, drive `PY_EVAL`/`ocs.selection()`/
-      `ocs.get()` via the `--serve` automation API or the GUI). That's a much
-      bigger lift (full native app build) than building the plugin alone —
-      flagged as the next thing to do before trusting this beyond "compiles
-      against the real contract."
+      `InterpreterBuilder`, `ToPyObject`/`DictKey` impls, etc.).
+- [x] **Host-runtime verified**, not just "compiles": built the actual OCS
+      host (debug, ~1m43s), installed the plugin, drove it through the real
+      `--mcp` automation API with an isolated `$HOME` (so the test couldn't
+      collide with an already-running instance — see below, that mistake cost
+      real time). Confirmed working end-to-end:
+      - `PY_EVAL 6 * 7` → `"42"`.
+      - `PY_EVAL 1 / 0` → `"ZeroDivisionError: division by zero"` via
+        `host.push_error` — not a silent no-op.
+      - `ocs.get(handle)` on a drawn `LINE` → correct
+        `{'handle': 98, 'kind': 'line', 'layer': '0', 'point': None}`.
+      - Along the way found and fixed a real bug: `PY_EVAL`'s `ocs` name was
+        never bound in scope (scripts would need `import ocs`, impossible
+        under `Mode::Eval`, which only accepts one expression). Fixed by
+        `vm.import("ocs", 0)` + `scope.globals.set_item` before compiling —
+        `ocs` is now pre-bound, no import needed or possible.
+      - **Confirmed broken, host-side, not this plugin**: `ocs.selection()`
+        always returns `[]`. Instrumented the plugin directly —
+        `HostApi::try_recv_notification()` returns nothing at all, ever, even
+        a full second after a `select` automation op, despite the runner
+        authenticating as V4 and dispatch working normally. The host's
+        `SelectionChangedV4` broadcast (`notify_plugins_selection_changed` /
+        `publish_selection_changed_v4` in `src/plugin/v4_support.rs`) isn't
+        reaching the plugin's IPC channel when selection changes via
+        automation. Not root-caused further (needs host-side
+        instrumentation); documented as a known limitation in
+        `opencad-python`'s `PLUGIN.md`.
+      - **Testing pitfall worth remembering**: `--mcp` doesn't run headless —
+        it's a thin JSON-RPC client that reuses any already-running OCS
+        instance it finds under `$HOME/Library/Application Support/
+        OpenCADStudio/automation` (`descriptors()` in `src/mcp.rs`), spawning
+        a fresh one only if none exists. First test run silently talked to
+        the *user's own already-running production app* (which obviously had
+        never seen this plugin — plugins load once at startup) instead of the
+        freshly built debug binary. Fix: override `$HOME` for the test
+        subprocess to a scratch directory, which isolates `config_dir()`,
+        `plugins_dir()` and the automation discovery directory all at once.
+      - macOS only, per current scope; Windows/Linux still unverified.
 
 ### 1.3 — Write access + scripts
 

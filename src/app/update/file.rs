@@ -118,7 +118,13 @@ fn plot_dialog_sheet_mm(d: &crate::ui::window::plot::PlotDialogState) -> (f64, f
 }
 
 fn plot_content_extents(content: &PlotContent) -> Option<(f64, f64, f64, f64)> {
-    let PlotContent { wires, hatches, wipeouts, images, .. } = content;
+    let PlotContent {
+        wires,
+        hatches,
+        wipeouts,
+        images,
+        ..
+    } = content;
     let mut bounds = (
         f64::INFINITY,
         f64::INFINITY,
@@ -133,7 +139,10 @@ fn plot_content_extents(content: &PlotContent) -> Option<(f64, f64, f64, f64)> {
             bounds.3 = bounds.3.max(y);
         }
     };
-    for wire in wires.iter().filter(|wire| wire.name != "paper_printable_area") {
+    for wire in wires
+        .iter()
+        .filter(|wire| wire.name != "paper_printable_area")
+    {
         let [x0, y0, x1, y1] = wire.aabb;
         include(x0 as f64, y0 as f64);
         include(x1 as f64, y1 as f64);
@@ -147,8 +156,12 @@ fn plot_content_extents(content: &PlotContent) -> Option<(f64, f64, f64, f64)> {
         }
     }
     for plot in images {
-        let mut image_bounds = [f64::INFINITY, f64::INFINITY,
-            f64::NEG_INFINITY, f64::NEG_INFINITY];
+        let mut image_bounds = [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ];
         for vertex in &plot.image.verts {
             for axis in 0..2 {
                 let value = vertex.pos[axis] as f64 + vertex.pos_low[axis] as f64;
@@ -159,7 +172,10 @@ fn plot_content_extents(content: &PlotContent) -> Option<(f64, f64, f64, f64)> {
         for clip in &plot.clips {
             for axis in 0..2 {
                 let min = clip.iter().map(|p| p[axis]).fold(f64::INFINITY, f64::min);
-                let max = clip.iter().map(|p| p[axis]).fold(f64::NEG_INFINITY, f64::max);
+                let max = clip
+                    .iter()
+                    .map(|p| p[axis])
+                    .fold(f64::NEG_INFINITY, f64::max);
                 image_bounds[axis] = image_bounds[axis].max(min);
                 image_bounds[axis + 2] = image_bounds[axis + 2].min(max);
             }
@@ -275,7 +291,13 @@ fn plot_scene_content(
         images.extend(model_images);
         (wires, hatches, wipeouts, images, splits)
     };
-    PlotContent { wires: std::sync::Arc::new(wires), hatches, wipeouts, images, group_splits: splits }
+    PlotContent {
+        wires: std::sync::Arc::new(wires),
+        hatches,
+        wipeouts,
+        images,
+        group_splits: splits,
+    }
 }
 
 impl OpenCADStudio {
@@ -1316,6 +1338,22 @@ impl OpenCADStudio {
         // overlay state was cleared and we silently drop the result.
         if self.opening.is_none() {
             return Task::none();
+        }
+        // Web drawings live under bare file names: two tabs sharing a name
+        // also share the single browser-stored copy, and the last save
+        // silently replaces the other tab's. Warn at open time — the
+        // desktop identifies drawings by full path and needs no such check.
+        #[cfg(target_arch = "wasm32")]
+        if self.tab_showing(&path).is_some() {
+            self.command_line.push_warning(
+                crate::tf!(
+                    "\"{}\" is already open in another tab. On the web both \
+                     tabs share one stored copy — the last save overwrites \
+                     the other.",
+                    name
+                )
+                .as_ref(),
+            );
         }
         let open_started = self.opening.as_ref().map(|p| p.started);
         let size_bytes = self
@@ -2963,8 +3001,7 @@ impl OpenCADStudio {
                 self.load_plotsettings_into_dialog(&settings);
             }
         }
-        let Some(page) = self.direct_plot_page()
-        else {
+        let Some(page) = self.direct_plot_page() else {
             self.command_line.push_error(
                 crate::t!("Nothing to plot: model space contains no printable geometry.").as_ref(),
             );
@@ -2990,8 +3027,7 @@ impl OpenCADStudio {
             "Extents" => self.extents_plot_job(),
             _ => self.window_plot_job(),
         };
-        let Some(page) = job
-        else {
+        let Some(page) = job else {
             self.command_line
                 .push_error(crate::t!("Plot area is empty. Pick a larger window.").as_ref());
             return Task::none();
@@ -3302,7 +3338,8 @@ impl OpenCADStudio {
         // The printable-area rectangle is an on-screen guide, not drawing
         // content. It used to leak into every paper-space PDF/preview/print.
         if paper_space {
-            content.group_splits.wires = content.wires[..content.group_splits.wires.min(content.wires.len())]
+            content.group_splits.wires = content.wires
+                [..content.group_splits.wires.min(content.wires.len())]
                 .iter()
                 .filter(|wire| wire.name != "paper_printable_area")
                 .count();
@@ -3465,8 +3502,10 @@ impl OpenCADStudio {
         }
         let page = self.extents_plot_job()?;
         let content = &page.content;
-        if content.wires.is_empty() && content.hatches.is_empty()
-            && content.wipeouts.is_empty() && content.images.is_empty()
+        if content.wires.is_empty()
+            && content.hatches.is_empty()
+            && content.wipeouts.is_empty()
+            && content.images.is_empty()
         {
             return None;
         }
@@ -3474,8 +3513,7 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_print_to_printer(&mut self) -> Task<Message> {
-        let Some(page) = self.direct_plot_page()
-        else {
+        let Some(page) = self.direct_plot_page() else {
             self.command_line.push_error(
                 crate::t!("Nothing to plot: model space contains no printable geometry.").as_ref(),
             );
@@ -4407,8 +4445,7 @@ impl OpenCADStudio {
                 }
                 _ => None,
             };
-            let Some(page) = job
-            else {
+            let Some(page) = job else {
                 self.command_line
                     .push_error(crate::t!("Plot area is empty. Pick a larger window.").as_ref());
                 self.active_modal = Some(crate::app::ModalKind::Plot);
@@ -4432,9 +4469,7 @@ impl OpenCADStudio {
             let opts = self.plot_print_options(&d);
             let work = move || {
                 crate::io::pdf_export::export_pdf(&page, &tmp)
-                    .and_then(|_| {
-                        crate::io::print_to_printer::print_existing_pdf(&tmp, &opts)
-                    })
+                    .and_then(|_| crate::io::print_to_printer::print_existing_pdf(&tmp, &opts))
                     .map(|printer| crate::tf!("Sent to printer: {printer}").into_owned())
                     .map_err(|e| crate::tf!("Print failed: {e}").into_owned())
             };
@@ -4464,8 +4499,8 @@ impl OpenCADStudio {
             iced::futures::executor::block_on(crate::io::print_to_printer::print_wires_with(
                 page, opts,
             ))
-                .map(|printer| crate::tf!("Sent to printer: {printer}").into_owned())
-                .map_err(|error| crate::tf!("Print failed: {error}").into_owned())
+            .map(|printer| crate::tf!("Sent to printer: {printer}").into_owned())
+            .map_err(|error| crate::tf!("Print failed: {error}").into_owned())
         };
         self.run_plot_work(true, false, work)
     }
@@ -4658,8 +4693,10 @@ impl OpenCADStudio {
         );
         let in_window = |wire: &crate::io::pdf_export::PlotWire| {
             wire.name != "paper_printable_area"
-                && wire.aabb[0] <= wx1 && wire.aabb[2] >= wx0
-                && wire.aabb[1] <= wy1 && wire.aabb[3] >= wy0
+                && wire.aabb[0] <= wx1
+                && wire.aabb[2] >= wx0
+                && wire.aabb[1] <= wy1
+                && wire.aabb[3] >= wy0
         };
         content.group_splits.wires = content.wires
             [..content.group_splits.wires.min(content.wires.len())]

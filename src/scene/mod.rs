@@ -31,6 +31,8 @@ mod camera_ops;
 pub(crate) mod centerline;
 pub(crate) mod centermark;
 pub(crate) mod dimension_assoc;
+pub(crate) mod dimension_assoc_chain;
+pub use dimension_assoc::{ReferenceStatus, ResolvedReference};
 mod dwg_native_constraints;
 mod entity;
 #[cfg(test)]
@@ -40,6 +42,8 @@ mod layout;
 mod limits;
 mod modify;
 mod mspace;
+pub mod viewport_ref;
+pub mod viewport_dimension_pick;
 pub mod named_parameters;
 mod page_setup;
 mod paper;
@@ -5438,6 +5442,10 @@ impl Scene {
         self.document
             .set_viewport_annotation_scale(viewport, scale_handle);
 
+        // Viewport scale changed: the dimensions drawn on the sheet
+        // through it measure the same model geometry at a new paper
+        // size and have to be re-placed.
+        self.notify_viewport_changed(viewport);
         self.resident_wire_sets.borrow_mut().clear();
         self.bump_geometry();
 
@@ -5484,6 +5492,10 @@ impl Scene {
         vp.view_height = vp.height / factor;
         self.document
             .set_viewport_annotation_scale(viewport, scale_handle);
+        // Viewport scale changed: the dimensions drawn on the sheet
+        // through it measure the same model geometry at a new paper
+        // size and have to be re-placed.
+        self.notify_viewport_changed(viewport);
         self.resident_wire_sets.borrow_mut().clear();
         self.bump_geometry();
         true

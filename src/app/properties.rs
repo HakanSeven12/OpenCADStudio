@@ -1277,6 +1277,35 @@ impl OpenCADStudio {
                                     &self.tabs[i].scene.document,
                                     d.base().common.handle,
                                 );
+                            let statuses = self.tabs[i]
+                                .scene
+                                .dimension_association_status(d.base().common.handle);
+                            let slots = self.tabs[i]
+                                .scene
+                                .dimension_association_slot_points(d.base().common.handle)
+                                .len();
+                            let status = if statuses.is_empty() {
+                                t!("Nonassociative")
+                            } else if statuses.iter().any(|(_, status)| {
+                                matches!(status, crate::scene::ReferenceStatus::Broken(_))
+                            }) {
+                                t!("Broken reference")
+                            } else if statuses.iter().any(|(_, status)| {
+                                matches!(status, crate::scene::ReferenceStatus::Unresolved)
+                            }) {
+                                t!("Unresolved reference")
+                            } else if statuses.len() < slots {
+                                t!("Partially associated")
+                            } else {
+                                t!("Associated")
+                            };
+                            general.props.push(crate::scene::model::object::Property {
+                                label: t!("Association status").into_owned(),
+                                field: "association_status",
+                                value: crate::scene::model::object::PropValue::ReadOnly(
+                                    status.into_owned(),
+                                ),
+                            });
                             general.props.push(crate::scene::model::object::Property {
                                 label: t!("Associative").into_owned(),
                                 field: "associative",

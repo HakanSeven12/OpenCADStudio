@@ -95,6 +95,7 @@ mod file;
 mod style;
 mod util;
 mod viewport;
+mod viewport_snap;
 
 impl OpenCADStudio {
     pub(in crate::app) fn reset_modal_geometry(&mut self) {

@@ -10,6 +10,9 @@ pub use automation::{export_headless, serve};
 mod annotation_data;
 mod command_driver;
 pub(crate) mod commands;
+pub(crate) mod dim_viewport;
+#[cfg(test)]
+mod viewport_dimension_tests;
 mod document;
 mod drafting_settings;
 pub(crate) mod expr_eval;
@@ -714,6 +717,16 @@ pub(super) struct OpenCADStudio {
     show_layout_tabs: bool,
     /// Last point committed by a drawing command — used as ortho/polar base.
     last_point: Option<glam::DVec3>,
+    /// Viewport used by the current snap; the displayed point is in paper space.
+    pub(crate) vp_snap_frame: Option<crate::scene::viewport_ref::ViewportFrame>,
+    /// Acquired coordinates and source identities in command-step order.
+    /// Cleared when the command starts or ends.
+    accepted_snaps: Vec<crate::scene::viewport_ref::AcceptedSnap>,
+    /// Click result retained until the command accepts its point.
+    pending_click_snap: Option<(
+        crate::snap::SnapResult,
+        Option<crate::scene::viewport_ref::ViewportFrame>,
+    )>,
     /// Endpoint + unit exit-tangent of the most recently drawn line/arc, so
     /// `ARC_CONT` (Arc → Continue) can start tangentially from where drawing
     /// ended. `None` once a non-line/arc entity is committed.
@@ -3719,6 +3732,9 @@ impl OpenCADStudio {
             show_file_tabs: true,
             show_layout_tabs: true,
             last_point: None,
+            vp_snap_frame: None,
+            accepted_snaps: Vec::new(),
+            pending_click_snap: None,
             main_window: None,
             thumbnail_capture_clean: false,
             #[cfg(not(target_arch = "wasm32"))]

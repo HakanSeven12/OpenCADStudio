@@ -482,6 +482,42 @@ impl CadCommand for AngularDimensionCommand {
         CmdResult::Cancel
     }
 
+    /// Points and object picks may come through a paper-space viewport;
+    /// the committed dimension then reports the model measurement.
+    fn measures_through_viewports(&self) -> bool {
+        true
+    }
+
+    fn dimension_acquired_points(&self) -> Vec<DVec3> {
+        match self.step {
+            Step::Vertex => vec![],
+            Step::FirstRay(p) => vec![p],
+            Step::SecondRay { vertex, first } | Step::CircleSecondRay { vertex, first, .. } => {
+                vec![vertex, first]
+            }
+            Step::SecondLine {
+                first_start,
+                first_end,
+                ..
+            } => vec![first_start, first_end],
+            Step::ArcPoint3 {
+                vertex,
+                first,
+                second,
+            } => vec![vertex, first, second],
+            Step::ArcPoint2 {
+                first_start,
+                first_end,
+                second_start,
+                second_end,
+            } => vec![first_start, first_end, second_start, second_end],
+        }
+    }
+
+    fn dimension_placement_pending(&self) -> bool {
+        matches!(self.step, Step::ArcPoint3 { .. } | Step::ArcPoint2 { .. })
+    }
+
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }

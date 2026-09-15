@@ -97,6 +97,10 @@ impl OpenCADStudio {
         self.tabs[i].scene.clear_preview_wire();
         self.tabs[i].snap_result = None;
         self.last_point = None;
+        // Points collected in the space being left are meaningless in the new
+        // one.
+        self.clear_accepted_snaps();
+        self.pending_click_snap = None;
         self.snapper.from_point = None;
         self.snapper.clear_tracking();
         self.otrack_active = None;
@@ -417,6 +421,13 @@ impl OpenCADStudio {
             if !self.command_point_allowed(i, *point) {
                 return Task::none();
             }
+            // Typed / dynamic-input / headless points carry no snap, but the
+            // accepted-snap list must stay index-parallel with the points the
+            // command collects. Interactive picks record themselves in
+            // the click handler and never reach here.
+            if !self.record_accepted_snap(i, None, None, *point) {
+                return Task::none();
+            }
         }
         if default_start {
             let StepInput::Point(point) = &input else {
@@ -430,6 +441,9 @@ impl OpenCADStudio {
             self.push_ucs_to_cmd(i);
         }
         if let StepInput::EntityPick(handle, point) = &input {
+            if !self.dimension_acquisition_allowed(i, None) {
+                return Task::none();
+            }
             let solid_pick = matches!(
                 self.tabs[i].scene.document.get_entity(*handle),
                 Some(
@@ -502,6 +516,11 @@ impl OpenCADStudio {
         }
         let ctrl = self.ctrl_down;
         let shift = self.shift_down;
+        let picked_handle = if let StepInput::EntityPick(h, _) = &input {
+            Some(*h)
+        } else {
+            None
+        };
         let result: Option<CmdResult> = {
             let Some(cmd) = self.tabs[i].active_cmd.as_mut() else {
                 return Task::none();
@@ -520,6 +539,10 @@ impl OpenCADStudio {
                 StepInput::Escape => Some(cmd.on_escape()),
             }
         };
+        if let Some(handle) = picked_handle {
+            self.record_dimension_entity_points(i, None, handle, Vec::new());
+        }
+        self.sync_dimension_snaps(i);
         match result {
             Some(r) => self.apply_cmd_result(r),
             None => Task::none(),
@@ -1871,7 +1894,7 @@ impl OpenCADStudio {
                 };
                 if is_associative_dimension && association_enabled {
                     if let Some(handle) = committed {
-                        let sources = self.tabs[i].scene.infer_dimension_sources(handle);
+                        let sources = self.infer_dimension_sources_guarded(i, handle);
                         self.tabs[i]
                             .scene
                             .attach_dimension_association(handle, sources);
@@ -2349,7 +2372,7 @@ impl OpenCADStudio {
                 let committed = self.commit_entity_handle(entity);
                 if is_associative_dimension && association_enabled {
                     if let Some(handle) = committed {
-                        let sources = self.tabs[i].scene.infer_dimension_sources(handle);
+                        let sources = self.infer_dimension_sources_guarded(i, handle);
                         self.tabs[i]
                             .scene
                             .attach_dimension_association(handle, sources);
@@ -2382,6 +2405,20 @@ impl OpenCADStudio {
                     &entity,
                     acadrust::EntityType::Dimension(acadrust::entities::Dimension::Ordinate(_))
                 );
+                // A dimension placed on the sheet but measuring model geometry
+                // through a viewport carries the compensation as a negative
+                // DIMLFAC override.
+                if !preserve_base_style {
+                    crate::scene::creation_style::apply_current_creation_styles(
+                        &self.tabs[i].scene.document,
+                        &mut entity,
+                    );
+                }
+                if !self.apply_viewport_dimension_measurement(i, &mut entity) {
+                    return Task::none();
+                }
+                // Projected points cannot use direct paper-space source inference.
+                let association_allowed = self.dimension_association_allowed(i);
                 let inherited_dimension = if preserve_base_style {
                     match &entity {
                         acadrust::EntityType::Dimension(dimension) => Some((
@@ -2445,12 +2482,12 @@ impl OpenCADStudio {
                     if let Some(handle) =
                         self.commit_entity_handle_with_dimension_policy(entity, preserve_base_style)
                     {
-                        if association_mode == 2 {
+                        if association_mode == 2 && association_allowed {
                             let mut changes = vec![(handle, crate::scene::ChangeKind::Modified)];
                             match association {
                                 crate::command::DimensionAssociationInput::Infer(source) => {
                                     let sources: Vec<_> = source.map_or_else(
-                                        || self.tabs[i].scene.infer_dimension_sources(handle),
+                                        || self.infer_dimension_sources_guarded(i, handle),
                                         |source| {
                                             if single_source_dimension {
                                                 vec![Some(source)]
@@ -2479,6 +2516,9 @@ impl OpenCADStudio {
                             changes.sort_by_key(|(handle, _)| handle.value());
                             changes.dedup_by_key(|(handle, _)| handle.value());
                             self.tabs[i].scene.bump_entities(&changes);
+                        } else if association_mode == 2 {
+                            // Preserve the acquired viewport and source paths.
+                            self.attach_viewport_dimension_association(i, handle);
                         }
                     }
                     pending
@@ -2565,9 +2605,7 @@ impl OpenCADStudio {
                             crate::command::DimensionAssociationInput::Infer(source) => {
                                 source.map_or_else(
                                     || {
-                                        self.tabs[i]
-                                            .scene
-                                            .infer_dimension_sources(handle)
+                                        self.infer_dimension_sources_guarded(i, handle)
                                             .into_iter()
                                             .map(|source| {
                                                 source.map(

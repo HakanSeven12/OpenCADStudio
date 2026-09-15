@@ -1613,7 +1613,60 @@ pub(crate) fn resolved_dimension_style(
             style.dimtxsty = record.name.clone();
         }
     }
+
+    // DXF DIMLFAC sign convention. A negative DIMLFAC applies |DIMLFAC| only
+    // to dimensions that live in a paper-space layout (where it compensates a
+    // viewport's scale); model-space dimensions use 1.0. Resolving it here —
+    // the single place an effective style is derived — keeps dimension text,
+    // alternate units, the properties measurement row and the exploded /
+    // baked text all in agreement, while `extended_data` keeps the raw signed
+    // value for DXF/DWG export. See `MeasurementScale::viewport_dimlfac_override`.
+    if style.dimlfac < 0.0 {
+        style.dimlfac = crate::scene::viewport_ref::MeasurementScale::user_lfac_for_space(
+            style.dimlfac,
+            dimension_in_paper_space(dimension, document),
+        );
+    }
     style
+}
+
+/// Whether a dimension entity is owned by a paper-space layout block rather
+/// than model space. Used only for the DIMLFAC sign convention, so it is
+/// evaluated lazily (negative DIMLFAC is rare).
+pub(crate) fn dimension_in_paper_space(dimension: &Dimension, document: &CadDocument) -> bool {
+    let owner = dimension.base().common.owner_handle;
+    if !owner.is_valid() {
+        return false;
+    }
+    document.objects.values().any(|object| {
+        matches!(object,
+            acadrust::objects::ObjectType::Layout(layout)
+                if layout.name != "Model" && layout.block_record == owner
+        )
+    })
+}
+
+/// The value a dimension's text reports for its measurement: the raw
+/// geometric measurement times the resolved linear factor. Angular dimensions
+/// never scale.
+///
+/// `actual_measurement` (DXF group 42) stays **raw** — that is what the format
+/// specifies and what export writes — so this is the one helper UI surfaces
+/// use when they want the number the user reads.
+pub(crate) fn displayed_measurement(dimension: &Dimension, style: Option<&DimStyle>) -> f64 {
+    let raw = dimension.measurement();
+    if matches!(
+        dimension,
+        Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_)
+    ) {
+        return raw;
+    }
+    let lfac = style.map(|s| s.dimlfac).unwrap_or(1.0);
+    if lfac.abs() < 1e-12 {
+        raw
+    } else {
+        raw * lfac
+    }
 }
 
 /// Build the linear-dimension property groups from the assigned style plus
@@ -2097,7 +2150,13 @@ pub fn style_sections(
                 property(
                     t!("Measurement").as_ref(),
                     "measurement",
-                    PropValue::ReadOnly(format!("{:.4}", dimension.measurement())),
+                    // The value the dimension text reports (DIMLFAC applied,
+                    // including viewport compensation) — not the raw paper
+                    // distance, which would disagree with what is drawn.
+                    PropValue::ReadOnly(format!(
+                        "{:.4}",
+                        displayed_measurement(dimension, Some(s))
+                    )),
                 ),
                 property(
                     t!("Text override").as_ref(),
@@ -2196,7 +2255,12 @@ pub fn style_sections(
                 number(
                     t!("Dim scale linear").as_ref(),
                     "dim_scale_linear",
-                    real(ov::DIMLFAC, s.dimlfac),
+                    // The *raw* signed DIMLFAC: a negative value is the
+                    // paper-space / viewport-compensation convention, and
+                    // hiding its sign would make the row uneditable in
+                    // practice. `s.dimlfac` is sign-resolved, so fall back to
+                    // the unresolved source style instead.
+                    real(ov::DIMLFAC, style.dimlfac),
                     true,
                 ),
                 number(
@@ -6403,7 +6467,14 @@ fn format_linear_value(measurement: f64, style: Option<&DimStyle>) -> String {
         })
         .unwrap_or((4, 8, 1.0, 0.0, 46, 2, 0, 1.0, ""));
 
-    let lfac = if lfac.abs() < 1e-12 { 1.0 } else { lfac };
+    // `resolved_dimension_style` has already applied the DXF sign convention,
+    // so a negative value here means the caller passed an unresolved style;
+    // fall back to 1.0 rather than reporting a negative length.
+    let lfac = if lfac.abs() < 1e-12 || lfac < 0.0 {
+        1.0
+    } else {
+        lfac
+    };
     let scaled = measurement * lfac;
     let use_sub_units = zin & 4 != 0 && scaled.abs() < 1.0 && sub_factor.abs() > 1e-12;
     // For values below one unit, DIMMZF replaces DIMLFAC; applying it after

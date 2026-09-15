@@ -134,7 +134,7 @@ impl Scene {
         let _ = self.document.layers.add(layer);
     }
 
-    fn ensure_app_id(&mut self, name: &str) {
+    pub(super) fn ensure_app_id(&mut self, name: &str) {
         if name.trim().is_empty() || self.document.app_ids.contains(name) {
             return;
         }

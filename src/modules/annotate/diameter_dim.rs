@@ -132,6 +132,23 @@ impl CadCommand for DiameterDimensionCommand {
         CmdResult::Cancel
     }
 
+    /// Points and object picks may come through a paper-space viewport;
+    /// the committed dimension then reports the model measurement.
+    fn measures_through_viewports(&self) -> bool {
+        true
+    }
+
+    fn dimension_acquired_points(&self) -> Vec<DVec3> {
+        match self.step {
+            Step::SelectObject => vec![],
+            Step::DimLine(source) => vec![dvec(source.point_at_angle(source.start_angle))],
+        }
+    }
+
+    fn dimension_placement_pending(&self) -> bool {
+        matches!(self.step, Step::DimLine(_))
+    }
+
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }

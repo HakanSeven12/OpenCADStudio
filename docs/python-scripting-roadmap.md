@@ -163,14 +163,27 @@ through the existing Plugin Manager with zero OCS core changes.
 
 ### 1.4 — Usability
 
-- [ ] Script manager UI inside the plugin's own ribbon tab: list / run / save
-      scripts, bind one to a ribbon button. (A dockable REPL console is a
-      stretch goal — confirm first whether `HostApi`/`CadModule` can host a
-      persistent custom panel today, or whether that needs a new `HostApi`
-      method, i.e. an `ocs_plugin_api` version bump. Treat as an open question,
-      not an assumption.)
-- [ ] `ModuleEvent::PluginFileDialog` (already exists) for "Run Script…" /
-      "Save Script As…".
+- [x] **Open question resolved by reading `ribbon.rs` end to end, not
+      assumed**: a script manager UI (or a dockable REPL console) is **not
+      possible** with today's `ocs_plugin_api`. `CadModule` exposes exactly
+      one hook, `ribbon_groups()`, returning a *static* set of
+      buttons/dropdowns (`RibbonItem`) — there is no API for a plugin to host
+      a persistent custom panel or render dynamic content (a script list, a
+      REPL buffer, ...). That needs a new `HostApi`/`CadModule` capability —
+      an `ocs_plugin_api` version bump, a host feature request. Out of scope
+      for a plugin repo; documented as a real, checked answer in
+      `opencad-python`'s `PLUGIN.md`, not left open.
+- [x] `ModuleEvent::PluginFileDialog` (already exists) for "Run Script…":
+      opens a native file picker filtered to `.py`, and on selection the host
+      dispatches `PY_RUN <path>` back to the plugin — no new plugin code
+      needed beyond the ribbon entry, since `PY_RUN` already exists from
+      §1.3. Verified the plugin still loads and dispatches correctly with the
+      new ribbon entry; the file-picker interaction itself isn't automatable
+      headlessly over `--mcp` (no way to drive a native OS dialog over
+      JSON-RPC), so that specific interaction is unverified beyond "doesn't
+      crash". "Save Script As…" was dropped — with no in-app editor (which
+      needs the same missing custom-panel capability above), there's no
+      script content to save.
 
 ### 1.5 — Sandboxing
 

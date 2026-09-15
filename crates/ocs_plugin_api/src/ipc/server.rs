@@ -77,5 +77,9 @@ pub fn handle_plugin_request(
         DocumentPath { tab_id } => PluginResponse::DocumentPath(
             host.document_path(tab_id).map(|path| path.into_os_string()),
         ),
+        RunCommand { cmd } => match host.run_command(&cmd) {
+            Ok(()) => PluginResponse::Ok,
+            Err(e) => PluginResponse::Error(e),
+        },
     }
 }

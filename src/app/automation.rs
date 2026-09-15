@@ -500,6 +500,16 @@ impl OpenCADStudio {
         self.drive_headless_task(task)
     }
 
+    /// Used only by `HostApi::run_command` (a plugin asking the host to run
+    /// a command line — see `plugin_host.rs`). Identical to `run_headless`
+    /// except it skips plugin dispatch entirely: see
+    /// `commands::dispatch_command_no_plugin_reentry` for why a plugin
+    /// calling this on itself would otherwise deadlock both sides.
+    pub(super) fn run_headless_no_plugin_reentry(&mut self, cmd: &str) -> Result<(), String> {
+        let task = self.run_command_line_no_plugin_reentry(cmd);
+        self.drive_headless_task(task)
+    }
+
     pub(super) fn drive_headless_task(
         &mut self,
         task: iced::Task<super::Message>,

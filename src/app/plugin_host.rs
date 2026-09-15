@@ -43,6 +43,31 @@ impl<'a> HostSession<'a> {
             .and_then(|t| t.current_path.clone())
     }
 
+    /// Run a full command line to completion, exactly as if typed — see
+    /// `HostApi::run_command`. Reuses the same headless-drive machinery the
+    /// `--serve`/`--mcp` automation surface already uses for its `"run"` op,
+    /// but *not* `run_headless` itself: this call is reached only from
+    /// inside a plugin's own `dispatch()`, so it must skip plugin dispatch
+    /// entirely or a plugin invoking this on itself deadlocks — that
+    /// plugin's single-threaded runner process is already blocked waiting
+    /// for this exact call to return, so routing back through
+    /// `try_dispatch` hands it a second `Dispatch` request it has no free
+    /// thread to answer. See `run_headless_no_plugin_reentry` and
+    /// `commands::dispatch_command_no_plugin_reentry` for the full chain.
+    ///
+    /// Refuses to act on a tab other than the currently active one: `Self`
+    /// wraps a specific `tab`, but `run_command_line` and the command-line
+    /// UI state it drives are keyed to `app.active_tab`, so running it
+    /// against a background tab would silently act on the wrong document.
+    pub fn run_command(&mut self, cmd: &str) -> Result<(), String> {
+        if self.tab != self.app.active_tab {
+            return Err(
+                "run_command only supports the active document tab".to_string(),
+            );
+        }
+        self.app.run_headless_no_plugin_reentry(cmd)
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn document_view_v4(&mut self, tab_id: u64) -> Option<ocs_plugin_api::shm::DocumentViewInfo> {
         if tab_id != self.tab_id() {
@@ -359,6 +384,9 @@ impl HostApi for HostSession<'_> {
     #[cfg(not(target_arch = "wasm32"))]
     fn close_document_view_v4(&mut self, tab_id: u64) {
         self.close_document_view_v4(tab_id)
+    }
+    fn run_command(&mut self, cmd: &str) -> Result<(), String> {
+        self.run_command(cmd)
     }
 }
 

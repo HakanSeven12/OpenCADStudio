@@ -552,6 +552,31 @@ pub trait HostApi {
         let _ = tab_id;
         None
     }
+
+    // ── Run command (added after API v5; appended at the very end so older
+    // plugins compiled without it keep stable vtable indices) ───────────────
+
+    /// Run a full command line (built-in or plugin) to completion, exactly
+    /// as if typed into the command line — including any inline
+    /// point/keyword/handle tokens an interactive command needs to finish
+    /// (e.g. `"LINE 0,0 10,10"`, or `"PCONSTRAINT 2F 30"` with two entity
+    /// handles for an interactive constraint command's object picks).
+    ///
+    /// The default implementation returns an error; a host must opt in by
+    /// overriding this, so an older host binary that predates this method
+    /// (and an in-process test double that doesn't need it) doesn't have to
+    /// implement command-line replay just to satisfy the trait.
+    ///
+    /// This lets a plugin drive *any* built-in command, not just its own —
+    /// including destructive ones (`ERASE`, `PURGE`, `SAVE` with an
+    /// arbitrary path). That is consistent with this project's existing
+    /// trust model for plugins (native code, not sandboxed; see
+    /// `docs/plugin-architecture.md`'s Non-goals), not a new exposure this
+    /// method introduces on its own.
+    fn run_command(&mut self, cmd: &str) -> Result<(), String> {
+        let _ = cmd;
+        Err("run_command is not supported by this host".to_string())
+    }
 }
 
 /// Simplified, read-only entity kind exposed by [`DocumentReader`].

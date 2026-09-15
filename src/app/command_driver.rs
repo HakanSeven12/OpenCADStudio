@@ -497,29 +497,58 @@ impl OpenCADStudio {
     /// terminated as if Enter were pressed. Shared by the GUI command line and
     /// the headless automation feeder so both behave identically.
     pub(super) fn run_command_line(&mut self, cmd: &str) -> Task<Message> {
+        self.run_command_line_inner(cmd, true)
+    }
+
+    /// Used only by `HostApi::run_command` — see
+    /// `commands::dispatch_command_no_plugin_reentry` for why plugin
+    /// dispatch must be skipped for that caller specifically (a plugin
+    /// asking the host to run a command can deadlock itself otherwise).
+    /// Identical to `run_command_line` in every other respect.
+    pub(super) fn run_command_line_no_plugin_reentry(&mut self, cmd: &str) -> Task<Message> {
+        self.run_command_line_inner(cmd, false)
+    }
+
+    fn run_command_line_inner(&mut self, cmd: &str, try_plugins: bool) -> Task<Message> {
         let i = self.active_tab;
         let tokens: Vec<&str> = cmd.split_whitespace().collect();
         if tokens.len() <= 1 {
-            return self.dispatch_command(cmd);
+            return if try_plugins {
+                self.dispatch_command(cmd)
+            } else {
+                self.dispatch_command_no_plugin_reentry(cmd)
+            };
         }
         // Plugin commands parse their own inline arguments from the whole line
         // (e.g. `HC_PIPE 2B 2C 1.25 0.013`), so offer the full command to plugin
         // dispatch first. A built-in interactive tool matches only its bare name
         // (`LINE`), so the full line is not a plugin command and falls through to
         // the first-word + fed-tokens path below. (#162)
-        if crate::plugin::try_dispatch(self, i, cmd) {
+        if try_plugins && crate::plugin::try_dispatch(self, i, cmd) {
             let toks: Vec<String> = tokens.iter().map(|s| s.to_string()).collect();
             return self.finish_active_command(&toks);
         }
         if tokens[0].eq_ignore_ascii_case("BACKGROUND")
             || tokens[0].eq_ignore_ascii_case("COLORSCHEME")
         {
-            return self.dispatch_command(cmd);
+            return if try_plugins {
+                self.dispatch_command(cmd)
+            } else {
+                self.dispatch_command_no_plugin_reentry(cmd)
+            };
         }
-        let start_task = self.dispatch_command(tokens[0]);
+        let start_task = if try_plugins {
+            self.dispatch_command(tokens[0])
+        } else {
+            self.dispatch_command_no_plugin_reentry(tokens[0])
+        };
         if self.tabs[i].active_cmd.is_none() {
             // Not an interactive tool — an inline-argument command (`PDMODE 3`).
-            return self.dispatch_command(cmd);
+            return if try_plugins {
+                self.dispatch_command(cmd)
+            } else {
+                self.dispatch_command_no_plugin_reentry(cmd)
+            };
         }
         let toks: Vec<String> = tokens.iter().map(|s| s.to_string()).collect();
         let finish_task = self.finish_active_command(&toks);

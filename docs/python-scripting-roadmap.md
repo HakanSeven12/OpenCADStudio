@@ -33,12 +33,25 @@ through the existing Plugin Manager with zero OCS core changes.
 
 ### 1.1 — Scaffold
 
-- [ ] New repo from [`docs/plugin-template/`](plugin-template); `plugin.toml`
+- [x] New repo from [`docs/plugin-template/`](plugin-template); `plugin.toml`
       + `Cargo.toml` pinning `ocs_plugin_api` (`host` feature) and matching the
-      target host's `acadrust_source` / `rustc_version` (see Risks).
-- [ ] Add RustPython as a dependency; confirm it builds cleanly as part of a
-      `cdylib` on all three target platforms (macOS/Windows/Linux) — this is
-      the first real unknown to de-risk before investing further.
+      target host's `acadrust_source` / `rustc_version` (see Risks). Scaffolded
+      locally at `~/Documents/MacApps/opencad-python` (own git repo, no
+      remote yet — not pushed anywhere).
+- [x] Add RustPython as a dependency; confirm it builds cleanly as part of a
+      `cdylib` on **macOS** (arm64) — Windows/Linux still unverified. Used
+      crates.io `rustpython-vm = "0.5"` (not the `rustpython` facade crate;
+      matches how the upstream `examples/hello_embed.rs` embeds it). Builds
+      clean, no warnings: `libopencad_python.dylib`, 17MB, ~80s from a cold
+      `cargo clean` release build. Exports the expected
+      `ocs_plugin_register` / `ocs_plugin_api_version` C-ABI symbols. A
+      `PY_HELLO` command runs a real RustPython smoke test (compiles and
+      evaluates `1 + 1` via `Interpreter::without_stdlib`) — confirms the
+      interpreter actually runs inside the cdylib, not just that it links.
+      One API gap vs. the upstream example: 0.5.0's `Vm::compile` takes an
+      owned `String` filename (not `&str`), and `CompileError` has no
+      `into_pyexception` method — worked around by matching on the `Result`
+      directly instead of using `?` with `PyResult`.
 
 ### 1.2 — Minimal `ocs` module (read-only)
 

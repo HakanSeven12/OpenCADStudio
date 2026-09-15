@@ -53,7 +53,6 @@ struct InstanceIn {
     @location(7) taper_ratio: vec2<f32>,
 }
 
-const DRAW_ORDER_BIAS: f32 = 0.001;
 const MODEL_LINEWEIGHT_BOOST: f32 = 2.0;
 const MODEL_LINEWEIGHT_MAX_PX: f32 = 10.0;
 
@@ -172,7 +171,7 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
         let pos_rel = mix(rel_a, rel_b, which_end);
         let world_pos = pos_rel + perp_world * (eff_hw * side);
         var clip_pos = u.view_rot * vec4<f32>(world_pos, 1.0);
-        clip_pos.z = clip_pos.z - c.draw_depth * DRAW_ORDER_BIAS * clip_pos.w;
+        clip_pos = apply_draw_order(clip_pos, c.draw_depth);
 
         final_clip = clip_pos;
         out_dist = mix(in.distance_a, in.distance_b, which_end);
@@ -206,7 +205,7 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
         let offset_px = perp * hw * side + dir * hw * ext;
         let ndc_offset = offset_px / (u.viewport_size * 0.5);
         var clip_pos_out = clip_pos + vec4<f32>(ndc_offset * clip_pos.w, 0.0, 0.0);
-        clip_pos_out.z = clip_pos_out.z - c.draw_depth * DRAW_ORDER_BIAS * clip_pos_out.w;
+        clip_pos_out = apply_draw_order(clip_pos_out, c.draw_depth);
 
         final_clip = clip_pos_out;
         out_dist = mix(in.distance_a, in.distance_b, which_end) + ext * hw * u.world_per_pixel;

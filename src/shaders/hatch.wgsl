@@ -47,9 +47,6 @@ struct HatchInstance {
     grad_kind:       u32,         // shape (0=linear,1=cyl,2=sph,3=hemi,4=curved), bit4=invert
 }
 
-// Draw-order depth bias (see wire.wgsl). Higher draw_depth → smaller z →
-// drawn on top, ordering this fill against other entity types.
-const DRAW_ORDER_BIAS: f32 = 0.001;
 const MODEL_LINEWEIGHT_BOOST: f32 = 2.0;
 const MODEL_LINEWEIGHT_MAX_PX: f32 = 10.0;
 
@@ -122,8 +119,7 @@ struct VOut {
                        local.y + inst.world_origin_low.y + v.translation_low.y - u.eye_low.y,
                        -u.eye_low.z);
     o.clip = u.view_rot * vec4<f32>(hi + lo, 1.0);
-    o.clip.z = o.clip.z
-        - (inst.draw_depth + v.draw_depth) * DRAW_ORDER_BIAS * o.clip.w;
+    o.clip = apply_draw_order(o.clip, inst.draw_depth + v.draw_depth);
     o.xz = local;
     o.instance_index = v.instance_index;
     return o;

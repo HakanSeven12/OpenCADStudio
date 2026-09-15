@@ -1,5 +1,22 @@
+// WGSL has no includes. Compose one shared draw-order function into each 2D
+// shader at compile time, including the sources used by shader validation tests.
+macro_rules! draw_order_shader {
+    ($file:literal) => {
+        concat!(
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/shaders/draw_order.wgsl"
+            )),
+            "\n",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/shaders/", $file))
+        )
+    };
+}
+
 #[cfg(test)]
 mod gpu_tests;
+#[cfg(test)]
+mod depth_tests;
 mod device_capabilities;
 pub mod circle_gpu;
 pub mod ellipse_gpu;
@@ -614,18 +631,18 @@ impl Pipeline {
             label: Some("wire.shader"),
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(match wire_mode {
                 wire_gpu::WirePipelineMode::IndexedStorage => {
-                    include_str!("../../shaders/wire_indexed.wgsl")
+                    draw_order_shader!("wire_indexed.wgsl")
                 }
-                wire_gpu::WirePipelineMode::Packed => include_str!("../../shaders/wire.wgsl"),
+                wire_gpu::WirePipelineMode::Packed => draw_order_shader!("wire.wgsl"),
             })),
         });
         let block_wire_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("block_wire.shader"),
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(
                 if wire_mode.uses_storage() {
-                    include_str!("../../shaders/block_wire_storage.wgsl")
+                    draw_order_shader!("block_wire_storage.wgsl")
                 } else {
-                    include_str!("../../shaders/block_wire.wgsl")
+                    draw_order_shader!("block_wire.wgsl")
                 },
             )),
         });
@@ -1011,8 +1028,8 @@ impl Pipeline {
 
         let wipeout_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("wipeout.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../shaders/wipeout.wgsl"
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(draw_order_shader!(
+                "wipeout.wgsl"
             ))),
         });
 
@@ -1826,14 +1843,14 @@ impl Pipeline {
         // ── Face3D pipeline ────────────────────────────────────────────────
         let face3d_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("face3d.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../shaders/face3d.wgsl"
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(draw_order_shader!(
+                "face3d.wgsl"
             ))),
         });
         let block_face3d_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("block_face3d.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../shaders/block_face3d.wgsl"
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(draw_order_shader!(
+                "block_face3d.wgsl"
             ))),
         });
 
@@ -2038,8 +2055,8 @@ impl Pipeline {
 
         let image_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("image.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../shaders/image.wgsl"
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(draw_order_shader!(
+                "image.wgsl"
             ))),
         });
 

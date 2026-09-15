@@ -28,16 +28,13 @@ struct VertexOut {
     @location(0) color: vec4<f32>,
 }
 
-const DRAW_ORDER_BIAS: f32 = 0.001;
-
 @vertex
 fn vs_main(v: VertexIn) -> VertexOut {
     var out: VertexOut;
     let rel = (v.position + v.translation - u.eye_high)
         + (v.position_low + v.translation_low - u.eye_low);
     out.clip_pos = u.view_rot * vec4<f32>(rel, 1.0);
-    out.clip_pos.z = out.clip_pos.z
-        - (v.source_depth + v.instance_depth) * DRAW_ORDER_BIAS * out.clip_pos.w;
+    out.clip_pos = apply_draw_order(out.clip_pos, v.source_depth + v.instance_depth);
     out.color = v.color;
     return out;
 }

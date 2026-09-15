@@ -26,7 +26,6 @@ struct Uniforms {
 }
 @group(0) @binding(0) var<uniform> u: Uniforms;
 
-const DRAW_ORDER_BIAS: f32 = 0.001;
 const MODEL_LINEWEIGHT_BOOST: f32 = 2.0;
 const MODEL_LINEWEIGHT_MAX_PX: f32 = 10.0;
 const TAU: f32 = 6.283185307179586;
@@ -116,7 +115,7 @@ fn resolve_px_hw(px_hw: f32) -> f32 {
     let world_pos_rel = center_rel + (u_val * axis_x + v_val * axis_y) * ext;
 
     var clip_pos = u.view_rot * vec4<f32>(world_pos_rel, 1.0);
-    clip_pos.z = clip_pos.z - draw_depth * DRAW_ORDER_BIAS * clip_pos.w;
+    clip_pos = apply_draw_order(clip_pos, draw_depth);
 
     var out: VertexOut;
     out.clip_pos = clip_pos;

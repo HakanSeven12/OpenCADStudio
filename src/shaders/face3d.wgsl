@@ -34,17 +34,16 @@ struct VertexOut {
     @location(0)       color:    vec4<f32>,
 };
 
-// Draw-order depth bias (see wire.wgsl). Signed draw_depth; 0.0 (all 3D
+// Draw-order depth bias (see draw_order.wgsl). Signed draw_depth; 0.0 (all 3D
 // surface faces — 3DFACE, PolyfaceMesh, PolygonMesh) leaves real depth
 // untouched so they occlude against solids; only 2D fills order by rank.
-const DRAW_ORDER_BIAS: f32 = 0.001;
 
 @vertex
 fn vs_main(v: VertexIn) -> VertexOut {
     var out: VertexOut;
     let rel = (v.position - u.eye_high) + (v.position_low - u.eye_low);
     out.clip_pos = u.view_rot * vec4<f32>(rel, 1.0);
-    out.clip_pos.z = out.clip_pos.z - v.draw_depth * DRAW_ORDER_BIAS * out.clip_pos.w;
+    out.clip_pos = apply_draw_order(out.clip_pos, v.draw_depth);
     out.color    = v.color;
     return out;
 }

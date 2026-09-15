@@ -106,10 +106,10 @@ struct VOut {
     let hi = h.plane_origin_high.xyz + v.translation - u.eye_high;
     let lo = local_world + h.plane_origin_low.xyz + v.translation_low - u.eye_low;
     o.clip = u.view_rot * vec4<f32>(hi + lo, 1.0);
-    // Draw-order bias (see wire.wgsl): the mask erases what draws BELOW its
+    // Draw-order bias (see draw_order.wgsl): the mask erases what draws BELOW its
     // entity and loses to what draws above — including its own frame wire,
     // which rides a +half-rank override.
-    o.clip.z = o.clip.z - (h.draw_depth + v.draw_depth) * 0.001 * o.clip.w;
+    o.clip = apply_draw_order(o.clip, h.draw_depth + v.draw_depth);
     o.xz   = vec2<f32>(v.pos.x, v.pos.y);
     return o;
 }

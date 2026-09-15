@@ -26,9 +26,6 @@ struct Uniforms {
 @group(1) @binding(0) var atlas_tex: texture_2d<f32>;
 @group(1) @binding(1) var atlas_samp: sampler;
 
-// Draw-order depth bias (see wire.wgsl / image.wgsl).
-const DRAW_ORDER_BIAS: f32 = 0.001;
-
 // ── Vertex stage ──────────────────────────────────────────────────────────────
 struct VertIn {
     @location(0) pos:        vec3<f32>,
@@ -50,7 +47,7 @@ fn vs_main(in: VertIn) -> VertOut {
     // Double-single relative-to-eye, then rotation-only projection.
     let rel = (in.pos - u.eye_high) + (in.pos_low - u.eye_low);
     out.clip_pos = u.view_rot * vec4<f32>(rel, 1.0);
-    out.clip_pos.z = out.clip_pos.z - in.draw_depth * DRAW_ORDER_BIAS * out.clip_pos.w;
+    out.clip_pos = apply_draw_order(out.clip_pos, in.draw_depth);
     out.uv = in.uv;
     out.color = in.color;
     return out;

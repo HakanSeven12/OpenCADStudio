@@ -78,9 +78,9 @@ impl HatchGpu {
                 "hatch.texture.shader"
             }),
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(if uses_storage {
-                include_str!("../../../shaders/hatch.wgsl")
+                draw_order_shader!("hatch.wgsl")
             } else {
-                include_str!("../../../shaders/hatch_texture.wgsl")
+                draw_order_shader!("hatch_texture.wgsl")
             })),
         });
         let vertex_layouts = if uses_storage {

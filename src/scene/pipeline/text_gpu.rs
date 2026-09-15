@@ -341,7 +341,7 @@ pub fn create_pipelines(
 ) {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("text.wgsl"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/text.wgsl").into()),
+        source: wgpu::ShaderSource::Wgsl(draw_order_shader!("text.wgsl").into()),
     });
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("text.pipeline.layout"),
@@ -390,7 +390,7 @@ pub fn create_pipelines(
     };
     let block_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("block_text.wgsl"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/block_text.wgsl").into()),
+        source: wgpu::ShaderSource::Wgsl(draw_order_shader!("block_text.wgsl").into()),
     });
     let create_block = |label, depth_write_enabled, depth_compare| {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {

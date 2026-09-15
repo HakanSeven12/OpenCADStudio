@@ -144,6 +144,10 @@ pub enum PluginRequest {
     /// `"PCONSTRAINT 2F 30"`). Not supported by every host; see
     /// [`crate::host::HostApi::run_command`].
     RunCommand { cmd: String },
+    /// Replace the active tab's selection with exactly these entities
+    /// (clearing any existing selection first). Not supported by every
+    /// host; see [`crate::host::HostApi::set_selection`].
+    SetSelection { handles: Vec<Handle> },
 }
 
 /// Responses the host sends back for `PluginRequest`.

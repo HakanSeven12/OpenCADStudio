@@ -81,5 +81,9 @@ pub fn handle_plugin_request(
             Ok(()) => PluginResponse::Ok,
             Err(e) => PluginResponse::Error(e),
         },
+        SetSelection { handles } => match host.set_selection(&handles) {
+            Ok(()) => PluginResponse::Ok,
+            Err(e) => PluginResponse::Error(e),
+        },
     }
 }

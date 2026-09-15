@@ -68,6 +68,35 @@ impl<'a> HostSession<'a> {
         self.app.run_headless_no_plugin_reentry(cmd)
     }
 
+    /// Replace the active tab's selection with exactly `handles` — see
+    /// `HostApi::set_selection`. Validates every handle exists *before*
+    /// changing anything, so a bad handle errors instead of leaving a
+    /// partial selection. Same active-tab-only restriction as
+    /// `run_command`, for consistency (and because `notify_plugins_
+    /// selection_changed`, which fires `SelectionChangedV4`, only ever
+    /// looks at `app.active_tab`).
+    pub fn set_selection(&mut self, handles: &[Handle]) -> Result<(), String> {
+        if self.tab != self.app.active_tab {
+            return Err(
+                "set_selection only supports the active document tab".to_string(),
+            );
+        }
+        let tab = &self.app.tabs[self.tab];
+        if let Some(missing) = handles
+            .iter()
+            .find(|h| tab.scene.document.get_entity(**h).is_none())
+        {
+            return Err(format!("set_selection: entity {missing} does not exist"));
+        }
+        let tab = &mut self.app.tabs[self.tab];
+        tab.scene.deselect_all();
+        for &h in handles {
+            tab.scene.select_entity(h, false);
+        }
+        self.app.refresh_properties();
+        Ok(())
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn document_view_v4(&mut self, tab_id: u64) -> Option<ocs_plugin_api::shm::DocumentViewInfo> {
         if tab_id != self.tab_id() {
@@ -387,6 +416,9 @@ impl HostApi for HostSession<'_> {
     }
     fn run_command(&mut self, cmd: &str) -> Result<(), String> {
         self.run_command(cmd)
+    }
+    fn set_selection(&mut self, handles: &[Handle]) -> Result<(), String> {
+        self.set_selection(handles)
     }
 }
 

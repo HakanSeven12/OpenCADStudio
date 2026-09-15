@@ -577,6 +577,20 @@ pub trait HostApi {
         let _ = cmd;
         Err("run_command is not supported by this host".to_string())
     }
+
+    /// Replace the active tab's selection with exactly `handles` (clearing
+    /// any existing selection first). Errors — without partially applying —
+    /// if any handle doesn't exist.
+    ///
+    /// This is the piece `run_command` alone can't provide: constraint
+    /// commands (`PCONSTRAINT`, `TCONSTRAINT`, ...) read a prior selection
+    /// rather than picks fed as command-line tokens, so applying one from a
+    /// plugin needs this call before `run_command("PCONSTRAINT")`. Same
+    /// default-`Err` opt-in pattern as `run_command`, for the same reason.
+    fn set_selection(&mut self, handles: &[Handle]) -> Result<(), String> {
+        let _ = handles;
+        Err("set_selection is not supported by this host".to_string())
+    }
 }
 
 /// Simplified, read-only entity kind exposed by [`DocumentReader`].

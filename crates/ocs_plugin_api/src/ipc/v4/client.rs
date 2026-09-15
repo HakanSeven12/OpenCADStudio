@@ -744,6 +744,17 @@ impl HostApi for V4PluginHostApi {
             Err(e) => Err(e.to_string()),
         }
     }
+
+    fn set_selection(&mut self, handles: &[Handle]) -> Result<(), String> {
+        match self.request(PluginRequest::SetSelection {
+            handles: handles.to_vec(),
+        }) {
+            Ok(PluginResponse::Ok) => Ok(()),
+            Ok(PluginResponse::Error(e)) => Err(e),
+            Ok(other) => Err(format!("unexpected SetSelection response: {other:?}")),
+            Err(e) => Err(e.to_string()),
+        }
+    }
 }
 
 #[cfg(test)]

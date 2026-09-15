@@ -3210,33 +3210,37 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_print_all_print(&mut self) -> Task<Message> {
+        let dialog = self.plot_dialog.clone();
+        if self.print_all_settings_override && dialog.style_missing && dialog.apply_plot_styles {
+            self.command_line.push_error(
+                crate::tf!("Plot style table '{}' is not loaded.", dialog.style_name).as_ref(),
+            );
+            return Task::none();
+        }
+        let pages = match self.print_all_pages() {
+            Ok(pages) => pages,
+            Err(error) => {
+                self.command_line.push_error(&error);
+                return Task::none();
+            }
+        };
+        self.save_config();
+        self.close_active_modal();
+        // The web build has no system printers: render every layout into one
+        // PDF and open it in a browser tab for the browser print dialog.
         #[cfg(target_arch = "wasm32")]
         {
-            self.command_line
-                .push_error(crate::t!("Printing is not available in the web version.").as_ref());
-            Task::none()
+            let work = move || {
+                crate::io::print_to_printer::preview_pages_pdf(&pages)
+                    .map(|_| crate::t!("Opened plot preview.").into_owned())
+                    .map_err(|e| crate::tf!("Preview failed: {e}").into_owned())
+            };
+            self.run_print_all_work(true, work)
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let dialog = self.plot_dialog.clone();
-            if self.print_all_settings_override && dialog.style_missing && dialog.apply_plot_styles
-            {
-                self.command_line.push_error(
-                    crate::tf!("Plot style table '{}' is not loaded.", dialog.style_name).as_ref(),
-                );
-                return Task::none();
-            }
-            let pages = match self.print_all_pages() {
-                Ok(pages) => pages,
-                Err(error) => {
-                    self.command_line.push_error(&error);
-                    return Task::none();
-                }
-            };
             let options = self.plot_print_options(&dialog);
             let temp_path = crate::io::print_to_printer::temp_pdf_path("print_all");
-            self.save_config();
-            self.close_active_modal();
             self.command_line
                 .push_info(crate::t!("Sending selected layouts to the system printer…").as_ref());
             let work = move || {
@@ -3477,17 +3481,33 @@ impl OpenCADStudio {
             );
             return Task::none();
         };
-        let options = self.plot_print_options(&self.plot_dialog);
-        self.command_line
-            .push_info(crate::t!("Sending to system printer…").as_ref());
-        background_task(
-            move || {
-                iced::futures::executor::block_on(
-                    crate::io::print_to_printer::print_wires_with(page, options),
-                )
-            },
-            Message::PrintResult,
-        )
+        // The web build has no system printers: PRINT opens the rendered PDF
+        // in a browser tab, where the browser's own print dialog takes over.
+        #[cfg(target_arch = "wasm32")]
+        {
+            background_task(
+                move || {
+                    crate::io::print_to_printer::preview_page_pdf(&page)
+                        .map(|_| crate::t!("Opened plot preview.").into_owned())
+                        .map_err(|e| crate::tf!("Preview failed: {e}").into_owned())
+                },
+                |result| Message::BackgroundIoFinished(result, false),
+            )
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let options = self.plot_print_options(&self.plot_dialog);
+            self.command_line
+                .push_info(crate::t!("Sending to system printer…").as_ref());
+            background_task(
+                move || {
+                    iced::futures::executor::block_on(
+                        crate::io::print_to_printer::print_wires_with(page, options),
+                    )
+                },
+                Message::PrintResult,
+            )
+        }
     }
 
     /// QUICKPRINT / QP — use the current selection's bounding box as the plot
@@ -4354,6 +4374,12 @@ impl OpenCADStudio {
     /// Open a preview PDF, export a PDF, or send the job to the chosen printer.
     fn on_plot_dlg_commit(&mut self, preview: bool) -> Task<Message> {
         let d = self.plot_dialog.clone();
+        // The web dialog only offers PDF output, but a page setup loaded from
+        // the drawing can still seed `to_file = false` — always export there.
+        #[cfg(target_arch = "wasm32")]
+        let to_file = true;
+        #[cfg(not(target_arch = "wasm32"))]
+        let to_file = d.to_file;
         if d.style_missing && d.apply_plot_styles {
             self.command_line.push_error(
                 crate::tf!("Plot style table '{}' is not loaded.", d.style_name).as_ref(),
@@ -4391,16 +4417,14 @@ impl OpenCADStudio {
             // Preview renders to a temp PDF and opens it — never a save dialog,
             // whatever the output target is.
             if preview {
-                let tmp = crate::io::print_to_printer::temp_pdf_path("preview");
                 let work = move || {
-                    crate::io::pdf_export::export_pdf(&page, &tmp)
-                        .and_then(|_| crate::io::print_to_printer::open_in_viewer(&tmp))
+                    crate::io::print_to_printer::preview_page_pdf(&page)
                         .map(|_| crate::t!("Opened plot preview.").into_owned())
                         .map_err(|e| crate::tf!("Preview failed: {e}").into_owned())
                 };
                 return self.run_plot_work(d.background, true, work);
             }
-            if d.to_file {
+            if to_file {
                 // Tested clipped export (opens a save dialog).
                 return Task::done(Message::PlotWindowExport);
             }
@@ -4420,17 +4444,15 @@ impl OpenCADStudio {
         let page = self.layout_plot_page();
 
         if preview {
-            let tmp = crate::io::print_to_printer::temp_pdf_path("preview");
             let work = move || {
-                crate::io::pdf_export::export_pdf(&page, &tmp)
-                    .and_then(|_| crate::io::print_to_printer::open_in_viewer(&tmp))
+                crate::io::print_to_printer::preview_page_pdf(&page)
                     .map(|_| crate::t!("Opened plot preview.").into_owned())
                     .map_err(|e| crate::tf!("Preview failed: {e}").into_owned())
             };
             return self.run_plot_work(d.background, true, work);
         }
 
-        if d.to_file {
+        if to_file {
             // Reuse the tested PDF export flow (it opens a save dialog).
             return Task::done(Message::PlotExport);
         }
@@ -4470,6 +4492,7 @@ impl OpenCADStudio {
             transparency: d.transparency,
             stamp: d.stamp,
             merge_lines: d.merge_lines,
+            quality: crate::io::pdf_export::PlotQuality::from_dialog(&d.quality),
         }
     }
 

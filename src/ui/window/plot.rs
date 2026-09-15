@@ -3,6 +3,8 @@
 //! quality and output options into one dialog; on commit it either sends the
 //! current layout to a system printer (with the chosen options) or writes a
 //! PDF. Styled to match the other OCS dialogs (dark pills + fields).
+//! The web build has no system printers, so PDF is the only output it
+//! offers — and its default.
 
 use crate::app::Message;
 use crate::io::paper_sizes::PaperSize;
@@ -211,7 +213,8 @@ impl Default for PlotDialogState {
         Self {
             printers: Vec::new(),
             printer: None,
-            to_file: false,
+            // Web defaults to PDF output: it has no system printers.
+            to_file: cfg!(target_arch = "wasm32"),
             paper: "A4".into(),
             paper_width_mm: 297.0,
             paper_height_mm: 210.0,
@@ -525,6 +528,24 @@ fn choices(items: &[&str]) -> Vec<PlotChoice> {
     items.iter().map(|&value| PlotChoice::localized(value)).collect()
 }
 
+/// Entries for the output dropdown. The web build has no system printers, so
+/// PDF is the only output it offers; native lists the system default, every
+/// discovered printer, then PDF.
+fn output_choices(printers: &[String]) -> Vec<PlotChoice> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = printers;
+        vec![PlotChoice::localized(OUT_PDF)]
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut out = vec![PlotChoice::localized(OUT_DEFAULT)];
+        out.extend(printers.iter().cloned().map(PlotChoice::raw));
+        out.push(PlotChoice::localized(OUT_PDF));
+        out
+    }
+}
+
 pub fn view_window(
     s: &PlotDialogState,
     print_all_options: bool,
@@ -532,9 +553,15 @@ pub fn view_window(
 ) -> Element<'_, Message> {
     let width = sizing.width;
     let height = sizing.height;
+    // The web build always outputs PDF, whatever a stored dialog state says;
+    // native follows the stored choice.
+    #[cfg(target_arch = "wasm32")]
+    let to_file = true;
+    #[cfg(not(target_arch = "wasm32"))]
+    let to_file = s.to_file;
     let action = if print_all_options {
         t!("Apply")
-    } else if s.to_file {
+    } else if to_file {
         t!("Export PDF")
     } else {
         t!("Print")
@@ -648,10 +675,8 @@ pub fn view_window(
     .spacing(4);
 
     // ── Printer / plotter ─────────────────────────────────────────────────
-    let mut printer_opts = vec![PlotChoice::localized(OUT_DEFAULT)];
-    printer_opts.extend(s.printers.iter().cloned().map(PlotChoice::raw));
-    printer_opts.push(PlotChoice::localized(OUT_PDF));
-    let printer_sel = if s.to_file {
+    let printer_opts = output_choices(&s.printers);
+    let printer_sel = if to_file {
         Some(PlotChoice::localized(OUT_PDF))
     } else {
         Some(match &s.printer {
@@ -681,7 +706,7 @@ pub fn view_window(
     ]
     .spacing(8)
     .align_y(iced::Center);
-    if !s.to_file {
+    if !to_file {
         output_row = output_row.push(
             button(text(t!("Properties…")).size(11))
                 .on_press(Message::PlotDlg(PlotDlgMsg::PrinterProperties))
@@ -695,7 +720,7 @@ pub fn view_window(
     ]
     .spacing(4)
     .width(Length::Fill);
-    let copies_row: Element<'_, Message> = if s.to_file {
+    let copies_row: Element<'_, Message> = if to_file {
         Space::new().height(0).into()
     } else {
         field_row(t!("Copies"), &s.copies, PlotDlgMsg::Copies, 60)

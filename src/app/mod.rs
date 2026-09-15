@@ -3201,6 +3201,8 @@ pub enum Message {
     /// Send current layout to the system printer (via lp / lpr).
     PrintToPrinter,
     /// Callback from the async printer job.
+    /// Web never constructs it — printing opens the PDF preview instead.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     PrintResult(Result<String, String>),
     /// Open the full Plot / Print dialog (seeds state from the layout).
     PlotDialogOpen,

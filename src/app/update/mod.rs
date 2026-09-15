@@ -8032,11 +8032,10 @@ impl OpenCADStudio {
                 }
                 #[cfg(target_arch = "wasm32")]
                 {
-                    let _ = stem;
-                    self.command_line.push_error(
-                        crate::t!("PDF export is not available in the web version.").as_ref(),
-                    );
-                    Task::none()
+                    Task::perform(
+                        crate::io::pdf_export::pick_pdf_path_owned(stem),
+                        Message::PrintAllPdfPath,
+                    )
                 }
             }
             Message::PrintAllPdfPath(None) => Task::none(),

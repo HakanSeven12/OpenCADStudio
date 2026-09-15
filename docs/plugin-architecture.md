@@ -176,11 +176,14 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ocs_plugin_api = { git = "https://github.com/HakanSeven12/OpenCADStudio", features = ["host"] }
-
-# Match the host's acadrust so the loaded library is binary-compatible.
-[patch.crates-io]
-acadrust = { git = "https://github.com/HakanSeven12/acadrust", branch = "main" }
 ```
+
+`ocs_plugin_api`'s own `Cargo.toml` already pins the `host`-feature `acadrust`
+dependency to an exact git rev (currently
+`{ git = "https://github.com/HakanSeven12/cadcodec.git", rev = "568a12c" }`,
+not published to crates.io), so a plugin that only depends on `ocs_plugin_api`
+picks up the matching `acadrust` automatically — no `[patch.crates-io]` needed
+or possible. What still needs to match the host exactly is the compiler:
 
 Your release build must also use the same `rustc` as the host. Record it in
 `plugin.toml` (see below) and pin the toolchain in your CI matrix so every
@@ -202,11 +205,12 @@ struct ExampleModule;
 impl CadModule for ExampleModule {
     fn id(&self) -> &'static str { "example" }
     fn title(&self) -> &'static str { "Example" }
-    fn ribbon_groups(&self) -> Vec<RibbonGroup> {
-        vec![RibbonGroup { title: "Demo", tools: vec![RibbonItem::LargeTool(ToolDef {
+    fn ribbon_groups(&self) -> &[RibbonGroup] {
+        static GROUPS: std::sync::OnceLock<Vec<RibbonGroup>> = std::sync::OnceLock::new();
+        GROUPS.get_or_init(|| vec![RibbonGroup { title: "Demo", tools: vec![RibbonItem::LargeTool(ToolDef {
             id: "EX_HELLO", label: "Hello", icon: IconKind::Glyph("◆"),
             event: ModuleEvent::Command("EX_HELLO".to_string()),
-        })]}]
+        })]}])
     }
 }
 

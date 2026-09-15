@@ -1,11 +1,15 @@
 // print_to_printer — send the current layout to the system printer.
 //
-// Strategy:
+// Desktop strategy:
 //   1. Render the drawing to a temporary PDF (reusing the PDF export pipeline).
 //   2. Send that PDF to the system printer with `lp` (Linux/macOS) or
 //      `ShellExecute PRINT` (Windows).
 //
 // The function is async so the UI remains responsive while the job is queued.
+//
+// The web build has no system printers: `preview_page_pdf` /
+// `preview_pages_pdf` render the same PDF bytes and open them in a browser
+// tab, where the browser's own print dialog takes over.
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::io::pdf_export;
@@ -330,6 +334,32 @@ pub fn open_in_viewer(path: &std::path::Path) -> Result<(), String> {
     cmd.spawn()
         .map(|_| ())
         .map_err(|e| format!("Could not open preview: {e}"))
+}
+
+/// Render a page and show it the way each platform previews: the OS PDF
+/// viewer on desktop, a new browser tab on the web.
+pub fn preview_page_pdf(page: &crate::io::pdf_export::PdfPageInput) -> Result<(), String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let tmp = temp_pdf_path("preview");
+        crate::io::pdf_export::export_pdf(page, &tmp)?;
+        open_in_viewer(&tmp)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let bytes = crate::io::pdf_export::render_pdf_bytes(std::slice::from_ref(page), None)?;
+        crate::sys::open_bytes_in_new_tab("plot_preview.pdf", &bytes);
+        Ok(())
+    }
+}
+
+/// Web-only multi-page variant used by print-all: render every layout into
+/// one PDF and open it in a browser tab.
+#[cfg(target_arch = "wasm32")]
+pub fn preview_pages_pdf(pages: &[crate::io::pdf_export::PdfPageInput]) -> Result<(), String> {
+    let bytes = crate::io::pdf_export::render_pdf_bytes(pages, None)?;
+    crate::sys::open_bytes_in_new_tab("plot_preview.pdf", &bytes);
+    Ok(())
 }
 
 /// Dispatch a PDF to a specific printer with [`PrintOptions`].

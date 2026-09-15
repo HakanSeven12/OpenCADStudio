@@ -373,6 +373,42 @@ pub fn download_bytes(name: &str, bytes: &[u8]) {
     let _ = web_sys::Url::revoke_object_url(&url);
 }
 
+/// Open `bytes` (e.g. a generated PDF) in a new browser tab. Web only.
+/// Falls back to a download when the popup is blocked, so the output is
+/// never lost. Used for plot preview and as the web stand-in for printing.
+#[cfg(target_arch = "wasm32")]
+pub fn open_bytes_in_new_tab(name: &str, bytes: &[u8]) {
+    use wasm_bindgen::JsCast;
+    let Some(window) = web_sys::window() else { return };
+    let array = js_sys::Uint8Array::from(bytes);
+    let parts = js_sys::Array::new();
+    parts.push(&array.buffer());
+    let Ok(blob) = web_sys::Blob::new_with_u8_array_sequence(&parts) else {
+        return;
+    };
+    let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) else {
+        return;
+    };
+    let tab = window.open_with_url_and_target(&url, "_blank").ok().flatten();
+    if tab.is_none() {
+        // Popup blocked: free the URL right away and fall back to a plain
+        // download so the rendered output is never lost.
+        let _ = web_sys::Url::revoke_object_url(&url);
+        download_bytes(name, bytes);
+        return;
+    }
+    // The new tab loads the blob asynchronously, so the URL must outlive this
+    // call; revoke it a minute later, once the viewer has the content. The
+    // one-shot closure is owned by the timer, not stored Rust-side.
+    let revoke = wasm_bindgen::closure::Closure::once_into_js(move || {
+        let _ = web_sys::Url::revoke_object_url(&url);
+    });
+    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+        revoke.unchecked_ref(),
+        60_000,
+    );
+}
+
 /// Short platform string for bug reports: OS + architecture on the desktop,
 /// the browser user-agent on the web.
 #[cfg(not(target_arch = "wasm32"))]

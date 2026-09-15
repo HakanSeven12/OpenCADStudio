@@ -10,11 +10,9 @@
 
 use crate::io::plot_style::PlotStyleTable;
 use crate::scene::model::hatch_model::HatchModel;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::scene::model::hatch_model::HatchPattern;
 use crate::scene::WireModel;
 use crate::scene::model::image_model::ImageModel;
-#[cfg(not(target_arch = "wasm32"))]
 use printpdf::{
     BlendMode, BuiltinFont, Color, ExtendedGraphicsState, ExtendedGraphicsStateId, Line,
     LineCapStyle, LineDashPattern, LineJoinStyle, LinePoint, Mm, Op, PaintMode, PdfDocument,
@@ -24,7 +22,6 @@ use printpdf::{
 use std::path::Path;
 
 #[derive(Clone, Debug)]
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub struct PlotWire {
     pub wire: WireModel,
     pub draw_depth: f32,
@@ -45,40 +42,48 @@ pub struct PlotImage {
     pub clips: Vec<Vec<[f64; 2]>>,
 }
 
-// The web build has no `printpdf` (it pulls a wasm-incompatible `memchr` via
-// lopdf → nom_locate) and no filesystem, so PDF export is native-only; the web
-// build gets these stubs so the call sites still compile.
-#[cfg(target_arch = "wasm32")]
-pub fn export_pdf(_page: &PdfPageInput, _path: &Path) -> Result<(), String> {
-    Err("PDF export is not available in the web version.".into())
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn export_pdf_pages(
-    _pages: &[PdfPageInput],
-    _path: &Path,
-    _plot_style: Option<&PlotStyleTable>,
-) -> Result<(), String> {
-    Err("PDF export is not available in the web version.".into())
-}
-
-#[cfg(target_arch = "wasm32")]
-pub async fn pick_pdf_path_owned(_stem: String) -> Option<std::path::PathBuf> {
-    None
-}
+// Rendering is fully portable; only persistence differs — desktop writes the
+// bytes atomically through a temp file, web delivers them as a browser download.
 
 /// mm to PDF points (1 mm = 2.834645 pt).
-#[cfg(not(target_arch = "wasm32"))]
 const MM_TO_PT: f32 = 2.834645;
 /// `wire.line_weight_px` is the on-screen pixel weight. Convert the 96-dpi
 /// pixels to points while retaining the viewport's lineweight visibility
 /// boost, so "As displayed" output has the same visual hierarchy as the
 /// canvas instead of making 0.35 mm ByLayer outlines look half as thick.
-#[cfg(not(target_arch = "wasm32"))]
 const LW_PX_TO_PT: f32 = MM_TO_PT / (96.0 / 25.4);
 
-#[cfg(not(target_arch = "wasm32"))]
 const SCREEN_DOT_MM: f32 = 25.4 / 96.0;
+
+/// Image resolution preset from the plot dialog's Quality dropdown. Vector
+/// output is resolution-independent; this only caps raster content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlotQuality {
+    Low,
+    #[default]
+    Normal,
+    High,
+}
+
+impl PlotQuality {
+    /// Accepts the dialog's raw string, including legacy names.
+    pub fn from_dialog(value: &str) -> Self {
+        match value {
+            "Low" | "Draft" => Self::Low,
+            "High" | "Presentation" | "Maximum" | "Custom" => Self::High,
+            _ => Self::Normal,
+        }
+    }
+
+    /// Maximum effective DPI for embedded raster images; `None` keeps native pixels.
+    fn target_dpi(self) -> Option<u32> {
+        match self {
+            Self::Low => Some(150),
+            Self::Normal => Some(300),
+            Self::High => None,
+        }
+    }
+}
 
 /// Output controls shared by preview, PDF export, and printer rendering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +93,7 @@ pub struct PdfPlotOptions {
     pub transparency: bool,
     pub stamp: bool,
     pub merge_lines: bool,
+    pub quality: PlotQuality,
 }
 
 /// End indexes of the first paper/model render group in each flat input list.
@@ -109,7 +115,6 @@ pub struct PlotContent {
 }
 
 /// Owned geometry and settings for one PDF page.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub struct PdfPageInput {
     pub content: PlotContent,
     /// Page dimensions in mm, after any 90/270-degree rotation.
@@ -133,6 +138,7 @@ impl Default for PdfPlotOptions {
             transparency: false,
             stamp: false,
             merge_lines: false,
+            quality: PlotQuality::Normal,
         }
     }
 }
@@ -140,13 +146,11 @@ impl Default for PdfPlotOptions {
 // ── Public entry point ────────────────────────────────────────────────────
 
 /// Export one page to a PDF file.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn export_pdf(page: &PdfPageInput, path: &Path) -> Result<(), String> {
     export_pdf_pages(std::slice::from_ref(page), path, None)
 }
 
 /// Export several independently sized pages into one PDF file.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn export_pdf_pages(
     pages: &[PdfPageInput],
     path: &Path,
@@ -155,8 +159,23 @@ pub fn export_pdf_pages(
     if pages.is_empty() {
         return Err("No pages were selected.".into());
     }
-    let bytes = build_pdf_pages(pages, plot_style)?;
-    write_pdf_atomically(path, &bytes)
+    let bytes = render_pdf_bytes(pages, plot_style)?;
+    persist_pdf(path, &bytes)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn persist_pdf(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    write_pdf_atomically(path, bytes)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn persist_pdf(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "drawing.pdf".into());
+    crate::sys::download_bytes(&name, bytes);
+    Ok(())
 }
 
 /// Write a complete PDF beside the destination, then replace it atomically.
@@ -174,7 +193,6 @@ fn write_pdf_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn image_clip(ops: &mut Vec<Op>, rings: Vec<Vec<[f32; 2]>>) {
     ops.push(Op::DrawPolygon {
         polygon: Polygon {
@@ -196,7 +214,18 @@ fn image_clip(ops: &mut Vec<Op>, rings: Vec<Vec<[f32; 2]>>) {
     });
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+/// Pixel dimensions that keep the image at most `target_dpi` when drawn at
+/// `effective_dpi`. Returns the input unchanged when already within target
+/// (or when a dimension would collapse), so High/native never resamples.
+fn downsample_target(width: u32, height: u32, effective_dpi: f64, target_dpi: u32) -> (u32, u32) {
+    let factor = target_dpi as f64 / effective_dpi;
+    if width == 0 || height == 0 || !factor.is_finite() || factor >= 1.0 {
+        return (width, height);
+    }
+    let scaled = |dim: u32| ((dim as f64 * factor).round() as u64).clamp(1, dim as u64) as u32;
+    (scaled(width), scaled(height))
+}
+
 fn emit_image(
     doc: &mut PdfDocument,
     resources: &mut std::collections::HashMap<(usize, u32, u32), printpdf::XObjectId>,
@@ -204,6 +233,7 @@ fn emit_image(
     plot: &PlotImage,
     ox: f64,
     oy: f64,
+    scale: f32,
     options: PdfPlotOptions,
 ) -> Result<(), String> {
     let image = &plot.image;
@@ -242,10 +272,61 @@ fn emit_image(
     {
         return Err("Cannot plot bitmap: invalid coordinates, clip boundary, or opacity.".into());
     }
+    // Quality caps the raster resolution (High = native pixels, the previous
+    // behaviour). Effective DPI is pixels per inch on paper: the page-space
+    // corner edges are points, / MM_TO_PT and × the page CTM `scale` give
+    // on-paper mm.
+    let mut width = image.width;
+    let mut height = image.height;
+    let mut pixels: std::borrow::Cow<[u8]> = std::borrow::Cow::Borrowed(image.pixels.as_slice());
+    if let Some(target) = options.quality.target_dpi() {
+        let dist = |a: [f32; 2], b: [f32; 2]| {
+            ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt()
+        };
+        let width_edge = {
+            let d = dist(corners[0], corners[1]);
+            if d > 0.0 { d } else { dist(corners[0], corners[3]) }
+        };
+        let height_edge = {
+            let d = dist(corners[0], corners[3]);
+            if d > 0.0 { d } else { dist(corners[0], corners[1]) }
+        };
+        // A degenerate (zero-area) placement keeps the native pixels.
+        if width_edge > 0.0 && height_edge > 0.0 {
+            let dpi_x = width as f64 * 25.4 / (width_edge / MM_TO_PT * scale) as f64;
+            let dpi_y = height as f64 * 25.4 / (height_edge / MM_TO_PT * scale) as f64;
+            // One shared factor from the denser axis preserves the pixel aspect ratio.
+            let (w, h) = downsample_target(width, height, dpi_x.max(dpi_y), target);
+            // Skip token reductions (< 5%): a Lanczos pass costs more than it saves.
+            if (w != width || h != height) && w as f64 / (width as f64) < 0.95 {
+                if let Some(resized) =
+                    image::RgbaImage::from_raw(width, height, image.pixels.as_ref().clone())
+                        .map(|buffer| {
+                            image::imageops::resize(
+                                &buffer,
+                                w,
+                                h,
+                                image::imageops::FilterType::Lanczos3,
+                            )
+                            .into_raw()
+                        })
+                {
+                    width = w;
+                    height = h;
+                    pixels = std::borrow::Cow::Owned(resized);
+                }
+            }
+        }
+    }
+    // Keyed on the FINAL (post-resample) dims: the same pixels Arc can be
+    // placed at different effective DPIs (several inserts at different
+    // scales, layouts plotted with different quality settings), and each
+    // XObject must match its own draw transform's scale factors. Identical
+    // placements still dedupe on the shared key.
     let key = (
         std::sync::Arc::as_ptr(&image.pixels) as usize,
-        image.width,
-        image.height,
+        width,
+        height,
     );
     let id = resources
         .entry(key)
@@ -255,9 +336,9 @@ fn emit_image(
             doc.resources.xobjects.map.insert(
                 id.clone(),
                 printpdf::XObject::Image(printpdf::RawImage {
-                    pixels: printpdf::RawImageData::U8(image.pixels.as_ref().clone()),
-                    width: image.width as usize,
-                    height: image.height as usize,
+                    pixels: printpdf::RawImageData::U8(pixels.into_owned()),
+                    width: width as usize,
+                    height: height as usize,
                     data_format: printpdf::RawImageFormat::RGBA8,
                     tag: Vec::new(),
                 }),
@@ -299,10 +380,12 @@ fn emit_image(
             id: id.clone(),
             // Cancel printpdf's pixel-size transform: matrix maps the PDF
             // image's unit square directly onto the CAD quad in page points.
+            // The scale factors divide the EMBEDDED dims, which differ from
+            // the source when quality downsampling kicked in above.
             transform: printpdf::XObjectTransform {
                 dpi: Some(72.0),
-                scale_x: Some(1.0 / image.width as f32),
-                scale_y: Some(1.0 / image.height as f32),
+                scale_x: Some(1.0 / width as f32),
+                scale_y: Some(1.0 / height as f32),
                 ..Default::default()
             },
         });
@@ -346,7 +429,6 @@ fn emit_image(
     Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn image_triangle_matrix(p: [[f32; 2]; 3], uv: [[f32; 2]; 3]) -> Option<[f32; 6]> {
     let u = [uv[1][0] - uv[0][0], uv[1][1] - uv[0][1]];
     let v = [uv[2][0] - uv[0][0], uv[2][1] - uv[0][1]];
@@ -392,10 +474,19 @@ pub fn pick_pdf_path_owned(
     Some(path)
 }
 
+/// Web: no save dialog — the export continues with a virtual filename and
+/// the generated bytes are delivered as a browser download.
+#[cfg(target_arch = "wasm32")]
+pub async fn pick_pdf_path_owned(stem: String) -> Option<std::path::PathBuf> {
+    Some(std::path::PathBuf::from(format!("{stem}.pdf")))
+}
+
 // ── PDF builder ───────────────────────────────────────────────────────────
 
-#[cfg(not(target_arch = "wasm32"))]
-fn build_pdf_pages(pages: &[PdfPageInput], plot_style: Option<&PlotStyleTable>) -> Result<Vec<u8>, String> {
+pub fn render_pdf_bytes(
+    pages: &[PdfPageInput],
+    plot_style: Option<&PlotStyleTable>,
+) -> Result<Vec<u8>, String> {
     let mut doc = PdfDocument::new("Open CAD Studio Export");
     // Borrowing all pages keeps their pixel Arcs alive until this cache is dropped.
     // Allocation addresses cannot be reused by another source during this export.
@@ -408,7 +499,6 @@ fn build_pdf_pages(pages: &[PdfPageInput], plot_style: Option<&PlotStyleTable>) 
     Ok(doc.save(&PdfSaveOptions::default(), &mut warnings))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn append_pdf_page(
     doc: &mut PdfDocument,
     image_resources: &mut std::collections::HashMap<(usize, u32, u32), printpdf::XObjectId>,
@@ -630,7 +720,7 @@ fn append_pdf_page(
                 continue;
             }
             DrawItem::Image(image) => {
-                emit_image(doc, image_resources, &mut ops, image, ox, oy, options)?;
+                emit_image(doc, image_resources, &mut ops, image, ox, oy, scale, options)?;
                 continue;
             }
             DrawItem::Wire(wire) => wire,
@@ -858,7 +948,6 @@ fn append_pdf_page(
 /// the wire shader uses). Returns an empty vec for a solid line. printpdf's
 /// `LineDashPattern` holds at most six entries, so longer patterns are
 /// truncated to three dash/gap pairs.
-#[cfg(not(target_arch = "wasm32"))]
 fn dash_array_from_pattern(pattern_length: f32, pattern: &[f32; 8], mm_to_pt: f32) -> Vec<i64> {
     if pattern_length <= 1e-6 {
         return Vec::new();
@@ -875,7 +964,6 @@ fn dash_array_from_pattern(pattern_length: f32, pattern: &[f32; 8], mm_to_pt: f3
         .collect()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn visible_station_ranges(
     start: f32,
     end: f32,
@@ -945,7 +1033,6 @@ fn visible_station_ranges(
     ranges
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn flush_line(ops: &mut Vec<Op>, pts: &[LinePoint], dot_radius: Option<Pt>) {
     if pts.len() < 2 {
         return;
@@ -969,7 +1056,6 @@ fn flush_line(ops: &mut Vec<Op>, pts: &[LinePoint], dot_radius: Option<Pt>) {
     });
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn emit_round_dot(ops: &mut Vec<Op>, center: Point, radius: Pt) {
     const SIDES: usize = 12;
     let points = (0..SIDES)
@@ -993,7 +1079,6 @@ fn emit_round_dot(ops: &mut Vec<Op>, center: Point, radius: Pt) {
     });
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn plotted_color(
     rgb: [f32; 3],
     alpha: f32,
@@ -1013,7 +1098,6 @@ fn plotted_color(
     ]
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn emit_wire_fills(
     ops: &mut Vec<Op>,
     wires: &[WireModel],
@@ -1137,7 +1221,6 @@ fn emit_wire_fills(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn emit_plot_stamp(ops: &mut Vec<Op>) {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1178,7 +1261,6 @@ fn emit_plot_stamp(ops: &mut Vec<Op>) {
 /// rings so islands and holes render correctly under the even-odd rule.
 /// Mirrors `scene::paper_canvas::draw_hatch`: solid → fill, pattern → outline,
 /// gradient → solid fill of the averaged colour.
-#[cfg(not(target_arch = "wasm32"))]
 fn emit_hatch(
     ops: &mut Vec<Op>,
     hatch: &HatchModel,
@@ -1419,7 +1501,6 @@ fn emit_hatch(
 /// The fold must happen in f64: the pair exists because the absolute coordinate
 /// does not fit an f32, so `pos + pos_low` evaluated in f32 rounds straight back
 /// to `pos` and throws away the residual it was carrying.
-#[cfg(not(target_arch = "wasm32"))]
 fn glyph_world_xy(v: &crate::scene::pipeline::text_gpu::TextVertex) -> [f64; 2] {
     [
         v.pos[0] as f64 + v.pos_low[0] as f64,
@@ -1429,7 +1510,6 @@ fn glyph_world_xy(v: &crate::scene::pipeline::text_gpu::TextVertex) -> [f64; 2] 
 
 /// Adapt a text colour to the white sheet, mirroring the wire/hatch passes:
 /// near-white / near-yellow (colour-7-on-white) → black, near-cyan → dark blue.
-#[cfg(not(target_arch = "wasm32"))]
 fn adapt_text_color([r, g, b]: [f32; 3]) -> [f32; 3] {
     let is_light = r > 0.80 && g > 0.80 && b > 0.80;
     let is_yellow = r > 0.80 && g > 0.70 && b < 0.30;
@@ -1451,7 +1531,6 @@ fn adapt_text_color([r, g, b]: [f32; 3]) -> [f32; 3] {
 /// quad's `uv_min` and map it into that quad by affine interpolation of the
 /// plane rect — so a stroke (LFF) font emits polylines and a filled TrueType
 /// glyph emits filled triangles, exactly where the SDF quad sits.
-#[cfg(not(target_arch = "wasm32"))]
 fn emit_text(
     ops: &mut Vec<Op>,
     wires: &[WireModel],
@@ -1690,10 +1769,119 @@ mod tests {
         let mut page = test_page(vec![w]);
         page.scale = 2.0;
         page.clip = Some((10.0, 10.0, 100.0, 100.0));
-        let bytes = build_pdf_pages(&[page], None).unwrap();
+        let bytes = render_pdf_bytes(&[page], None).unwrap();
         // A valid PDF is produced (starts with the PDF header) and is non-trivial.
         assert!(bytes.starts_with(b"%PDF"), "not a PDF");
         assert!(bytes.len() > 200, "suspiciously small: {}", bytes.len());
+    }
+
+    #[test]
+    fn downsample_target_returns_input_within_target() {
+        // Exactly at the cap keeps the native pixels…
+        assert_eq!(downsample_target(300, 150, 300.0, 300), (300, 150));
+        // …and so does drawing larger than the pixel count (factor > 1).
+        assert_eq!(downsample_target(300, 150, 150.0, 300), (300, 150));
+    }
+
+    #[test]
+    fn downsample_target_halves_two_x_oversampling() {
+        assert_eq!(downsample_target(600, 400, 600.0, 300), (300, 200));
+    }
+
+    #[test]
+    fn downsample_target_clamps_tiny_images_to_one_pixel() {
+        assert_eq!(downsample_target(2, 2, 1500.0, 150), (1, 1));
+    }
+
+    #[test]
+    fn plot_quality_dpi_caps_match_the_dialog_presets() {
+        assert_eq!(PlotQuality::High.target_dpi(), None);
+        assert_eq!(PlotQuality::Normal.target_dpi(), Some(300));
+        assert_eq!(PlotQuality::Low.target_dpi(), Some(150));
+        assert_eq!(PlotQuality::default(), PlotQuality::Normal);
+    }
+
+    #[test]
+    fn plot_quality_from_dialog_maps_legacy_and_unknown_names() {
+        assert_eq!(PlotQuality::from_dialog("Low"), PlotQuality::Low);
+        assert_eq!(PlotQuality::from_dialog("Draft"), PlotQuality::Low);
+        assert_eq!(PlotQuality::from_dialog("Normal"), PlotQuality::Normal);
+        assert_eq!(PlotQuality::from_dialog("High"), PlotQuality::High);
+        assert_eq!(PlotQuality::from_dialog("Presentation"), PlotQuality::High);
+        assert_eq!(PlotQuality::from_dialog("Maximum"), PlotQuality::High);
+        assert_eq!(PlotQuality::from_dialog("Best"), PlotQuality::Normal);
+        assert_eq!(PlotQuality::from_dialog(""), PlotQuality::Normal);
+    }
+
+    // A noise-filled square image drawn as a `paper_mm`-sized world quad.
+    // Incompressible pixels guarantee the High-quality PDF's embedded stream
+    // dominates the Low-quality one's after downsampling.
+    fn plot_image(px: u32, paper_mm: f32) -> PlotImage {
+        let mut pixels = Vec::with_capacity((px * px * 4) as usize);
+        for i in 0..px * px {
+            let v = (i.wrapping_mul(2_654_435_761) >> 24) as u8;
+            pixels.extend_from_slice(&[v, 255 - v, v ^ 0x5a, 0xff]);
+        }
+        let corner = |x: f32, y: f32| [x, y, 0.0];
+        let corners = [
+            corner(0.0, 0.0),
+            corner(paper_mm, 0.0),
+            corner(paper_mm, paper_mm),
+            corner(0.0, paper_mm),
+        ];
+        let verts = [
+            (corners[0], [0.0, 1.0]),
+            (corners[1], [1.0, 1.0]),
+            (corners[2], [1.0, 0.0]),
+            (corners[0], [0.0, 1.0]),
+            (corners[2], [1.0, 0.0]),
+            (corners[3], [0.0, 0.0]),
+        ]
+        .iter()
+        .map(|(pos, uv)| crate::scene::model::image_model::ImageQuadVertex {
+            pos: *pos,
+            uv: *uv,
+            pos_low: [0.0; 3],
+        })
+        .collect();
+        PlotImage {
+            image: ImageModel {
+                render_instance: None,
+                file_path: String::new(),
+                pixels: std::sync::Arc::new(pixels),
+                width: px,
+                height: px,
+                opacity: 1.0,
+                corners,
+                corners_low: [[0.0; 3]; 4],
+                draw_depth: 0.5,
+                verts,
+            },
+            clips: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn low_quality_embeds_a_smaller_image_stream() {
+        // 600 px on a 25.4 mm (1") square = 600 DPI effective; Low's 150 DPI
+        // cap resamples to 150×150 while High embeds the native pixels.
+        let image = plot_image(600, 25.4);
+        let mut high = test_page(Vec::new());
+        high.options.quality = PlotQuality::High;
+        high.content.images = vec![image.clone()];
+        let mut low = test_page(Vec::new());
+        low.options.quality = PlotQuality::Low;
+        low.content.images = vec![image];
+
+        let high_bytes = render_pdf_bytes(&[high], None).unwrap();
+        let low_bytes = render_pdf_bytes(&[low], None).unwrap();
+        assert!(high_bytes.starts_with(b"%PDF"));
+        assert!(
+            low_bytes.len() < high_bytes.len(),
+            "low quality did not shrink the PDF: {} !< {}",
+            low_bytes.len(),
+            high_bytes.len()
+        );
     }
 
     // Build a WireModel carrying the SDF glyph quads for `text` in the embedded
@@ -1725,8 +1913,8 @@ mod tests {
         let mut blank = wire.clone();
         blank.wire.text_verts.clear();
 
-        let with_text = build_pdf_pages(&[test_page(vec![wire])], None).unwrap();
-        let no_text = build_pdf_pages(&[test_page(vec![blank])], None).unwrap();
+        let with_text = render_pdf_bytes(&[test_page(vec![wire])], None).unwrap();
+        let no_text = render_pdf_bytes(&[test_page(vec![blank])], None).unwrap();
         assert!(with_text.starts_with(b"%PDF"));
         assert!(
             with_text.len() > no_text.len(),

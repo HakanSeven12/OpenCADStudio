@@ -354,6 +354,7 @@ impl OpenCADStudio {
             self.block_palette.placing = None;
         }
         self.control_settle();
+        self.sync_spacemouse();
         task
     }
 
@@ -369,6 +370,48 @@ impl OpenCADStudio {
 
     fn update_inner(&mut self, msg: Message) -> Task<Message> {
         match msg {
+            Message::SpaceMouseWake => self.on_spacemouse_wake(),
+            Message::SpaceMouseFrame(time) => {
+                self.spacemouse.frame(
+                    time.saturating_duration_since(self.start).as_secs_f64() * 1000.,
+                );
+                Task::none()
+            }
+            Message::SpaceMouseFocus(id, focused) => {
+                if Some(id) == self.main_window {
+                    self.spacemouse_focused = focused;
+                }
+                Task::none()
+            }
+            Message::SpaceMouseEnabled(enabled) => {
+                self.spacemouse_preferences.enabled = enabled;
+                Task::none()
+            }
+            Message::SpaceMouseMode(mode) => {
+                self.spacemouse_preferences.mode = mode;
+                Task::none()
+            }
+            Message::SpaceMousePanSpeed(speed) => {
+                self.spacemouse_preferences.pan_speed = speed.clamp(10, 300);
+                Task::none()
+            }
+            Message::SpaceMousePanReversed(reversed) => {
+                self.spacemouse_preferences.pan_reversed = reversed;
+                Task::none()
+            }
+            Message::SpaceMousePause => {
+                self.spacemouse_paused = !self.spacemouse_paused;
+                Task::none()
+            }
+            Message::SpaceMousePreferences => {
+                self.open_spacemouse_preferences();
+                Task::none()
+            }
+            Message::SpaceMouseDriverSettings => self.open_spacemouse_driver_settings(),
+            Message::SpaceMouseDetails => {
+                self.spacemouse_details = !self.spacemouse_details;
+                Task::none()
+            }
             Message::ControlRequest(envelope) => {
                 let (response, task) = self.control_request(envelope.request);
                 envelope.reply.send(response);

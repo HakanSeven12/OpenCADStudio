@@ -1,6 +1,7 @@
 //! Bottom status bar — Model/Layout tabs + OSNAP toggle + status info
 
 pub mod status_menu;
+pub(crate) mod spacemouse;
 pub mod statusbar_config;
 pub mod statusbar_menu;
 
@@ -135,6 +136,7 @@ impl StatusBar {
         parametric_conflicts: usize,
         // What is drawing the scene. Only a degraded verdict shows anything.
         gpu_status: &'a crate::scene::pipeline::GpuStatus,
+        spacemouse: Option<Element<'a, Message>>,
     ) -> Element<'a, Message> {
         let StatusMenuData {
             layout_names,
@@ -241,6 +243,11 @@ impl StatusBar {
         // when the width can't hold them all on one line.
         let vis = |p: StatusPill| config.is_visible(p);
         let mut pills: Vec<Element<'_, Message>> = Vec::new();
+        if vis(StatusPill::SpaceMouse) {
+            if let Some(pill) = spacemouse {
+                pills.push(pill);
+            }
+        }
         // Not a `StatusPill` and not hideable: the scene is on a software
         // rasterizer or not drawn at all, and the popup that said so has been
         // dismissed. This stays for the session and reopens it. Many people

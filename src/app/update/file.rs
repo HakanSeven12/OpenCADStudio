@@ -382,6 +382,7 @@ impl OpenCADStudio {
     /// Snapshot the persisted UI preferences from live state.
     pub(in crate::app) fn current_settings(&self) -> crate::app::settings::UserSettings {
         crate::app::settings::UserSettings {
+            spacemouse: self.spacemouse_preferences,
             dyn_input: self.dyn_input,
             polar: self.polar_mode,
             polar_increment_deg: self.polar_increment_deg,
@@ -457,6 +458,7 @@ impl OpenCADStudio {
         self.cursor_size = s.cursor_size.clamp(1, 100);
         self.pick_box = s.pick_box.clamp(0, 50);
         self.options_tab = s.options_tab;
+        self.spacemouse_preferences = s.spacemouse;
         // These four drive real features with commands and status-bar pills,
         // but they lived only on the app struct: turning the ViewCube off and
         // restarting brought it straight back.

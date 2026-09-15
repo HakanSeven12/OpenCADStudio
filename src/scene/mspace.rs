@@ -446,6 +446,45 @@ impl Scene {
         self.camera.borrow().rotation
     }
 
+    /// Camera owning navigation, including an entered paper-space viewport.
+    pub(crate) fn navigation_camera(&self) -> view::camera::Camera {
+        self.active_viewport
+            .and_then(|h| self.camera_for_viewport(h))
+            .unwrap_or_else(|| self.camera.borrow().clone())
+    }
+
+    pub(crate) fn navigation_locked(&self) -> bool {
+        self.active_viewport.is_some_and(|h| {
+            !matches!(self.document.get_entity(h), Some(acadrust::EntityType::Viewport(v)) if !v.status.locked)
+        })
+    }
+
+    /// Commit an externally navigated camera through the same floating-view
+    /// encoding as the ViewCube. Camera coordinates already include view_center.
+    pub(crate) fn apply_navigation_camera(&mut self, camera: view::camera::Camera) -> bool {
+        if self.navigation_locked() {
+            return false;
+        }
+        if let Some(handle) = self.active_viewport {
+            if !self.mutate_active_viewport_camera(|c| *c = camera.clone()) {
+                return false;
+            }
+            if let Some(acadrust::EntityType::Viewport(vp)) = self.document.get_entity_mut(handle) {
+                vp.view_target.x = camera.target.x;
+                vp.view_target.y = camera.target.y;
+                vp.view_target.z = camera.target.z;
+                vp.view_center.x = 0.;
+                vp.view_center.y = 0.;
+                vp.view_height = camera.ortho_size() as f64 * 2.;
+                vp.custom_scale = vp.height / vp.view_height;
+            }
+        } else {
+            *self.camera.borrow_mut() = camera;
+        }
+        self.camera_generation += 1;
+        true
+    }
+
     pub fn active_camera_projection(&self) -> view::camera::Projection {
         if let Some(handle) = self.active_viewport {
             if let Some(camera) = self.camera_for_viewport(handle) {

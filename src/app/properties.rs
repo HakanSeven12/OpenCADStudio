@@ -3806,7 +3806,7 @@ fn format_unit_factor(factor: f64) -> String {
 }
 
 /// Convert INSUNITS (DXF group 70) to millimetres.
-fn insunits_to_mm(code: i16) -> Option<f64> {
+pub(super) fn insunits_to_mm(code: i16) -> Option<f64> {
     Some(match code {
         1 => 25.4,                        // Inches
         2 => 304.8,                       // Feet

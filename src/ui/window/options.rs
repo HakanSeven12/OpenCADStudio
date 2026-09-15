@@ -1,3 +1,4 @@
+pub(crate) mod spacemouse;
 use crate::app::config::UiThemeConfig;
 use crate::app::settings::CursorType;
 use crate::app::Message;
@@ -153,6 +154,7 @@ pub fn view_window<'a>(
     cursor_size: i32,
     selection: SelectionPrefs,
     prefs: AppPrefs,
+    spacemouse: Element<'a, Message>,
     snap_angle_input: &'a str,
     drawing_prefs: DrawingPrefs,
     folders: Folders,
@@ -1135,6 +1137,8 @@ pub fn view_window<'a>(
     let user_prefs = column![
         text(crate::t!("User Preferences")).size(15),
         Space::new().height(10),
+        spacemouse,
+        Space::new().height(12),
         text(crate::t!("Zoom")).size(15),
         Space::new().height(10),
         row![

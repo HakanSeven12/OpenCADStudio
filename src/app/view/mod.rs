@@ -1200,6 +1200,9 @@ bg={bg_ms:.1}ms n={view_count}"
         };
 
         if !thumbnail_capture_clean && !self.layout_settling {
+            if let Some(pivot) = self.spacemouse_pivot_overlay() {
+                viewport_stack = viewport_stack.push(pivot);
+            }
             // Per-pane input pane_grid goes ABOVE the crosshair overlay so it
             // receives mouse events (the overlay's `Hidden` cursor would otherwise
             // starve any layer beneath it). The controls bar is pushed on top of it.
@@ -2199,6 +2202,18 @@ bg={bg_ms:.1}ms n={view_count}"
                             .map(|s| s.conflicts.len())
                             .unwrap_or(0),
                         &self.gpu_status,
+                        (self.spacemouse.visible()
+                            || self.spacemouse_preferences.mode
+                                != crate::input::spacemouse::NavigationMode::Auto)
+                            .then(|| {
+                                crate::ui::statusbar::spacemouse::view(
+                                    self.spacemouse_preferences,
+                                    self.spacemouse.status(),
+                                    self.spacemouse_paused,
+                                    self.spacemouse_label(),
+                                    self.spacemouse_sheet(),
+                                )
+                            }),
                     )
                 })
                 .width(Fill)
@@ -2658,6 +2673,21 @@ impl OpenCADStudio {
         let control = iced::time::every(std::time::Duration::from_millis(50))
             .map(|_| Message::PollWebControl);
         iced::Subscription::batch([
+            if self.spacemouse.moving() && self.spacemouse_focused && !self.spacemouse_paused {
+                window::frames().map(Message::SpaceMouseFrame)
+            } else {
+                Subscription::none()
+            },
+            self.spacemouse.subscription().map(|_| Message::SpaceMouseWake),
+            event::listen_with(|event, _, id| match event {
+                iced::Event::Window(window::Event::Focused) => {
+                    Some(Message::SpaceMouseFocus(id, true))
+                }
+                iced::Event::Window(window::Event::Unfocused) => {
+                    Some(Message::SpaceMouseFocus(id, false))
+                }
+                _ => None,
+            }),
             control,
             frames,
             history_tick,

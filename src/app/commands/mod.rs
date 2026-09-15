@@ -65,6 +65,9 @@ impl OpenCADStudio {
         // the first space are left untouched. A non-alias passes through as-is.
         let resolved = self.resolve_alias(cmd);
         let cmd = resolved.as_deref().unwrap_or(cmd);
+        if is_spacemouse_command(cmd) {
+            return self.run_action(cmd);
+        }
         // A drafting aid only flips a flag, so it must not disturb whatever is
         // already running: pressing F8 partway through a LINE means "constrain
         // the rest of this line", not "abandon it". Everything below tears the
@@ -270,9 +273,22 @@ impl OpenCADStudio {
 /// vanish. Nothing here starts a command, opens a document or reads geometry,
 /// so there is nothing for the teardown to protect. (#677)
 pub fn is_transparent(cmd: &str) -> bool {
+    is_spacemouse_command(cmd)
+        || matches!(
+            cmd,
+            "ORTHO" | "GRID" | "SNAP" | "POLAR" | "OSNAP" | "DSETTINGS"
+        )
+}
+
+fn is_spacemouse_command(cmd: &str) -> bool {
     matches!(
         cmd,
-        "ORTHO" | "GRID" | "SNAP" | "POLAR" | "OSNAP" | "DSETTINGS"
+        "SPACEMOUSE"
+            | "SPACEMOUSEPAUSE"
+            | "SPACEMOUSEPAN"
+            | "SPACEMOUSEPANZOOM"
+            | "SPACEMOUSEAUTO"
+            | "SPACEMOUSE3D"
     )
 }
 
@@ -281,7 +297,7 @@ pub fn is_transparent(cmd: &str) -> bool {
 /// source of truth: the dispatch gate refuses everything else, and the ribbon
 /// dims the tools this rejects.
 pub fn start_allowed(cmd: &str) -> bool {
-    matches!(
+    is_spacemouse_command(cmd) || matches!(
         cmd,
         "NEW"
             | "OPEN"

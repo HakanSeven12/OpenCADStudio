@@ -232,6 +232,10 @@ impl OpenCADStudio {
                             show_ucs_icon: self.show_ucs_icon,
                             ucs_icon_at_origin: self.ucs_icon_at_origin,
                         },
+                        crate::ui::window::options::spacemouse::view(
+                            self.spacemouse_preferences, self.spacemouse.status(),
+                            self.spacemouse_paused, self.spacemouse_details,
+                        ),
                         &self.snap_angle_input,
                         {
                             let header = self

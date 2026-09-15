@@ -18,6 +18,7 @@ pub(crate) mod helpers;
 mod history;
 mod layers;
 mod model_ops;
+mod navigation;
 mod mtext_editor;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin_host;
@@ -540,6 +541,14 @@ pub(super) struct OpenCADStudio {
     dyn_input: bool,
     /// Currently visible page in the application Options dialog.
     options_tab: crate::ui::window::options::OptionsTab,
+    spacemouse: crate::input::spacemouse::Service,
+    spacemouse_preferences: crate::input::spacemouse::Preferences,
+    spacemouse_paused: bool,
+    spacemouse_focused: bool,
+    spacemouse_details: bool,
+    spacemouse_was_moving: bool,
+    spacemouse_pivot: Option<(crate::input::spacemouse::Target, glam::DVec3)>,
+    spacemouse_selection: navigation::SelectionCache,
     /// Controls whether the TEXTEDIT command repeats automatically (0 = Multiple, 1 = Single).
     pub texteditmode: bool,
     /// QDIM extension-origin priority: 0 = endpoints, 1 = intersections.
@@ -1882,6 +1891,17 @@ pub enum ArrowKey {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    SpaceMouseWake,
+    SpaceMouseFrame(iced::time::Instant),
+    SpaceMouseFocus(iced::window::Id, bool),
+    SpaceMouseEnabled(bool),
+    SpaceMouseMode(crate::input::spacemouse::NavigationMode),
+    SpaceMousePanSpeed(u16),
+    SpaceMousePanReversed(bool),
+    SpaceMousePause,
+    SpaceMousePreferences,
+    SpaceMouseDriverSettings,
+    SpaceMouseDetails,
     ControlRequest(control::Envelope),
     PollWebControl,
     ControlStep(String, Box<Message>),
@@ -3650,6 +3670,18 @@ impl OpenCADStudio {
             show_grid: false,
             dyn_input: true,
             options_tab: crate::ui::window::options::OptionsTab::General,
+            spacemouse: {
+                let service = crate::input::spacemouse::Service::default();
+                service.set_actions(navigation::actions());
+                service
+            },
+            spacemouse_preferences: crate::input::spacemouse::Preferences::default(),
+            spacemouse_paused: false,
+            spacemouse_focused: false,
+            spacemouse_details: false,
+            spacemouse_was_moving: false,
+            spacemouse_pivot: None,
+            spacemouse_selection: navigation::SelectionCache::default(),
             texteditmode: false,
             quick_dimension_snap_priority: 0,
             dimension_continue_mode: 1,

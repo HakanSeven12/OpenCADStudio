@@ -32,6 +32,7 @@ glam = { version = "0.33", features = ["bytemuck"] }
 rfd = "0.17"
 clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
+log = "0.4"
 acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "568a12c", features = ["serde"] }
 cadkernel = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "dcf0840", features = ["acis", "offset"] }
 cadkernel-constraints = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "dcf0840" }
@@ -60,7 +61,8 @@ fluent-syntax = "0.12"
 naga = { version = "27", features = ["wgsl-in"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_System_Registry", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_Graphics_Printing"] }
+libloading = "0.8"
+windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_Security", "Win32_System_Com", "Win32_System_Registry", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_Graphics_Printing"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "wayland"] }
@@ -93,7 +95,6 @@ ocs_plugin_api = { path = "crates/ocs_plugin_api" }
 i18n-embed = { version = "0.16", features = ["web-sys-requester"] }
 rust-embed = { version = "8", features = ["debug-embed"] }
 console_error_panic_hook = "0.1"
-log = "0.4"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

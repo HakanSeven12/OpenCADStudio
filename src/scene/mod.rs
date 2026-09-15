@@ -10855,11 +10855,21 @@ vis_index={:.1} visible_probe={:.1}",
     /// when something is selected. `None` keeps the current camera target as
     /// the orbit centre. (#229)
     pub fn orbit_pivot(&self) -> Option<glam::DVec3> {
+        self.navigation_selection_bounds()
+            .map(|(min, max)| (min + max) * 0.5)
+    }
+
+    pub(crate) fn navigation_selection_bounds(&self) -> Option<(glam::DVec3, glam::DVec3)> {
         if self.selected.is_empty() {
             return None;
         }
-        let block = self.current_layout_block_handle();
-        let scale = if self.current_layout == "Model" {
+        let model_view = self.current_layout == "Model" || self.active_viewport.is_some();
+        let block = if self.active_viewport.is_some() {
+            self.model_space_block_handle()
+        } else {
+            self.current_layout_block_handle()
+        };
+        let scale = if model_view {
             crate::scene::annotative::scale_handle_by_name(
                 &self.document,
                 &self.document.header.current_annotation_scale,
@@ -10916,7 +10926,7 @@ vis_index={:.1} visible_probe={:.1}",
             }
         }
         if any {
-            Some((min + max) * 0.5)
+            Some((min, max))
         } else {
             None
         }

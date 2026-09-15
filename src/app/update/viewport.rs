@@ -922,7 +922,7 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    pub(super) fn on_viewport_move(&mut self, p: Point) -> Task<Message> {
+    pub(in crate::app) fn on_viewport_move(&mut self, p: Point) -> Task<Message> {
         // A ribbon dropdown is open over the viewport. Its backdrop
         // cannot swallow cursor motion — in iced 0.14 mouse_area/opaque
         // capture only button presses, never CursorMoved — so the move
@@ -5324,7 +5324,7 @@ properties={:.1}ms picked={}",
     /// model-space view moves (zoom/pan), so the selection rectangle tracks the
     /// drawing instead of staying frozen at its original pixel. No-op when no
     /// box is in progress. (#234)
-    pub(super) fn reproject_box_anchor(&mut self, i: usize, vw: f32, vh: f32) {
+    pub(in crate::app) fn reproject_box_anchor(&mut self, i: usize, vw: f32, vh: f32) {
         let world = self.tabs[i].scene.selection.borrow().box_anchor_world;
         let Some(world) = world else { return };
         let tile_b = self.tabs[i].scene.active_model_tile_bounds(vw, vh);

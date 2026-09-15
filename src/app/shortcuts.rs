@@ -145,6 +145,8 @@ fn is_named_key(key: &str) -> bool {
 /// the command dispatcher — valid shortcut commands that never appear in the
 /// command registry. Used to validate the shortcut editor's command column.
 pub(super) const INPUT_ACTIONS: &[&str] = &[
+    "SPACEMOUSEFIT",
+    "SPACEMOUSETOP",
     "FINALIZE",
     "COMMANDSPACE",
     "CANCEL",
@@ -270,7 +272,36 @@ impl OpenCADStudio {
         let Some(action) = action.cloned() else {
             return Task::none();
         };
-        let message = match action.as_str() {
+        self.run_action(&action)
+    }
+
+    /// Shared by keyboard bindings and exported device actions. In particular,
+    /// Undo retains its command-local behavior during PLINE and SPLINE.
+    pub(super) fn run_action(&mut self, action: &str) -> Task<Message> {
+        let message = match action {
+            "SPACEMOUSEFIT" => {
+                let i = self.active_tab;
+                self.clear_navigation_hover(i);
+                self.tabs[i].scene.remember_current_view();
+                self.tabs[i].scene.fit_all();
+                self.arm_hover_after_navigation(i);
+                return Task::none();
+            }
+            "SPACEMOUSETOP" => Message::ViewCubeHome,
+            "SPACEMOUSE" => Message::SpaceMousePreferences,
+            "SPACEMOUSEPAUSE" => Message::SpaceMousePause,
+            "SPACEMOUSEPAN" => {
+                Message::SpaceMouseMode(crate::input::spacemouse::NavigationMode::PanOnly)
+            }
+            "SPACEMOUSEPANZOOM" => {
+                Message::SpaceMouseMode(crate::input::spacemouse::NavigationMode::PanZoom)
+            }
+            "SPACEMOUSEAUTO" => {
+                Message::SpaceMouseMode(crate::input::spacemouse::NavigationMode::Auto)
+            }
+            "SPACEMOUSE3D" => {
+                Message::SpaceMouseMode(crate::input::spacemouse::NavigationMode::Full3D)
+            }
             "FINALIZE" => Message::CommandFinalize,
             "COMMANDSPACE" => Message::CommandSpace,
             "CANCEL" => Message::CommandEscape,

@@ -761,7 +761,7 @@ impl Camera {
     // ── Internal helpers ───────────────────────────────────────────────────
 
     /// Derive yaw and pitch from the current quaternion.
-    fn sync_yaw_pitch(&mut self) {
+    pub(crate) fn sync_yaw_pitch(&mut self) {
         let eye_dir = self.rotation * Vec3::Z;
         self.pitch = eye_dir.z.clamp(-1.0, 1.0).asin();
         self.yaw = if eye_dir.x.abs() < 1e-6 && eye_dir.y.abs() < 1e-6 {

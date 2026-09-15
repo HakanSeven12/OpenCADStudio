@@ -289,6 +289,7 @@ pub const DEFAULT_GRIP_OBJECT_LIMIT: i32 = 100;
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UserSettings {
+    pub spacemouse: crate::input::spacemouse::Preferences,
     pub dyn_input: bool,
     pub polar: bool,
     pub polar_increment_deg: f32,
@@ -497,6 +498,7 @@ pub fn clamp_clipromptlines(v: i32) -> i32 {
 impl Default for UserSettings {
     fn default() -> Self {
         Self {
+            spacemouse: crate::input::spacemouse::Preferences::default(),
             dyn_input: true,
             polar: false,
             polar_increment_deg: 45.0,

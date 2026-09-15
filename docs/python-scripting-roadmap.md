@@ -155,11 +155,40 @@ through the existing Plugin Manager with zero OCS core changes.
       `PY_EVAL`: a missing file or a raised exception is never a silent
       no-op. Reusing the automation `run` op needed no transport changes, as
       expected — `{"op":"run","cmd":"PY_RUN <path>"}` just works.
-- [ ] `ocs.command("ALIGNLEFT")` to invoke existing built-in commands by
-      name — **not implemented**. There's no `HostApi` method for it in
-      `ocs_plugin_api` today (checked, not assumed); it would need a host API
-      addition. Documented as a real gap in `PLUGIN.md` rather than attempting
-      a workaround.
+- [x] `ocs.command(cmd)` to invoke existing built-in commands by name —
+      **implemented, required a host change**. Added `HostApi::run_command`
+      (default `Err` impl, no forced version bump) by reusing
+      `run_command_line` + `drive_headless_task` — the exact machinery
+      `--serve`/`--mcp` automation's `"run"` op already uses — via a new
+      `PluginRequest::RunCommand` and one match arm in
+      `handle_plugin_request`. Full detail: `docs/plugin-architecture.md`'s
+      `HostApi` table, and `opencad-python`'s `PLUGIN.md`.
+      - **Found and fixed a real deadlock along the way**: the naive version
+        routed back through normal plugin dispatch, which — since this call
+        is a nested plugin→host request arriving *while* the calling
+        plugin's `dispatch()` is still running on its one runner thread —
+        sends that same plugin a second `Dispatch` it has no free thread to
+        answer. Both sides wait forever. Fixed by skipping plugin dispatch
+        entirely for this one call path
+        (`dispatch_command_no_plugin_reentry` /
+        `run_command_line_no_plugin_reentry`); confirmed via the full
+        `cargo test --lib` suite (1040 passed, 1 pre-existing unrelated
+        failure) that normal command-line/automation behavior is unchanged.
+        Consequence, by design: `ocs.command()` can reach built-ins only,
+        never another plugin's command.
+      - **Verified against a real, non-trivial case, not just `LINE`**:
+        pre-selecting two non-parallel lines then `ocs.command("PCONSTRAINT")`
+        ran the actual geometric solver and adjusted both lines to be
+        genuinely parallel — checked numerically (direction-vector cross
+        product ≈ 0 after), a real persistent constraint object.
+      - **Real gap surfaced, not closed**: constraint commands read a prior
+        *selection*, not picks fed as command tokens — feeding handles as
+        trailing `PCONSTRAINT` tokens starts the command but ends in
+        "Command cancelled", not a constraint. There's no `ocs`-level way to
+        set the document selection from a script yet (the working test used
+        the automation `select` op directly, unreachable from
+        `PY_EVAL`/`PY_RUN`). An `ocs.select(handles)` would close this —
+        natural next step, not built yet.
 
 ### 1.4 — Usability
 

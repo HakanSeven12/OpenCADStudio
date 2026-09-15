@@ -221,10 +221,33 @@ through the existing Plugin Manager with zero OCS core changes.
 
 ### 1.5 — Sandboxing
 
-- [ ] Audit: the `ocs` module is the *only* thing a script can call — no
-      ambient `import os`/`socket`/`subprocess`. RustPython's default stdlib
-      surface needs an explicit allow-list decision, not an assumption that
-      "no C extensions" already means "safe."
+- [x] Audit: the `ocs` module is the *only* thing a script can call — done,
+      and **the earlier assumption was wrong, which is exactly why this was
+      worth auditing instead of assuming**. Phase 1.2/1.3 claimed "no stdlib
+      is loaded, so `import os`/`socket`/`subprocess` is already impossible"
+      — true for those three names, but RustPython 0.5.0's `host_env` Cargo
+      feature is **on by default** and bakes `posix`/`_ctypes` into every
+      interpreter's core module registry regardless of `rustpython-stdlib`.
+      Confirmed by actually running it: with `host_env` on,
+      `PY_EVAL __import__('posix').getcwd()` and
+      `PY_EVAL open('/etc/passwd').read()` both worked — full filesystem
+      read/write from any script. Fixed: `rustpython-vm` now builds with
+      `default-features = false, features = ["compiler", "gc"]`.
+      Re-verified the full matrix after: `os`/`posix`/`nt`/`subprocess`/
+      `socket`/`ctypes`/`_ctypes`/`_socket`/`_subprocess`/`_signal`/`pwd`
+      all blocked, `open()` blocked for both read and write (its `FileIO`
+      needs `host_env` internally too, even though `_io` itself is always
+      registered). No functional regression — `ocs.add_line` and the full
+      `examples/example.py` (both real constraints) still run correctly.
+      Audited what remains exhaustively rather than assuming "fewer is
+      enough": 15 `sys.modules` entries, all core language/import/codec
+      plumbing plus `ocs`. One accepted, documented residual gap: `_thread`
+      is real and functional (verified callable) and has no feature guard
+      at all in this RustPython version — no dependency-level way to
+      remove it without patching RustPython. Grants no filesystem/network/
+      process access; worst case is a resource/stability issue local to
+      the already crash-isolated plugin process. Full detail in
+      `opencad-python`'s `PLUGIN.md`.
 
 ### 1.6 — Distribution
 

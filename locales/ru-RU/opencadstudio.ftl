@@ -264,6 +264,12 @@ command-copy =
         } | Массив | Enter=готово | база { $x },{ $y }]:
 
 common =
+    .recover-drawing = Восстановление чертежа
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = Восстановите его на отдельной вкладке или удалите копию.
+    .name-has-an-autosave-copy-newer-than-the-last-save = У «__ocs_fmt_0__» есть копия автосохранения новее последнего сохранения.
+    .autosave-copy-could-not-be-stored = Не удалось сохранить копию автосохранения: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = «__ocs_fmt_0__» восстановлен из копии автосохранения
+    .autosave-copy-could-not-be-read = Не удалось прочитать копию автосохранения: __ocs_fmt_0__
     .jogged-radius = Радиус с изломом
     .none-use-shortcuts-set-key-command = (нет — используйте: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case = Выравнивание:

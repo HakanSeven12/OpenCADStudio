@@ -251,6 +251,12 @@ command-copy =
     .target = COPY  移動先を指定  [これまでに { $count } 個複写 | 配列 | Enter=完了 | 基点 { $x },{ $y }]:
 
 common =
+    .recover-drawing = 図面の復元
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = 復元タブとして開くか、コピーを破棄してください。
+    .name-has-an-autosave-copy-newer-than-the-last-save = "__ocs_fmt_0__" には最終保存より新しい自動保存コピーがあります。
+    .autosave-copy-could-not-be-stored = 自動保存コピーを保存できませんでした: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = "__ocs_fmt_0__" を自動保存コピーから復元しました
+    .autosave-copy-could-not-be-read = 自動保存コピーを読み込めませんでした: __ocs_fmt_0__
     .jogged-radius = 折れ曲がり半径
     .none-use-shortcuts-set-key-command =   （なし — SHORTCUTS SET <key> <command> を使用）
     .alignment-indented-label-title-case =   配置:

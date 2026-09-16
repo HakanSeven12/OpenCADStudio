@@ -260,6 +260,12 @@ command-copy =
            *[other] { $count } копия досега
         } | Масив | Enter=готово | база { $x },{ $y }]:
 common =
+    .recover-drawing = Възстановяване на чертеж
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = Възстановете го като възстановен раздел или отхвърлете копието.
+    .name-has-an-autosave-copy-newer-than-the-last-save = "__ocs_fmt_0__" има копие от автоматично записване, по-ново от последния запис.
+    .autosave-copy-could-not-be-stored = Копието от автоматичното записване не можа да бъде съхранено: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = "__ocs_fmt_0__" беше възстановен от копието от автоматичното записване
+    .autosave-copy-could-not-be-read = Копието от автоматичното записване не можа да бъде прочетено: __ocs_fmt_0__
     .jogged-radius = Радиус с чупка
     .none-use-shortcuts-set-key-command =   (няма — използвай: SHORTCUTS SET <клавиш> <команда>)
     .alignment-indented-label-title-case =   Подравняване:

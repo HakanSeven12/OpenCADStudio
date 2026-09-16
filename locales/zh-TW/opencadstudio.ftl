@@ -260,6 +260,12 @@ command-copy =
         } | 陣列 | Enter=完成 | 基準點 { $x },{ $y }]：
 
 common =
+    .recover-drawing = 恢復圖面
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = 將其恢復為已恢復的分頁，或捨棄該副本。
+    .name-has-an-autosave-copy-newer-than-the-last-save = "__ocs_fmt_0__" 有一份比上次儲存更新的自動儲存副本。
+    .autosave-copy-could-not-be-stored = 無法儲存自動儲存副本: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = 已從自動儲存副本恢復 "__ocs_fmt_0__"
+    .autosave-copy-could-not-be-read = 無法讀取自動儲存副本: __ocs_fmt_0__
     .jogged-radius = 折彎半徑
     .none-use-shortcuts-set-key-command =   （無 — 使用：SHORTCUTS SET <key> <command>）
     .alignment-indented-label-title-case = 對齊:

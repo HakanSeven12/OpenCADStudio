@@ -260,6 +260,12 @@ command-copy =
         } | tömb | Enter=kész | alap { $x },{ $y }]:
 
 common =
+    .recover-drawing = Rajz helyreállítása
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = Állítsa helyre egy helyreállított lapon, vagy vesse el a másolatot.
+    .name-has-an-autosave-copy-newer-than-the-last-save = A(z) "__ocs_fmt_0__" újabb automatikus mentési másolattal rendelkezik, mint az utolsó mentés.
+    .autosave-copy-could-not-be-stored = Az automatikus mentési másolatot nem sikerült tárolni: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = A(z) "__ocs_fmt_0__" helyreállítva az automatikus mentési másolatból
+    .autosave-copy-could-not-be-read = Az automatikus mentési másolatot nem sikerült elolvasni: __ocs_fmt_0__
     .jogged-radius = Tört sugarú méret
     .none-use-shortcuts-set-key-command =(nincs – használat: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case =   Igazítás:

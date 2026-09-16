@@ -260,6 +260,12 @@ command-copy =
         } | 배열 | Enter=완료 | 베이스 { $x },{ $y }]:
 
 common =
+    .recover-drawing = 도면 복구
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = 복구된 탭으로 열거나 사본을 삭제하세요.
+    .name-has-an-autosave-copy-newer-than-the-last-save = "__ocs_fmt_0__"에 마지막 저장보다 새로운 자동 저장 사본이 있습니다.
+    .autosave-copy-could-not-be-stored = 자동 저장 사본을 저장할 수 없습니다: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = "__ocs_fmt_0__"을(를) 자동 저장 사본에서 복원했습니다
+    .autosave-copy-could-not-be-read = 자동 저장 사본을 읽을 수 없습니다: __ocs_fmt_0__
     .jogged-radius = 꺾인 반지름
     .none-use-shortcuts-set-key-command =   (없음 — 사용: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case =정렬:

@@ -248,6 +248,12 @@ command-copy =
     .target = COPY  指定目标点  [已复制 { $count } 个 | 阵列 | 回车=完成 | 基点 { $x },{ $y }]：
 
 common =
+    .recover-drawing = 恢复图形
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = 将其恢复为已恢复的标签页，或放弃该副本。
+    .name-has-an-autosave-copy-newer-than-the-last-save = "__ocs_fmt_0__" 有一份比上次保存更新的自动保存副本。
+    .autosave-copy-could-not-be-stored = 无法存储自动保存副本: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = 已从自动保存副本恢复 "__ocs_fmt_0__"
+    .autosave-copy-could-not-be-read = 无法读取自动保存副本: __ocs_fmt_0__
     .jogged-radius = 折弯半径
     .none-use-shortcuts-set-key-command =   （无 — 使用：SHORTCUTS SET <key> <command>）
     .alignment-indented-label-title-case = 对齐:

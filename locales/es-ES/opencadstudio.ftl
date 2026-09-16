@@ -261,6 +261,12 @@ command-copy =
         } | Matriz | Enter=terminar | base { $x },{ $y }]:
 
 common =
+    .recover-drawing = Recuperar dibujo
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = Restáurelo como una pestaña recuperada o descarte la copia.
+    .name-has-an-autosave-copy-newer-than-the-last-save = "__ocs_fmt_0__" tiene una copia de autoguardado más reciente que la última copia guardada.
+    .autosave-copy-could-not-be-stored = No se pudo guardar la copia de autoguardado: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = "__ocs_fmt_0__" restaurado desde la copia de autoguardado
+    .autosave-copy-could-not-be-read = No se pudo leer la copia de autoguardado: __ocs_fmt_0__
     .jogged-radius = Radio con recodo
     .none-use-shortcuts-set-key-command =   (ninguno — use: SHORTCUTS SET <tecla> <comando>)
     .alignment-indented-label-title-case =   Alineación:

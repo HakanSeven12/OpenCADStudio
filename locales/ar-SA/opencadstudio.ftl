@@ -273,6 +273,12 @@ command-copy =
         } | مصفوفة | Enter=إنهاء | الأساس { $x },{ $y }]:
 
 common =
+    .recover-drawing = استرداد الرسم
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = استعده كعلامة تبويب مستردة أو تجاهل النسخة.
+    .name-has-an-autosave-copy-newer-than-the-last-save = لدى "__ocs_fmt_0__" نسخة حفظ تلقائي أحدث من آخر حفظ.
+    .autosave-copy-could-not-be-stored = تعذر تخزين نسخة الحفظ التلقائي: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = تم استرداد "__ocs_fmt_0__" من نسخة الحفظ التلقائي
+    .autosave-copy-could-not-be-read = تعذر قراءة نسخة الحفظ التلقائي: __ocs_fmt_0__
     .jogged-radius = نصف قطر منكسر
     .none-use-shortcuts-set-key-command =   (لا شيء — استخدم: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case =   المحاذاة:

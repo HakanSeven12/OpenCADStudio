@@ -260,6 +260,12 @@ command-copy =
         } | Serie | Enter=completato | base { $x },{ $y }]:
 
 common =
+    .recover-drawing = Recupera disegno
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = Ripristinalo in una scheda recuperata oppure elimina la copia.
+    .name-has-an-autosave-copy-newer-than-the-last-save = "__ocs_fmt_0__" ha una copia di salvataggio automatico più recente dell’ultimo salvataggio.
+    .autosave-copy-could-not-be-stored = Impossibile salvare la copia di salvataggio automatico: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = "__ocs_fmt_0__" ripristinato dalla copia di salvataggio automatico
+    .autosave-copy-could-not-be-read = Impossibile leggere la copia di salvataggio automatico: __ocs_fmt_0__
     .jogged-radius = Raggio spezzato
     .none-use-shortcuts-set-key-command =(nessuno — utilizzare: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case =   Allineamento:

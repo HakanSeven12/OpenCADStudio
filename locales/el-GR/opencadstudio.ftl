@@ -260,6 +260,12 @@ command-copy =
         } | Διάταξη | Enter=τέλος | βάση { $x },{ $y }]:
 
 common =
+    .recover-drawing = Ανάκτηση σχεδίου
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = Επαναφέρετέ το ως ανακτημένη καρτέλα ή απορρίψτε το αντίγραφο.
+    .name-has-an-autosave-copy-newer-than-the-last-save = Το "__ocs_fmt_0__" έχει αντίγραφο αυτόματης αποθήκευσης νεότερο της τελευταίας αποθήκευσης.
+    .autosave-copy-could-not-be-stored = Δεν ήταν δυνατή η αποθήκευση του αντιγράφου αυτόματης αποθήκευσης: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = Το "__ocs_fmt_0__" επαναφέρθηκε από το αντίγραφο αυτόματης αποθήκευσης
+    .autosave-copy-could-not-be-read = Δεν ήταν δυνατή η ανάγνωση του αντιγράφου αυτόματης αποθήκευσης: __ocs_fmt_0__
     .revolve-created-objects-failed-sources = REVOLVE: δημιουργήθηκαν __ocs_arg_created__ αντικείμενα· __ocs_arg_failed__ αρχικά αντικείμενα δεν μπόρεσαν να περιστραφούν.
     .revolve-no-selected-object-could-be-revolved = REVOLVE: κανένα επιλεγμένο αντικείμενο δεν μπόρεσε να περιστραφεί με τις ζητούμενες επιλογές.
     .none-use-shortcuts-set-key-command = (κανένα — χρησιμοποιήστε: SHORTCUTS SET <πλήκτρο> <εντολή>)

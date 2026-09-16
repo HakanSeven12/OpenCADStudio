@@ -260,6 +260,12 @@ command-copy =
         } | Pole | Enter=hotovo | základna { $x },{ $y }]:
 
 common =
+    .recover-drawing = Obnovit výkres
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = Obnovte jej jako obnovenou kartu nebo kopii zahoďte.
+    .name-has-an-autosave-copy-newer-than-the-last-save = "__ocs_fmt_0__" má kopii automatického uložení novější než poslední uložení.
+    .autosave-copy-could-not-be-stored = Kopii automatického uložení nelze uložit: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = "__ocs_fmt_0__" byl obnoven z kopie automatického uložení
+    .autosave-copy-could-not-be-read = Kopii automatického uložení nelze přečíst: __ocs_fmt_0__
     .jogged-radius = Zalomený poloměr
     .none-use-shortcuts-set-key-command =(žádné — použijte: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case =   Zarovnání:

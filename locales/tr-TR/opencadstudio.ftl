@@ -246,6 +246,12 @@ command-copy =
     .target = COPY  Hedef noktayı belirtin  [şimdiye kadar { $count } kopya | Dizi | Enter=tamam | temel { $x },{ $y }]:
 
 common =
+    .recover-drawing = Çizimi Kurtar
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = Onu kurtarılan bir sekme olarak geri yükleyin veya kopyayı atın.
+    .name-has-an-autosave-copy-newer-than-the-last-save = "__ocs_fmt_0__" son kayıttan daha yeni bir otomatik kayıt kopyasına sahip.
+    .autosave-copy-could-not-be-stored = Otomatik kayıt kopyası depolanamadı: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = "__ocs_fmt_0__" otomatik kayıt kopyasından geri yüklendi
+    .autosave-copy-could-not-be-read = Otomatik kayıt kopyası okunamadı: __ocs_fmt_0__
     .none-use-shortcuts-set-key-command = (none – use: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case = Adapt:
     .background-fill-enabled = Arka plan doldurma etkinleştir etkinleştirildi

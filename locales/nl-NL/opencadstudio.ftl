@@ -261,6 +261,12 @@ command-copy =
         } | Reeks | Enter=gereed | basis { $x },{ $y }]:
 
 common =
+    .recover-drawing = Tekening herstellen
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = Herstel het als een hersteld tabblad of verwijder de kopie.
+    .name-has-an-autosave-copy-newer-than-the-last-save = "__ocs_fmt_0__" heeft een automatisch opgeslagen kopie die nieuwer is dan de laatste opslag.
+    .autosave-copy-could-not-be-stored = Automatische opslagkopie kon niet worden bewaard: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = "__ocs_fmt_0__" is hersteld uit de automatische opslagkopie
+    .autosave-copy-could-not-be-read = Automatische opslagkopie kon niet worden gelezen: __ocs_fmt_0__
     .jogged-radius = Geknikte straal
     .none-use-shortcuts-set-key-command = (geen gebruik: SHORTCUTS SET <toets> <opdracht>)
     .alignment-indented-label-title-case = Uitlijning:

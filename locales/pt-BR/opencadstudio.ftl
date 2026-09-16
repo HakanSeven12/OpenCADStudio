@@ -261,6 +261,12 @@ command-copy =
         } | Matriz | Enter=concluir | base { $x },{ $y }]:
 
 common =
+    .recover-drawing = Recuperar desenho
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = Restaure-o como uma guia recuperada ou descarte a cópia.
+    .name-has-an-autosave-copy-newer-than-the-last-save = "__ocs_fmt_0__" tem uma cópia de salvamento automático mais recente que o último salvamento.
+    .autosave-copy-could-not-be-stored = Não foi possível armazenar a cópia de salvamento automático: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = "__ocs_fmt_0__" restaurado da cópia de salvamento automático
+    .autosave-copy-could-not-be-read = Não foi possível ler a cópia de salvamento automático: __ocs_fmt_0__
     .jogged-radius = Raio com desvio
     .none-use-shortcuts-set-key-command =   (nenhum — use: SHORTCUTS SET <tecla> <comando>)
     .alignment-indented-label-title-case =   Alinhamento:

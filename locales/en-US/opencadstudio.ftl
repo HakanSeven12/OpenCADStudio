@@ -260,6 +260,12 @@ command-copy =
         } | Array | Enter=done | base { $x },{ $y }]:
 
 common =
+    .recover-drawing = Recover Drawing
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = Restore it as a recovered tab, or discard the copy.
+    .name-has-an-autosave-copy-newer-than-the-last-save = "__ocs_fmt_0__" has an autosave copy newer than the last save.
+    .autosave-copy-could-not-be-stored = Autosave copy could not be stored: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = Restored "__ocs_fmt_0__" from the autosave copy
+    .autosave-copy-could-not-be-read = Autosave copy could not be read: __ocs_fmt_0__
     .none-use-shortcuts-set-key-command =   (none — use: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case =   Alignment:
     .background-fill-enabled =   Background fill enabled

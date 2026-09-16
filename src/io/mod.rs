@@ -25,6 +25,9 @@ pub mod thumbnail;
 mod web_worker;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod web_recent;
+// Registered on every target so the pure helpers (and their tests) compile on
+// the native host; the OPFS half inside is wasm-only.
+pub(crate) mod web_autosave;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod web_drop;
 

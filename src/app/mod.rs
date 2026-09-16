@@ -724,6 +724,18 @@ pub(super) struct OpenCADStudio {
     pending_native_thumbnail_save: Option<PendingNativeThumbnailSave>,
     #[cfg(target_arch = "wasm32")]
     pending_web_thumbnail_save: Option<PendingWebThumbnailSave>,
+    /// One web autosave round is running; ticks that fire while it lasts are
+    /// dropped instead of queued (the next interval retries).
+    #[cfg(target_arch = "wasm32")]
+    web_autosave_in_flight: bool,
+    /// Web autosave storage already reported a failure — stay quiet until a
+    /// round succeeds again, so a full quota does not spam every tick.
+    #[cfg(target_arch = "wasm32")]
+    web_autosave_warned: bool,
+    /// Crash-recovery snapshots found at boot (newest first) that the restore
+    /// prompt still has to offer, one at a time.
+    #[cfg(target_arch = "wasm32")]
+    web_autosave_pending: Vec<crate::io::web_autosave::WebAutosaveEntry>,
     // ── Floating panel windows ────────────────────────────────────────────
     /// Active `iced_aw` colour picker: destination plus its initial colour.
     color_pick_target: Option<(ColorPickTarget, AcadColor)>,
@@ -1770,6 +1782,11 @@ pub enum ModalKind {
     /// means and what usually fixes it. Queued once per verdict; the status
     /// bar's ⚠ pill reopens it.
     GpuWarning,
+    /// Web: a crash-recovery autosave snapshot newer than the drawing's last
+    /// save awaits a restore/discard decision. Distinct from the corrupt-file
+    /// `RecoveryPrompt` — nothing is wrong with the drawing itself.
+    #[cfg(target_arch = "wasm32")]
+    AutosaveRestore,
 }
 
 /// A property group controlled by a layer state's restore mask.
@@ -1994,6 +2011,23 @@ pub enum Message {
     /// Web: an asynchronous OPFS copy written after Save is ready for recents.
     #[cfg(target_arch = "wasm32")]
     WebRecentStored(Result<PathBuf, String>),
+    /// Web: the boot scan finished — these autosave snapshots are newer than
+    /// the drawings' last saved copies (newest first).
+    #[cfg(target_arch = "wasm32")]
+    WebAutosavesScanned(Result<Vec<crate::io::web_autosave::WebAutosaveEntry>, String>),
+    /// Web: restore the offered autosave snapshot into a recovered tab.
+    #[cfg(target_arch = "wasm32")]
+    WebAutosaveRestore,
+    /// Web: delete the offered autosave snapshot (and offer the next, if any).
+    #[cfg(target_arch = "wasm32")]
+    WebAutosaveDiscard,
+    /// Web: the offered snapshot's bytes are in (and the OPFS copy consumed);
+    /// open them as `name`.
+    #[cfg(target_arch = "wasm32")]
+    WebAutosaveBytes(String, Result<Vec<u8>, String>),
+    /// Web: one autosave round finished for all dirty tabs (serially).
+    #[cfg(target_arch = "wasm32")]
+    WebAutosaveSnapshotFinished(Result<(), String>),
     SaveFile,
     SaveAs,
     // ── Custom Save-As dialog ─────────────────────────────────────────────
@@ -3729,6 +3763,12 @@ impl OpenCADStudio {
             pending_native_thumbnail_save: None,
             #[cfg(target_arch = "wasm32")]
             pending_web_thumbnail_save: None,
+            #[cfg(target_arch = "wasm32")]
+            web_autosave_in_flight: false,
+            #[cfg(target_arch = "wasm32")]
+            web_autosave_warned: false,
+            #[cfg(target_arch = "wasm32")]
+            web_autosave_pending: Vec::new(),
             color_pick_target: None,
             color_picker_tab: ColorPickerTab::Index,
             recent_colors: Vec::new(),
@@ -4258,9 +4298,23 @@ impl OpenCADStudio {
             Message::DiscussionsFetched,
         );
         let thumbs_fetch = s.refresh_recent_thumbs();
+        // Crash-recovery scan: OPFS snapshots newer than a drawing's last
+        // saved copy come back as a restore prompt (stale ones are deleted).
+        let autosave_scan = Task::perform(
+            crate::io::web_autosave::scan(),
+            Message::WebAutosavesScanned,
+        );
         (
             s,
-            Task::batch([focus, fonts, patrons, videos, discussions, thumbs_fetch]),
+            Task::batch([
+                focus,
+                fonts,
+                patrons,
+                videos,
+                discussions,
+                thumbs_fetch,
+                autosave_scan,
+            ]),
         )
     }
 }
@@ -4320,6 +4374,16 @@ pub fn run_web() -> iced::Result {
     // winit never emits DroppedFile on the web, so the document drag & drop
     // listeners are installed here and feed the control poll (#344).
     crate::io::web_drop::install();
+    // Best-effort, fire-and-forget: ask the browser not to evict the origin's
+    // storage under pressure — settings (localStorage) and the OPFS recent
+    // copies / autosave snapshots live there. A denial changes nothing.
+    wasm_bindgen_futures::spawn_local(async {
+        if let Some(window) = web_sys::window() {
+            if let Ok(promise) = window.navigator().storage().persist() {
+                let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+            }
+        }
+    });
     iced::application(
         OpenCADStudio::boot_web,
         OpenCADStudio::update,

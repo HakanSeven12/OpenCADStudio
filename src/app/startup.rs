@@ -24,6 +24,20 @@ impl OpenCADStudio {
         }
     }
 
+    /// Queue the web crash-recovery prompt behind whatever startup modal is
+    /// already showing (donation, GPU warning…); the after-message hook in
+    /// `update` surfaces it as soon as the slot is free.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn queue_autosave_restore_prompt(&mut self) {
+        if !self
+            .pending_startup_modals
+            .contains(&ModalKind::AutosaveRestore)
+        {
+            self.pending_startup_modals.push_back(ModalKind::AutosaveRestore);
+        }
+        self.show_next_startup_modal();
+    }
+
     /// Notice when the scene is drawn by a software rasterizer, or not at
     /// all, and say so everywhere the user might look: the command line,
     /// the log, a one-time popup, and a status-bar pill that stays.

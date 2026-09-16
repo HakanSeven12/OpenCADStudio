@@ -111,7 +111,9 @@ pub async fn store_open(
     }
 }
 
-async fn write_entry(
+/// Shared with the autosave snapshot store (`web_autosave`), which keeps its
+/// own OPFS directory but the same entry format.
+pub(crate) async fn write_entry(
     directory: &web_sys::FileSystemDirectoryHandle,
     key: &str,
     bytes: &[u8],
@@ -139,7 +141,7 @@ pub async fn read(name: &str) -> Result<Vec<u8>, String> {
     read_entry(&directory, &cache_key(name)).await
 }
 
-async fn read_entry(
+pub(crate) async fn read_entry(
     directory: &web_sys::FileSystemDirectoryHandle,
     key: &str,
 ) -> Result<Vec<u8>, String> {
@@ -147,7 +149,7 @@ async fn read_entry(
     read_blob(file.as_ref()).await
 }
 
-async fn get_file(
+pub(crate) async fn get_file(
     directory: &web_sys::FileSystemDirectoryHandle,
     key: &str,
 ) -> Result<web_sys::File, String> {
@@ -213,7 +215,9 @@ fn thumbnail_key(name: &str) -> String {
     format!("{}.thumb", name_hash(name))
 }
 
-fn name_hash(name: &str) -> String {
+/// Shared with the autosave snapshot store so both caches derive identical
+/// keys for the same drawing name.
+pub(crate) fn name_hash(name: &str) -> String {
     let mut hash = 0xcbf29ce484222325_u64;
     for byte in name.as_bytes() {
         hash ^= u64::from(*byte);
@@ -256,8 +260,27 @@ fn decode_thumbnail(bytes: Vec<u8>) -> Option<Thumbnail> {
     })
 }
 
-fn js_error(value: wasm_bindgen::JsValue) -> String {
+/// Shared with the autosave snapshot store (`web_autosave`).
+pub(crate) fn js_error(value: wasm_bindgen::JsValue) -> String {
     value
         .as_string()
         .unwrap_or_else(|| format!("browser storage error: {value:?}"))
+}
+
+/// Last-modified time (ms since the Unix epoch) of a drawing's cached copy,
+/// or `None` when no copy exists. The autosave boot scan compares it against
+/// the crash-recovery snapshot of the same name.
+pub(crate) async fn modified_ms(name: &str) -> Option<f64> {
+    let directory = recent_directory(false).await.ok()?;
+    let handle = JsFuture::from(directory.get_file_handle(&cache_key(name)))
+        .await
+        .ok()?
+        .dyn_into::<web_sys::FileSystemFileHandle>()
+        .ok()?;
+    let file = JsFuture::from(handle.get_file())
+        .await
+        .ok()?
+        .dyn_into::<web_sys::File>()
+        .ok()?;
+    Some(file.last_modified())
 }

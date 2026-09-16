@@ -260,6 +260,12 @@ command-copy =
         } | taulukko | Enter=valmis | pohja { $x },{ $y }]:
 
 common =
+    .recover-drawing = Palauta piirustus
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = Palauta se palautettuna välilehtenä tai hylkää kopio.
+    .name-has-an-autosave-copy-newer-than-the-last-save = Kohteella "__ocs_fmt_0__" on automaattisen tallennuksen kopio, joka on uudempi kuin viimeisin tallennus.
+    .autosave-copy-could-not-be-stored = Automaattisen tallennuksen kopiota ei voitu tallentaa: __ocs_fmt_0__
+    .restored-from-the-autosave-copy = "__ocs_fmt_0__" palautettiin automaattisen tallennuksen kopiosta
+    .autosave-copy-could-not-be-read = Automaattisen tallennuksen kopiota ei voitu lukea: __ocs_fmt_0__
     .jogged-radius = Katkaistu säde
     .none-use-shortcuts-set-key-command =(ei mitään — käytä: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case =   Tasaus:

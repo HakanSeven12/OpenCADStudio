@@ -54,6 +54,8 @@ impl OpenCADStudio {
             Some(K::SaveDialog) => crate::tr!("modal", "save-drawing-as"),
             Some(K::Recovery) => crate::tr!("modal", "recovery-report"),
             Some(K::RecoveryPrompt) => crate::tr!("modal", "recovery-prompt"),
+            #[cfg(target_arch = "wasm32")]
+            Some(K::AutosaveRestore) => crate::t!("Recover Drawing").into_owned(),
             Some(K::GpuWarning) => crate::tr!("gpu", "title"),
             None => String::new(),
         }
@@ -1589,6 +1591,17 @@ impl OpenCADStudio {
                     )
                 })
             }
+            #[cfg(target_arch = "wasm32")]
+            super::super::ModalKind::AutosaveRestore => {
+                let name = self
+                    .web_autosave_pending
+                    .first()
+                    .map(|entry| entry.name.clone())
+                    .unwrap_or_default();
+                automatic_flow(ex, |flow| {
+                    autosave_restore_dialog_window(&name, flow)
+                })
+            }
         })
     }
 }
@@ -1750,6 +1763,40 @@ fn unsaved_changes_dialog_window(
                 dialog_button(t!("Discard"), Message::UnsavedDialogDiscard, button::danger),
                 iced::widget::Space::new().width(8),
                 dialog_button(t!("Cancel"), Message::UnsavedDialogCancel, button::secondary),
+            ],
+        ]
+        .spacing(0),
+    )
+    .style(dialog_body_style)
+    .center_x(sizing.width)
+    .center_y(sizing.height)
+    .padding([24, 28])
+    .into()
+}
+
+/// Web crash-recovery prompt: an autosave snapshot of `name` is newer than
+/// the drawing's last save. Restore opens it as a recovered tab; Discard
+/// deletes the snapshot. Mirrors the unsaved-changes dialog's layout.
+#[cfg(target_arch = "wasm32")]
+fn autosave_restore_dialog_window(
+    name: &str,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'static, Message> {
+    container(
+        column![
+            text(crate::tf!(
+                "\"{name}\" has an autosave copy newer than the last save."
+            ))
+            .size(14),
+            iced::widget::Space::new().height(4),
+            text(t!("Restore it as a recovered tab, or discard the copy."))
+                .size(12)
+                .style(dialog_muted_text_style),
+            iced::widget::Space::new().height(20),
+            row![
+                dialog_button(t!("Restore"), Message::WebAutosaveRestore, button::primary),
+                iced::widget::Space::new().width(8),
+                dialog_button(t!("Discard"), Message::WebAutosaveDiscard, button::danger),
             ],
         ]
         .spacing(0),

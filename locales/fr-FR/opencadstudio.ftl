@@ -261,6 +261,12 @@ command-copy =
         } | Réseau | Entrée=terminer | base { $x },{ $y }] :
 
 common =
+    .recover-drawing = Récupérer le dessin
+    .restore-it-as-a-recovered-tab-or-discard-the-copy = Restaurez-le dans un onglet récupéré ou supprimez la copie.
+    .name-has-an-autosave-copy-newer-than-the-last-save = «__ocs_fmt_0__» dispose d’une copie de sauvegarde automatique plus récente que le dernier enregistrement.
+    .autosave-copy-could-not-be-stored = Impossible de stocker la copie de sauvegarde automatique : __ocs_fmt_0__
+    .restored-from-the-autosave-copy = «__ocs_fmt_0__» restauré depuis la copie de sauvegarde automatique
+    .autosave-copy-could-not-be-read = Impossible de lire la copie de sauvegarde automatique : __ocs_fmt_0__
     .jogged-radius = Rayon raccourci
     .none-use-shortcuts-set-key-command = (aucune utilisation: SHORTCUTS SET <key> <command>)
     .alignment-indented-label-title-case = Alignement :

@@ -6281,7 +6281,6 @@ mod selection_preview_tests {
         };
         let before = vertices(&app);
         let height = before[3].y - before[0].y;
-        let width = before[1].x - before[0].x;
         for grip_id in 0..8 {
         let vertex = if grip_id < 4 { before[grip_id] }
             else { (before[grip_id - 4] + before[(grip_id - 3) % 4]) * 0.5 };
@@ -6294,10 +6293,10 @@ mod selection_preview_tests {
             let _ = app.on_viewport_move(Point::new(cursor.x, cursor.y));
             let after = vertices(&app);
             let (left, right, bottom, top) = match grip_id {
-                0 => (target.x, target.x + width, target.y, before[3].y),
+                0 => (target.x, before[1].x, target.y, before[3].y),
                 1 => (before[0].x, target.x, target.y, before[3].y),
-                2 => (before[0].x, target.x, target.y - height, target.y),
-                3 => (target.x, target.x + width, target.y - height, target.y),
+                2 => (before[0].x, target.x, before[0].y, target.y),
+                3 => (target.x, before[1].x, before[0].y, target.y),
                 4 => (before[0].x + offset[0], before[1].x + offset[0], target.y, before[3].y),
                 5 => (before[0].x, target.x, before[0].y + offset[1], before[3].y + offset[1]),
                 6 => (before[0].x + offset[0], before[1].x + offset[0], before[0].y, target.y),

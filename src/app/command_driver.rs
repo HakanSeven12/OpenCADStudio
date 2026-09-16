@@ -146,9 +146,27 @@ impl OpenCADStudio {
                     entity, target.handle, target.grip_id,
                 )).unwrap_or_default()
         }).collect();
+        let rectangle_vertex_resize = grip.targets.len() == 1
+            && grip.targets.first().is_some_and(|target| {
+                self.grip_originals
+                    .iter()
+                    .find(|(handle, _)| *handle == target.handle)
+                    .map(|(_, entity)| entity)
+                    .or_else(|| self.tabs[i].scene.document.get_entity(target.handle))
+                    .is_some_and(|entity| match entity {
+                        acadrust::EntityType::LwPolyline(polyline) => {
+                            target.grip_id < polyline.vertices.len()
+                                && crate::entities::lwpolyline::rectangle_frame(polyline).is_some()
+                        }
+                        _ => false,
+                    })
+            });
+        let retain_size = self.constraint_solve_mode
+            && !driven_refs.is_empty()
+            && !rectangle_vertex_resize;
         let solved = self.tabs[i].scene.solve_parametric_constraints_preview(
             &touched, &driven_refs,
-            self.constraint_solve_mode && !driven_refs.is_empty(), &self.grip_originals,
+            retain_size, &self.grip_originals,
         );
         for (handle, entity) in solved {
             if let Some(slot) = self.tabs[i].scene.document.get_entity_mut(handle) {

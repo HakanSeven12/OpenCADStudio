@@ -17,6 +17,15 @@ impl OpenCADStudio {
 
     pub(super) fn show_next_startup_modal(&mut self) {
         if self.active_modal.is_none() && self.opening.is_none() && self.pending_opens.is_empty() {
+            // A queued AutosaveRestore can outlive its pending list when a
+            // concurrent open displaces the modal and the entry is consumed
+            // meanwhile; resurfacing it would show an empty prompt.
+            #[cfg(target_arch = "wasm32")]
+            while self.pending_startup_modals.front() == Some(&ModalKind::AutosaveRestore)
+                && self.web_autosave_pending.is_empty()
+            {
+                self.pending_startup_modals.pop_front();
+            }
             if let Some(&kind) = self.pending_startup_modals.front() {
                 self.active_modal = Some(kind);
                 self.reset_modal_geometry();

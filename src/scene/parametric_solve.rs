@@ -1815,6 +1815,7 @@ fn solve_scope(
     driven_refs: &[ParametricRef],
     retain_size: bool,
     retain_lengths: bool,
+    fix_opposite_points: bool,
     retained_before: &HashMap<Handle, std::sync::Arc<EntityType>>,
 ) -> Option<SolveResult> {
     let params = if set.local_parameters.is_empty() {
@@ -1945,7 +1946,7 @@ fn solve_scope(
                 !editable.iter().any(|(_, _, vertical)| vertical == axis)));
             for (reference, line, vertical) in editable.iter().copied() {
                 let opposite = if group.contains(&line.p1) { line.p2 } else { line.p1 };
-                if !driven_points.contains(&opposite) {
+                if fix_opposite_points && !driven_points.contains(&opposite) {
                     let parameter = if *vertical { opposite.y } else { opposite.x };
                     // Only the along-edge coordinate stays fixed. The normal
                     // coordinate follows the grabbed point through the kernel.
@@ -1996,12 +1997,19 @@ fn solve_scope(
                 sys.add_constraint(Rc::new(Difference::new(a_param, b_param, target)));
             }
         }
-        for reference in driven_refs {
-            if matches!(document.get_entity(reference.entity), Some(EntityType::Line(_)))
-                && matches!(reference.marker, Some(0 | 1))
-                && !axis_lines.iter().any(|(line_ref, _, _)| line_ref.entity == reference.entity)
-            {
-                anchors.push(ParametricRef::point(reference.entity, 1 - reference.marker.unwrap()));
+        if fix_opposite_points {
+            for reference in driven_refs {
+                if matches!(document.get_entity(reference.entity), Some(EntityType::Line(_)))
+                    && matches!(reference.marker, Some(0 | 1))
+                    && !axis_lines
+                        .iter()
+                        .any(|(line_ref, _, _)| line_ref.entity == reference.entity)
+                {
+                    anchors.push(ParametricRef::point(
+                        reference.entity,
+                        1 - reference.marker.unwrap(),
+                    ));
+                }
             }
         }
     }
@@ -2823,6 +2831,7 @@ impl Scene {
                 driven_refs,
                 retain_size,
                 true,
+                true,
                 &retained_before,
             ) else {
                 continue;
@@ -2850,6 +2859,7 @@ impl Scene {
         touched: &[Handle],
         driven_refs: &[ParametricRef],
         retain_size: bool,
+        fix_opposite_points: bool,
         retained_originals: &[(Handle, EntityType)],
     ) -> Vec<(Handle, EntityType)> {
         if self.parametric_constraints.is_empty() || touched.is_empty() {
@@ -2878,6 +2888,7 @@ impl Scene {
                 driven_refs,
                 retain_size,
                 false,
+                fix_opposite_points,
                 &retained_before,
             )
             else {
@@ -2918,7 +2929,7 @@ mod tests {
             let Some(EntityType::Line(line)) = scene.document.get_entity_mut(handle) else { panic!("line") };
             if marker == 0 { line.start = target; } else { line.end = target; }
             let solved = scene.solve_parametric_constraints_preview(
-                &[handle], &[ParametricRef::point(handle, marker)], true, &originals);
+                &[handle], &[ParametricRef::point(handle, marker)], true, true, &originals);
             for (handle, entity) in solved {
                 *scene.document.get_entity_mut(handle).unwrap() = entity;
             }
@@ -3231,6 +3242,7 @@ mod tests {
         let solved = scene.solve_parametric_constraints_preview(
             &[a],
             &[ParametricRef::point(a, 0), ParametricRef::point(a, 1)],
+            true,
             true,
             &[(a, a_before)],
         );

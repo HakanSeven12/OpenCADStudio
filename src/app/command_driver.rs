@@ -124,10 +124,11 @@ impl OpenCADStudio {
         grip: &crate::scene::pick::grip::GripEdit,
     ) {
         let touched: Vec<_> = grip.targets.iter().map(|target| target.handle).collect();
+        let scope = self.tabs[i].current_parametric_scope();
         let connected = self.tabs[i].scene.parametric_connected_handles(
-            self.tabs[i].current_parametric_scope(), &touched, true,
+            scope, &touched, true,
         );
-        for handle in connected {
+        for &handle in &connected {
             if !self.grip_originals.iter().any(|(original, _)| *original == handle) {
                 if let Some(entity) = self.tabs[i].scene.document.get_entity(handle).cloned() {
                     self.grip_originals.push((handle, entity));
@@ -161,12 +162,55 @@ impl OpenCADStudio {
                         _ => false,
                     })
             });
+        let linked_tangent_endpoint_resize = driven_refs
+            .iter()
+            .any(|reference| matches!(reference.marker, Some(0 | 1)))
+            && self.tabs[i]
+                .scene
+                .parametric_constraint_set(scope)
+                .is_some_and(|set| {
+                    let in_component = |handle| connected.contains(&handle);
+                    let tangent_count = set
+                        .constraints
+                        .iter()
+                        .filter(|constraint| {
+                            constraint.enabled
+                                && constraint.kind
+                                    == crate::scene::parametric_constraints::ConstraintKind::Tangent
+                                && constraint
+                                    .refs
+                                    .iter()
+                                    .all(|reference| in_component(reference.entity))
+                        })
+                        .count();
+                    let equal_round_curves = set.constraints.iter().any(|constraint| {
+                        constraint.enabled
+                            && constraint.kind
+                                == crate::scene::parametric_constraints::ConstraintKind::Equal
+                            && constraint.refs.len() == 2
+                            && constraint.refs.iter().all(|reference| {
+                                in_component(reference.entity)
+                                    && matches!(
+                                        self.tabs[i]
+                                            .scene
+                                            .document
+                                            .get_entity(reference.entity),
+                                        Some(
+                                            acadrust::EntityType::Arc(_)
+                                                | acadrust::EntityType::Circle(_)
+                                        )
+                                    )
+                            })
+                    });
+                    tangent_count >= 2 && equal_round_curves
+                });
         let retain_size = self.constraint_solve_mode
             && !driven_refs.is_empty()
-            && !rectangle_vertex_resize;
+            && !rectangle_vertex_resize
+            && !linked_tangent_endpoint_resize;
         let solved = self.tabs[i].scene.solve_parametric_constraints_preview(
             &touched, &driven_refs,
-            retain_size, &self.grip_originals,
+            retain_size, !linked_tangent_endpoint_resize, &self.grip_originals,
         );
         for (handle, entity) in solved {
             if let Some(slot) = self.tabs[i].scene.document.get_entity_mut(handle) {

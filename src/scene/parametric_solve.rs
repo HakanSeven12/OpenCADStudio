@@ -1977,12 +1977,17 @@ fn solve_scope(
                     }
                     sys.store_mut().set_driven(opposite.x, true);
                     sys.store_mut().set_driven(opposite.y, true);
-                    // The cursor component rejected by the anchored leg still
-                    // controls the component's remaining horizontal/vertical
-                    // degree of freedom. Transfer it to the parallel mate in
-                    // the opposite direction: the fixed corner stays exact,
-                    // while all three unfixed corners can respond to the drag.
-                    if dragged_normal_delta.abs() > f64::EPSILON {
+                    // For the diagonally opposite corner of a four-sided
+                    // constrained polyline, the far corner is fixed. Preserve
+                    // the rejected normal cursor component by moving only the
+                    // opposite parallel edge in the inverse direction.
+                    let rectangle_entity = retained_before.get(&reference.entity).is_some_and(|entity| {
+                        matches!(entity.as_ref(), EntityType::LwPolyline(polyline)
+                            if polyline.is_closed && polyline.vertices.len() == 4)
+                            || matches!(entity.as_ref(), EntityType::Polyline2D(polyline)
+                                if polyline.is_closed() && polyline.vertices.len() == 4)
+                    });
+                    if rectangle_entity && dragged_normal_delta.abs() > f64::EPSILON {
                         let paired_reference = set.constraints.iter().find_map(|constraint| {
                             (constraint.enabled
                                 && constraint.kind == ConstraintKind::Parallel
@@ -1990,10 +1995,7 @@ fn solve_scope(
                             .then(|| constraint.refs.iter().copied()
                                 .find(|candidate| *candidate != *reference))
                             .flatten()
-                        }).or_else(|| axis_lines.iter().find_map(|(candidate, _, candidate_vertical)| {
-                            (*candidate != *reference && *candidate_vertical == *vertical)
-                                .then_some(*candidate)
-                        }));
+                        });
                         if let Some(paired_reference) = paired_reference {
                             if let Some((_, paired_line, paired_vertical)) = axis_lines.iter()
                                 .find(|(candidate, _, _)| *candidate == paired_reference)
@@ -2082,44 +2084,18 @@ fn solve_scope(
             // edge crosses zero length; cross-product equations do not.
             let (a, b) = if *vertical { (line.p1.x, line.p2.x) } else { (line.p1.y, line.p2.y) };
             sys.add_constraint(Rc::new(Equal::new(a, b, 1.0)));
-            let paired_dragged_edge = set.constraints.iter().find_map(|c| {
-                (c.enabled && c.kind == ConstraintKind::Parallel && c.refs.contains(reference))
-                    .then(|| c.refs.iter().copied()
-                        .find(|other| *other != *reference && driven_refs.contains(other)))
-                    .flatten()
+            let paired_edge_is_dragged = set.constraints.iter().any(|c| {
+                c.enabled && c.kind == ConstraintKind::Parallel && c.refs.contains(reference)
+                    && c.refs.iter().any(|other| other != reference && driven_refs.contains(other))
             });
-            if let Some(dragged_reference) = paired_dragged_edge
-                .filter(|_| !driven_refs.contains(reference))
-            {
-                // A constrained edge-midpoint grip offsets its edge only in
-                // the normal direction. The opposite edge is the complete
-                // temporary reference, and the selected edge's along-edge
-                // cursor component is released before the anchor pass.
+            if paired_edge_is_dragged && !driven_refs.contains(reference) {
+                // Moving a whole edge changes its separation from the opposite
+                // parallel edge, whose normal coordinate remains the reference.
                 if let Some(original) = retained_before.get(&reference.entity) {
                     let points = super::dimension_assoc::source_points(original);
-                    let start = reference.segment_index().unwrap_or(0);
-                    let end = (start + 1) % points.len().max(1);
-                    if let (Some(original_start), Some(original_end)) =
-                        (points.get(start), points.get(end))
-                    {
-                        for (parameter, value) in [
-                            (line.p1.x, original_start.x),
-                            (line.p1.y, original_start.y),
-                            (line.p2.x, original_end.x),
-                            (line.p2.y, original_end.y),
-                        ] {
-                            sys.store_mut().set(parameter, value);
-                            sys.store_mut().set_driven(parameter, true);
-                        }
-                    }
-                }
-                if let Some((_, dragged_line, dragged_vertical)) = axis_lines.iter()
-                    .find(|(candidate, _, _)| *candidate == dragged_reference)
-                {
-                    if *dragged_vertical {
-                        released_driver_params.extend([dragged_line.p1.y, dragged_line.p2.y]);
-                    } else {
-                        released_driver_params.extend([dragged_line.p1.x, dragged_line.p2.x]);
+                    if let Some(point) = points.get(reference.segment_index().unwrap_or(0)) {
+                        sys.store_mut().set(a, if *vertical { point.x } else { point.y });
+                        sys.store_mut().set_driven(a, true);
                     }
                 }
             }

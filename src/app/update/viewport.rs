@@ -6318,15 +6318,30 @@ mod selection_preview_tests {
                     ),
                     2 => (before[0].x, target.x, target.y - height, target.y),
                     3 => (target.x, target.x + width, target.y - height, target.y),
-                    4 => (before[0].x, before[1].x, target.y, before[3].y),
+                    4 => (
+                        before[0].x + offset[0],
+                        before[1].x + offset[0],
+                        target.y,
+                        before[3].y,
+                    ),
                     5 => (
                         before[0].x,
                         target.x,
-                        before[0].y,
-                        before[3].y,
+                        before[0].y + offset[1],
+                        before[3].y + offset[1],
                     ),
-                    6 => (before[0].x, before[1].x, before[0].y, target.y),
-                    7 => (target.x, before[1].x, before[0].y, before[3].y),
+                    6 => (
+                        before[0].x + offset[0],
+                        before[1].x + offset[0],
+                        before[0].y,
+                        target.y,
+                    ),
+                    7 => (
+                        target.x,
+                        before[1].x,
+                        before[0].y + offset[1],
+                        before[3].y + offset[1],
+                    ),
                     _ => unreachable!(),
                 };
                 let expected = [

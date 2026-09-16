@@ -846,12 +846,15 @@ impl OpenCADStudio {
                 // not be clobbered (its bytes are gone once dequeued), so the
                 // entry goes back to the queue for the next poll tick.
                 if self.opening.is_some() {
-                    match restore_key {
+                    // A full queue rejects the bytes here; io-side console
+                    // warning only (the drop path has no user-facing
+                    // surface for rejections by design — see QUEUE_CAP).
+                    let _ = match restore_key {
                         Some(key) => {
                             crate::io::web_drop::enqueue_restore(name, bytes, key)
                         }
                         None => crate::io::web_drop::enqueue_open(name, bytes),
-                    }
+                    };
                     return Task::none();
                 }
                 let state = std::sync::Arc::new(crate::io::OpenProgressState::new(
@@ -1021,6 +1024,8 @@ impl OpenCADStudio {
             Message::WebAutosaveRestore => self.on_web_autosave_restore(),
             #[cfg(target_arch = "wasm32")]
             Message::WebAutosaveDiscard => self.on_web_autosave_discard(),
+            #[cfg(target_arch = "wasm32")]
+            Message::WebAutosaveDefer => self.on_web_autosave_defer(),
             #[cfg(target_arch = "wasm32")]
             Message::WebAutosaveBytes(name, key, result) => {
                 self.on_web_autosave_bytes(name, key, result)
@@ -7121,11 +7126,13 @@ impl OpenCADStudio {
                 if self.active_modal == Some(super::ModalKind::RecoveryPrompt) {
                     return self.update(Message::RecoveryDecline);
                 }
-                // Closing the crash-recovery prompt (✕ or Escape) discards
-                // the offered snapshot — otherwise it would requeue itself.
+                // Closing the crash-recovery prompt (✕ or Escape) DEFERS:
+                // one stray keystroke must not delete the only recovery
+                // copy, so the snapshot survives and is re-offered on the
+                // next boot. Only the Discard button deletes.
                 #[cfg(target_arch = "wasm32")]
                 if self.active_modal == Some(super::ModalKind::AutosaveRestore) {
-                    return self.update(Message::WebAutosaveDiscard);
+                    return self.update(Message::WebAutosaveDefer);
                 }
                 // Closing the shortcut editor with un-applied rows needs an
                 // explicit discard; a second close attempt (or the overlay's

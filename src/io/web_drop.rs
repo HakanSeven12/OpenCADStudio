@@ -12,7 +12,8 @@ use wasm_bindgen_futures::JsFuture;
 
 /// A stray multi-drop must not grow the queue without bound; extras are
 /// rejected with a console warning instead of being silently dropped.
-const QUEUE_CAP: usize = 8;
+/// Entries are just name+bytes; 32 drawings is a realistic folder drop.
+const QUEUE_CAP: usize = 32;
 
 /// One queued open. `restore_key` tags an autosave-restore file so its
 /// snapshot is deleted only when THIS open succeeds — matching by identity,
@@ -41,7 +42,9 @@ fn lock_queue() -> std::sync::MutexGuard<'static, VecDeque<QueuedOpen>> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn push(entry: QueuedOpen) {
+/// Returns `false` (after a console warning) when the queue is full and the
+/// entry was NOT stored — the caller decides how to surface the loss.
+fn push(entry: QueuedOpen) -> bool {
     let name = entry.name.clone();
     let mut queue = lock_queue();
     if queue.len() >= QUEUE_CAP {
@@ -49,35 +52,40 @@ fn push(entry: QueuedOpen) {
         warn(&format!(
             "ocs: dropped-file queue full; ignoring \"{name}\""
         ));
-        return;
+        return false;
     }
     queue.push_back(entry);
+    true
 }
 
 /// Queue already-read drawing bytes (drag-and-drop) for the 50 ms poll to
-/// open through the guarded web-picker flow.
-pub fn enqueue_open(name: String, bytes: Vec<u8>) {
+/// open through the guarded web-picker flow. Returns `false` when the queue
+/// is full and the bytes were dropped.
+pub fn enqueue_open(name: String, bytes: Vec<u8>) -> bool {
     push(QueuedOpen {
         name,
         bytes,
         restore_key: None,
-    });
+    })
 }
 
-/// Queue an autosave-restore file tagged with its snapshot key.
-pub fn enqueue_restore(name: String, bytes: Vec<u8>, restore_key: String) {
+/// Queue an autosave-restore file tagged with its snapshot key. Returns
+/// `false` when the queue is full and the bytes were dropped (the OPFS
+/// snapshot survives; the caller must not wait for an open that will
+/// never start).
+pub fn enqueue_restore(name: String, bytes: Vec<u8>, restore_key: String) -> bool {
     push(QueuedOpen {
         name,
         bytes,
         restore_key: Some(restore_key),
-    });
+    })
 }
 
 /// JS-callable entry (same shape as `ocs_control_submit`) for hosts that
 /// forward drops themselves.
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub fn ocs_web_drop_file(name: String, bytes: js_sys::Uint8Array) {
-    enqueue_open(name, bytes.to_vec());
+    let _ = enqueue_open(name, bytes.to_vec());
 }
 
 /// Pop the oldest dropped file that the poll has not started opening yet.
@@ -179,7 +187,10 @@ pub fn install() {
                 for (name, read) in reads {
                     match JsFuture::from(read).await {
                         Ok(buffer) => {
-                            enqueue_open(name, js_sys::Uint8Array::new(&buffer).to_vec())
+                            // A full queue warns on the console; the drop
+                            // handler has no command line to talk to.
+                            let _ =
+                                enqueue_open(name, js_sys::Uint8Array::new(&buffer).to_vec());
                         }
                         Err(error) => {
                             web_sys::console::error_1(&wasm_bindgen::JsValue::from_str(&format!(
@@ -203,7 +214,11 @@ pub fn install() {
 }
 
 fn is_drawing_name(name: &str) -> bool {
-    name.rsplit_once('.').is_some_and(|(_, extension)| {
-        matches!(extension.to_ascii_lowercase().as_str(), "dwg" | "dxf")
-    })
+    // Same convention as the worker's reader dispatch (`rsplit('.').next()`):
+    // a dot-less name is its own extension, so a file literally named
+    // "DWG"/"dxf" parses and must not be filtered out here.
+    matches!(
+        name.rsplit('.').next().unwrap_or_default().to_ascii_lowercase().as_str(),
+        "dwg" | "dxf"
+    )
 }

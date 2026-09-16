@@ -995,6 +995,19 @@ impl OpenCADStudio {
         // Native: pick a path, then load on a worker thread. Web: the
         // browser hands back bytes, so pick + parse in one step and feed
         // the shared `FileOpened` handler directly.
+        // Web guard: a second open (Ctrl+O, the OPEN command, host
+        // automation) while a drop/restore/picker open is still in flight
+        // would overwrite `self.opening` — the in-flight open's
+        // `WebFileOpened` then misses the id check and its bytes are lost,
+        // and any pending restore prompt stalls for the session. Native
+        // keeps the old behaviour: its `OpenPathPicked` round-trip is
+        // guarded downstream.
+        #[cfg(target_arch = "wasm32")]
+        if self.opening.is_some() {
+            self.command_line
+                .push_info(crate::tf!("An open is already in progress.").as_ref());
+            return Task::none();
+        }
         #[cfg(not(target_arch = "wasm32"))]
         {
             Task::perform(crate::io::pick_open_path(), Message::OpenPathPicked)
@@ -1908,12 +1921,7 @@ impl OpenCADStudio {
         let mut recent_task = Task::none();
         // The name the autosave snapshot for this tab is keyed by — capture it
         // before the save re-points `current_path` at the download name.
-        let autosave_key = self.tabs[i]
-            .current_path
-            .as_ref()
-            .and_then(|path| path.file_name())
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| self.tabs[i].tab_display_name());
+        let autosave_key = Self::web_autosave_key(&self.tabs[i]);
         let saved = match crate::io::save_to_bytes(&self.tabs[i].scene.document, &ext, version) {
             Ok(bytes) => {
                 crate::sys::download_bytes(&filename, &bytes);
@@ -2881,6 +2889,21 @@ impl OpenCADStudio {
         }
     }
 
+    /// The OPFS autosave snapshot key for `tab`: the drawing's display name
+    /// (the recent copy's name), or the tab title for untitled tabs — the
+    /// single derivation every web snapshot/remove site must agree on, or a
+    /// remove misses the snapshot a round wrote (and vice versa).
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn web_autosave_key(
+        tab: &crate::app::document::DocumentTab,
+    ) -> String {
+        tab.current_path
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| tab.tab_display_name())
+    }
+
     /// Periodic autosave (SAVETIME): write a `.sv$` recovery copy for every
     /// dirty tab — beside the file if it's saved, else under the temp dir — at
     /// the document's own DWG version. Best-effort and non-destructive: it never
@@ -2936,12 +2959,7 @@ impl OpenCADStudio {
             // Key by the drawing's display name (the recent copy's name), so
             // the boot scan can compare the two; untitled tabs use the tab
             // title, which is what Save would download as.
-            let name = tab
-                .current_path
-                .as_ref()
-                .and_then(|path| path.file_name())
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| tab.tab_display_name());
+            let name = Self::web_autosave_key(tab);
             let is_dxf = crate::io::source_is_dxf(tab.current_path.as_deref(), &tab.scene.document);
             let ext = if is_dxf { "dxf" } else { "dwg" }.to_string();
             let version = tab.scene.document.version;
@@ -3081,6 +3099,21 @@ impl OpenCADStudio {
         Task::none()
     }
 
+    /// Defer the offered snapshot (Escape/✕ on the restore modal): unlike
+    /// Discard the OPFS copy is NOT removed — one stray keystroke must not
+    /// destroy the only recovery copy — it is simply re-offered on the next
+    /// boot. The prompt moves on to the next queued snapshot, if any.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn on_web_autosave_defer(&mut self) -> Task<Message> {
+        if !self.web_autosave_pending.is_empty() {
+            self.web_autosave_pending.remove(0);
+        }
+        if self.web_autosave_pending.is_empty() {
+            self.close_active_modal();
+        }
+        Task::none()
+    }
+
     /// The offered snapshot's bytes arrived (or did not). On success the
     /// bytes ride the 50 ms poll's guarded open queue — the poll starts an
     /// open only when the slot is free, so the recovered drawing can
@@ -3101,7 +3134,19 @@ impl OpenCADStudio {
                 // (`web_autosave_opened` / the failure hook), not here — the
                 // poll has not started the open yet, so queueing now would
                 // show the modal before the recovered drawing loads.
-                crate::io::web_drop::enqueue_restore(open_name, bytes, key);
+                // Exception: a rejected enqueue (queue full) means no open
+                // will ever start for these bytes, so the prompt cycle must
+                // continue here or stall for the session. The snapshot
+                // survives in OPFS and is re-offered on the next boot.
+                if !crate::io::web_drop::enqueue_restore(open_name, bytes, key) {
+                    self.command_line.push_warning(
+                        crate::tf!(
+                            "Autosave copy could not be queued: too many pending opens"
+                        )
+                        .as_ref(),
+                    );
+                    self.queue_next_web_autosave_prompt();
+                }
                 Task::none()
             }
             Err(error) => {
@@ -3128,30 +3173,39 @@ impl OpenCADStudio {
 
     /// Delete the `.sv$` autosave recovery files for all open drawings. They
     /// exist only to survive a crash, so a clean save or exit removes them.
-    pub(in crate::app) fn cleanup_autosaves(&self) {
+    pub(in crate::app) fn cleanup_autosaves(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
         for i in 0..self.tabs.len() {
             let _ = std::fs::remove_file(self.autosave_target(i));
         }
-        // Web counterpart: drop each open tab's OPFS snapshot. A tab close is
-        // not an exit, so this only runs on the explicit exit path; anything
-        // the teardown race leaves behind is caught by the next boot scan.
+        // Web counterpart: drop each open tab's OPFS snapshot, plus any
+        // removes a save deferred while a snapshot round was still writing.
+        // A tab close is not an exit, so this only runs on the explicit exit
+        // path; anything the teardown race leaves behind is caught by the
+        // next boot scan.
         #[cfg(target_arch = "wasm32")]
-        for tab in &self.tabs {
-            let name = tab
-                .current_path
-                .as_ref()
-                .and_then(|path| path.file_name())
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| tab.tab_display_name());
+        {
+            let mut keys = std::mem::take(&mut self.web_autosave_clear_after);
+            // An in-flight round may still be writing snapshots right now;
+            // its late writes would land AFTER these removes and resurrect
+            // exactly what was removed, so the per-tab sweep is pointless in
+            // that race — skip it entirely (the boot scan bounds leftovers:
+            // `SNAPSHOT_CAP` eviction discards the oldest overflow).
+            if !self.web_autosave_in_flight {
+                for tab in &self.tabs {
+                    keys.push(Self::web_autosave_key(tab));
+                }
+            }
             wasm_bindgen_futures::spawn_local(async move {
-                let _ = crate::io::web_autosave::remove(&name).await;
+                for key in &keys {
+                    let _ = crate::io::web_autosave::remove(key).await;
+                }
             });
         }
     }
 
     /// Remove the autosave recovery files, then quit the application.
-    pub(in crate::app) fn exit_app(&self) -> Task<Message> {
+    pub(in crate::app) fn exit_app(&mut self) -> Task<Message> {
         self.cleanup_autosaves();
         iced::exit()
     }

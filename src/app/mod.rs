@@ -2034,6 +2034,11 @@ pub enum Message {
     /// Web: delete the offered autosave snapshot (and offer the next, if any).
     #[cfg(target_arch = "wasm32")]
     WebAutosaveDiscard,
+    /// Web: close the restore prompt WITHOUT deleting the offered snapshot
+    /// (Escape/✕): it is simply re-offered on the next boot. Only the
+    /// Discard button deletes.
+    #[cfg(target_arch = "wasm32")]
+    WebAutosaveDefer,
     /// Web: the offered snapshot's bytes are in; queue them for the guarded
     /// open poll. The OPFS copy is consumed only once that open succeeds.
     #[cfg(target_arch = "wasm32")]

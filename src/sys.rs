@@ -385,9 +385,11 @@ pub fn show_pdf_preview(name: &str, pdf_bytes: &[u8], page_pngs: &[Vec<u8>], tot
     let Some(document) = window.document() else {
         return;
     };
-    // One preview at a time: a replotted preview replaces its predecessor and
-    // revokes its blob URLs, so repeated previews cannot stack overlays or
-    // leak the images underneath.
+    // One preview at a time: a replotted preview replaces its predecessor,
+    // revokes its blob URLs and DROPS its Download closure (freeing the full
+    // PDF copy the closure captured — a `forget()` would leak one per
+    // preview), so repeated previews cannot stack overlays or leak the
+    // images underneath.
     const OVERLAY_ID: &str = "ocs-plot-preview";
     if let Some(previous) = document.get_element_by_id(OVERLAY_ID) {
         previous.remove();
@@ -399,6 +401,11 @@ pub fn show_pdf_preview(name: &str, pdf_bytes: &[u8], page_pngs: &[Vec<u8>], tot
     {
         let _ = web_sys::Url::revoke_object_url(&url);
     }
+    // Take the previous closure out so it destructs BEFORE the new preview
+    // stores its own: removing the overlay element already released the JS
+    // handler reference, so this drop is the last one and actually frees
+    // the captured bytes.
+    drop(PREVIEW_DOWNLOAD_CLOSURE.with(|slot| slot.borrow_mut().take()));
     if page_pngs.is_empty() {
         // Rasterisation produced nothing: deliver the PDF itself rather than
         // show an empty frame.
@@ -501,13 +508,16 @@ pub fn show_pdf_preview(name: &str, pdf_bytes: &[u8], page_pngs: &[Vec<u8>], tot
         let name = name.to_string();
         let bytes = pdf_bytes.to_vec();
         // A plain FnMut stays usable for every click; the one-shot variant
-        // throws on the second click, and users click Download twice.
+        // throws on the second click, and users click Download twice. The
+        // closure is HELD in a registry (not `forget()`ed): replacing or
+        // closing the overlay drops it and frees the captured PDF copy,
+        // while the cloned JS function keeps the live handler working.
         let closure: wasm_bindgen::closure::Closure<dyn FnMut()> =
             wasm_bindgen::closure::Closure::new(move || {
                 download_bytes(&name, &bytes);
             });
         let click: js_sys::Function = closure.as_ref().unchecked_ref::<js_sys::Function>().clone();
-        closure.forget();
+        PREVIEW_DOWNLOAD_CLOSURE.with(|slot| *slot.borrow_mut() = Some(closure));
         dl.set_onclick(Some(&click));
         bar.append_child(&dl).ok();
     }
@@ -541,6 +551,20 @@ pub fn show_pdf_preview(name: &str, pdf_bytes: &[u8], page_pngs: &[Vec<u8>], tot
 fn preview_urls() -> &'static std::sync::Mutex<Vec<String>> {
     static URLS: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> = std::sync::OnceLock::new();
     URLS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+// The live preview overlay's Download-button closure. The closure captures
+// a full copy of the PDF bytes, so `forget()`-ing it would leak one PDF per
+// preview; holding it here lets the next `show_pdf_preview` drop and free
+// the previous one (the overlay element's removal already released the JS
+// handler reference). A thread-local `RefCell` rather than a static
+// `Mutex` like `preview_urls`: `Closure` is not `Send`, and the overlay
+// only ever lives on the one UI thread.
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static PREVIEW_DOWNLOAD_CLOSURE:
+        std::cell::RefCell<Option<wasm_bindgen::closure::Closure<dyn FnMut()>>> =
+        std::cell::RefCell::new(None);
 }
 
 /// Short platform string for bug reports: OS + architecture on the desktop,

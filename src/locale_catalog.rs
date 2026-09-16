@@ -4608,6 +4608,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Autosave copy could not be stored: {error}" => Some(("common", "autosave-copy-could-not-be-stored")),
         "Restored \"{}\" from the autosave copy" => Some(("common", "restored-from-the-autosave-copy")),
         "Autosave copy could not be read: {error}" => Some(("common", "autosave-copy-could-not-be-read")),
+        "An open is already in progress." => Some(("common", "an-open-is-already-in-progress")),
+        "Autosave copy could not be queued: too many pending opens" => Some(("common", "autosave-copy-could-not-be-queued-too-many-pending-opens")),
         _ => None,
     }
 }

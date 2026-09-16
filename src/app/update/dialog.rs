@@ -205,6 +205,23 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                         // Discarded — drop this tab's autosave recovery copy.
                         #[cfg(not(target_arch = "wasm32"))]
                         let _ = std::fs::remove_file(self.autosave_target(idx));
+                        // Web counterpart: the OPFS snapshot must go too, or
+                        // the drawing the user just declined to save is
+                        // offered back at the next boot. A snapshot round
+                        // still writing this tab's key would resurrect it
+                        // after the remove, so defer to the round's end
+                        // (the same guard the save flow uses).
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            let key = Self::web_autosave_key(&self.tabs[idx]);
+                            if self.web_autosave_in_flight {
+                                self.web_autosave_clear_after.push(key);
+                            } else {
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    let _ = crate::io::web_autosave::remove(&key).await;
+                                });
+                            }
+                        }
                         if self.tabs.len() == 1 {
                             self.tab_counter += 1;
                             self.tabs[0] =

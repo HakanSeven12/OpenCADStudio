@@ -83,24 +83,44 @@ pub(crate) fn cap_evictions(
     (entries, evicted)
 }
 
+/// The marker `recovered_name` appends (and strips when it is already
+/// there, so it never stacks across crash cycles).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // unit-tested on native
+const RECOVERED_MARKER: &str = " (recovered)";
+
 /// The name a restored drawing carries as a tab and download: the drawing's
-/// stem plus " (recovered)" and its own extension (DWG when the stored name
-/// has none, matching how autosave serializes untitled tabs). The extension
-/// must survive intact because the web parser picks the format from it.
+/// stem plus " (recovered)" and its own extension. The extension split
+/// follows the WORKER convention (`name.rsplit('.').next()`, the whole name
+/// when there is no dot): a dot-file like ".dxf" is a DXF name to the parse
+/// worker, and `Path::extension` would misread it as extensionless —
+/// restoring DXF bytes under a ".dwg" name jams the restore door. A name
+/// with no extension at all defaults to DXF, matching how autosave
+/// serializes untitled tabs (`source_is_dxf` → `dwg_source_version.is_none()`).
+/// An existing trailing marker is stripped first, so "(recovered)" stacks
+/// at most once no matter how many crash cycles re-snapshotted a previously
+/// recovered name.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // unit-tested on native
 pub(crate) fn recovered_name(drawing: &str) -> String {
-    let path = std::path::Path::new(drawing);
-    let stem = path
-        .file_stem()
-        .map(|stem| stem.to_string_lossy().into_owned())
-        .filter(|stem| !stem.is_empty())
-        .unwrap_or_else(|| drawing.to_string());
-    let ext = path
-        .extension()
-        .map(|ext| ext.to_string_lossy().into_owned())
-        .filter(|ext| !ext.is_empty())
-        .unwrap_or_else(|| "dwg".to_string());
-    format!("{stem} (recovered).{ext}")
+    let (head, ext) = match drawing.rsplit_once('.') {
+        Some((head, ext)) if !ext.is_empty() => (head, ext.to_string()),
+        // No dot (or a trailing one): the whole name is the stem.
+        _ => (drawing, "dxf".to_string()),
+    };
+    // A hostile stored name must not smuggle path separators into the tab
+    // title / download name: keep only the final component of the head.
+    let head = head.rsplit(['/', '\\']).next().unwrap_or_default();
+    // When the split consumed everything (".dxf") fall back to the whole
+    // stored name, like `Path::file_stem`'s empty-stem fallback did.
+    let mut stem = if head.is_empty() {
+        drawing
+    } else {
+        head
+    };
+    // Idempotent: strip every trailing marker, then append exactly one.
+    while let Some(stripped) = stem.strip_suffix(RECOVERED_MARKER) {
+        stem = stripped;
+    }
+    format!("{stem}{RECOVERED_MARKER}.{ext}")
 }
 
 /// Overwrite (or create) the snapshot for `name`. The optional thumbnail is
@@ -108,7 +128,7 @@ pub(crate) fn recovered_name(drawing: &str) -> String {
 #[cfg(target_arch = "wasm32")]
 pub async fn snapshot(name: &str, bytes: &[u8], thumbnail: Option<&[u8]>) -> Result<(), String> {
     let directory = autosave_directory(true).await?;
-    let mut names = read_index(&directory).await;
+    let mut names = read_index(&directory).await?;
     if !names.iter().any(|stored| stored == name) {
         names.push(name.to_string());
         write_index(&directory, &names).await?;
@@ -140,7 +160,9 @@ pub async fn remove(name: &str) -> Result<(), String> {
         .await
         .map_err(super::web_recent::js_error);
     let _ = JsFuture::from(directory.remove_entry(&thumbnail_key(name))).await;
-    let mut names = read_index(&directory).await;
+    // A corrupt index must abort the rewrite (not reset it to `names`),
+    // or this remove would orphan every other row's snapshot.
+    let mut names = read_index(&directory).await?;
     let before = names.len();
     names.retain(|stored| stored != name);
     if names.len() != before {
@@ -161,7 +183,9 @@ pub async fn scan() -> Result<Vec<WebAutosaveEntry>, String> {
     let directory = autosave_directory(false).await?;
     let mut entries = Vec::new();
     let mut dead: Vec<String> = Vec::new();
-    for name in read_index(&directory).await {
+    // An unreadable index fails the whole boot scan: guessing an empty list
+    // would cap-evict and remove snapshots the index can no longer name.
+    for name in read_index(&directory).await? {
         let file = match super::web_recent::get_file(&directory, &snapshot_key(&name)).await {
             Ok(file) => file,
             // Crash between the index and snapshot writes: the row points
@@ -212,12 +236,23 @@ fn thumbnail_key(name: &str) -> String {
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn read_index(directory: &web_sys::FileSystemDirectoryHandle) -> Vec<String> {
-    super::web_recent::read_entry(directory, INDEX_KEY)
-        .await
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+async fn read_index(
+    directory: &web_sys::FileSystemDirectoryHandle,
+) -> Result<Vec<String>, String> {
+    let bytes = match super::web_recent::read_entry(directory, INDEX_KEY).await {
+        Ok(bytes) => bytes,
+        // A missing index is a fresh store.
+        Err(_) => return Ok(Vec::new()),
+    };
+    // An empty (freshly created or truncated) index is an empty store.
+    if bytes.is_empty() {
+        return Ok(Vec::new());
+    }
+    // A non-empty file that fails to parse is real data we cannot name:
+    // returning it as empty would let the next write reset the index and
+    // silently orphan every other row's snapshot. Surface the failure so
+    // callers skip the round/boot and leave the file untouched.
+    serde_json::from_slice(&bytes).map_err(|error| error.to_string())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -266,10 +301,42 @@ mod tests {
     fn recovered_names_keep_a_parseable_extension() {
         assert_eq!(recovered_name("plan.dwg"), "plan (recovered).dwg");
         assert_eq!(recovered_name("sketch.dxf"), "sketch (recovered).dxf");
-        assert_eq!(recovered_name("Drawing1"), "Drawing1 (recovered).dwg");
+        // Extensionless names (untitled tabs) restore as DXF: that is what
+        // autosave serializes them as (`source_is_dxf` → no DWG source
+        // version), and the parse worker dispatches on the final extension.
+        assert_eq!(recovered_name("Drawing1"), "Drawing1 (recovered).dxf");
         // Multi-dot names keep everything but the final extension in the stem.
         assert_eq!(recovered_name("a.b.dwg"), "a.b (recovered).dwg");
-        assert_eq!(recovered_name(""), " (recovered).dwg");
+        // A dot-file like ".dxf" is a DXF name under the worker's
+        // `rsplit('.')` convention — the extension must not flip to dwg.
+        assert_eq!(recovered_name(".dxf"), ".dxf (recovered).dxf");
+        assert_eq!(recovered_name(".dwg"), ".dwg (recovered).dwg");
+        assert_eq!(recovered_name(""), " (recovered).dxf");
+    }
+
+    #[test]
+    fn the_recovered_marker_never_stacks() {
+        // Restoring sets the tab name to the recovered name; a later
+        // autosave round snapshots under it. One marker per drawing:
+        assert_eq!(
+            recovered_name("plan (recovered).dwg"),
+            "plan (recovered).dwg"
+        );
+        // Idempotent even for names that already stacked (old cycles).
+        assert_eq!(
+            recovered_name("plan (recovered) (recovered).dwg"),
+            "plan (recovered).dwg"
+        );
+        // Extensionless stacked names de-stack too, then gain ".dxf".
+        assert_eq!(
+            recovered_name("plan (recovered)"),
+            "plan (recovered).dxf"
+        );
+        // A marker embedded in the middle (not a suffix) is left alone.
+        assert_eq!(
+            recovered_name("(recovered) plan.dwg"),
+            "(recovered) plan (recovered).dwg"
+        );
     }
 
     #[test]

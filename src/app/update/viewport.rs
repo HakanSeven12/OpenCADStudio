@@ -6310,7 +6310,7 @@ mod selection_preview_tests {
                 let after = vertices(&app);
                 let (left, right, bottom, top) = match grip_id {
                     0 => (target.x, before[1].x, target.y, target.y + height),
-                    1 => (before[0].x, target.x, target.y, before[3].y),
+                    1 => (before[0].x, before[1].x, target.y, before[3].y),
                     2 => (before[0].x, target.x, target.y - height, target.y),
                     3 => (target.x, target.x + width, target.y - height, target.y),
                     4 => (

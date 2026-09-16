@@ -1887,6 +1887,7 @@ fn solve_scope(
     }
 
     let mut anchors = driven_refs.to_vec();
+    let mut released_driver_params = HashSet::new();
     if !retain_lengths {
         let mut axis_lines: Vec<_> = line_axes.into_iter().filter_map(|(reference, vertical)| {
             let geometry = cache.get(&reference.entity)?;
@@ -1951,6 +1952,35 @@ fn solve_scope(
             }
             let free_legs: Vec<_> = incident.iter().copied().filter(|(reference, _, _)|
                 perpendicular.iter().any(|c| c.refs.contains(reference))).collect();
+            if free_legs.is_empty() && explicit_axis_directions.len() == 1 {
+                let explicit_axis = *explicit_axis_directions.iter().next().unwrap();
+                let opposite_leg = incident.iter().copied()
+                    .find(|(_, _, vertical)| *vertical != explicit_axis);
+                if let Some((reference, line, vertical)) = opposite_leg {
+                    let opposite = if group.contains(&line.p1) { line.p2 } else { line.p1 };
+                    if let Some(original) = retained_before.get(&reference.entity) {
+                        let points = super::dimension_assoc::source_points(original);
+                        let start = reference.segment_index().unwrap_or(0);
+                        let index = if opposite == line.p1 {
+                            start
+                        } else {
+                            (start + 1) % points.len().max(1)
+                        };
+                        if let Some(original_point) = points.get(index) {
+                            sys.store_mut().set(opposite.x, original_point.x);
+                            sys.store_mut().set(opposite.y, original_point.y);
+                        }
+                    }
+                    sys.store_mut().set_driven(opposite.x, true);
+                    sys.store_mut().set_driven(opposite.y, true);
+                    // This is the corner opposite the explicit right-angle
+                    // corner. Its far endpoint is the sole temporary anchor.
+                    // Release the dragged point's normal coordinate so the
+                    // axis relation can keep that far endpoint fully fixed.
+                    released_driver_params.insert(if *vertical { point.x } else { point.y });
+                    continue;
+                }
+            }
             // When one explicit Horizontal/Vertical direction orients the
             // component, the leg parallel to it is the corner's stretch leg.
             // The perpendicular leg keeps its original length. This also
@@ -2260,7 +2290,9 @@ fn solve_scope(
             }
         };
         for parameter in params_to_pin {
-            sys.store_mut().set_driven(parameter, true);
+            if !released_driver_params.contains(&parameter) {
+                sys.store_mut().set_driven(parameter, true);
+            }
         }
     }
 

@@ -376,11 +376,25 @@ impl OpenCADStudio {
             }
             #[cfg(target_arch = "wasm32")]
             Message::PollWebControl => {
-                if let Some(request) = super::control::web_request() {
+                let control = if let Some(request) = super::control::web_request() {
                     self.update(Message::ControlRequest(request))
                 } else {
                     Task::none()
-                }
+                };
+                // Dragged-in drawings ride the same poll (#344): start one
+                // only while the open slot is free — the same guard as a
+                // desktop drop — and leave the rest queued, so a multi-file
+                // drop opens sequentially without its own subscription.
+                let dropped = if self.opening.is_none()
+                    && self.active_modal != Some(super::ModalKind::Recovery)
+                {
+                    crate::io::web_drop::take_dropped()
+                        .map(|(name, bytes)| self.update(Message::WebFileDropped(name, bytes)))
+                        .unwrap_or_else(Task::none)
+                } else {
+                    Task::none()
+                };
+                Task::batch([control, dropped])
             }
             #[cfg(not(target_arch = "wasm32"))]
             Message::PollWebControl => Task::none(),
@@ -801,6 +815,32 @@ impl OpenCADStudio {
             }
 
             #[cfg(target_arch = "wasm32")]
+            Message::WebFileDropped(name, bytes) => {
+                // Bytes are already in hand (no picker round-trip), so this is
+                // `on_open_file`'s web branch with the real name and size on
+                // the overlay from the start.
+                let state = std::sync::Arc::new(crate::io::OpenProgressState::new(
+                    crate::app::OPEN_PHASE_READING,
+                ));
+                let open_id = self.next_open_id();
+                self.opening = Some(crate::app::OpenProgress {
+                    id: open_id,
+                    name: name.clone(),
+                    source_path: Some(std::path::PathBuf::from(&name)),
+                    size_bytes: bytes.len() as u64,
+                    state: state.clone(),
+                    started: Instant::now(),
+                    recovery_error: None,
+                    recovery_read_stats: None,
+                    recovery_bytes: None,
+                });
+                Task::perform(
+                    crate::io::web_drop::open_dropped(name, bytes, state),
+                    move |outcome| Message::WebFileOpened(open_id, outcome),
+                )
+            }
+
+            #[cfg(target_arch = "wasm32")]
             Message::WebFileOpened(open_id, mut outcome) => {
                 if self.opening.as_ref().map(|opening| opening.id) != Some(open_id) {
                     return Task::none();
@@ -1178,19 +1218,37 @@ impl OpenCADStudio {
                         .push_error(crate::t!("STLOUT: no 3D mesh data in this drawing.").as_ref());
                     return Task::none();
                 }
-                Task::perform(
-                    async {
-                        crate::sys::file_dialog()
-                            .set_title(crate::t!("Export STL").as_ref())
-                            .set_file_name("export.stl")
-                            .add_filter(crate::t!("STL Files").as_ref(), &["stl"])
-                            .add_filter(crate::t!("All Files").as_ref(), &["*"])
-                            .save_file()
-                            .await
-                            .map(|h| crate::sys::handle_path(&h))
-                    },
-                    Message::StlExportPath,
-                )
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    Task::perform(
+                        async {
+                            crate::sys::file_dialog()
+                                .set_title(crate::t!("Export STL").as_ref())
+                                .set_file_name("export.stl")
+                                .add_filter(crate::t!("STL Files").as_ref(), &["stl"])
+                                .add_filter(crate::t!("All Files").as_ref(), &["*"])
+                                .save_file()
+                                .await
+                                .map(|h| crate::sys::handle_path(&h))
+                        },
+                        Message::StlExportPath,
+                    )
+                }
+                // Web: rfd's save dialog shows no UI, so skip straight to a
+                // virtual path — the browser download supplies the file name.
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let stem = self.tabs[i]
+                        .current_path
+                        .as_deref()
+                        .and_then(|p: &std::path::Path| p.file_stem())
+                        .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "drawing".into());
+                    Task::perform(
+                        crate::io::stl::pick_stl_path_owned(stem),
+                        Message::StlExportPath,
+                    )
+                }
             }
 
             Message::StlExportPath(Some(path)) => self.on_stl_export_path_some(path),
@@ -1218,19 +1276,37 @@ impl OpenCADStudio {
                     );
                     return Task::none();
                 }
-                Task::perform(
-                    async {
-                        crate::sys::file_dialog()
-                            .set_title(crate::t!("Export STEP AP203").as_ref())
-                            .set_file_name("export.step")
-                            .add_filter(crate::t!("STEP Files").as_ref(), &["step", "stp"])
-                            .add_filter(crate::t!("All Files").as_ref(), &["*"])
-                            .save_file()
-                            .await
-                            .map(|h| crate::sys::handle_path(&h))
-                    },
-                    Message::StepExportPath,
-                )
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    Task::perform(
+                        async {
+                            crate::sys::file_dialog()
+                                .set_title(crate::t!("Export STEP AP203").as_ref())
+                                .set_file_name("export.step")
+                                .add_filter(crate::t!("STEP Files").as_ref(), &["step", "stp"])
+                                .add_filter(crate::t!("All Files").as_ref(), &["*"])
+                                .save_file()
+                                .await
+                                .map(|h| crate::sys::handle_path(&h))
+                        },
+                        Message::StepExportPath,
+                    )
+                }
+                // Web: rfd's save dialog shows no UI, so skip straight to a
+                // virtual path — the browser download supplies the file name.
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let stem = self.tabs[i]
+                        .current_path
+                        .as_deref()
+                        .and_then(|p: &std::path::Path| p.file_stem())
+                        .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "drawing".into());
+                    Task::perform(
+                        crate::io::step::pick_step_path_owned(stem),
+                        Message::StepExportPath,
+                    )
+                }
             }
 
             Message::StepExportPath(Some(path)) => self.on_step_export_path_some(path),
@@ -1250,6 +1326,7 @@ impl OpenCADStudio {
             }
 
             // ── OBJ import ────────────────────────────────────────────────
+            #[cfg(not(target_arch = "wasm32"))]
             Message::ObjImport => Task::perform(
                 async {
                     crate::sys::file_dialog()
@@ -1262,6 +1339,39 @@ impl OpenCADStudio {
                 },
                 Message::ObjImportPath,
             ),
+
+            // Web: the browser picker hands back a handle whose bytes must be
+            // read directly — the name-only `PathBuf` it maps to cannot be
+            // opened — so pick, read, and parse in one step and feed the
+            // shared finished handler. A cancelled picker stays silent.
+            #[cfg(target_arch = "wasm32")]
+            Message::ObjImport => {
+                let tab_id = self.tabs[self.active_tab].id;
+                Task::perform(
+                    async move {
+                        let handle = crate::sys::file_dialog()
+                            .set_title(crate::t!("Import OBJ Mesh").as_ref())
+                            .add_filter(crate::t!("Wavefront OBJ").as_ref(), &["obj", "OBJ"])
+                            .add_filter(crate::t!("All Files").as_ref(), &["*"])
+                            .pick_file()
+                            .await?;
+                        let path = crate::sys::handle_path(&handle);
+                        let bytes = handle.read().await;
+                        let result = crate::io::obj::parse_obj(
+                            &String::from_utf8_lossy(&bytes),
+                            [0.7, 0.7, 0.85, 1.0],
+                        )
+                        .ok_or_else(|| "no usable geometry in file".to_string());
+                        Some((tab_id, path, result))
+                    },
+                    |picked| match picked {
+                        Some((tab_id, path, result)) => {
+                            Message::ObjImportFinished(tab_id, path, result)
+                        }
+                        None => Message::Noop,
+                    },
+                )
+            }
 
             Message::ObjImportPath(Some(path)) => self.on_obj_import_path_some(path),
 

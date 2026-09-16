@@ -1930,6 +1930,10 @@ pub enum Message {
     OpenPathPicked(Option<(PathBuf, u64)>),
     /// A file was dragged from the desktop and dropped on the window (#344).
     FileDropped(PathBuf),
+    /// Web only: a drawing dragged onto the page — the DOM drop listener has
+    /// already read the bytes; this opens through the web-picker flow (#344).
+    #[cfg(target_arch = "wasm32")]
+    WebFileDropped(String, Vec<u8>),
     /// Web only: Ctrl+V captured by a focused text field, whose iced-internal
     /// paste is inert there — read the async clipboard instead (#346).
     WebFieldPaste,
@@ -3519,6 +3523,8 @@ pub enum Message {
     /// Trigger OBJ import: show open-file dialog.
     ObjImport,
     /// Callback after the user picks (or cancels) the OBJ file path.
+    /// Web never constructs it — the browser handle's bytes are read directly.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     ObjImportPath(Option<std::path::PathBuf>),
     ObjImportFinished(
         u64,
@@ -4311,6 +4317,9 @@ impl Drop for OpenCADStudio {
 /// unavailable for now (see issue #45). Native keeps the multi-window `run`.
 #[cfg(target_arch = "wasm32")]
 pub fn run_web() -> iced::Result {
+    // winit never emits DroppedFile on the web, so the document drag & drop
+    // listeners are installed here and feed the control poll (#344).
+    crate::io::web_drop::install();
     iced::application(
         OpenCADStudio::boot_web,
         OpenCADStudio::update,

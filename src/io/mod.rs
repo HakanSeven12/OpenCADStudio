@@ -25,6 +25,8 @@ pub mod thumbnail;
 mod web_worker;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod web_recent;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod web_drop;
 
 use crate::scene::DerivedCaches;
 use acadrust::entities::EntityType;

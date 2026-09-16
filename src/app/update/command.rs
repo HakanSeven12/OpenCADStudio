@@ -573,7 +573,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                         .scene
                                         .apply_grip(handle, grip_id, apply);
                                 }
-                                self.solve_grip_constraints(i, &grip, target - grip.origin_world);
+                                self.solve_grip_constraints(i, &grip);
 
                                 // Keep GripEdit synchronized so the normal commit
                                 // path records the exact final position.

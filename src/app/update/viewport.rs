@@ -1748,7 +1748,7 @@ impl OpenCADStudio {
                     );
                 }
             }
-            self.solve_grip_constraints(i, &grip, snapped - grip.origin_world);
+            self.solve_grip_constraints(i, &grip);
             let mesh_changes: Vec<_> = self.grip_preview_handles
                 .iter()
                 .copied()
@@ -6311,8 +6311,8 @@ mod selection_preview_tests {
                 let (left, right, bottom, top) = match grip_id {
                     0 => (target.x, before[1].x, target.y, target.y + height),
                     1 => (
-                        before[0].x - offset[0],
-                        before[1].x,
+                        before[0].x,
+                        target.x,
                         target.y,
                         before[3].y,
                     ),

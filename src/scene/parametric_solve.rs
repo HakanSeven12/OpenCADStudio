@@ -1816,7 +1816,6 @@ fn solve_scope(
     retain_size: bool,
     retain_lengths: bool,
     retained_before: &HashMap<Handle, std::sync::Arc<EntityType>>,
-    grip_offset: Option<glam::DVec3>,
 ) -> Option<SolveResult> {
     let params = if set.local_parameters.is_empty() {
         drawing_params
@@ -1937,7 +1936,7 @@ fn solve_scope(
             }
         }).collect();
         let mut retained_axes = HashSet::new();
-        for (_, point) in &driven_points {
+        for (driven_reference, point) in &driven_points {
             let group = point_group(*point);
             let incident: Vec<_> = axis_lines.iter().filter(|(_, line, _)|
                 group.contains(&line.p1) || group.contains(&line.p2)).collect();
@@ -1958,9 +1957,50 @@ fn solve_scope(
                 let opposite_leg = incident.iter().copied()
                     .find(|(_, _, vertical)| *vertical != explicit_axis);
                 if let Some((reference, line, vertical)) = opposite_leg {
-                    let dragged_normal_delta = grip_offset
-                        .map(|offset| if *vertical { offset.x } else { offset.y })
-                        .unwrap_or(0.0);
+                    let rectangle_diagonal_index = (reference.entity == driven_reference.entity)
+                        .then(|| retained_before.get(&reference.entity))
+                        .flatten()
+                        .filter(|entity| {
+                            matches!(entity.as_ref(), EntityType::LwPolyline(polyline)
+                                if polyline.is_closed && polyline.vertices.len() == 4)
+                                || matches!(entity.as_ref(), EntityType::Polyline2D(polyline)
+                                    if polyline.is_closed() && polyline.vertices.len() == 4)
+                        })
+                        .and_then(|_| driven_reference.marker)
+                        .and_then(|marker| usize::try_from(marker).ok())
+                        .filter(|index| *index < 4)
+                        .map(|index| (index + 2) % 4);
+                    if let Some(diagonal_index) = rectangle_diagonal_index {
+                        let diagonal_reference = ParametricRef::point(
+                            driven_reference.entity,
+                            diagonal_index as i32,
+                        );
+                        if let Some(diagonal) = resolve_constraint_point(
+                            document,
+                            &mut sys,
+                            &mut cache,
+                            diagonal_reference,
+                        ) {
+                            if let Some(original_point) = retained_before
+                                .get(&driven_reference.entity)
+                                .and_then(|entity| {
+                                    super::dimension_assoc::source_points(entity)
+                                        .get(diagonal_index)
+                                        .copied()
+                                })
+                            {
+                                sys.store_mut().set(diagonal.x, original_point.x);
+                                sys.store_mut().set(diagonal.y, original_point.y);
+                                sys.store_mut().set_driven(diagonal.x, true);
+                                sys.store_mut().set_driven(diagonal.y, true);
+                                // The diagonal corner is the sole anchor. The
+                                // grabbed point retains both cursor coordinates,
+                                // and the remaining two corners follow the axis
+                                // and parallel relations.
+                                continue;
+                            }
+                        }
+                    }
                     let opposite = if group.contains(&line.p1) { line.p2 } else { line.p1 };
                     if let Some(original) = retained_before.get(&reference.entity) {
                         let points = super::dimension_assoc::source_points(original);
@@ -1977,60 +2017,6 @@ fn solve_scope(
                     }
                     sys.store_mut().set_driven(opposite.x, true);
                     sys.store_mut().set_driven(opposite.y, true);
-                    // For the diagonally opposite corner of a four-sided
-                    // constrained polyline, the far corner is fixed. Preserve
-                    // the rejected normal cursor component by moving only the
-                    // opposite parallel edge in the inverse direction.
-                    let rectangle_entity = retained_before.get(&reference.entity).is_some_and(|entity| {
-                        matches!(entity.as_ref(), EntityType::LwPolyline(polyline)
-                            if polyline.is_closed && polyline.vertices.len() == 4)
-                            || matches!(entity.as_ref(), EntityType::Polyline2D(polyline)
-                                if polyline.is_closed() && polyline.vertices.len() == 4)
-                    });
-                    if rectangle_entity && dragged_normal_delta.abs() > f64::EPSILON {
-                        let paired_reference = set.constraints.iter().find_map(|constraint| {
-                            (constraint.enabled
-                                && constraint.kind == ConstraintKind::Parallel
-                                && constraint.refs.contains(reference))
-                            .then(|| constraint.refs.iter().copied()
-                                .find(|candidate| *candidate != *reference))
-                            .flatten()
-                        });
-                        if let Some(paired_reference) = paired_reference {
-                            if let Some((_, paired_line, paired_vertical)) = axis_lines.iter()
-                                .find(|(candidate, _, _)| *candidate == paired_reference)
-                            {
-                                if let Some(original) = retained_before.get(&paired_reference.entity) {
-                                    let points = super::dimension_assoc::source_points(original);
-                                    let start = paired_reference.segment_index().unwrap_or(0);
-                                    let end = (start + 1) % points.len().max(1);
-                                    if let (Some(original_start), Some(original_end)) =
-                                        (points.get(start), points.get(end))
-                                    {
-                                        let (first, second, first_value, second_value) = if *paired_vertical {
-                                            (
-                                                paired_line.p1.x,
-                                                paired_line.p2.x,
-                                                original_start.x - dragged_normal_delta,
-                                                original_end.x - dragged_normal_delta,
-                                            )
-                                        } else {
-                                            (
-                                                paired_line.p1.y,
-                                                paired_line.p2.y,
-                                                original_start.y - dragged_normal_delta,
-                                                original_end.y - dragged_normal_delta,
-                                            )
-                                        };
-                                        sys.store_mut().set(first, first_value);
-                                        sys.store_mut().set(second, second_value);
-                                        sys.store_mut().set_driven(first, true);
-                                        sys.store_mut().set_driven(second, true);
-                                    }
-                                }
-                            }
-                        }
-                    }
                     // This is the corner opposite the explicit right-angle
                     // corner. Its far endpoint is the sole temporary anchor.
                     // Release the dragged point's normal coordinate so the
@@ -2950,7 +2936,6 @@ impl Scene {
                 retain_size,
                 true,
                 &retained_before,
-                None,
             ) else {
                 continue;
             };
@@ -2978,7 +2963,6 @@ impl Scene {
         driven_refs: &[ParametricRef],
         retain_size: bool,
         retained_originals: &[(Handle, EntityType)],
-        grip_offset: Option<glam::DVec3>,
     ) -> Vec<(Handle, EntityType)> {
         if self.parametric_constraints.is_empty() || touched.is_empty() {
             return Vec::new();
@@ -3007,7 +2991,6 @@ impl Scene {
                 retain_size,
                 false,
                 &retained_before,
-                grip_offset,
             )
             else {
                 continue;
@@ -3047,7 +3030,7 @@ mod tests {
             let Some(EntityType::Line(line)) = scene.document.get_entity_mut(handle) else { panic!("line") };
             if marker == 0 { line.start = target; } else { line.end = target; }
             let solved = scene.solve_parametric_constraints_preview(
-                &[handle], &[ParametricRef::point(handle, marker)], true, &originals, None);
+                &[handle], &[ParametricRef::point(handle, marker)], true, &originals);
             for (handle, entity) in solved {
                 *scene.document.get_entity_mut(handle).unwrap() = entity;
             }
@@ -3362,7 +3345,6 @@ mod tests {
             &[ParametricRef::point(a, 0), ParametricRef::point(a, 1)],
             true,
             &[(a, a_before)],
-            None,
         );
         assert_eq!(
             scene.document.get_entity(b),

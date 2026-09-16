@@ -736,11 +736,12 @@ pub(super) struct OpenCADStudio {
     /// prompt still has to offer, one at a time.
     #[cfg(target_arch = "wasm32")]
     web_autosave_pending: Vec<crate::io::web_autosave::WebAutosaveEntry>,
-    /// The snapshot whose recovered open is queued: `(autosave key,
-    /// open name)`. The OPFS copy is the only one, so it is deleted only
-    /// once an open with exactly that name succeeds.
+    /// The snapshot whose recovered open is in flight: `(autosave key,
+    /// open id)`. The OPFS copy is the only one, so it is deleted only
+    /// once the open with exactly that id succeeds — identity, never the
+    /// display name (same-named files share one stored copy on web).
     #[cfg(target_arch = "wasm32")]
-    web_autosave_consumed: Option<(String, String)>,
+    web_autosave_consumed: Option<(String, u64)>,
     /// Autosave keys a web save wanted to remove while a snapshot round was
     /// still writing (the round's late write would resurrect the snapshot
     /// with a fresh mtime); the removes run when the round finishes.
@@ -1959,8 +1960,10 @@ pub enum Message {
     FileDropped(PathBuf),
     /// Web only: a drawing dragged onto the page — the DOM drop listener has
     /// already read the bytes; this opens through the web-picker flow (#344).
+    /// The third field tags an autosave-restore file with its snapshot key so
+    /// the snapshot is deleted only when this exact open succeeds.
     #[cfg(target_arch = "wasm32")]
-    WebFileDropped(String, Vec<u8>),
+    WebFileDropped(String, Vec<u8>, Option<String>),
     /// Web only: Ctrl+V captured by a focused text field, whose iced-internal
     /// paste is inert there — read the async clipboard instead (#346).
     WebFieldPaste,
@@ -2034,7 +2037,7 @@ pub enum Message {
     /// Web: the offered snapshot's bytes are in; queue them for the guarded
     /// open poll. The OPFS copy is consumed only once that open succeeds.
     #[cfg(target_arch = "wasm32")]
-    WebAutosaveBytes(String, Result<Vec<u8>, String>),
+    WebAutosaveBytes(String, String, Result<Vec<u8>, String>),
     /// Web: one autosave round finished for all dirty tabs (serially).
     #[cfg(target_arch = "wasm32")]
     WebAutosaveSnapshotFinished(Result<(), String>),

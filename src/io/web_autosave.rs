@@ -125,30 +125,7 @@ pub async fn snapshot(name: &str, bytes: &[u8], thumbnail: Option<&[u8]>) -> Res
     Ok(())
 }
 
-/// All live snapshots. Index rows whose file is gone (crash between writes,
-/// partial eviction) and zero-byte snapshots (the crash window after the
-/// index write but before the snapshot write) are skipped rather than
-/// reported — an empty file recovers nothing and would only route the user
-/// into the corrupt-file recovery flow.
-#[cfg(target_arch = "wasm32")]
-pub async fn list() -> Result<Vec<WebAutosaveEntry>, String> {
-    let directory = autosave_directory(false).await?;
-    let mut entries = Vec::new();
-    for name in read_index(&directory).await {
-        let Ok(file) = super::web_recent::get_file(&directory, &snapshot_key(&name)).await else {
-            continue;
-        };
-        if file.size() == 0.0 {
-            continue;
-        }
-        entries.push(WebAutosaveEntry {
-            name,
-            size: file.size() as u64,
-            modified_ms: file.last_modified(),
-        });
-    }
-    Ok(entries)
-}
+
 
 #[cfg(target_arch = "wasm32")]
 pub async fn read(name: &str) -> Result<Vec<u8>, String> {
@@ -181,7 +158,35 @@ pub async fn remove(name: &str) -> Result<(), String> {
 /// snapshots the oldest are evicted, which is the only deletion here.
 #[cfg(target_arch = "wasm32")]
 pub async fn scan() -> Result<Vec<WebAutosaveEntry>, String> {
-    let (kept, evicted) = cap_evictions(list().await?, SNAPSHOT_CAP);
+    let directory = autosave_directory(false).await?;
+    let mut entries = Vec::new();
+    let mut dead: Vec<String> = Vec::new();
+    for name in read_index(&directory).await {
+        let file = match super::web_recent::get_file(&directory, &snapshot_key(&name)).await {
+            Ok(file) => file,
+            // Crash between the index and snapshot writes: the row points
+            // at nothing recoverable.
+            Err(_) => {
+                dead.push(name);
+                continue;
+            }
+        };
+        if file.size() == 0.0 {
+            dead.push(name);
+            continue;
+        }
+        entries.push(WebAutosaveEntry {
+            name,
+            size: file.size() as u64,
+            modified_ms: file.last_modified(),
+        });
+    }
+    // Dead rows are junk no other path removes: they never appear in an
+    // offer, so the user cannot discard them and the cap cannot evict them.
+    for name in dead {
+        let _ = remove(&name).await;
+    }
+    let (kept, evicted) = cap_evictions(entries, SNAPSHOT_CAP);
     for name in evicted {
         let _ = remove(&name).await;
     }

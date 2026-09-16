@@ -14,7 +14,16 @@ use wasm_bindgen_futures::JsFuture;
 /// rejected with a console warning instead of being silently dropped.
 const QUEUE_CAP: usize = 8;
 
-static DROPPED: Mutex<VecDeque<(String, Vec<u8>)>> = Mutex::new(VecDeque::new());
+/// One queued open. `restore_key` tags an autosave-restore file so its
+/// snapshot is deleted only when THIS open succeeds — matching by identity,
+/// never by display name (same-named files are one OPFS copy on web).
+pub struct QueuedOpen {
+    pub name: String,
+    pub bytes: Vec<u8>,
+    pub restore_key: Option<String>,
+}
+
+static DROPPED: Mutex<VecDeque<QueuedOpen>> = Mutex::new(VecDeque::new());
 // `OnceLock::take` needs `&mut self`, which an immutable static cannot
 // provide — an AtomicBool swap gives the same set-once marker and can still
 // be reverted when no document exists.
@@ -24,7 +33,7 @@ fn warn(line: &str) {
     web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(line));
 }
 
-fn lock_queue() -> std::sync::MutexGuard<'static, VecDeque<(String, Vec<u8>)>> {
+fn lock_queue() -> std::sync::MutexGuard<'static, VecDeque<QueuedOpen>> {
     // The critical sections are push/pop only, so poisoning is unreachable;
     // recover anyway rather than panic across the JS boundary.
     DROPPED
@@ -32,7 +41,8 @@ fn lock_queue() -> std::sync::MutexGuard<'static, VecDeque<(String, Vec<u8>)>> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn enqueue(name: String, bytes: Vec<u8>) {
+fn push(entry: QueuedOpen) {
+    let name = entry.name.clone();
     let mut queue = lock_queue();
     if queue.len() >= QUEUE_CAP {
         drop(queue);
@@ -41,24 +51,37 @@ fn enqueue(name: String, bytes: Vec<u8>) {
         ));
         return;
     }
-    queue.push_back((name, bytes));
+    queue.push_back(entry);
 }
 
-/// Queue already-read drawing bytes (drag-and-drop, autosave restore) for the
-/// 50 ms poll to open through the guarded web-picker flow.
+/// Queue already-read drawing bytes (drag-and-drop) for the 50 ms poll to
+/// open through the guarded web-picker flow.
 pub fn enqueue_open(name: String, bytes: Vec<u8>) {
-    enqueue(name, bytes);
+    push(QueuedOpen {
+        name,
+        bytes,
+        restore_key: None,
+    });
+}
+
+/// Queue an autosave-restore file tagged with its snapshot key.
+pub fn enqueue_restore(name: String, bytes: Vec<u8>, restore_key: String) {
+    push(QueuedOpen {
+        name,
+        bytes,
+        restore_key: Some(restore_key),
+    });
 }
 
 /// JS-callable entry (same shape as `ocs_control_submit`) for hosts that
 /// forward drops themselves.
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub fn ocs_web_drop_file(name: String, bytes: js_sys::Uint8Array) {
-    enqueue(name, bytes.to_vec());
+    enqueue_open(name, bytes.to_vec());
 }
 
 /// Pop the oldest dropped file that the poll has not started opening yet.
-pub fn take_dropped() -> Option<(String, Vec<u8>)> {
+pub fn take_dropped() -> Option<QueuedOpen> {
     lock_queue().pop_front()
 }
 
@@ -109,8 +132,12 @@ pub fn install() {
     );
     // Canceling `dragenter` too is belt-and-braces some engines still want
     // before treating the page as a drop target.
-    let _ = document.add_event_listener_with_callback("dragenter", cancel.as_ref().unchecked_ref());
-    let _ = document.add_event_listener_with_callback("dragover", cancel.as_ref().unchecked_ref());
+    let cancel_ok = document
+        .add_event_listener_with_callback("dragenter", cancel.as_ref().unchecked_ref())
+        .is_ok()
+        & document
+            .add_event_listener_with_callback("dragover", cancel.as_ref().unchecked_ref())
+            .is_ok();
     cancel.forget();
 
     let on_drop = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(
@@ -151,7 +178,9 @@ pub fn install() {
             wasm_bindgen_futures::spawn_local(async move {
                 for (name, read) in reads {
                     match JsFuture::from(read).await {
-                        Ok(buffer) => enqueue(name, js_sys::Uint8Array::new(&buffer).to_vec()),
+                        Ok(buffer) => {
+                            enqueue_open(name, js_sys::Uint8Array::new(&buffer).to_vec())
+                        }
                         Err(error) => {
                             web_sys::console::error_1(&wasm_bindgen::JsValue::from_str(&format!(
                                 "ocs: failed to read dropped file \"{name}\": {}",
@@ -163,8 +192,14 @@ pub fn install() {
             });
         },
     );
-    let _ = document.add_event_listener_with_callback("drop", on_drop.as_ref().unchecked_ref());
+    let drop_ok = document
+        .add_event_listener_with_callback("drop", on_drop.as_ref().unchecked_ref())
+        .is_ok();
     on_drop.forget();
+    if !cancel_ok || !drop_ok {
+        // Unlatch so a later install can retry with fresh listeners.
+        INSTALLED.store(false, Ordering::SeqCst);
+    }
 }
 
 fn is_drawing_name(name: &str) -> bool {

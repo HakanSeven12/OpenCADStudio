@@ -3040,29 +3040,24 @@ impl OpenCADStudio {
         self.close_active_modal();
         let open_name = crate::io::web_autosave::recovered_name(&entry.name);
         let key = entry.name;
-        // Remember the pair: `web_autosave_opened` deletes the OPFS copy
-        // only when an open with exactly `open_name` succeeds. A failed
-        // read below clears the marker again (`on_web_autosave_bytes`).
-        self.web_autosave_consumed = Some((key.clone(), open_name.clone()));
+        // The snapshot key travels with the bytes: the marker (and the
+        // deletion it authorises) is recorded only when the poll actually
+        // starts this open, keyed by that open's id — never by display name.
+        let read_key = key.clone();
         Task::perform(
-            async move { crate::io::web_autosave::read(&key).await },
-            move |result| Message::WebAutosaveBytes(open_name, result),
+            async move { crate::io::web_autosave::read(&read_key).await },
+            move |result| Message::WebAutosaveBytes(open_name, key, result),
         )
     }
 
     /// The recovered drawing opened: its autosave snapshot — held back until
     /// now — can finally be deleted, and the next queued snapshot can be
-    /// offered. A different name finishing first just means the recovered
-    /// open is still queued behind it; keep waiting.
+    /// offered. The caller already matched the marker to this open's id.
     #[cfg(target_arch = "wasm32")]
     pub(super) fn web_autosave_opened(&mut self, open_name: &str) {
-        let Some((key, recorded)) = self.web_autosave_consumed.clone() else {
+        let Some((key, _)) = self.web_autosave_consumed.take() else {
             return;
         };
-        if recorded != open_name {
-            return;
-        }
-        self.web_autosave_consumed = None;
         self.command_line
             .push_output(crate::tf!("Restored \"{}\" from the autosave copy", open_name).as_ref());
         wasm_bindgen_futures::spawn_local(async move {
@@ -3097,6 +3092,7 @@ impl OpenCADStudio {
     pub(super) fn on_web_autosave_bytes(
         &mut self,
         open_name: String,
+        key: String,
         result: Result<Vec<u8>, String>,
     ) -> Task<Message> {
         match result {
@@ -3105,7 +3101,7 @@ impl OpenCADStudio {
                 // (`web_autosave_opened` / the failure hook), not here — the
                 // poll has not started the open yet, so queueing now would
                 // show the modal before the recovered drawing loads.
-                crate::io::web_drop::enqueue_open(open_name, bytes);
+                crate::io::web_drop::enqueue_restore(open_name, bytes, key);
                 Task::none()
             }
             Err(error) => {
@@ -3113,7 +3109,6 @@ impl OpenCADStudio {
                 // re-offer it this session — it was already taken out of
                 // `web_autosave_pending`, so the cycle cannot loop on it.
                 // It stays discardable on the next boot.
-                self.web_autosave_consumed = None;
                 self.command_line
                     .push_warning(crate::tf!("Autosave copy could not be read: {error}").as_ref());
                 self.queue_next_web_autosave_prompt();

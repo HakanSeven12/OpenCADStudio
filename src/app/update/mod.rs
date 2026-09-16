@@ -389,7 +389,13 @@ impl OpenCADStudio {
                     && self.active_modal != Some(super::ModalKind::Recovery)
                 {
                     crate::io::web_drop::take_dropped()
-                        .map(|(name, bytes)| self.update(Message::WebFileDropped(name, bytes)))
+                        .map(|file| {
+                            self.update(Message::WebFileDropped(
+                                file.name,
+                                file.bytes,
+                                file.restore_key,
+                            ))
+                        })
                         .unwrap_or_else(Task::none)
                 } else {
                     Task::none()
@@ -807,35 +813,56 @@ impl OpenCADStudio {
             }
 
             Message::OpenCancel => {
+                #[cfg(target_arch = "wasm32")]
+                let cancelled_id = self.opening.as_ref().map(|opening| opening.id);
                 if let Some(p) = self.opening.take() {
                     self.command_line
                         .push_info(crate::tf!("Open cancelled: \"{}\"", p.name).as_ref());
                 }
                 // A cancelled recovered open keeps its snapshot (re-offered
                 // next boot — it is the only copy); the remaining queued
-                // snapshots can still be offered this session.
+                // snapshots can still be offered this session. Match on the
+                // open's id so cancelling an unrelated open leaves a pending
+                // restore marker alone.
                 #[cfg(target_arch = "wasm32")]
-                if self.web_autosave_consumed.take().is_some() {
+                if cancelled_id
+                    .is_some_and(|id| {
+                        self.web_autosave_consumed
+                            .as_ref()
+                            .is_some_and(|(_, recorded)| *recorded == id)
+                    })
+                    && self.web_autosave_consumed.take().is_some()
+                {
                     self.queue_next_web_autosave_prompt();
                 }
                 self.drain_pending_open()
             }
 
             #[cfg(target_arch = "wasm32")]
-            Message::WebFileDropped(name, bytes) => {
+            Message::WebFileDropped(name, bytes, restore_key) => {
                 // Bytes are already in hand (no picker round-trip), so this is
                 // `on_open_file`'s web branch with the real name and size on
                 // the overlay from the start. An open already in flight must
                 // not be clobbered (its bytes are gone once dequeued), so the
-                // pair goes back to the queue for the next poll tick.
+                // entry goes back to the queue for the next poll tick.
                 if self.opening.is_some() {
-                    crate::io::web_drop::enqueue_open(name, bytes);
+                    match restore_key {
+                        Some(key) => {
+                            crate::io::web_drop::enqueue_restore(name, bytes, key)
+                        }
+                        None => crate::io::web_drop::enqueue_open(name, bytes),
+                    }
                     return Task::none();
                 }
                 let state = std::sync::Arc::new(crate::io::OpenProgressState::new(
                     crate::app::OPEN_PHASE_READING,
                 ));
                 let open_id = self.next_open_id();
+                // Identity, not display name: only this exact open may delete
+                // the snapshot the restore came from.
+                if let Some(key) = restore_key {
+                    self.web_autosave_consumed = Some((key, open_id));
+                }
                 self.opening = Some(crate::app::OpenProgress {
                     id: open_id,
                     name: name.clone(),
@@ -865,7 +892,7 @@ impl OpenCADStudio {
                 if self
                     .web_autosave_consumed
                     .as_ref()
-                    .is_some_and(|(_, recorded)| *recorded == outcome.name)
+                    .is_some_and(|(_, recorded)| *recorded == open_id)
                 {
                     if outcome.result.is_ok() {
                         self.web_autosave_opened(&outcome.name);
@@ -995,7 +1022,9 @@ impl OpenCADStudio {
             #[cfg(target_arch = "wasm32")]
             Message::WebAutosaveDiscard => self.on_web_autosave_discard(),
             #[cfg(target_arch = "wasm32")]
-            Message::WebAutosaveBytes(name, result) => self.on_web_autosave_bytes(name, result),
+            Message::WebAutosaveBytes(name, key, result) => {
+                self.on_web_autosave_bytes(name, key, result)
+            }
             #[cfg(target_arch = "wasm32")]
             Message::WebAutosaveSnapshotFinished(result) => self.on_web_autosave_finished(result),
 

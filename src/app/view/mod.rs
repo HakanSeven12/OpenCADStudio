@@ -830,6 +830,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         sel_ref.vp_size,
                         self.show_constraint_values,
                         self.constraint_bar_display,
+                        self.constraint_bar_mode,
                     )
                     .into_iter()
                     .map(|(id, point, direction, label, is_conflicting, hover_points)| {

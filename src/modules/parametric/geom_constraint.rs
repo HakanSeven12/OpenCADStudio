@@ -37,7 +37,7 @@ impl CadCommand for GeomConstraintCommand {
     }
 
     fn prompt(&self) -> String {
-        "GEOMCONSTRAINT  Enter constraint type [Horizontal/Vertical/Perpendicular/Parallel/Tangent/Smooth/Coincident/Concentric/Collinear/Symmetric/Equal/Fix] <Coincident>:".to_string()
+        "GEOMCONSTRAINT  Enter constraint type [Horizontal/Vertical/Perpendicular/PArallel/Tangent/SMooth/Coincident/CONcentric/COLlinear/Symmetric/Equal/Fix] <Coincident>:".to_string()
     }
 
     fn options(&self) -> Vec<CmdOption> {

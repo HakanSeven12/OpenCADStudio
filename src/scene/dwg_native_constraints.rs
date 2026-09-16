@@ -131,24 +131,38 @@ impl<'a> GroupBuilder<'a> {
                     point: Some(insert.insert_point),
                 },
             ),
-            EntityType::Text(text) => self.push_node(
-                node_id,
-                "AcConstrainedPoint",
-                AssocConstraintNodeData::Point {
-                    geometry_dependency: Handle::NULL,
-                    geometry_node_id: node_id,
-                    point: Some(text.insertion_point),
-                },
-            ),
-            EntityType::MText(text) => self.push_node(
-                node_id,
-                "AcConstrainedPoint",
-                AssocConstraintNodeData::Point {
-                    geometry_dependency: Handle::NULL,
-                    geometry_node_id: node_id,
-                    point: Some(text.insertion_point),
-                },
-            ),
+            EntityType::Text(text) => {
+                let direction = Vector3::new(text.rotation.cos(), text.rotation.sin(), 0.0);
+                self.push_node(
+                    node_id,
+                    "AcConstrainedBoundedLine",
+                    AssocConstraintNodeData::BoundedLine {
+                        geometry_dependency: Handle::NULL,
+                        geometry_node_id: node_id,
+                        point: text.insertion_point,
+                        direction,
+                        is_ray: false,
+                        start_point: text.insertion_point,
+                        end_point: text.insertion_point + direction,
+                    },
+                );
+            }
+            EntityType::MText(text) => {
+                let direction = Vector3::new(text.rotation.cos(), text.rotation.sin(), 0.0);
+                self.push_node(
+                    node_id,
+                    "AcConstrainedBoundedLine",
+                    AssocConstraintNodeData::BoundedLine {
+                        geometry_dependency: Handle::NULL,
+                        geometry_node_id: node_id,
+                        point: text.insertion_point,
+                        direction,
+                        is_ray: false,
+                        start_point: text.insertion_point,
+                        end_point: text.insertion_point + direction,
+                    },
+                );
+            }
             EntityType::AttributeDefinition(attribute) => self.push_node(
                 node_id,
                 "AcConstrainedPoint",
@@ -498,6 +512,9 @@ impl<'a> GroupBuilder<'a> {
     /// The node id `ParametricRef` resolves to: a point node for a marked
     /// reference, the whole geometry node otherwise.
     fn ref_node(&mut self, r: ParametricRef) -> Option<i32> {
+        if let Some(minor) = r.ellipse_axis_is_minor() {
+            return self.ellipse_axis_node(r.entity, minor);
+        }
         if r.segment_midpoint_index().is_some() {
             return self.point_node(r.entity, r.marker?);
         }
@@ -510,8 +527,6 @@ impl<'a> GroupBuilder<'a> {
                 Some(
                     EntityType::Point(_)
                         | EntityType::Insert(_)
-                        | EntityType::Text(_)
-                        | EntityType::MText(_)
                         | EntityType::AttributeDefinition(_)
                         | EntityType::AttributeEntity(_)
                         | EntityType::Table(_)
@@ -524,6 +539,52 @@ impl<'a> GroupBuilder<'a> {
             Some(marker) => self.point_node(r.entity, marker),
             None => self.geometry_node(r.entity),
         }
+    }
+
+    fn ellipse_axis_node(&mut self, handle: Handle, minor: bool) -> Option<i32> {
+        let key = usize::MAX - usize::from(minor);
+        if let Some(node_id) = self
+            .entities
+            .get(&handle)
+            .and_then(|entity| entity.segments.get(&key))
+        {
+            return Some(*node_id);
+        }
+        let EntityType::Ellipse(ellipse) = self.document.get_entity(handle)? else {
+            return None;
+        };
+        let major_length = ellipse.major_axis.length();
+        if major_length <= 1.0e-9 {
+            return None;
+        }
+        let major = ellipse.major_axis / major_length;
+        let normal = ellipse.normal.normalize();
+        let minor_direction = Vector3::new(
+            normal.y * major.z - normal.z * major.y,
+            normal.z * major.x - normal.x * major.z,
+            normal.x * major.y - normal.y * major.x,
+        );
+        let direction = if minor { minor_direction } else { major };
+        let node_id = self.alloc_node_id();
+        self.push_node(
+            node_id,
+            "AcConstrainedLine",
+            AssocConstraintNodeData::Line {
+                geometry_dependency: Handle::NULL,
+                geometry_node_id: node_id,
+                point: ellipse.center,
+                direction,
+            },
+        );
+        self.entities
+            .entry(handle)
+            .or_default()
+            .segments
+            .insert(key, node_id);
+        if !self.referenced_entities.contains(&handle) {
+            self.referenced_entities.push(handle);
+        }
+        Some(node_id)
     }
 
     fn segment_node(&mut self, handle: Handle, index: usize) -> Option<i32> {
@@ -1553,6 +1614,10 @@ fn dependency_entity(
             ),
             AssocConstraintNodeData::Point { .. },
         ) => true,
+        (
+            Some(EntityType::Text(_) | EntityType::MText(_)),
+            AssocConstraintNodeData::BoundedLine { is_ray: false, .. },
+        ) => true,
         (Some(EntityType::Line(_)), AssocConstraintNodeData::BoundedLine { is_ray, .. }) => !is_ray,
         (
             Some(EntityType::LwPolyline(_) | EntityType::Polyline2D(_)),
@@ -1565,7 +1630,8 @@ fn dependency_entity(
         (
             Some(EntityType::Ellipse(_)),
             AssocConstraintNodeData::Ellipse { .. }
-            | AssocConstraintNodeData::BoundedEllipse { .. },
+            | AssocConstraintNodeData::BoundedEllipse { .. }
+            | AssocConstraintNodeData::Line { .. },
         ) => true,
         (Some(EntityType::Spline(_)), AssocConstraintNodeData::Spline { .. }) => true,
         _ => false,
@@ -1641,6 +1707,31 @@ fn polyline_segment_reference(
             score(*first).total_cmp(&score(*second))
         })
         .map(|index| ParametricRef::segment(entity, index))
+}
+
+fn ellipse_axis_reference(
+    document: &CadDocument,
+    entity: Handle,
+    data: &AssocConstraintNodeData,
+) -> Option<ParametricRef> {
+    let AssocConstraintNodeData::Line { direction, .. } = data else {
+        return None;
+    };
+    let EntityType::Ellipse(ellipse) = document.get_entity(entity)? else {
+        return None;
+    };
+    let major = ellipse.major_axis.normalize();
+    let normal = ellipse.normal.normalize();
+    let minor = Vector3::new(
+        normal.y * major.z - normal.z * major.y,
+        normal.z * major.x - normal.x * major.z,
+        normal.x * major.y - normal.y * major.x,
+    );
+    let direction = direction.normalize();
+    Some(ParametricRef::ellipse_axis(
+        entity,
+        direction.dot(&minor).abs() > direction.dot(&major).abs(),
+    ))
 }
 
 fn numeric_value(value: &AssocEvalVariant) -> Option<f64> {
@@ -1925,8 +2016,15 @@ pub(super) fn native_constraint_set(
                 continue;
             };
             if let Some(entity) = dependency_entity(document, dependency, &node.data) {
-                let reference =
-                    polyline_segment_reference(document, entity, &node.data, &group.work_plane)
+                let reference = ellipse_axis_reference(document, entity, &node.data)
+                    .or_else(|| {
+                        polyline_segment_reference(
+                            document,
+                            entity,
+                            &node.data,
+                            &group.work_plane,
+                        )
+                    })
                         .unwrap_or_else(|| {
                             if matches!(node.data, AssocConstraintNodeData::Point { .. }) {
                                 ParametricRef::point(entity, 0)

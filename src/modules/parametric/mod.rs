@@ -5,12 +5,14 @@
 mod coincident;
 mod equal_distance;
 mod geom_constraint;
+mod parallel_command;
 mod point_on_entity;
 mod tools;
 mod value;
 pub use coincident::{coincident_tool, CoincidentConstraintCommand};
 pub use equal_distance::{equal_distance_tool, EqualDistanceConstraintCommand};
 pub use geom_constraint::GeomConstraintCommand;
+pub use parallel_command::ParallelConstraintCommand;
 pub use point_on_entity::{
     center_point_tool, midpoint_tool, point_on_curve_tool, PointOnEntityConstraintCommand,
 };

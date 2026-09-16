@@ -162,7 +162,6 @@ inventory::submit!(crate::command::CommandRegistration {
     names: &[
         "HCONSTRAINT",
         "VCONSTRAINT",
-        "PCONSTRAINT",
         "QCONSTRAINT",
         "ECONSTRAINT",
         "TCONSTRAINT",

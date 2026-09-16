@@ -28,6 +28,8 @@ pub struct ParametricRef {
 
 const POLYLINE_SEGMENT_MARKER_BASE: i32 = -1_000_000;
 const POLYLINE_SEGMENT_MIDPOINT_MARKER_BASE: i32 = -2_000_000;
+const ELLIPSE_MAJOR_AXIS_MARKER: i32 = -3_000_000;
+const ELLIPSE_MINOR_AXIS_MARKER: i32 = -3_000_001;
 
 impl ParametricRef {
     pub fn whole(entity: Handle) -> Self {
@@ -78,8 +80,28 @@ impl ParametricRef {
 
     pub fn segment_midpoint_index(self) -> Option<usize> {
         let marker = self.marker?;
-        (marker <= POLYLINE_SEGMENT_MIDPOINT_MARKER_BASE)
+        (marker <= POLYLINE_SEGMENT_MIDPOINT_MARKER_BASE
+            && marker > ELLIPSE_MAJOR_AXIS_MARKER)
             .then(|| (POLYLINE_SEGMENT_MIDPOINT_MARKER_BASE - marker) as usize)
+    }
+
+    pub fn ellipse_axis(entity: Handle, minor: bool) -> Self {
+        Self {
+            entity,
+            marker: Some(if minor {
+                ELLIPSE_MINOR_AXIS_MARKER
+            } else {
+                ELLIPSE_MAJOR_AXIS_MARKER
+            }),
+        }
+    }
+
+    pub fn ellipse_axis_is_minor(self) -> Option<bool> {
+        match self.marker {
+            Some(ELLIPSE_MAJOR_AXIS_MARKER) => Some(false),
+            Some(ELLIPSE_MINOR_AXIS_MARKER) => Some(true),
+            _ => None,
+        }
     }
 }
 
@@ -583,7 +605,133 @@ pub(crate) fn parametric_curve_ref_for_pick(
     }
 }
 
+/// Resolve the exact straight sub-geometry selected by the Parallel command.
+/// Whole-line entities retain a whole reference; polylines retain the picked
+/// segment so save/reopen and later grip solves keep acting on that segment.
+/// Degenerate directions and curved polyline segments are rejected here,
+/// before a solver or undo record is created.
+pub(crate) fn parallel_constraint_ref_for_pick(
+    entity: &acadrust::EntityType,
+    handle: Handle,
+    world_point: glam::DVec3,
+) -> Option<ParametricRef> {
+    const DIRECTION_EPSILON_SQ: f64 = 1.0e-18;
+    match entity {
+        acadrust::EntityType::Line(line) => {
+            ((line.end - line.start).length_squared() > DIRECTION_EPSILON_SQ)
+                .then_some(ParametricRef::whole(handle))
+        }
+        acadrust::EntityType::Ray(ray) => {
+            (ray.direction.length_squared() > DIRECTION_EPSILON_SQ)
+                .then_some(ParametricRef::whole(handle))
+        }
+        acadrust::EntityType::XLine(line) => {
+            (line.direction.length_squared() > DIRECTION_EPSILON_SQ)
+                .then_some(ParametricRef::whole(handle))
+        }
+        acadrust::EntityType::Text(_) | acadrust::EntityType::MText(_) => {
+            Some(ParametricRef::whole(handle))
+        }
+        acadrust::EntityType::Ellipse(ellipse) => {
+            let major_length = ellipse.major_axis.length();
+            let minor_length = major_length * ellipse.minor_axis_ratio.abs();
+            if major_length <= 1.0e-9
+                || minor_length <= 1.0e-9
+                || (ellipse.minor_axis_ratio.abs() - 1.0).abs() <= 1.0e-9
+            {
+                return None;
+            }
+            let major = ellipse.major_axis / major_length;
+            let normal = ellipse.normal.normalize();
+            let minor = Vector3::new(
+                normal.y * major.z - normal.z * major.y,
+                normal.z * major.x - normal.x * major.z,
+                normal.x * major.y - normal.y * major.x,
+            );
+            let pick = Vector3::new(world_point.x, world_point.y, world_point.z) - ellipse.center;
+            let distance_to_major = pick.dot(&minor).abs();
+            let distance_to_minor = pick.dot(&major).abs();
+            Some(ParametricRef::ellipse_axis(
+                handle,
+                distance_to_minor < distance_to_major,
+            ))
+        }
+        acadrust::EntityType::LwPolyline(polyline) => {
+            let curve = crate::entities::curve::entity_curve_xy(entity)?;
+            let segments = curve.segments();
+            let (index, _) = cadkernel::geom2d::nearest_of(
+                segments.iter(),
+                [world_point.x, world_point.y],
+            )?;
+            if polyline
+                .vertices
+                .get(index)
+                .is_none_or(|vertex| vertex.bulge.abs() > 1.0e-9)
+            {
+                return None;
+            }
+            let points = super::dimension_assoc::source_points(entity);
+            let start = *points.get(index)?;
+            let end = points
+                .get(index + 1)
+                .copied()
+                .or_else(|| polyline.is_closed.then(|| points.first().copied()).flatten())?;
+            ((end - start).length_squared() > DIRECTION_EPSILON_SQ)
+                .then_some(ParametricRef::segment(handle, index))
+        }
+        acadrust::EntityType::Polyline2D(polyline) => {
+            let curve = crate::entities::curve::entity_curve_xy(entity)?;
+            let segments = curve.segments();
+            let (index, _) = cadkernel::geom2d::nearest_of(
+                segments.iter(),
+                [world_point.x, world_point.y],
+            )?;
+            if polyline
+                .vertices
+                .get(index)
+                .is_none_or(|vertex| vertex.bulge.abs() > 1.0e-9)
+            {
+                return None;
+            }
+            let points = super::dimension_assoc::source_points(entity);
+            let start = *points.get(index)?;
+            let end = points
+                .get(index + 1)
+                .copied()
+                .or_else(|| polyline.is_closed().then(|| points.first().copied()).flatten())?;
+            ((end - start).length_squared() > DIRECTION_EPSILON_SQ)
+                .then_some(ParametricRef::segment(handle, index))
+        }
+        _ => None,
+    }
+}
+
 impl ConstraintKind {
+    pub const fn constraint_bar_mode_bit(self) -> Option<i16> {
+        match self {
+            Self::Horizontal => Some(1),
+            Self::Vertical => Some(2),
+            Self::Perpendicular | Self::Normal => Some(4),
+            Self::Parallel => Some(8),
+            Self::Tangent => Some(16),
+            Self::Smooth => Some(32),
+            Self::Coincident | Self::PointOnCurve | Self::Midpoint => Some(64),
+            Self::Concentric | Self::CenterPoint => Some(128),
+            Self::Colinear => Some(256),
+            Self::Symmetric => Some(512),
+            Self::Equal | Self::EqualDistance => Some(1024),
+            Self::Fixed | Self::RigidSet => Some(2048),
+            Self::Distance
+            | Self::Angle
+            | Self::Angle3Point
+            | Self::Radius
+            | Self::Diameter
+            | Self::DistanceX
+            | Self::DistanceY
+            | Self::DistanceDirected => None,
+        }
+    }
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::Coincident => "Coincident",
@@ -712,6 +860,43 @@ fn glyph_placement_for_reference(
     }
     match (entity, r.marker) {
         (acadrust::EntityType::Line(line), None) => Some((line_midpoint(line), line_normal(line))),
+        (acadrust::EntityType::Text(text), None) => {
+            let direction = Vector3::new(text.rotation.cos(), text.rotation.sin(), 0.0);
+            Some((
+                text.insertion_point + direction * text.height.max(1.0),
+                Vector3::new(-direction.y, direction.x, 0.0),
+            ))
+        }
+        (acadrust::EntityType::MText(text), None) => {
+            let direction = Vector3::new(text.rotation.cos(), text.rotation.sin(), 0.0);
+            Some((
+                text.insertion_point + direction * text.height.max(1.0),
+                Vector3::new(-direction.y, direction.x, 0.0),
+            ))
+        }
+        (acadrust::EntityType::Ellipse(ellipse), marker)
+            if matches!(marker, Some(ELLIPSE_MAJOR_AXIS_MARKER | ELLIPSE_MINOR_AXIS_MARKER)) =>
+        {
+            let major_length = ellipse.major_axis.length();
+            let major = ellipse.major_axis / major_length;
+            let normal = ellipse.normal.normalize();
+            let minor = Vector3::new(
+                normal.y * major.z - normal.z * major.y,
+                normal.z * major.x - normal.x * major.z,
+                normal.x * major.y - normal.y * major.x,
+            );
+            let is_minor = marker == Some(ELLIPSE_MINOR_AXIS_MARKER);
+            let direction = if is_minor { minor } else { major };
+            let radius = if is_minor {
+                major_length * ellipse.minor_axis_ratio.abs()
+            } else {
+                major_length
+            };
+            Some((
+                ellipse.center + direction * radius,
+                Vector3::new(-direction.y, direction.x, 0.0),
+            ))
+        }
         (acadrust::EntityType::Circle(circle), None | Some(-3)) => {
             let center = circle.center_wcs();
             let anchor = circle.point_at_angle_wcs(0.0);
@@ -1391,6 +1576,7 @@ impl super::Scene {
         vp_size: (f32, f32),
         show_values: bool,
         display_mode: i16,
+        constraint_bar_mode: i16,
     ) -> Vec<(
         ConstraintId,
         iced::Point,
@@ -1419,6 +1605,11 @@ impl super::Scene {
         set.constraints
             .iter()
             .filter(|c| c.enabled)
+            .filter(|c| {
+                c.kind
+                    .constraint_bar_mode_bit()
+                    .is_none_or(|bit| constraint_bar_mode & bit != 0)
+            })
             .filter(|c| {
                 let selected = c
                     .refs
@@ -1497,6 +1688,7 @@ impl super::Scene {
         vp_size: (f32, f32),
         show_values: bool,
         display_mode: i16,
+        constraint_bar_mode: i16,
         p: iced::Point,
     ) -> Option<ConstraintId> {
         let placements = self.constraint_glyph_placements_screen(
@@ -1504,6 +1696,7 @@ impl super::Scene {
             vp_size,
             show_values,
             display_mode,
+            constraint_bar_mode,
         );
         let glyphs: Vec<(iced::Point, [f32; 2], String, bool)> = placements
             .iter()

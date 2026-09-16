@@ -1345,6 +1345,13 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "PCONSTRAINT" | "GCPARALLEL" => {
+                use crate::modules::parametric::ParallelConstraintCommand;
+                let new_cmd = ParallelConstraintCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
             "EDCONSTRAINT" => {
                 use crate::modules::parametric::EqualDistanceConstraintCommand;
                 let new_cmd = EqualDistanceConstraintCommand::new();
@@ -1352,7 +1359,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "PCONSTRAINT" | "QCONSTRAINT" | "ECONSTRAINT" | "TCONSTRAINT" | "LCONSTRAINT"
+            "QCONSTRAINT" | "ECONSTRAINT" | "TCONSTRAINT" | "LCONSTRAINT"
             | "NRCONSTRAINT" => {
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
@@ -1368,7 +1375,6 @@ impl OpenCADStudio {
                     use crate::command::CmdResult;
                     use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef};
                     let (kind, label) = match cmd {
-                        "PCONSTRAINT" => (ConstraintKind::Parallel, "Parallel constraint"),
                         "QCONSTRAINT" => {
                             (ConstraintKind::Perpendicular, "Perpendicular constraint")
                         }

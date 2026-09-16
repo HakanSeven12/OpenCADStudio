@@ -404,6 +404,9 @@ pub struct UserSettings {
     /// Constraint bar display bit mask: 1 after applying, 2 on selection.
     #[serde(default = "default_constraint_bar_display")]
     pub constraint_bar_display: i16,
+    /// Geometric constraint types shown on bars (1..2048, combined as bits).
+    #[serde(default = "default_constraint_bar_mode")]
+    pub constraint_bar_mode: i16,
     /// Minutes between autosaves to a `.sv$` recovery file (SAVETIME command).
     /// 0 disables autosave.
     pub savetime_min: i32,
@@ -479,7 +482,11 @@ fn default_constraint_solve_mode() -> bool {
 }
 
 fn default_constraint_bar_display() -> i16 {
-    3
+    1
+}
+
+fn default_constraint_bar_mode() -> i16 {
+    4095
 }
 
 fn deserialize_clipromptlines<'de, D>(de: D) -> Result<i32, D::Error>
@@ -541,7 +548,8 @@ impl Default for UserSettings {
             auto_constrain: AutoConstrainSettings::default(),
             constraint_solve_mode: true,
             constraint_infer: false,
-            constraint_bar_display: 3,
+            constraint_bar_display: 1,
+            constraint_bar_mode: 4095,
             savetime_min: 10,
             default_save_format: crate::io::DEFAULT_SAVE_FORMAT.to_string(),
             pick_add: true,

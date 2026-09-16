@@ -32,7 +32,7 @@ use cadkernel_constraints::system::System;
 use super::named_parameters::ParameterTable;
 use super::parametric_constraints::{
     angle_sector, distance_direction_type, ConstraintId, ConstraintKind, ParametricConstraint,
-    ParametricConstraintSet, ParametricRef,
+    ParametricConstraintSet, ParametricRef, ParametricScope,
 };
 use super::{ChangeKind, Scene};
 
@@ -41,6 +41,8 @@ use super::{ChangeKind, Scene};
 #[derive(Clone)]
 enum EntityGeom {
     Point(GPoint),
+    /// Text insertion point plus a unit baseline direction endpoint.
+    TextLine(GLine),
     Line(GLine),
     Ray(GLine),
     XLine(GLine),
@@ -78,6 +80,7 @@ impl EntityGeom {
     fn point_for_marker(&self, marker: i32) -> Option<GPoint> {
         match (self, marker) {
             (EntityGeom::Point(point), 0) => Some(*point),
+            (EntityGeom::TextLine(line), 0) => Some(line.p1),
             (EntityGeom::Line(l), 0) => Some(l.p1),
             (EntityGeom::Line(l), 1) => Some(l.p2),
             (EntityGeom::Ray(l), 0) => Some(l.p1),
@@ -143,6 +146,7 @@ fn as_circle_or_line(g: EntityGeom, reference: ParametricRef) -> CircleOrLine {
         EntityGeom::Circle(c) => CircleOrLine::Circle(c),
         EntityGeom::Arc(a) => CircleOrLine::Circle(a.circle),
         EntityGeom::Line(l) | EntityGeom::Ray(l) | EntityGeom::XLine(l) => CircleOrLine::Line(l),
+        EntityGeom::TextLine(_) => CircleOrLine::Other,
         EntityGeom::Ellipse(ellipse) => CircleOrLine::Ellipse(ellipse),
         EntityGeom::Point(_) => CircleOrLine::Other,
         EntityGeom::Spline { .. } => CircleOrLine::Other,
@@ -185,14 +189,32 @@ fn register_entity(
             sys.add_param(insert.insert_point.x, false),
             sys.add_param(insert.insert_point.y, false),
         ))),
-        EntityType::Text(text) => Some(EntityGeom::Point(GPoint::new(
-            sys.add_param(text.insertion_point.x, false),
-            sys.add_param(text.insertion_point.y, false),
-        ))),
-        EntityType::MText(text) => Some(EntityGeom::Point(GPoint::new(
-            sys.add_param(text.insertion_point.x, false),
-            sys.add_param(text.insertion_point.y, false),
-        ))),
+        EntityType::Text(text) => {
+            let direction = Vector3::new(text.rotation.cos(), text.rotation.sin(), 0.0);
+            Some(EntityGeom::TextLine(GLine {
+                p1: GPoint::new(
+                    sys.add_param(text.insertion_point.x, false),
+                    sys.add_param(text.insertion_point.y, false),
+                ),
+                p2: GPoint::new(
+                    sys.add_param(text.insertion_point.x + direction.x, false),
+                    sys.add_param(text.insertion_point.y + direction.y, false),
+                ),
+            }))
+        }
+        EntityType::MText(text) => {
+            let direction = Vector3::new(text.rotation.cos(), text.rotation.sin(), 0.0);
+            Some(EntityGeom::TextLine(GLine {
+                p1: GPoint::new(
+                    sys.add_param(text.insertion_point.x, false),
+                    sys.add_param(text.insertion_point.y, false),
+                ),
+                p2: GPoint::new(
+                    sys.add_param(text.insertion_point.x + direction.x, false),
+                    sys.add_param(text.insertion_point.y + direction.y, false),
+                ),
+            }))
+        }
         EntityType::AttributeDefinition(attribute) => Some(EntityGeom::Point(GPoint::new(
             sys.add_param(attribute.insertion_point.x, false),
             sys.add_param(attribute.insertion_point.y, false),
@@ -856,8 +878,33 @@ fn build_constraint(
     let whole_line = |sys: &mut System, cache: &mut HashMap<_, _>, r: ParametricRef| {
         let geometry = resolve_ref(document, sys, cache, r)?;
         match geometry {
-            EntityGeom::Line(line) | EntityGeom::Ray(line) | EntityGeom::XLine(line) => Some(line),
+            EntityGeom::TextLine(line)
+            | EntityGeom::Line(line)
+            | EntityGeom::Ray(line)
+            | EntityGeom::XLine(line) => Some(line),
             EntityGeom::Polyline { .. } => geometry.line_segment(r.segment_index()?),
+            _ => None,
+        }
+    };
+    let parallel_line = |sys: &mut System, cache: &mut HashMap<_, _>, r: ParametricRef| {
+        let geometry = resolve_ref(document, sys, cache, r)?;
+        match geometry {
+            EntityGeom::TextLine(line)
+            | EntityGeom::Line(line)
+            | EntityGeom::Ray(line)
+            | EntityGeom::XLine(line) => Some((line, false)),
+            EntityGeom::Polyline { .. } => {
+                geometry.line_segment(r.segment_index()?).map(|line| (line, false))
+            }
+            EntityGeom::Ellipse(ellipse) => r.ellipse_axis_is_minor().map(|minor| {
+                (
+                    GLine {
+                        p1: ellipse.center,
+                        p2: ellipse.focus1,
+                    },
+                    minor,
+                )
+            }),
             _ => None,
         }
     };
@@ -876,6 +923,7 @@ fn build_constraint(
             EntityGeom::Circle(circ) => Some(circ),
             EntityGeom::Arc(a) => Some(a.circle),
             EntityGeom::Point(_)
+            | EntityGeom::TextLine(_)
             | EntityGeom::Line(_)
             | EntityGeom::Ray(_)
             | EntityGeom::XLine(_)
@@ -946,12 +994,20 @@ fn build_constraint(
             let [a, b] = c.refs.as_slice() else {
                 return Vec::new();
             };
-            let (Some(fixed), Some(moving)) =
-                (whole_line(sys, cache, *a), whole_line(sys, cache, *b))
+            let (Some((fixed, fixed_minor)), Some((moving, moving_minor))) =
+                (parallel_line(sys, cache, *a), parallel_line(sys, cache, *b))
             else {
                 return Vec::new();
             };
-            vec![Rc::new(ParallelConstraint::new(sys.store(), moving, fixed))]
+            if fixed_minor == moving_minor {
+                vec![Rc::new(ParallelConstraint::new(sys.store(), moving, fixed))]
+            } else {
+                vec![Rc::new(PerpendicularConstraint::new(
+                    sys.store(),
+                    moving,
+                    fixed,
+                ))]
+            }
         }
         ConstraintKind::Perpendicular => {
             let [a, b] = c.refs.as_slice() else {
@@ -1109,7 +1165,7 @@ fn build_constraint(
                             })
                     })
                     .unwrap_or_default(),
-                EntityGeom::Point(_) => Vec::new(),
+                EntityGeom::Point(_) | EntityGeom::TextLine(_) => Vec::new(),
             }
         }
         ConstraintKind::Symmetric => {
@@ -1200,7 +1256,10 @@ fn build_constraint(
                         })
                         .collect()
                 }
-                EntityGeom::Line(l) | EntityGeom::Ray(l) | EntityGeom::XLine(l) => {
+                EntityGeom::TextLine(l)
+                | EntityGeom::Line(l)
+                | EntityGeom::Ray(l)
+                | EntityGeom::XLine(l) => {
                     let (x1, y1, x2, y2) = {
                         let store = sys.store();
                         (
@@ -2131,6 +2190,17 @@ fn solve_scope(
         }
     }
 
+    // A text baseline is represented by a unit line so direction constraints
+    // can rotate the text without changing its insertion point or inventing a
+    // text width. Keep that internal unit length exact during every solve.
+    for geom in cache.values() {
+        let EntityGeom::TextLine(line) = geom else {
+            continue;
+        };
+        let target = sys.add_param(1.0, true);
+        sys.add_constraint(Rc::new(P2PDistance::new(line.p1, line.p2, target)));
+    }
+
     // Ellipse rules (same motivation as arc rules, different mechanism):
     // `cadkernel_constraints::geo::Ellipse` stores `focus1` as an absolute point, not an
     // offset from `center`. If some constraint (e.g. Concentric) pulls only
@@ -2146,7 +2216,7 @@ fn solve_scope(
     // actually constrains `focus1`/`radmin` directly (only `Fixed` does
     // today). `radmin` needs no equivalent rule — as a lone scalar it isn't
     // coupled to `center`'s movement, so it already stays put on its own.
-    for geom in cache.values() {
+    for (&ellipse_handle, geom) in &cache {
         let EntityGeom::Ellipse(el) = geom else {
             continue;
         };
@@ -2159,10 +2229,49 @@ fn solve_scope(
                 store.get(el.focus1.y),
             )
         };
-        let dx = sys.add_param(fx - cx, true);
-        let dy = sys.add_param(fy - cy, true);
-        sys.add_constraint(Rc::new(Difference::new(el.center.x, el.focus1.x, dx)));
-        sys.add_constraint(Rc::new(Difference::new(el.center.y, el.focus1.y, dy)));
+        let direction_is_constrained = set.constraints.iter().any(|constraint| {
+            constraint.enabled
+                && constraint.kind == ConstraintKind::Parallel
+                && constraint.refs.iter().any(|reference| {
+                    reference.ellipse_axis_is_minor().is_some()
+                        && reference.entity == ellipse_handle
+                })
+        });
+        if direction_is_constrained {
+            let focus_distance = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
+            let target = sys.add_param(focus_distance, true);
+            sys.add_constraint(Rc::new(P2PDistance::new(el.center, el.focus1, target)));
+            sys.store_mut().set_driven(el.radmin, true);
+        } else {
+            let dx = sys.add_param(fx - cx, true);
+            let dy = sys.add_param(fy - cy, true);
+            sys.add_constraint(Rc::new(Difference::new(el.center.x, el.focus1.x, dx)));
+            sys.add_constraint(Rc::new(Difference::new(el.center.y, el.focus1.y, dy)));
+        }
+    }
+
+    // Direction-only entities rotate around their own insertion/centre when
+    // they are the moving side of a Parallel relation. The first reference is
+    // already supplied by the command as a whole-geometry anchor.
+    for constraint in set
+        .constraints
+        .iter()
+        .filter(|constraint| constraint.enabled && constraint.kind == ConstraintKind::Parallel)
+    {
+        for reference in &constraint.refs {
+            if driven_refs.contains(reference) {
+                continue;
+            }
+            match document.get_entity(reference.entity) {
+                Some(EntityType::Text(_) | EntityType::MText(_)) => {
+                    anchors.push(ParametricRef::point(reference.entity, 0));
+                }
+                Some(EntityType::Ellipse(_)) if reference.ellipse_axis_is_minor().is_some() => {
+                    anchors.push(ParametricRef::center(reference.entity));
+                }
+                _ => {}
+            }
+        }
     }
 
     // Temporarily make each requested anchor a fixed kernel input. Marking the
@@ -2177,7 +2286,18 @@ fn solve_scope(
         {
             continue;
         }
-        let params_to_pin = if let Some(index) = reference.segment_index() {
+        let params_to_pin = if reference.ellipse_axis_is_minor().is_some() {
+            match resolve_ref(document, &mut sys, &mut cache, *reference) {
+                Some(EntityGeom::Ellipse(ellipse)) => vec![
+                    ellipse.center.x,
+                    ellipse.center.y,
+                    ellipse.focus1.x,
+                    ellipse.focus1.y,
+                    ellipse.radmin,
+                ],
+                _ => Vec::new(),
+            }
+        } else if let Some(index) = reference.segment_index() {
             resolve_ref(document, &mut sys, &mut cache, *reference)
                 .and_then(|geometry| geometry.line_segment(index))
                 .map(|line| vec![line.p1.x, line.p1.y, line.p2.x, line.p2.y])
@@ -2189,6 +2309,9 @@ fn solve_scope(
         } else {
             match resolve_ref(document, &mut sys, &mut cache, *reference) {
                 Some(EntityGeom::Point(point)) => vec![point.x, point.y],
+                Some(EntityGeom::TextLine(line)) => {
+                    vec![line.p1.x, line.p1.y, line.p2.x, line.p2.y]
+                }
                 Some(EntityGeom::Line(line))
                 | Some(EntityGeom::Ray(line))
                 | Some(EntityGeom::XLine(line)) => {
@@ -2245,6 +2368,7 @@ fn solve_scope(
         .values()
         .map(|g| match g {
             EntityGeom::Point(_) => 2,
+            EntityGeom::TextLine(_) => 4,
             EntityGeom::Line(_) | EntityGeom::Ray(_) | EntityGeom::XLine(_) => 4,
             EntityGeom::Polyline { points, arcs, .. } => {
                 points.len() * 2 + arcs.iter().flatten().count() * 5
@@ -2327,31 +2451,47 @@ fn solve_scope(
                     results.push((handle, EntityType::Insert(updated)));
                 }
             }
-            (EntityType::Text(text), EntityGeom::Point(geometry)) => {
+            (EntityType::Text(text), EntityGeom::TextLine(geometry)) => {
                 let mut updated = text.clone();
                 let next = Vector3::new(
-                    store.get(geometry.x),
-                    store.get(geometry.y),
+                    store.get(geometry.p1.x),
+                    store.get(geometry.p1.y),
                     text.insertion_point.z,
                 );
+                let rotation = (store.get(geometry.p2.y) - next.y)
+                    .atan2(store.get(geometry.p2.x) - next.x);
                 let delta = next - text.insertion_point;
-                if delta.length() > MOVE_EPS {
+                if delta.length() > MOVE_EPS || (rotation - text.rotation).abs() > MOVE_EPS {
                     updated.insertion_point = next;
+                    updated.rotation = rotation;
                     if let Some(alignment) = &mut updated.alignment_point {
-                        *alignment = *alignment + delta;
+                        let relative = *alignment - text.insertion_point;
+                        let angle = rotation - text.rotation;
+                        let rotated = Vector3::new(
+                            relative.x * angle.cos() - relative.y * angle.sin(),
+                            relative.x * angle.sin() + relative.y * angle.cos(),
+                            relative.z,
+                        );
+                        *alignment = next + rotated;
                     }
                     results.push((handle, EntityType::Text(updated)));
                 }
             }
-            (EntityType::MText(text), EntityGeom::Point(geometry)) => {
+            (EntityType::MText(text), EntityGeom::TextLine(geometry)) => {
                 let mut updated = text.clone();
                 let next = Vector3::new(
-                    store.get(geometry.x),
-                    store.get(geometry.y),
+                    store.get(geometry.p1.x),
+                    store.get(geometry.p1.y),
                     text.insertion_point.z,
                 );
-                if (next - text.insertion_point).length() > MOVE_EPS {
+                let rotation = (store.get(geometry.p2.y) - next.y)
+                    .atan2(store.get(geometry.p2.x) - next.x);
+                if (next - text.insertion_point).length() > MOVE_EPS
+                    || (rotation - text.rotation).abs() > MOVE_EPS
+                {
                     updated.insertion_point = next;
+                    updated.rotation = rotation;
+                    updated.dwg_x_direction = None;
                     results.push((handle, EntityType::MText(updated)));
                 }
             }
@@ -2710,6 +2850,69 @@ impl Scene {
         .is_empty()
         {
             return Err("The selected entities or target value do not support this constraint.");
+        }
+        Ok(())
+    }
+
+    /// Validate a newly requested persistent constraint against the current
+    /// scope as well as against the geometry bridge. Exact duplicates and a
+    /// candidate that introduces a redundant/conflicting equation are
+    /// rejected before history, persistence, or geometry is touched.
+    pub(crate) fn validate_new_parametric_constraint(
+        &self,
+        scope: ParametricScope,
+        kind: ConstraintKind,
+        refs: &[ParametricRef],
+        driving_param: Option<&super::named_parameters::DrivingValue>,
+    ) -> Result<(), &'static str> {
+        self.validate_parametric_constraint(kind, refs, driving_param)?;
+
+        let Some(existing) = self.parametric_constraint_set(scope) else {
+            return Ok(());
+        };
+        let same_unordered_pair = |left: &[ParametricRef], right: &[ParametricRef]| {
+            left.len() == 2
+                && right.len() == 2
+                && ((left[0] == right[0] && left[1] == right[1])
+                    || (left[0] == right[1] && left[1] == right[0]))
+        };
+        if existing.constraints.iter().any(|constraint| {
+            constraint.enabled
+                && constraint.kind == kind
+                && (constraint.refs == refs || same_unordered_pair(&constraint.refs, refs))
+        }) {
+            return Err("The requested constraint already exists.");
+        }
+
+        let retained = HashMap::new();
+        let baseline_conflicts = solve_scope(
+            &self.document,
+            &self.named_parameters,
+            existing,
+            &[],
+            false,
+            true,
+            &retained,
+        )
+        .map(|(_, _, conflicts)| conflicts.len())
+        .unwrap_or(0);
+        let mut candidate = existing.clone();
+        let new_id = candidate.add(kind, refs.to_vec(), driving_param.cloned());
+        let Some((_, _, conflicts)) = solve_scope(
+            &self.document,
+            &self.named_parameters,
+            &candidate,
+            &[],
+            false,
+            true,
+            &retained,
+        ) else {
+            return Err("The requested constraint cannot be solved.");
+        };
+        if conflicts.iter().any(|(id, _)| *id == new_id)
+            || conflicts.len() > baseline_conflicts
+        {
+            return Err("The requested constraint would overconstrain the geometry.");
         }
         Ok(())
     }

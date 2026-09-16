@@ -1049,6 +1049,7 @@ impl OpenCADStudio {
                     | "CONSTRAINTSOLVEMODE"
                     | "CONSTRAINTINFER"
                     | "CONSTRAINTBARDISPLAY"
+                    | "CONSTRAINTBARMODE"
             ) =>
             {
                 return self.dispatch_styleprops(&format!("SETVAR {cmd}"), i);
@@ -1268,14 +1269,20 @@ impl OpenCADStudio {
                     if matches!(
                         name.as_str(),
                         "CONSTRAINTSOLVEMODE" | "CONSTRAINTINFER" | "CONSTRAINTBARDISPLAY"
+                            | "CONSTRAINTBARMODE"
                     ) {
                         let current = match name.as_str() {
                             "CONSTRAINTSOLVEMODE" => i16::from(self.constraint_solve_mode),
                             "CONSTRAINTINFER" => i16::from(self.constraint_infer),
                             "CONSTRAINTBARDISPLAY" => self.constraint_bar_display,
+                            "CONSTRAINTBARMODE" => self.constraint_bar_mode,
                             _ => unreachable!(),
                         };
-                        let maximum = if name == "CONSTRAINTBARDISPLAY" { 3 } else { 1 };
+                        let maximum = match name.as_str() {
+                            "CONSTRAINTBARDISPLAY" => 3,
+                            "CONSTRAINTBARMODE" => 4095,
+                            _ => 1,
+                        };
                         if let Some(value) = &value {
                             match value
                                 .parse::<i16>()
@@ -1291,6 +1298,7 @@ impl OpenCADStudio {
                                         "CONSTRAINTBARDISPLAY" => {
                                             self.constraint_bar_display = mode
                                         }
+                                        "CONSTRAINTBARMODE" => self.constraint_bar_mode = mode,
                                         _ => unreachable!(),
                                     }
                                     self.persist_settings_if_changed();

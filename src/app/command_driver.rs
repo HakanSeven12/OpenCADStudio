@@ -3093,7 +3093,9 @@ impl OpenCADStudio {
                 driving_param,
                 label,
             } => {
-                if let Err(message) = self.tabs[i].scene.validate_parametric_constraint(
+                let scope = self.tabs[i].current_parametric_scope();
+                if let Err(message) = self.tabs[i].scene.validate_new_parametric_constraint(
+                    scope,
                     kind,
                     &refs,
                     driving_param.as_ref(),
@@ -3103,7 +3105,6 @@ impl OpenCADStudio {
                     self.command_line.push_error(message);
                     return Task::none();
                 }
-                let scope = self.tabs[i].current_parametric_scope();
                 let constraints_before = self.tabs[i]
                     .scene
                     .parametric_constraint_set(scope)
@@ -3111,7 +3112,16 @@ impl OpenCADStudio {
                     .unwrap_or_else(|| {
                         crate::scene::parametric_constraints::ParametricConstraintSet::new(scope)
                     });
-                let touched: Vec<Handle> = refs.iter().map(|r| r.entity).collect();
+                let mut touched: Vec<Handle> = refs.iter().map(|r| r.entity).collect();
+                touched.sort();
+                touched.dedup();
+                let solve_anchors: Vec<_> = if kind
+                    == crate::scene::parametric_constraints::ConstraintKind::Parallel
+                {
+                    refs.first().copied().into_iter().collect()
+                } else {
+                    Vec::new()
+                };
                 let pending = self.begin_undo(i, label, touched.len(), true);
                 self.tabs[i]
                     .scene
@@ -3128,7 +3138,7 @@ impl OpenCADStudio {
                     .collect();
                 self.tabs[i].scene.bump_entities_with_parametric_policy(
                     &changes,
-                    &[],
+                    &solve_anchors,
                     retain_size,
                 );
                 self.tabs[i].dirty = true;

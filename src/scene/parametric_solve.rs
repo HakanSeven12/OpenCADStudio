@@ -41,6 +41,9 @@ use super::{ChangeKind, Scene};
 #[derive(Clone)]
 enum EntityGeom {
     Point(GPoint),
+    /// Text insertion plus its baseline direction.  Keeping two points lets
+    /// geometric constraints translate and rotate text as one linear object.
+    TextAxis(GLine),
     Line(GLine),
     Ray(GLine),
     XLine(GLine),
@@ -78,6 +81,7 @@ impl EntityGeom {
     fn point_for_marker(&self, marker: i32) -> Option<GPoint> {
         match (self, marker) {
             (EntityGeom::Point(point), 0) => Some(*point),
+            (EntityGeom::TextAxis(line), 0) => Some(line.p1),
             (EntityGeom::Line(l), 0) => Some(l.p1),
             (EntityGeom::Line(l), 1) => Some(l.p2),
             (EntityGeom::Ray(l), 0) => Some(l.p1),
@@ -142,7 +146,10 @@ fn as_circle_or_line(g: EntityGeom, reference: ParametricRef) -> CircleOrLine {
     match g {
         EntityGeom::Circle(c) => CircleOrLine::Circle(c),
         EntityGeom::Arc(a) => CircleOrLine::Circle(a.circle),
-        EntityGeom::Line(l) | EntityGeom::Ray(l) | EntityGeom::XLine(l) => CircleOrLine::Line(l),
+        EntityGeom::Line(l)
+        | EntityGeom::Ray(l)
+        | EntityGeom::XLine(l)
+        | EntityGeom::TextAxis(l) => CircleOrLine::Line(l),
         EntityGeom::Ellipse(ellipse) => CircleOrLine::Ellipse(ellipse),
         EntityGeom::Point(_) => CircleOrLine::Other,
         EntityGeom::Spline { .. } => CircleOrLine::Other,
@@ -185,14 +192,28 @@ fn register_entity(
             sys.add_param(insert.insert_point.x, false),
             sys.add_param(insert.insert_point.y, false),
         ))),
-        EntityType::Text(text) => Some(EntityGeom::Point(GPoint::new(
-            sys.add_param(text.insertion_point.x, false),
-            sys.add_param(text.insertion_point.y, false),
-        ))),
-        EntityType::MText(text) => Some(EntityGeom::Point(GPoint::new(
-            sys.add_param(text.insertion_point.x, false),
-            sys.add_param(text.insertion_point.y, false),
-        ))),
+        EntityType::Text(text) => {
+            let p1 = GPoint::new(
+                sys.add_param(text.insertion_point.x, false),
+                sys.add_param(text.insertion_point.y, false),
+            );
+            let p2 = GPoint::new(
+                sys.add_param(text.insertion_point.x + text.rotation.cos(), false),
+                sys.add_param(text.insertion_point.y + text.rotation.sin(), false),
+            );
+            Some(EntityGeom::TextAxis(GLine { p1, p2 }))
+        }
+        EntityType::MText(text) => {
+            let p1 = GPoint::new(
+                sys.add_param(text.insertion_point.x, false),
+                sys.add_param(text.insertion_point.y, false),
+            );
+            let p2 = GPoint::new(
+                sys.add_param(text.insertion_point.x + text.rotation.cos(), false),
+                sys.add_param(text.insertion_point.y + text.rotation.sin(), false),
+            );
+            Some(EntityGeom::TextAxis(GLine { p1, p2 }))
+        }
         EntityType::AttributeDefinition(attribute) => Some(EntityGeom::Point(GPoint::new(
             sys.add_param(attribute.insertion_point.x, false),
             sys.add_param(attribute.insertion_point.y, false),
@@ -856,7 +877,10 @@ fn build_constraint(
     let whole_line = |sys: &mut System, cache: &mut HashMap<_, _>, r: ParametricRef| {
         let geometry = resolve_ref(document, sys, cache, r)?;
         match geometry {
-            EntityGeom::Line(line) | EntityGeom::Ray(line) | EntityGeom::XLine(line) => Some(line),
+            EntityGeom::Line(line)
+            | EntityGeom::Ray(line)
+            | EntityGeom::XLine(line)
+            | EntityGeom::TextAxis(line) => Some(line),
             EntityGeom::Polyline { .. } => geometry.line_segment(r.segment_index()?),
             _ => None,
         }
@@ -876,6 +900,7 @@ fn build_constraint(
             EntityGeom::Circle(circ) => Some(circ),
             EntityGeom::Arc(a) => Some(a.circle),
             EntityGeom::Point(_)
+            | EntityGeom::TextAxis(_)
             | EntityGeom::Line(_)
             | EntityGeom::Ray(_)
             | EntityGeom::XLine(_)
@@ -1013,18 +1038,62 @@ fn build_constraint(
             let [a, b] = c.refs.as_slice() else {
                 return Vec::new();
             };
-            let (Some(onto), Some(moving)) =
-                (whole_line(sys, cache, *a), whole_line(sys, cache, *b))
+            let axis = |sys: &mut System,
+                        cache: &mut HashMap<Handle, EntityGeom>,
+                        reference: ParametricRef|
+             -> Option<(GLine, bool)> {
+                let geometry = resolve_ref(document, sys, cache, reference)?;
+                match geometry {
+                    EntityGeom::Line(line)
+                    | EntityGeom::Ray(line)
+                    | EntityGeom::XLine(line)
+                    | EntityGeom::TextAxis(line) => Some((line, false)),
+                    EntityGeom::Polyline { .. } => {
+                        Some((geometry.line_segment(reference.segment_index()?)?, false))
+                    }
+                    EntityGeom::Ellipse(ellipse) => Some((
+                        GLine {
+                            p1: ellipse.center,
+                            p2: ellipse.focus1,
+                        },
+                        reference.is_ellipse_minor_axis(),
+                    )),
+                    _ => None,
+                }
+            };
+            let (Some((onto_major, onto_minor)), Some((moving, moving_minor))) =
+                (axis(sys, cache, *a), axis(sys, cache, *b))
             else {
                 return Vec::new();
             };
-            // Pinning both of `moving`'s endpoints onto `onto`'s infinite
-            // line forces the two to coincide (as long as `moving`'s own
-            // two points stay distinct) — no dedicated "colinear" primitive
-            // needed, `PointOnLine` applied twice does it.
+            let onto = if onto_minor {
+                let (cx, cy, fx, fy) = {
+                    let store = sys.store();
+                    (
+                        store.get(onto_major.p1.x),
+                        store.get(onto_major.p1.y),
+                        store.get(onto_major.p2.x),
+                        store.get(onto_major.p2.y),
+                    )
+                };
+                GLine {
+                    p1: onto_major.p1,
+                    p2: GPoint::new(
+                        sys.add_param(cx - (fy - cy), true),
+                        sys.add_param(cy + (fx - cx), true),
+                    ),
+                }
+            } else {
+                onto_major
+            };
+            let direction_constraint: Rc<dyn Constraint> = if moving_minor {
+                Rc::new(PerpendicularConstraint::new(sys.store(), moving, onto))
+            } else {
+                Rc::new(ParallelConstraint::new(sys.store(), moving, onto))
+            };
             vec![
                 Rc::new(PointOnLine::new(moving.p1, onto)),
-                Rc::new(PointOnLine::new(moving.p2, onto)),
+                direction_constraint,
             ]
         }
         ConstraintKind::Midpoint => {
@@ -1059,7 +1128,10 @@ fn build_constraint(
                 return Vec::new();
             };
             match geom {
-                EntityGeom::Line(l) | EntityGeom::Ray(l) | EntityGeom::XLine(l) => {
+                EntityGeom::Line(l)
+                | EntityGeom::Ray(l)
+                | EntityGeom::XLine(l)
+                | EntityGeom::TextAxis(l) => {
                     vec![Rc::new(PointOnLine::new(p, l))]
                 }
                 EntityGeom::Circle(circ) => {
@@ -1200,7 +1272,10 @@ fn build_constraint(
                         })
                         .collect()
                 }
-                EntityGeom::Line(l) | EntityGeom::Ray(l) | EntityGeom::XLine(l) => {
+                EntityGeom::Line(l)
+                | EntityGeom::Ray(l)
+                | EntityGeom::XLine(l)
+                | EntityGeom::TextAxis(l) => {
                     let (x1, y1, x2, y2) = {
                         let store = sys.store();
                         (
@@ -2241,6 +2316,38 @@ fn solve_scope(
         }
     }
 
+    // Text is a point plus a unit baseline. Point constraints must translate
+    // that baseline without changing its rotation; Collinear is the one
+    // geometric relation that intentionally releases the baseline angle.
+    for (handle, geom) in &cache {
+        let EntityGeom::TextAxis(line) = geom else {
+            continue;
+        };
+        let (x1, y1, x2, y2) = {
+            let store = sys.store();
+            (
+                store.get(line.p1.x),
+                store.get(line.p1.y),
+                store.get(line.p2.x),
+                store.get(line.p2.y),
+            )
+        };
+        let rotates_for_collinear = set.constraints.iter().any(|constraint| {
+            constraint.enabled
+                && constraint.kind == ConstraintKind::Colinear
+                && constraint.refs.iter().any(|reference| reference.entity == *handle)
+        });
+        if rotates_for_collinear {
+            let length = sys.add_param((x2 - x1).hypot(y2 - y1), true);
+            sys.add_constraint(Rc::new(P2PDistance::new(line.p1, line.p2, length)));
+        } else {
+            let dx = sys.add_param(x2 - x1, true);
+            let dy = sys.add_param(y2 - y1, true);
+            sys.add_constraint(Rc::new(Difference::new(line.p1.x, line.p2.x, dx)));
+            sys.add_constraint(Rc::new(Difference::new(line.p1.y, line.p2.y, dy)));
+        }
+    }
+
     // Ellipse rules (same motivation as arc rules, different mechanism):
     // `cadkernel_constraints::geo::Ellipse` stores `focus1` as an absolute point, not an
     // offset from `center`. If some constraint (e.g. Concentric) pulls only
@@ -2256,7 +2363,7 @@ fn solve_scope(
     // actually constrains `focus1`/`radmin` directly (only `Fixed` does
     // today). `radmin` needs no equivalent rule — as a lone scalar it isn't
     // coupled to `center`'s movement, so it already stays put on its own.
-    for geom in cache.values() {
+    for (handle, geom) in &cache {
         let EntityGeom::Ellipse(el) = geom else {
             continue;
         };
@@ -2269,10 +2376,20 @@ fn solve_scope(
                 store.get(el.focus1.y),
             )
         };
-        let dx = sys.add_param(fx - cx, true);
-        let dy = sys.add_param(fy - cy, true);
-        sys.add_constraint(Rc::new(Difference::new(el.center.x, el.focus1.x, dx)));
-        sys.add_constraint(Rc::new(Difference::new(el.center.y, el.focus1.y, dy)));
+        let rotates_for_collinear = set.constraints.iter().any(|constraint| {
+            constraint.enabled
+                && constraint.kind == ConstraintKind::Colinear
+                && constraint.refs.iter().any(|reference| reference.entity == *handle)
+        });
+        if rotates_for_collinear {
+            let distance = sys.add_param((fx - cx).hypot(fy - cy), true);
+            sys.add_constraint(Rc::new(P2PDistance::new(el.center, el.focus1, distance)));
+        } else {
+            let dx = sys.add_param(fx - cx, true);
+            let dy = sys.add_param(fy - cy, true);
+            sys.add_constraint(Rc::new(Difference::new(el.center.x, el.focus1.x, dx)));
+            sys.add_constraint(Rc::new(Difference::new(el.center.y, el.focus1.y, dy)));
+        }
     }
 
     // Temporarily make each requested anchor a fixed kernel input. Marking the
@@ -2292,6 +2409,23 @@ fn solve_scope(
                 .and_then(|geometry| geometry.line_segment(index))
                 .map(|line| vec![line.p1.x, line.p1.y, line.p2.x, line.p2.y])
                 .unwrap_or_default()
+        } else if reference.is_text_axis()
+            || reference.is_ellipse_major_axis()
+            || reference.is_ellipse_minor_axis()
+        {
+            match resolve_ref(document, &mut sys, &mut cache, *reference) {
+                Some(EntityGeom::TextAxis(line)) => {
+                    vec![line.p1.x, line.p1.y, line.p2.x, line.p2.y]
+                }
+                Some(EntityGeom::Ellipse(ellipse)) => vec![
+                    ellipse.center.x,
+                    ellipse.center.y,
+                    ellipse.focus1.x,
+                    ellipse.focus1.y,
+                    ellipse.radmin,
+                ],
+                _ => Vec::new(),
+            }
         } else if reference.marker.is_some() {
             resolve_constraint_point(document, &mut sys, &mut cache, *reference)
                 .map(|point| vec![point.x, point.y])
@@ -2301,7 +2435,8 @@ fn solve_scope(
                 Some(EntityGeom::Point(point)) => vec![point.x, point.y],
                 Some(EntityGeom::Line(line))
                 | Some(EntityGeom::Ray(line))
-                | Some(EntityGeom::XLine(line)) => {
+                | Some(EntityGeom::XLine(line))
+                | Some(EntityGeom::TextAxis(line)) => {
                     vec![line.p1.x, line.p1.y, line.p2.x, line.p2.y]
                 }
                 Some(EntityGeom::Polyline { points, .. }) => points
@@ -2357,7 +2492,10 @@ fn solve_scope(
         .values()
         .map(|g| match g {
             EntityGeom::Point(_) => 2,
-            EntityGeom::Line(_) | EntityGeom::Ray(_) | EntityGeom::XLine(_) => 4,
+            EntityGeom::Line(_)
+            | EntityGeom::Ray(_)
+            | EntityGeom::XLine(_)
+            | EntityGeom::TextAxis(_) => 4,
             EntityGeom::Polyline { points, arcs, .. } => {
                 points.len() * 2 + arcs.iter().flatten().count() * 5
             }
@@ -2439,31 +2577,50 @@ fn solve_scope(
                     results.push((handle, EntityType::Insert(updated)));
                 }
             }
-            (EntityType::Text(text), EntityGeom::Point(geometry)) => {
+            (EntityType::Text(text), EntityGeom::TextAxis(axis)) => {
                 let mut updated = text.clone();
                 let next = Vector3::new(
-                    store.get(geometry.x),
-                    store.get(geometry.y),
+                    store.get(axis.p1.x),
+                    store.get(axis.p1.y),
                     text.insertion_point.z,
                 );
                 let delta = next - text.insertion_point;
-                if delta.length() > MOVE_EPS {
+                let dx = store.get(axis.p2.x) - store.get(axis.p1.x);
+                let dy = store.get(axis.p2.y) - store.get(axis.p1.y);
+                let rotation = if dx.hypot(dy) > MOVE_EPS {
+                    dy.atan2(dx)
+                } else {
+                    text.rotation
+                };
+                if delta.length() > MOVE_EPS || (rotation - text.rotation).abs() > MOVE_EPS {
                     updated.insertion_point = next;
                     if let Some(alignment) = &mut updated.alignment_point {
                         *alignment = *alignment + delta;
                     }
+                    updated.rotation = rotation;
                     results.push((handle, EntityType::Text(updated)));
                 }
             }
-            (EntityType::MText(text), EntityGeom::Point(geometry)) => {
+            (EntityType::MText(text), EntityGeom::TextAxis(axis)) => {
                 let mut updated = text.clone();
                 let next = Vector3::new(
-                    store.get(geometry.x),
-                    store.get(geometry.y),
+                    store.get(axis.p1.x),
+                    store.get(axis.p1.y),
                     text.insertion_point.z,
                 );
-                if (next - text.insertion_point).length() > MOVE_EPS {
+                let dx = store.get(axis.p2.x) - store.get(axis.p1.x);
+                let dy = store.get(axis.p2.y) - store.get(axis.p1.y);
+                let rotation = if dx.hypot(dy) > MOVE_EPS {
+                    dy.atan2(dx)
+                } else {
+                    text.rotation
+                };
+                if (next - text.insertion_point).length() > MOVE_EPS
+                    || (rotation - text.rotation).abs() > MOVE_EPS
+                {
                     updated.insertion_point = next;
+                    updated.rotation = rotation;
+                    updated.dwg_x_direction = None;
                     results.push((handle, EntityType::MText(updated)));
                 }
             }

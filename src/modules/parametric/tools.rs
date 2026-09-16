@@ -121,12 +121,12 @@ pub mod colinear {
     use super::*;
     pub fn tool() -> ToolDef {
         ToolDef {
-            id: "LCONSTRAINT",
-            label: "Colinear",
+            id: "GCCOLLINEAR",
+            label: "Collinear",
             icon: IconKind::Svg(include_bytes!(
                 "../../../assets/icons/constrain/colinear.svg"
             )),
-            event: ModuleEvent::Command("LCONSTRAINT".to_string()),
+            event: ModuleEvent::Command("GCCOLLINEAR".to_string()),
         }
     }
 }
@@ -169,6 +169,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "NCONSTRAINT",
         "NRCONSTRAINT",
         "LCONSTRAINT",
+        "GCCOLLINEAR",
         "FXCONSTRAINT",
         "SYCONSTRAINT",
     ]

@@ -28,6 +28,9 @@ pub struct ParametricRef {
 
 const POLYLINE_SEGMENT_MARKER_BASE: i32 = -1_000_000;
 const POLYLINE_SEGMENT_MIDPOINT_MARKER_BASE: i32 = -2_000_000;
+const ELLIPSE_MAJOR_AXIS_MARKER: i32 = -10;
+const ELLIPSE_MINOR_AXIS_MARKER: i32 = -11;
+const TEXT_AXIS_MARKER: i32 = -12;
 
 impl ParametricRef {
     pub fn whole(entity: Handle) -> Self {
@@ -80,6 +83,30 @@ impl ParametricRef {
         let marker = self.marker?;
         (marker <= POLYLINE_SEGMENT_MIDPOINT_MARKER_BASE)
             .then(|| (POLYLINE_SEGMENT_MIDPOINT_MARKER_BASE - marker) as usize)
+    }
+
+    pub fn ellipse_major_axis(entity: Handle) -> Self {
+        Self::point(entity, ELLIPSE_MAJOR_AXIS_MARKER)
+    }
+
+    pub fn ellipse_minor_axis(entity: Handle) -> Self {
+        Self::point(entity, ELLIPSE_MINOR_AXIS_MARKER)
+    }
+
+    pub fn text_axis(entity: Handle) -> Self {
+        Self::point(entity, TEXT_AXIS_MARKER)
+    }
+
+    pub fn is_ellipse_major_axis(self) -> bool {
+        self.marker == Some(ELLIPSE_MAJOR_AXIS_MARKER)
+    }
+
+    pub fn is_ellipse_minor_axis(self) -> bool {
+        self.marker == Some(ELLIPSE_MINOR_AXIS_MARKER)
+    }
+
+    pub fn is_text_axis(self) -> bool {
+        self.marker == Some(TEXT_AXIS_MARKER)
     }
 }
 
@@ -583,6 +610,189 @@ pub(crate) fn parametric_curve_ref_for_pick(
     }
 }
 
+/// Resolve a Collinear click to a straight entity, a straight polyline
+/// segment, one ellipse axis, or the baseline axis of text.
+pub(crate) fn parametric_linear_ref_for_pick(
+    document: &acadrust::CadDocument,
+    scope: ParametricScope,
+    handle: Handle,
+    world_point: Vector3,
+) -> Option<ParametricRef> {
+    let entity = document.get_entity(handle)?;
+    if entity.common().owner_handle != scope.owner_handle(document) {
+        return None;
+    }
+    match entity {
+        acadrust::EntityType::Line(_) => Some(ParametricRef::whole(handle)),
+        acadrust::EntityType::LwPolyline(_) | acadrust::EntityType::Polyline2D(_) => {
+            let pick = glam::DVec3::new(world_point.x, world_point.y, world_point.z);
+            let (source, _, _) = crate::scene::centerline::picked_source(entity, handle, pick)?;
+            usize::try_from(source.segment_index)
+                .ok()
+                .map(|index| ParametricRef::segment(handle, index))
+        }
+        acadrust::EntityType::Ellipse(ellipse) => {
+            let major = ellipse.major_axis;
+            let major_len = major.length();
+            if major_len <= 1.0e-10 {
+                return None;
+            }
+            let major_unit = major / major_len;
+            let minor_unit = ellipse.normal.cross(&major_unit).normalize();
+            let offset = world_point - ellipse.center;
+            let distance_to_major = offset.dot(&minor_unit).abs();
+            let distance_to_minor = offset.dot(&major_unit).abs();
+            if distance_to_minor < distance_to_major {
+                Some(ParametricRef::ellipse_minor_axis(handle))
+            } else {
+                Some(ParametricRef::ellipse_major_axis(handle))
+            }
+        }
+        acadrust::EntityType::Text(_) | acadrust::EntityType::MText(_) => {
+            Some(ParametricRef::text_axis(handle))
+        }
+        _ => None,
+    }
+}
+
+fn linear_axis(
+    document: &acadrust::CadDocument,
+    reference: ParametricRef,
+) -> Option<(Vector3, Vector3)> {
+    let entity = document.get_entity(reference.entity)?;
+    match entity {
+        acadrust::EntityType::Line(line) => {
+            let direction = line.end - line.start;
+            (direction.length() > 1.0e-10).then_some((line.start, direction))
+        }
+        acadrust::EntityType::LwPolyline(_) | acadrust::EntityType::Polyline2D(_) => {
+            let index = reference.segment_index()?;
+            let points = super::dimension_assoc::source_points(entity);
+            let closed = match entity {
+                acadrust::EntityType::LwPolyline(polyline) => polyline.is_closed,
+                acadrust::EntityType::Polyline2D(polyline) => polyline.is_closed(),
+                _ => false,
+            };
+            let start = *points.get(index)?;
+            let end = points
+                .get(index + 1)
+                .copied()
+                .or_else(|| closed.then(|| points.first().copied()).flatten())?;
+            Some((start, end - start))
+        }
+        acadrust::EntityType::Ellipse(ellipse) => {
+            let direction = if reference.is_ellipse_minor_axis() {
+                ellipse.normal.cross(&ellipse.major_axis)
+            } else {
+                ellipse.major_axis
+            };
+            Some((ellipse.center, direction))
+        }
+        acadrust::EntityType::Text(text) => Some((
+            text.insertion_point,
+            Vector3::new(text.rotation.cos(), text.rotation.sin(), 0.0),
+        )),
+        acadrust::EntityType::MText(text) => Some((
+            text.insertion_point,
+            Vector3::new(text.rotation.cos(), text.rotation.sin(), 0.0),
+        )),
+        _ => None,
+    }
+}
+
+/// Produce the exact first Collinear placement for the second selection.
+/// Its picked origin is projected onto the reference axis and its current
+/// direction and length are retained.  The persistent solver then keeps this
+/// configuration without the symmetric drift caused by moving both objects.
+pub(crate) fn aligned_collinear_target(
+    document: &acadrust::CadDocument,
+    reference: ParametricRef,
+    target: ParametricRef,
+) -> Option<acadrust::EntityType> {
+    let (reference_origin, reference_direction) = linear_axis(document, reference)?;
+    let (target_origin, target_direction) = linear_axis(document, target)?;
+    let mut direction = reference_direction.normalize();
+    if target_direction.dot(&direction) < 0.0 {
+        direction = direction * -1.0;
+    }
+    let projected = reference_origin
+        + direction * (target_origin - reference_origin).dot(&direction);
+    let target_length = target_direction.length();
+    let entity = document.get_entity(target.entity)?;
+    match entity {
+        acadrust::EntityType::Line(line) => {
+            let mut updated = line.clone();
+            updated.start = projected;
+            updated.end = projected + direction * target_length;
+            Some(acadrust::EntityType::Line(updated))
+        }
+        acadrust::EntityType::LwPolyline(polyline) => {
+            let index = target.segment_index()?;
+            let end_index = if index + 1 < polyline.vertices.len() {
+                index + 1
+            } else if polyline.is_closed {
+                0
+            } else {
+                return None;
+            };
+            let mut updated = polyline.clone();
+            updated.vertices[index].location.x = projected.x;
+            updated.vertices[index].location.y = projected.y;
+            let end = projected + direction * target_length;
+            updated.vertices[end_index].location.x = end.x;
+            updated.vertices[end_index].location.y = end.y;
+            Some(acadrust::EntityType::LwPolyline(updated))
+        }
+        acadrust::EntityType::Polyline2D(polyline) => {
+            let index = target.segment_index()?;
+            let end_index = if index + 1 < polyline.vertices.len() {
+                index + 1
+            } else if polyline.is_closed() {
+                0
+            } else {
+                return None;
+            };
+            let mut updated = polyline.clone();
+            updated.vertices[index].location.x = projected.x;
+            updated.vertices[index].location.y = projected.y;
+            let end = projected + direction * target_length;
+            updated.vertices[end_index].location.x = end.x;
+            updated.vertices[end_index].location.y = end.y;
+            Some(acadrust::EntityType::Polyline2D(updated))
+        }
+        acadrust::EntityType::Ellipse(ellipse) => {
+            let mut updated = ellipse.clone();
+            updated.center = projected;
+            let major_length = ellipse.major_axis.length();
+            let major_direction = if target.is_ellipse_minor_axis() {
+                direction.cross(&ellipse.normal).normalize()
+            } else {
+                direction
+            };
+            updated.major_axis = major_direction * major_length;
+            Some(acadrust::EntityType::Ellipse(updated))
+        }
+        acadrust::EntityType::Text(text) => {
+            let mut updated = text.clone();
+            let delta = projected - text.insertion_point;
+            updated.insertion_point = projected;
+            if let Some(alignment) = &mut updated.alignment_point {
+                *alignment = *alignment + delta;
+            }
+            updated.rotation = direction.y.atan2(direction.x);
+            Some(acadrust::EntityType::Text(updated))
+        }
+        acadrust::EntityType::MText(text) => {
+            let mut updated = text.clone();
+            updated.insertion_point = projected;
+            updated.rotation = direction.y.atan2(direction.x);
+            updated.dwg_x_direction = None;
+            Some(acadrust::EntityType::MText(updated))
+        }
+        _ => None,
+    }
+}
+
 impl ConstraintKind {
     pub const fn label(self) -> &'static str {
         match self {
@@ -635,7 +845,7 @@ impl ConstraintKind {
             ConstraintKind::Smooth => "G²",
             ConstraintKind::Concentric => "◎",
             ConstraintKind::CenterPoint => "⊕",
-            ConstraintKind::Colinear => "L",
+            ConstraintKind::Colinear => "╌",
             ConstraintKind::Midpoint => "M",
             ConstraintKind::Fixed => "F",
             ConstraintKind::PointOnCurve => "∈",
@@ -709,6 +919,11 @@ fn glyph_placement_for_reference(
         )?;
         let [start, end] = constraint_segment_endpoints(document, r)?;
         return Some((anchor, segment_normal(start, end)));
+    }
+    if r.is_ellipse_major_axis() || r.is_ellipse_minor_axis() || r.is_text_axis() {
+        let (origin, direction) = linear_axis(document, r)?;
+        let anchor = origin + direction * 0.5;
+        return Some((anchor, segment_normal(origin, origin + direction)));
     }
     match (entity, r.marker) {
         (acadrust::EntityType::Line(line), None) => Some((line_midpoint(line), line_normal(line))),

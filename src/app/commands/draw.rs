@@ -1338,6 +1338,32 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "LCONSTRAINT" | "GCCOLLINEAR" | "COLLINEAR" | "COLINEAR" => {
+                let handles = self.tabs[i].scene.selected_handles_in_order();
+                if handles.is_empty() {
+                    use crate::modules::parametric::CollinearConstraintCommand;
+                    let new_cmd = CollinearConstraintCommand::new();
+                    self.command_line.push_info(&new_cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+                } else if handles.len() != 2 {
+                    self.command_line.push_output(
+                        "Select exactly two linear objects (first = reference, second = the one that moves), then run this constraint again.",
+                    );
+                } else {
+                    use crate::command::CmdResult;
+                    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef};
+                    return Some(self.apply_cmd_result(CmdResult::AddParametricConstraint {
+                        kind: ConstraintKind::Colinear,
+                        refs: vec![
+                            ParametricRef::whole(handles[0]),
+                            ParametricRef::whole(handles[1]),
+                        ],
+                        driving_param: None,
+                        label: "Collinear constraint",
+                    }));
+                }
+            }
+
             "GEOMCONSTRAINT" => {
                 use crate::modules::parametric::GeomConstraintCommand;
                 let new_cmd = GeomConstraintCommand::new();
@@ -1352,7 +1378,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "PCONSTRAINT" | "QCONSTRAINT" | "ECONSTRAINT" | "TCONSTRAINT" | "LCONSTRAINT"
+            "PCONSTRAINT" | "QCONSTRAINT" | "ECONSTRAINT" | "TCONSTRAINT"
             | "NRCONSTRAINT" => {
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
@@ -1373,7 +1399,6 @@ impl OpenCADStudio {
                             (ConstraintKind::Perpendicular, "Perpendicular constraint")
                         }
                         "TCONSTRAINT" => (ConstraintKind::Tangent, "Tangent constraint"),
-                        "LCONSTRAINT" => (ConstraintKind::Colinear, "Colinear constraint"),
                         "NRCONSTRAINT" => (ConstraintKind::Normal, "Normal constraint"),
                         _ => (ConstraintKind::Equal, "Equal constraint"),
                     };

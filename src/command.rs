@@ -1248,6 +1248,15 @@ pub struct CoincidentPick {
     pub whole_curve: bool,
 }
 
+/// One ordered linear-object selection used by the Collinear command.  The
+/// click point disambiguates polyline segments and ellipse axes after the
+/// command hands control back to the document-owning host.
+#[derive(Clone, Copy, Debug)]
+pub struct CollinearPick {
+    pub handle: Handle,
+    pub point: DVec3,
+}
+
 /// Construction options shared by SWEEP creation and its live preview.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SweepOptions {
@@ -1486,6 +1495,15 @@ pub enum CmdResult {
         first: CoincidentPick,
         second: CoincidentPick,
         /// Keep the first curve active and accept another point.
+        multiple: bool,
+        label: &'static str,
+    },
+    /// Adds an ordered Collinear relation.  `first` is the reference geometry
+    /// and remains fixed while `second` is projected and rotated onto it.
+    AddCollinearConstraint {
+        first: CollinearPick,
+        second: CollinearPick,
+        /// Keep the first object active and accept another target.
         multiple: bool,
         label: &'static str,
     },

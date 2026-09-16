@@ -498,6 +498,9 @@ impl<'a> GroupBuilder<'a> {
     /// The node id `ParametricRef` resolves to: a point node for a marked
     /// reference, the whole geometry node otherwise.
     fn ref_node(&mut self, r: ParametricRef) -> Option<i32> {
+        if r.is_ellipse_major_axis() || r.is_ellipse_minor_axis() || r.is_text_axis() {
+            return self.geometry_node(r.entity);
+        }
         if r.segment_midpoint_index().is_some() {
             return self.point_node(r.entity, r.marker?);
         }

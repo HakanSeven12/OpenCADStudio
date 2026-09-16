@@ -3,12 +3,14 @@
 //! resulting constraints through the geometry kernel.
 
 mod coincident;
+mod collinear;
 mod equal_distance;
 mod geom_constraint;
 mod point_on_entity;
 mod tools;
 mod value;
 pub use coincident::{coincident_tool, CoincidentConstraintCommand};
+pub use collinear::CollinearConstraintCommand;
 pub use equal_distance::{equal_distance_tool, EqualDistanceConstraintCommand};
 pub use geom_constraint::GeomConstraintCommand;
 pub use point_on_entity::{
@@ -162,7 +164,7 @@ mod tests {
             groups[0].tools.iter().map(item_id).collect::<Vec<_>>(),
             [
                 "AUTOCONSTRAIN", "CCONSTRAINT", "PCONSTRAINT", "TCONSTRAINT",
-                "LCONSTRAINT", "QCONSTRAINT", "SMOOTHCONSTRAINT", "NCONSTRAINT",
+                "GCCOLLINEAR", "QCONSTRAINT", "SMOOTHCONSTRAINT", "NCONSTRAINT",
                 "HCONSTRAINT", "SYCONSTRAINT", "FXCONSTRAINT", "VCONSTRAINT",
                 "ECONSTRAINT", "GCVISIBILITY", "GCSHOWALL", "GCHIDEALL",
             ]

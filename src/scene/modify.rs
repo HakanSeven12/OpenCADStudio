@@ -153,6 +153,18 @@ impl Scene {
     // ── Modify (transform / copy) ─────────────────────────────────────────
 
     pub fn transform_entities(&mut self, handles: &[Handle], t: &EntityTransform) {
+        self.transform_entities_with_driven(handles, t, &[]);
+    }
+
+    /// Transform entities while treating the explicitly manipulated
+    /// parametric references as exact solver inputs. Connected geometry moves
+    /// to satisfy constraints instead of pulling the user's selection back.
+    pub(crate) fn transform_entities_with_driven(
+        &mut self,
+        handles: &[Handle],
+        t: &EntityTransform,
+        driven_refs: &[crate::scene::parametric_constraints::ParametricRef],
+    ) {
         // Never transform objects on a locked layer (defense-in-depth: the pick
         // path already excludes them, but programmatic callers may not).
         let handles: Vec<Handle> = handles
@@ -290,7 +302,7 @@ impl Scene {
         // per-handle, keeping the block cache + all other memoized wires.
         let changes: Vec<(Handle, ChangeKind)> =
             handles.iter().map(|&h| (h, ChangeKind::Modified)).collect();
-        self.bump_entities(&changes);
+        self.bump_entities_with_parametric_policy(&changes, driven_refs, false);
         self.refresh_meshes_for_handles(&refresh_solid_handles);
     }
 

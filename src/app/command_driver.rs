@@ -2280,6 +2280,11 @@ impl OpenCADStudio {
                     self.tabs[i].active_cmd = None;
                     return Task::none();
                 }
+                let driven_refs: Vec<_> = handles
+                    .iter()
+                    .copied()
+                    .map(crate::scene::parametric_constraints::ParametricRef::whole)
+                    .collect();
                 if matches!(&transform, crate::command::EntityTransform::Translate(_)) {
                     let scope = self.tabs[i].current_parametric_scope();
                     handles = self.tabs[i]
@@ -2292,7 +2297,9 @@ impl OpenCADStudio {
                 // component so each member keeps its own dimensions. Other
                 // transforms retain their selected-object behavior.
                 let pending = self.begin_undo(i, label, handles.len(), true);
-                self.tabs[i].scene.transform_entities(&handles, &transform);
+                self.tabs[i]
+                    .scene
+                    .transform_entities_with_driven(&handles, &transform, &driven_refs);
                 self.apply_inferred_constraints(i, &handles);
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.clear_preview_wire();
@@ -3173,6 +3180,23 @@ impl OpenCADStudio {
                 self.tabs[i]
                     .scene
                     .record_undo_parametric_constraints_before(scope, constraints_before);
+                let collinear_reference = (kind
+                    == crate::scene::parametric_constraints::ConstraintKind::Colinear)
+                    .then(|| refs.first().copied())
+                    .flatten();
+                if let (Some(reference), Some(target)) =
+                    (collinear_reference, refs.get(1).copied())
+                {
+                    if let Some(updated) =
+                        crate::scene::parametric_constraints::aligned_collinear_target(
+                            &self.tabs[i].scene.document,
+                            reference,
+                            target,
+                        )
+                    {
+                        self.tabs[i].scene.update_entity(updated);
+                    }
+                }
                 let retain_size = self.constraint_solve_mode && driving_param.is_none();
                 self.tabs[i].scene.parametric_constraint_set_mut(scope).add(
                     kind,
@@ -3185,13 +3209,104 @@ impl OpenCADStudio {
                     .collect();
                 self.tabs[i].scene.bump_entities_with_parametric_policy(
                     &changes,
-                    &[],
+                    collinear_reference.as_slice(),
                     retain_size,
                 );
                 self.tabs[i].dirty = true;
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.command_line.push_output("Constraint applied.");
+                self.refresh_properties();
+                if let Some(pd) = pending {
+                    self.commit_undo_delta(i, pd);
+                }
+            }
+            CmdResult::AddCollinearConstraint {
+                first,
+                second,
+                multiple,
+                label,
+            } => {
+                let scope = self.tabs[i].current_parametric_scope();
+                let to_world = |point: glam::DVec3| {
+                    acadrust::types::Vector3::new(point.x, point.y, point.z)
+                };
+                let resolve = |pick: crate::command::CollinearPick| {
+                    crate::scene::parametric_constraints::parametric_linear_ref_for_pick(
+                        &self.tabs[i].scene.document,
+                        scope,
+                        pick.handle,
+                        to_world(pick.point),
+                    )
+                };
+                let (Some(first_ref), Some(second_ref)) = (resolve(first), resolve(second)) else {
+                    self.command_line.push_error("Invalid selection for Collinear. Select a line segment, polyline segment, text, MText, major or minor axis of ellipse or elliptical arc.");
+                    return Task::none();
+                };
+                let refs = vec![first_ref, second_ref];
+                let kind = crate::scene::parametric_constraints::ConstraintKind::Colinear;
+                if let Err(message) = self.tabs[i]
+                    .scene
+                    .validate_parametric_constraint(kind, &refs, None)
+                {
+                    self.command_line.push_error(message);
+                    return Task::none();
+                }
+                let Some(updated) =
+                    crate::scene::parametric_constraints::aligned_collinear_target(
+                        &self.tabs[i].scene.document,
+                        first_ref,
+                        second_ref,
+                    )
+                else {
+                    self.command_line.push_error("Invalid selection for Collinear. Select a line segment, polyline segment, text, MText, major or minor axis of ellipse or elliptical arc.");
+                    return Task::none();
+                };
+                let touched = vec![first_ref.entity, second_ref.entity];
+                let constraints_before = self.tabs[i]
+                    .scene
+                    .parametric_constraint_set(scope)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        crate::scene::parametric_constraints::ParametricConstraintSet::new(scope)
+                    });
+                let pending = self.begin_undo(i, label, touched.len(), true);
+                self.tabs[i]
+                    .scene
+                    .record_undo_parametric_constraints_before(scope, constraints_before);
+                self.tabs[i].scene.update_entity(updated);
+                self.tabs[i]
+                    .scene
+                    .parametric_constraint_set_mut(scope)
+                    .add(kind, refs, None);
+                let changes: Vec<_> = touched
+                    .iter()
+                    .copied()
+                    .map(|handle| (handle, crate::scene::ChangeKind::Modified))
+                    .collect();
+                self.tabs[i].scene.bump_entities_with_parametric_policy(
+                    &changes,
+                    &[first_ref],
+                    self.constraint_solve_mode,
+                );
+                self.tabs[i].dirty = true;
+                self.tabs[i].snap_result = None;
+                if !multiple {
+                    self.tabs[i].active_cmd = None;
+                }
+                self.command_line.push_output("Collinear constraint applied.");
+                if multiple {
+                    if let Some(prompt) = self.tabs[i].active_cmd.as_ref().map(|cmd| cmd.prompt()) {
+                        self.command_line.push_info(&prompt);
+                    }
+                    self.command_line.set_step_options(
+                        self.tabs[i]
+                            .active_cmd
+                            .as_ref()
+                            .map(|cmd| cmd.options())
+                            .unwrap_or_default(),
+                    );
+                }
                 self.refresh_properties();
                 if let Some(pd) = pending {
                     self.commit_undo_delta(i, pd);

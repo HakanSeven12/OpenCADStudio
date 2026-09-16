@@ -22,7 +22,7 @@ impl GeomConstraintCommand {
             "SM" | "SMOOTH" => "SMOOTHCONSTRAINT",
             "C" | "COINCIDENT" => "GCCOINCIDENT",
             "CON" | "CONCENTRIC" => "NCONSTRAINT",
-            "COL" | "COLLINEAR" | "COLINEAR" => "LCONSTRAINT",
+            "COL" | "COLLINEAR" | "COLINEAR" => "GCCOLLINEAR",
             "SY" | "SYMMETRIC" => "SYCONSTRAINT",
             "E" | "EQUAL" => "ECONSTRAINT",
             "F" | "FIX" => "FXCONSTRAINT",

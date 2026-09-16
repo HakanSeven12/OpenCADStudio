@@ -122,6 +122,7 @@ impl OpenCADStudio {
         &mut self,
         i: usize,
         grip: &crate::scene::pick::grip::GripEdit,
+        grip_offset: glam::DVec3,
     ) {
         let touched: Vec<_> = grip.targets.iter().map(|target| target.handle).collect();
         let scope = self.tabs[i].current_parametric_scope();
@@ -205,7 +206,7 @@ impl OpenCADStudio {
             && !arc_shape_resize;
         let solved = self.tabs[i].scene.solve_parametric_constraints_preview(
             &touched, &driven_refs,
-            retain_size, &self.grip_originals,
+            retain_size, &self.grip_originals, Some(grip_offset),
         );
         for (handle, entity) in solved {
             if let Some(slot) = self.tabs[i].scene.document.get_entity_mut(handle) {

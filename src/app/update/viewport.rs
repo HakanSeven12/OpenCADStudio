@@ -1748,7 +1748,7 @@ impl OpenCADStudio {
                     );
                 }
             }
-            self.solve_grip_constraints(i, &grip);
+            self.solve_grip_constraints(i, &grip, snapped - grip.origin_world);
             let mesh_changes: Vec<_> = self.grip_preview_handles
                 .iter()
                 .copied()
@@ -6310,33 +6310,23 @@ mod selection_preview_tests {
                 let after = vertices(&app);
                 let (left, right, bottom, top) = match grip_id {
                     0 => (target.x, before[1].x, target.y, target.y + height),
-                    1 => (before[0].x, before[1].x, target.y, before[3].y),
-                    2 => (before[0].x, target.x, target.y - height, target.y),
-                    3 => (target.x, target.x + width, target.y - height, target.y),
-                    4 => (
-                        before[0].x + offset[0],
-                        before[1].x + offset[0],
+                    1 => (
+                        before[0].x - offset[0],
+                        before[1].x,
                         target.y,
                         before[3].y,
                     ),
+                    2 => (before[0].x, target.x, target.y - height, target.y),
+                    3 => (target.x, target.x + width, target.y - height, target.y),
+                    4 => (before[0].x, before[1].x, target.y, before[3].y),
                     5 => (
                         before[0].x,
                         target.x,
-                        before[0].y + offset[1],
-                        before[3].y + offset[1],
-                    ),
-                    6 => (
-                        before[0].x + offset[0],
-                        before[1].x + offset[0],
                         before[0].y,
-                        target.y,
+                        before[3].y,
                     ),
-                    7 => (
-                        target.x,
-                        before[1].x,
-                        before[0].y + offset[1],
-                        before[3].y + offset[1],
-                    ),
+                    6 => (before[0].x, before[1].x, before[0].y, target.y),
+                    7 => (target.x, before[1].x, before[0].y, before[3].y),
                     _ => unreachable!(),
                 };
                 let expected = [

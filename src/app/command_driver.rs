@@ -162,7 +162,7 @@ impl OpenCADStudio {
                         _ => false,
                     })
             });
-        let linked_tangent_endpoint_resize = driven_refs
+        let linked_tangent_profile_resize = driven_refs
             .iter()
             .any(|reference| matches!(reference.marker, Some(0 | 1)))
             && self.tabs[i]
@@ -204,13 +204,24 @@ impl OpenCADStudio {
                     });
                     tangent_count >= 2 && equal_round_curves
                 });
+        let arc_shape_resize = grip.targets.iter().any(|target| {
+            self.grip_originals
+                .iter()
+                .find(|(handle, _)| *handle == target.handle)
+                .map(|(_, entity)| entity)
+                .or_else(|| self.tabs[i].scene.document.get_entity(target.handle))
+                .is_some_and(|entity| {
+                    matches!(entity, acadrust::EntityType::Arc(_)) && target.grip_id != 0
+                })
+        });
         let retain_size = self.constraint_solve_mode
             && !driven_refs.is_empty()
             && !rectangle_vertex_resize
-            && !linked_tangent_endpoint_resize;
+            && !linked_tangent_profile_resize
+            && !arc_shape_resize;
         let solved = self.tabs[i].scene.solve_parametric_constraints_preview(
             &touched, &driven_refs,
-            retain_size, !linked_tangent_endpoint_resize, &self.grip_originals,
+            retain_size, &self.grip_originals,
         );
         for (handle, entity) in solved {
             if let Some(slot) = self.tabs[i].scene.document.get_entity_mut(handle) {

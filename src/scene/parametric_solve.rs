@@ -1924,21 +1924,22 @@ fn solve_scope(
         };
         let perpendicular: Vec<_> = set.constraints.iter().filter(|c|
             c.enabled && c.kind == ConstraintKind::Perpendicular && c.refs.len() == 2).collect();
+        let explicit_axis_directions: HashSet<_> = set.constraints.iter().filter_map(|constraint| {
+            if !constraint.enabled || constraint.refs.len() != 1 {
+                return None;
+            }
+            match constraint.kind {
+                ConstraintKind::Horizontal => Some(false),
+                ConstraintKind::Vertical => Some(true),
+                _ => None,
+            }
+        }).collect();
         let mut retained_axes = HashSet::new();
-        for (driven_ref, point) in &driven_points {
+        for (_, point) in &driven_points {
             let group = point_group(*point);
             let incident: Vec<_> = axis_lines.iter().filter(|(_, line, _)|
                 group.contains(&line.p1) || group.contains(&line.p2)).collect();
             if incident.is_empty() {
-                continue;
-            }
-            // A polyline vertex is already the shared endpoint of its two
-            // incident segments.  The selected point is the only temporary
-            // driver; its explicit geometric constraints decide where every
-            // other vertex goes.  Pinning an opposite endpoint here adds a
-            // synthetic fixed coordinate that is absent from the constraint
-            // graph and makes constrained boxes resize from a fixed diagonal.
-            if matches!(cache.get(&driven_ref.entity), Some(EntityGeom::Polyline { .. })) {
                 continue;
             }
             let common_corner = perpendicular.iter().any(|c| c.refs.iter()
@@ -1950,7 +1951,26 @@ fn solve_scope(
             }
             let free_legs: Vec<_> = incident.iter().copied().filter(|(reference, _, _)|
                 perpendicular.iter().any(|c| c.refs.contains(reference))).collect();
-            let editable = if free_legs.is_empty() { &incident } else { &free_legs };
+            // When one explicit Horizontal/Vertical direction orients the
+            // component, the leg parallel to it is the corner's stretch leg.
+            // The perpendicular leg keeps its original length. This also
+            // distinguishes the two corners adjacent to the constrained
+            // right-angle corner without relying on polyline vertex numbers.
+            let preferred_axis_legs: Vec<_> = if free_legs.len() == 1
+                && explicit_axis_directions.len() == 1
+            {
+                let axis = *explicit_axis_directions.iter().next().unwrap();
+                incident.iter().copied().filter(|(_, _, vertical)| *vertical == axis).collect()
+            } else {
+                Vec::new()
+            };
+            let editable = if !preferred_axis_legs.is_empty() {
+                &preferred_axis_legs
+            } else if free_legs.is_empty() {
+                &incident
+            } else {
+                &free_legs
+            };
             retained_axes.extend([false, true].into_iter().filter(|axis|
                 !editable.iter().any(|(_, _, vertical)| vertical == axis)));
             for (reference, line, vertical) in editable.iter().copied() {
@@ -1980,16 +2000,7 @@ fn solve_scope(
                 c.enabled && c.kind == ConstraintKind::Parallel && c.refs.contains(reference)
                     && c.refs.iter().any(|other| other != reference && driven_refs.contains(other))
             });
-            let same_polyline_segment_is_dragged = matches!(
-                cache.get(&reference.entity),
-                Some(EntityGeom::Polyline { .. })
-            ) && driven_refs.iter().any(|driven| {
-                driven.entity == reference.entity && driven.segment_index().is_some()
-            });
-            if paired_edge_is_dragged
-                && !driven_refs.contains(reference)
-                && !same_polyline_segment_is_dragged
-            {
+            if paired_edge_is_dragged && !driven_refs.contains(reference) {
                 // Moving a whole edge changes its separation from the opposite
                 // parallel edge, whose normal coordinate remains the reference.
                 if let Some(original) = retained_before.get(&reference.entity) {

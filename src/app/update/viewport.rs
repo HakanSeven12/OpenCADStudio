@@ -6236,7 +6236,7 @@ mod selection_preview_tests {
     }
 
     #[test]
-    fn constrained_rectangle_grips_distinguish_perpendicular_corner_and_free_ends() {
+    fn constrained_rectangle_grips_follow_the_constraint_graph() {
         use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
         use acadrust::{entities::LwPolyline, types::Vector2, EntityType};
 
@@ -6280,35 +6280,33 @@ mod selection_preview_tests {
             polyline.vertices.iter().map(|vertex| vertex.location).collect::<Vec<_>>()
         };
         let before = vertices(&app);
-        let height = before[3].y - before[0].y;
         for grip_id in 0..8 {
         let vertex = if grip_id < 4 { before[grip_id] }
             else { (before[grip_id - 4] + before[(grip_id - 3) % 4]) * 0.5 };
         let origin = glam::DVec3::new(vertex.x, vertex.y, 0.0);
         app.tabs[i].active_grip = Some(GripEdit::single(handle, grip_id, grip_id >= 4, origin));
-        for offset in [[-1.0, height], [-1.0, 3.0], [-2.0, 6.0], [-2.0, 6.0], [1.0, -4.0]] {
+        for offset in [[0.75, 0.5], [-0.75, -0.5], [0.75, 0.0], [0.0, 0.5]] {
             let target = origin + glam::DVec3::new(offset[0], offset[1], 0.0);
             let cursor = app.tabs[i].scene.camera.borrow().project(target,
                 iced::Rectangle::with_size(iced::Size::new(800.0, 600.0))).unwrap();
             let _ = app.on_viewport_move(Point::new(cursor.x, cursor.y));
             let after = vertices(&app);
-            let (left, right, bottom, top) = match grip_id {
-                0 => (target.x, before[1].x, target.y, before[3].y),
-                1 => (before[0].x, target.x, target.y, before[3].y),
-                2 => (before[0].x, target.x, before[0].y, target.y),
-                3 => (target.x, before[1].x, before[0].y, target.y),
-                4 => (before[0].x + offset[0], before[1].x + offset[0], target.y, before[3].y),
-                5 => (before[0].x, target.x, before[0].y + offset[1], before[3].y + offset[1]),
-                6 => (before[0].x + offset[0], before[1].x + offset[0], before[0].y, target.y),
-                7 => (target.x, before[1].x, before[0].y + offset[1], before[3].y + offset[1]),
-                _ => unreachable!(),
-            };
-            let expected = [Vector2::new(left, bottom), Vector2::new(right, bottom),
-                Vector2::new(right, top), Vector2::new(left, top)];
-            for (actual, expected) in after.iter().zip(expected) {
-                assert!((*actual - expected).length_squared() < 1e-10,
-                    "grip {grip_id}: rectangle collapsed or drifted: {after:?}, expected {expected:?}");
+            if grip_id < 4 {
+                assert!((after[grip_id] - Vector2::new(target.x, target.y)).length_squared() < 1e-10,
+                    "corner grip {grip_id} must remain the exact solver driver: {after:?}");
+            } else {
+                let segment = grip_id - 4;
+                let next = (segment + 1) % 4;
+                let delta = Vector2::new(offset[0], offset[1]);
+                assert!((after[segment] - (before[segment] + delta)).length_squared() < 1e-10,
+                    "segment grip {grip_id} must drive its first endpoint: {after:?}");
+                assert!((after[next] - (before[next] + delta)).length_squared() < 1e-10,
+                    "segment grip {grip_id} must drive its second endpoint: {after:?}");
             }
+            assert!((after[0].y - after[1].y).abs() < 1e-8, "bottom edge lost horizontal: {after:?}");
+            assert!((after[1].x - after[2].x).abs() < 1e-8, "right edge lost vertical: {after:?}");
+            assert!((after[2].y - after[3].y).abs() < 1e-8, "top edge lost horizontal: {after:?}");
+            assert!((after[3].x - after[0].x).abs() < 1e-8, "left edge lost vertical: {after:?}");
         }
         let preview = vertices(&app);
         let _ = app.on_viewport_left_release();

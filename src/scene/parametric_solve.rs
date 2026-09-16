@@ -1899,7 +1899,8 @@ fn solve_scope(
         }).collect();
         axis_lines.sort_by_key(|(reference, _, _)| (reference.entity.value(), reference.marker));
         let driven_points: Vec<_> = driven_refs.iter().filter_map(|reference|
-            resolve_constraint_point(document, &mut sys, &mut cache, *reference)).collect();
+            resolve_constraint_point(document, &mut sys, &mut cache, *reference)
+                .map(|point| (*reference, point))).collect();
         let coincident: Vec<_> = set.constraints.iter().filter(|c|
             c.enabled && c.kind == ConstraintKind::Coincident).filter_map(|c| {
                 let [a, b] = c.refs.as_slice() else { return None };
@@ -1924,11 +1925,20 @@ fn solve_scope(
         let perpendicular: Vec<_> = set.constraints.iter().filter(|c|
             c.enabled && c.kind == ConstraintKind::Perpendicular && c.refs.len() == 2).collect();
         let mut retained_axes = HashSet::new();
-        for point in &driven_points {
+        for (driven_ref, point) in &driven_points {
             let group = point_group(*point);
             let incident: Vec<_> = axis_lines.iter().filter(|(_, line, _)|
                 group.contains(&line.p1) || group.contains(&line.p2)).collect();
             if incident.is_empty() {
+                continue;
+            }
+            // A polyline vertex is already the shared endpoint of its two
+            // incident segments.  The selected point is the only temporary
+            // driver; its explicit geometric constraints decide where every
+            // other vertex goes.  Pinning an opposite endpoint here adds a
+            // synthetic fixed coordinate that is absent from the constraint
+            // graph and makes constrained boxes resize from a fixed diagonal.
+            if matches!(cache.get(&driven_ref.entity), Some(EntityGeom::Polyline { .. })) {
                 continue;
             }
             let common_corner = perpendicular.iter().any(|c| c.refs.iter()
@@ -1945,7 +1955,7 @@ fn solve_scope(
                 !editable.iter().any(|(_, _, vertical)| vertical == axis)));
             for (reference, line, vertical) in editable.iter().copied() {
                 let opposite = if group.contains(&line.p1) { line.p2 } else { line.p1 };
-                if !driven_points.contains(&opposite) {
+                if !driven_points.iter().any(|(_, point)| *point == opposite) {
                     let parameter = if *vertical { opposite.y } else { opposite.x };
                     // Only the along-edge coordinate stays fixed. The normal
                     // coordinate follows the grabbed point through the kernel.
@@ -1970,7 +1980,16 @@ fn solve_scope(
                 c.enabled && c.kind == ConstraintKind::Parallel && c.refs.contains(reference)
                     && c.refs.iter().any(|other| other != reference && driven_refs.contains(other))
             });
-            if paired_edge_is_dragged && !driven_refs.contains(reference) {
+            let same_polyline_segment_is_dragged = matches!(
+                cache.get(&reference.entity),
+                Some(EntityGeom::Polyline { .. })
+            ) && driven_refs.iter().any(|driven| {
+                driven.entity == reference.entity && driven.segment_index().is_some()
+            });
+            if paired_edge_is_dragged
+                && !driven_refs.contains(reference)
+                && !same_polyline_segment_is_dragged
+            {
                 // Moving a whole edge changes its separation from the opposite
                 // parallel edge, whose normal coordinate remains the reference.
                 if let Some(original) = retained_before.get(&reference.entity) {

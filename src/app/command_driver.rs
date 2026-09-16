@@ -147,20 +147,17 @@ impl OpenCADStudio {
                     entity, target.handle, target.grip_id,
                 )).unwrap_or_default()
         }).collect();
-        let rectangle_vertex_resize = grip.targets.len() == 1
-            && grip.targets.first().is_some_and(|target| {
+        let constrained_polyline_edit = grip.targets.iter().any(|target| {
                 self.grip_originals
                     .iter()
                     .find(|(handle, _)| *handle == target.handle)
                     .map(|(_, entity)| entity)
                     .or_else(|| self.tabs[i].scene.document.get_entity(target.handle))
-                    .is_some_and(|entity| match entity {
-                        acadrust::EntityType::LwPolyline(polyline) => {
-                            target.grip_id < polyline.vertices.len()
-                                && crate::entities::lwpolyline::rectangle_frame(polyline).is_some()
-                        }
-                        _ => false,
-                    })
+                    .is_some_and(|entity| matches!(
+                        entity,
+                        acadrust::EntityType::LwPolyline(_)
+                            | acadrust::EntityType::Polyline2D(_)
+                    ))
             });
         let linked_tangent_profile_resize = driven_refs
             .iter()
@@ -216,7 +213,7 @@ impl OpenCADStudio {
         });
         let retain_size = self.constraint_solve_mode
             && !driven_refs.is_empty()
-            && !rectangle_vertex_resize
+            && !constrained_polyline_edit
             && !linked_tangent_profile_resize
             && !arc_shape_resize;
         let solved = self.tabs[i].scene.solve_parametric_constraints_preview(

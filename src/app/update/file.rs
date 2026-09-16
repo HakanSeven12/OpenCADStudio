@@ -1936,22 +1936,33 @@ impl OpenCADStudio {
                 );
                 // A clean save supersedes any crash-recovery snapshot for this
                 // drawing — drop the old key and the new one so stale copies
-                // don't resurface in the next boot scan.
+                // don't resurface in the next boot scan. But an autosave
+                // round may still be writing the same key: its write would
+                // land AFTER the remove and resurrect the snapshot (with a
+                // newer mtime, so the next scan would offer it as
+                // recoverable). Defer the removes to the end of the round.
                 let new_key = self.tabs[i]
                     .current_path
                     .as_ref()
                     .map(|path| path.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                recent_task = Task::batch([
-                    recent_task,
-                    Task::perform(
-                        async move {
-                            let _ = crate::io::web_autosave::remove(&autosave_key).await;
-                            let _ = crate::io::web_autosave::remove(&new_key).await;
-                        },
-                        |_| Message::Noop,
-                    ),
-                ]);
+                if self.web_autosave_in_flight {
+                    self.web_autosave_clear_after.push(autosave_key);
+                    if !new_key.is_empty() {
+                        self.web_autosave_clear_after.push(new_key);
+                    }
+                } else {
+                    recent_task = Task::batch([
+                        recent_task,
+                        Task::perform(
+                            async move {
+                                let _ = crate::io::web_autosave::remove(&autosave_key).await;
+                                let _ = crate::io::web_autosave::remove(&new_key).await;
+                            },
+                            |_| Message::Noop,
+                        ),
+                    ]);
+                }
                 self.command_line
                     .push_output(crate::tf!("Saved: {filename}").as_ref());
                 true
@@ -2964,10 +2975,21 @@ impl OpenCADStudio {
     }
 
     /// One web autosave round finished. Silent on success; on failure one
-    /// command-line warning until a round succeeds again.
+    /// command-line warning until a round succeeds again. Also the drain
+    /// point for snapshot removes a save deferred while the round was
+    /// writing: the round's writes are done, so the keys can be cleared
+    /// for real now (no late write can resurrect them).
     #[cfg(target_arch = "wasm32")]
     pub(super) fn on_web_autosave_finished(&mut self, result: Result<(), String>) -> Task<Message> {
         self.web_autosave_in_flight = false;
+        let deferred = std::mem::take(&mut self.web_autosave_clear_after);
+        if !deferred.is_empty() {
+            wasm_bindgen_futures::spawn_local(async move {
+                for key in &deferred {
+                    let _ = crate::io::web_autosave::remove(key).await;
+                }
+            });
+        }
         match result {
             Ok(()) => self.web_autosave_warned = false,
             Err(error) => {
@@ -2983,7 +3005,10 @@ impl OpenCADStudio {
     }
 
     /// The boot scan decided which snapshots are recoverable; queue the
-    /// restore prompt (behind any already-queued startup modal).
+    /// restore prompt (behind any already-queued startup modal). An empty
+    /// scan — a fresh profile, or everything already cleaned up — must not
+    /// surface an empty "Recover Drawing" modal, so the prompt is only
+    /// queued when there is something to offer.
     #[cfg(target_arch = "wasm32")]
     pub(super) fn on_web_autosaves_scanned(
         &mut self,
@@ -2999,8 +3024,12 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    /// Restore the offered snapshot: read (and consume) the OPFS copy, then
-    /// open it as a recovered tab through the standard web-bytes open flow.
+    /// Restore the offered snapshot: read the OPFS copy — leaving it in
+    /// place — and hand the bytes to the 50 ms poll's guarded open queue.
+    /// The snapshot is the only copy, so it is deleted only once the
+    /// recovered drawing actually opens (`web_autosave_opened`, on the
+    /// matching `WebFileOpened` success); a parse failure or cancel leaves
+    /// it recoverable for the next boot.
     #[cfg(target_arch = "wasm32")]
     pub(super) fn on_web_autosave_restore(&mut self) -> Task<Message> {
         let Some(entry) = self.web_autosave_pending.first().cloned() else {
@@ -3011,16 +3040,35 @@ impl OpenCADStudio {
         self.close_active_modal();
         let open_name = crate::io::web_autosave::recovered_name(&entry.name);
         let key = entry.name;
+        // Remember the pair: `web_autosave_opened` deletes the OPFS copy
+        // only when an open with exactly `open_name` succeeds. A failed
+        // read below clears the marker again (`on_web_autosave_bytes`).
+        self.web_autosave_consumed = Some((key.clone(), open_name.clone()));
         Task::perform(
-            async move {
-                let bytes = crate::io::web_autosave::read(&key).await?;
-                // The snapshot is spent: the recovered tab (and its recent
-                // copy) replaces it from here on.
-                let _ = crate::io::web_autosave::remove(&key).await;
-                Ok(bytes)
-            },
+            async move { crate::io::web_autosave::read(&key).await },
             move |result| Message::WebAutosaveBytes(open_name, result),
         )
+    }
+
+    /// The recovered drawing opened: its autosave snapshot — held back until
+    /// now — can finally be deleted, and the next queued snapshot can be
+    /// offered. A different name finishing first just means the recovered
+    /// open is still queued behind it; keep waiting.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn web_autosave_opened(&mut self, open_name: &str) {
+        let Some((key, recorded)) = self.web_autosave_consumed.clone() else {
+            return;
+        };
+        if recorded != open_name {
+            return;
+        }
+        self.web_autosave_consumed = None;
+        self.command_line
+            .push_output(crate::tf!("Restored \"{}\" from the autosave copy", open_name).as_ref());
+        wasm_bindgen_futures::spawn_local(async move {
+            let _ = crate::io::web_autosave::remove(&key).await;
+        });
+        self.queue_next_web_autosave_prompt();
     }
 
     /// Discard the offered snapshot; the prompt stays up for the next one.
@@ -3038,8 +3086,13 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    /// The offered snapshot's bytes arrived (or did not): open the recovered
-    /// tab, or warn and move on to the next snapshot.
+    /// The offered snapshot's bytes arrived (or did not). On success the
+    /// bytes ride the 50 ms poll's guarded open queue — the poll starts an
+    /// open only when the slot is free, so the recovered drawing can
+    /// neither clobber an open in flight nor be lost to one, and the
+    /// snapshot survives until that open lands (`web_autosave_opened`).
+    /// On failure the snapshot stays in OPFS (discardable on a later boot)
+    /// and the prompt moves on to the next one.
     #[cfg(target_arch = "wasm32")]
     pub(super) fn on_web_autosave_bytes(
         &mut self,
@@ -3048,31 +3101,33 @@ impl OpenCADStudio {
     ) -> Task<Message> {
         match result {
             Ok(bytes) => {
-                self.command_line.push_output(
-                    crate::tf!("Restored \"{}\" from the autosave copy", open_name).as_ref(),
-                );
-                let task = self.update(Message::WebFileDropped(open_name, bytes));
-                // Further snapshots wait behind this one; queue the prompt
-                // again now that an open is in flight, so it reappears when
-                // the recovered drawing finishes opening.
-                if !self.web_autosave_pending.is_empty()
-                    && !self
-                        .pending_startup_modals
-                        .contains(&crate::app::ModalKind::AutosaveRestore)
-                {
-                    self.pending_startup_modals
-                        .push_back(crate::app::ModalKind::AutosaveRestore);
-                }
-                task
-            }
-            Err(error) => {
-                self.command_line
-                    .push_warning(crate::tf!("Autosave copy could not be read: {error}").as_ref());
-                if !self.web_autosave_pending.is_empty() {
-                    self.queue_autosave_restore_prompt();
-                }
+                // The next prompt is queued only when this open settles
+                // (`web_autosave_opened` / the failure hook), not here — the
+                // poll has not started the open yet, so queueing now would
+                // show the modal before the recovered drawing loads.
+                crate::io::web_drop::enqueue_open(open_name, bytes);
                 Task::none()
             }
+            Err(error) => {
+                // Unreadable snapshot: warn, but neither delete it nor
+                // re-offer it this session — it was already taken out of
+                // `web_autosave_pending`, so the cycle cannot loop on it.
+                // It stays discardable on the next boot.
+                self.web_autosave_consumed = None;
+                self.command_line
+                    .push_warning(crate::tf!("Autosave copy could not be read: {error}").as_ref());
+                self.queue_next_web_autosave_prompt();
+                Task::none()
+            }
+        }
+    }
+
+    /// Re-offer the remaining boot snapshots once the current one settled.
+    /// No-op when none are left (or the modal is already queued).
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn queue_next_web_autosave_prompt(&mut self) {
+        if !self.web_autosave_pending.is_empty() {
+            self.queue_autosave_restore_prompt();
         }
     }
 
@@ -3723,8 +3778,18 @@ impl OpenCADStudio {
                 let width = ((max.x - min.x) as f64 * margin).max(1.0);
                 let height = ((max.y - min.y) as f64 * margin).max(1.0);
                 if width < MIN_MODEL_SHEET_MM || height < MIN_MODEL_SHEET_MM {
+                    // Per-axis: a thin-but-long profile keeps its long
+                    // dimension instead of being clipped to the sheet, and
+                    // the content is centered on the enlarged page.
                     let (w, h) = standard_sheet.unwrap_or((297.0, 210.0));
-                    (w, h, -min.x as f64, -min.y as f64)
+                    let page_w = width.max(w);
+                    let page_h = height.max(h);
+                    (
+                        page_w,
+                        page_h,
+                        (page_w - width) * 0.5 - min.x as f64,
+                        (page_h - height) * 0.5 - min.y as f64,
+                    )
                 } else {
                     let pad_x = (width - (max.x - min.x) as f64) * 0.5;
                     let pad_y = (height - (max.y - min.y) as f64) * 0.5;

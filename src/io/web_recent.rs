@@ -90,10 +90,7 @@ pub async fn store_open(
                 return None;
             };
             if state.latest_id != pending_id {
-                return Some((
-                    state.latest_id,
-                    std::sync::Arc::clone(&state.latest_bytes),
-                ));
+                return Some((state.latest_id, std::sync::Arc::clone(&state.latest_bytes)));
             }
             state.active_writers = state.active_writers.saturating_sub(1);
             if state.active_writers == 0 {
@@ -130,6 +127,24 @@ pub(crate) async fn write_entry(
         .map_err(js_error)?
         .dyn_into::<web_sys::FileSystemWritableFileStream>()
         .map_err(js_error)?;
+    if let Err(error) = write_and_close(&writable, bytes).await {
+        // A failed write must still release the stream: the
+        // FileSystemWritableFileStream holds an exclusive lock on the entry,
+        // and leaving it undrained makes every later write to the same file
+        // fail the same way — one quota error would freeze autosave (its
+        // round would never finish) for the rest of the session. `abort`
+        // discards the pending bytes; ignore its own failure, there is
+        // nothing better to report than `error`.
+        let _ = JsFuture::from(writable.abort()).await;
+        return Err(error);
+    }
+    Ok(())
+}
+
+async fn write_and_close(
+    writable: &web_sys::FileSystemWritableFileStream,
+    bytes: &[u8],
+) -> Result<(), String> {
     let write = writable.write_with_u8_array(bytes).map_err(js_error)?;
     JsFuture::from(write).await.map_err(js_error)?;
     JsFuture::from(writable.close()).await.map_err(js_error)?;
@@ -262,9 +277,22 @@ fn decode_thumbnail(bytes: Vec<u8>) -> Option<Thumbnail> {
 
 /// Shared with the autosave snapshot store (`web_autosave`).
 pub(crate) fn js_error(value: wasm_bindgen::JsValue) -> String {
-    value
-        .as_string()
-        .unwrap_or_else(|| format!("browser storage error: {value:?}"))
+    if let Some(text) = value.as_string() {
+        return text;
+    }
+    // OPFS failures surface as DOMExceptions, which stringify as
+    // "[object DOMException]" — useless in a command-line warning. Their
+    // `name`/`message` properties carry the diagnosis ("QuotaExceededError",
+    // "NotFoundError", …), so render those when present.
+    let property = |key: &str| {
+        js_sys::Reflect::get(&value, &wasm_bindgen::JsValue::from_str(key))
+            .ok()
+            .and_then(|found| found.as_string())
+    };
+    match (property("name"), property("message")) {
+        (Some(name), Some(message)) => format!("{name}: {message}"),
+        _ => format!("browser storage error: {value:?}"),
+    }
 }
 
 /// Last-modified time (ms since the Unix epoch) of a drawing's cached copy,

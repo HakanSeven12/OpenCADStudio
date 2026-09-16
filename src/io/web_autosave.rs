@@ -8,11 +8,18 @@
 //! offered for restore at boot when newer than the drawing's last explicit
 //! save (the OPFS recent copy of the same name).
 //!
+//! Losing that comparison never deletes a snapshot: the recent copy is
+//! refreshed by every OPEN as well as every save, so a snapshot that just
+//! went stale may still be the only survivor of a crash right after a
+//! re-open. Accumulation is bounded instead — the boot scan keeps the
+//! newest [`SNAPSHOT_CAP`] snapshots and evicts only the oldest ones beyond
+//! that cap.
+//!
 //! OPFS entry names carry only the FNV hash of the drawing name (like
 //! `web_recent`), so a small JSON index maps hashes back to names. The index
 //! is written before its snapshot: a crash between the two writes leaves a
-//! name without bytes, which `list` filters out, rather than an orphan
-//! snapshot nobody can name.
+//! name without bytes — a missing file or a zero-byte one — which `list`
+//! filters out, rather than an orphan snapshot nobody can name.
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
@@ -38,12 +45,42 @@ pub struct WebAutosaveEntry {
 /// A snapshot is worth offering when it is strictly newer than the last
 /// explicit save, or when no saved copy exists at all (the drawing was never
 /// saved — or its recent copy was evicted — so the snapshot is all there is).
+/// The comparison decides *offering* only, never survival: the recent copy
+/// is refreshed by every open, so "older than the recent copy" is not proof
+/// that a snapshot recovers nothing.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // unit-tested on native
 pub(crate) fn newer_than_saved(autosave_ms: f64, saved_ms: Option<f64>) -> bool {
     match saved_ms {
         Some(saved_ms) => autosave_ms > saved_ms,
         None => true,
     }
+}
+
+/// Upper bound on stored snapshots; the boot scan evicts the oldest ones
+/// beyond it. Without a bound, snapshots superseded by a save (or by a
+/// mere re-open) would pile up forever, since age no longer deletes them.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // unit-tested on native
+pub(crate) const SNAPSHOT_CAP: usize = 16;
+
+/// Split `entries` into `(kept, evicted)` so at most `cap` snapshots remain,
+/// both sides ordered by `modified_ms` (newest first within each side; the
+/// evicted names overall run oldest-first, so an interrupted scan deletes
+/// the least valuable snapshots first). This is the only deletion criterion
+/// the boot scan applies — being older than the recent copy is not one.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // unit-tested on native
+pub(crate) fn cap_evictions(
+    mut entries: Vec<WebAutosaveEntry>,
+    cap: usize,
+) -> (Vec<WebAutosaveEntry>, Vec<String>) {
+    entries.sort_by(|a, b| b.modified_ms.total_cmp(&a.modified_ms));
+    let overflow = entries.len().saturating_sub(cap);
+    let mut evicted: Vec<String> = entries
+        .split_off(entries.len() - overflow)
+        .into_iter()
+        .map(|entry| entry.name)
+        .collect();
+    evicted.reverse();
+    (entries, evicted)
 }
 
 /// The name a restored drawing carries as a tab and download: the drawing's
@@ -89,7 +126,10 @@ pub async fn snapshot(name: &str, bytes: &[u8], thumbnail: Option<&[u8]>) -> Res
 }
 
 /// All live snapshots. Index rows whose file is gone (crash between writes,
-/// partial eviction) are skipped rather than reported.
+/// partial eviction) and zero-byte snapshots (the crash window after the
+/// index write but before the snapshot write) are skipped rather than
+/// reported — an empty file recovers nothing and would only route the user
+/// into the corrupt-file recovery flow.
 #[cfg(target_arch = "wasm32")]
 pub async fn list() -> Result<Vec<WebAutosaveEntry>, String> {
     let directory = autosave_directory(false).await?;
@@ -98,6 +138,9 @@ pub async fn list() -> Result<Vec<WebAutosaveEntry>, String> {
         let Ok(file) = super::web_recent::get_file(&directory, &snapshot_key(&name)).await else {
             continue;
         };
+        if file.size() == 0.0 {
+            continue;
+        }
         entries.push(WebAutosaveEntry {
             name,
             size: file.size() as u64,
@@ -130,22 +173,26 @@ pub async fn remove(name: &str) -> Result<(), String> {
     drawing.map(|_| ())
 }
 
-/// Boot scan: keep the snapshots worth offering (newer than the drawing's
-/// last explicit save, newest first) and silently delete the stale ones — a
-/// snapshot older than the saved copy recovers nothing and would otherwise
-/// pile up across sessions.
+/// Boot scan: offer the snapshots worth recovering — strictly newer than the
+/// drawing's last explicit copy, newest first. Age never deletes: the recent
+/// copy is refreshed by every OPEN as well as every save, so a snapshot that
+/// lost the comparison may still be the only survivor of a crash right after
+/// a re-open. Accumulation is bounded instead — beyond [`SNAPSHOT_CAP`]
+/// snapshots the oldest are evicted, which is the only deletion here.
 #[cfg(target_arch = "wasm32")]
 pub async fn scan() -> Result<Vec<WebAutosaveEntry>, String> {
+    let (kept, evicted) = cap_evictions(list().await?, SNAPSHOT_CAP);
+    for name in evicted {
+        let _ = remove(&name).await;
+    }
     let mut recoverable = Vec::new();
-    for entry in list().await? {
+    for entry in kept {
         let saved_ms = super::web_recent::modified_ms(&entry.name).await;
         if newer_than_saved(entry.modified_ms, saved_ms) {
             recoverable.push(entry);
-        } else {
-            let _ = remove(&entry.name).await;
         }
     }
-    recoverable.sort_by(|a, b| b.modified_ms.total_cmp(&a.modified_ms));
+    // `cap_evictions` already ordered the survivors newest-first.
     Ok(recoverable)
 }
 
@@ -218,5 +265,45 @@ mod tests {
         // Multi-dot names keep everything but the final extension in the stem.
         assert_eq!(recovered_name("a.b.dwg"), "a.b (recovered).dwg");
         assert_eq!(recovered_name(""), " (recovered).dwg");
+    }
+
+    #[test]
+    fn under_the_cap_nothing_is_evicted_and_order_is_newest_first() {
+        let (kept, evicted) = cap_evictions(
+            vec![
+                entry("old.dwg", 100.0),
+                entry("new.dwg", 300.0),
+                entry("mid.dwg", 200.0),
+            ],
+            SNAPSHOT_CAP,
+        );
+        assert!(evicted.is_empty());
+        assert_eq!(
+            kept.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["new.dwg", "mid.dwg", "old.dwg"]
+        );
+    }
+
+    #[test]
+    fn over_the_cap_exactly_the_oldest_overflow_is_evicted() {
+        let entries = (0..SNAPSHOT_CAP + 4)
+            .map(|i| entry(&format!("d{i}.dwg"), i as f64))
+            .collect();
+        let (kept, evicted) = cap_evictions(entries, SNAPSHOT_CAP);
+        assert_eq!(kept.len(), SNAPSHOT_CAP);
+        // Newest kept first, oldest evicted first.
+        assert_eq!(kept.first().map(|e| e.name.as_str()), Some("d19.dwg"));
+        assert_eq!(
+            evicted.iter().map(|name| name.as_str()).collect::<Vec<_>>(),
+            ["d0.dwg", "d1.dwg", "d2.dwg", "d3.dwg"]
+        );
+    }
+
+    fn entry(name: &str, modified_ms: f64) -> WebAutosaveEntry {
+        WebAutosaveEntry {
+            name: name.to_string(),
+            size: 16,
+            modified_ms,
+        }
     }
 }

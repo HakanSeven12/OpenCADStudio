@@ -736,6 +736,16 @@ pub(super) struct OpenCADStudio {
     /// prompt still has to offer, one at a time.
     #[cfg(target_arch = "wasm32")]
     web_autosave_pending: Vec<crate::io::web_autosave::WebAutosaveEntry>,
+    /// The snapshot whose recovered open is queued: `(autosave key,
+    /// open name)`. The OPFS copy is the only one, so it is deleted only
+    /// once an open with exactly that name succeeds.
+    #[cfg(target_arch = "wasm32")]
+    web_autosave_consumed: Option<(String, String)>,
+    /// Autosave keys a web save wanted to remove while a snapshot round was
+    /// still writing (the round's late write would resurrect the snapshot
+    /// with a fresh mtime); the removes run when the round finishes.
+    #[cfg(target_arch = "wasm32")]
+    web_autosave_clear_after: Vec<String>,
     // ── Floating panel windows ────────────────────────────────────────────
     /// Active `iced_aw` colour picker: destination plus its initial colour.
     color_pick_target: Option<(ColorPickTarget, AcadColor)>,
@@ -2021,8 +2031,8 @@ pub enum Message {
     /// Web: delete the offered autosave snapshot (and offer the next, if any).
     #[cfg(target_arch = "wasm32")]
     WebAutosaveDiscard,
-    /// Web: the offered snapshot's bytes are in (and the OPFS copy consumed);
-    /// open them as `name`.
+    /// Web: the offered snapshot's bytes are in; queue them for the guarded
+    /// open poll. The OPFS copy is consumed only once that open succeeds.
     #[cfg(target_arch = "wasm32")]
     WebAutosaveBytes(String, Result<Vec<u8>, String>),
     /// Web: one autosave round finished for all dirty tabs (serially).
@@ -3769,6 +3779,10 @@ impl OpenCADStudio {
             web_autosave_warned: false,
             #[cfg(target_arch = "wasm32")]
             web_autosave_pending: Vec::new(),
+            #[cfg(target_arch = "wasm32")]
+            web_autosave_consumed: None,
+            #[cfg(target_arch = "wasm32")]
+            web_autosave_clear_after: Vec::new(),
             color_pick_target: None,
             color_picker_tab: ColorPickerTab::Index,
             recent_colors: Vec::new(),

@@ -26,14 +26,21 @@ impl OpenCADStudio {
 
     /// Queue the web crash-recovery prompt behind whatever startup modal is
     /// already showing (donation, GPU warning…); the after-message hook in
-    /// `update` surfaces it as soon as the slot is free.
+    /// `update` surfaces it as soon as the slot is free. No-op when nothing
+    /// is pending: once the autosave OPFS directory merely exists (even with
+    /// no entries), queueing unconditionally would show an empty
+    /// "Recover Drawing" modal on every boot.
     #[cfg(target_arch = "wasm32")]
     pub(super) fn queue_autosave_restore_prompt(&mut self) {
+        if self.web_autosave_pending.is_empty() {
+            return;
+        }
         if !self
             .pending_startup_modals
             .contains(&ModalKind::AutosaveRestore)
         {
-            self.pending_startup_modals.push_back(ModalKind::AutosaveRestore);
+            self.pending_startup_modals
+                .push_back(ModalKind::AutosaveRestore);
         }
         self.show_next_startup_modal();
     }
@@ -62,7 +69,8 @@ impl OpenCADStudio {
         };
         match &self.gpu_status {
             GpuStatus::Software(adapter) => {
-                self.command_line.push_warning(&software_rasterizer_warning(adapter));
+                self.command_line
+                    .push_warning(&software_rasterizer_warning(adapter));
             }
             GpuStatus::NoRenderer => {
                 crate::scene::pipeline::report_gpu_line(
@@ -141,9 +149,15 @@ mod tests {
         // The name carries parentheses and commas of its own; the localized
         // template must still place it whole. The loader follows the system
         // locale here, so the assertions stay language-neutral.
-        assert!(warning.contains("(llvmpipe (LLVM 20.1.8, 256 bits))"), "{warning}");
+        assert!(
+            warning.contains("(llvmpipe (LLVM 20.1.8, 256 bits))"),
+            "{warning}"
+        );
         assert!(warning.contains("GPU"), "{warning}");
-        assert!(!warning.contains("{adapter}") && !warning.contains("__ocs_"), "{warning}");
+        assert!(
+            !warning.contains("{adapter}") && !warning.contains("__ocs_"),
+            "{warning}"
+        );
         // Every platform has a hint, and it is a sentence, not a missing key.
         let hint = gpu_platform_hint();
         assert!(hint.len() > 20 && !hint.contains("hint-"), "{hint}");

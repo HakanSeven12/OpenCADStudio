@@ -811,6 +811,13 @@ impl OpenCADStudio {
                     self.command_line
                         .push_info(crate::tf!("Open cancelled: \"{}\"", p.name).as_ref());
                 }
+                // A cancelled recovered open keeps its snapshot (re-offered
+                // next boot — it is the only copy); the remaining queued
+                // snapshots can still be offered this session.
+                #[cfg(target_arch = "wasm32")]
+                if self.web_autosave_consumed.take().is_some() {
+                    self.queue_next_web_autosave_prompt();
+                }
                 self.drain_pending_open()
             }
 
@@ -818,7 +825,13 @@ impl OpenCADStudio {
             Message::WebFileDropped(name, bytes) => {
                 // Bytes are already in hand (no picker round-trip), so this is
                 // `on_open_file`'s web branch with the real name and size on
-                // the overlay from the start.
+                // the overlay from the start. An open already in flight must
+                // not be clobbered (its bytes are gone once dequeued), so the
+                // pair goes back to the queue for the next poll tick.
+                if self.opening.is_some() {
+                    crate::io::web_drop::enqueue_open(name, bytes);
+                    return Task::none();
+                }
                 let state = std::sync::Arc::new(crate::io::OpenProgressState::new(
                     crate::app::OPEN_PHASE_READING,
                 ));
@@ -844,6 +857,22 @@ impl OpenCADStudio {
             Message::WebFileOpened(open_id, mut outcome) => {
                 if self.opening.as_ref().map(|opening| opening.id) != Some(open_id) {
                     return Task::none();
+                }
+                // A crash-recovery open settling here: success deletes its
+                // OPFS snapshot (the only copy, kept until now); a parse
+                // failure keeps it for the next boot. Either way the next
+                // queued snapshot can be offered again.
+                if self
+                    .web_autosave_consumed
+                    .as_ref()
+                    .is_some_and(|(_, recorded)| *recorded == outcome.name)
+                {
+                    if outcome.result.is_ok() {
+                        self.web_autosave_opened(&outcome.name);
+                    } else {
+                        self.web_autosave_consumed = None;
+                        self.queue_next_web_autosave_prompt();
+                    }
                 }
                 if let Some(opening) = self.opening.as_mut() {
                     opening.name = outcome.name.clone();
@@ -4455,8 +4484,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::AutoConstrainReset => {
-                self.auto_constrain_settings =
-                    super::settings::AutoConstrainSettings::default();
+                self.auto_constrain_settings = super::settings::AutoConstrainSettings::default();
                 self.auto_constrain_selected_row = 0;
                 self.auto_constrain_distance_input =
                     format!("{}", self.auto_constrain_settings.distance_tolerance);
@@ -4495,8 +4523,7 @@ impl OpenCADStudio {
                         self.auto_constrain_settings.distance_tolerance = distance;
                         self.auto_constrain_settings.angle_tolerance_deg = angle;
                         self.auto_constrain_settings.sanitize();
-                        self.auto_constrain_saved =
-                            Some(self.auto_constrain_settings.clone());
+                        self.auto_constrain_saved = Some(self.auto_constrain_settings.clone());
                         self.persist_settings_if_changed();
                         if matches!(action, Message::AutoConstrainOk) {
                             self.close_active_modal();

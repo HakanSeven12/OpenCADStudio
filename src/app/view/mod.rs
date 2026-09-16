@@ -832,17 +832,19 @@ bg={bg_ms:.1}ms n={view_count}"
                         self.constraint_bar_display,
                     )
                     .into_iter()
-                    .map(|(id, point, direction, label, is_conflicting, hover_points)| {
-                        let selected = tab.scene.selected_constraint == Some(id);
-                        (
-                            point,
-                            direction,
-                            label,
-                            is_conflicting,
-                            selected,
-                            hover_points,
-                        )
-                    })
+                    .map(
+                        |(id, point, direction, label, is_conflicting, hover_points)| {
+                            let selected = tab.scene.selected_constraint == Some(id);
+                            (
+                                point,
+                                direction,
+                                label,
+                                is_conflicting,
+                                selected,
+                                hover_points,
+                            )
+                        },
+                    )
                     .collect()
             };
             crate::ui::overlay::selection_overlay(

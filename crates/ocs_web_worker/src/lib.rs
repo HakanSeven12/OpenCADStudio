@@ -8,23 +8,11 @@ use sha2::{Digest, Sha256};
 use wasm_bindgen::prelude::*;
 
 const HASH_MARKER: &str = "\nreport-source-sha256:";
-const PROTOCOL_VERSION: u16 = 4;
 
-#[derive(serde::Serialize)]
-struct EntityRuntimeFields {
-    handle: u64,
-    linetype_handle: Option<u64>,
-    color_book_handle: Option<u64>,
-    face_visual_style_handle: Option<u64>,
-    edge_visual_style_handle: Option<u64>,
-    material_flags: u8,
-    material_handle: Option<u64>,
-    shadow_flags: u8,
-    plotstyle_flags: u8,
-    plotstyle_handle: Option<u64>,
-    entity_mode: Option<u8>,
-    has_ds_data: bool,
-}
+/// Version of the shared worker wire format (see `ocs_save`). Both sides of
+/// the boundary — this crate and the app's `io::web_worker` — check payloads
+/// against it.
+const PROTOCOL_VERSION: u16 = ocs_save::PROTOCOL_VERSION;
 
 /// Parse DWG/DXF on a dedicated browser worker and return a compact serialized
 /// document. The main wasm instance only deserializes and installs it, so the
@@ -147,6 +135,28 @@ pub fn sha256_document(bytes: Uint8Array) -> String {
     sha256_document_bytes(&bytes.to_vec())
 }
 
+/// Serialize an already-prepared document to DWG/DXF bytes on the dedicated
+/// browser worker, so the expensive writer pass (bit-level DWG encoding /
+/// ASCII DXF formatting) never occupies the UI thread. `encoded_document` is
+/// the shared `ocs_save` request payload (document + runtime-field sidecar +
+/// target extension); the reply is the shared response payload (protocol
+/// version + `Result<bytes, error text>`). The main wasm instance only decodes
+/// the result — the save-side counterpart of [`parse_document`].
+#[wasm_bindgen]
+pub fn serialize_document(
+    encoded_document: Uint8Array,
+    report_stage: &Function,
+) -> Result<Uint8Array, JsValue> {
+    console_error_panic_hook::set_once();
+    report_stage.call1(&JsValue::NULL, &JsValue::from_str("decode document"))?;
+    let (document, ext) = ocs_save::decode_request(&encoded_document.to_vec())?;
+    report_stage.call1(&JsValue::NULL, &JsValue::from_str("serialize drawing"))?;
+    let result = ocs_save::serialize_document(&document, &ext);
+    report_stage.call1(&JsValue::NULL, &JsValue::from_str("copy output"))?;
+    let encoded = ocs_save::encode_response(result)?;
+    Ok(Uint8Array::from(encoded.as_slice()))
+}
+
 fn report_fingerprint_needed(stats: &acadrust::ReadStats) -> bool {
     stats.recovered() || stats.skipped_source_records > 0 || !stats.stream_completed
 }
@@ -178,33 +188,7 @@ fn encode_result(
     let runtime_fields = result
         .as_ref()
         .ok()
-        .map(|outcome| {
-            outcome
-                .document
-                .entities()
-                .map(|entity| {
-                    let common = entity.common();
-                    EntityRuntimeFields {
-                        handle: common.handle.value(),
-                        linetype_handle: common.linetype_handle.map(|handle| handle.value()),
-                        color_book_handle: common.color_book_handle.map(|handle| handle.value()),
-                        face_visual_style_handle: common
-                            .face_visual_style_handle
-                            .map(|handle| handle.value()),
-                        edge_visual_style_handle: common
-                            .edge_visual_style_handle
-                            .map(|handle| handle.value()),
-                        material_flags: common.material_flags,
-                        material_handle: common.material_handle.map(|handle| handle.value()),
-                        shadow_flags: common.shadow_flags,
-                        plotstyle_flags: common.plotstyle_flags,
-                        plotstyle_handle: common.plotstyle_handle.map(|handle| handle.value()),
-                        entity_mode: common.entity_mode,
-                        has_ds_data: common.has_ds_data,
-                    }
-                })
-                .collect::<Vec<_>>()
-        })
+        .map(|outcome| ocs_save::extract_entity_runtime_fields(&outcome.document))
         .unwrap_or_default();
     let encoded = bincode::serialize(&(
         PROTOCOL_VERSION,

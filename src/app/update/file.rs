@@ -1429,11 +1429,18 @@ impl OpenCADStudio {
                         crate::tf!("XREF  Recovered with warnings: \"{}\"", info.name).as_ref(),
                     );
                 }
+                // Web: NotFound xrefs are summarized in one warning after the
+                // loop (see below) — the per-reference line carries a
+                // filesystem path no browser can open, and a drawing with
+                // several unresolved xrefs would repeat the same hint.
+                #[cfg(not(target_arch = "wasm32"))]
                 crate::io::xref::XrefStatus::NotFound => {
                     self.command_line.push_error(
                         crate::tf!("XREF  Not found: \"{}\" ({})", info.name, info.path).as_ref(),
                     );
                 }
+                #[cfg(target_arch = "wasm32")]
+                crate::io::xref::XrefStatus::NotFound => {}
                 crate::io::xref::XrefStatus::Failed => {
                     self.command_line.push_error(
                         crate::tf!("XREF  Recovery failed: \"{}\" ({})", info.name, info.path)
@@ -1445,6 +1452,22 @@ impl OpenCADStudio {
                         crate::tf!("XREF  Unloaded (skipped): \"{}\"", info.name).as_ref(),
                     );
                 }
+            }
+        }
+        // Web: one warning per open lists every unresolved xref and the way
+        // to fix it — dropping the files on the page registers their bytes,
+        // and reopening the drawing (or XRELOAD) then resolves them.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let unresolved = crate::io::xref::unresolved_xref_names(&caches.xrefs);
+            if !unresolved.is_empty() {
+                let names = unresolved.join(", ");
+                self.command_line.push_warning(
+                    crate::tf!(
+                        "XREF  Unresolved external references: {names} — drop the referenced DWG/DXF files on the page to register them, then reopen this drawing or run XRELOAD."
+                    )
+                    .as_ref(),
+                );
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -2001,82 +2024,144 @@ impl OpenCADStudio {
             self.tabs[i].scene.document.preview = Some(preview);
         }
 
-        let mut recent_task = Task::none();
         // The name the autosave snapshot for this tab is keyed by — capture it
         // before the save re-points `current_path` at the download name.
         let autosave_key = Self::web_autosave_key(&self.tabs[i]);
-        let saved = match crate::io::save_to_bytes(&self.tabs[i].scene.document, &ext, version) {
-            Ok(bytes) => {
-                crate::sys::download_bytes(&filename, &bytes);
-                let cache_name = std::path::Path::new(&filename)
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| filename.clone());
-                let path = std::path::PathBuf::from(cache_name);
-                self.tabs[i].current_path = Some(path.clone());
-                self.tabs[i].scene.document.version = version;
-                self.tabs[i].dirty = false;
-                self.tabs[i].recovery_save_as_required = false;
-                recent_task = Task::perform(
-                    async move {
-                        crate::io::web_recent::store(&path.to_string_lossy(), &bytes)
-                            .await
-                            .map(|_| path)
-                    },
-                    Message::WebRecentStored,
-                );
-                // A clean save supersedes any crash-recovery snapshot for this
-                // drawing — drop the old key and the new one so stale copies
-                // don't resurface in the next boot scan. But an autosave
-                // round may still be writing the same key: its write would
-                // land AFTER the remove and resurrect the snapshot (with a
-                // newer mtime, so the next scan would offer it as
-                // recoverable). Defer the removes to the end of the round.
-                let new_key = self.tabs[i]
-                    .current_path
-                    .as_ref()
-                    .map(|path| path.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                if self.web_autosave_in_flight {
-                    self.web_autosave_clear_after.push(autosave_key);
-                    if !new_key.is_empty() {
-                        self.web_autosave_clear_after.push(new_key);
-                    }
-                } else {
-                    recent_task = Task::batch([
-                        recent_task,
-                        Task::perform(
-                            async move {
-                                let _ = crate::io::web_autosave::remove(&autosave_key).await;
-                                let _ = crate::io::web_autosave::remove(&new_key).await;
-                            },
-                            |_| Message::Noop,
-                        ),
-                    ]);
-                }
-                self.command_line
-                    .push_output(crate::tf!("Saved: {filename}").as_ref());
-                true
-            }
+        // Race guard (the web counterpart of native's `snapshot_is_current`):
+        // completion only clears the dirty flag if the tab did not change
+        // while the writer ran off-thread.
+        let geometry_epoch = self.tabs[i].scene.geometry_epoch;
+        let edit_revision = self.tabs[i].edit_revision;
+        let camera_generation = self.tabs[i].scene.camera_generation;
+        // Prepare the document here (clone + style sync + dimension bake — the
+        // app-side half of the pipeline), then hand the DWG/DXF writer pass to
+        // the browser worker so the UI thread stays responsive on large
+        // drawings. Completion (download + bookkeeping) continues in
+        // `on_web_save_serialized`.
+        let prepared =
+            crate::io::prepare_document_for_save(&self.tabs[i].scene.document, version);
+        Task::perform(
+            async move { crate::io::serialize_prepared_document(&prepared, &ext).await },
+            move |result| Message::WebSaveSerialized {
+                tab_id,
+                filename,
+                autosave_key,
+                version,
+                geometry_epoch,
+                edit_revision,
+                camera_generation,
+                result,
+            },
+        )
+    }
+
+    /// Web SAVE completion: the serializer worker (or inline fallback) has the
+    /// drawing bytes. The download and tab bookkeeping that used to run
+    /// synchronously inside `on_web_save_screenshot`, unchanged in semantics —
+    /// except the dirty flag is only cleared when the serialized snapshot is
+    /// still the tab's current state.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn on_web_save_serialized(
+        &mut self,
+        tab_id: u64,
+        filename: String,
+        autosave_key: String,
+        version: acadrust::DxfVersion,
+        geometry_epoch: u64,
+        edit_revision: u64,
+        camera_generation: u64,
+        result: Result<Vec<u8>, String>,
+    ) -> Task<Message> {
+        let bytes = match result {
+            Ok(bytes) => bytes,
             Err(error) => {
                 self.command_line
                     .push_error(crate::tf!("Save failed: {error}").as_ref());
-                false
+                return self.finish_web_save(false);
             }
         };
+        // The download is the only artifact of the save — fire it even if the
+        // tab was closed while serialization was in flight.
+        crate::sys::download_bytes(&filename, &bytes);
+        let cache_name = std::path::Path::new(&filename)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| filename.clone());
+        let path = std::path::PathBuf::from(cache_name);
+        let mut recent_task = Task::perform(
+            async move {
+                crate::io::web_recent::store(&path.to_string_lossy(), &bytes)
+                    .await
+                    .map(|_| path)
+            },
+            Message::WebRecentStored,
+        );
+        let Some(i) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            return recent_task;
+        };
+        self.tabs[i].current_path = Some(
+            std::path::Path::new(&filename)
+                .file_name()
+                .map(|name| std::path::PathBuf::from(name.to_string_lossy().into_owned()))
+                .unwrap_or_else(|| std::path::PathBuf::from(filename.clone())),
+        );
+        self.tabs[i].scene.document.version = version;
+        self.tabs[i].recovery_save_as_required = false;
+        let snapshot_is_current = self.tabs[i].scene.geometry_epoch == geometry_epoch
+            && self.tabs[i].edit_revision == edit_revision
+            && self.tabs[i].scene.camera_generation == camera_generation;
+        if snapshot_is_current {
+            self.tabs[i].dirty = false;
+        }
+        // A clean save supersedes any crash-recovery snapshot for this
+        // drawing — drop the old key and the new one so stale copies don't
+        // resurface in the next boot scan. But an autosave round may still be
+        // writing the same key: its write would land AFTER the remove and
+        // resurrect the snapshot (with a newer mtime, so the next scan would
+        // offer it as recoverable). Defer the removes to the end of the round.
+        let new_key = self.tabs[i]
+            .current_path
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if self.web_autosave_in_flight {
+            self.web_autosave_clear_after.push(autosave_key);
+            if !new_key.is_empty() {
+                self.web_autosave_clear_after.push(new_key);
+            }
+        } else {
+            recent_task = Task::batch([
+                recent_task,
+                Task::perform(
+                    async move {
+                        let _ = crate::io::web_autosave::remove(&autosave_key).await;
+                        let _ = crate::io::web_autosave::remove(&new_key).await;
+                    },
+                    |_| Message::Noop,
+                ),
+            ]);
+        }
+        self.command_line
+            .push_output(crate::tf!("Saved: {filename}").as_ref());
+        Task::batch([recent_task, self.finish_web_save(true)])
+    }
+
+    /// Tail of the web save flow: continue a pending close when the save
+    /// succeeded, or re-open the unsaved-changes dialog when it failed.
+    #[cfg(target_arch = "wasm32")]
+    fn finish_web_save(&mut self, saved: bool) -> Task<Message> {
         if self.save_dialog_for_unsaved {
             if saved {
                 if let Some(crate::app::PendingClose::Tab(index)) = self.pending_close.take() {
                     let continuation = self.update(Message::TabClose(index));
                     let rest = self.continue_tab_close_queue();
-                    return Task::batch([recent_task, continuation, rest]);
+                    return Task::batch([continuation, rest]);
                 }
             } else if self.pending_close.is_some() {
-                let retry = self.open_unsaved_dialog_window();
-                return Task::batch([recent_task, retry]);
+                return self.open_unsaved_dialog_window();
             }
         }
-        recent_task
+        Task::none()
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -3017,7 +3102,10 @@ impl OpenCADStudio {
     /// native `.sv$` copy — best-effort and non-destructive: no download, no
     /// recents update, dirty flag untouched. Snapshots run serially in one
     /// round; while it lasts (or a web save's thumbnail capture is pending)
-    /// further ticks are dropped, not queued.
+    /// further ticks are dropped, not queued. Each tab is prepared (clone +
+    /// style sync + dimension bake) once up front, then the DWG/DXF writer
+    /// pass runs on the serializer worker — the UI thread only awaits the
+    /// result between OPFS writes.
     #[cfg(target_arch = "wasm32")]
     pub(super) fn on_autosave(&mut self) -> Task<Message> {
         if self.web_autosave_in_flight || self.pending_web_thumbnail_save.is_some() {
@@ -3044,7 +3132,11 @@ impl OpenCADStudio {
             let is_dxf = crate::io::source_is_dxf(tab.current_path.as_deref(), &tab.scene.document);
             let ext = if is_dxf { "dxf" } else { "dwg" }.to_string();
             let version = tab.scene.document.version;
-            pending.push((name, ext, version, tab.scene.document.clone()));
+            pending.push((
+                name,
+                ext,
+                crate::io::prepare_document_for_save(&tab.scene.document, version),
+            ));
         }
         if pending.is_empty() {
             return Task::none();
@@ -3053,10 +3145,10 @@ impl OpenCADStudio {
         Task::perform(
             async move {
                 let mut failure = None;
-                for (name, ext, version, doc) in pending {
+                for (name, ext, prepared) in pending {
                     // Autosave exists to recover geometry, not pretty recents:
                     // no thumbnail capture, just bytes into OPFS.
-                    match crate::io::save_to_bytes(&doc, &ext, version) {
+                    match crate::io::serialize_prepared_document(&prepared, &ext).await {
                         Ok(bytes) => {
                             if let Err(error) =
                                 crate::io::web_autosave::snapshot(&name, &bytes, None).await

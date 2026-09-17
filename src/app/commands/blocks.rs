@@ -571,13 +571,29 @@ impl OpenCADStudio {
             }
 
             "XRELOAD" => {
-                // Reload all xrefs for the current drawing.
-                if let Some(path) = &self.tabs[i].current_path.clone() {
-                    if let Some(base_dir) = path.parent() {
+                // Reload all xrefs for the current drawing. Web: xrefs
+                // re-read from the in-session bytes registry, so an unsaved
+                // drawing reloads too; native needs the drawing's own folder
+                // for relative xref paths.
+                #[cfg(target_arch = "wasm32")]
+                let base_dir: Option<std::path::PathBuf> = Some(std::path::PathBuf::new());
+                #[cfg(not(target_arch = "wasm32"))]
+                let base_dir: Option<std::path::PathBuf> = self
+                    .tabs[i]
+                    .current_path
+                    .clone()
+                    .and_then(|path| path.parent().map(std::path::Path::to_path_buf));
+                if let Some(base_dir) = base_dir {
+                    {
                         let (infos, _dropped) = crate::io::xref::resolve_xrefs(
                             &mut self.tabs[i].scene.document,
-                            base_dir,
+                            &base_dir,
                         );
+                        // Web: unresolved references surface once, with the
+                        // drop hint, instead of a filesystem path no browser
+                        // can open.
+                        #[cfg(target_arch = "wasm32")]
+                        let mut unresolved: Vec<String> = Vec::new();
                         for info in &infos {
                             match info.status {
                                 crate::io::xref::XrefStatus::Loaded => {
@@ -590,11 +606,16 @@ impl OpenCADStudio {
                                         info.name
                                     ).as_ref());
                                 }
+                                #[cfg(not(target_arch = "wasm32"))]
                                 crate::io::xref::XrefStatus::NotFound => {
                                     self.command_line.push_error(crate::tf!(
                                         "XREF  Not found: \"{}\" ({})",
                                         info.name, info.path
                                     ).as_ref());
+                                }
+                                #[cfg(target_arch = "wasm32")]
+                                crate::io::xref::XrefStatus::NotFound => {
+                                    unresolved.push(info.name.clone());
                                 }
                                 crate::io::xref::XrefStatus::Failed => {
                                     self.command_line.push_error(crate::tf!(
@@ -609,6 +630,16 @@ impl OpenCADStudio {
                                     ).as_ref());
                                 }
                             }
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        if !unresolved.is_empty() {
+                            let names = unresolved.join(", ");
+                            self.command_line.push_warning(
+                                crate::tf!(
+                                    "XREF  Unresolved external references: {names} — drop the referenced DWG/DXF files on the page to register them, then reopen this drawing or run XRELOAD."
+                                )
+                                .as_ref(),
+                            );
                         }
                         self.tabs[i].scene.populate_hatches_from_document();
                         self.tabs[i].scene.populate_images_from_document();

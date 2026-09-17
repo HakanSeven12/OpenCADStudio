@@ -148,72 +148,81 @@ impl OpenCADStudio {
 
             // ARCHIVE / ETRANSMIT — package the drawing and its referenced files
             // (xrefs + raster images) into a sibling "<name>_archive" folder.
+            // Web: there is no folder to copy into — the same dependency set is
+            // collected from the session's bytes registries and delivered as a
+            // "<name>_transmit.zip" download (`archive_web` below).
             "ARCHIVE" | "ETRANSMIT" => {
-                use std::path::PathBuf;
-                if let Some(src) = self.tabs[i].current_path.clone() {
-                    let stem = src
-                        .file_stem()
-                        .map(|s| s.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "drawing".into());
-                    let parent = src
-                        .parent()
-                        .map(|p| p.to_path_buf())
-                        .unwrap_or_else(|| PathBuf::from("."));
-                    let folder = parent.join(format!("{stem}_archive"));
-                    match std::fs::create_dir_all(&folder) {
-                        Ok(()) => {
-                            let mut copied = 0usize;
-                            if let Some(fname) = src.file_name() {
-                                if std::fs::copy(&src, folder.join(fname)).is_ok() {
-                                    copied += 1;
-                                }
-                            }
-                            let mut deps: Vec<String> = Vec::new();
-                            for br in self.tabs[i].scene.document.block_records.iter() {
-                                if !br.xref_path.trim().is_empty() {
-                                    deps.push(br.xref_path.clone());
-                                }
-                            }
-                            for e in self.tabs[i].scene.document.entities() {
-                                if let acadrust::EntityType::RasterImage(img) = e {
-                                    if !img.file_path.trim().is_empty() {
-                                        deps.push(img.file_path.clone());
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    use std::path::PathBuf;
+                    if let Some(src) = self.tabs[i].current_path.clone() {
+                        let stem = src
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| "drawing".into());
+                        let parent = src
+                            .parent()
+                            .map(|p| p.to_path_buf())
+                            .unwrap_or_else(|| PathBuf::from("."));
+                        let folder = parent.join(format!("{stem}_archive"));
+                        match std::fs::create_dir_all(&folder) {
+                            Ok(()) => {
+                                let mut copied = 0usize;
+                                if let Some(fname) = src.file_name() {
+                                    if std::fs::copy(&src, folder.join(fname)).is_ok() {
+                                        copied += 1;
                                     }
                                 }
-                            }
-                            for d in deps {
-                                let dp = PathBuf::from(&d);
-                                let resolved = if dp.is_absolute() {
-                                    dp
-                                } else {
-                                    parent.join(&dp)
-                                };
-                                if resolved.exists() {
-                                    if let Some(fname) = resolved.file_name() {
-                                        if std::fs::copy(&resolved, folder.join(fname)).is_ok() {
-                                            copied += 1;
+                                let mut deps: Vec<String> = Vec::new();
+                                for br in self.tabs[i].scene.document.block_records.iter() {
+                                    if !br.xref_path.trim().is_empty() {
+                                        deps.push(br.xref_path.clone());
+                                    }
+                                }
+                                for e in self.tabs[i].scene.document.entities() {
+                                    if let acadrust::EntityType::RasterImage(img) = e {
+                                        if !img.file_path.trim().is_empty() {
+                                            deps.push(img.file_path.clone());
                                         }
                                     }
                                 }
+                                for d in deps {
+                                    let dp = PathBuf::from(&d);
+                                    let resolved = if dp.is_absolute() {
+                                        dp
+                                    } else {
+                                        parent.join(&dp)
+                                    };
+                                    if resolved.exists() {
+                                        if let Some(fname) = resolved.file_name() {
+                                            if std::fs::copy(&resolved, folder.join(fname)).is_ok()
+                                            {
+                                                copied += 1;
+                                            }
+                                        }
+                                    }
+                                }
+                                self.command_line.push_output(
+                                    crate::tf!(
+                                        "{cmd}: packaged {copied} file(s) into {}",
+                                        folder.display()
+                                    )
+                                    .as_ref(),
+                                );
                             }
-                            self.command_line.push_output(
-                                crate::tf!(
-                                    "{cmd}: packaged {copied} file(s) into {}",
-                                    folder.display()
-                                )
-                                .as_ref(),
-                            );
+                            Err(e) => self.command_line.push_error(
+                                crate::tf!("{cmd}: cannot create folder ({e}).").as_ref(),
+                            ),
                         }
-                        Err(e) => self
-                            .command_line
-                            .push_error(crate::tf!("{cmd}: cannot create folder ({e}).").as_ref()),
+                    } else {
+                        self.command_line.push_error(
+                            crate::t!("ARCHIVE: save the drawing first (it has no file path yet).")
+                                .as_ref(),
+                        );
                     }
-                } else {
-                    self.command_line.push_error(
-                        crate::t!("ARCHIVE: save the drawing first (it has no file path yet).")
-                            .as_ref(),
-                    );
                 }
+                #[cfg(target_arch = "wasm32")]
+                self.archive_web(i, cmd);
             }
 
             "EXIT" | "QUIT" => {
@@ -498,4 +507,187 @@ fn parse_background_color(args: &[&str]) -> Option<[f32; 4]> {
         return Some(to_rgba([r, g, b]));
     }
     None
+}
+
+// ── Web ARCHIVE / ETRANSMIT ──────────────────────────────────────────────────
+//
+// The browser has no folder to copy into, so the transmittal is assembled in
+// memory and downloaded as one ZIP — the same dependency set the native
+// folder walk collects (drawing, xrefs, raster images) plus the web-only
+// bytes-backed kinds (PDF underlays, session-picked plot tables). Anything
+// whose bytes never entered the session is reported as skipped rather than
+// silently dropped, the web counterpart of native's missing-file skip.
+#[cfg(target_arch = "wasm32")]
+impl OpenCADStudio {
+    pub(in crate::app) fn archive_web(&mut self, i: usize, cmd: &str) {
+        use crate::io::zip::ZipEntry;
+
+        let Some(src) = self.tabs[i].current_path.clone() else {
+            self.command_line.push_error(
+                crate::t!("ARCHIVE: save the drawing first (it has no file path yet).").as_ref(),
+            );
+            return;
+        };
+        let stem = src
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "drawing".into());
+        let ext = src
+            .extension()
+            .map(|e| e.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "dwg".into());
+        let filename = src
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| format!("{stem}.{ext}"));
+        let version = self.tabs[i].scene.document.version;
+
+        // The drawing itself: the same serialization a web Save performs
+        // (native copies the last-saved file; the web build has none, so the
+        // current document is re-serialized).
+        let drawing = match crate::io::save_to_bytes(&self.tabs[i].scene.document, &ext, version) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                self.command_line.push_error(
+                    crate::tf!("{cmd}: cannot package the drawing ({e}).").as_ref(),
+                );
+                return;
+            }
+        };
+        let mut entries: Vec<ZipEntry> = vec![ZipEntry::new(filename, drawing)];
+        let mut skipped: Vec<String> = Vec::new();
+
+        // Xrefs — the block-record walk native copies. No xref bytes store
+        // exists on the web build (the file behind the path never entered
+        // the session), so every reference reports as skipped.
+        for br in self.tabs[i].scene.document.block_records.iter() {
+            if !br.xref_path.trim().is_empty() {
+                push_skipped(&mut skipped, &transmit_file_name(&br.xref_path));
+            }
+        }
+
+        // Raster images — picked/dropped bytes registered for the reference
+        // stand in for the file native would copy.
+        for e in self.tabs[i].scene.document.entities() {
+            if let acadrust::EntityType::RasterImage(img) = e {
+                if img.file_path.trim().is_empty() {
+                    continue;
+                }
+                match crate::scene::model::image_model::registered_source_bytes(&img.file_path) {
+                    Some(bytes) => push_entry(
+                        &mut entries,
+                        transmit_file_name(&img.file_path),
+                        (*bytes).clone(),
+                    ),
+                    None => push_skipped(&mut skipped, &transmit_file_name(&img.file_path)),
+                }
+            }
+        }
+
+        // PDF underlays — bytes registered at attach time.
+        for o in self.tabs[i].scene.document.objects.values() {
+            if let acadrust::objects::ObjectType::UnderlayDefinition(def) = o {
+                if !matches!(def.underlay_type, acadrust::entities::UnderlayType::Pdf)
+                    || def.file_path.trim().is_empty()
+                {
+                    continue;
+                }
+                match crate::scene::model::pdf_raster::registered_source_bytes(&def.file_path) {
+                    Some(bytes) => push_entry(
+                        &mut entries,
+                        transmit_file_name(&def.file_path),
+                        (*bytes).clone(),
+                    ),
+                    None => push_skipped(&mut skipped, &transmit_file_name(&def.file_path)),
+                }
+            }
+        }
+
+        // Plot tables named by the layouts (and the session's active one).
+        // Only tables picked this session have bytes; the built-ins ship
+        // with the app, so they are neither packaged nor reported missing.
+        let mut style_names: Vec<String> = self.tabs[i]
+            .scene
+            .document
+            .objects
+            .values()
+            .filter_map(|o| {
+                if let acadrust::objects::ObjectType::Layout(l) = o {
+                    Some(l.plot_style_sheet.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if let Some(table) = self.active_plot_style.as_ref() {
+            style_names.push(table.name.clone());
+        }
+        for name in style_names {
+            if name.trim().is_empty()
+                || crate::io::plot_style::PlotStyleTable::builtin(&name).is_ok()
+            {
+                continue;
+            }
+            match crate::io::plot_style::session_table(&name) {
+                Some(bytes) => push_entry(&mut entries, name, (*bytes).clone()),
+                None => push_skipped(&mut skipped, &name),
+            }
+        }
+
+        let zip_name = format!("{stem}_transmit.zip");
+        match crate::io::zip::build_zip(&entries) {
+            Ok(zip) => {
+                crate::sys::download_bytes(&zip_name, &zip);
+                // The same report shape the native folder transmittal makes.
+                let copied = entries.len();
+                self.command_line.push_output(
+                    crate::tf!("{cmd}: packaged {copied} file(s) into {}", zip_name).as_ref(),
+                );
+            }
+            Err(e) => self.command_line.push_error(
+                crate::tf!("{cmd}: cannot build the transmittal ZIP ({e}).").as_ref(),
+            ),
+        }
+        if !skipped.is_empty() {
+            let n = skipped.len();
+            let names = skipped.join(", ");
+            self.command_line.push_output(
+                crate::tf!("{cmd}: skipped {n} referenced file(s) not loaded in this session: {names}")
+                    .as_ref(),
+            );
+        }
+    }
+}
+
+/// Trailing component of a reference path — the flat name a transmittal
+/// packages it under (native copies `file_name()` into one folder).
+#[cfg(target_arch = "wasm32")]
+fn transmit_file_name(path: &str) -> String {
+    path.trim()
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// Add one entry under its flat name; a later dependency with the same name
+/// replaces the bytes (native's `fs::copy` overwrite into the folder).
+#[cfg(target_arch = "wasm32")]
+fn push_entry(entries: &mut Vec<crate::io::zip::ZipEntry>, name: String, data: Vec<u8>) {
+    if let Some(slot) = entries
+        .iter_mut()
+        .find(|entry| entry.name.eq_ignore_ascii_case(&name))
+    {
+        slot.data = data;
+    } else {
+        entries.push(crate::io::zip::ZipEntry::new(name, data));
+    }
+}
+
+/// Remember a missing dependency for the report, once per name.
+#[cfg(target_arch = "wasm32")]
+fn push_skipped(skipped: &mut Vec<String>, name: &str) {
+    if !name.is_empty() && !skipped.iter().any(|s| s.eq_ignore_ascii_case(name)) {
+        skipped.push(name.to_string());
+    }
 }

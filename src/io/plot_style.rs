@@ -132,8 +132,11 @@ pub fn register_session_table(name: &str, bytes: Arc<Vec<u8>>) {
 }
 
 /// The bytes registered under `name` this session, matched
-/// case-insensitively the way the folder scan matches file names.
-fn session_table(name: &str) -> Option<Arc<Vec<u8>>> {
+/// case-insensitively the way the folder scan matches file names. The web
+/// ARCHIVE/ETRANSMIT packages a drawing's registered plot table into the
+/// transmittal; `None` means the table was not picked this session (the
+/// built-ins ship with the app and need no transmittal copy).
+pub fn session_table(name: &str) -> Option<Arc<Vec<u8>>> {
     session_tables()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())

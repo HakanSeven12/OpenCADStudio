@@ -30,6 +30,18 @@ fn source_cache() -> &'static Mutex<HashMap<String, Arc<Vec<u8>>>> {
     SOURCES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Bytes registered for exactly this PDF reference (the attach flow keys by
+/// the same path the underlay definition stores). The web ARCHIVE/ETRANSMIT
+/// packages the underlay into the transmittal; `None` means no PDF was
+/// picked for this reference this session.
+pub fn registered_source_bytes(path: &str) -> Option<Arc<Vec<u8>>> {
+    source_cache()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .get(path)
+        .cloned()
+}
+
 /// Keep bytes selected through a file dialog. Browsers expose no reusable path,
 /// while native builds also benefit by avoiding a second disk read.
 pub fn register_source(path: &str, bytes: Arc<Vec<u8>>) {

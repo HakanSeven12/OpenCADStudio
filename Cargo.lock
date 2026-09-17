@@ -42,6 +42,7 @@ dependencies = [
  "objc2-app-kit 0.2.2",
  "objc2-foundation 0.2.2",
  "ocs_plugin_api",
+ "ocs_save",
  "open",
  "printpdf",
  "rayon",
@@ -4175,6 +4176,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ocs_save"
+version = "0.1.0"
+dependencies = [
+ "acadrust",
+ "bincode",
+ "serde",
+]
+
+[[package]]
 name = "ocs_web_worker"
 version = "0.1.0"
 dependencies = [
@@ -4183,6 +4193,7 @@ dependencies = [
  "console_error_panic_hook",
  "getrandom 0.3.4",
  "js-sys",
+ "ocs_save",
  "serde",
  "sha2 0.10.9",
  "wasm-bindgen",

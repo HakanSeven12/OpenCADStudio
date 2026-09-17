@@ -130,6 +130,11 @@ pub async fn open_dropped(
     bytes: Vec<u8>,
     progress: std::sync::Arc<crate::io::OpenProgressState>,
 ) -> crate::io::WebOpenOutcome {
+    // The dropped drawing's bytes also enter the xref registry (name-keyed,
+    // like dropped raster images): another drawing may reference it by
+    // name, and the registry — not the absent filesystem — is what
+    // re-resolves that reference when its host is reopened or reloaded.
+    super::xref::register_source(&name, std::sync::Arc::new(bytes.clone()));
     progress.set(crate::app::OPEN_PHASE_READING, 500, 1, 2);
     let bytes: std::sync::Arc<[u8]> = std::sync::Arc::from(bytes);
     let size_bytes = bytes.len() as u64;

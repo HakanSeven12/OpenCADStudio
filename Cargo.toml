@@ -8,6 +8,7 @@ default-run = "OpenCADStudio"
 [workspace]
 members = [
     "crates/ocs_plugin_api",
+    "crates/ocs_save",
     "crates/ocs_web_worker",
     "crates/dwg-thumbnailer",
     "crates/dwg-thumbnailer-win",
@@ -36,6 +37,9 @@ acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "568a12
 cadkernel = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "dcf0840", features = ["acis", "offset"] }
 cadkernel-constraints = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "dcf0840" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
+# Shared SAVE serialization dispatch + web-worker wire format: one
+# implementation for the inline (fallback/native) path and the worker path.
+ocs_save = { path = "crates/ocs_save" }
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
 hayro = "0.7.1"

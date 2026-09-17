@@ -7,6 +7,7 @@ use acadrust::types::{Handle, Vector3};
 use acadrust::{CadDocument, EntityType};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 #[cfg(not(target_arch = "wasm32"))]
 type SourceFingerprint = crate::io::edit_lock::FileFingerprint;
@@ -44,6 +45,198 @@ pub struct XrefInfo {
     pub source_sha256: Option<String>,
 }
 
+/// Every xref whose bytes the browser session holds (picked or dropped),
+/// named by its trailing file component. Used to assemble the one-line
+/// "unresolved references" warning after a web open.
+pub fn unresolved_xref_names(infos: &[XrefInfo]) -> Vec<String> {
+    infos
+        .iter()
+        .filter(|info| info.status == XrefStatus::NotFound)
+        .map(|info| info.name.clone())
+        .collect()
+}
+
+// ── In-session xref byte registry (web) ────────────────────────────────
+//
+// The browser exposes no filesystem behind the path a drawing's XREF block
+// carries, so the web build keeps the bytes of every DWG/DXF the user picked
+// or dropped, keyed by file name — the xref counterpart of
+// `image_model::register_source`. Resolution matches a block-record's
+// `xref_path` against the registry by trailing file name (case-insensitive),
+// the only component two machines can be expected to agree on. Native builds
+// never consult the registry: `resolve_path` reads the real filesystem, so
+// their behaviour is byte-identical to before. The registry itself compiles
+// on every target so its pure matching logic stays unit-testable on the
+// native host.
+
+/// Lower-cased trailing component of a path-style xref reference. Drawings
+/// store xref paths as the author wrote them (often an absolute foreign
+/// path), so the file name is the only part a picked or dropped file on
+/// another machine can be expected to match.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // unit-tested on native
+pub(crate) fn file_name_key(path: &str) -> String {
+    path.rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+}
+
+/// Do two xref references name the same file? Compares trailing components
+/// case-insensitively (the web has no path beyond the name at all, and the
+/// Windows paths most drawings were authored on are case-insensitive).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // unit-tested on native
+pub(crate) fn same_file_name(a: &str, b: &str) -> bool {
+    let (a, b) = (file_name_key(a), file_name_key(b));
+    !a.is_empty() && a == b
+}
+
+fn source_cache() -> &'static Mutex<HashMap<String, Arc<Vec<u8>>>> {
+    static SOURCES: OnceLock<Mutex<HashMap<String, Arc<Vec<u8>>>>> = OnceLock::new();
+    SOURCES.get_or_init(|| Mutex::new(HashMap::default()))
+}
+
+fn parsed_cache() -> &'static Mutex<HashMap<String, acadrust::ReadOutcome>> {
+    static PARSED: OnceLock<Mutex<HashMap<String, acadrust::ReadOutcome>>> = OnceLock::new();
+    PARSED.get_or_init(|| Mutex::new(HashMap::default()))
+}
+
+/// Keep a picked or dropped drawing's bytes, keyed by the file name the
+/// drawing's xref references will be matched against. Registering supersedes
+/// any eager parse cached for the same file, so a re-pick (or a drop that
+/// finally supplies a missing reference) reloads from the new bytes.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // mirrors image_model::register_source
+pub fn register_source(name: &str, bytes: Arc<Vec<u8>>) {
+    source_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(name.to_string(), bytes);
+    parsed_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .retain(|parsed, _| !same_file_name(parsed, name));
+}
+
+/// Cache an off-thread parse (web parse worker) for the next resolve to
+/// merge. The entry is one-shot: a resolve consumes it, so a later reload
+/// re-reads the registered bytes instead of replaying a stale document.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) fn register_parsed(name: &str, outcome: acadrust::ReadOutcome) {
+    parsed_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(name.to_string(), outcome);
+}
+
+/// Registry key whose trailing file name matches `raw` (case-insensitive) —
+/// the web stand-in for `resolve_path`, which has no filesystem to consult.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // unit-tested on native
+pub(crate) fn find_registered_source(raw: &str) -> Option<String> {
+    source_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .keys()
+        .find(|key| same_file_name(key, raw))
+        .cloned()
+}
+
+/// Bytes registered under exactly `key`.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) fn registered_bytes(key: &str) -> Option<Arc<Vec<u8>>> {
+    source_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(key)
+        .cloned()
+}
+
+/// Take the cached parse for `key`, if one is pending.
+#[cfg(any(target_arch = "wasm32", test))]
+fn take_parsed(key: &str) -> Option<acadrust::ReadOutcome> {
+    parsed_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(key)
+}
+
+/// Read a registered xref on the web: the cached off-thread parse when the
+/// pick/open pre-pass produced one, otherwise a direct parse of the
+/// registered bytes (the eager parse never caches recoverable outcomes —
+/// those must keep their stats so phase 2 reports them as Failed, like the
+/// native reader does).
+#[cfg(target_arch = "wasm32")]
+fn read_registered_outcome(
+    key: &str,
+    progress: Option<Arc<dyn Fn(u16) + Send + Sync>>,
+) -> Result<acadrust::ReadOutcome, String> {
+    if let Some(mut outcome) = take_parsed(key) {
+        finalize_xref_outcome(&mut outcome);
+        return Ok(outcome);
+    }
+    let Some(bytes) = registered_bytes(key) else {
+        return Err(format!("no registered bytes for xref \"{key}\""));
+    };
+    let mut outcome = read_outcome_from_bytes(key, bytes, progress)?;
+    finalize_xref_outcome(&mut outcome);
+    Ok(outcome)
+}
+
+/// Apply the same post-parse fixups the file-open tail applies, so merged
+/// xref content behaves like natively loaded content.
+#[cfg(target_arch = "wasm32")]
+fn finalize_xref_outcome(outcome: &mut acadrust::ReadOutcome) {
+    let doc = &mut outcome.document;
+    super::normalize_block_origins(doc);
+    if outcome.stats.source_format == Some(acadrust::SourceFormat::Dxf) {
+        super::fix_dxf_dimension_rotations(doc);
+        super::fix_dxf_layout_plot_settings(doc);
+    }
+    super::fix_viewport_status_flags(doc);
+    super::fix_current_style_names(doc);
+}
+
+/// Parse DWG/DXF bytes into a reader outcome — `load_file_with_progress`
+/// for the browser, where the "file" is the registry entry. Recoverable
+/// parse issues stay in the stats instead of failing the read, matching the
+/// native xref loader's behaviour (phase 2 turns them into Failed).
+#[cfg(target_arch = "wasm32")]
+fn read_outcome_from_bytes(
+    name: &str,
+    bytes: Arc<Vec<u8>>,
+    progress: Option<Arc<dyn Fn(u16) + Send + Sync>>,
+) -> Result<acadrust::ReadOutcome, String> {
+    use acadrust::io::dwg::DwgReader;
+    use acadrust::DxfReader;
+    // The readers keep their stream and want an owned, 'static buffer —
+    // take the registry `Arc`'s contents by value (one copy; the worker
+    // pre-parse makes this fallback path the exception, not the rule).
+    let bytes = bytes.to_vec();
+    let ext = name.rsplit('.').next().unwrap_or_default().to_lowercase();
+    // A `.bak`/`.sv$` copy hides the real format behind its extension —
+    // sniff the leading bytes, exactly as the path-based reader does.
+    let effective = if matches!(ext.as_str(), "bak" | "sv$") {
+        super::sniff_dwg_or_dxf_bytes(&bytes).to_string()
+    } else {
+        ext.clone()
+    };
+    let outcome = match effective.as_str() {
+        "dwg" => {
+            let mut reader = DwgReader::from_stream(std::io::Cursor::new(bytes));
+            if let Some(progress) = progress {
+                reader.set_progress_callback(progress);
+            }
+            reader.read_with_stats()
+        }
+        "dxf" => DxfReader::from_reader(std::io::Cursor::new(bytes))
+            .and_then(|reader| reader.read_with_stats()),
+        _ => return Err(format!("Unsupported file format: .{ext}")),
+    };
+    let outcome = outcome.map_err(|error| error.to_string())?;
+    if !outcome.stats.has_usable_drawing_data() {
+        return Err("initial read returned no source drawing records".to_string());
+    }
+    Ok(outcome)
+}
+
 /// Scan `doc` for XREF block-records, resolve their paths relative to
 /// `base_dir`, and populate each xref block with entities from the
 /// referenced file.
@@ -67,6 +260,10 @@ pub fn resolve_xrefs_with_progress(
     base_dir: &Path,
     progress: Option<std::sync::Arc<dyn Fn(usize, usize) + Send + Sync>>,
 ) -> (Vec<XrefInfo>, usize) {
+    // Web: resolution is registry-by-name, so the caller's folder is only a
+    // native concept; reference it so the parameter stays meaningful.
+    #[cfg(target_arch = "wasm32")]
+    let _ = base_dir;
     // Auto-resolve every xref — frustum + LOD culling keep GPU cost bounded.
     let xref_entries: Vec<(String, String, Handle)> = doc
         .block_records
@@ -103,7 +300,12 @@ pub fn resolve_xrefs_with_progress(
         .into_par_iter()
         .enumerate()
         .map(|(xref_index, (block_name, raw_path, br_handle))| {
+            #[cfg(not(target_arch = "wasm32"))]
             let resolved = resolve_path(&raw_path, base_dir);
+            // Web: there is no filesystem behind `raw_path` — resolve to the
+            // name-keyed bytes registry instead (trailing-name match).
+            #[cfg(target_arch = "wasm32")]
+            let resolved = find_registered_source(&raw_path).map(PathBuf::from);
             #[cfg(not(target_arch = "wasm32"))]
             let initial_fingerprint = resolved.as_ref().and_then(|path| {
                 crate::io::edit_lock::FileFingerprint::capture(path).ok()
@@ -125,9 +327,16 @@ pub fn resolve_xrefs_with_progress(
                     });
                 callback
             });
+            #[cfg(not(target_arch = "wasm32"))]
             let xref_outcome = resolved
                 .as_ref()
                 .map(|path| super::load_file_with_progress(path, nested_progress));
+            // Web: read the registry — the cached off-thread parse when the
+            // pick/open pre-pass made one, otherwise the registered bytes.
+            #[cfg(target_arch = "wasm32")]
+            let xref_outcome = resolved
+                .as_ref()
+                .map(|path| read_registered_outcome(&path.to_string_lossy(), nested_progress));
             let source_sha256 = resolved.as_ref().and_then(|path| {
                 let needs_fingerprint = match &xref_outcome {
                     Some(Ok(outcome)) => {
@@ -263,6 +472,9 @@ pub fn resolve_xrefs_with_progress(
 
 /// Try to build an absolute path from a raw xref path string.
 /// Handles absolute paths, relative paths, and Windows-style separators.
+/// Web builds never get here — `resolve_xrefs_with_progress` matches the
+/// bytes registry by name instead (there is no filesystem to probe).
+#[cfg(not(target_arch = "wasm32"))]
 fn resolve_path(raw: &str, base_dir: &Path) -> Option<PathBuf> {
     let normalised = raw.replace('\\', "/");
     let p = PathBuf::from(&normalised);
@@ -538,4 +750,113 @@ fn is_sentinel_linetype(name: &str) -> bool {
 /// Set the handle field of any entity variant.
 fn set_handle(entity: &mut EntityType, h: Handle) {
     entity.common_mut().handle = h;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn outcome() -> acadrust::ReadOutcome {
+        acadrust::ReadOutcome::new(CadDocument::new(), acadrust::ReadStats::default())
+    }
+
+    #[test]
+    fn file_name_key_takes_the_trailing_component_case_folded() {
+        assert_eq!(file_name_key("Site Plan.dwg"), "site plan.dwg");
+        assert_eq!(
+            file_name_key(r"D:\Projects\Arch\XREFS\Elevation.DWG"),
+            "elevation.dwg"
+        );
+        assert_eq!(file_name_key("../consultant/model.dxf"), "model.dxf");
+        assert_eq!(file_name_key(""), "");
+    }
+
+    #[test]
+    fn same_file_name_ignores_path_and_case_but_not_empty() {
+        assert!(same_file_name(
+            r"C:\foreign\abs\PATH\Elevation.DWG",
+            "elevation.dwg"
+        ));
+        assert!(same_file_name("a/x.dwg", r"b\X.Dwg"));
+        assert!(!same_file_name("elevation.dwg", "elevation-2.dwg"));
+        // An empty trailing component names nothing — never a match, or a
+        // drawing with a blank xref path would resolve to any empty key.
+        assert!(!same_file_name("", ""));
+        assert!(!same_file_name("", "x.dwg"));
+    }
+
+    #[test]
+    fn registry_finds_a_registered_source_by_trailing_name() {
+        let registered = "Registry-Find-Site.dwg";
+        register_source(registered, Arc::new(vec![1, 2, 3]));
+        // The drawing's stored path is the author's absolute foreign path;
+        // only the trailing name can match, case-insensitively.
+        assert_eq!(
+            find_registered_source(r"E:\2009\Consultant\REGISTRY-FIND-SITE.DWG"),
+            Some(registered.to_string())
+        );
+        assert_eq!(find_registered_source("registry-find-site.dxf"), None);
+        assert_eq!(
+            registered_bytes(registered).map(|bytes| bytes.as_ref().clone()),
+            Some(vec![1, 2, 3])
+        );
+    }
+
+    #[test]
+    fn register_source_supersedes_a_cached_parse_of_the_same_file() {
+        let name = "Registry-Supersede-Plan.dwg";
+        register_parsed(name, outcome());
+        // Re-registering the same file under a differently-cased path name
+        // must drop the stale parse so a reload re-reads the new bytes.
+        register_source("registry-supersede-plan.DWG", Arc::new(vec![9]));
+        assert!(take_parsed(name).is_none());
+        // And the fresh bytes are what the registry hands back.
+        assert_eq!(
+            find_registered_source(name).as_deref(),
+            Some("registry-supersede-plan.DWG")
+        );
+    }
+
+    #[test]
+    fn unresolved_xref_names_lists_not_found_entries_only() {
+        let infos = vec![
+            XrefInfo {
+                name: "Loaded.dwg".into(),
+                path: "Loaded.dwg".into(),
+                status: XrefStatus::Loaded,
+                diagnostics: Vec::new(),
+                read_stats: None,
+                source_sha256: None,
+            },
+            XrefInfo {
+                name: "Missing A.dwg".into(),
+                path: r"C:\gone\Missing A.dwg".into(),
+                status: XrefStatus::NotFound,
+                diagnostics: Vec::new(),
+                read_stats: None,
+                source_sha256: None,
+            },
+            XrefInfo {
+                name: "Broken.dwg".into(),
+                path: "Broken.dwg".into(),
+                status: XrefStatus::Failed,
+                diagnostics: Vec::new(),
+                read_stats: None,
+                source_sha256: None,
+            },
+            XrefInfo {
+                name: "Missing B.dxf".into(),
+                path: "Missing B.dxf".into(),
+                status: XrefStatus::NotFound,
+                diagnostics: Vec::new(),
+                read_stats: None,
+                source_sha256: None,
+            },
+        ];
+        assert_eq!(
+            unresolved_xref_names(&infos),
+            vec!["Missing A.dwg".to_string(), "Missing B.dxf".to_string()]
+        );
+        assert!(unresolved_xref_names(&[]).is_empty());
+    }
 }

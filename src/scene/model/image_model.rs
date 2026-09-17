@@ -465,6 +465,19 @@ fn registered_bytes_by_name(path: &str) -> Option<Arc<Vec<u8>>> {
         .map(|(_, bytes)| Arc::clone(bytes))
 }
 
+/// Original image file bytes registered for a reference, resolved the way
+/// `decode_reference` resolves pixels: exact reference first, then any
+/// registration that names the same file. The web ARCHIVE/ETRANSMIT
+/// packages these bytes into the transmittal; `None` means nothing was
+/// picked or dropped for the reference this session.
+pub fn registered_source_bytes(path: &str) -> Option<Arc<Vec<u8>>> {
+    let path = path.trim();
+    if path.is_empty() {
+        return None;
+    }
+    registered_bytes(path).or_else(|| registered_bytes_by_name(path))
+}
+
 /// Drop every memoised image so the next resolve re-reads / re-fetches. Called
 /// when a new document is opened — a fresh drawing shouldn't inherit a prior
 /// one's stale successes or offline failures.

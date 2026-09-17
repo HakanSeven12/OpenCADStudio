@@ -1,5 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use acadrust::entities::{table::CellRange, TableBuilder};
 use acadrust::objects::{ClassObject, ClassObjectData, DataLink, DataLinkCustomData, ObjectType};
@@ -23,6 +25,100 @@ struct ExtractionRecord {
     color: String,
     linetype: String,
     details: String,
+}
+
+// ── In-session picked-file registries (web) ───────────────────────────────
+//
+// The browser exposes no reusable filesystem path: a picked file's bytes exist
+// only while the app keeps them. Both registries below hold those bytes (and
+// what was parsed from them) keyed by the reference the drawing or wizard
+// carries, following the image-model / PDF-raster pattern. Native builds never
+// fill them — the real path stays readable — but the lookup and matching
+// logic compiles everywhere so it stays unit-testable.
+
+fn picked_sources() -> &'static Mutex<HashMap<String, Arc<Vec<u8>>>> {
+    static SOURCES: OnceLock<Mutex<HashMap<String, Arc<Vec<u8>>>>> = OnceLock::new();
+    SOURCES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn extraction_documents() -> &'static Mutex<HashMap<String, Arc<CadDocument>>> {
+    static DOCUMENTS: OnceLock<Mutex<HashMap<String, Arc<CadDocument>>>> = OnceLock::new();
+    DOCUMENTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Lower-cased trailing component of a path-style reference. Links and wizard
+/// sources carry whatever the author stored, so the file name — not the full
+/// path — is the only component a re-picked file can be expected to match.
+fn source_name_key(path: &str) -> String {
+    path.rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+}
+
+/// Do two source references name the same file? Compares trailing components
+/// case-insensitively (Windows paths are case-insensitive where the link was
+/// authored, and the web has no path beyond the name at all).
+fn same_source_name(a: &str, b: &str) -> bool {
+    let (a, b) = (source_name_key(a), source_name_key(b));
+    !a.is_empty() && a == b
+}
+
+/// Keep the bytes of a spreadsheet or settings file chosen through a picker.
+/// Re-opening the link in-session re-reads these instead of demanding a new
+/// pick; re-picking the same file overwrites the entry.
+// Only the web registers sources (native re-reads the real file, so a file
+// edited after picking is picked up); tests exercise the registry directly.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) fn register_picked_source(path: &str, bytes: Arc<Vec<u8>>) {
+    picked_sources()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .insert(path.to_string(), bytes);
+}
+
+/// Bytes registered for this reference — exact key first, then any entry that
+/// names the same file (the web fallback for links whose stored path is the
+/// original author's, while the user picked only the bare file).
+pub(crate) fn picked_source_bytes(path: &str) -> Option<Arc<Vec<u8>>> {
+    let cache = picked_sources()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some(bytes) = cache.get(path) {
+        return Some(Arc::clone(bytes));
+    }
+    cache
+        .iter()
+        .find(|(key, _)| same_source_name(key, path))
+        .map(|(_, bytes)| Arc::clone(bytes))
+}
+
+/// Keep a source drawing parsed at pick time, keyed by the name the wizard
+/// lists. The extraction pipeline reads these on the web instead of calling
+/// the path-based `load_file`.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) fn register_extraction_document(name: &str, document: CadDocument) {
+    extraction_documents()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .insert(name.to_string(), Arc::new(document));
+}
+
+/// The parsed drawing registered under this source reference, matched by exact
+/// key or by file name.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) fn extraction_document(path: &str) -> Option<Arc<CadDocument>> {
+    let cache = extraction_documents()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some(document) = cache.get(path) {
+        return Some(Arc::clone(document));
+    }
+    cache
+        .iter()
+        .find(|(key, _)| same_source_name(key, path))
+        .map(|(_, document)| Arc::clone(document))
 }
 
 impl ExtractionRecord {
@@ -88,11 +184,15 @@ fn data_link_choices(doc: &CadDocument) -> Vec<DataLinkChoice> {
             ObjectType::ClassObject(object) => match &object.data {
                 ClassObjectData::DataLink(link) => {
                     let path = resolve_link_path(doc, link);
+                    let path_text = path.to_string_lossy().into_owned();
+                    // The web has no filesystem: a link is valid when its
+                    // picked bytes are still registered in-session.
+                    let valid = path.is_file() || picked_source_bytes(&path_text).is_some();
                     Some(DataLinkChoice {
                         handle: *handle,
                         name: link_display_name(link),
-                        path: path.to_string_lossy().into_owned(),
-                        valid: path.is_file(),
+                        path: path_text,
+                        valid,
                     })
                 }
                 _ => None,
@@ -171,8 +271,28 @@ fn workbook_metadata(path: &Path) -> Result<(Vec<String>, Vec<String>), String> 
     if ext == "csv" || ext == "txt" {
         return Ok((Vec::new(), Vec::new()));
     }
+    if let Some(bytes) = picked_source_bytes(&path.to_string_lossy()) {
+        return workbook_metadata_bytes(&bytes);
+    }
+    if cfg!(target_arch = "wasm32") {
+        return Err(crate::t!("Pick the file again to load its contents in the browser.").into_owned());
+    }
     use calamine::{open_workbook_auto, Reader};
     let workbook = open_workbook_auto(path).map_err(|error| error.to_string())?;
+    let sheets = workbook.sheet_names();
+    let names = workbook
+        .defined_names()
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect();
+    Ok((sheets, names))
+}
+
+/// Sheet and defined-name catalog read straight from bytes (a picked file on
+/// the web, where no path exists to reopen).
+fn workbook_metadata_bytes(bytes: &[u8]) -> Result<(Vec<String>, Vec<String>), String> {
+    use calamine::{open_workbook_auto_from_rs, Reader};
+    let workbook = open_workbook_auto_from_rs(Cursor::new(bytes)).map_err(|error| error.to_string())?;
     let sheets = workbook.sheet_names();
     let names = workbook
         .defined_names()
@@ -193,6 +313,66 @@ fn named_range_target(formula: &str) -> Option<(String, String)> {
     (!sheet.is_empty() && !range.is_empty()).then_some((sheet, range))
 }
 
+/// Read the text of a CSV/TXT (or settings) source: registered picked bytes
+/// first, then the native filesystem. On the web an unregistered path has
+/// nothing behind it, so it asks for the pick instead of failing on I/O.
+fn read_text_source(path: &Path) -> Result<String, String> {
+    if let Some(bytes) = picked_source_bytes(&path.to_string_lossy()) {
+        return Ok(String::from_utf8_lossy(&bytes).into_owned());
+    }
+    if cfg!(target_arch = "wasm32") {
+        return Err(crate::t!("Pick the file again to load its contents in the browser.").into_owned());
+    }
+    std::fs::read_to_string(path).map_err(|error| error.to_string())
+}
+
+/// Sheet selection + range resolution shared by the path- and bytes-based
+/// workbook readers. Returns the raw rows and the cell range to crop to, if
+/// any.
+fn workbook_rows<RS: std::io::Read + std::io::Seek>(
+    workbook: &mut calamine::Sheets<RS>,
+    sheet: Option<&str>,
+    range_kind: LinkRange,
+    range_value: Option<&str>,
+) -> Result<(Vec<Vec<String>>, Option<String>), String> {
+    use calamine::Reader;
+    let (selected_sheet, cell_range) = if range_kind == LinkRange::NamedRange {
+        let name = range_value
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| crate::t!("Select a named range.").into_owned())?;
+        let formula = workbook
+            .defined_names()
+            .iter()
+            .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+            .map(|(_, formula)| formula.clone())
+            .ok_or_else(|| crate::t!("The named range was not found.").into_owned())?;
+        named_range_target(&formula)
+            .ok_or_else(|| crate::t!("The named range does not refer to a worksheet cell range.").into_owned())?
+    } else {
+        let selected_sheet = sheet
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string)
+            .or_else(|| workbook.sheet_names().first().cloned())
+            .ok_or_else(|| crate::t!("The spreadsheet contains no worksheets.").into_owned())?;
+        let range = (range_kind == LinkRange::CellRange)
+            .then_some(range_value)
+            .flatten()
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string)
+            .unwrap_or_default();
+        (selected_sheet, range)
+    };
+    let data = workbook
+        .worksheet_range(&selected_sheet)
+        .map_err(|error| error.to_string())?;
+    Ok((
+        data.rows()
+            .map(|row| row.iter().map(ToString::to_string).collect())
+            .collect(),
+        (!cell_range.is_empty()).then_some(cell_range),
+    ))
+}
+
 pub(crate) fn read_tabular_file(
     path: &Path,
     sheet: Option<&str>,
@@ -204,52 +384,24 @@ pub(crate) fn read_tabular_file(
         if range_kind == LinkRange::NamedRange {
             return Err(crate::t!("Named ranges require a spreadsheet file.").into_owned());
         }
-        let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
         (
-            crate::app::commands::display::parse_csv_table(&text),
+            crate::app::commands::display::parse_csv_table(&read_text_source(path)?),
             (range_kind == LinkRange::CellRange)
                 .then_some(range_value)
                 .flatten()
                 .map(str::to_string),
         )
-    } else {
-        use calamine::{open_workbook_auto, Reader};
-        let mut workbook = open_workbook_auto(path).map_err(|error| error.to_string())?;
-        let (selected_sheet, cell_range) = if range_kind == LinkRange::NamedRange {
-            let name = range_value
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| crate::t!("Select a named range.").into_owned())?;
-            let formula = workbook
-                .defined_names()
-                .iter()
-                .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
-                .map(|(_, formula)| formula.clone())
-                .ok_or_else(|| crate::t!("The named range was not found.").into_owned())?;
-            named_range_target(&formula)
-                .ok_or_else(|| crate::t!("The named range does not refer to a worksheet cell range.").into_owned())?
-        } else {
-            let selected_sheet = sheet
-                .filter(|value| !value.trim().is_empty())
-                .map(str::to_string)
-                .or_else(|| workbook.sheet_names().first().cloned())
-                .ok_or_else(|| crate::t!("The spreadsheet contains no worksheets.").into_owned())?;
-            let range = (range_kind == LinkRange::CellRange)
-                .then_some(range_value)
-                .flatten()
-                .filter(|value| !value.trim().is_empty())
-                .map(str::to_string)
-                .unwrap_or_default();
-            (selected_sheet, range)
-        };
-        let data = workbook
-            .worksheet_range(&selected_sheet)
+    } else if let Some(bytes) = picked_source_bytes(&path.to_string_lossy()) {
+        use calamine::open_workbook_auto_from_rs;
+        let mut workbook = open_workbook_auto_from_rs(Cursor::new(bytes.as_slice()))
             .map_err(|error| error.to_string())?;
-        (
-            data.rows()
-                .map(|row| row.iter().map(ToString::to_string).collect())
-                .collect(),
-            (!cell_range.is_empty()).then_some(cell_range),
-        )
+        workbook_rows(&mut workbook, sheet, range_kind, range_value)?
+    } else if cfg!(target_arch = "wasm32") {
+        return Err(crate::t!("Pick the file again to load its contents in the browser.").into_owned());
+    } else {
+        use calamine::open_workbook_auto;
+        let mut workbook = open_workbook_auto(path).map_err(|error| error.to_string())?;
+        workbook_rows(&mut workbook, sheet, range_kind, range_value)?
     };
     let rows = match cell_range.as_deref().filter(|value| !value.trim().is_empty()) {
         Some(value) => crop_range(rows, value)?,
@@ -429,12 +581,14 @@ fn collect_records(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn is_drawing_file(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
         .is_some_and(|value| value.eq_ignore_ascii_case("dwg") || value.eq_ignore_ascii_case("dxf"))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn collect_drawing_paths(
     path: &Path,
     recursive: bool,
@@ -461,6 +615,7 @@ fn collect_drawing_paths(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn extraction_drawing_paths(state: &DataExtractionState) -> Result<Vec<PathBuf>, String> {
     let mut paths = Vec::new();
     for source in &state.source_files {
@@ -469,6 +624,36 @@ fn extraction_drawing_paths(state: &DataExtractionState) -> Result<Vec<PathBuf>,
     paths.sort_by_key(|path| path.to_string_lossy().to_ascii_lowercase());
     paths.dedup_by(|left, right| left == right);
     Ok(paths)
+}
+
+/// Source drawings the extraction pipeline should read beyond the current
+/// one. Native loads them from disk (folders walked recursively); the web
+/// reads the documents parsed at pick time from the in-session registry —
+/// every listed source must have been picked, or it asks for the pick again.
+fn extraction_documents_for(
+    state: &DataExtractionState,
+) -> Result<Vec<(String, Arc<CadDocument>)>, String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut documents = Vec::new();
+        for source in &state.source_files {
+            let document = extraction_document(source).ok_or_else(|| {
+                crate::tf!("Drawing not loaded in the browser: {name}.", name = source).into_owned()
+            })?;
+            documents.push((source.clone(), document));
+        }
+        Ok(documents)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut documents = Vec::new();
+        for source in extraction_drawing_paths(state)? {
+            let document = crate::io::load_file(&source)
+                .map_err(|error| format!("{}: {error}", source.display()))?;
+            documents.push((source.to_string_lossy().into_owned(), Arc::new(document)));
+        }
+        Ok(documents)
+    }
 }
 
 fn collect_type_counts(
@@ -500,9 +685,8 @@ fn extraction_preview(state: &DataExtractionState, current: &CadDocument) -> Res
             if state.include_current {
                 collect_records(current, None, &allowed_types, &mut records);
             }
-            for source in extraction_drawing_paths(state)? {
-                let doc = crate::io::load_file(&source).map_err(|error| format!("{}: {error}", source.display()))?;
-                collect_records(&doc, None, &allowed_types, &mut records);
+            for (_, document) in extraction_documents_for(state)? {
+                collect_records(&document, None, &allowed_types, &mut records);
             }
         }
     }
@@ -598,11 +782,25 @@ fn save_extraction_settings(state: &DataExtractionState) -> Result<(), String> {
         "tableTitle": state.table_title,
     });
     let text = serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?;
-    std::fs::write(&state.settings_path, text).map_err(|error| error.to_string())
+    #[cfg(target_arch = "wasm32")]
+    {
+        // No filesystem to write to: hand the settings to the browser as a
+        // download, mirroring the native write of the same JSON.
+        let name = Path::new(state.settings_path.trim())
+            .file_name()
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "extraction.dxex".into());
+        crate::sys::download_bytes(&name, text.as_bytes());
+        Ok(())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::fs::write(&state.settings_path, text).map_err(|error| error.to_string())
+    }
 }
 
 fn load_extraction_settings(state: &mut DataExtractionState) -> Result<(), String> {
-    let text = std::fs::read_to_string(&state.settings_path).map_err(|error| error.to_string())?;
+    let text = read_text_source(Path::new(state.settings_path.trim()))?;
     let value: serde_json::Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
     state.source = match value["source"].as_str() {
         Some("currentSelection") => ExtractionSource::CurrentSelection,
@@ -878,13 +1076,22 @@ impl OpenCADStudio {
     pub(super) fn on_data_link_browse(&mut self) -> Task<Message> {
         Task::perform(
             async {
-                crate::sys::file_dialog()
+                let Some(handle) = crate::sys::file_dialog()
                     .set_title(crate::t!("Choose a Spreadsheet File").as_ref())
                     .add_filter(crate::t!("Spreadsheet Files").as_ref(), &["csv", "txt", "xls", "xlsx", "xlsb", "ods"])
                     .add_filter(crate::t!("All Files").as_ref(), &["*"])
                     .pick_file()
                     .await
-                    .map(|handle| crate::sys::handle_path(&handle))
+                else {
+                    return None;
+                };
+                let path = crate::sys::handle_path(&handle);
+                // The browser forgets the file the moment the pick resolves:
+                // keep its bytes so preview, save, and later re-opens read
+                // them instead of asking for the picker again.
+                #[cfg(target_arch = "wasm32")]
+                register_picked_source(&path.to_string_lossy(), Arc::new(handle.read().await));
+                Some(path)
             },
             Message::DataLinkBrowseResult,
         )
@@ -1125,10 +1332,8 @@ impl OpenCADStudio {
                 if state.include_current {
                     collect_type_counts(current, None, &mut counts);
                 }
-                for path in extraction_drawing_paths(&state)? {
-                    let doc = crate::io::load_file(&path)
-                        .map_err(|error| format!("{}: {error}", path.display()))?;
-                    collect_type_counts(&doc, None, &mut counts);
+                for (_, document) in extraction_documents_for(&state)? {
+                    collect_type_counts(&document, None, &mut counts);
                 }
             }
         }
@@ -1253,11 +1458,23 @@ impl OpenCADStudio {
         let save = self.data_extraction.begin == ExtractionBegin::New;
         Task::perform(async move {
             let dialog = crate::sys::file_dialog().set_title(crate::t!("Data Extraction Settings").as_ref()).add_filter(crate::t!("Data Extraction Settings").as_ref(), &["dxex"]).add_filter(crate::t!("All Files").as_ref(), &["*"]);
-            if save {
-                dialog.set_file_name("extraction.dxex").save_file().await.map(|handle| crate::sys::handle_path(&handle))
+            let handle = if save {
+                dialog.set_file_name("extraction.dxex").save_file().await
             } else {
-                dialog.pick_file().await.map(|handle| crate::sys::handle_path(&handle))
+                dialog.pick_file().await
+            };
+            let Some(handle) = handle else {
+                return None;
+            };
+            let path = crate::sys::handle_path(&handle);
+            // Loading settings in the browser: the picked .dxex has no path
+            // to read back from, so its bytes are kept for the load that
+            // follows this message.
+            #[cfg(target_arch = "wasm32")]
+            if !save {
+                register_picked_source(&path.to_string_lossy(), Arc::new(handle.read().await));
             }
+            Some(path)
         }, Message::DataExtractionBrowseSettingsResult)
     }
 
@@ -1275,9 +1492,10 @@ impl OpenCADStudio {
         Task::none()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn on_data_extraction_add_drawings(&mut self) -> Task<Message> {
         Task::perform(async {
-            crate::sys::file_dialog()
+            Ok(crate::sys::file_dialog()
                 .set_title(crate::t!("Add Drawings").as_ref())
                 .add_filter(crate::t!("CAD Files").as_ref(), &["dwg", "dxf", "DWG", "DXF"])
                 .add_filter(crate::t!("All Files").as_ref(), &["*"])
@@ -1286,8 +1504,40 @@ impl OpenCADStudio {
                 .unwrap_or_default()
                 .into_iter()
                 .map(|handle| crate::sys::handle_path(&handle))
-                .collect()
+                .collect())
         }, Message::DataExtractionAddDrawingsResult)
+    }
+
+    /// Web: the picked drawings have no paths to re-open later, so each one is
+    /// parsed on the shared worker right here and the document registered
+    /// under its name — the pipeline then reads the registry instead of the
+    /// filesystem. The first file that fails to parse aborts the add with the
+    /// same `name: error` shape the native refresh reports.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn on_data_extraction_add_drawings(&mut self) -> Task<Message> {
+        Task::perform(
+            async {
+                let handles = crate::sys::file_dialog()
+                    .set_title(crate::t!("Add Drawings").as_ref())
+                    .add_filter(crate::t!("CAD Files").as_ref(), &["dwg", "dxf", "DWG", "DXF"])
+                    .add_filter(crate::t!("All Files").as_ref(), &["*"])
+                    .pick_files()
+                    .await
+                    .unwrap_or_default();
+                let mut paths = Vec::new();
+                for handle in handles {
+                    let name = handle.file_name();
+                    let bytes = handle.read().await;
+                    let document = crate::io::parse_drawing_bytes_web(&name, &bytes)
+                        .await
+                        .map_err(|error| format!("{}: {error}", name))?;
+                    register_extraction_document(&name, document);
+                    paths.push(PathBuf::from(name));
+                }
+                Ok(paths)
+            },
+            Message::DataExtractionAddDrawingsResult,
+        )
     }
 
     pub(super) fn on_data_extraction_add_drawings_result(&mut self, paths: Vec<PathBuf>) -> Task<Message> {
@@ -1379,6 +1629,18 @@ impl OpenCADStudio {
             } else {
                 rows_to_csv(&rows)
             };
+            // Web output mirrors the native CSV/TXT write (there is no xlsx
+            // writer on either target): the browser gets the same bytes as a
+            // download under the picked name.
+            #[cfg(target_arch = "wasm32")]
+            {
+                let name = path
+                    .file_name()
+                    .map(|value| value.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "extraction.csv".into());
+                crate::sys::download_bytes(&name, text.as_bytes());
+            }
+            #[cfg(not(target_arch = "wasm32"))]
             if let Err(error) = std::fs::write(&path, text) {
                 self.data_extraction.error = error.to_string();
                 return Task::none();
@@ -1450,5 +1712,48 @@ mod tests {
                 vec!["e".to_string(), "f".to_string()],
             ]
         );
+    }
+
+    #[test]
+    fn csv_links_read_from_registered_bytes() {
+        let name = format!("ocs-registry-{}-{}.csv", std::process::id(), line!());
+        register_picked_source(&name, Arc::new(b"a,b,c\nd,e,f\n".to_vec()));
+        let rows = read_tabular_file(Path::new(&name), None, LinkRange::CellRange, Some("B1:C2"));
+        assert_eq!(
+            rows.unwrap(),
+            vec![
+                vec!["b".to_string(), "c".to_string()],
+                vec!["e".to_string(), "f".to_string()],
+            ]
+        );
+    }
+
+    #[test]
+    fn registered_bytes_match_by_file_name() {
+        let key = format!("ocs-match-{}-{}.xlsx", std::process::id(), line!());
+        register_picked_source(
+            &format!(r"C:\drawings\{key}"),
+            Arc::new(Vec::new()),
+        );
+        // Exact key…
+        assert!(picked_source_bytes(&format!(r"C:\drawings\{key}")).is_some());
+        // …same file under a differently-cased bare name (the web stores only
+        // the name, links may store the author's path)…
+        assert!(picked_source_bytes(&key.to_ascii_uppercase()).is_some());
+        // …and not another file.
+        assert!(picked_source_bytes("ocs-match-other.xlsx").is_none());
+    }
+
+    #[test]
+    fn registered_extraction_documents_match_by_file_name() {
+        let key = format!("ocs-doc-{}-{}.dwg", std::process::id(), line!());
+        register_extraction_document(&key, CadDocument::new());
+        assert!(extraction_document(&key.to_ascii_uppercase()).is_some());
+        assert!(extraction_document("ocs-doc-other.dwg").is_none());
+    }
+
+    #[test]
+    fn workbook_metadata_bytes_rejects_non_workbooks() {
+        assert!(workbook_metadata_bytes(b"not a workbook").is_err());
     }
 }

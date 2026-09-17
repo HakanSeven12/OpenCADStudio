@@ -1,7 +1,7 @@
-import init, { parse_document, sha256_document } from "./worker_pkg/ocs_web_worker.js?v=4";
+import init, { parse_document, serialize_document, sha256_document } from "./worker_pkg/ocs_web_worker.js?v=5";
 
 const ready = init(
-  new URL("./worker_pkg/ocs_web_worker_bg.wasm?v=4", import.meta.url),
+  new URL("./worker_pkg/ocs_web_worker_bg.wasm?v=5", import.meta.url),
 );
 
 self.onmessage = async ({ data }) => {
@@ -11,6 +11,18 @@ self.onmessage = async ({ data }) => {
     if (data.action === "hash") {
       const digest = sha256_document(new Uint8Array(data.bytes));
       self.postMessage({ ok: true, digest });
+      return;
+    }
+    if (data.action === "serialize") {
+      // SAVE/AUTOSAVE: decode the prepared document, run the DWG/DXF writer
+      // here, and hand the encoded result buffer back. Mirrors the parse
+      // branch's copy-before-transfer (wasm-bindgen returns a view into
+      // WebAssembly.Memory, which must not detach).
+      const encoded = serialize_document(new Uint8Array(data.document), (next) => {
+        stage = next;
+      });
+      const transferable = encoded.slice();
+      self.postMessage({ ok: true, data: transferable.buffer }, [transferable.buffer]);
       return;
     }
     const encoded = parse_document(

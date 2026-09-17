@@ -14,5 +14,8 @@ serde = { version = "1", features = ["derive"] }
 console_error_panic_hook = "0.1"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 js-sys = "0.3"
+# Shared save serialization + worker wire format (one implementation for both
+# this worker and the app's inline fallback).
+ocs_save = { path = "../ocs_save" }
 sha2 = "0.10"
 wasm-bindgen = "0.2"

@@ -1143,26 +1143,46 @@ impl OpenCADStudio {
 
                 Task::none()
             }
-            Message::XAttachPick => Task::perform(
-                async {
-                    let handle = crate::sys::file_dialog()
-                        .set_title(crate::t!("Select External Reference File").as_ref())
-                        .add_filter(
-                            crate::t!("CAD Files").as_ref(),
-                            &["dwg", "dxf", "bak", "DWG", "DXF", "BAK"],
-                        )
-                        .add_filter(crate::t!("DWG Files").as_ref(), &["dwg", "DWG"])
-                        .add_filter(crate::t!("DXF Files").as_ref(), &["dxf", "DXF"])
-                        .add_filter(crate::t!("Backup Files").as_ref(), &["bak", "BAK"])
-                        .pick_file()
-                        .await;
-                    match handle {
-                        Some(h) => Ok(crate::sys::handle_path(&h)),
-                        None => Err("Cancelled".to_string()),
-                    }
-                },
-                Message::XAttachPickResult,
-            ),
+            Message::XAttachPick => {
+                // Web: the browser hands back bytes, not a path — read them,
+                // register them name-keyed (so reloads and re-opens of the
+                // host drawing re-resolve the xref in-session) and pre-parse
+                // on the worker in one step. The returned name-only PathBuf
+                // is what the native branch's `handle_path` yields there.
+                #[cfg(target_arch = "wasm32")]
+                {
+                    Task::perform(
+                        crate::io::pick_and_register_xref_web(),
+                        Message::XAttachPickResult,
+                    )
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    Task::perform(
+                        async {
+                            let handle = crate::sys::file_dialog()
+                                .set_title(crate::t!("Select External Reference File").as_ref())
+                                .add_filter(
+                                    crate::t!("CAD Files").as_ref(),
+                                    &["dwg", "dxf", "bak", "DWG", "DXF", "BAK"],
+                                )
+                                .add_filter(crate::t!("DWG Files").as_ref(), &["dwg", "DWG"])
+                                .add_filter(crate::t!("DXF Files").as_ref(), &["dxf", "DXF"])
+                                .add_filter(
+                                    crate::t!("Backup Files").as_ref(),
+                                    &["bak", "BAK"],
+                                )
+                                .pick_file()
+                                .await;
+                            match handle {
+                                Some(h) => Ok(crate::sys::handle_path(&h)),
+                                None => Err("Cancelled".to_string()),
+                            }
+                        },
+                        Message::XAttachPickResult,
+                    )
+                }
+            }
 
             Message::XAttachPickResult(Ok(path)) => {
                 use crate::command::CadCommand;
@@ -1255,8 +1275,12 @@ impl OpenCADStudio {
                 self.on_data_extraction_browse_settings_result(path)
             }
             Message::DataExtractionAddDrawings => self.on_data_extraction_add_drawings(),
-            Message::DataExtractionAddDrawingsResult(paths) => {
+            Message::DataExtractionAddDrawingsResult(Ok(paths)) => {
                 self.on_data_extraction_add_drawings_result(paths)
+            }
+            Message::DataExtractionAddDrawingsResult(Err(error)) => {
+                self.data_extraction.error = error;
+                Task::none()
             }
             Message::DataExtractionAddFolder => self.on_data_extraction_add_folder(),
             Message::DataExtractionAddFolderResult(path) => {
@@ -1291,13 +1315,22 @@ impl OpenCADStudio {
             }
 
             Message::DataExtractionSaveResult(csv, Some(path)) => {
-                match std::fs::write(&path, csv.as_bytes()) {
+                let fname = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.to_string_lossy().into_owned());
+                // The browser has no writable path behind the picked name:
+                // the CSV leaves as a download instead of an fs::write.
+                #[cfg(target_arch = "wasm32")]
+                let write_result: Result<(), String> = {
+                    crate::sys::download_bytes(&fname, csv.as_bytes());
+                    Ok(())
+                };
+                #[cfg(not(target_arch = "wasm32"))]
+                let write_result = std::fs::write(&path, csv.as_bytes()).map_err(|e| e.to_string());
+                match write_result {
                     Ok(()) => {
                         let rows = csv.lines().count().saturating_sub(1);
-                        let fname = path
-                            .file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| path.to_string_lossy().into_owned());
                         self.command_line.push_output(
                             crate::tf!("DATAEXTRACTION  {rows} rows → \"{fname}\"").as_ref(),
                         );
@@ -8204,6 +8237,27 @@ impl OpenCADStudio {
                 bounds,
                 screenshot,
             } => self.on_web_save_screenshot(tab_id, filename, ext, version, bounds, screenshot),
+
+            #[cfg(target_arch = "wasm32")]
+            Message::WebSaveSerialized {
+                tab_id,
+                filename,
+                autosave_key,
+                version,
+                geometry_epoch,
+                edit_revision,
+                camera_generation,
+                result,
+            } => self.on_web_save_serialized(
+                tab_id,
+                filename,
+                autosave_key,
+                version,
+                geometry_epoch,
+                edit_revision,
+                camera_generation,
+                result,
+            ),
 
             #[cfg(not(target_arch = "wasm32"))]
             Message::SaveFileInUseRetry => self.on_save_file_in_use_retry(),

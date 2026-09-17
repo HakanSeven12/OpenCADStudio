@@ -564,6 +564,17 @@ pub fn data_extraction_view(state: &DataExtractionState, sizing: crate::ui::moda
     let add_folder = button(text(t!("Add folder…")).size(12)).padding([5, 10]);
     #[cfg(not(target_arch = "wasm32"))]
     let add_folder = add_folder.on_press(Message::DataExtractionAddFolder);
+    // The web has no folder picker and no directory to walk, so the button
+    // stays disabled there — with a tooltip that says why and what to do.
+    #[cfg(target_arch = "wasm32")]
+    let add_folder = iced::widget::tooltip(
+        add_folder,
+        container(text(t!("Adding folders is not available in the browser. Add drawing files instead.")).size(11))
+            .padding([3, 6])
+            .style(container::bordered_box),
+        iced::widget::tooltip::Position::Top,
+    )
+    .gap(4);
 
     let body: Element<'_, Message> = match state.page {
         ExtractionPage::Begin => group(t!("Begin"), column![

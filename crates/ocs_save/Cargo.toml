@@ -1,0 +1,15 @@
+[package]
+name = "ocs_save"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Pure-Rust SAVE pipeline pieces shared by the app crate (native host and the
+# main wasm instance) and the browser parse/serialize worker (`ocs_web_worker`),
+# so the DWG/DXF byte serialization and the worker wire format each have
+# exactly one implementation. No UI/app dependencies — only acadrust + serde.
+
+[dependencies]
+acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "568a12c", features = ["serde"] }
+bincode = "1.3"
+serde = { version = "1", features = ["derive"] }

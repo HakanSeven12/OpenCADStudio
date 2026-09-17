@@ -2305,6 +2305,22 @@ pub enum Message {
         bounds: Option<iced::Rectangle>,
         screenshot: Option<iced::window::Screenshot>,
     },
+    /// Web SAVE: the serializer worker (or the inline fallback) produced the
+    /// drawing bytes; download them and finish the save bookkeeping. The
+    /// epoch/revision/camera markers snapshot the tab when serialization
+    /// started — the web counterpart of native's `snapshot_is_current`, so a
+    /// save that raced user edits does not wipe the newer dirty flag.
+    #[cfg(target_arch = "wasm32")]
+    WebSaveSerialized {
+        tab_id: u64,
+        filename: String,
+        autosave_key: String,
+        version: acadrust::DxfVersion,
+        geometry_epoch: u64,
+        edit_revision: u64,
+        camera_generation: u64,
+        result: Result<Vec<u8>, String>,
+    },
     /// Retry the failed save after the other application releases the file.
     #[cfg(not(target_arch = "wasm32"))]
     SaveFileInUseRetry,
@@ -3579,7 +3595,9 @@ pub enum Message {
     DataExtractionBrowseSettings,
     DataExtractionBrowseSettingsResult(Option<std::path::PathBuf>),
     DataExtractionAddDrawings,
-    DataExtractionAddDrawingsResult(Vec<std::path::PathBuf>),
+    /// Picked source drawings — `Err` carries a pick/parse failure (web
+    /// parses each file on the worker at pick time).
+    DataExtractionAddDrawingsResult(Result<Vec<std::path::PathBuf>, String>),
     DataExtractionAddFolder,
     DataExtractionAddFolderResult(Option<std::path::PathBuf>),
     DataExtractionClearSources,

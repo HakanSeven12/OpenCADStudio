@@ -1086,6 +1086,80 @@ pub(super) fn action_names() -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Renders `docs/command-reference.md` from the live command registry,
+    /// the category table, selection policies, and the default key bindings
+    /// (HELP opens this page). Regenerate with
+    /// `UPDATE_COMMAND_REFERENCE=1 cargo test command_reference`.
+    fn render_command_reference() -> String {
+        let mut names = crate::command::all_registered_command_names();
+        names.sort_unstable();
+        names.dedup();
+
+        // First sorted binding wins; Ctrl/Cmd is normalized so the
+        // generated file does not differ by generating platform.
+        let mut shortcut_for: std::collections::BTreeMap<String, String> = Default::default();
+        for (key, cmd) in crate::app::shortcuts::default_bindings() {
+            let key = key.replace("CMD+", "Ctrl+").replace("CTRL+", "Ctrl+");
+            shortcut_for.entry(cmd).or_insert(key);
+        }
+
+        let mut by_category: std::collections::BTreeMap<&str, Vec<&str>> = Default::default();
+        for name in &names {
+            by_category
+                .entry(command_category(name))
+                .or_default()
+                .push(name);
+        }
+
+        let mut out = String::new();
+        out.push_str("# Open CAD Studio \u{2014} Command Reference\n\n");
+        out.push_str(
+            "Generated from the in-repo command registry; manual edits are overwritten. \
+Regenerate with `UPDATE_COMMAND_REFERENCE=1 cargo test command_reference`.\n\n",
+        );
+        for (category, commands) in &by_category {
+            let title: String = category
+                .char_indices()
+                .map(|(i, c)| if i == 0 { c.to_ascii_uppercase() } else { c })
+                .collect::<String>();
+            out.push_str(&format!("## {title} ({})\n\n", commands.len()));
+            out.push_str("| Command | Default shortcut | Selection |\n|---|---|---|\n");
+            for cmd in commands {
+                let shortcut = shortcut_for.get(*cmd).map(String::as_str).unwrap_or("");
+                let selection = match command_selection_policy(cmd) {
+                    "current_selection_or_prompt" => "current selection or prompt",
+                    "command_defined" => "command-driven",
+                    other => other,
+                };
+                out.push_str(&format!("| `{cmd}` | {shortcut} | {selection} |\n"));
+            }
+            out.push('\n');
+        }
+        out.push_str(&format!(
+            "_{} commands across {} categories._\n",
+            names.len(),
+            by_category.len()
+        ));
+        out
+    }
+
+    #[test]
+    fn command_reference_is_up_to_date() {
+        let generated = render_command_reference();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/docs/command-reference.md");
+        if std::env::var("UPDATE_COMMAND_REFERENCE").is_ok() {
+            std::fs::write(path, generated).expect("write command reference");
+            return;
+        }
+        let committed = std::fs::read_to_string(path).unwrap_or_default();
+        assert_eq!(
+            committed, generated,
+            "docs/command-reference.md is stale: run UPDATE_COMMAND_REFERENCE=1 cargo test \
+             command_reference_is_up_to_date and commit the result"
+        );
+    }
+
     fn request(app: &mut OpenCADStudio, mut req: Value) -> Value {
         let state = app.control_state();
         req["protocol"] = json!(1);

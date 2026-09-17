@@ -78,9 +78,11 @@ impl OpenCADStudio {
 
             "HELP" => {
                 self.command_line
-                    .push_info(crate::t!("Opening OCS Discussions for help and questions...").as_ref());
+                    .push_info(crate::t!("Opening the command reference...").as_ref());
                 return Some(crate::sys::open_url(
-                    "https://github.com/HakanSeven12/OpenCADStudio/discussions",
+                    // Generated from the in-repo command registry; the
+                    // staleness test in app::control keeps it current.
+                    "https://github.com/HakanSeven12/OpenCADStudio/blob/main/docs/command-reference.md",
                     self.main_window,
                 ));
             }

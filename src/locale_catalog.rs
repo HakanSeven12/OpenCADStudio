@@ -1884,6 +1884,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Opening \"{name}\" ({size_label})…" => Some(("common", "opening-name-size-label")),
         "Opening OCS Discussions for help and questions..." => Some(("view", "opening-ocs-discussions-for-help-and-questions")),
         "Opening OCS Web..." => Some(("view", "opening-ocs-web")),
+        "Opening the command reference..." => Some(("view", "opening-the-command-reference")),
         "Opening Patreon page..." => Some(("view", "opening-patreon-page")),
         "Opening feedback page..." => Some(("view", "opening-feedback-page")),
         "Opening file" => Some(("ui", "opening-file")),

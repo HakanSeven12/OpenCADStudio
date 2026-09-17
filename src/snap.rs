@@ -2464,9 +2464,12 @@ impl WirePlane {
 }
 
 fn wire_plane(wire: &WireModel) -> Option<WirePlane> {
-    let [geom] = wire.tangent_geoms.as_slice() else {
-        return None;
-    };
+    // A multi-geometry wire (a polyline carrying one Line/Arc geom per
+    // segment) still lives in one plane: take it from the first planar
+    // (non-Line) geom. Straight-only wires have no plane of their own and
+    // rely on the partner wire to supply the frame.
+    let mut planar = wire.tangent_geoms.iter().filter(|geom| !matches!(geom, TangentGeom::Line { .. }));
+    let geom = planar.next()?;
     let (origin, axis_x, axis_y) = match geom {
         TangentGeom::Circle { center, .. } => (DVec3::new(center[0] as f64, center[1] as f64, center[2] as f64), DVec3::X, DVec3::Y),
         TangentGeom::PlanarCircle { center, axis_x, axis_y, .. } | TangentGeom::Arc { center, axis_x, axis_y, .. } => (
@@ -2488,7 +2491,47 @@ fn wire_plane(wire: &WireModel) -> Option<WirePlane> {
     Some(WirePlane { origin, axis_x, axis_y, normal: axis_x.cross(axis_y).normalize() })
 }
 
-fn curve_in_frame(wire: &WireModel, frame: &WirePlane, tol: f64) -> Option<Curve> {
+/// The f64 endpoints behind a `TangentGeom::Line`. The geom itself stores
+/// f32, which quantises survey-scale coordinates by centimetres; the wire's
+/// tessellation points (a double-single pair) hold the same vertices in full
+/// precision, so when a consecutive point pair matches the geom, use it.
+fn line_geom_endpoints_f64(wire: &WireModel, p1: [f32; 3], p2: [f32; 3]) -> (DVec3, DVec3) {
+    if wire.points.len() == 2 {
+        return (wp_f64(wire, 0), wp_f64(wire, 1));
+    }
+    let f32_pair = (Vec3::from_array(p1).as_dvec3(), Vec3::from_array(p2).as_dvec3());
+    // The f64 pair matches the geom's own segment when it sits within the
+    // f32 cast's rounding error (≤ 0.5 ulp of the coordinate magnitude).
+    // Take the CLOSEST pair, not the first within tolerance: adjacent
+    // polyline vertices can sit closer together than the quantisation at
+    // survey scale, and a first-match scan would then grab a neighbour's
+    // segment.
+    let mag = p1.iter().chain(p2.iter()).fold(0.0f32, |m, c| m.max(c.abs()));
+    let tol = (mag * f32::EPSILON) as f64 + 1e-9;
+    let mut best: Option<(f64, DVec3, DVec3)> = None;
+    for index in 0..wire.points.len().saturating_sub(1) {
+        let a = wp_f64(wire, index);
+        let b = wp_f64(wire, index + 1);
+        // NaN separators split runs; either side being NaN never matches.
+        if !a.is_finite() || !b.is_finite() {
+            continue;
+        }
+        let miss = (a - f32_pair.0).length_squared() + (b - f32_pair.1).length_squared();
+        if miss <= 4.0 * tol * tol && best.map_or(true, |(m, _, _)| miss < m) {
+            best = Some((miss, a, b));
+        }
+    }
+    best.map(|(_, a, b)| (a, b)).unwrap_or(f32_pair)
+}
+
+/// Decompose a wire into its analytic curves inside `frame`.
+///
+/// Returns `None` unless EVERY geometry converts: a partially-converted wire
+/// would silently drop the intersections of the skipped pieces, and the
+/// tessellated sweep is the correct fallback for those pairs. A wire with no
+/// tangent geoms is a bare polyline — only a single straight run (2 points)
+/// has an analytic form.
+fn curves_in_frame(wire: &WireModel, frame: &WirePlane, tol: f64) -> Option<Vec<Curve>> {
     use cadkernel::geom2d::{Arc as KArc, Circle as KCircle, Ellipse as KEllipse, EllipseArc as KEllipseArc, Line as KLine};
 
     if wire.tangent_geoms.is_empty() {
@@ -2496,99 +2539,150 @@ fn curve_in_frame(wire: &WireModel, frame: &WirePlane, tol: f64) -> Option<Curve
             return None;
         }
         let (p0, p1) = (wp_f64(wire, 0), wp_f64(wire, 1));
-        return (frame.contains(p0, tol) && frame.contains(p1, tol)).then(|| Curve::Line(KLine { start: frame.to_2d(p0), end: frame.to_2d(p1) }));
+        return (frame.contains(p0, tol) && frame.contains(p1, tol))
+            .then(|| vec![Curve::Line(KLine { start: frame.to_2d(p0), end: frame.to_2d(p1) })]);
     }
 
-    let [geom] = wire.tangent_geoms.as_slice() else {
-        return None;
-    };
     let angle_in_frame = |world_point: DVec3, centre: DVec3| {
         let (p2, c2) = (frame.to_2d(world_point), frame.to_2d(centre));
         (p2[1] - c2[1]).atan2(p2[0] - c2[0])
     };
 
-    match geom {
-        TangentGeom::Line { p1, p2 } => {
-            let (p1, p2) = if wire.points.len() == 2 {
-                (wp_f64(wire, 0), wp_f64(wire, 1))
-            } else {
-                (Vec3::from_array(*p1).as_dvec3(), Vec3::from_array(*p2).as_dvec3())
-            };
-            (frame.contains(p1, tol) && frame.contains(p2, tol)).then(|| Curve::Line(KLine { start: frame.to_2d(p1), end: frame.to_2d(p2) }))
-        }
-        TangentGeom::Circle { center, radius } => {
-            let c = DVec3::new(center[0] as f64, center[1] as f64, center[2] as f64);
-            (DVec3::Z.cross(frame.normal).length() <= tol && frame.contains(c, tol)).then(|| Curve::Circle(KCircle { centre: frame.to_2d(c), radius: *radius as f64 }))
-        }
-        TangentGeom::PlanarCircle { center, axis_x, axis_y, radius } => {
-            let c = DVec3::new(center[0], center[1], center[2]);
-            let n = DVec3::new(axis_x[0], axis_x[1], axis_x[2]).cross(DVec3::new(axis_y[0], axis_y[1], axis_y[2])).normalize();
-            (n.cross(frame.normal).length() <= tol && frame.contains(c, tol)).then(|| Curve::Circle(KCircle { centre: frame.to_2d(c), radius: *radius }))
-        }
-        TangentGeom::Arc { center, axis_x, axis_y, radius, start_angle, end_angle } => {
-            let c = DVec3::new(center[0], center[1], center[2]);
-            let (ax, ay) = (DVec3::new(axis_x[0], axis_x[1], axis_x[2]), DVec3::new(axis_y[0], axis_y[1], axis_y[2]));
-            let n = ax.cross(ay).normalize();
-            if n.cross(frame.normal).length() > tol || !frame.contains(c, tol) {
-                return None;
+    let mut curves = Vec::with_capacity(wire.tangent_geoms.len());
+    for geom in &wire.tangent_geoms {
+        let curve = match geom {
+            TangentGeom::Line { p1, p2 } => {
+                let (p1, p2) = line_geom_endpoints_f64(wire, *p1, *p2);
+                (frame.contains(p1, tol) && frame.contains(p2, tol)).then(|| {
+                    let (start, end) = (frame.to_2d(p1), frame.to_2d(p2));
+                    // A crossing can sit exactly on a segment endpoint (the
+                    // #1319 vertices are polyline vertices ON the circle).
+                    // The frame reduction subtracts f64 world coordinates, so
+                    // at survey scale the endpoint parameter lands an ulp or
+                    // two outside the bounded line and the kernel drops the
+                    // crossing. Extend the analytic segment by the world
+                    // magnitude's own quantisation so those survive; the
+                    // overhang (≤ ~1e-9 relative) is far below snap
+                    // distinguishability.
+                    let mag = p1.abs().max_element().max(p2.abs().max_element());
+                    let pad = 1e-9 + mag * 4.0 * f64::EPSILON;
+                    let dx = end[0] - start[0];
+                    let dy = end[1] - start[1];
+                    let len = dx.hypot(dy);
+                    let (ux, uy) = if len > 1e-12 { (dx / len, dy / len) } else { (1.0, 0.0) };
+                    Curve::Line(KLine {
+                        start: [start[0] - ux * pad, start[1] - uy * pad],
+                        end: [end[0] + ux * pad, end[1] + uy * pad],
+                    })
+                })
             }
-            let arc = KArc { centre: frame.to_2d(c), radius: *radius, start_angle: *start_angle, end_angle: *end_angle };
-            let sweep = arc.sweep();
-            if (sweep - std::f64::consts::TAU).abs() <= 1e-12 {
-                return Some(Curve::Circle(KCircle { centre: arc.centre, radius: *radius }));
+            TangentGeom::Circle { center, radius } => {
+                let c = DVec3::new(center[0] as f64, center[1] as f64, center[2] as f64);
+                (DVec3::Z.cross(frame.normal).length() <= tol && frame.contains(c, tol))
+                    .then(|| Curve::Circle(KCircle { centre: frame.to_2d(c), radius: *radius as f64 }))
             }
-            let boundary = if n.dot(frame.normal) < 0.0 { *end_angle } else { *start_angle };
-            let start_angle = angle_in_frame(c + *radius * (boundary.cos() * ax + boundary.sin() * ay), c);
-            Some(Curve::Arc(KArc { start_angle, end_angle: start_angle + sweep, ..arc }))
-        }
+            TangentGeom::PlanarCircle { center, axis_x, axis_y, radius } => {
+                let c = DVec3::new(center[0], center[1], center[2]);
+                let n = DVec3::new(axis_x[0], axis_x[1], axis_x[2]).cross(DVec3::new(axis_y[0], axis_y[1], axis_y[2])).normalize();
+                (n.cross(frame.normal).length() <= tol && frame.contains(c, tol))
+                    .then(|| Curve::Circle(KCircle { centre: frame.to_2d(c), radius: *radius }))
+            }
+            TangentGeom::Arc { center, axis_x, axis_y, radius, start_angle, end_angle } => {
+                let c = DVec3::new(center[0], center[1], center[2]);
+                let (ax, ay) = (DVec3::new(axis_x[0], axis_x[1], axis_x[2]), DVec3::new(axis_y[0], axis_y[1], axis_y[2]));
+                let n = ax.cross(ay).normalize();
+                if n.cross(frame.normal).length() > tol || !frame.contains(c, tol) {
+                    None
+                } else {
+                    let arc = KArc { centre: frame.to_2d(c), radius: *radius, start_angle: *start_angle, end_angle: *end_angle };
+                    let sweep = arc.sweep();
+                    if (sweep - std::f64::consts::TAU).abs() <= 1e-12 {
+                        Some(Curve::Circle(KCircle { centre: arc.centre, radius: *radius }))
+                    } else {
+                        let boundary = if n.dot(frame.normal) < 0.0 { *end_angle } else { *start_angle };
+                        let start_angle = angle_in_frame(c + *radius * (boundary.cos() * ax + boundary.sin() * ay), c);
+                        Some(Curve::Arc(KArc { start_angle, end_angle: start_angle + sweep, ..arc }))
+                    }
+                }
+            }
 
-        TangentGeom::PlanarEllipse { center, major_axis, normal, minor_axis_ratio, start_param, end_param } => {
-            let c = DVec3::new(center[0], center[1], center[2]);
-            let ell_normal = DVec3::new(normal[0], normal[1], normal[2]).normalize();
-            if ell_normal.cross(frame.normal).length() > tol || !frame.contains(c, tol) {
-                return None;
+            TangentGeom::PlanarEllipse { center, major_axis, normal, minor_axis_ratio, start_param, end_param } => {
+                let c = DVec3::new(center[0], center[1], center[2]);
+                let ell_normal = DVec3::new(normal[0], normal[1], normal[2]).normalize();
+                if ell_normal.cross(frame.normal).length() > tol || !frame.contains(c, tol) {
+                    None
+                } else {
+                    let major = DVec3::new(major_axis[0], major_axis[1], major_axis[2]);
+                    let major_radius = major.length();
+                    if major_radius <= 1e-12 {
+                        None
+                    } else {
+                        let minor_radius = major_radius * *minor_axis_ratio;
+                        let dir2d = frame.dir_to_2d(major / major_radius);
+                        let len = (dir2d[0] * dir2d[0] + dir2d[1] * dir2d[1]).sqrt();
+                        if len <= 1e-12 {
+                            None
+                        } else {
+                            let major_axis_2d = [dir2d[0] / len, dir2d[1] / len];
+                            let (start_parameter, end_parameter) = if ell_normal.dot(frame.normal) < 0.0 {
+                                (-*end_param, -*start_param)
+                            } else {
+                                (*start_param, *end_param)
+                            };
+                            Some(Curve::Ellipse(KEllipseArc {
+                                ellipse: KEllipse { centre: frame.to_2d(c), major_radius, minor_radius, major_axis: major_axis_2d },
+                                start_parameter,
+                                end_parameter,
+                            }))
+                        }
+                    }
+                }
             }
-            let major = DVec3::new(major_axis[0], major_axis[1], major_axis[2]);
-            let major_radius = major.length();
-            if major_radius <= 1e-12 {
-                return None;
-            }
-            let minor_radius = major_radius * *minor_axis_ratio;
-            let dir2d = frame.dir_to_2d(major / major_radius);
-            let len = (dir2d[0] * dir2d[0] + dir2d[1] * dir2d[1]).sqrt();
-            if len <= 1e-12 {
-                return None;
-            }
-            let major_axis_2d = [dir2d[0] / len, dir2d[1] / len];
-            let (start_parameter, end_parameter) = if ell_normal.dot(frame.normal) < 0.0 {
-                (-*end_param, -*start_param)
-            } else {
-                (*start_param, *end_param)
-            };
-            Some(Curve::Ellipse(KEllipseArc {
-                ellipse: KEllipse { centre: frame.to_2d(c), major_radius, minor_radius, major_axis: major_axis_2d },
-                start_parameter,
-                end_parameter,
-            }))
-        }
+        };
+        curves.push(curve?);
     }
+    Some(curves)
 }
 
+/// Intersections of two wires from their analytic geometry, not their
+/// tessellation (#1052, #1319).
+///
+/// Each wire may carry SEVERAL tangent geoms — a polyline holds one Line or
+/// Arc per segment — so both sides are decomposed into their analytic pieces
+/// and every piece pair is solved exactly (closed form for line/circle/arc
+/// pairs, subdivision refined to tolerance for ellipse pairs). Returning
+/// `Some` also tells the caller the pair is fully resolved, so the
+/// tessellated segment sweep must skip it: a 48-segment circle chord meets a
+/// vertex-holding segment r·(1−cos(π/48)) ≈ 0.0053 short of the true
+/// crossing, which is exactly the error MEASURE reported in #1319.
 fn exact_curve_intersections(wire_a: &WireModel, wire_b: &WireModel) -> Option<Vec<DVec3>> {
     let frame = wire_plane(wire_a).or_else(|| wire_plane(wire_b))?;
 
     const PLANE_TOL: f64 = 1e-7;
-    let curve_a = curve_in_frame(wire_a, &frame, PLANE_TOL)?;
-    let curve_b = curve_in_frame(wire_b, &frame, PLANE_TOL)?;
-    // Two lines have nothing this path can improve on (the segment sweep is
-    // already exact for a straight pair); avoid the extra work.
-    if matches!(curve_a, Curve::Line(_)) && matches!(curve_b, Curve::Line(_)) {
+    let curves_a = curves_in_frame(wire_a, &frame, PLANE_TOL)?;
+    let curves_b = curves_in_frame(wire_b, &frame, PLANE_TOL)?;
+    // Straight-vs-straight pairs have nothing this path can improve on (the
+    // segment sweep is already exact for them); avoid the extra work. This
+    // covers two plain lines AND two straight-only polylines.
+    if curves_a.iter().all(Curve::is_straight) && curves_b.iter().all(Curve::is_straight) {
         return None;
     }
 
     let tolerance = cadkernel::geom2d::Tolerance::new(1e-9_f64.max(PLANE_TOL));
-    let crossings = cadkernel::geom2d::intersect(&curve_a, &curve_b, tolerance);
-    let points: Vec<DVec3> = crossings.into_iter().map(|c| frame.to_3d(c.point)).collect();
+    let linear = tolerance.linear();
+    let mut points: Vec<DVec3> = Vec::new();
+    for curve_a in &curves_a {
+        for curve_b in &curves_b {
+            for crossing in cadkernel::geom2d::intersect(curve_a, curve_b, tolerance) {
+                let point = frame.to_3d(crossing.point);
+                // Adjacent pieces share vertices, so a crossing on the shared
+                // vertex is found by both; keep one copy.
+                if !points.iter().any(|p| p.distance_squared(point) <= linear * linear) {
+                    points.push(point);
+                }
+            }
+        }
+    }
     Some(points)
 }
 
@@ -3544,6 +3638,59 @@ mod ext_tests {
         assert!(points.iter().all(|point| (point.x - origin).abs() == 3.0 && point.y == origin));
     }
 
+    /// #1319 at survey coordinates: a multi-segment polyline wire (one Line
+    /// geom per segment, f32 in the geom) must still intersect a circle
+    /// exactly — `line_geom_endpoints_f64` recovers the f64 endpoints from
+    /// the wire's double-single tessellation points instead of letting the
+    /// f32 geom endpoints quantise UTM-scale crossings by centimetres.
+    #[test]
+    fn polyline_circle_intersection_retains_low_coordinate_bits() {
+        let (ox, oy) = (512_345.678, 4_512_345.678);
+        let vertex = |x: f64, y: f64| [ox + x, oy + y, 0.0];
+        let segments = [
+            (vertex(0.0, 0.0), vertex(3.0, 0.0)),
+            (vertex(3.0, 0.0), vertex(0.0, 4.0)),
+            (vertex(0.0, 4.0), vertex(0.0, 0.0)),
+        ];
+        // plinegen=false layout: one NaN-separated run per segment, split
+        // into double-single exactly like `tessellate` does.
+        let mut runs: Vec<[f64; 3]> = Vec::new();
+        let mut geoms = Vec::new();
+        for (index, (a, b)) in segments.iter().enumerate() {
+            if index > 0 {
+                runs.push([f64::NAN; 3]);
+            }
+            runs.push(*a);
+            runs.push(*b);
+            geoms.push(TangentGeom::Line {
+                p1: a.map(|v| v as f32),
+                p2: b.map(|v| v as f32),
+            });
+        }
+        let (points, points_low) = crate::scene::convert::tessellate::points_to_ds(runs);
+        let polyline = WireModel {
+            points, points_low,
+            tangent_geoms: geoms,
+            ..Default::default()
+        };
+        let circle = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarCircle {
+                center: vertex(1.5, 2.0), axis_x: [1.0, 0.0, 0.0], axis_y: [0.0, 1.0, 0.0], radius: 2.5,
+            }],
+            ..Default::default()
+        };
+        let points = exact_curve_intersections(&polyline, &circle)
+            .expect("polyline segments and the circle are coplanar analytic curves");
+        assert_eq!(points.len(), 3, "one crossing per vertex, got {points:?}");
+        for (x, y) in [(0.0, 0.0), (3.0, 0.0), (0.0, 4.0)] {
+            let expected = DVec3::from(vertex(x, y));
+            assert!(
+                points.iter().any(|p| p.distance(expected) < 1e-6),
+                "vertex ({x}, {y}) not found exactly in {points:?}"
+            );
+        }
+    }
+
     #[test]
     fn test_unindexed_snap_endpoint_and_midpoint_accuracy() {
         let mut snapper = Snapper::default();
@@ -3682,6 +3829,305 @@ mod ext_tests {
         ).expect("should snap to endpoint even with > 16 wires in aperture");
         assert_eq!(res.snap_type, SnapType::Endpoint);
         assert_eq!(res.world, DVec3::ZERO);
+    }
+
+    /// The scene wires of the #1319 repro: a 3-4-5 right triangle drawn as
+    /// three LINE entities plus their circumscribed circle — the circle
+    /// through (0,0), (3,0), (0,4), centre (1.5, 2), radius 2.5. The circle
+    /// wire mirrors `entities::circle::to_render_with_wpp`: a
+    /// `circle_segments` tessellation (48 segments at minimum zoom) carrying
+    /// one `TangentGeom::PlanarCircle`; each line wire mirrors
+    /// `entities::line::to_render` with one `TangentGeom::Line`.
+    fn issue_1319_wires() -> Vec<WireModel> {
+        let vertices = [
+            DVec3::new(0.0, 0.0, 0.0),
+            DVec3::new(3.0, 0.0, 0.0),
+            DVec3::new(0.0, 4.0, 0.0),
+        ];
+        let line_wire = |a: DVec3, b: DVec3| {
+            let af = a.to_array().map(|v| v as f32);
+            let bf = b.to_array().map(|v| v as f32);
+            WireModel {
+                points: vec![af, bf],
+                key_vertices: vec![a.to_array(), b.to_array()],
+                tangent_geoms: vec![TangentGeom::Line { p1: af, p2: bf }],
+                aabb: [
+                    af[0].min(bf[0]),
+                    af[1].min(bf[1]),
+                    af[0].max(bf[0]),
+                    af[1].max(bf[1]),
+                ],
+                ..Default::default()
+            }
+        };
+        let mut wires = vec![
+            line_wire(vertices[0], vertices[1]),
+            line_wire(vertices[1], vertices[2]),
+            line_wire(vertices[2], vertices[0]),
+        ];
+        let (center, radius) = (DVec3::new(1.5, 2.0, 0.0), 2.5_f64);
+        let n = crate::entities::circle::circle_segments(radius, None);
+        let points: Vec<[f32; 3]> = (0..=n)
+            .map(|i| {
+                let angle = i as f64 * std::f64::consts::TAU / n as f64;
+                [
+                    (center.x + radius * angle.cos()) as f32,
+                    (center.y + radius * angle.sin()) as f32,
+                    0.0,
+                ]
+            })
+            .collect();
+        let mut circle = WireModel {
+            points,
+            tangent_geoms: vec![TangentGeom::PlanarCircle {
+                center: center.to_array(),
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, 1.0, 0.0],
+                radius,
+            }],
+            aabb: [
+                (center.x - radius) as f32,
+                (center.y - radius) as f32,
+                (center.x + radius) as f32,
+                (center.y + radius) as f32,
+            ],
+            ..Default::default()
+        };
+        circle.snap_pts = vec![
+            (center, SnapHint::Center),
+            (DVec3::new(center.x + radius, center.y, 0.0), SnapHint::Quadrant),
+            (DVec3::new(center.x, center.y + radius, 0.0), SnapHint::Quadrant),
+            (DVec3::new(center.x - radius, center.y, 0.0), SnapHint::Quadrant),
+            (DVec3::new(center.x, center.y - radius, 0.0), SnapHint::Quadrant),
+        ];
+        wires.push(circle);
+        wires
+    }
+
+    /// #1319: snapping INTERSECTION at a triangle vertex that also lies on the
+    /// circumscribed circle must return the exact vertex, not a point on the
+    /// circle's tessellation chords (an error of r·(1−cos(π/48)) ≈ 0.0053 for
+    /// the 48-segment minimum tessellation), which then compounds through
+    /// MEASURE. Verified at every vertex, through both the indexed and the
+    /// unindexed wire sources the app snaps with.
+    #[test]
+    fn intersection_snap_at_circumcircle_vertex_is_exact() {
+        let view_rot = Mat4::IDENTITY;
+        let bounds = Rectangle { x: 0.0, y: 0.0, width: 1000.0, height: 1000.0 };
+        let vertices = [
+            DVec3::new(0.0, 0.0, 0.0),
+            DVec3::new(3.0, 0.0, 0.0),
+            DVec3::new(0.0, 4.0, 0.0),
+        ];
+
+        fn check<W: crate::scene::pick::interaction_index::WireSource + ?Sized>(
+            wires: &W,
+            label: &str,
+            view_rot: Mat4,
+            bounds: Rectangle,
+            vertices: [DVec3; 3],
+        ) {
+            for vertex in vertices {
+                let cursor_world = vertex + DVec3::new(0.01, 0.01, 0.0);
+                let eye = vertex + DVec3::new(0.0, 0.0, 500.0);
+                let cursor_screen = world_to_screen(cursor_world, view_rot, eye, bounds);
+                let mut snapper = Snapper::default();
+                snapper.snap_enabled = true;
+                snapper.enabled = [SnapType::Intersection].into_iter().collect();
+                let res = snapper
+                    .snap(
+                        cursor_world, cursor_screen, wires,
+                        view_rot, eye, bounds,
+                        Vec3::ZERO, (Vec3::X, Vec3::Y, Vec3::Z), None,
+                    )
+                    .unwrap_or_else(|| panic!("{label}: no intersection snap near {vertex:?}"));
+                assert_eq!(res.snap_type, SnapType::Intersection);
+                let err = (res.world - vertex).length();
+                assert!(
+                    err < 1e-6,
+                    "{label}: intersection snap near {vertex:?} was off by {err} (expected the exact vertex)"
+                );
+            }
+        }
+
+        let wires = issue_1319_wires();
+        check(wires.as_slice(), "unindexed", view_rot, bounds, vertices);
+
+        let arc = std::sync::Arc::new(issue_1319_wires());
+        let index = crate::scene::pick::interaction_index::InteractionIndex::build(&arc);
+        for vertex in vertices {
+            let r = 0.05_f64;
+            let aabb = [
+                vertex.x - r,
+                vertex.y - r,
+                vertex.x + r,
+                vertex.y + r,
+            ];
+            let candidates = index.query_xy(std::sync::Arc::clone(&arc), aabb);
+            check(&candidates, "indexed", view_rot, bounds, vertices);
+        }
+    }
+
+    /// #1319, end to end through the real production wire pipeline: the same
+    /// triangle + circumscribed circle committed as document entities, the
+    /// wires produced by the scene's own tessellator (`model_tile_wires_arc`,
+    /// which is what `hit_test_wires`/`entity_wires_arc` hand the snapper),
+    /// and the same `interaction_candidates_near` broad phase the viewport
+    /// uses before calling `Snapper::snap`. The INT snap at each vertex must
+    /// land on the exact vertex, not on the circle's tessellation chords.
+    #[test]
+    fn intersection_snap_through_scene_wires_is_exact() {
+        use crate::scene::view::camera::Camera;
+        use crate::scene::Scene;
+
+        let mut scene = Scene::new();
+        let line = |a: [f64; 3], b: [f64; 3]| {
+            acadrust::entities::Line::from_points(
+                acadrust::types::Vector3::new(a[0], a[1], a[2]),
+                acadrust::types::Vector3::new(b[0], b[1], b[2]),
+            )
+        };
+        scene.add_entity(acadrust::EntityType::Line(line([0.0, 0.0, 0.0], [3.0, 0.0, 0.0])));
+        scene.add_entity(acadrust::EntityType::Line(line([3.0, 0.0, 0.0], [0.0, 4.0, 0.0])));
+        scene.add_entity(acadrust::EntityType::Line(line([0.0, 4.0, 0.0], [0.0, 0.0, 0.0])));
+        let mut circle = acadrust::entities::Circle::default();
+        circle.center = acadrust::types::Vector3::new(1.5, 2.0, 0.0);
+        circle.radius = 2.5;
+        scene.add_entity(acadrust::EntityType::Circle(circle));
+
+        let camera = Camera::default();
+        let bounds = Rectangle { x: 0.0, y: 0.0, width: 1000.0, height: 1000.0 };
+        let view_rot = camera.view_proj_rte(bounds);
+        let eye = camera.eye();
+
+        let all_wires = scene.model_tile_wires_arc(0, &camera, 1.0, 1000.0);
+        let vertices = [
+            DVec3::new(0.0, 0.0, 0.0),
+            DVec3::new(3.0, 0.0, 0.0),
+            DVec3::new(0.0, 4.0, 0.0),
+        ];
+        // Sweep a ring of cursor offsets so the assertion does not depend on
+        // which side of the vertex the user approached from.
+        let mut worst = 0.0_f64;
+        for k in 0..16 {
+            let angle = k as f64 * std::f64::consts::TAU / 16.0;
+            let approach = DVec3::new(angle.cos(), angle.sin(), 0.0) * 0.02;
+            for vertex in vertices {
+                let cursor_world = vertex + approach;
+                let cursor_screen = world_to_screen(cursor_world, view_rot, eye, bounds);
+                let snap_candidates =
+                    scene.interaction_candidates_near(
+                        std::sync::Arc::clone(&all_wires),
+                        cursor_world,
+                        view_rot,
+                        eye,
+                        bounds,
+                        12.0,
+                    );
+                let mut snapper = Snapper::default();
+                snapper.snap_enabled = true;
+                snapper.enabled = [SnapType::Intersection].into_iter().collect();
+                let res = snapper
+                    .snap(
+                        cursor_world, cursor_screen, &snap_candidates,
+                        view_rot, eye, bounds,
+                        Vec3::ZERO, (Vec3::X, Vec3::Y, Vec3::Z), None,
+                    )
+                    .unwrap_or_else(|| panic!("no intersection snap near {vertex:?}"));
+                assert_eq!(res.snap_type, SnapType::Intersection);
+                let err = (res.world - vertex).length();
+                worst = worst.max(err);
+                assert!(
+                    err < 1e-6,
+                    "scene-wire intersection snap near {vertex:?} (approach {approach:?}) was off by {err} (expected the exact vertex)"
+                );
+            }
+        }
+    }
+
+    /// #1319, the reported shape of it: the triangle drawn as ONE closed
+    /// polyline (how PLINE/POLYGON produce it) plus the circumscribed circle.
+    /// The polyline wire carries three `TangentGeom::Line` geoms, and the
+    /// vertex the user INTERSECTION-snaps to is polyline-segment ∩ circle.
+    /// The exact vertex must come back — the tessellated segment sweep puts
+    /// that crossing on a 48-segment chord, r·(1−cos(π/48)) ≈ 0.0053 inside
+    /// the true circle, so MEASURE reads ~2.9947 instead of 3.0000 while
+    /// ENDPOINT (key vertices) stays exact.
+    #[test]
+    fn intersection_snap_polyline_triangle_circumcircle_is_exact() {
+        use crate::scene::view::camera::Camera;
+        use crate::scene::Scene;
+
+        let mut scene = Scene::new();
+        let mut pl = acadrust::entities::LwPolyline::new();
+        pl.vertices = vec![
+            acadrust::entities::LwVertex::new(acadrust::types::Vector2::new(0.0, 0.0)),
+            acadrust::entities::LwVertex::new(acadrust::types::Vector2::new(3.0, 0.0)),
+            acadrust::entities::LwVertex::new(acadrust::types::Vector2::new(0.0, 4.0)),
+        ];
+        pl.is_closed = true;
+        scene.add_entity(acadrust::EntityType::LwPolyline(pl));
+        let mut circle = acadrust::entities::Circle::default();
+        circle.center = acadrust::types::Vector3::new(1.5, 2.0, 0.0);
+        circle.radius = 2.5;
+        scene.add_entity(acadrust::EntityType::Circle(circle));
+
+        let camera = Camera::default();
+        let bounds = Rectangle { x: 0.0, y: 0.0, width: 1000.0, height: 1000.0 };
+        let view_rot = camera.view_proj_rte(bounds);
+        let eye = camera.eye();
+        let all_wires = scene.model_tile_wires_arc(0, &camera, 1.0, 1000.0);
+        let vertices = [
+            DVec3::new(0.0, 0.0, 0.0),
+            DVec3::new(3.0, 0.0, 0.0),
+            DVec3::new(0.0, 4.0, 0.0),
+        ];
+        // The broad phase a small drawing gets (unindexed scan) and the one a
+        // large drawing gets (interaction index query) must agree.
+        let index = crate::scene::pick::interaction_index::InteractionIndex::build(&all_wires);
+        for k in 0..16 {
+            let angle = k as f64 * std::f64::consts::TAU / 16.0;
+            let approach = DVec3::new(angle.cos(), angle.sin(), 0.0) * 0.02;
+            for vertex in vertices {
+                let cursor_world = vertex + approach;
+                let cursor_screen = world_to_screen(cursor_world, view_rot, eye, bounds);
+                let unindexed = scene.interaction_candidates_near(
+                    std::sync::Arc::clone(&all_wires),
+                    cursor_world,
+                    view_rot,
+                    eye,
+                    bounds,
+                    12.0,
+                );
+                let indexed = index.query_xy(
+                    std::sync::Arc::clone(&all_wires),
+                    [
+                        cursor_world.x - 0.1,
+                        cursor_world.y - 0.1,
+                        cursor_world.x + 0.1,
+                        cursor_world.y + 0.1,
+                    ],
+                );
+                for (label, snap_candidates) in [("unindexed", &unindexed as &dyn WireSource), ("indexed", &indexed)] {
+                    let mut snapper = Snapper::default();
+                    snapper.snap_enabled = true;
+                    snapper.enabled = [SnapType::Intersection].into_iter().collect();
+                    let res = snapper
+                        .snap(
+                            cursor_world, cursor_screen, snap_candidates,
+                            view_rot, eye, bounds,
+                            Vec3::ZERO, (Vec3::X, Vec3::Y, Vec3::Z), None,
+                        )
+                        .unwrap_or_else(|| panic!("no {label} intersection snap near {vertex:?}"));
+                    assert_eq!(res.snap_type, SnapType::Intersection);
+                    let err = (res.world - vertex).length();
+                    assert!(
+                        err < 1e-6,
+                        "#1319: {label} polyline∩circle intersection snap near {vertex:?} (approach {approach:?}) was off by {err} — the tessellated chord crossing, not the exact vertex"
+                    );
+                }
+            }
+        }
     }
 
 }

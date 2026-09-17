@@ -6,7 +6,7 @@ use crate::scene::Scene;
 /// Returns (1.0, 1.0) for "Fit" or unknown formats.
 /// Sync the model-space annotation scale into its named drawing variable and
 /// numeric header mirror before a save.
-pub(super) fn sync_annotation_scale_header(scene: &mut Scene) {
+pub(in crate::app) fn sync_annotation_scale_header(scene: &mut Scene) {
     let anno = scene.annotation_scale;
     let value = if anno.abs() > 1e-9 {
         1.0 / anno as f64

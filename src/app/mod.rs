@@ -1298,8 +1298,10 @@ pub(super) struct OpenCADStudio {
 /// What triggered the "unsaved changes" dialog.
 #[derive(Debug, Clone)]
 pub(super) enum PendingClose {
-    /// User tried to close the tab at this index.
-    Tab(usize),
+    /// User tried to close this tab — stored as the stable tab id, because
+    /// the web save completes asynchronously and removing an earlier tab in
+    /// the meantime shifts every later vector index.
+    Tab(u64),
     /// User tried to quit the application.
     Quit,
 }

@@ -302,7 +302,7 @@ fn plot_scene_content(
 
 impl OpenCADStudio {
     /// Persist exact ACIS bodies and kernel-derived edge caches before saving.
-    fn sync_solid_models_for_save(&mut self, i: usize) {
+    pub(in crate::app) fn sync_solid_models_for_save(&mut self, i: usize) {
         use acadrust::EntityType;
         let scene = &mut self.tabs[i].scene;
         let targets: Vec<(acadrust::Handle, bool, bool)> = scene
@@ -1893,7 +1893,7 @@ impl OpenCADStudio {
         )
     }
 
-    fn sync_view_state_for_save(&mut self, i: usize) {
+    pub(in crate::app) fn sync_view_state_for_save(&mut self, i: usize) {
         self.sync_vport_display(i);
         if self.tabs[i].active_block_edit.is_none() {
             self.tabs[i].scene.sync_camera_to_document();
@@ -2152,10 +2152,15 @@ impl OpenCADStudio {
     fn finish_web_save(&mut self, saved: bool) -> Task<Message> {
         if self.save_dialog_for_unsaved {
             if saved {
-                if let Some(crate::app::PendingClose::Tab(index)) = self.pending_close.take() {
-                    let continuation = self.update(Message::TabClose(index));
-                    let rest = self.continue_tab_close_queue();
-                    return Task::batch([continuation, rest]);
+                if let Some(crate::app::PendingClose::Tab(id)) = self.pending_close.take() {
+                    // Resolve the id NOW: tabs may have closed while the
+                    // serialization ran, shifting every stored index.
+                    if let Some(index) = self.tabs.iter().position(|tab| tab.id == id) {
+                        let continuation = self.update(Message::TabClose(index));
+                        let rest = self.continue_tab_close_queue();
+                        return Task::batch([continuation, rest]);
+                    }
+                    return self.continue_tab_close_queue();
                 }
             } else if self.pending_close.is_some() {
                 return self.open_unsaved_dialog_window();
@@ -2547,7 +2552,7 @@ impl OpenCADStudio {
                 });
                 match outcome.continuation {
                     crate::app::SaveContinuation::CloseTab => {
-                        self.pending_close = Some(crate::app::PendingClose::Tab(i));
+                        self.pending_close = Some(crate::app::PendingClose::Tab(self.tabs[i].id));
                     }
                     crate::app::SaveContinuation::Quit => {
                         self.pending_close = Some(crate::app::PendingClose::Quit);
@@ -2561,7 +2566,7 @@ impl OpenCADStudio {
                 .push_error(crate::tf!("Save failed: {error}").as_ref());
             return match outcome.continuation {
                 crate::app::SaveContinuation::CloseTab => {
-                    self.pending_close = Some(crate::app::PendingClose::Tab(i));
+                    self.pending_close = Some(crate::app::PendingClose::Tab(self.tabs[i].id));
                     self.open_unsaved_dialog_window()
                 }
                 crate::app::SaveContinuation::Quit => {
@@ -2638,7 +2643,7 @@ impl OpenCADStudio {
                 }
             }
             crate::app::SaveContinuation::CloseTab => {
-                self.pending_close = Some(crate::app::PendingClose::Tab(i));
+                self.pending_close = Some(crate::app::PendingClose::Tab(self.tabs[i].id));
                 tasks.push(self.open_unsaved_dialog_window());
             }
             crate::app::SaveContinuation::Quit => {
@@ -2657,7 +2662,9 @@ impl OpenCADStudio {
     ) {
         self.pending_close = match continuation {
             crate::app::SaveContinuation::None => None,
-            crate::app::SaveContinuation::CloseTab => Some(crate::app::PendingClose::Tab(tab_idx)),
+            crate::app::SaveContinuation::CloseTab => {
+                Some(crate::app::PendingClose::Tab(self.tabs[tab_idx].id))
+            }
             crate::app::SaveContinuation::Quit => Some(crate::app::PendingClose::Quit),
         };
     }

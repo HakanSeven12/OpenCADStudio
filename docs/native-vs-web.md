@@ -15,7 +15,7 @@ browser can't provide. This page lists the differences.
 | Fonts | Embedded stroke fonts + system TrueType + shaping + fallback | Fetched Noto subsets (shaping, fallback, and family aliases) + embedded stroke fonts |
 | File open | Native file dialog → path | Browser picker → bytes |
 | File save | Path / Save dialog → write to disk | Save dialog → direct browser download |
-| Parallelism | Multi-threaded (rayon) | Main thread + one Web Worker (DWG/DXF parse, hashing) |
+| Parallelism | Multi-threaded (rayon) | Main thread + one Web Worker (DWG/DXF parse, hashing, save/autosave serialization) |
 | GPU backend | Vulkan / DX12 / Metal (wgpu) | WebGL2 (the backend is pinned to OpenGL) |
 | Update check / external links | `ureq`, `open` | skipped / `window.open` |
 | External plugins | Native packages + Plugin Manager | **No** — native libraries cannot run in a browser |

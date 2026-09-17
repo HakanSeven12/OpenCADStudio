@@ -72,8 +72,13 @@ impl ZipEntry {
 /// make. Duplicate names are written as given; callers that want one file
 /// per name dedupe before building.
 pub fn build_zip(entries: &[ZipEntry]) -> Result<Vec<u8>, String> {
-    let count =
-        u16::try_from(entries.len()).map_err(|_| format!("too many entries: {}", entries.len()))?;
+    let count = u16::try_from(entries.len())
+        .map_err(|_| format!("too many entries: {}", entries.len()))?;
+    // 0xFFFF/0xFFFFFFFF are the classic-format ZIP64 sentinels; writing
+    // them without a ZIP64 EOCD would send strict readers hunting for one.
+    if count == u16::MAX {
+        return Err("too many entries (ZIP64 sentinel)".to_string());
+    }
     let mut out: Vec<u8> = Vec::new();
     let mut central: Vec<u8> = Vec::new();
     for entry in entries {
@@ -97,6 +102,14 @@ pub fn build_zip(entries: &[ZipEntry]) -> Result<Vec<u8>, String> {
             .map_err(|_| format!("entry {} exceeds the 4 GiB classic-ZIP limit", name))?;
         let local_offset = u32::try_from(out.len())
             .map_err(|_| "archive exceeds the 4 GiB classic-ZIP limit".to_string())?;
+        // 0xFFFFFFFF is the classic-format ZIP64 sentinel; writing it without
+        // a ZIP64 EOCD sends strict readers hunting for one that is absent.
+        if local_offset == u32::MAX
+            || compressed_size == u32::MAX
+            || uncompressed_size == u32::MAX
+        {
+            return Err("archive exceeds the classic-ZIP limit".to_string());
+        }
 
         // Local file header — immediately followed by name and payload.
         out.extend_from_slice(&LOCAL_SIG.to_le_bytes());
@@ -136,6 +149,9 @@ pub fn build_zip(entries: &[ZipEntry]) -> Result<Vec<u8>, String> {
 
     let central_offset = u32::try_from(out.len())
         .map_err(|_| "archive exceeds the 4 GiB classic-ZIP limit".to_string())?;
+    if central_offset == u32::MAX {
+        return Err("archive exceeds the classic-ZIP limit".to_string());
+    }
     let central_size = u32::try_from(central.len())
         .map_err(|_| "archive exceeds the 4 GiB classic-ZIP limit".to_string())?;
     out.extend_from_slice(&central);

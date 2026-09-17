@@ -649,6 +649,10 @@ async fn open_recent_web_attempt(
         bytes.len(),
     );
     let result = load_web_bytes(&name, &bytes, progress, recovery_mode, &initial_error, None).await;
+    // A recent reopened from OPFS registers like a picked or dropped file,
+    // so it can serve as another drawing's xref in this session.
+    #[cfg(target_arch = "wasm32")]
+    xref::register_source(&name, Arc::new(bytes.to_vec()));
     let keep_for_recovery = result
         .as_ref()
         .err()

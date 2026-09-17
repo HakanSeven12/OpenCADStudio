@@ -197,8 +197,12 @@ impl OpenCADStudio {
 
     pub(super) fn on_unsaved_dialog_discard(&mut self) -> Task<Message> {
         match self.pending_close.take() {
-            Some(crate::app::PendingClose::Tab(idx)) => {
+            Some(crate::app::PendingClose::Tab(id)) => {
                 let close_win = self.close_unsaved_dialog_window();
+                let Some(idx) = self.tabs.iter().position(|tab| tab.id == id) else {
+                    // The tab is already gone; nothing to discard.
+                    return close_win;
+                };
                 // Discarded — drop this tab's autosave recovery copy.
                 #[cfg(not(target_arch = "wasm32"))]
                 let _ = std::fs::remove_file(self.autosave_target(idx));
@@ -262,7 +266,13 @@ impl OpenCADStudio {
                 return Task::none();
             };
             let (idx, continuation) = match pending {
-                crate::app::PendingClose::Tab(idx) => (idx, crate::app::SaveContinuation::CloseTab),
+                crate::app::PendingClose::Tab(id) => {
+                    let Some(idx) = self.tabs.iter().position(|tab| tab.id == id) else {
+                        self.pending_close = None;
+                        return self.close_unsaved_dialog_window();
+                    };
+                    (idx, crate::app::SaveContinuation::CloseTab)
+                }
                 crate::app::PendingClose::Quit => {
                     let Some(idx) = self.tabs.iter().position(|tab| tab.dirty) else {
                         self.pending_close = None;
@@ -306,8 +316,11 @@ impl OpenCADStudio {
         #[cfg(target_arch = "wasm32")]
         {
             match self.pending_close.take() {
-                Some(crate::app::PendingClose::Tab(idx)) => {
-                    self.pending_close = Some(crate::app::PendingClose::Tab(idx));
+                Some(crate::app::PendingClose::Tab(id)) => {
+                    let Some(idx) = self.tabs.iter().position(|tab| tab.id == id) else {
+                        return self.close_unsaved_dialog_window();
+                    };
+                    self.pending_close = Some(crate::app::PendingClose::Tab(id));
                     self.save_dialog_for_unsaved = true;
                     let close = self.close_unsaved_dialog_window();
                     let save = self.save_with_default_format(idx);

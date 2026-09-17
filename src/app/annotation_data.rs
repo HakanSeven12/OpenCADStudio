@@ -71,11 +71,42 @@ fn same_source_name(a: &str, b: &str) -> bool {
 // Only the web registers sources (native re-reads the real file, so a file
 // edited after picking is picked up); tests exercise the registry directly.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub(crate) fn register_picked_source(path: &str, bytes: Arc<Vec<u8>>) {
-    picked_sources()
+/// Returns false when the registration REPLACED different bytes under the
+/// same key — the browser hands back bare file names, so two distinct files
+/// named alike collide and every reference to that name would silently read
+/// the newer pick. Callers surface that to the user.
+pub(crate) fn register_picked_source(path: &str, bytes: Arc<Vec<u8>>) -> bool {
+    let mut cache = picked_sources()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let replaced = cache
+        .get(path)
+        .is_some_and(|old| old.as_slice() != bytes.as_slice());
+    if replaced {
+        take_last_collision().replace(file_name_of(path));
+    }
+    cache.insert(path.to_string(), bytes);
+    !replaced
+}
+
+/// The name whose re-pick was refused because different bytes are already
+/// registered under it — the browse handler reports and clears it.
+fn last_collision() -> &'static Mutex<Option<String>> {
+    static LAST: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    LAST.get_or_init(|| Mutex::new(None))
+}
+
+fn take_last_collision() -> std::sync::MutexGuard<'static, Option<String>> {
+    last_collision()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
-        .insert(path.to_string(), bytes);
+}
+
+fn file_name_of(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
 }
 
 /// Bytes registered for this reference — exact key first, then any entry that
@@ -1090,7 +1121,15 @@ impl OpenCADStudio {
                 // keep its bytes so preview, save, and later re-opens read
                 // them instead of asking for the picker again.
                 #[cfg(target_arch = "wasm32")]
-                register_picked_source(&path.to_string_lossy(), Arc::new(handle.read().await));
+                {
+                    let fresh = register_picked_source(
+                        &path.to_string_lossy(),
+                        Arc::new(handle.read().await),
+                    );
+                    if !fresh {
+                        return None;
+                    }
+                }
                 Some(path)
             },
             Message::DataLinkBrowseResult,
@@ -1098,6 +1137,15 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_data_link_browse_result(&mut self, path: Option<PathBuf>) -> Task<Message> {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(name) = take_last_collision().take() {
+            self.command_line.push_warning(
+                crate::tf!(
+                    "\"{name}\" is already loaded from another folder with different                      contents; re-picking it was ignored to keep the existing link."
+                )
+                .as_ref(),
+            );
+        }
         if let Some(path) = path {
             self.data_link_manager.path = path.to_string_lossy().into_owned();
             let (sheets, named_ranges) = workbook_metadata(&path).unwrap_or_default();
@@ -1472,7 +1520,13 @@ impl OpenCADStudio {
             // follows this message.
             #[cfg(target_arch = "wasm32")]
             if !save {
-                register_picked_source(&path.to_string_lossy(), Arc::new(handle.read().await));
+                let fresh = register_picked_source(
+                    &path.to_string_lossy(),
+                    Arc::new(handle.read().await),
+                );
+                if !fresh {
+                    return None;
+                }
             }
             Some(path)
         }, Message::DataExtractionBrowseSettingsResult)

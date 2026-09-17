@@ -90,7 +90,7 @@ pub(super) fn begin_tab_close_queue(&mut self, tab_ids: Vec<u64>) -> Task<Messag
                 continue;
             }
             if self.tabs[idx].dirty {
-                self.pending_close = Some(crate::app::PendingClose::Tab(idx));
+                self.pending_close = Some(crate::app::PendingClose::Tab(self.tabs[idx].id));
                 tasks.push(self.open_unsaved_dialog_window());
                 break;
             }
@@ -109,7 +109,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 // now rather than risk it applying to a different tab's document.
                 self.cancel_attr_editor();
                 if self.tabs.get(idx).map_or(false, |t| t.dirty) {
-                    self.pending_close = Some(crate::app::PendingClose::Tab(idx));
+                    self.pending_close = Some(crate::app::PendingClose::Tab(self.tabs[idx].id));
                     return self.open_unsaved_dialog_window();
                 }
                 #[cfg(not(target_arch = "wasm32"))]

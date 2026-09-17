@@ -542,6 +542,14 @@ impl OpenCADStudio {
             .unwrap_or_else(|| format!("{stem}.{ext}"));
         let version = self.tabs[i].scene.document.version;
 
+        // The same save preparation a web Save performs — without it the
+        // archived copy ships kernel solids without their ACIS data and a
+        // staler view/sysvar header than a real save would produce.
+        self.sync_view_state_for_save(i);
+        crate::app::update::util::sync_annotation_scale_header(&mut self.tabs[i].scene);
+        self.stamp_header_sysvars(i);
+        self.sync_solid_models_for_save(i);
+        self.tabs[i].scene.sync_native_parametric_graph();
         // The drawing itself: the same serialization a web Save performs
         // (native copies the last-saved file; the web build has none, so the
         // current document is re-serialized).
@@ -557,12 +565,18 @@ impl OpenCADStudio {
         let mut entries: Vec<ZipEntry> = vec![ZipEntry::new(filename, drawing)];
         let mut skipped: Vec<String> = Vec::new();
 
-        // Xrefs — the block-record walk native copies. No xref bytes store
-        // exists on the web build (the file behind the path never entered
-        // the session), so every reference reports as skipped.
+        // Xrefs — the block-record walk native copies. Opened, dropped,
+        // and XATTACHed drawings register their bytes (io::xref), so a
+        // referenced file that entered the session ships in the ZIP.
         for br in self.tabs[i].scene.document.block_records.iter() {
             if !br.xref_path.trim().is_empty() {
-                push_skipped(&mut skipped, &transmit_file_name(&br.xref_path));
+                let name = transmit_file_name(&br.xref_path);
+                match crate::io::xref::find_registered_source(&br.xref_path)
+                    .and_then(|key| crate::io::xref::registered_bytes(&key))
+                {
+                    Some(bytes) => push_entry(&mut entries, name, (*bytes).clone()),
+                    None => push_skipped(&mut skipped, &name),
+                }
             }
         }
 

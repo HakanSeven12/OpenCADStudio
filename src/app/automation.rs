@@ -1680,4 +1680,95 @@ mod tests {
         let _ = app.update(Message::ToggleRibbonDropdown("PROP_COLOR".to_string()));
         let _ = app.view(wid);
     }
+
+    /// Regression test for issue #1082: a height typed while EXTRUDE waits at
+    /// its Height prompt must extrude, including when the keystrokes arrive
+    /// through the global key-press subscription (`CommandAppendChar` → the
+    /// dynamic-input field buffer → `CommandFinalize`) instead of the focused
+    /// command-line widget (`CommandInput` → `CommandSubmit`). The former is
+    /// the only route on the web build, where the canvas — not the command
+    /// line — holds keyboard focus.
+    #[test]
+    fn extrude_typed_height_from_dyn_field() {
+        use crate::app::Message;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        // A closed rectangle in the XY plane.
+        use acadrust::entities::LwVertex;
+        use acadrust::types::Vector2;
+        let rect = acadrust::LwPolyline {
+            vertices: [
+                (-10.0, -10.0),
+                (10.0, -10.0),
+                (10.0, 10.0),
+                (-10.0, 10.0),
+            ]
+            .iter()
+            .map(|(x, y)| LwVertex::new(Vector2::new(*x, *y)))
+            .collect(),
+            is_closed: true,
+            ..Default::default()
+        };
+        let handle = app.tabs[0]
+            .scene
+            .document
+            .add_entity(acadrust::EntityType::LwPolyline(rect))
+            .unwrap();
+
+        // Start EXTRUDE via the command line.
+        let _ = app.update(Message::CommandInput("EXTRUDE".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        assert_eq!(
+            app.tabs[0].active_cmd.as_ref().map(|c| c.name()),
+            Some("EXTRUDE")
+        );
+
+        // Pick the rectangle: the GUI route is an entity pick at a world point.
+        let _ = app.feed_command(crate::command::StepInput::EntityPick(
+            handle,
+            glam::DVec3::new(-10.0, -10.0, 0.0),
+        ));
+        // Bare Enter finishes selection → Height step (DYN input is on by
+        // default, so the prompt shows a Distance field).
+        let _ = app.update(Message::CommandFinalize);
+        assert_eq!(
+            app.tabs[0].active_cmd.as_ref().map(|c| c.name()),
+            Some("EXTRUDE")
+        );
+        assert!(
+            app.dyn_input
+                && app.tabs[0]
+                    .dyn_fields
+                    .iter()
+                    .any(|f| f.role == crate::command::DynRole::Distance)
+        );
+
+        // The unfocused-input route for digits while dyn fields show:
+        // CommandAppendChar fills the Distance field buffer, not the
+        // command-line input.
+        for ch in ["5"] {
+            let _ = app.update(Message::CommandAppendChar(ch.to_string()));
+        }
+        assert_eq!(app.command_line.input, "");
+        assert!(
+            app.tabs[0]
+                .dyn_fields
+                .iter()
+                .any(|f| f.buffer.as_deref() == Some("5"))
+        );
+
+        // Enter commits the typed height through the dyn-field buffer.
+        let _ = app.update(Message::CommandFinalize);
+        let solid_count = app.tabs[0]
+            .scene
+            .document
+            .entities()
+            .filter(|e| matches!(e, acadrust::EntityType::Solid3D(_)))
+            .count();
+        assert!(solid_count > 0, "typed height must extrude");
+        assert!(
+            app.tabs[0].active_cmd.is_none(),
+            "EXTRUDE must finish after the typed height"
+        );
+    }
 }

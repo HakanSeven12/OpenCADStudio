@@ -472,6 +472,16 @@ impl CadCommand for ExtrudeCommand {
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
         Some((cursor - self.anchor).dot(self.profile_direction?))
     }
+    // The Height step's dynamic box is a span along the profile normal, not a
+    // point in the drawing plane. Without this, a typed value committed from
+    // the box (the only route on web, where the canvas — not the command
+    // line — holds keyboard focus) is resolved into an in-plane point whose
+    // height projects to ~0 and is silently dropped. `on_text_input` parses
+    // the same string the command-line path would (keywords and
+    // `parse_typed_length`), so both entry routes behave identically (#1082).
+    fn dyn_commit_as_text(&self) -> bool {
+        self.step == ExtrudeStep::Height
+    }
     fn is_selection_gathering(&self) -> bool {
         self.step == ExtrudeStep::Pick
     }

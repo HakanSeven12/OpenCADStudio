@@ -770,15 +770,22 @@ bg={bg_ms:.1}ms n={view_count}"
             // The active alignment vector: a dashed guide from the acquired
             // tracking point through the locked cursor, so the user sees the
             // extension / tracking line they are snapped to (#219).
-            let otrack_line: Option<(iced::Point, iced::Point)> =
-                match (otrack_proj, self.otrack_active) {
-                    (Some((view_rot, eye, ob)), Some((base, _dir))) => {
-                        let b = ost_project(base, view_rot, eye, ob);
-                        let a = ost_project(tab.last_cursor_world, view_rot, eye, ob);
-                        (b.x.is_finite() && a.x.is_finite()).then_some((b, a))
-                    }
-                    _ => None,
-                };
+            // An intersection lock is the meeting of two tracking vectors, so
+            // both are drawn — one guide alone hides what the point is (#1313).
+            let otrack_lines: Vec<(iced::Point, iced::Point)> = match otrack_proj {
+                Some((view_rot, eye, ob)) => {
+                    let a = ost_project(tab.last_cursor_world, view_rot, eye, ob);
+                    self.otrack_active
+                        .into_iter()
+                        .chain(self.otrack_cross)
+                        .filter_map(|(base, _dir)| {
+                            let b = ost_project(base, view_rot, eye, ob);
+                            (b.x.is_finite() && a.x.is_finite()).then_some((b, a))
+                        })
+                        .collect()
+                }
+                None => vec![],
+            };
             // The acquired Parallel-snap reference, marked on its line (#277).
             let parallel_ref_marker: Option<iced::Point> =
                 match (otrack_proj, self.snapper.parallel_ref) {
@@ -894,7 +901,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 grip_clip,
                 ucs_icons,
                 ost_points,
-                otrack_line,
+                otrack_lines,
                 parallel_ref_marker,
                 // ViewCube hover region matches the drawn cube — gone when hidden.
                 !is_paper && viewcube_visible,

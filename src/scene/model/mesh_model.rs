@@ -80,10 +80,11 @@ pub fn edge_snap_wire(
         total += 1;
     }
     // Force-retain the final segment so decimation never removes the far end
-    // of the mesh: `(total - 1) % stride != 0` proves it is not already kept
-    // (every kept entry sits at an index that is a multiple of `stride`).
+    // of the mesh. The seam entry pushed right after a stride doubling is
+    // NOT on the stride grid, so index arithmetic cannot prove membership —
+    // compare against the last kept entry instead.
     if let Some(last) = last_pair {
-        if (total - 1) % stride != 0 {
+        if kept.last() != Some(&last) {
             if kept.len() >= MAX_EDGE_SEGMENTS {
                 halve_kept_segments(&mut kept);
             }

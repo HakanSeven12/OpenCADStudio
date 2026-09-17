@@ -2510,9 +2510,11 @@ fn line_geom_key(p1: [f32; 3], p2: [f32; 3]) -> LineGeomKey {
 /// the wire's full-precision f64 pair behind it, so every Line geom of the
 /// wire resolves with an O(1) lookup instead of rescanning the whole
 /// tessellation per geom (which made `curves_in_frame` O(points × geoms) for
-/// every wire pair on every snap). First-wins on quantisation collisions:
-/// adjacent vertices closer than the grid are indistinguishable at snap
-/// scale anyway.
+/// every wire pair on every snap). First-wins on quantisation collisions —
+/// a bucket is 4 f32 ulp wide, so two DISTINCT near-coincident segments can
+/// share one; lookups therefore verify the hit against the geom's own f32
+/// endpoints and fall back to the widened pair on mismatch, restoring the
+/// closest-match semantics of the scan this replaced.
 fn line_endpoint_map(wire: &WireModel) -> HashMap<LineGeomKey, (DVec3, DVec3)> {
     let mut map =
         HashMap::with_capacity_and_hasher(wire.points.len() / 2 + 1, Default::default());
@@ -2545,8 +2547,13 @@ fn line_geom_endpoints_f64(
     if wire.points.len() == 2 {
         return (wp_f64(wire, 0), wp_f64(wire, 1));
     }
+    let near = |v: Vec3, p: [f32; 3]| {
+        let ulp = |x: f32, y: f32| (x - y).abs() <= y.abs().max(1.0) * f32::EPSILON;
+        ulp(v.x, p[0]) && ulp(v.y, p[1]) && ulp(v.z, p[2])
+    };
     endpoints
         .get(&line_geom_key(p1, p2))
+        .filter(|(a, b)| near(a.as_vec3(), p1) && near(b.as_vec3(), p2))
         .copied()
         .unwrap_or((Vec3::from_array(p1).as_dvec3(), Vec3::from_array(p2).as_dvec3()))
 }

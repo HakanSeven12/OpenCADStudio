@@ -573,6 +573,19 @@ pub struct GridCanvasState {
 /// least `MIN_GRID_PX` pixels apart at the camera pivot. Both orthographic and
 /// perspective cameras have the same vertical scale there. Camera rotation is
 /// intentionally absent so orbiting cannot rescale the visible grid or snap.
+/// Perpendicular screen distance (px) from `p` to the infinite line through
+/// `a` and `b`. Degenerate (`a`≈`b`) falls back to the point distance. Used
+/// to tell whether a tracking vector really passes through the locked cursor
+/// — a genuine OTRACK crossing lock (#1313).
+fn point_inf_line_dist(p: Point, a: Point, b: Point) -> f32 {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let len2 = dx * dx + dy * dy;
+    if len2 < 1e-12 {
+        return ((p.x - a.x).powi(2) + (p.y - a.y).powi(2)).sqrt();
+    }
+    ((p.x - a.x) * dy - (p.y - a.y) * dx).abs() / len2.sqrt()
+}
+
 /// Clip the screen segment `p0`→`p1` to `bounds` (Liang–Barsky), returning the
 /// visible part, or `None` when it misses entirely.
 ///
@@ -660,6 +673,18 @@ pub struct UcsIconParams {
 #[derive(Clone, Debug)]
 pub struct OstTrackPoint {
     pub screen: Point,
+}
+
+/// One OTRACK alignment vector, in screen space: an infinite dashed guide
+/// through `base` along (`tip` − `base`). `active` marks the vector the
+/// cursor is currently locked to; every other acquired tracking point
+/// contributes its own (fainter) vector so a crossing lock shows BOTH
+/// guides through the cursor (#1313).
+#[derive(Clone, Debug)]
+pub struct OtrackLine {
+    pub base: Point,
+    pub tip: Point,
+    pub active: bool,
 }
 
 pub fn grid_overlay<'a>(
@@ -754,7 +779,7 @@ pub fn selection_overlay<'a>(
     grip_clip: Option<iced::Rectangle>,
     ucs_icons: Vec<UcsIconParams>,
     ost_points: Vec<OstTrackPoint>,
-    otrack_line: Option<(Point, Point)>,
+    otrack_lines: Vec<OtrackLine>,
     parallel_ref_marker: Option<Point>,
     show_viewcube: bool,
     dividers: Vec<iced::Rectangle>,
@@ -778,7 +803,7 @@ pub fn selection_overlay<'a>(
         grip_clip,
         ucs_icons,
         ost_points,
-        otrack_line,
+        otrack_lines,
         parallel_ref_marker,
         show_viewcube,
         dividers,
@@ -817,11 +842,12 @@ struct SelectionCanvas {
     /// entry carries hover/selected (grips).
     ucs_icons: Vec<UcsIconParams>,
     ost_points: Vec<OstTrackPoint>,
-    /// Active OTRACK alignment: (acquired tracking point, locked cursor), both
-    /// in screen space. Drawn as a dashed guide extended a little past the
-    /// cursor so the extension / tracking line the user snapped to is visible.
-    /// (#219)
-    otrack_line: Option<(Point, Point)>,
+    /// OTRACK alignment vectors, screen space: the one the cursor is locked
+    /// to (`active`) plus one per other acquired tracking point, so a
+    /// crossing lock shows both guides that intersect at the cursor (#1313).
+    /// Each is drawn as a dashed guide extended a little past the cursor so
+    /// the extension / tracking line reads as a full construction line. (#219)
+    otrack_lines: Vec<OtrackLine>,
     /// The acquired Parallel-snap reference point (screen), marked with a small
     /// ∥ glyph so the user sees which line is the parallel reference. (#277)
     parallel_ref_marker: Option<Point>,
@@ -1708,11 +1734,16 @@ impl canvas::Program<Message> for SelectionCanvas {
 
         // ── Object Snap Tracking ─────────────────────────────────────────────
         let track_color = theme.palette().primary.base.color.scale_alpha(0.7);
-        // The alignment line the cursor is currently locked to — drawn at its
-        // real angle from the acquired point through the lock and a little
-        // beyond, dashed so it reads as a construction guide. This covers the
-        // ortho (0°/90°), polar, and edge-extension cases uniformly (#219).
-        if let Some((base, tip)) = self.otrack_line {
+        // One alignment vector per acquired tracking point, each drawn at its
+        // real angle through the acquired point and a little beyond, dashed so
+        // it reads as a construction guide. The vector the cursor is locked
+        // to keeps full strength; the other acquired points' vectors fade to
+        // half so a crossing lock shows BOTH guides through the cursor —
+        // previously only the locked one drew (#1313). The angle cases are the
+        // same for every vector: ortho (0°/90°), polar, edge-extension (#219).
+        let mut crossing_lock = None;
+        for line in &self.otrack_lines {
+            let (base, tip) = (line.base, line.tip);
             let dx = tip.x - base.x;
             let dy = tip.y - base.y;
             let len = (dx * dx + dy * dy).sqrt();
@@ -1733,12 +1764,45 @@ impl canvas::Program<Message> for SelectionCanvas {
                         offset: 0,
                     },
                     ..canvas::Stroke::default()
-                        .with_color(track_color)
+                        .with_color(if line.active {
+                            track_color
+                        } else {
+                            track_color.scale_alpha(0.5)
+                        })
                         .with_width(1.0)
                 };
                 if let Some((a, b)) = clip_seg(p0, p1, bounds) {
                     frame.stroke(&canvas::Path::line(a, b), dash);
                 }
+            }
+            // The locked cursor position (the active vector's tip) — kept for
+            // the crossing check below.
+            if line.active {
+                crossing_lock = Some(tip);
+            }
+        }
+        // Crossing lock: an intersection X at the locked cursor (classic
+        // yellow OSNAP marker, same glyph as `SnapType::Intersection`) so the
+        // point both vectors meet at is unambiguous (#1313).
+        if let Some(lock) = crossing_lock {
+            let crossed = self.otrack_lines.iter().any(|l| {
+                !l.active && point_inf_line_dist(lock, l.base, l.tip) <= 2.5
+            });
+            if crossed {
+                let r = 5.0_f32;
+                let stroke = canvas::Stroke::default()
+                    .with_color(Color::from_rgb(1.0, 0.9, 0.1))
+                    .with_width(1.5);
+                let p1 = canvas::Path::new(|b| {
+                    b.move_to(Point::new(lock.x - r, lock.y - r));
+                    b.line_to(Point::new(lock.x + r, lock.y + r));
+                });
+                let p2 = canvas::Path::new(|b| {
+                    b.move_to(Point::new(lock.x - r, lock.y + r));
+                    b.line_to(Point::new(lock.x + r, lock.y - r));
+                });
+                frame.stroke(&p1, stroke.clone());
+                frame.stroke(&p2, stroke);
             }
         }
         // The acquired Parallel-snap reference — a small ∥ glyph on its line so
@@ -3498,6 +3562,26 @@ mod clip_tests {
         let (a, c) = clip_seg(Point::new(10.0, 10.0), Point::new(700.0, 500.0), b()).unwrap();
         assert!((a.x - 10.0).abs() < 0.01 && (c.x - 700.0).abs() < 0.01);
         assert!(clip_seg(Point::new(-9000.0, -9000.0), Point::new(-8000.0, -8000.0), b()).is_none());
+    }
+}
+
+#[cfg(test)]
+mod otrack_tests {
+    use super::*;
+
+    #[test]
+    fn point_inf_line_dist_measures_perpendicular_offset() {
+        // A horizontal line through the origin: distance is |y| anywhere on it.
+        let a = Point::new(-1000.0, 0.0);
+        let b = Point::new(1000.0, 0.0);
+        assert!((point_inf_line_dist(Point::new(400.0, 3.0), a, b) - 3.0).abs() < 1e-4);
+        // Off the segment's span the infinite line still applies.
+        assert!((point_inf_line_dist(Point::new(5000.0, -2.0), a, b) - 2.0).abs() < 1e-4);
+        // On the line exactly.
+        assert!(point_inf_line_dist(Point::new(123.0, 0.0), a, b).abs() < 1e-4);
+        // Degenerate segment: falls back to point distance.
+        let p = Point::new(3.0, 4.0);
+        assert!((point_inf_line_dist(p, Point::new(0.0, 0.0), Point::new(0.0, 0.0)) - 5.0).abs() < 1e-4);
     }
 }
 

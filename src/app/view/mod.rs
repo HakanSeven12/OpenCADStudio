@@ -746,17 +746,82 @@ bg={bg_ms:.1}ms n={view_count}"
                 } else {
                     vec![]
                 };
-            // The active alignment vector: a dashed guide from the acquired
-            // tracking point through the locked cursor, so the user sees the
-            // extension / tracking line they are snapped to (#219).
-            let otrack_line: Option<(iced::Point, iced::Point)> =
+            // The tracking vectors — one per acquired tracking point: the
+            // active alignment from the acquired point through the locked
+            // cursor (#219), plus each remaining acquired point's ray whose
+            // direction best matches the cursor. At a crossing lock those are
+            // exactly the two vectors intersecting at the cursor, which
+            // previously went undrawn (#1313).
+            let otrack_lines: Vec<crate::ui::overlay::OtrackLine> =
                 match (otrack_proj, self.otrack_active) {
                     (Some((view_rot, eye, ob)), Some((base, _dir))) => {
                         let b = ost_project(base, view_rot, eye, ob);
                         let a = ost_project(tab.last_cursor_world, view_rot, eye, ob);
-                        (b.x.is_finite() && a.x.is_finite()).then_some((b, a))
+                        if !(b.x.is_finite() && a.x.is_finite()) {
+                            vec![]
+                        } else {
+                            let mut lines = vec![crate::ui::overlay::OtrackLine {
+                                base: b,
+                                tip: a,
+                                active: true,
+                            }];
+                            // Candidate rays mirror the snap-side per-point set
+                            // (polar/ortho quantized angle, edge extensions,
+                            // perpendicular ray) — read-only, the snap math and
+                            // state machine stay untouched.
+                            let (_, (ux, uy, _)) = self.drafting_grid_basis(i);
+                            let (ux, uy) = (ux.as_dvec3(), uy.as_dvec3());
+                            let step = self.polar_mode.then_some(self.polar_increment_deg);
+                            let perp_on =
+                                self.snapper.is_on(crate::snap::SnapType::Perpendicular);
+                            let no_dirs: Vec<glam::DVec3> = Vec::new();
+                            for (gi, &wp) in self.snapper.tracking_points.iter().enumerate() {
+                                if wp == base {
+                                    continue; // its vector is the active one
+                                }
+                                let to_cursor = tab.last_cursor_world - wp;
+                                let dist = (to_cursor.x * to_cursor.x
+                                    + to_cursor.y * to_cursor.y)
+                                    .sqrt();
+                                let edges = self
+                                    .snapper
+                                    .tracking_dirs
+                                    .get(gi)
+                                    .unwrap_or(&no_dirs);
+                                let perps = if perp_on {
+                                    self.snapper
+                                        .tracking_perp_dirs
+                                        .get(gi)
+                                        .unwrap_or(&no_dirs)
+                                } else {
+                                    &no_dirs
+                                };
+                                let Some(d) = otrack_guide_dir(
+                                    to_cursor, ux, uy, step, edges, perps,
+                                ) else {
+                                    continue;
+                                };
+                                // Walk the unit direction out to the cursor's
+                                // distance before projecting: a unit offset on
+                                // UTM-scale coordinates cancels in f32.
+                                let t = ost_project(wp + d * dist, view_rot, eye, ob);
+                                let s = ost_project(wp, view_rot, eye, ob);
+                                if t.x.is_finite()
+                                    && t.y.is_finite()
+                                    && s.x.is_finite()
+                                    && s.y.is_finite()
+                                {
+                                    lines.push(crate::ui::overlay::OtrackLine {
+                                        base: s,
+                                        tip: t,
+                                        active: false,
+                                    });
+                                }
+                            }
+                            lines
+                        }
                     }
-                    _ => None,
+                    _ => vec![],
                 };
             // The acquired Parallel-snap reference, marked on its line (#277).
             let parallel_ref_marker: Option<iced::Point> =
@@ -857,7 +922,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 grip_clip,
                 ucs_icons,
                 ost_points,
-                otrack_line,
+                otrack_lines,
                 parallel_ref_marker,
                 // ViewCube hover region matches the drawn cube — gone when hidden.
                 !is_paper && viewcube_visible,
@@ -4155,6 +4220,68 @@ pub(super) fn recent_files_panel<'a>(
     .into()
 }
 
+/// The OTRACK guide direction for one acquired (non-active) tracking point:
+/// among the candidate rays the snap engine would offer from it — the
+/// polar/ortho angle quantized toward the cursor, the acquired edge
+/// extensions, and the perpendicular ray — the one whose angle best matches
+/// the direction to the cursor. At a crossing lock that is exactly the second
+/// vector through the cursor (#1313). View-side read only: the snap math and
+/// its state machine are untouched.
+fn otrack_guide_dir(
+    to_cursor: glam::DVec3,
+    ucs_x: glam::DVec3,
+    ucs_y: glam::DVec3,
+    polar_step_deg: Option<f32>,
+    edge_dirs: &[glam::DVec3],
+    perp_dirs: &[glam::DVec3],
+) -> Option<glam::DVec3> {
+    let len = (to_cursor.x * to_cursor.x + to_cursor.y * to_cursor.y).sqrt();
+    if len < 1e-9 {
+        return None; // cursor sits on the acquired point: no direction
+    }
+    let toward = glam::DVec3::new(to_cursor.x / len, to_cursor.y / len, 0.0);
+    let mut best: Option<(f64, glam::DVec3)> = None;
+    let mut consider = |mut d: glam::DVec3| {
+        // A tracking ray reads as a line through the point: orient each
+        // candidate toward the cursor side before comparing angles.
+        if d.x * toward.x + d.y * toward.y < 0.0 {
+            d = -d;
+        }
+        let n = (d.x * d.x + d.y * d.y).sqrt();
+        if n < 1e-9 {
+            return;
+        }
+        let d = d / n;
+        let alignment = d.x * toward.x + d.y * toward.y;
+        if best.map_or(true, |(b, _)| alignment > b) {
+            best = Some((alignment, d));
+        }
+    };
+    // Polar (quantized to the increment) or ortho (0°/90°) candidates, in
+    // the active UCS frame like the snap side.
+    let ux = to_cursor.dot(ucs_x);
+    let uy = to_cursor.dot(ucs_y);
+    match polar_step_deg.filter(|s| *s > 1e-3) {
+        Some(step) => {
+            let step = step as f64;
+            let deg = (uy.atan2(ux).to_degrees() / step).round() * step;
+            let rad = deg.to_radians();
+            consider(ucs_x * rad.cos() + ucs_y * rad.sin());
+        }
+        None => {
+            consider(ucs_x);
+            consider(ucs_y);
+        }
+    }
+    for &d in edge_dirs {
+        consider(d);
+    }
+    for &d in perp_dirs {
+        consider(d);
+    }
+    best.map(|(_, d)| d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4165,5 +4292,45 @@ mod tests {
         let bg = crosshair_background(&tab, true);
         assert_eq!(bg, tab.scene.paper_bg_color);
         assert!(crate::ui::style::common::canvas_is_light(bg));
+    }
+
+    #[test]
+    fn otrack_guide_dir_picks_the_closest_candidate() {
+        let x = glam::DVec3::X;
+        let y = glam::DVec3::Y;
+        let dir_at = |deg: f64| {
+            let r = deg.to_radians();
+            glam::DVec3::new(r.cos(), r.sin(), 0.0)
+        };
+
+        // Cursor 10° above +X with no polar step: the X axis wins over Y.
+        let d =
+            otrack_guide_dir(dir_at(10.0) * 100.0, x, y, None, &[], &[]).unwrap();
+        assert!(d.dot(x) > 0.99);
+
+        // A 45° polar step quantizes a 50° cursor direction to 45°.
+        let d =
+            otrack_guide_dir(dir_at(50.0) * 100.0, x, y, Some(45.0), &[], &[]).unwrap();
+        assert!((d.y.atan2(d.x).to_degrees() - 45.0).abs() < 1e-6);
+
+        // An edge extension closer than either axis wins over them.
+        let d = otrack_guide_dir(dir_at(4.0) * 100.0, x, y, None, &[dir_at(5.0)], &[])
+            .unwrap();
+        assert!(d.dot(dir_at(5.0)) > 0.999);
+
+        // A candidate pointing away from the cursor is oriented toward it.
+        let d = otrack_guide_dir(
+            glam::DVec3::new(100.0, 0.0, 0.0),
+            x,
+            y,
+            None,
+            &[-x],
+            &[],
+        )
+        .unwrap();
+        assert!(d.x > 0.99);
+
+        // Degenerate: the cursor sits exactly on the acquired point.
+        assert!(otrack_guide_dir(glam::DVec3::ZERO, x, y, None, &[], &[]).is_none());
     }
 }

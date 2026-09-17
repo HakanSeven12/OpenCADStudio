@@ -503,9 +503,18 @@ pub fn render_pdf_bytes(
     // Borrowing all pages keeps their pixel Arcs alive until this cache is dropped.
     // Allocation addresses cannot be reused by another source during this export.
     let mut image_resources = std::collections::HashMap::new();
+    // Glyph Form XObjects keyed by the atlas tile key — shared across pages so
+    // multi-layout exports bake each unique glyph once.
+    let mut glyph_forms = std::collections::HashMap::new();
     for (index, page) in pages.iter().enumerate() {
-        append_pdf_page(&mut doc, &mut image_resources, page, plot_style)
-            .map_err(|error| format!("Page {}: {error}", index + 1))?;
+        append_pdf_page(
+            &mut doc,
+            &mut image_resources,
+            &mut glyph_forms,
+            page,
+            plot_style,
+        )
+        .map_err(|error| format!("Page {}: {error}", index + 1))?;
     }
     let mut warnings = Vec::new();
     Ok(doc.save(&PdfSaveOptions::default(), &mut warnings))
@@ -514,6 +523,7 @@ pub fn render_pdf_bytes(
 fn append_pdf_page(
     doc: &mut PdfDocument,
     image_resources: &mut std::collections::HashMap<(usize, u32, u32), printpdf::XObjectId>,
+    glyph_forms: &mut std::collections::HashMap<u64, printpdf::XObjectId>,
     page: &PdfPageInput,
     fallback_plot_style: Option<&PlotStyleTable>,
 ) -> Result<(), String> {
@@ -746,6 +756,8 @@ fn append_pdf_page(
                 }
                 DrawItem::Text(wire) => {
                     emit_text(
+                        doc,
+                        glyph_forms,
                         &mut ops,
                         std::slice::from_ref(&wire.wire),
                         ox,
@@ -1538,6 +1550,119 @@ fn emit_hatch(
 
 // ── Text (SDF glyph quads → vector strokes / fills) ────────────────────────
 
+/// Format a coordinate as the shortest PDF real with 0.01 resolution
+/// (`3`, `3.5`, `-0.25`). 0.01 pt ≈ 3.5 µm on paper — visually lossless, but
+/// it keeps path operands half the size of printpdf's default
+/// shortest-round-trip f32 text (`41.5445 28.712158` → `41.54 28.71`), which
+/// dominates text-heavy vector pages (#702).
+fn pdf_real(v: f32) -> String {
+    let rounded = (v * 100.0).round() / 100.0;
+    if rounded == rounded.trunc() && rounded.abs() < 1e15 {
+        return format!("{}", rounded as i64);
+    }
+    let mut s = format!("{rounded:.2}");
+    if s.ends_with('0') {
+        s.pop();
+        if s.ends_with('.') {
+            s.pop();
+        }
+    }
+    s
+}
+
+/// Serialize one glyph's vector geometry as a compact PDF content stream in
+/// glyph-plane units (the 9-unit space the atlas tile spans).
+///
+/// Filled TrueType glyphs paint their outline contours as one multi-subpath
+/// nonzero fill — the exact region the tessellated `fill_tris` cover, since
+/// both derive from the same contours under the same winding rule — at a
+/// fraction of the operator count. Stroke (LFF/SHX) glyphs keep one subpath
+/// per pen stroke and a single `S`; colours and pen width are inherited from
+/// the invoking content stream, so they stay per-instance.
+fn glyph_form_bytes(ge: &crate::scene::text::sdf_atlas::GlyphExport) -> Vec<u8> {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    let point = |s: &mut String, p: [f32; 2]| {
+        let _ = write!(s, "{} {} ", pdf_real(p[0]), pdf_real(p[1]));
+    };
+    if !ge.fill_tris.is_empty() {
+        let contours: Vec<&Vec<[f32; 2]>> = ge.strokes.iter().filter(|c| c.len() >= 2).collect();
+        if contours.is_empty() {
+            // No recovered contours (unexpected for a filled glyph): fall back
+            // to the triangulation, still one shared paint op at the end.
+            for tri in ge.fill_tris.chunks_exact(3) {
+                point(&mut s, tri[0]);
+                s.push_str("m\n");
+                point(&mut s, tri[1]);
+                s.push_str("l\n");
+                point(&mut s, tri[2]);
+                s.push_str("l\nh\n");
+            }
+        } else {
+            for contour in contours {
+                point(&mut s, contour[0]);
+                s.push_str("m\n");
+                for &p in &contour[1..] {
+                    point(&mut s, p);
+                    s.push_str("l\n");
+                }
+                s.push_str("h\n");
+            }
+        }
+        s.push_str("f\n");
+    } else {
+        for stroke in &ge.strokes {
+            if stroke.len() < 2 {
+                continue;
+            }
+            point(&mut s, stroke[0]);
+            s.push_str("m\n");
+            for &p in &stroke[1..] {
+                point(&mut s, p);
+                s.push_str("l\n");
+            }
+        }
+        s.push_str("S\n");
+    }
+    s.into_bytes()
+}
+
+/// Wrap a glyph's path bytes in a Form XObject so every occurrence of the
+/// character replays one `/Do` instead of re-emitting its whole outline
+/// (#702: a 1-page Vietnamese drawing exploded to ~128 MB that way).
+///
+/// Built through `XObject::External` because printpdf's `FormXObject`
+/// serializer omits the spec-required `/BBox`; the external dict gives full
+/// control. `/BBox` is the glyph's atlas plane rect, which by construction
+/// contains all ink (it is the ink box plus the SDF spread margin).
+fn glyph_form_xobject(ge: &crate::scene::text::sdf_atlas::GlyphExport) -> printpdf::XObject {
+    let real = |v: f32| printpdf::DictItem::Real(pdf_real(v).parse().unwrap_or(v));
+    let mut dict = std::collections::BTreeMap::new();
+    dict.insert("Type".into(), printpdf::DictItem::Name(b"XObject".to_vec()));
+    dict.insert("Subtype".into(), printpdf::DictItem::Name(b"Form".to_vec()));
+    dict.insert("FormType".into(), printpdf::DictItem::Int(1));
+    dict.insert(
+        "BBox".into(),
+        printpdf::DictItem::Array(vec![
+            real(ge.plane_min[0]),
+            real(ge.plane_min[1]),
+            real(ge.plane_max[0]),
+            real(ge.plane_max[1]),
+        ]),
+    );
+    printpdf::XObject::External(printpdf::ExternalXObject {
+        stream: printpdf::ExternalStream {
+            dict,
+            content: glyph_form_bytes(ge),
+            compress: true,
+        },
+        width: None,
+        height: None,
+        dpi: None,
+    })
+}
+
+
 /// Absolute world XY of a glyph vertex (double-single high + low parts folded).
 ///
 /// The fold must happen in f64: the pair exists because the absolute coordinate
@@ -1574,6 +1699,8 @@ fn adapt_text_color([r, g, b]: [f32; 3]) -> [f32; 3] {
 /// plane rect — so a stroke (LFF) font emits polylines and a filled TrueType
 /// glyph emits filled triangles, exactly where the SDF quad sits.
 fn emit_text(
+    doc: &mut PdfDocument,
+    glyph_forms: &mut std::collections::HashMap<u64, printpdf::XObjectId>,
     ops: &mut Vec<Op>,
     wires: &[WireModel],
     ox: f64,
@@ -1602,6 +1729,12 @@ fn emit_text(
     ops.push(Op::SetLineDashPattern {
         dash: LineDashPattern::default(),
     });
+
+    // Glyph colour changes only: with glyphs replayed from cached Form
+    // XObjects a uniform text run costs one colour op total, not one per
+    // character. Pen width cannot dedupe this way — see emit below.
+    let mut last_fill: Option<[f32; 3]> = None;
+    let mut last_outline: Option<[f32; 3]> = None;
 
     for wire in wires {
         let verts = &wire.text_verts;
@@ -1657,68 +1790,73 @@ fn emit_text(
             let key = sdf_atlas::uv_key([quad[5].uv[0], quad[5].uv[1]]);
 
             // Cancel the offset in f64, then narrow: the sheet-mm result is a
-            // small number even when the world coordinate is UTM-scale.
-            let point = |wx: f64, wy: f64| Point::new(Mm((wx + ox) as f32), Mm((wy + oy) as f32));
+            // small number even when the world coordinate is UTM-scale. Points
+            // round to 0.01 pt (see `pdf_real`).
+            let point = |wx: f64, wy: f64| -> Point {
+                let pt = |mm: f64| ((mm * MM_TO_PT as f64 * 100.0).round() / 100.0) as f32;
+                Point {
+                    x: Pt(pt(wx + ox)),
+                    y: Pt(pt(wy + oy)),
+                }
+            };
 
             if let Some(ge) = table.get(&key) {
-                // Affine basis of the quad: plane_min → bl, +x → br, +y → tl.
-                // The glyph-space maths is small and stays f32; only the lift into
-                // world coordinates needs f64.
                 let (pmin, pmax) = (ge.plane_min, ge.plane_max);
                 let (sx, sy) = (pmax[0] - pmin[0], pmax[1] - pmin[1]);
                 if sx.abs() < 1e-9 || sy.abs() < 1e-9 {
                     continue;
                 }
-                let map = |p: [f32; 2]| -> Point {
-                    let u = ((p[0] - pmin[0]) / sx) as f64;
-                    let v = ((p[1] - pmin[1]) / sy) as f64;
-                    let wx = bl[0] + u * (br[0] - bl[0]) + v * (tl[0] - bl[0]);
-                    let wy = bl[1] + u * (br[1] - bl[1]) + v * (tl[1] - bl[1]);
-                    point(wx, wy)
-                };
+                // Affine basis of the quad: plane_min → bl, +x → br, +y → tl,
+                // resolved in f64 exactly like the previous per-point `map`. A
+                // glyph-plane point p lands at
+                // `origin + u·(p.x − pmin.x) + v·(p.y − pmin.y)`, which as a
+                // `cm` lets the glyph's whole path ride one cached Form XObject
+                // instead of being re-emitted per character occurrence (#702).
+                let ux = (br[0] - bl[0]) / sx as f64;
+                let uy = (br[1] - bl[1]) / sx as f64;
+                let vx = (tl[0] - bl[0]) / sy as f64;
+                let vy = (tl[1] - bl[1]) / sy as f64;
+                let origin_x = bl[0] - ux * pmin[0] as f64 - vx * pmin[1] as f64;
+                let origin_y = bl[1] - uy * pmin[0] as f64 - vy * pmin[1] as f64;
+                let m2pt = MM_TO_PT as f64;
+                let r2 = |v: f64| ((v * 100.0).round() / 100.0) as f32;
 
+                // Colour ops go OUTSIDE the per-glyph q/Q: the CTM must be
+                // scoped, but fill colour has to persist past the Q or the
+                // next glyph would fill with the page-default black despite
+                // `last_fill` claiming the colour is already set (found by
+                // pixel-diffing the pre/post-fix renders).
+                let mut stroke_pen: Option<f32> = None;
                 if !ge.fill_tris.is_empty() {
-                    // Filled TrueType glyph: one filled triangle per triple.
-                    ops.push(Op::SetFillColor {
-                        col: Color::Rgb(Rgb {
-                            r,
-                            g,
-                            b,
-                            icc_profile: None,
-                        }),
-                    });
-                    for tri in ge.fill_tris.chunks_exact(3) {
-                        ops.push(Op::DrawPolygon {
-                            polygon: Polygon {
-                                rings: vec![PolygonRing {
-                                    points: tri
-                                        .iter()
-                                        .map(|&p| LinePoint {
-                                            p: map(p),
-                                            bezier: false,
-                                        })
-                                        .collect(),
-                                }],
-                                mode: PaintMode::Fill,
-                                winding_order: WindingOrder::NonZero,
-                            },
+                    if last_fill.map(|c| color_differs(c, [r, g, b])).unwrap_or(true) {
+                        ops.push(Op::SetFillColor {
+                            col: Color::Rgb(Rgb {
+                                r,
+                                g,
+                                b,
+                                icc_profile: None,
+                            }),
                         });
+                        last_fill = Some([r, g, b]);
                     }
                 } else {
-                    // Stroke (LFF/SHX pen) font or hollow glyph: polylines.
+                    // Stroke (LFF/SHX pen) font or hollow glyph.
                     // Match the SDF atlas' nominal glyph-space pen instead of
                     // borrowing the entity lineweight: Roman Duplex and similar
                     // multi-stroke faces rely on that band to close the narrow
                     // gaps between parallel centrelines. An explicit CTB
                     // lineweight still wins and stays absolute under the plot CTM.
-                    ops.push(Op::SetOutlineColor {
-                        col: Color::Rgb(Rgb {
-                            r,
-                            g,
-                            b,
-                            icc_profile: None,
-                        }),
-                    });
+                    if last_outline.map(|c| color_differs(c, [r, g, b])).unwrap_or(true) {
+                        ops.push(Op::SetOutlineColor {
+                            col: Color::Rgb(Rgb {
+                                r,
+                                g,
+                                b,
+                                icc_profile: None,
+                            }),
+                        });
+                        last_outline = Some([r, g, b]);
+                    }
                     let pen = if let Some(ctb_pen) = lw_override {
                         if ge.bold {
                             ctb_pen * 1.7
@@ -1732,36 +1870,62 @@ fn emit_text(
                         (2.0 * sdf_atlas::stroke_pen_half_units(ge.bold) * glyph_unit_mm * MM_TO_PT)
                             .max(0.1)
                     };
-                    ops.push(Op::SetOutlineThickness { pt: Pt(pen) });
-                    for stroke in &ge.strokes {
-                        if stroke.len() < 2 {
-                            continue;
-                        }
-                        ops.push(Op::DrawLine {
-                            line: Line {
-                                points: stroke
-                                    .iter()
-                                    .map(|&p| LinePoint {
-                                        p: map(p),
-                                        bezier: false,
-                                    })
-                                    .collect(),
-                                is_closed: false,
-                            },
-                        });
-                    }
+                    stroke_pen = Some(((pen * 100.0).round() / 100.0).max(0.1));
                 }
+                ops.push(Op::SaveGraphicsState);
+                ops.push(Op::SetTransformationMatrix {
+                    matrix: printpdf::CurTransMat::Raw([
+                        r2(ux * m2pt),
+                        r2(uy * m2pt),
+                        r2(vx * m2pt),
+                        r2(vy * m2pt),
+                        r2((origin_x + ox) * m2pt),
+                        r2((origin_y + oy) * m2pt),
+                    ]),
+                });
+                if let Some(pen) = stroke_pen {
+                    // Line width is GEOMETRIC state: the CTM above scales a `w`
+                    // set before it, so the pen is re-set per glyph, under its
+                    // own CTM, pre-divided by the quad's area scale to keep the
+                    // on-paper width identical to stroking in page units.
+                    let det = (ux * vy - uy * vx).abs() * m2pt * m2pt;
+                    let unit_scale = det.sqrt().max(1e-6) as f32;
+                    ops.push(Op::SetOutlineThickness {
+                        pt: Pt((pen / unit_scale * 100.0).round() / 100.0),
+                    });
+                }
+                // First occurrence of this glyph in the export bakes its path
+                // into a shared Form XObject; repeats replay it with `/Do`.
+                let id = glyph_forms
+                    .entry(key)
+                    .or_insert_with(|| {
+                        let id = printpdf::XObjectId::new();
+                        doc.resources
+                            .xobjects
+                            .map
+                            .insert(id.clone(), glyph_form_xobject(ge));
+                        id
+                    })
+                    .clone();
+                ops.push(Op::UseXobject {
+                    id,
+                    transform: Default::default(),
+                });
+                ops.push(Op::RestoreGraphicsState);
             } else if key == solid_key {
                 // Decoration bar (underline / overline / strike): the quad is a
                 // solid-texel rectangle — fill it directly from its corners.
-                ops.push(Op::SetFillColor {
-                    col: Color::Rgb(Rgb {
-                        r,
-                        g,
-                        b,
-                        icc_profile: None,
-                    }),
-                });
+                if last_fill.map(|c| color_differs(c, [r, g, b])).unwrap_or(true) {
+                    ops.push(Op::SetFillColor {
+                        col: Color::Rgb(Rgb {
+                            r,
+                            g,
+                            b,
+                            icc_profile: None,
+                        }),
+                    });
+                    last_fill = Some([r, g, b]);
+                }
                 ops.push(Op::DrawPolygon {
                     polygon: Polygon {
                         rings: vec![PolygonRing {
@@ -1780,6 +1944,12 @@ fn emit_text(
             }
         }
     }
+}
+
+/// Channel-wise colour change test at the same 0.01 tolerance the wire pass
+/// uses for its own state dedupe.
+fn color_differs(a: [f32; 3], b: [f32; 3]) -> bool {
+    (a[0] - b[0]).abs() > 0.01 || (a[1] - b[1]).abs() > 0.01 || (a[2] - b[2]).abs() > 0.01
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

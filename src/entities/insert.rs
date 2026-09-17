@@ -5,6 +5,7 @@ use glam::Vec3;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_angle_prop as edit_angle, edit_prop as edit, parse_f64, ro_prop as ro, square_grip};
+use crate::entities::traits::Grippable;
 
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::WireModel;
@@ -12,11 +13,38 @@ use crate::scene::cache::block_cache;
 use crate::scene::convert::tessellate;
 use crate::scene::view::render;
 
+/// Grip ids from here up address the INSERT's attributes — `BASE + i` is
+/// `attributes[i]`. Grip 0 stays the block's own insertion point.
+const ATTRIBUTE_GRIP_BASE: usize = 1;
+
+/// Whether an attribute is one the user can pick up and reposition. A constant
+/// attribute belongs to the block definition rather than this insert, and an
+/// invisible one is not drawn, so neither has a grip to offer. The attribute
+/// itself declines a locked position.
+fn attribute_is_movable(att: &acadrust::entities::AttributeEntity) -> bool {
+    !att.flags.constant && !att.flags.invisible
+}
+
 fn grips(ins: &Insert) -> Vec<GripDef> {
     // `insert_point` is in the OCS defined by `normal`; the grip must sit at
     // the world placement, so map it through the OCS. Identity for +Z.
     let w = Matrix3::arbitrary_axis(ins.normal) * ins.insert_point;
-    vec![square_grip(0, glam::DVec3::new(w.x, w.y, w.z))]
+    let mut out = vec![square_grip(0, glam::DVec3::new(w.x, w.y, w.z))];
+    // One grip per attribute, so an attribute can be moved off the place the
+    // block definition put it without dragging the whole block (#1259).
+    // Attributes are stored beside the block in world space — the same space
+    // `apply_grip` already translates them in.
+    out.extend(ins.attributes.iter().enumerate().filter_map(|(i, att)| {
+        if !attribute_is_movable(att) {
+            return None;
+        }
+        let grip = Grippable::grips(att).into_iter().next()?;
+        Some(GripDef {
+            id: ATTRIBUTE_GRIP_BASE + i,
+            ..grip
+        })
+    }));
+    out
 }
 
 fn properties(ins: &Insert) -> Vec<PropSection> {
@@ -108,7 +136,14 @@ fn apply_geom_prop(ins: &mut Insert, field: &str, value: &str) {
     }
 }
 
-fn apply_grip(ins: &mut Insert, _grip_id: usize, apply: GripApply) {
+fn apply_grip(ins: &mut Insert, grip_id: usize, apply: GripApply) {
+    // An attribute grip moves that attribute alone; the block stays put.
+    if let Some(index) = grip_id.checked_sub(ATTRIBUTE_GRIP_BASE) {
+        if let Some(att) = ins.attributes.get_mut(index).filter(|a| attribute_is_movable(a)) {
+            Grippable::apply_grip(att, 0, apply);
+        }
+        return;
+    }
     // The grip works in world space, but `insert_point` is stored in the OCS
     // defined by `normal`. Round-trip through the OCS so dragging a block
     // whose extrusion direction isn't +Z moves along world axes. Identity OCS
@@ -326,5 +361,87 @@ pub(crate) fn append_insert_attribute_wires(
             }
             wires.extend(attr_wires);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acadrust::entities::AttributeEntity;
+
+    fn attribute(tag: &str, x: f64, y: f64) -> AttributeEntity {
+        let mut att = AttributeEntity::new(tag.to_string(), format!("{tag}-value"));
+        att.insertion_point = Vector3::new(x, y, 0.0);
+        att.alignment_point = Vector3::new(x, y, 0.0);
+        att
+    }
+
+    fn block_with(attributes: Vec<AttributeEntity>) -> Insert {
+        let mut ins = Insert::new("BLOCK", Vector3::new(0.0, 0.0, 0.0));
+        ins.attributes = attributes;
+        ins
+    }
+
+    /// #1259: selecting a block showed only the insertion grip, so there was no
+    /// handle to pick an attribute up by and nowhere to drop it.
+    #[test]
+    fn each_attribute_offers_its_own_grip() {
+        let ins = block_with(vec![attribute("TAG_A", 3.0, 4.0), attribute("TAG_B", 6.0, 8.0)]);
+
+        let g = grips(&ins);
+        assert_eq!(g.len(), 3, "insertion point plus one grip per attribute");
+        assert_eq!(g[0].world, glam::DVec3::new(0.0, 0.0, 0.0));
+        assert_eq!(g[1].world, glam::DVec3::new(3.0, 4.0, 0.0));
+        assert_eq!(g[2].world, glam::DVec3::new(6.0, 8.0, 0.0));
+    }
+
+    /// Dragging an attribute grip moves that attribute and nothing else — the
+    /// block and its other attributes stay where they were.
+    #[test]
+    fn attribute_grip_moves_only_that_attribute() {
+        let mut ins = block_with(vec![attribute("TAG_A", 3.0, 4.0), attribute("TAG_B", 6.0, 8.0)]);
+
+        let moved = grips(&ins)[1].id;
+        apply_grip(&mut ins, moved, GripApply::Absolute(glam::DVec3::new(30.0, 40.0, 0.0)));
+
+        assert_eq!(ins.insert_point, Vector3::new(0.0, 0.0, 0.0));
+        assert_eq!(ins.attributes[0].insertion_point, Vector3::new(30.0, 40.0, 0.0));
+        assert_eq!(ins.attributes[0].alignment_point, Vector3::new(30.0, 40.0, 0.0));
+        assert_eq!(ins.attributes[1].insertion_point, Vector3::new(6.0, 8.0, 0.0));
+    }
+
+    /// The insertion grip keeps carrying the attributes along with the block,
+    /// which is what the attribute grips are an alternative to, not a
+    /// replacement for (#255).
+    #[test]
+    fn insertion_grip_still_carries_the_attributes() {
+        let mut ins = block_with(vec![attribute("TAG_A", 3.0, 4.0)]);
+
+        apply_grip(&mut ins, 0, GripApply::Translate(glam::DVec3::new(10.0, 0.0, 0.0)));
+
+        assert_eq!(ins.insert_point, Vector3::new(10.0, 0.0, 0.0));
+        assert_eq!(ins.attributes[0].insertion_point, Vector3::new(13.0, 4.0, 0.0));
+    }
+
+    /// A constant attribute belongs to the block definition and an invisible
+    /// one is not drawn, so neither gets a grip — and a grip id must still
+    /// address the attribute it was built from once some are skipped.
+    #[test]
+    fn skipped_attributes_neither_grip_nor_shift_the_others() {
+        let mut constant = attribute("TAG_CONST", 1.0, 1.0);
+        constant.flags.constant = true;
+        let mut invisible = attribute("TAG_HIDDEN", 2.0, 2.0);
+        invisible.flags.invisible = true;
+        let mut locked = attribute("TAG_LOCKED", 4.0, 4.0);
+        locked.lock_position = true;
+        let mut ins = block_with(vec![constant, invisible, locked, attribute("TAG_OK", 5.0, 5.0)]);
+
+        let g = grips(&ins);
+        assert_eq!(g.len(), 2, "only the movable attribute is gripped: {g:?}");
+        assert_eq!(g[1].world, glam::DVec3::new(5.0, 5.0, 0.0));
+
+        apply_grip(&mut ins, g[1].id, GripApply::Absolute(glam::DVec3::new(50.0, 50.0, 0.0)));
+        assert_eq!(ins.attributes[3].insertion_point, Vector3::new(50.0, 50.0, 0.0));
+        assert_eq!(ins.attributes[0].insertion_point, Vector3::new(1.0, 1.0, 0.0));
     }
 }

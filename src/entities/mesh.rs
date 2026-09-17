@@ -1307,24 +1307,28 @@ impl RenderConvertible for Mesh {
         // pick apart on screen — so past this size ship none, which is what
         // PolyfaceMesh / PolygonMesh already do at any size.
         const SNAP_TABLE_MAX_VERTICES: usize = 50_000;
-        let (snap_pts, key_vertices) = if self.vertices.len() > SNAP_TABLE_MAX_VERTICES {
-            (Vec::new(), Vec::new())
+        let snap_pts = if self.vertices.len() > SNAP_TABLE_MAX_VERTICES {
+            Vec::new()
         } else {
-            (
-                self.vertices
-                    .iter()
-                    .map(|v| (glam::DVec3::new(v.x, v.y, v.z), SnapHint::Node))
-                    .collect(),
-                self.vertices.iter().map(|v| [v.x, v.y, v.z]).collect(),
-            )
+            self.vertices
+                .iter()
+                .map(|v| (glam::DVec3::new(v.x, v.y, v.z), SnapHint::Node))
+                .collect()
         };
 
+        // No `key_vertices`: consecutive entries there are snap-joined as
+        // straight segments, but a mesh's vertex list is not a chain — it
+        // produced midpoint candidates floating between unrelated vertices.
+        // Endpoint/Midpoint on the *rendered* wireframe comes from the
+        // interaction-only edge wire the scene appends for volume entities
+        // (scene `tessellate_entity`, #1030); the Node snap points above
+        // still land on every control vertex.
         Some(RenderEntity {
             pick_tris: Vec::new(),
             object: RenderObject::Lines(Vec::new()),
             snap_pts,
             tangent_geoms: vec![],
-            key_vertices,
+            key_vertices: vec![],
             fill_tris: vec![],
         })
     }

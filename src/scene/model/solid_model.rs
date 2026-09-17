@@ -269,6 +269,27 @@ pub fn edge_wires(body: &Body) -> Vec<acadrust::entities::Wire> {
         .collect()
 }
 
+/// Interaction-only snap wire for a volume entity's stored edge `Wire`s
+/// (`Solid3D::wires` and friends — pre-computed B-rep edge chains, also set
+/// on the temporary live-section entity). Each chain contributes its
+/// consecutive point pairs as snap segments (#1030). Returns `None` when the
+/// chains carry no usable segments or exceed the shared snap-wire point cap.
+pub fn entity_edge_snap_wire(
+    chains: &[acadrust::entities::Wire],
+    name: String,
+    color: [f32; 4],
+) -> Option<WireModel> {
+    let pairs = chains.iter().flat_map(|chain| {
+        chain.points.windows(2).map(|segment| {
+            (
+                [segment[0].x, segment[0].y, segment[0].z],
+                [segment[1].x, segment[1].y, segment[1].z],
+            )
+        })
+    });
+    super::mesh_model::edge_snap_wire(name, color, false, pairs)
+}
+
 /// White wireframe used while a solid-history grip is hot. Surface previews
 /// include the requested construction isolines so their cage follows the edit.
 ///

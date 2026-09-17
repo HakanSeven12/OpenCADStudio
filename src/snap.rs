@@ -4130,4 +4130,227 @@ mod ext_tests {
         }
     }
 
+    // ── Volume entities (3D solids / meshes) — #1030 ─────────────────────────
+    //
+    // Solids and meshes render through the mesh pipeline, so their wire path
+    // used to be empty: no Endpoint/Midpoint/Nearest snap on any 3D object.
+    // The scene now appends one interaction-only edge wire per volume entity
+    // (see `scene::tessellate_entity`); these tests pin the snap coverage that
+    // wire provides, at the same seams the production code uses.
+
+    /// Two-triangle square in the z=0 plane, exactly what an OBJ import or a
+    /// plain polyface mesh produces.
+    fn square_mesh_lod_set(name: &str) -> crate::scene::model::mesh_model::MeshLodSet {
+        use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
+        MeshLodSet::from_single(MeshModel {
+            name: name.to_owned(),
+            verts: vec![
+                [0.0, 0.0, 0.0],
+                [10.0, 0.0, 0.0],
+                [10.0, 10.0, 0.0],
+                [0.0, 10.0, 0.0],
+            ],
+            verts_low: Vec::new(),
+            normals: Vec::new(),
+            indices: vec![0, 1, 2, 0, 2, 3],
+            triangle_material_handles: Vec::new(),
+            triangle_colors: Vec::new(),
+            color: [0.7, 0.7, 0.85, 1.0],
+            selected: false,
+        })
+    }
+
+    fn snap_one(
+        snapper: &mut Snapper,
+        wires: &[WireModel],
+        near: DVec3,
+        expected: SnapType,
+        want: DVec3,
+    ) {
+        // Zoomed out: 1 world unit ≈ 5 px, so sub-unit cursor nudges stay
+        // inside the 15 px aperture.
+        let view_rot = Mat4::from_scale(Vec3::splat(0.01));
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1000.0,
+            height: 1000.0,
+        };
+        let eye = DVec3::new(want.x, want.y, 500.0);
+        let cursor_screen = world_to_screen(near, view_rot, eye, bounds);
+        let res = snapper
+            .snap(
+                near, cursor_screen, wires, view_rot, eye, bounds, Vec3::ZERO,
+                (Vec3::X, Vec3::Y, Vec3::Z), None,
+            )
+            .unwrap_or_else(|| panic!("no {expected:?} snap near {near:?}"));
+        assert_eq!(res.snap_type, expected, "near {near:?}");
+        let err = (res.world - want).length();
+        assert!(err < 1e-6, "{expected:?} snap landed {err} from {want:?}");
+    }
+
+    #[test]
+    fn mesh_edge_wire_snaps_endpoint_midpoint_and_nearest() {
+        let wire = square_mesh_lod_set("1")
+            .snap_edge_wire("1".to_owned())
+            .expect("plain mesh should derive an edge wire from LOD-0 triangles");
+        // The generated wire must take part in interaction only — rendering
+        // stays single-sourced in the mesh pipeline.
+        assert!(!wire.display_visible);
+        assert!(!wire.plot_visible);
+        assert!(!wire.points.is_empty());
+
+        let wires = [wire];
+        let mut snapper = Snapper::default();
+        snapper.snap_enabled = true;
+
+        snapper.enabled = [SnapType::Endpoint].into_iter().collect();
+        snap_one(
+            &mut snapper,
+            &wires,
+            DVec3::new(0.2, 0.1, 0.0),
+            SnapType::Endpoint,
+            DVec3::new(0.0, 0.0, 0.0),
+        );
+        snap_one(
+            &mut snapper,
+            &wires,
+            DVec3::new(10.2, 9.9, 0.0),
+            SnapType::Endpoint,
+            DVec3::new(10.0, 10.0, 0.0),
+        );
+
+        snapper.enabled = [SnapType::Midpoint].into_iter().collect();
+        snap_one(
+            &mut snapper,
+            &wires,
+            DVec3::new(5.1, 0.2, 0.0),
+            SnapType::Midpoint,
+            DVec3::new(5.0, 0.0, 0.0),
+        );
+
+        snapper.enabled = [SnapType::Nearest].into_iter().collect();
+        snap_one(
+            &mut snapper,
+            &wires,
+            DVec3::new(12.0, 5.0, 0.0),
+            SnapType::Nearest,
+            DVec3::new(10.0, 5.0, 0.0),
+        );
+    }
+
+    #[test]
+    fn solid_stored_edge_wires_snap_endpoint_and_midpoint() {
+        use crate::scene::model::solid_model::entity_edge_snap_wire;
+        // A box's bottom + vertical edges as stored B-rep chains, the same
+        // shape `register_prepared_solid_model` writes into `Solid3D::wires`.
+        let chain = |points: &[[f64; 3]]| {
+            acadrust::entities::Wire::from_points(
+                points
+                    .iter()
+                    .map(|p| acadrust::types::Vector3::new(p[0], p[1], p[2]))
+                    .collect(),
+            )
+        };
+        let chains = vec![
+            chain(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0]]),
+            chain(&[[0.0, 0.0, 4.0], [10.0, 0.0, 4.0], [10.0, 10.0, 4.0], [0.0, 10.0, 4.0]]),
+            chain(&[[0.0, 0.0, 0.0], [0.0, 0.0, 4.0]]),
+        ];
+        let wire =
+            entity_edge_snap_wire(&chains, "42".to_owned(), [0.8, 0.8, 0.85, 1.0]).expect("wire");
+        let wires = [wire];
+        let mut snapper = Snapper::default();
+        snapper.snap_enabled = true;
+
+        snapper.enabled = [SnapType::Endpoint].into_iter().collect();
+        snap_one(
+            &mut snapper,
+            &wires,
+            DVec3::new(9.8, 10.1, 0.2),
+            SnapType::Endpoint,
+            DVec3::new(10.0, 10.0, 0.0),
+        );
+
+        snapper.enabled = [SnapType::Midpoint].into_iter().collect();
+        // Midpoint of a vertical solid edge — a true 3-D snap point.
+        snap_one(
+            &mut snapper,
+            &wires,
+            DVec3::new(0.1, 0.1, 2.1),
+            SnapType::Midpoint,
+            DVec3::new(0.0, 0.0, 2.0),
+        );
+    }
+
+    #[test]
+    fn edge_snap_wire_caps_runaway_meshes() {
+        use crate::scene::model::mesh_model::{edge_snap_wire, SNAP_EDGE_WIRE_MAX_POINTS};
+        let segment = ([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
+        // Each pair costs up to 3 points (2 endpoints + a NaN separator), so
+        // a third of the cap fits and the full cap must not.
+        let pairs = std::iter::repeat(segment).take(SNAP_EDGE_WIRE_MAX_POINTS / 3);
+        assert!(edge_snap_wire("ok".into(), [1.0; 4], false, pairs).is_some());
+        let pairs = std::iter::repeat(segment).take(SNAP_EDGE_WIRE_MAX_POINTS);
+        assert!(
+            edge_snap_wire("too big".into(), [1.0; 4], false, pairs).is_none(),
+            "meshes past the point cap must ship no snap wire"
+        );
+    }
+
+    #[test]
+    fn scene_solid_with_mesh_cache_snaps_endpoint_midpoint_nearest() {
+        use crate::scene::model::mesh_model::MeshLodSet;
+        use crate::scene::Scene;
+        use acadrust::entities::Solid3D;
+
+        let mut scene = Scene::new();
+        let handle = scene.add_entity(acadrust::EntityType::Solid3D(Solid3D::new()));
+        assert!(!handle.is_null());
+        // Mirror the OBJ import: an (empty) Solid3D entity plus a display
+        // mesh in the scene cache.
+        scene
+            .meshes
+            .insert(handle, square_mesh_lod_set(&handle.value().to_string()));
+
+        let wires = scene.hit_test_wires();
+        let edge_wire = wires
+            .iter()
+            .find(|wire| wire.name == handle.value().to_string() && !wire.points.is_empty())
+            .expect("the solid's interaction edge wire must join the snap wire set");
+        assert!(!edge_wire.display_visible);
+
+        let owned = wires.as_ref().clone();
+        let wires = owned.as_slice();
+        let mut snapper = Snapper::default();
+        snapper.snap_enabled = true;
+
+        snapper.enabled = [SnapType::Endpoint].into_iter().collect();
+        snap_one(
+            &mut snapper,
+            wires,
+            DVec3::new(0.1, 0.2, 0.0),
+            SnapType::Endpoint,
+            DVec3::new(0.0, 0.0, 0.0),
+        );
+
+        snapper.enabled = [SnapType::Midpoint].into_iter().collect();
+        snap_one(
+            &mut snapper,
+            wires,
+            DVec3::new(5.1, 9.9, 0.0),
+            SnapType::Midpoint,
+            DVec3::new(5.0, 10.0, 0.0),
+        );
+
+        snapper.enabled = [SnapType::Nearest].into_iter().collect();
+        snap_one(
+            &mut snapper,
+            wires,
+            DVec3::new(-2.0, 5.0, 0.0),
+            SnapType::Nearest,
+            DVec3::new(0.0, 5.0, 0.0),
+        );
+    }
+
 }

@@ -3,6 +3,112 @@
 // Stored alongside WireModels in the scene; rendered by the mesh pipeline
 // (wgpu TriangleList with depth test, flat normals).
 
+use super::wire_model::WireModel;
+
+/// Hard ceiling on the point count of a generated volume snap wire, matching
+/// the per-wire cap the block cache applies (`block_cache.rs`) and the spirit
+/// of the mesh converters' `SNAP_TABLE_MAX_VERTICES`: a mesh dense enough to
+/// exceed this has edges far too close together to pick apart at snap
+/// aperture size, and duplicating them into the wire set would cost more
+/// memory than the whole rest of the interaction set.
+pub const SNAP_EDGE_WIRE_MAX_POINTS: usize = 100_000;
+
+/// Build the interaction-only edge wire shared by every volume entity
+/// (3D solids, regions, bodies, surfaces, plain meshes).
+///
+/// `pairs` yields one `(a, b)` world-space segment per edge. The wire carries
+/// the segments as NaN-separated point pairs (so `points` never chains two
+/// unrelated edges together) plus the same pairs in `key_vertices` (so
+/// Endpoint/Midpoint snap sees every true edge end / edge middle, not the
+/// ends of an artificial chain). It is `display_visible: false` /
+/// `plot_visible: false`: the mesh pipeline already draws these edges, the
+/// wire exists so the SNAPPER and the proximity pick see them exactly like
+/// any 2-D entity's geometry (#1030).
+///
+/// Returns `None` when the edge count exceeds [`SNAP_EDGE_WIRE_MAX_POINTS`].
+pub fn edge_snap_wire(
+    name: String,
+    color: [f32; 4],
+    selected: bool,
+    pairs: impl Iterator<Item = ([f64; 3], [f64; 3])>,
+) -> Option<WireModel> {
+    let mut points: Vec<[f32; 3]> = Vec::new();
+    let mut points_low: Vec<[f32; 3]> = Vec::new();
+    let mut key_vertices: Vec<[f64; 3]> = Vec::new();
+    let mut aabb = WireModel::UNBOUNDED_AABB;
+    let mut extend = |p: [f64; 3]| {
+        let (x, y) = (p[0] as f32, p[1] as f32);
+        if x.is_finite() && y.is_finite() {
+            if aabb == WireModel::UNBOUNDED_AABB {
+                aabb = [x, y, x, y];
+            } else {
+                aabb[0] = aabb[0].min(x);
+                aabb[1] = aabb[1].min(y);
+                aabb[2] = aabb[2].max(x);
+                aabb[3] = aabb[3].max(y);
+            }
+        }
+    };
+    for (a, b) in pairs {
+        if points.len() + 2 > SNAP_EDGE_WIRE_MAX_POINTS {
+            return None;
+        }
+        if !points.is_empty() {
+            points.push([f32::NAN; 3]);
+            points_low.push([0.0; 3]);
+            if points.len() + 2 > SNAP_EDGE_WIRE_MAX_POINTS {
+                return None;
+            }
+        }
+        for p in [a, b] {
+            let (hx, lx) = WireModel::split_ds(p[0]);
+            let (hy, ly) = WireModel::split_ds(p[1]);
+            let (hz, lz) = WireModel::split_ds(p[2]);
+            points.push([hx, hy, hz]);
+            points_low.push([lx, ly, lz]);
+            key_vertices.push(p);
+            extend(p);
+        }
+    }
+    if points.is_empty() {
+        return None;
+    }
+    Some(WireModel {
+        bg_adapt: None,
+        point_marker: None,
+        taper_widths: Vec::new(),
+        pattern_stations: Vec::new(),
+        world_width: 0.0,
+        depth_override: None,
+        display_visible: false,
+        plot_visible: false,
+        fill_is_3d: false,
+        fill_is_2d_solid: false,
+        render_instance: None,
+        pick_tris: Vec::new(),
+        pick_tris_low: Vec::new(),
+        text_verts: Vec::new(),
+        name,
+        points,
+        points_low,
+        color,
+        selected,
+        aci: 0,
+        pattern_length: 0.0,
+        pattern: [0.0; 8],
+        line_weight_px: 1.0,
+        snap_pts: vec![],
+        tangent_geoms: vec![],
+        key_vertices,
+        aabb,
+        plinegen: true,
+        dash_from_start: false,
+        dash_align_end: None,
+        fill_tris: vec![],
+        fill_tris_low: Vec::new(),
+    })
+}
+
 /// A tessellated triangle mesh ready to upload to the GPU.
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
@@ -316,5 +422,66 @@ impl MeshLodSet {
                 .find(|mesh| !mesh.indices.is_empty())
                 .map(|mesh| mesh.color)
         })
+    }
+
+    /// Interaction-only edge wire for this volume entity (#1030).
+    ///
+    /// ACIS solids carry their B-rep feature edges in `edge_verts` (a flat
+    /// line list of endpoint pairs). Plain meshes (OBJ imports, SubD meshes,
+    /// polyface meshes) leave it empty — their visible wireframe is the
+    /// triangle edges of the highest-detail LOD, exactly what the mesh GPU
+    /// pipeline draws when `edge_verts` is empty — so derive the pairs from
+    /// LOD 0's index buffer the same way. Instanced (block-local) sources are
+    /// resolved through `geometry_lods` / `geometry_edges`; the caller applies
+    /// the INSERT transform when it expands the block, like any other wire.
+    pub fn snap_edge_wire(&self, name: String) -> Option<WireModel> {
+        let color = self.display_color().unwrap_or([0.8, 0.8, 0.85, 1.0]);
+        let (edges, edges_low) = self.geometry_edges();
+        if !edges.is_empty() {
+            let at = |index: usize| -> [f64; 3] {
+                let high = edges[index];
+                let low = edges_low.get(index).copied().unwrap_or([0.0; 3]);
+                [
+                    high[0] as f64 + low[0] as f64,
+                    high[1] as f64 + low[1] as f64,
+                    high[2] as f64 + low[2] as f64,
+                ]
+            };
+            return edge_snap_wire(
+                name,
+                color,
+                false,
+                (0..edges.len() / 2).map(|pair| {
+                    let base = pair * 2;
+                    (at(base), at(base + 1))
+                }),
+            );
+        }
+        let mesh = self
+            .geometry_lods()
+            .iter()
+            .find(|lod| !lod.indices.is_empty())?;
+        let verts = &mesh.verts;
+        let at = |index: usize| -> Option<[f64; 3]> {
+            let high = verts.get(index)?;
+            let low = mesh.verts_low.get(index).copied().unwrap_or([0.0; 3]);
+            Some([
+                high[0] as f64 + low[0] as f64,
+                high[1] as f64 + low[1] as f64,
+                high[2] as f64 + low[2] as f64,
+            ])
+        };
+        let pairs = mesh
+            .indices
+            .chunks_exact(3)
+            .filter_map(|triangle| {
+                Some((
+                    at(triangle[0] as usize)?,
+                    at(triangle[1] as usize)?,
+                    at(triangle[2] as usize)?,
+                ))
+            })
+            .flat_map(|(a, b, c)| [(a, b), (b, c), (c, a)]);
+        edge_snap_wire(name, color, false, pairs)
     }
 }

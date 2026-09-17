@@ -3914,6 +3914,10 @@ impl Scene {
                     None,
                     None,
                     content_viewport,
+                    // Alternate-scale context previews of annotative entities
+                    // (text/dims/leaders) — volume entities are never
+                    // annotative, so no edge wire is needed here.
+                    None,
                 );
                 for wire in &mut context_wires {
                     wire.color = tint;

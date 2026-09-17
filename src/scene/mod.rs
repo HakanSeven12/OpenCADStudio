@@ -79,6 +79,7 @@ pub(crate) fn tessellate_entity(
     view_aabb: Option<[f32; 4]>,
     world_per_pixel: Option<f32>,
     paper_space: bool,
+    volume_meshes: Option<&HashMap<Handle, MeshLodSet>>,
 ) -> Vec<WireModel> {
     let mut wires = convert::tess::tessellate_entity(
         document,
@@ -93,6 +94,54 @@ pub(crate) fn tessellate_entity(
         world_per_pixel,
         paper_space,
     );
+    // Volume entities (3D solids, regions, bodies, surfaces and the mesh
+    // families) render through the mesh pipeline, so their wire path is
+    // empty (PolygonMesh keeps only its grid runs, with no per-vertex
+    // Endpoint or any Midpoint) — which left little for the SNAPPER to hold
+    // onto: no Endpoint/Midpoint on solids, no Nearest/Perpendicular/
+    // Intersection on any 3D object (#1030). Complete that path with one
+    // interaction-only edge wire per entity, generated from the same
+    // tessellation the mesh pipeline draws:
+    //   * the entity's stored B-rep edge `Wire`s when present (kernel results
+    //     and the temporary live-section entity), then
+    //   * the scene's `MeshLodSet` display cache (`edge_verts` feature edges
+    //     for solids; LOD-0 triangle edges for plain meshes).
+    // `display_visible: false` keeps rendering single-sourced in the mesh
+    // pipeline; the wire rides the normal wire set so the snap engine, the
+    // interaction index and the incremental resident patch treat it exactly
+    // like any 2-D entity's geometry.
+    if matches!(
+        entity,
+        EntityType::Solid3D(_)
+            | EntityType::Region(_)
+            | EntityType::Body(_)
+            | EntityType::Surface(_)
+            | EntityType::Mesh(_)
+            | EntityType::PolygonMesh(_)
+            | EntityType::PolyfaceMesh(_)
+    ) {
+        let handle = entity.common().handle;
+        let name = handle.value().to_string();
+        let color = wires
+            .first()
+            .map(|wire| wire.color)
+            .unwrap_or([0.8, 0.8, 0.85, 1.0]);
+        let stored = match entity {
+            EntityType::Solid3D(solid) => solid.wires.as_slice(),
+            EntityType::Surface(surface) => surface.wires.as_slice(),
+            EntityType::Region(region) => region.wires.as_slice(),
+            EntityType::Body(body) => body.wires.as_slice(),
+            _ => &[],
+        };
+        let edge_wire = if stored.is_empty() {
+            volume_meshes
+                .and_then(|meshes| meshes.get(&handle))
+                .and_then(|set| set.snap_edge_wire(name))
+        } else {
+            model::solid_model::entity_edge_snap_wire(stored, name, color)
+        };
+        wires.extend(edge_wire);
+    }
     if matches!(entity, EntityType::Solid3D(_) | EntityType::Surface(_)) {
         let handle = entity.common().handle;
         for source in model::solid_history::loft_visible_history_entities(document, handle) {
@@ -5896,6 +5945,7 @@ impl Scene {
                 None,
                 None,
                 anno_scale_override.is_some(),
+                Some(&self.meshes),
             );
             memo_updates.push((*h, Arc::new(raw.clone())));
             let mut faded = raw;
@@ -9809,6 +9859,7 @@ impl Scene {
                 .collect();
             hits_ms = crate::perf::elapsed_ms(t_hits);
             let t_tess_miss = perf.then(iced::time::Instant::now);
+            let volume_meshes = &self.meshes;
             let miss_pairs: Vec<(Handle, Arc<Vec<WireModel>>)> = misses
                 .par_iter()
                 .map(|e| {
@@ -9825,6 +9876,7 @@ impl Scene {
                         view_aabb,
                         wpp,
                         paper,
+                        Some(volume_meshes),
                     );
                     (e.common().handle, Arc::new(w))
                 })
@@ -9844,6 +9896,7 @@ impl Scene {
             out
         } else {
             let t_tess_all = perf.then(iced::time::Instant::now);
+            let volume_meshes = &self.meshes;
             let out: Vec<WireModel> = visible
                 .into_par_iter()
                 .flat_map(|e| {
@@ -9859,6 +9912,7 @@ impl Scene {
                         view_aabb,
                         wpp,
                         paper,
+                        Some(volume_meshes),
                     )
                 })
                 .collect();
@@ -9893,6 +9947,10 @@ impl Scene {
                         view_aabb,
                         wpp,
                         paper,
+                        // The temporary sectioned entity carries its own cut
+                        // edge `Wire`s, which the volume hook prefers over
+                        // this (un-cut) cache.
+                        Some(&self.meshes),
                     )),
                     Ok(None) => Some(Vec::new()),
                     Err(()) => None,
@@ -10808,6 +10866,7 @@ vis_index={:.1} visible_probe={:.1}",
             None,
             None,
             paper,
+            Some(&self.meshes),
         )
     }
 

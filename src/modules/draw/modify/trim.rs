@@ -3810,6 +3810,55 @@ mod tests {
             other => panic!("expected LwPolyline, got {other:?}"),
         }
     }
+
+    /// #1318 repro: a 3D polyline whose first segment is not horizontal has no
+    /// plan-view shape, so it samples to nothing. The seam test then compared
+    /// two empty ends as equal and sliced the empty sample from index 1.
+    #[test]
+    fn sampling_skips_segments_with_no_plan_shape() {
+        use acadrust::entities::{Polyline3D, Vertex3DPolyline};
+
+        let mut pl = Polyline3D::new();
+        pl.vertices = vec![
+            // Vertical: an upright curve plane, dropped by `entity_curve_xy`.
+            Vertex3DPolyline::from_xyz(0.0, 0.0, 0.0),
+            Vertex3DPolyline::from_xyz(0.0, 0.0, 10.0),
+            // Horizontal, so this one does sample.
+            Vertex3DPolyline::from_xyz(10.0, 0.0, 10.0),
+        ];
+
+        let pts = sample_entity_xy(&EntityType::Polyline3D(pl));
+        assert!(
+            !pts.is_empty(),
+            "the horizontal segment still has to be sampled"
+        );
+        assert!(
+            pts.iter().all(|p| p.iter().all(|c| c.is_finite())),
+            "sampled points stay finite: {pts:?}"
+        );
+    }
+
+    /// The same skip must not swallow a leading segment that does sample, and
+    /// must keep dropping the duplicated seam vertex between two of them.
+    #[test]
+    fn sampling_still_joins_segments_at_their_seam() {
+        use acadrust::entities::{Polyline3D, Vertex3DPolyline};
+
+        let mut pl = Polyline3D::new();
+        pl.vertices = vec![
+            Vertex3DPolyline::from_xyz(0.0, 0.0, 0.0),
+            Vertex3DPolyline::from_xyz(10.0, 0.0, 0.0),
+            Vertex3DPolyline::from_xyz(10.0, 10.0, 0.0),
+        ];
+
+        let pts = sample_entity_xy(&EntityType::Polyline3D(pl));
+        let seam = [10.0, 0.0];
+        assert_eq!(
+            pts.iter().filter(|p| **p == seam).count(),
+            1,
+            "the shared vertex appears once, not twice: {pts:?}"
+        );
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -3978,6 +4027,13 @@ fn sample_entity_xy(e: &EntityType) -> Vec<[f64; 2]> {
         let mut pts: Vec<[f64; 2]> = Vec::new();
         for seg in crate::modules::draw::modify::explode::explode_polyline_segments(e) {
             let sp = sample_entity_xy(&seg);
+            // A segment with no plan-view shape samples to nothing — an
+            // edge-on plane has no XY curve, so `entity_curve_xy` declines it.
+            // Skipping it here also keeps the seam test below from comparing
+            // two `None`s and then slicing an empty sample (#1318).
+            if sp.is_empty() {
+                continue;
+            }
             if pts.last() == sp.first() {
                 pts.extend_from_slice(&sp[1..]);
             } else {

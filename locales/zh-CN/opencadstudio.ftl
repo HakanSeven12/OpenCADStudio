@@ -1944,6 +1944,7 @@ file =
     .saveall-saved-saved-drawing-s = SAVEALL:已保存 __ocs_fmt_0__ 绘图 __ocs_fmt_1__ 。
     .saveall-already-has-a-save-running = SAVEALL: __ocs_fmt_0__ 已经有一个保存运行
     .saveall-failed-e = SAVEALL : __ocs_fmt_0__ 失败 : __ocs_fmt_1__
+    .load-linetype-file = 加载线型文件
     .script-path-to-the-scr-file = SCRIPT  路径 :
     .script-cannot-read-p-e = SCRIPT: 无法读取__ocs_fmt_0__: __ocs_fmt_1__
     .script-running-command-s-from-p = SCRIPT:从__ocs_fmt_1__运行__ocs_fmt_0__命令。

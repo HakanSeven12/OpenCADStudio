@@ -25,6 +25,9 @@ pub struct QueuedOpen {
 }
 
 static DROPPED: Mutex<VecDeque<QueuedOpen>> = Mutex::new(VecDeque::new());
+// Dropped raster images never open as drawings: they are registered by name
+// so RasterImage entities the open drawing references can resolve them.
+static DROPPED_IMAGES: Mutex<VecDeque<(String, Vec<u8>)>> = Mutex::new(VecDeque::new());
 // `OnceLock::take` needs `&mut self`, which an immutable static cannot
 // provide — an AtomicBool swap gives the same set-once marker and can still
 // be reverted when no document exists.
@@ -67,6 +70,32 @@ pub fn enqueue_open(name: String, bytes: Vec<u8>) -> bool {
         bytes,
         restore_key: None,
     })
+}
+
+/// Queue a dropped raster image for the poll to register as decodable bytes
+/// (name-keyed) — the web analogue of the drawing folder a drawing's images
+/// live beside natively. Returns `false` when the queue is full.
+pub fn enqueue_image(name: String, bytes: Vec<u8>) -> bool {
+    let mut queue = DROPPED_IMAGES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if queue.len() >= QUEUE_CAP {
+        drop(queue);
+        warn(&format!(
+            "ocs: dropped-image queue full; ignoring \"{name}\""
+        ));
+        return false;
+    }
+    queue.push_back((name, bytes));
+    true
+}
+
+/// Pop the oldest dropped image the poll has not registered yet.
+pub fn take_dropped_image() -> Option<(String, Vec<u8>)> {
+    DROPPED_IMAGES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .pop_front()
 }
 
 /// Queue an autosave-restore file tagged with its snapshot key. Returns
@@ -162,22 +191,26 @@ pub fn install() {
             // reads that begin after the event returns, and parallel reads
             // would enqueue (and open) in completion order, not drop order.
             let mut reads: Vec<(String, js_sys::Promise)> = Vec::new();
+            let mut image_reads: Vec<(String, js_sys::Promise)> = Vec::new();
             for index in 0..files.length() {
                 let Some(file) = files.get(index) else {
                     continue;
                 };
                 let name = file.name();
                 // A drop has no picker filter: accept the formats the web Open
-                // dialog accepts; anything else is logged, never parsed.
-                if !is_drawing_name(&name) {
+                // dialog accepts, plus the raster formats the IMAGE command
+                // accepts; anything else is logged, never parsed.
+                if is_drawing_name(&name) {
+                    reads.push((name, file.array_buffer()));
+                } else if is_image_name(&name) {
+                    image_reads.push((name, file.array_buffer()));
+                } else {
                     warn(&format!(
-                        "ocs: ignored dropped file \"{name}\" (not .dwg/.dxf)"
+                        "ocs: ignored dropped file \"{name}\" (not .dwg/.dxf/image)"
                     ));
-                    continue;
                 }
-                reads.push((name, file.array_buffer()));
             }
-            if reads.is_empty() {
+            if reads.is_empty() && image_reads.is_empty() {
                 return;
             }
             // The page is the only intended drop target; hide drawing drops
@@ -189,12 +222,24 @@ pub fn install() {
                         Ok(buffer) => {
                             // A full queue warns on the console; the drop
                             // handler has no command line to talk to.
-                            let _ =
-                                enqueue_open(name, js_sys::Uint8Array::new(&buffer).to_vec());
+                            let _ = enqueue_open(name, js_sys::Uint8Array::new(&buffer).to_vec());
                         }
                         Err(error) => {
                             web_sys::console::error_1(&wasm_bindgen::JsValue::from_str(&format!(
                                 "ocs: failed to read dropped file \"{name}\": {}",
+                                error.as_string().unwrap_or_else(|| format!("{error:?}"))
+                            )))
+                        }
+                    }
+                }
+                for (name, read) in image_reads {
+                    match JsFuture::from(read).await {
+                        Ok(buffer) => {
+                            let _ = enqueue_image(name, js_sys::Uint8Array::new(&buffer).to_vec());
+                        }
+                        Err(error) => {
+                            web_sys::console::error_1(&wasm_bindgen::JsValue::from_str(&format!(
+                                "ocs: failed to read dropped image \"{name}\": {}",
                                 error.as_string().unwrap_or_else(|| format!("{error:?}"))
                             )))
                         }
@@ -218,7 +263,25 @@ fn is_drawing_name(name: &str) -> bool {
     // a dot-less name is its own extension, so a file literally named
     // "DWG"/"dxf" parses and must not be filtered out here.
     matches!(
-        name.rsplit('.').next().unwrap_or_default().to_ascii_lowercase().as_str(),
+        name.rsplit('.')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
         "dwg" | "dxf"
+    )
+}
+
+/// The decodable raster set matches the IMAGE picker's filter (and the `image`
+/// crate features the app builds with) — anything else would queue bytes that
+/// can only ever fail to decode.
+fn is_image_name(name: &str) -> bool {
+    matches!(
+        name.rsplit('.')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "png" | "jpg" | "jpeg" | "bmp" | "tiff" | "tif"
     )
 }

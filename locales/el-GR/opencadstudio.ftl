@@ -1956,6 +1956,7 @@ file =
     .saveall-saved-saved-drawing-s = SAVEALL: αποθηκεύτηκαν __ocs_fmt_0__ σχέδιο(α)__ocs_fmt_1__.
     .saveall-already-has-a-save-running = SAVEALL: για το __ocs_fmt_0__ εκτελείται ήδη αποθήκευση
     .saveall-failed-e = SAVEALL: το __ocs_fmt_0__ απέτυχε: __ocs_fmt_1__
+    .load-linetype-file = Φόρτωση αρχείου τύπου γραμμής
     .script-path-to-the-scr-file = SCRIPT  διαδρομή προς το αρχείο .scr:
     .script-cannot-read-p-e = SCRIPT: δεν είναι δυνατή η ανάγνωση του __ocs_fmt_0__: __ocs_fmt_1__
     .script-running-command-s-from-p = SCRIPT: εκτέλεση __ocs_fmt_0__ εντολής(ών) από __ocs_fmt_1__.

@@ -284,23 +284,34 @@ mod imp {
 
     /// Record a fetch result: `Some(bytes)` on success, `None` on failure.
     pub fn insert(script: Script, bytes: Option<Vec<u8>>) {
-        let mut store = store().lock().unwrap();
-        match bytes {
-            Some(bytes) => {
-                let bytes = Arc::new(bytes);
-                store.states.insert(script, State::Loaded(bytes.clone()));
-                if script != Script::Latin {
-                    store
-                        .states
-                        .entry(Script::Latin)
-                        .or_insert_with(|| State::Loaded(bytes));
+        let mut fetched: Option<Arc<Vec<u8>>> = None;
+        {
+            let mut store = store().lock().unwrap();
+            match bytes {
+                Some(bytes) => {
+                    let bytes = Arc::new(bytes);
+                    store.states.insert(script, State::Loaded(bytes.clone()));
+                    if script != Script::Latin {
+                        store
+                            .states
+                            .entry(Script::Latin)
+                            .or_insert_with(|| State::Loaded(bytes.clone()));
+                    }
+                    fetched = Some(bytes);
+                }
+                None => {
+                    store.states.insert(script, State::Failed);
                 }
             }
-            None => {
-                store.states.insert(script, State::Failed);
-            }
         }
-        drop(store);
+        // Join the system-font database before the generation bump wakes
+        // consumers: a text style naming a TTF family (or one of its aliases,
+        // e.g. Arial → Noto Sans) then resolves to filled glyphs instead of
+        // LFF strokes. Family-name memo + glyph caches are invalidated by the
+        // caller (`clear_fallback_cache`) on the same message.
+        if let Some(bytes) = fetched {
+            crate::scene::text::sysfont::register_web_font(&bytes);
+        }
         super::bump_generation();
     }
 
@@ -320,7 +331,9 @@ mod imp {
         let resp_val = JsFuture::from(win.fetch_with_str(script.asset()))
             .await
             .map_err(|e| format!("{e:?}"))?;
-        let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "bad response".to_string())?;
+        let resp: web_sys::Response = resp_val
+            .dyn_into()
+            .map_err(|_| "bad response".to_string())?;
         if !resp.ok() {
             return Err(format!("HTTP {}", resp.status()));
         }

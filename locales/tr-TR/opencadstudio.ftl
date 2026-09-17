@@ -1940,6 +1940,7 @@ file =
     .saveall-saved-saved-drawing-s = SAVEALL: __ocs_fmt_0__ çizim kaydedildi__ocs_fmt_1__.
     .saveall-already-has-a-save-running = SAVEALL: __ocs_fmt_0__ için zaten bir kaydetme işlemi çalışıyor
     .saveall-failed-e = SAVEALL: __ocs_fmt_0__ başarısız: __ocs_fmt_1__
+    .load-linetype-file = Çizgi tipi dosyasını yükle
     .script-path-to-the-scr-file = SCRIPT  .scr dosyasının yolu:
     .script-cannot-read-p-e = SCRIPT: __ocs_fmt_0__ okunamıyor: __ocs_fmt_1__
     .script-running-command-s-from-p = SCRIPT: __ocs_fmt_1__ dosyasından __ocs_fmt_0__ komut çalıştırılıyor.

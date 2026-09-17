@@ -4,6 +4,7 @@
 // from the RasterImage entity's insertion point, u/v vectors, and pixel size.
 
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -22,12 +23,36 @@ fn quad_verts(corners: &[[f32; 3]; 4], corners_low: &[[f32; 3]; 4]) -> Vec<Image
     let [p0, p1, p2, p3] = *corners;
     let [l0, l1, l2, l3] = *corners_low;
     vec![
-        ImageQuadVertex { pos: p0, uv: [0.0, 1.0], pos_low: l0 },
-        ImageQuadVertex { pos: p1, uv: [1.0, 1.0], pos_low: l1 },
-        ImageQuadVertex { pos: p2, uv: [1.0, 0.0], pos_low: l2 },
-        ImageQuadVertex { pos: p0, uv: [0.0, 1.0], pos_low: l0 },
-        ImageQuadVertex { pos: p2, uv: [1.0, 0.0], pos_low: l2 },
-        ImageQuadVertex { pos: p3, uv: [0.0, 0.0], pos_low: l3 },
+        ImageQuadVertex {
+            pos: p0,
+            uv: [0.0, 1.0],
+            pos_low: l0,
+        },
+        ImageQuadVertex {
+            pos: p1,
+            uv: [1.0, 1.0],
+            pos_low: l1,
+        },
+        ImageQuadVertex {
+            pos: p2,
+            uv: [1.0, 0.0],
+            pos_low: l2,
+        },
+        ImageQuadVertex {
+            pos: p0,
+            uv: [0.0, 1.0],
+            pos_low: l0,
+        },
+        ImageQuadVertex {
+            pos: p2,
+            uv: [1.0, 0.0],
+            pos_low: l2,
+        },
+        ImageQuadVertex {
+            pos: p3,
+            uv: [0.0, 0.0],
+            pos_low: l3,
+        },
     ]
 }
 
@@ -39,12 +64,7 @@ fn clip_triangles_px(img: &acadrust::entities::RasterImage) -> Vec<[f64; 2]> {
     use acadrust::entities::{ClipMode, ClipType};
     let w = img.size.x;
     let h = img.size.y;
-    let quad = || {
-        vec![
-            [0.0, 0.0], [w, 0.0], [w, h],
-            [0.0, 0.0], [w, h], [0.0, h],
-        ]
-    };
+    let quad = || vec![[0.0, 0.0], [w, 0.0], [w, h], [0.0, 0.0], [w, h], [0.0, h]];
     if !img.clipping_enabled {
         return quad();
     }
@@ -114,9 +134,7 @@ pub struct ImageModel {
 impl ImageModel {
     /// Build an ImageModel from a DXF RasterImage entity.
     /// Returns `None` if the image file cannot be opened or decoded.
-    pub fn from_raster_image(
-        img: &acadrust::entities::RasterImage,
-    ) -> Option<Self> {
+    pub fn from_raster_image(img: &acadrust::entities::RasterImage) -> Option<Self> {
         let w = img.size.x;
         let h = img.size.y;
         // Model-space geometry is drawn in (WCS - world_offset) so large UTM-
@@ -160,7 +178,11 @@ impl ImageModel {
                 let fu = (px / w) as f32;
                 let fv = (py / h) as f32;
                 ImageQuadVertex {
-                    pos: [ox + ux * fu + vx * fv, oy + uy * fu + vy * fv, oz + uz * fu + vz * fv],
+                    pos: [
+                        ox + ux * fu + vx * fv,
+                        oy + uy * fu + vy * fv,
+                        oz + uz * fu + vz * fv,
+                    ],
                     uv: [fu, 1.0 - fv],
                     pos_low: [oxl, oyl, ozl],
                 }
@@ -367,6 +389,82 @@ fn image_cache() -> &'static Mutex<HashMap<String, ImageCacheEntry>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn source_cache() -> &'static Mutex<HashMap<String, Arc<Vec<u8>>>> {
+    static SOURCES: OnceLock<Mutex<HashMap<String, Arc<Vec<u8>>>>> = OnceLock::new();
+    SOURCES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Lower-cased trailing component of a path-style reference. Drawings store
+/// image paths as the author wrote them (often an absolute foreign path), so
+/// name — not full path — is the only component a dropped or picked file on
+/// another machine can be expected to match.
+pub(crate) fn file_name_key(path: &str) -> String {
+    path.rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+}
+
+/// Do two image references name the same file? Compares trailing components
+/// case-insensitively (the web has no path beyond the name at all, and Windows
+/// paths are case-insensitive where the drawing was authored).
+pub(crate) fn same_file_name(a: &str, b: &str) -> bool {
+    let (a, b) = (file_name_key(a), file_name_key(b));
+    !a.is_empty() && a == b
+}
+
+/// Keep bytes selected through a file dialog or dropped onto the page, keyed
+/// by the reference the drawing will carry. The browser exposes no reusable
+/// filesystem path, so `decode_reference` reads these instead of a disk file;
+/// native builds also skip a second disk read. Registering invalidates every
+/// memoised answer that names the same file, so a re-pick (or a drop that
+/// finally supplies a missing reference) re-decodes instead of replaying a
+/// stale success or a cached failure.
+pub fn register_source(path: &str, bytes: Arc<Vec<u8>>) {
+    source_cache()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .insert(path.to_string(), bytes);
+    if let Ok(mut cache) = image_cache().lock() {
+        cache.retain(|cached, _| !same_file_name(cached, path));
+    }
+}
+
+/// Every reference with bytes currently registered (picked or dropped).
+/// Used after a web open settles to catch images registered while the load —
+/// which builds the raster models — was already running.
+pub fn registered_image_names() -> Vec<String> {
+    source_cache()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .keys()
+        .cloned()
+        .collect()
+}
+
+/// Bytes registered for exactly this reference.
+fn registered_bytes(path: &str) -> Option<Arc<Vec<u8>>> {
+    source_cache()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .get(path)
+        .cloned()
+}
+
+/// Bytes registered under a different path that names the same file — the
+/// web fallback for images inside opened drawings, whose stored path is the
+/// original author's (a foreign absolute path no browser can open) while the
+/// user dropped or picked only the bare file.
+fn registered_bytes_by_name(path: &str) -> Option<Arc<Vec<u8>>> {
+    let cache = source_cache()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    cache
+        .iter()
+        .find(|(key, _)| same_file_name(key, path))
+        .map(|(_, bytes)| Arc::clone(bytes))
+}
+
 /// Drop every memoised image so the next resolve re-reads / re-fetches. Called
 /// when a new document is opened — a fresh drawing shouldn't inherit a prior
 /// one's stale successes or offline failures.
@@ -400,15 +498,42 @@ pub fn resolve_image(path: &str) -> Option<DecodedImage> {
     entry.get_or_init(|| decode_reference(path)).clone()
 }
 
-/// Decode a reference (local path or remote URL) to RGBA pixels.
+/// Decode a reference to RGBA pixels. Priority: registered bytes (picked or
+/// dropped — the only source on the web, where the reference is a name-only
+/// path), then the filesystem (native), then any registered file that merely
+/// shares the name (a drawing's foreign absolute path vs a dropped file).
+/// `http`/`https` references stay a native-only network fetch.
 fn decode_reference(path: &str) -> Option<DecodedImage> {
     let lower = path.to_ascii_lowercase();
-    let img = if lower.starts_with("http://") || lower.starts_with("https://") {
+    if lower.starts_with("http://") || lower.starts_with("https://") {
         let bytes = fetch_remote(path)?;
-        image::load_from_memory(&bytes).ok()?
-    } else {
-        image::open(Path::new(path)).ok()?
-    };
+        return decode_from_memory(&bytes);
+    }
+    if let Some(bytes) = registered_bytes(path) {
+        return decode_from_memory(&bytes);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(decoded) = decode_from_file(path) {
+        return Some(decoded);
+    }
+    registered_bytes_by_name(path)
+        .as_deref()
+        .and_then(|bytes| decode_from_memory(bytes))
+}
+
+/// Decode in-memory image bytes (picked file, drop, or network body) to RGBA.
+fn decode_from_memory(bytes: &[u8]) -> Option<DecodedImage> {
+    let img = image::load_from_memory(bytes).ok()?;
+    rgba_image(img)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn decode_from_file(path: &str) -> Option<DecodedImage> {
+    let img = image::open(Path::new(path)).ok()?;
+    rgba_image(img)
+}
+
+fn rgba_image(img: image::DynamicImage) -> Option<DecodedImage> {
     let rgba = img.into_rgba8();
     let (width, height) = rgba.dimensions();
     Some(DecodedImage {
@@ -445,4 +570,99 @@ fn fetch_remote(url: &str) -> Option<Vec<u8>> {
 #[cfg(target_arch = "wasm32")]
 fn fetch_remote(_url: &str) -> Option<Vec<u8>> {
     None
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    /// Encode a small deterministic PNG entirely in memory — the same codec
+    /// `decode_from_memory` reads, so no fixture file is needed.
+    fn png_bytes(w: u32, h: u32, tint: u8) -> Vec<u8> {
+        let img =
+            image::RgbaImage::from_fn(w, h, |x, y| image::Rgba([x as u8, y as u8, tint, 0xff]));
+        let mut out = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .expect("encode test png");
+        out
+    }
+
+    /// Registered bytes decode without any filesystem path — the web attach
+    /// flow, where the reference is the picked file's name and nothing else.
+    #[test]
+    fn registered_bytes_decode_without_a_filesystem_path() {
+        let path = "memory://image-registry-exact.png";
+        register_source(path, Arc::new(png_bytes(7, 5, 0x42)));
+        let decoded = resolve_image(path).expect("registered bytes should decode");
+
+        assert_eq!((decoded.width, decoded.height), (7, 5));
+        assert_eq!(decoded.pixels.len(), 7 * 5 * 4);
+        // First texel is (x=0, y=0) — row 0 counted from the top in the PNG.
+        assert_eq!(&decoded.pixels[0..3], &[0, 0, 0x42]);
+    }
+
+    /// A re-registration replaces the bytes AND the memoised decode: picking
+    /// the same name again must show the new pixels, not the cached old ones.
+    #[test]
+    fn reregistering_replaces_the_memoised_decode() {
+        let path = "memory://image-registry-repick.png";
+        register_source(path, Arc::new(png_bytes(3, 3, 0x11)));
+        assert_eq!(resolve_image(path).expect("first decode").width, 3);
+
+        register_source(path, Arc::new(png_bytes(9, 4, 0x22)));
+        let decoded = resolve_image(path).expect("second decode");
+        assert_eq!((decoded.width, decoded.height), (9, 4));
+        assert_eq!(&decoded.pixels[0..3], &[0, 0, 0x22]);
+    }
+
+    /// The opened-drawing flow: the entity stores the author's absolute path,
+    /// which exists on no machine but this one's — a registered file that
+    /// merely shares the (case-insensitive) name resolves it.
+    #[test]
+    fn a_name_only_match_resolves_a_foreign_path() {
+        register_source("Registry-Name.png", Arc::new(png_bytes(4, 2, 0x33)));
+        let foreign = if cfg!(windows) {
+            "C:\\far away\\registry-name.PNG"
+        } else {
+            "/mnt/far away/registry-name.PNG"
+        };
+
+        let decoded = resolve_image(foreign).expect("name match should decode");
+        assert_eq!((decoded.width, decoded.height), (4, 2));
+        assert_eq!(decoded.pixels.len(), 4 * 2 * 4);
+    }
+
+    /// A cached failure must not outlive the registration that fixes it: the
+    /// drop flow registers bytes after the open already memoised `None`.
+    #[test]
+    fn registering_after_a_failed_resolve_retries_the_decode() {
+        let path = "memory://image-registry-late.png";
+        let foreign = format!("/definitely/not/here/{path}");
+        assert!(resolve_image(&foreign).is_none(), "nothing registered yet");
+
+        register_source(path, Arc::new(png_bytes(2, 2, 0x44)));
+        let decoded = resolve_image(&foreign).expect("late registration should resolve");
+        assert_eq!((decoded.width, decoded.height), (2, 2));
+    }
+
+    /// A reference nothing can satisfy stays `None` (and stays memoised as
+    /// such) — the placeholder keeps its broken-reference treatment.
+    #[test]
+    fn an_unmatchable_reference_stays_none() {
+        assert!(resolve_image("memory://image-registry-missing.png").is_none());
+        assert!(resolve_image("").is_none());
+        assert!(resolve_image("   ").is_none());
+    }
+
+    /// The name comparison keys on the trailing component only, ignoring
+    /// case and separators, and rejects empty names.
+    #[test]
+    fn file_name_comparison_rules() {
+        assert!(same_file_name("C:\\A\\B\\site.png", "site.png"));
+        assert!(same_file_name("/a/b/SITE.PNG", "site.PNG"));
+        assert!(!same_file_name("site.png", "site.jpg"));
+        assert!(!same_file_name("", ""));
+        assert!(!same_file_name("C:\\dir\\", "dir"));
+    }
 }

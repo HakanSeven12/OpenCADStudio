@@ -2320,6 +2320,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "SCALETEXT: scaled {count} text entity(ies)." => Some(("styles", "scaletext-scaled-count-text-entity-ies")),
         "SCALETEXT: select Text/MText entities first." => Some(("styles", "scaletext-select-text-mtext-entities-first")),
         "SCALETEXT: value must be positive." => Some(("styles", "scaletext-value-must-be-positive")),
+        "Load linetype file" => Some(("file", "load-linetype-file")),
         "SCRIPT  path to the .scr file:" => Some(("file", "script-path-to-the-scr-file")),
         "SCRIPT: cannot read {p}: {e}" => Some(("file", "script-cannot-read-p-e")),
         "SCRIPT: running {} command(s) from {p}." => Some(("file", "script-running-command-s-from-p")),

@@ -1,4 +1,6 @@
-use cosmic_text::{Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache, Weight, Wrap};
+use cosmic_text::{
+    Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache, Weight, Wrap,
+};
 
 pub(super) const ATLAS_WIDTH: u32 = 512;
 pub(super) const ATLAS_HEIGHT: u32 = 256;
@@ -37,24 +39,14 @@ pub(super) fn empty_label_atlas() -> LabelAtlas {
     }
 }
 
-pub(super) fn build_label_atlas(
-    labels: &[String; FACE_TILE_COUNT],
-) -> Option<LabelAtlas> {
+pub(super) fn build_label_atlas(labels: &[String; FACE_TILE_COUNT]) -> Option<LabelAtlas> {
     let (mut font_system, family, weight) = font_system(labels)?;
     let mut swash_cache = SwashCache::new();
     let mut texts: Vec<&str> = labels.iter().map(String::as_str).collect();
     texts.extend(["N", "E", "S", "W"]);
     let bitmaps: Vec<LabelBitmap> = texts
         .into_iter()
-        .map(|text| {
-            rasterize_label(
-                &mut font_system,
-                &mut swash_cache,
-                text,
-                family,
-                weight,
-            )
-        })
+        .map(|text| rasterize_label(&mut font_system, &mut swash_cache, text, family, weight))
         .collect();
 
     Some(pack_bitmaps(&bitmaps))
@@ -184,7 +176,9 @@ fn font_system(
     Some((
         FontSystem::new_with_locale_and_db("en-US".to_owned(), database),
         Some(script.family()),
-        Weight::NORMAL,
+        // Match the native request; fontdb picks the nearest available weight
+        // (the subsets ship Regular) and `embolden_alpha` adds the thickness.
+        Weight::SEMIBOLD,
     ))
 }
 

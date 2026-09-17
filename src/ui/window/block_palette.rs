@@ -6,7 +6,9 @@ use crate::modules::IconKind;
 use crate::scene::model::wire_model::WireModel;
 use crate::ui::dock::{DockMsg, PanelId};
 use iced::widget::canvas::{Frame, Path, Program, Stroke};
-use iced::widget::{button, canvas, column, container, mouse_area, row, scrollable, text, text_input, tooltip};
+use iced::widget::{
+    button, canvas, column, container, mouse_area, row, scrollable, text, text_input, tooltip,
+};
 use iced::{Background, Border, Color, Element, Fill, Length, Theme};
 
 const TOOL_H: f32 = 22.0;
@@ -26,6 +28,10 @@ pub enum BlockPaletteMsg {
     Insert(String),
     Refresh,
     FilePicked(Result<std::path::PathBuf, String>),
+    /// Web: the picked drawing arrived already parsed from the picker's
+    /// bytes — a name-only path has nothing behind it to read later.
+    #[cfg(target_arch = "wasm32")]
+    FilePickedDoc(Result<(String, acadrust::CadDocument), String>),
 }
 
 /// Thumbnail box sizes for the three preview-size settings.
@@ -109,8 +115,12 @@ impl<'a> Program<Message> for BlockPreviewCanvas<'a> {
         let pad = 6.0;
         let inner_w = (bounds.width - 2.0 * pad).max(1.0);
         let inner_h = (bounds.height - 2.0 * pad).max(1.0);
-        let (mut minx, mut miny, mut maxx, mut maxy) =
-            (f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+        let (mut minx, mut miny, mut maxx, mut maxy) = (
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        );
         let mut any = false;
         for w in self.wires {
             for p in &w.points {
@@ -125,8 +135,19 @@ impl<'a> Program<Message> for BlockPreviewCanvas<'a> {
         }
         if !any {
             // Placeholder box so an empty block still reads as a card.
-            let rect = Path::rectangle(iced::Point::new(pad, pad), iced::Size::new(inner_w, inner_h));
-            frame.fill(&rect, Color { r: 0.10, g: 0.10, b: 0.10, a: 1.0 });
+            let rect = Path::rectangle(
+                iced::Point::new(pad, pad),
+                iced::Size::new(inner_w, inner_h),
+            );
+            frame.fill(
+                &rect,
+                Color {
+                    r: 0.10,
+                    g: 0.10,
+                    b: 0.10,
+                    a: 1.0,
+                },
+            );
             return vec![frame.into_geometry()];
         }
         let span_x = (maxx - minx).max(1e-6);
@@ -135,10 +156,16 @@ impl<'a> Program<Message> for BlockPreviewCanvas<'a> {
         let ox = (bounds.width - span_x * scale) * 0.5;
         let oy = (bounds.height - span_y * scale) * 0.5;
         // World up → screen down; centre the fitted AABB.
-        let map = |x: f32, y: f32| iced::Point::new(ox + (x - minx) * scale, oy + (maxy - y) * scale);
+        let map =
+            |x: f32, y: f32| iced::Point::new(ox + (x - minx) * scale, oy + (maxy - y) * scale);
         // Solid fills first so strokes sit on top.
         for w in self.wires {
-            let col = Color { r: w.color[0], g: w.color[1], b: w.color[2], a: 0.55 };
+            let col = Color {
+                r: w.color[0],
+                g: w.color[1],
+                b: w.color[2],
+                a: 0.55,
+            };
             for tri in w.fill_tris.chunks(3) {
                 if tri.len() == 3 {
                     let path = Path::new(|p| {
@@ -153,7 +180,12 @@ impl<'a> Program<Message> for BlockPreviewCanvas<'a> {
         }
         // Polylines, split into runs on NaN separators (NaN = polyline break).
         for w in self.wires {
-            let col = Color { r: w.color[0], g: w.color[1], b: w.color[2], a: 1.0 };
+            let col = Color {
+                r: w.color[0],
+                g: w.color[1],
+                b: w.color[2],
+                a: 1.0,
+            };
             let width = if w.line_weight_px > 1.5 { 2.0 } else { 1.0 };
             let mut run: Vec<iced::Point> = Vec::new();
             let flush = |frame: &mut Frame, run: &mut Vec<iced::Point>, col: Color, width: f32| {
@@ -197,7 +229,9 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
         crate::ui::icons::themed_secondary(crate::ui::icons::PIN, 12.0)
     };
     let pin = button(pin_icon)
-        .on_press(Message::Dock(DockMsg::AutoCollapseToggle(PanelId::BlockPalette)))
+        .on_press(Message::Dock(DockMsg::AutoCollapseToggle(
+            PanelId::BlockPalette,
+        )))
         .style(move |theme: &Theme, status| {
             let mut style = button::subtle(theme, status);
             if auto_collapse {
@@ -210,13 +244,26 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
             style
         })
         .padding([3, 5]);
-    let pin = tooltip(pin, text(crate::t!("Auto")).size(10), tooltip::Position::Bottom).gap(4);
+    let pin = tooltip(
+        pin,
+        text(crate::t!("Auto")).size(10),
+        tooltip::Position::Bottom,
+    )
+    .gap(4);
 
-    let close = button(crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 12.0))
-        .on_press(Message::Dock(DockMsg::Close(PanelId::BlockPalette)))
-        .style(button::subtle)
-        .padding([3, 5]);
-    let close = tooltip(close, text(crate::t!("Close")).size(10), tooltip::Position::Bottom).gap(4);
+    let close = button(crate::ui::icons::themed_secondary(
+        crate::ui::icons::CLOSE,
+        12.0,
+    ))
+    .on_press(Message::Dock(DockMsg::Close(PanelId::BlockPalette)))
+    .style(button::subtle)
+    .padding([3, 5]);
+    let close = tooltip(
+        close,
+        text(crate::t!("Close")).size(10),
+        tooltip::Position::Bottom,
+    )
+    .gap(4);
 
     let title_bar = mouse_area(
         container(
@@ -251,7 +298,9 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
             BlockPaletteMsg::PickFile,
         ),
         icon_button(
-            IconKind::Svg(include_bytes!("../../../assets/icons/blocks/preview_size.svg")),
+            IconKind::Svg(include_bytes!(
+                "../../../assets/icons/blocks/preview_size.svg"
+            )),
             BlockPaletteMsg::CyclePreviewSize,
         ),
     ]
@@ -264,12 +313,17 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
         } else {
             "No matches"
         };
-        container(text(crate::t!(msg)).size(12).color(iced::Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 }))
-            .center_x(Fill)
-            .center_y(Fill)
-            .width(Fill)
-            .height(Fill)
-            .into()
+        container(text(crate::t!(msg)).size(12).color(iced::Color {
+            r: 0.55,
+            g: 0.55,
+            b: 0.55,
+            a: 1.0,
+        }))
+        .center_x(Fill)
+        .center_y(Fill)
+        .width(Fill)
+        .height(Fill)
+        .into()
     } else {
         let mut col = column![].spacing(6);
         for chunk in filtered.chunks(palette.preview_size.columns()) {
@@ -279,14 +333,12 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
             }
             col = col.push(r);
         }
-        scrollable(
-            container(col).padding(iced::Padding {
-                top: 0.0,
-                right: 8.0,
-                bottom: 6.0,
-                left: 0.0,
-            }),
-        )
+        scrollable(container(col).padding(iced::Padding {
+            top: 0.0,
+            right: 8.0,
+            bottom: 6.0,
+            left: 0.0,
+        }))
         .width(Fill)
         .height(Fill)
         .into()
@@ -309,9 +361,11 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
 
 fn block_card<'a>(palette: &'a BlockPalette, block: &'a BlockEntry) -> Element<'a, Message> {
     let is_placing = palette.placing.as_deref() == Some(block.name.as_str());
-    let preview = canvas(BlockPreviewCanvas { wires: &block.wires })
-        .width(Fill)
-        .height(Length::Fixed(palette.preview_size.box_height()));
+    let preview = canvas(BlockPreviewCanvas {
+        wires: &block.wires,
+    })
+    .width(Fill)
+    .height(Length::Fixed(palette.preview_size.box_height()));
     // Fixed height guarantees the label occupies exactly one line, so every
     // cell in a row keeps the same height even for long names (the elide budget
     // handles overflow, and this clips anything that still won't fit).
@@ -323,7 +377,9 @@ fn block_card<'a>(palette: &'a BlockPalette, block: &'a BlockEntry) -> Element<'
         .center();
     let content = column![preview, label].spacing(4).padding(6);
     button(content)
-        .on_press(Message::BlockPalette(BlockPaletteMsg::Insert(block.name.clone())))
+        .on_press(Message::BlockPalette(BlockPaletteMsg::Insert(
+            block.name.clone(),
+        )))
         .width(Fill)
         .style(move |theme: &Theme, status| {
             let palette = theme.palette();

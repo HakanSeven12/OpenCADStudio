@@ -5,54 +5,175 @@
 // picker and (b) borrow a face's raw bytes to extract glyph outlines (see the
 // TTF glyph engine). LFF stroke fonts stay separate — this is purely the
 // TrueType side of the renderer.
+//
+// The web build has no installed fonts to scan (`load_system_fonts` finds
+// nothing on wasm), so the database is instead populated at runtime with the
+// Noto subsets `web_font` fetches (#141): each completed fetch is registered
+// via [`register_web_font`], and a static alias table maps the common
+// office/CAD families (Arial, Cambria, …) onto that Noto set so styles naming
+// them resolve to filled TTF glyphs instead of falling back to LFF strokes.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 struct SysFonts {
-    db: fontdb::Database,
-    /// Sorted, de-duplicated family names for the picker.
-    families: Vec<String>,
+    db: Mutex<fontdb::Database>,
+    /// Sorted, de-duplicated family names for the picker and name resolution.
+    families: Mutex<Vec<String>>,
 }
 
 static FONTS: OnceLock<SysFonts> = OnceLock::new();
 
 fn fonts() -> &'static SysFonts {
     FONTS.get_or_init(|| {
-        let mut db = fontdb::Database::new();
-        db.load_system_fonts();
+        // No system fonts to scan on the web — the database is filled from the
+        // fetched Noto subsets instead (see `register_web_font`).
+        #[cfg(not(target_arch = "wasm32"))]
+        let db = {
+            let mut db = fontdb::Database::new();
+            db.load_system_fonts();
+            db
+        };
+        #[cfg(target_arch = "wasm32")]
+        let db = fontdb::Database::new();
 
-        let mut families: Vec<String> = db
-            .faces()
-            .filter_map(|face| face.families.first().map(|(name, _)| name.clone()))
-            .collect();
-        families.sort_by_key(|n| n.to_lowercase());
-        families.dedup();
-
-        SysFonts { db, families }
+        let families = family_names(&db);
+        SysFonts {
+            db: Mutex::new(db),
+            families: Mutex::new(families),
+        }
     })
 }
 
-/// All installed system font families, sorted case-insensitively, de-duped.
-pub fn families() -> &'static [String] {
-    &fonts().families
+/// Sorted, de-duplicated family names of every face currently in `db`.
+fn family_names(db: &fontdb::Database) -> Vec<String> {
+    let mut families: Vec<String> = db
+        .faces()
+        .filter_map(|face| face.families.first().map(|(name, _)| name.clone()))
+        .collect();
+    families.sort_by_key(|n| n.to_lowercase());
+    families.dedup();
+    families
+}
+
+/// All known system font families, sorted case-insensitively, de-duped. On the
+/// web this is the fetched Noto set, so it grows as fetches complete.
+pub fn families() -> Vec<String> {
+    fonts().families.lock().unwrap().clone()
+}
+
+/// Sans families aliased to the Noto stand-in on the web.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+static SANS_ALIASES: &[&str] = &[
+    "Arial",
+    "Calibri",
+    "DejaVu Sans",
+    "Helvetica",
+    "Liberation Sans",
+    "Segoe UI",
+    "Tahoma",
+    "Verdana",
+];
+
+/// Serif families aliased on the web; they prefer Noto Serif when such a
+/// subset is ever fetched and otherwise degrade to Noto Sans.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+static SERIF_ALIASES: &[&str] = &[
+    "Book Antiqua",
+    "Cambria",
+    "Constantia",
+    "DejaVu Serif",
+    "Garamond",
+    "Georgia",
+    "Liberation Serif",
+    "Palatino Linotype",
+    "Times New Roman",
+];
+
+/// Preferred stand-in families for an alias request (lowercase), in order.
+/// `None` when the name is not a known alias. Pure table lookup, so it is unit
+/// tested on every platform even though only the web resolution path uses it.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn alias_targets(family_lower: &str) -> Option<&'static [&'static str]> {
+    const SANS: &[&str] = &["Noto Sans"];
+    const SERIF: &[&str] = &["Noto Serif", "Noto Sans"];
+    if SANS_ALIASES
+        .iter()
+        .any(|alias| alias.eq_ignore_ascii_case(family_lower))
+    {
+        Some(SANS)
+    } else if SERIF_ALIASES
+        .iter()
+        .any(|alias| alias.eq_ignore_ascii_case(family_lower))
+    {
+        Some(SERIF)
+    } else {
+        None
+    }
+}
+
+/// First alias stand-in that `known` reports as available. `known` receives
+/// candidate family names; on the live path it scans the registered families.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn alias_resolution(family_lower: &str, known: impl Fn(&str) -> bool) -> Option<&'static str> {
+    alias_targets(family_lower)?
+        .iter()
+        .copied()
+        .find(|t| known(t))
+}
+
+/// Append the alias names to a family list when the sans stand-in is present
+/// (every fetched subset carries the Latin face, so one successful fetch makes
+/// all aliases resolvable). Pure, so the picker behaviour is unit testable.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn merge_web_aliases(families: &mut Vec<String>) {
+    if !families.iter().any(|f| f.eq_ignore_ascii_case("Noto Sans")) {
+        return;
+    }
+    families.extend(
+        SANS_ALIASES
+            .iter()
+            .chain(SERIF_ALIASES.iter())
+            .map(|name| name.to_string()),
+    );
+    families.sort_by_key(|n| n.to_lowercase());
+    families.dedup();
+}
+
+/// Families offered by the text-style picker's "System fonts" list: installed
+/// fonts natively; on the web the fetched Noto families plus the common
+/// office/CAD family names that stand in via them.
+pub fn picker_families() -> Vec<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut families = families();
+        merge_web_aliases(&mut families);
+        families
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    families()
+}
+
+fn canonical_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// Resolve a requested family name to the canonical installed system family name (with exact case).
 ///
-/// Memoised process-wide: `resolve_font` calls this once per word on the MTEXT
+/// Memoised: `resolve_font` calls this once per word on the MTEXT
 /// measure hot path for inline-`\f` TTF runs, and `Face::resolve` re-runs it
 /// immediately after — the underlying fontdb query plus linear family scans are
-/// not free. The cache keys on the raw request string; results are stable for
-/// the process lifetime (the font DB is loaded once via `OnceLock`).
+/// not free. The cache keys on the raw request string. Results are stable for
+/// the process lifetime on desktop; on the web the cache is cleared whenever a
+/// fetched Noto subset joins the database, because earlier `None` resolutions
+/// (font still in flight) must not stick.
 pub fn canonical_family_name(family: &str) -> Option<String> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(hit) = cache.lock().unwrap().get(family) {
+    if let Some(hit) = canonical_cache().lock().unwrap().get(family) {
         return hit.clone();
     }
     let resolved = canonical_family_name_uncached(family);
-    cache
+    canonical_cache()
         .lock()
         .unwrap()
         .insert(family.to_string(), resolved.clone());
@@ -60,25 +181,27 @@ pub fn canonical_family_name(family: &str) -> Option<String> {
 }
 
 fn canonical_family_name_uncached(family: &str) -> Option<String> {
-    let db = &fonts().db;
-    
+    // Snapshot so the families lock is never held across the db lock below
+    // (`register_web_font` takes them in the opposite order, scoped).
+    let families = fonts().families.lock().unwrap().clone();
+
     // 1. Try exact match first
     let query = fontdb::Query {
         families: &[fontdb::Family::Name(family)],
         ..Default::default()
     };
-    if db.query(&query).is_some() {
-        if let Some(canonical) = fonts().families.iter().find(|&f| f.eq_ignore_ascii_case(family)) {
+    if fonts().db.lock().unwrap().query(&query).is_some() {
+        if let Some(canonical) = families.iter().find(|&f| f.eq_ignore_ascii_case(family)) {
             return Some(canonical.clone());
         }
         return Some(family.to_string());
     }
-    
+
     // 2. Try case-insensitive match on the families we have
-    if let Some(matched) = fonts().families.iter().find(|&f| f.eq_ignore_ascii_case(family)) {
+    if let Some(matched) = families.iter().find(|&f| f.eq_ignore_ascii_case(family)) {
         return Some(matched.clone());
     }
-    
+
     // 3. Match common prefixes / variations
     let family_lower = family.to_lowercase();
     let alias = match family_lower.as_str() {
@@ -88,19 +211,33 @@ fn canonical_family_name_uncached(family: &str) -> Option<String> {
         "cour" => Some("Courier New"),
         _ => None,
     };
-    
+
     if let Some(alias_name) = alias {
-        if let Some(matched) = fonts().families.iter().find(|&f| f.eq_ignore_ascii_case(alias_name)) {
+        if let Some(matched) = families
+            .iter()
+            .find(|&f| f.eq_ignore_ascii_case(alias_name))
+        {
             return Some(matched.clone());
         }
     }
-    
-    // 4. Try matching prefix/subset case-insensitively. Require at least 3
+
+    // 4. Web: the common office/CAD families the client cannot have installed
+    //    stand in via the fetched Noto set (#141). Runs before the fuzzy prefix
+    //    match so "Arial" can never drift onto an arbitrary Noto name.
+    #[cfg(target_arch = "wasm32")]
+    if let Some(target) = alias_resolution(&family_lower, |name| {
+        families.iter().any(|f| f.eq_ignore_ascii_case(name))
+    }) {
+        if let Some(matched) = families.iter().find(|&f| f.eq_ignore_ascii_case(target)) {
+            return Some(matched.clone());
+        }
+    }
+
+    // 5. Try matching prefix/subset case-insensitively. Require at least 3
     //    chars so a 1–2 letter request can't grab an arbitrary family by the
     //    first iteration order. Iterating sorted keeps the pick deterministic.
     if family_lower.len() >= 3 {
-        let mut candidates: Vec<&String> = fonts()
-            .families
+        let mut candidates: Vec<&String> = families
             .iter()
             .filter(|&f| {
                 let f_low = f.to_lowercase();
@@ -118,13 +255,12 @@ fn canonical_family_name_uncached(family: &str) -> Option<String> {
 
 /// Resolve a family name to a concrete face id (regular weight/style).
 fn face_id(family: &str) -> Option<fontdb::ID> {
-    let db = &fonts().db;
     let canonical = canonical_family_name(family)?;
     let query = fontdb::Query {
         families: &[fontdb::Family::Name(&canonical)],
         ..Default::default()
     };
-    db.query(&query)
+    fonts().db.lock().unwrap().query(&query)
 }
 
 /// Borrow the raw face bytes for `family` and run `f` over them. The byte slice
@@ -133,7 +269,7 @@ fn face_id(family: &str) -> Option<fontdb::ID> {
 /// within a TrueType collection. Returns `None` if the family is unknown.
 pub fn with_face_data<T>(family: &str, f: impl FnOnce(&[u8], u32) -> T) -> Option<T> {
     let id = face_id(family)?;
-    fonts().db.with_face_data(id, f)
+    fonts().db.lock().unwrap().with_face_data(id, f)
 }
 
 /// Whether `family` matches an installed system font (case-insensitive via
@@ -142,3 +278,143 @@ pub fn has_family(family: &str) -> bool {
     face_id(family).is_some()
 }
 
+/// Web: add a fetched font's bytes (a Noto subset, see `web_font`) to the
+/// database so family-name resolution starts finding it. Fetches land after
+/// the first text layout pass, so the family list is rebuilt and the
+/// canonical-name memo cleared — negative resolutions from while the font was
+/// in flight must not stick. Callers invalidate the glyph caches separately
+/// (`ttf_glyph::clear_fallback_cache`).
+///
+/// Faces may repeat across subsets (every file carries the Latin face, and the
+/// CJK collections repeat it per language); `family_names` de-duplicates the
+/// list, and fontdb picks one of the identical Latin faces per query.
+#[cfg(target_arch = "wasm32")]
+pub fn register_web_font(bytes: &[u8]) {
+    let sys = fonts();
+    let names = {
+        let mut db = sys.db.lock().unwrap();
+        db.load_font_data(bytes.to_vec());
+        family_names(&db)
+        // db lock released before the families lock is taken — the resolution
+        // path takes them in the opposite order.
+    };
+    *sys.families.lock().unwrap() = names;
+    canonical_cache().lock().unwrap().clear();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sans_aliases_map_to_noto_sans() {
+        for name in [
+            "Arial",
+            "Helvetica",
+            "Verdana",
+            "Tahoma",
+            "Calibri",
+            "Segoe UI",
+            "Liberation Sans",
+            "DejaVu Sans",
+        ] {
+            assert_eq!(
+                alias_targets(&name.to_lowercase()),
+                Some(&["Noto Sans"][..]),
+                "{name} must alias to Noto Sans"
+            );
+        }
+    }
+
+    #[test]
+    fn serif_aliases_prefer_serif_with_sans_fallback() {
+        for name in [
+            "Cambria",
+            "Times New Roman",
+            "Georgia",
+            "Liberation Serif",
+            "DejaVu Serif",
+        ] {
+            assert_eq!(
+                alias_targets(&name.to_lowercase()),
+                Some(&["Noto Serif", "Noto Sans"][..]),
+                "{name} must alias to Noto Serif first, Noto Sans second"
+            );
+        }
+    }
+
+    #[test]
+    fn alias_resolution_is_case_insensitive_and_needs_a_target() {
+        // Only the sans stand-in available (today's web fetch set): a serif
+        // alias degrades to Noto Sans rather than resolving to nothing.
+        assert_eq!(
+            alias_resolution("arial", |f| f == "Noto Sans"),
+            Some("Noto Sans")
+        );
+        assert_eq!(
+            alias_resolution("ARIAL", |f| f == "Noto Sans"),
+            Some("Noto Sans")
+        );
+        assert_eq!(
+            alias_resolution("cambria", |f| f == "Noto Sans"),
+            Some("Noto Sans")
+        );
+        // Serif preferred when a serif subset is present.
+        assert_eq!(
+            alias_resolution("cambria", |f| f == "Noto Serif"),
+            Some("Noto Serif")
+        );
+        // Nothing registered yet — fetch still in flight.
+        assert_eq!(alias_resolution("arial", |_| false), None);
+        // Unknown / stroke-font names are never aliased.
+        assert_eq!(alias_resolution("txt", |_| true), None);
+        assert_eq!(alias_resolution("isocp", |_| true), None);
+        assert_eq!(alias_resolution("monospace", |_| true), None);
+    }
+
+    #[test]
+    fn picker_aliases_only_once_noto_arrives() {
+        // Before any fetch lands the picker must not offer unresolvable names.
+        let mut empty: Vec<String> = Vec::new();
+        merge_web_aliases(&mut empty);
+        assert!(empty.is_empty());
+
+        // With the Noto set present the aliases join, sorted and de-duplicated.
+        let mut with_noto = vec!["Noto Sans CJK SC".to_string(), "Noto Sans".to_string()];
+        merge_web_aliases(&mut with_noto);
+        assert_eq!(
+            with_noto,
+            vec![
+                "Arial".to_string(),
+                "Book Antiqua".to_string(),
+                "Calibri".to_string(),
+                "Cambria".to_string(),
+                "Constantia".to_string(),
+                "DejaVu Sans".to_string(),
+                "DejaVu Serif".to_string(),
+                "Garamond".to_string(),
+                "Georgia".to_string(),
+                "Helvetica".to_string(),
+                "Liberation Sans".to_string(),
+                "Liberation Serif".to_string(),
+                "Noto Sans".to_string(),
+                "Noto Sans CJK SC".to_string(),
+                "Palatino Linotype".to_string(),
+                "Segoe UI".to_string(),
+                "Tahoma".to_string(),
+                "Times New Roman".to_string(),
+                "Verdana".to_string(),
+            ]
+        );
+
+        // A registry that already carries an alias name (case differs) dedupes.
+        let mut dup = vec!["noto sans".to_string()];
+        merge_web_aliases(&mut dup);
+        assert_eq!(
+            dup.iter()
+                .filter(|f| f.eq_ignore_ascii_case("Noto Sans"))
+                .count(),
+            1
+        );
+    }
+}

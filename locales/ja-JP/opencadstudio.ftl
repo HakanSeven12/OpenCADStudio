@@ -1947,6 +1947,7 @@ file =
     .saveall-saved-saved-drawing-s = SAVEALL: __ocs_fmt_0__ 件の図面を保存しました__ocs_fmt_1__。
     .saveall-already-has-a-save-running = SAVEALL: __ocs_fmt_0__ は既に保存中です
     .saveall-failed-e = SAVEALL: __ocs_fmt_0__ 失敗: __ocs_fmt_1__
+    .load-linetype-file = 線種ファイルを読み込む
     .script-path-to-the-scr-file = SCRIPT  .scr ファイルのパス:
     .script-cannot-read-p-e = SCRIPT: __ocs_fmt_0__ を読み込めません: __ocs_fmt_1__
     .script-running-command-s-from-p = SCRIPT: __ocs_fmt_1__ から __ocs_fmt_0__ 個のコマンドを実行中です。

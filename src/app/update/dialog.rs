@@ -2,25 +2,23 @@
 
 #![allow(unused_imports)]
 use super::util::*;
-use crate::ui::window::block_palette::BlockPaletteMsg;
 use super::{format_size, VIEWCUBE_HIT_SIZE};
 use crate::app::helpers::{
-    parse_coord, polar_constrain_near, ucs_rotate_vec, ucs_to_wcs, ucs_z_axis,
-    CoordKind,
+    parse_coord, polar_constrain_near, ucs_rotate_vec, ucs_to_wcs, ucs_z_axis, CoordKind,
 };
 use crate::app::{Message, OpenCADStudio, POLY_START_DELAY_MS};
 use crate::modules::ModuleEvent;
-use crate::scene::pick::grip::{find_hit_grip, find_hit_grip_paper, find_hit_grip_rte, GripEdit};
 use crate::scene::model::object::GripApply;
+use crate::scene::pick::grip::{find_hit_grip, find_hit_grip_paper, find_hit_grip_rte, GripEdit};
 use crate::scene::{
     self, hover_id, CubeRegion, Scene, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX,
 };
+use crate::ui::window::block_palette::BlockPaletteMsg;
 use crate::ui::PropertiesPanel;
 use acadrust::types::Color as AcadColor;
 use acadrust::{EntityType as AcadEntityType, Handle};
 use iced::time::Instant;
 use iced::{mouse, Point, Task};
-
 
 impl OpenCADStudio {
     pub(in crate::app) fn open_save_dialog_window(&mut self, tab_idx: usize) -> Task<Message> {
@@ -65,7 +63,6 @@ impl OpenCADStudio {
         Task::none()
     }
 
-
     pub(in crate::app) fn close_save_dialog_window(&mut self) -> Task<Message> {
         self.aec_drop_acknowledged = false;
         if self.active_modal == Some(crate::app::ModalKind::SaveDialog) {
@@ -74,7 +71,6 @@ impl OpenCADStudio {
         }
         Task::none()
     }
-
 
     pub(in crate::app) fn open_unsaved_dialog_window(&mut self) -> Task<Message> {
         self.active_modal = Some(crate::app::ModalKind::Unsaved);
@@ -96,7 +92,6 @@ impl OpenCADStudio {
         }
     }
 
-
     pub(in crate::app) fn close_unsaved_dialog_window(&mut self) -> Task<Message> {
         if self.active_modal == Some(crate::app::ModalKind::Unsaved) {
             self.active_modal = None;
@@ -105,158 +100,159 @@ impl OpenCADStudio {
         Task::none()
     }
 
-
-pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEvent) -> Task<Message> {
-                // Commands use `start_allowed`; other events need a drawing
-                // and stay blocked on the Start page (#299, #388, #389).
-                if self.tabs[self.active_tab].is_start && !matches!(event, ModuleEvent::Command(_)) {
-                    self.ribbon.close_dropdown();
-                    self.command_line
-                        .push_info(crate::t!("No drawing open — use New or Open first.").as_ref());
-                    return Task::none();
+    pub(super) fn on_ribbon_tool_click(
+        &mut self,
+        tool_id: String,
+        event: ModuleEvent,
+    ) -> Task<Message> {
+        // Commands use `start_allowed`; other events need a drawing
+        // and stay blocked on the Start page (#299, #388, #389).
+        if self.tabs[self.active_tab].is_start && !matches!(event, ModuleEvent::Command(_)) {
+            self.ribbon.close_dropdown();
+            self.command_line
+                .push_info(crate::t!("No drawing open — use New or Open first.").as_ref());
+            return Task::none();
+        }
+        // Dismiss any open dropdown / collapsed-panel flyout on tool use,
+        // and remember this tool as its panel's last-used one.
+        self.ribbon.close_dropdown();
+        self.ribbon.note_panel_tool(&tool_id);
+        self.ribbon.activate_tool(&tool_id);
+        match event {
+            ModuleEvent::Command(cmd) => {
+                let task = self.dispatch_command(&cmd);
+                // One-shot tools (view changes, clipboard, toggles,
+                // audits…) leave nothing running: no interactive
+                // command and no dialog. Their highlight would stick
+                // forever — turn it off now. Interactive commands and
+                // dialog owners keep theirs; the command end / modal
+                // close clears those. (#355)
+                let i = self.active_tab;
+                if self.tabs[i].active_cmd.is_none()
+                    && self.active_modal.is_none()
+                    && !self.tabs[i].pan_mode
+                    && !self.tabs[i].orbit_mode
+                    && !self.tabs[i].zoom_dynamic_mode
+                {
+                    self.ribbon.deactivate_tool();
                 }
-                // Dismiss any open dropdown / collapsed-panel flyout on tool use,
-                // and remember this tool as its panel's last-used one.
-                self.ribbon.close_dropdown();
-                self.ribbon.note_panel_tool(&tool_id);
-                self.ribbon.activate_tool(&tool_id);
-                match event {
-                    ModuleEvent::Command(cmd) => {
-                        let task = self.dispatch_command(&cmd);
-                        // One-shot tools (view changes, clipboard, toggles,
-                        // audits…) leave nothing running: no interactive
-                        // command and no dialog. Their highlight would stick
-                        // forever — turn it off now. Interactive commands and
-                        // dialog owners keep theirs; the command end / modal
-                        // close clears those. (#355)
-                        let i = self.active_tab;
-                        if self.tabs[i].active_cmd.is_none()
-                            && self.active_modal.is_none()
-                            && !self.tabs[i].pan_mode
-                            && !self.tabs[i].orbit_mode
-                            && !self.tabs[i].zoom_dynamic_mode
-                        {
-                            self.ribbon.deactivate_tool();
-                        }
-                        return task;
-                    }
-                    ModuleEvent::OpenFileDialog => {
+                return task;
+            }
+            ModuleEvent::OpenFileDialog => {
+                self.command_line
+                    .push_info(crate::t!("Open DWG/DXF: not yet implemented.").as_ref());
+            }
+            ModuleEvent::ClearModels => {
+                let i = self.active_tab;
+                self.tabs[i].scene.clear();
+                self.tabs[i].properties = PropertiesPanel::empty();
+                self.command_line
+                    .push_output(crate::t!("Scene cleared.").as_ref());
+            }
+            ModuleEvent::SetVisualStyle(name) => {
+                use crate::modules::view::visual_style;
+                match visual_style::mode_for_keyword(&name) {
+                    Some(mode) => return Task::done(Message::SetRenderMode(mode)),
+                    None => {
+                        // Name the styles that do exist, from the same
+                        // list every other caller reads.
                         self.command_line
-                            .push_info(crate::t!("Open DWG/DXF: not yet implemented.").as_ref());
-                    }
-                    ModuleEvent::ClearModels => {
-                        let i = self.active_tab;
-                        self.tabs[i].scene.clear();
-                        self.tabs[i].properties = PropertiesPanel::empty();
-                        self.command_line.push_output(crate::t!("Scene cleared.").as_ref());
-                    }
-                    ModuleEvent::SetVisualStyle(name) => {
-                        use crate::modules::view::visual_style;
-                        match visual_style::mode_for_keyword(&name) {
-                            Some(mode) => return Task::done(Message::SetRenderMode(mode)),
-                            None => {
-                                // Name the styles that do exist, from the same
-                                // list every other caller reads.
-                                self.command_line.push_error(
-                                    crate::tf!("Unknown visual style \"{name}\".").as_ref(),
-                                );
-                                self.command_line
-                                    .push_info(crate::t!(visual_style::keyword_prompt()).as_ref());
-                            }
-                        }
-                    }
-                    ModuleEvent::ToggleLayers => {
-                        return Task::done(Message::ToggleLayers);
-                    }
-                    ModuleEvent::PluginFileDialog {
-                        command,
-                        title,
-                        filter_name,
-                        extensions,
-                    } => {
-                        return Task::perform(
-                            async move {
-                                let exts: Vec<&str> =
-                                    extensions.iter().map(|s| s.as_str()).collect();
-                                let path = crate::sys::file_dialog()
-                                    .set_title(title)
-                                    .add_filter(filter_name, &exts)
-                                    .add_filter(crate::t!("All Files").as_ref(), &["*"])
-                                    .pick_file()
-                                    .await
-                                    .map(|h| crate::sys::handle_path(&h));
-                                (command, path)
-                            },
-                            |(command, path)| Message::PluginFileDialogResult { command, path },
-                        );
+                            .push_error(crate::tf!("Unknown visual style \"{name}\".").as_ref());
+                        self.command_line
+                            .push_info(crate::t!(visual_style::keyword_prompt()).as_ref());
                     }
                 }
-                // Every non-Command event above is a one-shot (state toggle,
-                // clear, dialog spawn) — nothing stays running to clear the
-                // highlight later, so turn it off here. (#355)
-                self.ribbon.deactivate_tool();
-                Task::none()
+            }
+            ModuleEvent::ToggleLayers => {
+                return Task::done(Message::ToggleLayers);
+            }
+            ModuleEvent::PluginFileDialog {
+                command,
+                title,
+                filter_name,
+                extensions,
+            } => {
+                return Task::perform(
+                    async move {
+                        let exts: Vec<&str> = extensions.iter().map(|s| s.as_str()).collect();
+                        let path = crate::sys::file_dialog()
+                            .set_title(title)
+                            .add_filter(filter_name, &exts)
+                            .add_filter(crate::t!("All Files").as_ref(), &["*"])
+                            .pick_file()
+                            .await
+                            .map(|h| crate::sys::handle_path(&h));
+                        (command, path)
+                    },
+                    |(command, path)| Message::PluginFileDialogResult { command, path },
+                );
+            }
+        }
+        // Every non-Command event above is a one-shot (state toggle,
+        // clear, dialog spawn) — nothing stays running to clear the
+        // highlight later, so turn it off here. (#355)
+        self.ribbon.deactivate_tool();
+        Task::none()
     }
 
     pub(super) fn on_unsaved_dialog_discard(&mut self) -> Task<Message> {
-                match self.pending_close.take() {
-                    Some(crate::app::PendingClose::Tab(idx)) => {
-                        let close_win = self.close_unsaved_dialog_window();
-                        // Discarded — drop this tab's autosave recovery copy.
-                        #[cfg(not(target_arch = "wasm32"))]
-                        let _ = std::fs::remove_file(self.autosave_target(idx));
-                        // Web counterpart: the OPFS snapshot must go too, or
-                        // the drawing the user just declined to save is
-                        // offered back at the next boot. A snapshot round
-                        // still writing this tab's key would resurrect it
-                        // after the remove, so defer to the round's end
-                        // (the same guard the save flow uses).
-                        #[cfg(target_arch = "wasm32")]
-                        {
-                            let key = Self::web_autosave_key(&self.tabs[idx]);
-                            if self.web_autosave_in_flight {
-                                self.web_autosave_clear_after.push(key);
-                            } else {
-                                wasm_bindgen_futures::spawn_local(async move {
-                                    let _ = crate::io::web_autosave::remove(&key).await;
-                                });
-                            }
-                        }
-                        if self.tabs.len() == 1 {
-                            self.tab_counter += 1;
-                            self.tabs[0] =
-                                crate::app::document::DocumentTab::new_drawing(self.tab_counter);
-                            self.active_tab = 0;
-                            self.apply_display_defaults(0);
-                        } else {
-                            self.tabs.remove(idx);
-                            if self.active_tab >= self.tabs.len() {
-                                self.active_tab = self.tabs.len() - 1;
-                            }
-                        }
-                        // The active tab is now a fresh blank or a
-                        // different existing tab; sync ribbon chips so
-                        // they don't keep showing the discarded tab's
-                        // last selection. #21.
-                        self.sync_ribbon_layers();
-                        self.sync_ribbon_from_selection();
-                        return Task::batch([close_win, self.continue_tab_close_queue()]);
+        match self.pending_close.take() {
+            Some(crate::app::PendingClose::Tab(idx)) => {
+                let close_win = self.close_unsaved_dialog_window();
+                // Discarded — drop this tab's autosave recovery copy.
+                #[cfg(not(target_arch = "wasm32"))]
+                let _ = std::fs::remove_file(self.autosave_target(idx));
+                // Web counterpart: the OPFS snapshot must go too, or
+                // the drawing the user just declined to save is
+                // offered back at the next boot. A snapshot round
+                // still writing this tab's key would resurrect it
+                // after the remove, so defer to the round's end
+                // (the same guard the save flow uses).
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let key = Self::web_autosave_key(&self.tabs[idx]);
+                    if self.web_autosave_in_flight {
+                        self.web_autosave_clear_after.push(key);
+                    } else {
+                        wasm_bindgen_futures::spawn_local(async move {
+                            let _ = crate::io::web_autosave::remove(&key).await;
+                        });
                     }
-                    Some(crate::app::PendingClose::Quit) => {
-                        if let Some(idx) = self.tabs.iter().position(|t| t.dirty) {
-                            self.tabs[idx].dirty = false;
-                        }
-                        if self.tabs.iter().any(|t| t.dirty) {
-                            // More dirty tabs remain — keep window open.
-                            self.pending_close = Some(crate::app::PendingClose::Quit);
-                        } else {
-                            let close_win = self.close_unsaved_dialog_window();
-                            return Task::batch(vec![close_win, self.exit_app()]);
-                        }
-                    }
-                    None => {}
                 }
-                Task::none()
+                if self.tabs.len() == 1 {
+                    self.tab_counter += 1;
+                    self.tabs[0] = crate::app::document::DocumentTab::new_drawing(self.tab_counter);
+                    self.active_tab = 0;
+                    self.apply_display_defaults(0);
+                } else {
+                    self.tabs.remove(idx);
+                    if self.active_tab >= self.tabs.len() {
+                        self.active_tab = self.tabs.len() - 1;
+                    }
+                }
+                // The active tab is now a fresh blank or a
+                // different existing tab; sync ribbon chips so
+                // they don't keep showing the discarded tab's
+                // last selection. #21.
+                self.sync_ribbon_layers();
+                self.sync_ribbon_from_selection();
+                return Task::batch([close_win, self.continue_tab_close_queue()]);
+            }
+            Some(crate::app::PendingClose::Quit) => {
+                if let Some(idx) = self.tabs.iter().position(|t| t.dirty) {
+                    self.tabs[idx].dirty = false;
+                }
+                if self.tabs.iter().any(|t| t.dirty) {
+                    // More dirty tabs remain — keep window open.
+                    self.pending_close = Some(crate::app::PendingClose::Quit);
+                } else {
+                    let close_win = self.close_unsaved_dialog_window();
+                    return Task::batch(vec![close_win, self.exit_app()]);
+                }
+            }
+            None => {}
+        }
+        Task::none()
     }
 
     pub(super) fn on_unsaved_dialog_save(&mut self) -> Task<Message> {
@@ -266,16 +262,11 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 return Task::none();
             };
             let (idx, continuation) = match pending {
-                crate::app::PendingClose::Tab(idx) => {
-                    (idx, crate::app::SaveContinuation::CloseTab)
-                }
+                crate::app::PendingClose::Tab(idx) => (idx, crate::app::SaveContinuation::CloseTab),
                 crate::app::PendingClose::Quit => {
                     let Some(idx) = self.tabs.iter().position(|tab| tab.dirty) else {
                         self.pending_close = None;
-                        return Task::batch([
-                            self.close_unsaved_dialog_window(),
-                            self.exit_app(),
-                        ]);
+                        return Task::batch([self.close_unsaved_dialog_window(), self.exit_app()]);
                     };
                     (idx, crate::app::SaveContinuation::Quit)
                 }
@@ -331,10 +322,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                         let save = self.save_with_default_format(idx);
                         Task::batch([close, save])
                     } else {
-                        Task::batch([
-                            self.close_unsaved_dialog_window(),
-                            self.exit_app(),
-                        ])
+                        Task::batch([self.close_unsaved_dialog_window(), self.exit_app()])
                     }
                 }
                 None => Task::none(),
@@ -377,6 +365,14 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
         self.import_document_as_block(doc, stem)
     }
 
+    /// A file import defined a new block — announce it and start placing it.
+    fn block_file_imported(&mut self, name: &str) {
+        self.command_line
+            .push_output(&crate::tf!("Inserting \"{name}\" from file."));
+        self.refresh_block_palette();
+        self.start_block_placement(name);
+    }
+
     /// Define one block in the active drawing from a loaded `CadDocument`'s
     /// model-space entities (base = the file's model-space insertion base).
     fn import_document_as_block(
@@ -409,7 +405,10 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                     .iter()
                     .filter_map(|h| doc.get_entity(*h))
                     .filter(|e| {
-                        !matches!(e, acadrust::EntityType::Block(_) | acadrust::EntityType::BlockEnd(_))
+                        !matches!(
+                            e,
+                            acadrust::EntityType::Block(_) | acadrust::EntityType::BlockEnd(_)
+                        )
                     })
                     .cloned()
                     .collect()
@@ -422,7 +421,10 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                         o == model_br || o.is_null()
                     })
                     .filter(|e| {
-                        !matches!(e, acadrust::EntityType::Block(_) | acadrust::EntityType::BlockEnd(_))
+                        !matches!(
+                            e,
+                            acadrust::EntityType::Block(_) | acadrust::EntityType::BlockEnd(_)
+                        )
                     })
                     .cloned()
                     .collect()
@@ -516,7 +518,10 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
         Ok(name)
     }
 
-    pub(super) fn on_block_palette(&mut self, m: crate::ui::window::block_palette::BlockPaletteMsg) -> iced::Task<Message> {
+    pub(super) fn on_block_palette(
+        &mut self,
+        m: crate::ui::window::block_palette::BlockPaletteMsg,
+    ) -> iced::Task<Message> {
         use crate::ui::window::block_palette::{BlockEntry, BlockPaletteMsg};
         match m {
             BlockPaletteMsg::Search(s) => {
@@ -534,32 +539,81 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 self.refresh_block_palette();
                 iced::Task::none()
             }
-            BlockPaletteMsg::PickFile => iced::Task::perform(
-                async {
-                    let handle = rfd::AsyncFileDialog::new()
-                        .set_title(crate::t!("Select Drawing to Insert as Block").as_ref())
-                        .add_filter(crate::t!("DWG/DXF Files").as_ref(), &["dwg", "dxf", "DWG", "DXF"])
-                        .pick_file()
-                        .await;
-                    match handle {
-                        Some(h) => Ok(crate::sys::handle_path(&h)),
-                        None => Err("Cancelled".to_string()),
-                    }
-                },
-                |r| Message::BlockPalette(BlockPaletteMsg::FilePicked(r)),
-            ),
+            BlockPaletteMsg::PickFile => {
+                // Native: pick a path; the file is read in `import_file_as_block`.
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    iced::Task::perform(
+                        async {
+                            let handle = rfd::AsyncFileDialog::new()
+                                .set_title(crate::t!("Select Drawing to Insert as Block").as_ref())
+                                .add_filter(
+                                    crate::t!("DWG/DXF Files").as_ref(),
+                                    &["dwg", "dxf", "DWG", "DXF"],
+                                )
+                                .pick_file()
+                                .await;
+                            match handle {
+                                Some(h) => Ok(crate::sys::handle_path(&h)),
+                                None => Err("Cancelled".to_string()),
+                            }
+                        },
+                        |r| Message::BlockPalette(BlockPaletteMsg::FilePicked(r)),
+                    )
+                }
+                // Web: read the picked file's bytes and parse them on the
+                // worker right away — the picker's name-only path has
+                // nothing behind it for `import_file_as_block` to read.
+                #[cfg(target_arch = "wasm32")]
+                {
+                    iced::Task::perform(
+                        async {
+                            crate::io::pick_and_parse_web(
+                                crate::t!("Select Drawing to Insert as Block").as_ref(),
+                                crate::t!("DWG/DXF Files").as_ref(),
+                                &["dwg", "dxf", "DWG", "DXF"],
+                            )
+                            .await
+                            // The native pick reports a cancelled dialog the
+                            // same way.
+                            .and_then(|picked| picked.ok_or_else(|| "Cancelled".to_string()))
+                        },
+                        |r| Message::BlockPalette(BlockPaletteMsg::FilePickedDoc(r)),
+                    )
+                }
+            }
             BlockPaletteMsg::FilePicked(Ok(path)) => {
                 match self.import_file_as_block(path) {
-                    Ok(name) => {
-                        self.command_line
-                            .push_output(&crate::tf!("Inserting \"{name}\" from file."));
-                        self.refresh_block_palette();
-                        self.start_block_placement(&name);
-                    }
+                    Ok(name) => self.block_file_imported(&name),
                     Err(e) if e != "Cancelled" => {
-                        self.command_line.push_error(&crate::tf!("INSERT FILE: {e}"));
+                        self.command_line
+                            .push_error(&crate::tf!("INSERT FILE: {e}"));
                     }
                     Err(_) => {}
+                }
+                iced::Task::none()
+            }
+            // Web: the drawing arrived parsed — define the block from it
+            // directly (the tail of `import_file_as_block`).
+            #[cfg(target_arch = "wasm32")]
+            BlockPaletteMsg::FilePickedDoc(Ok((name, document))) => {
+                let stem = std::path::Path::new(&name)
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "Block".to_string());
+                match self.import_document_as_block(document, stem) {
+                    Ok(name) => self.block_file_imported(&name),
+                    Err(e) => {
+                        self.command_line
+                            .push_error(&crate::tf!("INSERT FILE: {e}"));
+                    }
+                }
+                iced::Task::none()
+            }
+            #[cfg(target_arch = "wasm32")]
+            BlockPaletteMsg::FilePickedDoc(Err(e)) => {
+                if e != "Cancelled" {
+                    self.command_line.push_error(&e);
                 }
                 iced::Task::none()
             }
@@ -653,7 +707,12 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
             }
             DockMsg::DragMove(point) => {
                 if self.dock_dragging.is_some() {
-                    let avail = self.tabs[self.active_tab].scene.selection.borrow().vp_size.1;
+                    let avail = self.tabs[self.active_tab]
+                        .scene
+                        .selection
+                        .borrow()
+                        .vp_size
+                        .1;
                     let side = if point.x < self.win_size.0 * 0.5 {
                         DockSide::Left
                     } else {
@@ -817,7 +876,9 @@ mod tests {
     fn import_document_as_block_defines_block() {
         let mut app = fresh();
         let doc = foreign_doc(&app);
-        let name = app.import_document_as_block(doc, "Fixture".to_string()).unwrap();
+        let name = app
+            .import_document_as_block(doc, "Fixture".to_string())
+            .unwrap();
         assert_eq!(name, "Fixture");
         assert!(app.tabs[app.active_tab]
             .scene
@@ -912,15 +973,14 @@ mod tests {
     }
 
     /// The nested-INSERT's block name inside a defined block record.
-    fn nested_insert_target(
-        doc: &acadrust::CadDocument,
-        block: &str,
-    ) -> Option<String> {
+    fn nested_insert_target(doc: &acadrust::CadDocument, block: &str) -> Option<String> {
         let br = doc.block_records.get(block)?;
-        br.entity_handles.iter().find_map(|h| match doc.get_entity(*h)? {
-            EntityType::Insert(ins) => Some(ins.block_name.clone()),
-            _ => None,
-        })
+        br.entity_handles
+            .iter()
+            .find_map(|h| match doc.get_entity(*h)? {
+                EntityType::Insert(ins) => Some(ins.block_name.clone()),
+                _ => None,
+            })
     }
 
     /// A foreign document whose model space INSERTs a `Fixture` block whose
@@ -997,7 +1057,9 @@ mod tests {
             )
             .unwrap();
 
-        let _ = app.import_document_as_block(doc, "Imported".to_string()).unwrap();
+        let _ = app
+            .import_document_as_block(doc, "Imported".to_string())
+            .unwrap();
         let doc = &app.tabs[i].scene.document;
         // The file's own "Door (2)" is kept intact and targets the file's
         // renamed "Door" (now "Door (3)" — "Door (2)" was taken by the source).
@@ -1044,7 +1106,9 @@ mod tests {
             )
             .unwrap();
 
-        let name = app.import_document_as_block(doc, "Imported".to_string()).unwrap();
+        let name = app
+            .import_document_as_block(doc, "Imported".to_string())
+            .unwrap();
         assert_eq!(name, "Imported");
 
         let doc = &app.tabs[i].scene.document;
@@ -1075,11 +1139,16 @@ mod tests {
     fn blockpalette_refresh_lists_and_places_block() {
         let mut app = fresh();
         let doc = foreign_doc(&app);
-        let name = app.import_document_as_block(doc, "Fixture".to_string()).unwrap();
+        let name = app
+            .import_document_as_block(doc, "Fixture".to_string())
+            .unwrap();
         app.refresh_block_palette();
         assert!(app.block_palette.blocks.iter().any(|b| b.name == "Fixture"));
         app.start_block_placement(&name);
-        let cmd = app.tabs[app.active_tab].active_cmd.as_ref().expect("INSERT running");
+        let cmd = app.tabs[app.active_tab]
+            .active_cmd
+            .as_ref()
+            .expect("INSERT running");
         assert_eq!(cmd.name(), "INSERT");
         assert_eq!(app.block_palette.placing.as_deref(), Some("Fixture"));
     }
@@ -1135,7 +1204,10 @@ mod tests {
         let _ = app.on_dock(crate::ui::dock::DockMsg::AutoCollapseToggle(id));
         assert!(app.dock.auto_collapse(id), "pin enables auto-collapse");
         let _ = app.on_dock(crate::ui::dock::DockMsg::AutoCollapseToggle(id));
-        assert!(!app.dock.auto_collapse(id), "second pin disables auto-collapse");
+        assert!(
+            !app.dock.auto_collapse(id),
+            "second pin disables auto-collapse"
+        );
         let _ = app.on_dock(crate::ui::dock::DockMsg::Close(id));
         assert!(!app.show_block_palette, "close dismisses the sidebar");
     }
@@ -1153,7 +1225,9 @@ mod tests {
         );
         let _ = app.on_dock(crate::ui::dock::DockMsg::DockGrab(id));
         app.win_size = (1600.0, 900.0).into();
-        let _ = app.on_dock(crate::ui::dock::DockMsg::DragMove(iced::Point::new(100.0, 100.0)));
+        let _ = app.on_dock(crate::ui::dock::DockMsg::DragMove(iced::Point::new(
+            100.0, 100.0,
+        )));
         assert_eq!(
             app.dock_drag_target,
             Some((crate::app::config::DockSide::Left, 0))
@@ -1176,22 +1250,13 @@ mod tests {
         // Left: block palette hidden, properties shown -> 1 visible panel.
         app.show_block_palette = false;
         app.show_properties = true;
-        assert_eq!(
-            app.dock_visible_len(crate::app::config::DockSide::Left),
-            1
-        );
+        assert_eq!(app.dock_visible_len(crate::app::config::DockSide::Left), 1);
         // Reveal the block palette -> both count.
         app.show_block_palette = true;
-        assert_eq!(
-            app.dock_visible_len(crate::app::config::DockSide::Left),
-            2
-        );
+        assert_eq!(app.dock_visible_len(crate::app::config::DockSide::Left), 2);
         // A hidden (closed) panel counts for nothing even when stacked.
         app.show_block_palette = false;
-        assert_eq!(
-            app.dock_visible_len(crate::app::config::DockSide::Left),
-            1
-        );
+        assert_eq!(app.dock_visible_len(crate::app::config::DockSide::Left), 1);
     }
 
     #[test]
@@ -1215,8 +1280,9 @@ mod tests {
         let _ = app.on_dock(crate::ui::dock::DockMsg::DockGrab(id));
         // Pointer near the bottom of the left edge: one visible panel means a
         // single slot, so every y maps to index 0 (no top/bottom split).
-        let _ =
-            app.on_dock(crate::ui::dock::DockMsg::DragMove(iced::Point::new(100.0, 850.0)));
+        let _ = app.on_dock(crate::ui::dock::DockMsg::DragMove(iced::Point::new(
+            100.0, 850.0,
+        )));
         assert_eq!(
             app.dock_drag_target,
             Some((crate::app::config::DockSide::Left, 0))
@@ -1240,8 +1306,9 @@ mod tests {
         app.win_size = (1600.0, 900.0).into();
         let id = crate::ui::dock::PanelId::Properties;
         let _ = app.on_dock(crate::ui::dock::DockMsg::DockGrab(id));
-        let _ =
-            app.on_dock(crate::ui::dock::DockMsg::DragMove(iced::Point::new(100.0, 850.0)));
+        let _ = app.on_dock(crate::ui::dock::DockMsg::DragMove(iced::Point::new(
+            100.0, 850.0,
+        )));
         assert_eq!(
             app.dock_drag_target,
             Some((crate::app::config::DockSide::Left, 2))
@@ -1266,7 +1333,11 @@ mod tests {
         line.end = Vector3::new(1.0, 0.0, 0.0);
         app.tabs[i]
             .scene
-            .define_block_from_owned_entities(vec![EntityType::Line(line)], "Chair", glam::DVec3::ZERO)
+            .define_block_from_owned_entities(
+                vec![EntityType::Line(line)],
+                "Chair",
+                glam::DVec3::ZERO,
+            )
             .unwrap();
         assert_eq!(app.block_name_from_file("Chair"), "Chair (2)");
         assert_eq!(app.block_name_from_file("Table"), "Table");

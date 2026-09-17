@@ -11,12 +11,12 @@ browser can't provide. This page lists the differences.
 |------|------------------|------------|
 | Windowing | Multi-window (`iced::daemon`) | Single window (`iced::application`); dialogs are in-canvas modals |
 | 3D solid modeling | Yes | Yes — the geometry kernel is pure Rust |
-| Hatch rendering | Yes | **No** — WebGL2 has no vertex-stage storage |
-| Fonts | Embedded stroke fonts + system TrueType + shaping + fallback | Embedded stroke fonts only |
+| Hatch rendering | Yes | Yes — texture transport when WebGL2 lacks vertex-stage storage |
+| Fonts | Embedded stroke fonts + system TrueType + shaping + fallback | Fetched Noto subsets (shaping, fallback, and family aliases) + embedded stroke fonts |
 | File open | Native file dialog → path | Browser picker → bytes |
 | File save | Path / Save dialog → write to disk | Save dialog → direct browser download |
-| Parallelism | Multi-threaded (rayon) | Single-threaded |
-| GPU backend | Vulkan / DX12 / Metal (wgpu) | WebGL2 (WebGPU where available) |
+| Parallelism | Multi-threaded (rayon) | Main thread + one Web Worker (DWG/DXF parse, hashing) |
+| GPU backend | Vulkan / DX12 / Metal (wgpu) | WebGL2 (the backend is pinned to OpenGL) |
 | Update check / external links | `ureq`, `open` | skipped / `window.open` |
 | External plugins | Native packages + Plugin Manager | **No** — native libraries cannot run in a browser |
 
@@ -33,21 +33,26 @@ all, so none of that applies and the feature is gone. The web build makes
 primitives, runs booleans, draws ACIS solids read from a file and writes them
 back out as exact geometry, exactly as the desktop build does.
 
-### Hatch rendering — web: not drawn
+### Hatch rendering — web: same modes via a texture transport
 The batched hatch pipeline binds a read-only storage buffer in the vertex
-stage. WebGL2 lacks `VERTEX_STORAGE`, so that pipeline is skipped on wasm and
-hatches simply don't render. Everything else (lines, arcs, polylines, text,
-images) draws normally.
+stage, which WebGL2 lacks. The hatch renderer selects its texture backend
+instead (an RGBA32F data texture + `hatch_texture.wgsl`) and draws the same
+solid, patterned, and gradient hatches as native, with the same dash math and
+sub-pixel-to-solid LOD fallback. Everything else (lines, arcs, polylines,
+text, images) draws normally.
 
-### Fonts — web: bundled stroke fonts only
+### Fonts — web: fetched Noto subsets plus embedded stroke fonts
 - **Native** discovers installed system fonts (fontdb), extracts TrueType
   outlines (ttf-parser), shapes runs with cosmic-text (ligatures, Arabic
   joining, kerning, bidi), and falls back to a system font for glyphs a stroke
   font lacks.
-- **Web** has no system fonts, and cosmic-text panics with "no default font
-  found" on an empty font set, so shaping and fallback are disabled. Only the
-  embedded LFF stroke fonts render; a glyph missing from them is skipped.
-  (A future option is to fetch a font file from the server at startup.)
+- **Web** fetches per-script Noto subsets from the server, registers them
+  into the font database, and shapes runs with the same cosmic-text path
+  (ligatures, Arabic joining, bidi) with per-glyph Noto fallback. Text styles
+  naming a desktop family (Arial, Times New Roman, ...) resolve through an
+  alias table to the Noto faces, so they render filled instead of falling to
+  the stroke fonts; scripts without a fetched subset still render via the
+  embedded LFF stroke fonts. (Text pops in once the first font fetch lands.)
 
 ### File I/O — web: bytes and downloads
 - **Open**: the desktop returns a filesystem path and reads it (streaming).

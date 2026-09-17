@@ -1957,6 +1957,7 @@ file =
     .saveall-saved-saved-drawing-s = SAVEALL: gespeichert __ocs_fmt_0__ Zeichnung(en)__ocs_fmt_1__.
     .saveall-already-has-a-save-running = SAVEALL: Für __ocs_fmt_0__ wird bereits gespeichert
     .saveall-failed-e = SAVEALL: __ocs_fmt_0__ fehlgeschlagen: __ocs_fmt_1__
+    .load-linetype-file = Linetype-Datei laden
     .script-path-to-the-scr-file = SCRIPT  Pfad zur .scr-Datei:
     .script-cannot-read-p-e = SCRIPT: kann nicht lesen __ocs_fmt_0__: __ocs_fmt_1__
     .script-running-command-s-from-p = SCRIPT: Ausführen des Befehls __ocs_fmt_0__ aus __ocs_fmt_1__.

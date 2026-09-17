@@ -1956,6 +1956,7 @@ file =
     .saveall-saved-saved-drawing-s = SAVEALL:已儲存 __ocs_fmt_0__ 繪圖 __ocs_fmt_1__ 。
     .saveall-already-has-a-save-running = SAVEALL: __ocs_fmt_0__ 已經有一個儲存執行
     .saveall-failed-e = SAVEALL : __ocs_fmt_0__ 失敗 : __ocs_fmt_1__
+    .load-linetype-file = 載入線型檔案
     .script-path-to-the-scr-file = SCRIPT  路徑 :
     .script-cannot-read-p-e = SCRIPT: 無法讀取__ocs_fmt_0__: __ocs_fmt_1__
     .script-running-command-s-from-p = SCRIPT:從__ocs_fmt_1__執行__ocs_fmt_0__命令。

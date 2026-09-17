@@ -1960,6 +1960,7 @@ file =
     .saveall-saved-saved-drawing-s = SAVEALL: сохранен __ocs_fmt_0__ чертеж(ы)__ocs_fmt_1__.
     .saveall-already-has-a-save-running = SAVEALL: __ocs_fmt_0__ уже имеет резервный ход
     .saveall-failed-e = SAVEALL: __ocs_fmt_0__ не получилось: __ocs_fmt_1__
+    .load-linetype-file = Загрузить файл типов линий
     .script-path-to-the-scr-file = SCRIPT  Путь к файлу .scr:
     .script-cannot-read-p-e = SCRIPT: не может читать __ocs_fmt_0__: __ocs_fmt_1__
     .script-running-command-s-from-p = SCRIPT: выполнение команды (команд) __ocs_fmt_0__ из __ocs_fmt_1__.

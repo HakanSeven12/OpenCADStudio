@@ -1957,6 +1957,7 @@ file =
     .saveall-saved-saved-drawing-s = SAVEALL: opgeslagen __ocs_fmt_0__ tekening(s)__ocs_fmt_1__.
     .saveall-already-has-a-save-running = SAVEALL: __ocs_fmt_0__ heeft al een opslag uitgevoerd
     .saveall-failed-e = SAVEALL: __ocs_fmt_0__ mislukt: __ocs_fmt_1__
+    .load-linetype-file = Lijntypebestand laden
     .script-path-to-the-scr-file = SCRIPT  pad naar het .scr bestand:
     .script-cannot-read-p-e = SCRIPT: kan __ocs_fmt_0__ niet lezen: __ocs_fmt_1__
     .script-running-command-s-from-p = SCRIPT: __ocs_fmt_0__ commando(s) van __ocs_fmt_1__.

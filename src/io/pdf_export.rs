@@ -1724,7 +1724,6 @@ fn glyph_form_xobject(ge: &crate::scene::text::sdf_atlas::GlyphExport) -> printp
     })
 }
 
-
 /// Absolute world XY of a glyph vertex (double-single high + low parts folded).
 ///
 /// The fold must happen in f64: the pair exists because the absolute coordinate
@@ -1905,7 +1904,10 @@ fn emit_text(
                     // The Form-dedupe win is irrelevant for the rare heavy-pen
                     // case. The pen is already divided by the page CTM scale
                     // above, so it stays absolute on paper.
-                    if last_outline.map(|c| color_differs(c, [r, g, b])).unwrap_or(true) {
+                    if last_outline
+                        .map(|c| color_differs(c, [r, g, b]))
+                        .unwrap_or(true)
+                    {
                         ops.push(Op::SetOutlineColor {
                             col: Color::Rgb(Rgb {
                                 r,
@@ -1917,11 +1919,7 @@ fn emit_text(
                         last_outline = Some([r, g, b]);
                     }
                     ops.push(Op::SetOutlineThickness {
-                        pt: Pt(if ge.bold {
-                            ctb_pen * 1.7
-                        } else {
-                            ctb_pen
-                        }),
+                        pt: Pt(if ge.bold { ctb_pen * 1.7 } else { ctb_pen }),
                     });
                     let map = |p: [f32; 2]| -> Point {
                         let u = ((p[0] - pmin[0]) / sx) as f64;
@@ -1958,7 +1956,10 @@ fn emit_text(
                 // pixel-diffing the pre/post-fix renders).
                 let mut stroke_pen: Option<f32> = None;
                 if !ge.fill_tris.is_empty() {
-                    if last_fill.map(|c| color_differs(c, [r, g, b])).unwrap_or(true) {
+                    if last_fill
+                        .map(|c| color_differs(c, [r, g, b]))
+                        .unwrap_or(true)
+                    {
                         ops.push(Op::SetFillColor {
                             col: Color::Rgb(Rgb {
                                 r,
@@ -1977,7 +1978,10 @@ fn emit_text(
                     // gaps between parallel centrelines. (An explicit CTB
                     // lineweight never reaches this Form path; it takes the
                     // direct heavy-pen path above.)
-                    if last_outline.map(|c| color_differs(c, [r, g, b])).unwrap_or(true) {
+                    if last_outline
+                        .map(|c| color_differs(c, [r, g, b]))
+                        .unwrap_or(true)
+                    {
                         ops.push(Op::SetOutlineColor {
                             col: Color::Rgb(Rgb {
                                 r,
@@ -1988,12 +1992,13 @@ fn emit_text(
                         });
                         last_outline = Some([r, g, b]);
                     }
-                    let glyph_unit_mm = (((tl[0] - bl[0]).powi(2) + (tl[1] - bl[1]).powi(2))
-                        .sqrt()
+                    let glyph_unit_mm = (((tl[0] - bl[0]).powi(2) + (tl[1] - bl[1]).powi(2)).sqrt()
                         / sy.abs() as f64) as f32;
-                    let pen =
-                        (2.0 * sdf_atlas::stroke_pen_half_units(ge.bold) * glyph_unit_mm * MM_TO_PT)
-                            .max(0.1);
+                    let pen = (2.0
+                        * sdf_atlas::stroke_pen_half_units(ge.bold)
+                        * glyph_unit_mm
+                        * MM_TO_PT)
+                        .max(0.1);
                     stroke_pen = Some(((pen * 100.0).round() / 100.0).max(0.1));
                 }
                 ops.push(Op::SaveGraphicsState);
@@ -2047,7 +2052,10 @@ fn emit_text(
             } else if key == *solid_key {
                 // Decoration bar (underline / overline / strike): the quad is a
                 // solid-texel rectangle — fill it directly from its corners.
-                if last_fill.map(|c| color_differs(c, [r, g, b])).unwrap_or(true) {
+                if last_fill
+                    .map(|c| color_differs(c, [r, g, b]))
+                    .unwrap_or(true)
+                {
                     ops.push(Op::SetFillColor {
                         col: Color::Rgb(Rgb {
                             r,
@@ -2265,6 +2273,65 @@ mod tests {
             "low quality did not shrink the PDF: {} !< {}",
             low_bytes.len(),
             high_bytes.len()
+        );
+    }
+
+    // End-to-end for the web attach flow: bytes registered under a name-only
+    // reference (no filesystem path exists behind it) must build an
+    // ImageModel from the RasterImage entity AND export — the whole wire from
+    // pick to PDF without `image::open` ever touching a path.
+    #[test]
+    fn an_image_resolved_from_registered_bytes_exports_to_pdf() {
+        let (w, h) = (64u32, 64u32);
+        // Incompressible noise guarantees the embedded stream is sizeable.
+        let mut pixels = Vec::with_capacity((w * h * 4) as usize);
+        for i in 0..w * h {
+            let v = (i.wrapping_mul(2_654_435_761) >> 24) as u8;
+            pixels.extend_from_slice(&[v, 255 - v, v ^ 0x5a, 0xff]);
+        }
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(w, h, pixels).unwrap())
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .expect("encode test png");
+        let reference = "memory://plot-registered-image.png";
+        crate::scene::model::image_model::register_source(reference, std::sync::Arc::new(png));
+
+        let entity = acadrust::entities::RasterImage::with_size(
+            reference,
+            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            f64::from(w),
+            f64::from(h),
+            50.0,
+            50.0,
+        );
+        let model = crate::scene::model::image_model::ImageModel::from_raster_image(&entity)
+            .expect("registered bytes should build an image model");
+        assert_eq!((model.width, model.height), (w, h));
+        assert_eq!(model.pixels.len(), (w * h * 4) as usize);
+
+        let bare_bytes = render_pdf_bytes(&[test_page(Vec::new())], None).unwrap();
+        let mut page = test_page(Vec::new());
+        page.content.images = vec![PlotImage {
+            image: model,
+            clips: Vec::new(),
+        }];
+        let bytes = render_pdf_bytes(&[page], None).unwrap();
+        assert!(bytes.starts_with(b"%PDF"));
+        // Structural: an image XObject with the native pixel dims reached the
+        // file (printpdf writes dictionary keys without spaces).
+        assert!(
+            bytes
+                .windows(b"/Subtype/Image/Width 64/Height 64".len())
+                .any(|w| w == b"/Subtype/Image/Width 64/Height 64"),
+            "no embedded 64x64 image XObject in {} bytes",
+            bytes.len()
+        );
+        // …and carries real pixel data (a deflate stream of 64×64 RGBA).
+        assert!(
+            bytes.len() > bare_bytes.len() + 1_500,
+            "registered image did not grow the PDF: {} !> {} + 1500",
+            bytes.len(),
+            bare_bytes.len()
         );
     }
 

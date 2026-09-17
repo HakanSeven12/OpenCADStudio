@@ -1945,6 +1945,7 @@ file =
     .saveall-saved-saved-drawing-s = SAVEALL: __ocs_fmt_0__ ड्रॉइंग सहेजी गईं; __ocs_fmt_1__।
     .saveall-already-has-a-save-running = SAVEALL: __ocs_fmt_0__ पहले से ही एक बचा दौड़ है
     .saveall-failed-e = SAVEALL: __ocs_fmt_0__ विफल: __ocs_fmt_1__
+    .load-linetype-file = लाइनटाइप फ़ाइल लोड करें
     .script-path-to-the-scr-file = SCRIPT  .scr फ़ाइल के लिए पथ:
     .script-cannot-read-p-e = SCRIPTनहीं पढ़ सकते __ocs_fmt_0__: __ocs_fmt_1__
     .script-running-command-s-from-p = SCRIPT: __ocs_fmt_0__ __ocs_fmt_1__ से कमांड (s) चला रहा है।

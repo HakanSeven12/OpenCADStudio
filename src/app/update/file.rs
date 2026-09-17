@@ -1695,10 +1695,93 @@ impl OpenCADStudio {
                     crate::modules::insert::wblock::extract_block_to_doc(&document, &worker_name)
                 }
                 .map_err(|e| e.to_string())?;
-                crate::io::save(&document, &worker_path).map_err(|e| e.to_string())
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    crate::io::save(&document, &worker_path).map_err(|e| e.to_string())
+                }
+                // Web: no filesystem behind the name-only path — serialize to
+                // bytes (the same document version `save` would pick, format
+                // from the chosen file name) and hand the browser a download,
+                // the way the other web exports do.
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let ext = worker_path
+                        .extension()
+                        .map(|ext| ext.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "dwg".to_string());
+                    let bytes = crate::io::save_to_bytes(&document, &ext, document.version)?;
+                    let name = worker_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "block.dwg".into());
+                    crate::sys::download_bytes(&name, &bytes);
+                    Ok(())
+                }
             },
             move |result| Message::WblockWriteFinished(block_name, path, result),
         )
+    }
+
+    /// Web SAVEALL: every dirty tab that already has a name-only path is
+    /// serialized and downloaded in one pass — the same
+    /// `save_to_bytes` + `download_bytes` route a single Save takes. The
+    /// browser may ask once for permission to download several files, which
+    /// is the platform's price. Clean tabs are skipped (re-downloading
+    /// identical bytes is noise); tabs with no path still need SAVEAS.
+    #[cfg(target_arch = "wasm32")]
+    pub(in crate::app) fn saveall_web(&mut self) {
+        let mut saved = 0usize;
+        let mut skipped = 0usize;
+        for t in 0..self.tabs.len() {
+            if self.tabs[t].is_start {
+                continue;
+            }
+            let Some(path) = self.tabs[t].current_path.clone() else {
+                skipped += 1;
+                continue;
+            };
+            if !self.tabs[t].dirty {
+                continue;
+            }
+            // The same preparation a single web Save makes on the tab.
+            self.sync_view_state_for_save(t);
+            sync_annotation_scale_header(&mut self.tabs[t].scene);
+            self.stamp_header_sysvars(t);
+            self.sync_solid_models_for_save(t);
+            self.tabs[t].scene.sync_native_parametric_graph();
+            let ext = path
+                .extension()
+                .map(|ext| ext.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "dwg".to_string());
+            let version = self.tabs[t].scene.document.version;
+            let filename = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.to_string_lossy().into_owned());
+            match crate::io::save_to_bytes(&self.tabs[t].scene.document, &ext, version) {
+                Ok(bytes) => {
+                    crate::sys::download_bytes(&filename, &bytes);
+                    self.tabs[t].scene.document.version = version;
+                    self.tabs[t].dirty = false;
+                    self.tabs[t].recovery_save_as_required = false;
+                    saved += 1;
+                }
+                Err(error) => self
+                    .command_line
+                    .push_error(crate::tf!("SAVEALL: {} failed: {error}", path.display()).as_ref()),
+            }
+        }
+        self.command_line.push_output(
+            crate::tf!(
+                "SAVEALL: saved {saved} drawing(s){}.",
+                if skipped > 0 {
+                    crate::tf!("; {skipped} need SAVEAS (no file path yet)").into_owned()
+                } else {
+                    String::new()
+                }
+            )
+            .as_ref(),
+        );
     }
 
     pub(super) fn on_stl_export_path_some(&mut self, path: std::path::PathBuf) -> Task<Message> {
@@ -2894,9 +2977,7 @@ impl OpenCADStudio {
     /// single derivation every web snapshot/remove site must agree on, or a
     /// remove misses the snapshot a round wrote (and vice versa).
     #[cfg(target_arch = "wasm32")]
-    pub(super) fn web_autosave_key(
-        tab: &crate::app::document::DocumentTab,
-    ) -> String {
+    pub(super) fn web_autosave_key(tab: &crate::app::document::DocumentTab) -> String {
         tab.current_path
             .as_ref()
             .and_then(|path| path.file_name())
@@ -3140,10 +3221,8 @@ impl OpenCADStudio {
                 // survives in OPFS and is re-offered on the next boot.
                 if !crate::io::web_drop::enqueue_restore(open_name, bytes, key) {
                     self.command_line.push_warning(
-                        crate::tf!(
-                            "Autosave copy could not be queued: too many pending opens"
-                        )
-                        .as_ref(),
+                        crate::tf!("Autosave copy could not be queued: too many pending opens")
+                            .as_ref(),
                     );
                     self.queue_next_web_autosave_prompt();
                 }

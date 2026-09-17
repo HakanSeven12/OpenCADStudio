@@ -2191,6 +2191,19 @@ pub enum Message {
     LayerTranslatorLoad,
     /// A target set was read from `path`.
     LayerTranslatorLoaded(std::path::PathBuf),
+    /// Web: a standards drawing picked and parsed in the browser, with the
+    /// target layers already extracted — a name-only path has nothing behind
+    /// it for `load_targets` to read. `Ok(None)` = cancelled.
+    #[cfg(target_arch = "wasm32")]
+    LayerTranslatorLoadedWeb(
+        Result<
+            Option<(
+                String,
+                Vec<crate::modules::draw::layers::laytrans::TargetLayer>,
+            )>,
+            String,
+        >,
+    ),
     LayerTranslatorSelectFrom(String),
     LayerTranslatorSelectTo(String),
     /// Pair the two selected layers.
@@ -2321,6 +2334,14 @@ pub enum Message {
     /// dispatch, this accepts an interactive verb and all of its arguments on
     /// the same line (`BOX 0,0,0 10,10,0 10`).
     ScriptLine(String),
+    /// Web SCRIPT: the picked .scr file's name and text. `None` = the
+    /// browser dialog was cancelled.
+    #[cfg(target_arch = "wasm32")]
+    ScriptFilePicked(Option<(String, String)>),
+    /// Web CENTERLTYPEFILE: the picked .lin/.dnl file's name and text.
+    /// `None` = cancelled.
+    #[cfg(target_arch = "wasm32")]
+    CenterlineLinetypeFilePicked(Option<(String, String)>),
     /// Append one typed character to the command-line input from the
     /// global key-press subscription. Used when the text-input widget
     /// itself isn't focused (focus parked on viewport / button / etc.)

@@ -1956,6 +1956,7 @@ file =
     .saveall-saved-saved-drawing-s = SAVEALL: tallennettu __ocs_fmt_0__-piirustukset __ocs_fmt_1__.
     .saveall-already-has-a-save-running = SAVEALL: __ocs_fmt_0__:n tallennus on jo käynnissä
     .saveall-failed-e = SAVEALL: __ocs_fmt_0__ epäonnistui: __ocs_fmt_1__
+    .load-linetype-file = Lataa viivatyylitiedosto
     .script-path-to-the-scr-file = SCRIPT polku .scr-tiedostoon:
     .script-cannot-read-p-e = SCRIPT: ei voi lukea __ocs_fmt_0__: __ocs_fmt_1__
     .script-running-command-s-from-p = SCRIPT: __ocs_fmt_0__-komentojen suorittaminen lähteestä __ocs_fmt_1__.

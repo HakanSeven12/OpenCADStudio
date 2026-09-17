@@ -1956,6 +1956,7 @@ file =
     .saveall-saved-saved-drawing-s = SAVEALL: __ocs_fmt_0__ 도면 __ocs_fmt_1__를 저장했습니다.
     .saveall-already-has-a-save-running = SAVEALL: __ocs_fmt_0__에는 이미 실행 중인 저장이 있습니다.
     .saveall-failed-e = SAVEALL: __ocs_fmt_0__ 실패: __ocs_fmt_1__
+    .load-linetype-file = 선종 파일 로드
     .script-path-to-the-scr-file = .scr 파일에 대한 SCRIPT 경로:
     .script-cannot-read-p-e = SCRIPT: __ocs_fmt_0__: __ocs_fmt_1__를 읽을 수 없습니다.
     .script-running-command-s-from-p = SCRIPT: __ocs_fmt_1__에서 __ocs_fmt_0__ 명령을 실행합니다.

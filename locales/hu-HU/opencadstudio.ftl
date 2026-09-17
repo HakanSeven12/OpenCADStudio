@@ -1956,6 +1956,7 @@ file =
     .saveall-saved-saved-drawing-s = SAVEALL: mentett __ocs_fmt_0__ rajz(ok)__ocs_fmt_1__.
     .saveall-already-has-a-save-running = SAVEALL: A __ocs_fmt_0__ már fut egy mentés
     .saveall-failed-e = SAVEALL: __ocs_fmt_0__ sikertelen: __ocs_fmt_1__
+    .load-linetype-file = Vonaltípusfájl betöltése
     .script-path-to-the-scr-file = SCRIPT elérési út a .scr fájlhoz:
     .script-cannot-read-p-e = SCRIPT: nem tudja olvasni __ocs_fmt_0__: __ocs_fmt_1__
     .script-running-command-s-from-p = SCRIPT: __ocs_fmt_0__ parancs(ok) futtatása a __ocs_fmt_1__ fájlból.

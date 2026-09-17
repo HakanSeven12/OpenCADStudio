@@ -1969,6 +1969,7 @@ file =
     .saveall-saved-saved-drawing-s = SAVEALL: حُفظ __ocs_fmt_0__ رسم__ocs_fmt_1__.
     .saveall-already-has-a-save-running = SAVEALL: يجري بالفعل حفظ __ocs_fmt_0__
     .saveall-failed-e = SAVEALL: فشل __ocs_fmt_0__: ‏__ocs_fmt_1__
+    .load-linetype-file = تحميل ملف نوع الخط
     .script-path-to-the-scr-file = SCRIPT  مسار ملف ‎.scr:
     .script-cannot-read-p-e = SCRIPT: تعذرت قراءة __ocs_fmt_0__: ‏__ocs_fmt_1__
     .script-running-command-s-from-p = SCRIPT: يجري تشغيل __ocs_fmt_0__ أمر من __ocs_fmt_1__.

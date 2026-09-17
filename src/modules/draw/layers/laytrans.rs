@@ -72,6 +72,13 @@ impl Report {
 /// drawing. They are all the same format, so nothing here cares which.
 pub fn load_targets(path: &Path) -> Result<Vec<TargetLayer>, String> {
     let document = crate::io::load_file(path)?;
+    targets_from_document(&document)
+}
+
+/// Extract the translation targets from an already-parsed drawing — the
+/// tail of [`load_targets`], reused by the web flow, which parses the
+/// picked file's bytes before it gets here.
+pub fn targets_from_document(document: &acadrust::CadDocument) -> Result<Vec<TargetLayer>, String> {
     let mut targets: Vec<TargetLayer> = document
         .layers
         .iter()
@@ -141,9 +148,10 @@ pub fn translate(
             continue;
         }
         if mapping.from == "0" {
-            report
-                .skipped
-                .push((mapping.from.clone(), crate::t!("layer \"0\" cannot be translated").into_owned()));
+            report.skipped.push((
+                mapping.from.clone(),
+                crate::t!("layer \"0\" cannot be translated").into_owned(),
+            ));
             continue;
         }
         if mapping.from.eq_ignore_ascii_case(current_layer) {
@@ -154,9 +162,10 @@ pub fn translate(
             continue;
         }
         if !scene.document.layers.contains(&mapping.from) {
-            report
-                .skipped
-                .push((mapping.from.clone(), crate::t!("no such layer in this drawing").into_owned()));
+            report.skipped.push((
+                mapping.from.clone(),
+                crate::t!("no such layer in this drawing").into_owned(),
+            ));
             continue;
         }
         // Bring the target in with the standard's own properties. An existing
@@ -168,9 +177,10 @@ pub fn translate(
                 .iter()
                 .find(|target| target.name.eq_ignore_ascii_case(&mapping.to))
             else {
-                report
-                    .skipped
-                    .push((mapping.from.clone(), crate::t!("target layer is not in the loaded set").into_owned()));
+                report.skipped.push((
+                    mapping.from.clone(),
+                    crate::t!("target layer is not in the loaded set").into_owned(),
+                ));
                 continue;
             };
             let mut layer = target.layer.clone();

@@ -3810,6 +3810,84 @@ mod tests {
             other => panic!("expected LwPolyline, got {other:?}"),
         }
     }
+
+    /// #1318: a segment that samples to nothing — here a zero-length edge,
+    /// which has no curve — must contribute no points instead of panicking on
+    /// the `sp[1..]` join when the accumulator is empty too.
+    #[test]
+    fn sample_entity_xy_skips_degenerate_segments() {
+        use acadrust::entities::Polyline3D;
+        // First edge (0,0,0)→(0,0,0) is zero-length; the second runs to (5,0,0).
+        let p3d = Polyline3D::from_points(vec![
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(5.0, 0.0, 0.0),
+        ]);
+        let pts = sample_entity_xy(&EntityType::Polyline3D(p3d));
+        assert!(!pts.is_empty(), "the real segment still samples");
+        assert!(pts[0][0].abs() < 1e-9 && pts[0][1].abs() < 1e-9, "starts at the shared vertex");
+        assert!(
+            (pts[pts.len() - 1][0] - 5.0).abs() < 1e-9 && pts[pts.len() - 1][1].abs() < 1e-9,
+            "ends at the far vertex"
+        );
+
+        // All-degenerate: no segment has a curve — nothing to sample, no panic.
+        let degenerate = Polyline3D::from_points(vec![
+            Vector3::new(1.0, 1.0, 1.0),
+            Vector3::new(1.0, 1.0, 1.0),
+        ]);
+        assert!(sample_entity_xy(&EntityType::Polyline3D(degenerate)).is_empty());
+    }
+
+    /// #1318 in the preview sampler: an arc on an edge-on OCS has no plan
+    /// view, so it samples empty — the same join must skip it rather than
+    /// slice an empty vec.
+    #[test]
+    fn preview_sample_xy_skips_unsampleable_segments() {
+        use acadrust::entities::{Polyline2D, Vertex2D};
+        let mut p2d = Polyline2D::new();
+        p2d.normal = Vector3::new(0.0, 1.0, 0.0); // edge-on: no plan view
+        let mut v0 = Vertex2D::new(Vector3::new(0.0, 0.0, 0.0));
+        v0.bulge = 1.0; // first segment is an arc — it samples to nothing
+        p2d.vertices = vec![
+            v0,
+            Vertex2D::new(Vector3::new(2.0, 0.0, 0.0)),
+            Vertex2D::new(Vector3::new(4.0, 0.0, 0.0)),
+        ];
+        let pts = preview_sample_xy(&EntityType::Polyline2D(p2d));
+        assert!(pts.len() >= 2, "the straight segment still samples");
+        // Whatever the OCS maps onto world XY, these vertices stay on y = 0.
+        for p in &pts {
+            assert!(p[1].abs() < 1e-9, "sampled off the segment: {p:?}");
+        }
+    }
+
+    /// Healthy input still stitches: the vertex shared by two segments is
+    /// sampled once, not twice — the dedup the `sp[1..]` join exists for.
+    #[test]
+    fn polyline_samples_stitch_shared_vertex_once() {
+        let mut poly = LwPolyline::new();
+        poly.common.handle = Handle::new(95);
+        poly.vertices = vec![
+            LwVertex::from_coords(0.0, 0.0),
+            LwVertex::from_coords(3.0, 0.0),
+            LwVertex::from_coords(3.0, 4.0),
+        ];
+        let pts = sample_entity_xy(&EntityType::LwPolyline(poly));
+        assert!(pts.len() >= 2);
+        assert!(pts[0][0].abs() < 1e-9 && pts[0][1].abs() < 1e-9);
+        assert!(
+            (pts[pts.len() - 1][0] - 3.0).abs() < 1e-9
+                && (pts[pts.len() - 1][1] - 4.0).abs() < 1e-9
+        );
+        for w in pts.windows(2) {
+            assert!(
+                (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1]) > 1e-9,
+                "duplicated consecutive sample at {:?}",
+                w[0]
+            );
+        }
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -3978,7 +4056,11 @@ fn sample_entity_xy(e: &EntityType) -> Vec<[f64; 2]> {
         let mut pts: Vec<[f64; 2]> = Vec::new();
         for seg in crate::modules::draw::modify::explode::explode_polyline_segments(e) {
             let sp = sample_entity_xy(&seg);
-            if pts.last() == sp.first() {
+            // A segment can sample to nothing — a zero-length edge has no
+            // curve, and one on an edge-on OCS has no plan view. It joins
+            // onto nothing either way; slicing `sp[1..]` when both sides are
+            // empty is the #1318 panic.
+            if !sp.is_empty() && pts.last() == sp.first() {
                 pts.extend_from_slice(&sp[1..]);
             } else {
                 pts.extend(sp);
@@ -4030,7 +4112,11 @@ fn preview_sample_xy(e: &EntityType) -> Vec<[f64; 2]> {
                     }
                     _ => sample_entity_xy(&seg),
                 };
-                if pts.last() == sp.first() {
+                // As in `sample_entity_xy`: an empty sample (an arc on an
+                // edge-on OCS) contributes nothing and must not reach the
+                // `sp[1..]` join — that is the #1318 panic when `pts` is
+                // still empty too.
+                if !sp.is_empty() && pts.last() == sp.first() {
                     pts.extend_from_slice(&sp[1..]);
                 } else {
                     pts.extend(sp);

@@ -1862,6 +1862,21 @@ impl CadCommand for SweepCommand {
         matches!(self.step, SweepStep::PickPath | SweepStep::ReferenceLength | SweepStep::NewLength)
     }
 
+    // The reference-scale prompts read a typed length, but they also accept
+    // keyword letters, so without this a value committed from the dynamic
+    // box (the only route on web, where the canvas — not the command line —
+    // holds keyboard focus) resolves into an in-plane point instead: at
+    // `ReferenceLength` the typed length is dropped and stored as a stray
+    // first reference pick, at `NewLength` the scale is computed from the
+    // distance of that arbitrary point to the length anchor. `on_text_input`
+    // parses the same strings the command-line path would (keywords and
+    // `parse_typed_length`), so both entry routes behave identically (#1082).
+    // PickPath stays a point step: its letters are option keywords and its
+    // picks are path entities.
+    fn dyn_commit_as_text(&self) -> bool {
+        matches!(self.step, SweepStep::ReferenceLength | SweepStep::NewLength)
+    }
+
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let value = text.trim();
         if value.is_empty() {

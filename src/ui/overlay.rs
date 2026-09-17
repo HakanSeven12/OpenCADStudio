@@ -567,12 +567,6 @@ pub struct GridCanvasState {
     pub cache: canvas::Cache<iced::Renderer>,
 }
 
-/// Compute the adaptive grid step size (world units) from camera zoom.
-///
-/// Returns the smallest power-of-5 multiple of 1.0 that places grid lines at
-/// least `MIN_GRID_PX` pixels apart at the camera pivot. Both orthographic and
-/// perspective cameras have the same vertical scale there. Camera rotation is
-/// intentionally absent so orbiting cannot rescale the visible grid or snap.
 /// Perpendicular screen distance (px) from `p` to the infinite line through
 /// `a` and `b`. Degenerate (`a`≈`b`) falls back to the point distance. Used
 /// to tell whether a tracking vector really passes through the locked cursor
@@ -632,6 +626,12 @@ fn clip_seg(p0: Point, p1: Point, bounds: iced::Rectangle) -> Option<(Point, Poi
     ))
 }
 
+/// Compute the adaptive grid step size (world units) from camera zoom.
+///
+/// Returns the smallest power-of-5 multiple of 1.0 that places grid lines at
+/// least `MIN_GRID_PX` pixels apart at the camera pivot. Both orthographic and
+/// perspective cameras have the same vertical scale there. Camera rotation is
+/// intentionally absent so orbiting cannot rescale the visible grid or snap.
 pub fn compute_grid_step(distance: f32, fov_y: f32, bounds: iced::Rectangle) -> f32 {
     let half_height = distance * (fov_y * 0.5).tan();
     if !half_height.is_finite() || half_height <= 1e-9 || bounds.height <= 0.0 {

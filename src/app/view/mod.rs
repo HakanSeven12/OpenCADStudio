@@ -771,6 +771,9 @@ bg={bg_ms:.1}ms n={view_count}"
                             // state machine stay untouched.
                             let (_, (ux, uy, _)) = self.drafting_grid_basis(i);
                             let (ux, uy) = (ux.as_dvec3(), uy.as_dvec3());
+                            // Guides quantize to the polar increment even
+                            // while a window-corner drag suppresses polar in
+                            // the snapper (drafting gate) — cosmetic only.
                             let step = self.polar_mode.then_some(self.polar_increment_deg);
                             let perp_on =
                                 self.snapper.is_on(crate::snap::SnapType::Perpendicular);

@@ -1526,8 +1526,11 @@ mod save_failure_tests {
 /// `Ok(None)` means the user cancelled the dialog; `Err` carries a parse
 /// failure so it reaches the command line instead of dying silently (the
 /// legacy-CTB complaint in #1261d was partly that a file which failed to
-/// parse produced no feedback at all).
-pub async fn pick_plot_style() -> Result<Option<plot_style::PlotStyleTable>, String> {
+/// parse produced no feedback at all). The table is paired with an optional
+/// non-fatal note for the command line — currently the registration
+/// collision message below.
+pub async fn pick_plot_style()
+-> Result<Option<(plot_style::PlotStyleTable, Option<String>)>, String> {
     let dialog = crate::sys::file_dialog()
         .set_title(crate::t!("Load Plot Style Table").as_ref())
         .add_filter(
@@ -1553,17 +1556,137 @@ pub async fn pick_plot_style() -> Result<Option<plot_style::PlotStyleTable>, Str
     })?;
     // Loading a table registers it, the way AutoCAD does: copy it next to the
     // built-ins so it stays in the Plot dialog's table list after restart.
-    // Failures are non-fatal — the table is already applied to this plot.
+    // Only real AutoCAD containers are registered — the permissive heuristic
+    // also accepts junk (any text file, a stray deflate stream), and writing
+    // those into the folder would pollute it permanently — so heuristic
+    // parses stay loadable for this session only. Failures are non-fatal —
+    // the table is already applied to this plot.
     #[cfg(not(target_arch = "wasm32"))]
-    if !table.is_stb {
-        if let (Ok(dir), Some(file_name)) = (plot_style::plot_styles_dir(), path.file_name()) {
-            let registered = dir.join(file_name);
-            if !registered.exists() {
-                let _ = std::fs::copy(&path, &registered);
-            }
-        }
+    let note = should_register_plot_style(&table)
+        .then(|| register_picked_plot_style(&path))
+        .flatten();
+    #[cfg(target_arch = "wasm32")]
+    let note = None;
+    Ok(Some((table, note)))
+}
+
+/// Whether a loaded table should be registered permanently: only real
+/// AutoCAD CTB containers. Named (STB) tables are not offered in the
+/// color-dependent list, and heuristic parses (plain text, a stray deflate
+/// stream) must not be written into the plot-styles folder.
+#[cfg(not(target_arch = "wasm32"))]
+fn should_register_plot_style(table: &plot_style::PlotStyleTable) -> bool {
+    !table.is_stb && table.structured
+}
+
+/// Copy the picked CTB into the per-user plot-styles folder, reporting a
+/// command-line note when the already-registered table was kept instead.
+#[cfg(not(target_arch = "wasm32"))]
+fn register_picked_plot_style(path: &Path) -> Option<String> {
+    plot_style::plot_styles_dir()
+        .ok()
+        .and_then(|dir| register_plot_style_into(&dir, path))
+}
+
+/// Copy `path` into `dir` unless a table with the same file name is already
+/// registered there. A collision keeps the registered file — overwriting it
+/// from a stray pick would silently destroy edits made through the Plot
+/// Style panel — and returns a note naming the kept table so the user hears
+/// about it. Copy failures stay silent: the table is already applied to the
+/// current plot.
+#[cfg(not(target_arch = "wasm32"))]
+fn register_plot_style_into(dir: &Path, path: &Path) -> Option<String> {
+    let file_name = path.file_name()?;
+    let registered = dir.join(file_name);
+    if registered.exists() {
+        return Some(
+            crate::tf!(
+                "'{}' is already registered; the existing table was kept.",
+                file_name.to_string_lossy()
+            )
+            .into_owned(),
+        );
     }
-    Ok(Some(table))
+    let _ = std::fs::copy(path, &registered);
+    None
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod plot_style_registration_tests {
+    use super::{register_plot_style_into, should_register_plot_style};
+    use crate::io::plot_style::{self, PlotStyleTable};
+
+    fn scratch_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ocs_ctb_register_{tag}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A name collision keeps the registered table and surfaces a note
+    /// naming it instead of silently discarding the pick.
+    #[test]
+    fn a_collision_keeps_the_registered_table_and_notes_it() {
+        let dir = scratch_dir("collide");
+        let picked = dir.join("picked.ctb");
+        std::fs::write(&picked, b"freshly picked").unwrap();
+        std::fs::write(dir.join("picked.ctb"), b"already registered").unwrap();
+        let note = register_plot_style_into(&dir, &picked).expect("collision note");
+        assert!(note.contains("picked.ctb"), "{note}");
+        assert!(note.contains("already registered"), "{note}");
+        assert!(note.contains("kept"), "{note}");
+        assert_eq!(
+            std::fs::read(dir.join("picked.ctb")).unwrap(),
+            b"already registered"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Without a collision the picked table is copied and no note is pushed.
+    #[test]
+    fn a_fresh_table_is_copied_without_a_note() {
+        let dir = scratch_dir("fresh");
+        let picked = dir.join("source").join("new.ctb");
+        std::fs::create_dir_all(picked.parent().unwrap()).unwrap();
+        std::fs::write(&picked, b"fresh bytes").unwrap();
+        assert!(register_plot_style_into(&dir, &picked).is_none());
+        assert_eq!(
+            std::fs::read(dir.join("new.ctb")).unwrap(),
+            b"fresh bytes"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Registration is reserved for real AutoCAD containers: the permissive
+    /// heuristic loads junk files for the session but they must never be
+    /// written into the plot-styles folder.
+    #[test]
+    fn only_structured_containers_are_registrable() {
+        let builtin = PlotStyleTable::builtin(plot_style::DEFAULT_PLOT_STYLE).unwrap();
+        assert!(builtin.structured);
+        assert!(should_register_plot_style(&builtin));
+        let mut stb = builtin.clone();
+        stb.is_stb = true;
+        assert!(!should_register_plot_style(&stb));
+
+        // A loose zlib stream without the container header still parses…
+        use std::io::Write;
+        let mut enc =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(b"description=\"junk\n").unwrap();
+        let mut loose = b"any first line\n".to_vec();
+        loose.extend_from_slice(&enc.finish().unwrap());
+        let junk = PlotStyleTable::from_bytes("junk.ctb", &loose).unwrap();
+        // …but stays session-only.
+        assert!(!junk.structured);
+        assert!(!should_register_plot_style(&junk));
+    }
 }
 
 // ── Image file picker ─────────────────────────────────────────────────────

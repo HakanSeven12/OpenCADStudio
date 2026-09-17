@@ -506,6 +506,11 @@ pub fn render_pdf_bytes(
     // Glyph Form XObjects keyed by the atlas tile key — shared across pages so
     // multi-layout exports bake each unique glyph once.
     let mut glyph_forms = std::collections::HashMap::new();
+    // Snapshot the atlas once for the whole export (see `atlas_export_snapshot`):
+    // `emit_text` used to re-snapshot per TEXT entity, re-cloning every baked
+    // glyph's strokes and fill triangulation each call while the forms cache
+    // here makes only the first copy useful.
+    let atlas = atlas_export_snapshot(pages);
     for (index, page) in pages.iter().enumerate() {
         append_pdf_page(
             &mut doc,
@@ -513,11 +518,47 @@ pub fn render_pdf_bytes(
             &mut glyph_forms,
             page,
             plot_style,
+            atlas.as_ref(),
         )
         .map_err(|error| format!("Page {}: {error}", index + 1))?;
     }
     let mut warnings = Vec::new();
     Ok(doc.save(&PdfSaveOptions::default(), &mut warnings))
+}
+
+/// Per-export atlas snapshot: every baked glyph's vector geometry keyed by its
+/// tile `uv_min`, plus the reserved solid-texel key for decoration bars.
+type AtlasExport = (
+    std::collections::HashMap<u64, crate::scene::text::sdf_atlas::GlyphExport>,
+    u64,
+);
+
+/// Snapshot the atlas' baked-glyph geometry ONCE per export, not per TEXT
+/// entity.
+///
+/// `export_table` re-resolves each baked entry through its `Face` and clones
+/// its strokes and fill triangulation, so calling it from every `emit_text`
+/// re-copied the whole atlas for each of the hundreds of text wires a drawing
+/// carries — while holding the global atlas mutex. Export is single-threaded
+/// here and the glyph forms are cached document-wide, so one snapshot serves
+/// every page and entity. Returns `None` when no page carries text (nothing
+/// to snapshot) or the atlas mutex is poisoned (the old per-entity code
+/// skipped text in that case too).
+fn atlas_export_snapshot(pages: &[PdfPageInput]) -> Option<AtlasExport> {
+    let has_text = pages.iter().any(|page| {
+        page.content
+            .wires
+            .iter()
+            .any(|wire| !wire.wire.text_verts.is_empty())
+    });
+    if !has_text {
+        return None;
+    }
+    let atlas = crate::scene::text::sdf_atlas::text_atlas().lock().ok()?;
+    Some((
+        atlas.export_table(),
+        crate::scene::text::sdf_atlas::uv_key(atlas.solid_uv()),
+    ))
 }
 
 fn append_pdf_page(
@@ -526,6 +567,7 @@ fn append_pdf_page(
     glyph_forms: &mut std::collections::HashMap<u64, printpdf::XObjectId>,
     page: &PdfPageInput,
     fallback_plot_style: Option<&PlotStyleTable>,
+    atlas: Option<&AtlasExport>,
 ) -> Result<(), String> {
     // Paper dimensions are validated like the content coordinates below: a
     // NaN/inf/zero sheet (`width < MIN` compares false for NaN) would be
@@ -758,6 +800,7 @@ fn append_pdf_page(
                     emit_text(
                         doc,
                         glyph_forms,
+                        atlas,
                         &mut ops,
                         std::slice::from_ref(&wire.wire),
                         ox,
@@ -1551,10 +1594,12 @@ fn emit_hatch(
 // ── Text (SDF glyph quads → vector strokes / fills) ────────────────────────
 
 /// Format a coordinate as the shortest PDF real with 0.01 resolution
-/// (`3`, `3.5`, `-0.25`). 0.01 pt ≈ 3.5 µm on paper — visually lossless, but
-/// it keeps path operands half the size of printpdf's default
-/// shortest-round-trip f32 text (`41.5445 28.712158` → `41.54 28.71`), which
-/// dominates text-heavy vector pages (#702).
+/// (`3`, `3.5`, `-0.25`). The resolution is in the units of whichever stream
+/// the operand lands in: 0.01 pt (≈ 3.5 µm on paper) for page-space operands,
+/// 0.01 glyph-plane units (≈ 0.1% of the 9-unit atlas tile) for Form XObject
+/// content. Both are visually lossless, and half the size of printpdf's
+/// default shortest-round-trip f32 text (`41.5445 28.712158` → `41.54 28.71`),
+/// which dominates text-heavy vector pages (#702).
 fn pdf_real(v: f32) -> String {
     let rounded = (v * 100.0).round() / 100.0;
     if rounded == rounded.trunc() && rounded.abs() < 1e15 {
@@ -1568,6 +1613,23 @@ fn pdf_real(v: f32) -> String {
         }
     }
     s
+}
+
+/// Round a `cm` scale operand to 4 significant digits (`0.7874015` → `0.7874`).
+///
+/// The glyph `cm` scale entries are pt per glyph-plane unit — ~0.5–0.9 for
+/// small text — so quantizing them on the absolute 0.01 grid used for
+/// translations fixed the ratio by up to ~1%, accumulating visible
+/// advance-width drift across a text run. Four significant digits keep the
+/// relative error within ~0.05%; translations stay at 0.01 because they are
+/// absolute page positions, not ratios.
+fn round_sig4(v: f64) -> f64 {
+    if !v.is_finite() || v == 0.0 {
+        return v;
+    }
+    let decimals = (3 - v.abs().log10().floor() as i32).clamp(0, 17);
+    let factor = 10f64.powi(decimals);
+    (v * factor).round() / factor
 }
 
 /// Serialize one glyph's vector geometry as a compact PDF content stream in
@@ -1698,9 +1760,13 @@ fn adapt_text_color([r, g, b]: [f32; 3]) -> [f32; 3] {
 /// quad's `uv_min` and map it into that quad by affine interpolation of the
 /// plane rect — so a stroke (LFF) font emits polylines and a filled TrueType
 /// glyph emits filled triangles, exactly where the SDF quad sits.
+///
+/// The atlas geometry comes from `atlas`, the export-wide snapshot taken once
+/// in `render_pdf_bytes`.
 fn emit_text(
     doc: &mut PdfDocument,
     glyph_forms: &mut std::collections::HashMap<u64, printpdf::XObjectId>,
+    atlas: Option<&AtlasExport>,
     ops: &mut Vec<Op>,
     wires: &[WireModel],
     ox: f64,
@@ -1714,12 +1780,8 @@ fn emit_text(
     if wires.iter().all(|w| w.text_verts.is_empty()) {
         return;
     }
-    // Snapshot the atlas' baked-glyph geometry once; drop the lock before use.
-    let (table, solid_key) = {
-        let Ok(atlas) = sdf_atlas::text_atlas().lock() else {
-            return;
-        };
-        (atlas.export_table(), sdf_atlas::uv_key(atlas.solid_uv()))
+    let Some((table, solid_key)) = atlas else {
+        return;
     };
 
     // `Op::SetLineDashPattern` is persistent graphics state and the wire pass
@@ -1816,10 +1878,78 @@ fn emit_text(
                 let uy = (br[1] - bl[1]) / sx as f64;
                 let vx = (tl[0] - bl[0]) / sy as f64;
                 let vy = (tl[1] - bl[1]) / sy as f64;
+                // Degenerate quad (collapsed corners → zero-area transform):
+                // skip emission, mirroring the plane guard above, instead of
+                // letting a near-zero scale reach the pen division below and
+                // paint a page-spanning hairline.
+                let det = ux * vy - uy * vx;
+                if det.abs() < 1e-9 {
+                    continue;
+                }
                 let origin_x = bl[0] - ux * pmin[0] as f64 - vx * pmin[1] as f64;
                 let origin_y = bl[1] - uy * pmin[0] as f64 - vy * pmin[1] as f64;
                 let m2pt = MM_TO_PT as f64;
                 let r2 = |v: f64| ((v * 100.0).round() / 100.0) as f32;
+
+                if let Some(ctb_pen) = lw_override.filter(|_| ge.fill_tris.is_empty()) {
+                    // Heavy CTB pen: bypass the glyph Form XObject and stroke the
+                    // centrelines DIRECTLY in page space. The Form /BBox is the
+                    // atlas tile rect, whose 1.5-unit SDF spread margin bounds
+                    // the nominal pen — an absolute CTB lineweight is arbitrary
+                    // pt and can exceed it (2.5 mm text + 1.0 mm pen → 1.79-unit
+                    // half-width > 1.5), squaring round caps off at the tile
+                    // edge. The override is per text entity, so every stroked
+                    // glyph of the entity takes this one path — no per-glyph
+                    // mixing of Form and direct pens (a filled TrueType
+                    // fallback glyph keeps its Form; it has no pen to clip).
+                    // The Form-dedupe win is irrelevant for the rare heavy-pen
+                    // case. The pen is already divided by the page CTM scale
+                    // above, so it stays absolute on paper.
+                    if last_outline.map(|c| color_differs(c, [r, g, b])).unwrap_or(true) {
+                        ops.push(Op::SetOutlineColor {
+                            col: Color::Rgb(Rgb {
+                                r,
+                                g,
+                                b,
+                                icc_profile: None,
+                            }),
+                        });
+                        last_outline = Some([r, g, b]);
+                    }
+                    ops.push(Op::SetOutlineThickness {
+                        pt: Pt(if ge.bold {
+                            ctb_pen * 1.7
+                        } else {
+                            ctb_pen
+                        }),
+                    });
+                    let map = |p: [f32; 2]| -> Point {
+                        let u = ((p[0] - pmin[0]) / sx) as f64;
+                        let v = ((p[1] - pmin[1]) / sy) as f64;
+                        point(
+                            bl[0] + u * (br[0] - bl[0]) + v * (tl[0] - bl[0]),
+                            bl[1] + u * (br[1] - bl[1]) + v * (tl[1] - bl[1]),
+                        )
+                    };
+                    for stroke in &ge.strokes {
+                        if stroke.len() < 2 {
+                            continue;
+                        }
+                        ops.push(Op::DrawLine {
+                            line: Line {
+                                points: stroke
+                                    .iter()
+                                    .map(|&p| LinePoint {
+                                        p: map(p),
+                                        bezier: false,
+                                    })
+                                    .collect(),
+                                is_closed: false,
+                            },
+                        });
+                    }
+                    continue;
+                }
 
                 // Colour ops go OUTSIDE the per-glyph q/Q: the CTM must be
                 // scoped, but fill colour has to persist past the Q or the
@@ -1840,12 +1970,13 @@ fn emit_text(
                         last_fill = Some([r, g, b]);
                     }
                 } else {
-                    // Stroke (LFF/SHX pen) font or hollow glyph.
-                    // Match the SDF atlas' nominal glyph-space pen instead of
-                    // borrowing the entity lineweight: Roman Duplex and similar
+                    // Stroke (LFF/SHX pen) font or hollow glyph, nominal pen:
+                    // match the SDF atlas' glyph-space pen instead of borrowing
+                    // the entity lineweight — Roman Duplex and similar
                     // multi-stroke faces rely on that band to close the narrow
-                    // gaps between parallel centrelines. An explicit CTB
-                    // lineweight still wins and stays absolute under the plot CTM.
+                    // gaps between parallel centrelines. (An explicit CTB
+                    // lineweight never reaches this Form path; it takes the
+                    // direct heavy-pen path above.)
                     if last_outline.map(|c| color_differs(c, [r, g, b])).unwrap_or(true) {
                         ops.push(Op::SetOutlineColor {
                             col: Color::Rgb(Rgb {
@@ -1857,28 +1988,27 @@ fn emit_text(
                         });
                         last_outline = Some([r, g, b]);
                     }
-                    let pen = if let Some(ctb_pen) = lw_override {
-                        if ge.bold {
-                            ctb_pen * 1.7
-                        } else {
-                            ctb_pen
-                        }
-                    } else {
-                        let glyph_unit_mm = (((tl[0] - bl[0]).powi(2) + (tl[1] - bl[1]).powi(2))
-                            .sqrt()
-                            / sy.abs() as f64) as f32;
+                    let glyph_unit_mm = (((tl[0] - bl[0]).powi(2) + (tl[1] - bl[1]).powi(2))
+                        .sqrt()
+                        / sy.abs() as f64) as f32;
+                    let pen =
                         (2.0 * sdf_atlas::stroke_pen_half_units(ge.bold) * glyph_unit_mm * MM_TO_PT)
-                            .max(0.1)
-                    };
+                            .max(0.1);
                     stroke_pen = Some(((pen * 100.0).round() / 100.0).max(0.1));
                 }
                 ops.push(Op::SaveGraphicsState);
                 ops.push(Op::SetTransformationMatrix {
                     matrix: printpdf::CurTransMat::Raw([
-                        r2(ux * m2pt),
-                        r2(uy * m2pt),
-                        r2(vx * m2pt),
-                        r2(vy * m2pt),
+                        // Scale entries carry the pt-per-glyph-unit ratio
+                        // (~0.5–0.9 for small text) and are rounded to 4
+                        // significant digits — the 0.01 absolute grid would
+                        // quantize them by ~1% and visibly drift the advance
+                        // width across a text run.
+                        round_sig4(ux * m2pt) as f32,
+                        round_sig4(uy * m2pt) as f32,
+                        round_sig4(vx * m2pt) as f32,
+                        round_sig4(vy * m2pt) as f32,
+                        // Translations are absolute page positions: 0.01 pt.
                         r2((origin_x + ox) * m2pt),
                         r2((origin_y + oy) * m2pt),
                     ]),
@@ -1886,10 +2016,12 @@ fn emit_text(
                 if let Some(pen) = stroke_pen {
                     // Line width is GEOMETRIC state: the CTM above scales a `w`
                     // set before it, so the pen is re-set per glyph, under its
-                    // own CTM, pre-divided by the quad's area scale to keep the
-                    // on-paper width identical to stroking in page units.
-                    let det = (ux * vy - uy * vx).abs() * m2pt * m2pt;
-                    let unit_scale = det.sqrt().max(1e-6) as f32;
+                    // own CTM, pre-divided by the quad's transform.
+                    // sqrt(|det|) is the geometric-mean width — it matches the
+                    // on-screen SDF band, and is exact only for uniform scales
+                    // (an anisotropic quad strokes marginally off in its thin
+                    // axis, the same compromise the SDF render makes).
+                    let unit_scale = (det.abs() * m2pt * m2pt).sqrt() as f32;
                     ops.push(Op::SetOutlineThickness {
                         pt: Pt((pen / unit_scale * 100.0).round() / 100.0),
                     });
@@ -1912,7 +2044,7 @@ fn emit_text(
                     transform: Default::default(),
                 });
                 ops.push(Op::RestoreGraphicsState);
-            } else if key == solid_key {
+            } else if key == *solid_key {
                 // Decoration bar (underline / overline / strike): the quad is a
                 // solid-texel rectangle — fill it directly from its corners.
                 if last_fill.map(|c| color_differs(c, [r, g, b])).unwrap_or(true) {
@@ -2028,6 +2160,19 @@ mod tests {
     #[test]
     fn downsample_target_clamps_tiny_images_to_one_pixel() {
         assert_eq!(downsample_target(2, 2, 1500.0, 150), (1, 1));
+    }
+
+    #[test]
+    fn round_sig4_keeps_four_significant_digits() {
+        // Small-text pt-per-unit ratios keep 4 decimals…
+        assert!((round_sig4(0.78740156) - 0.7874).abs() < 1e-12);
+        assert!((round_sig4(-0.512399) - (-0.5124)).abs() < 1e-12);
+        // …larger magnitudes shift the kept digits, not the precision…
+        assert!((round_sig4(7.8740156) - 7.874).abs() < 1e-12);
+        assert!((round_sig4(28.346456) - 28.35).abs() < 1e-12);
+        // …and tiny ratios gain decimals instead of collapsing onto 0.01/0.1.
+        assert!((round_sig4(0.078740156) - 0.07874).abs() < 1e-12);
+        assert_eq!(round_sig4(0.0), 0.0);
     }
 
     #[test]

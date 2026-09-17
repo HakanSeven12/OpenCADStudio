@@ -8335,12 +8335,19 @@ impl OpenCADStudio {
                     .push_error(crate::tf!("Print failed: {e}").as_ref());
                 Task::none()
             }
+            // The printer list arrives after the Plot dialog already opened
+            // (enumeration runs off the UI thread); assigning it re-renders
+            // the dropdown while leaving the user's selection untouched.
+            Message::PrintersListed(printers) => {
+                self.plot_dialog.printers = printers;
+                Task::none()
+            }
 
             // ── Plot Style Table ──────────────────────────────────────────────
             Message::PlotStyleLoad => {
                 Task::perform(crate::io::pick_plot_style(), Message::PlotStyleLoaded)
             }
-            Message::PlotStyleLoaded(Ok(Some(table))) => {
+            Message::PlotStyleLoaded(Ok(Some((table, note)))) => {
                 if table.is_stb {
                     self.command_line.push_error(
                         crate::t!(
@@ -8364,6 +8371,11 @@ impl OpenCADStudio {
                     )
                     .as_ref(),
                 );
+                // Non-fatal registration feedback — e.g. the picked file was
+                // already registered and the existing table was kept.
+                if let Some(note) = note {
+                    self.command_line.push_info(&note);
+                }
                 self.active_plot_style = Some(table);
                 self.plot_dialog.plot_styles = crate::io::plot_style::available_ctb_names();
                 Task::none()

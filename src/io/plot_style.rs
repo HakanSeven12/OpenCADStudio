@@ -166,6 +166,12 @@ pub struct PlotStyleTable {
     pub name: String,
     /// Whether this is a named-style (STB) table rather than color-based (CTB).
     pub is_stb: bool,
+    /// Whether the bytes parsed through the real AutoCAD container
+    /// (`PIAFILEVERSION_2.0,CTBVER1/STBVER1,compress`) rather than the
+    /// permissive heuristic fallback that also accepts loose text or deflate
+    /// streams. Only container tables are registered permanently; heuristic
+    /// parses stay loadable for the session only.
+    pub structured: bool,
     pub description: String,
     pub scale_factor: f32,
     pub apply_factor: bool,
@@ -183,6 +189,7 @@ impl PlotStyleTable {
         PlotStyleTable {
             name: name.into(),
             is_stb: false,
+            structured: false,
             description: String::new(),
             scale_factor: 1.0,
             apply_factor: false,
@@ -207,8 +214,12 @@ impl PlotStyleTable {
     pub fn from_bytes(name: impl Into<String>, raw: &[u8]) -> Result<Self, String> {
         let name = name.into();
         let is_stb = name.to_ascii_lowercase().ends_with(".stb");
-        let text = decompress_ctb(raw)?;
-        parse_plot_style_text(&text, name, is_stb)
+        let (text, structured) = decompress_ctb(raw)?;
+        let mut table = parse_plot_style_text(&text, name, is_stb)?;
+        // Record the parse route so callers can refuse to permanently
+        // register tables that only the heuristic accepted.
+        table.structured = structured;
+        Ok(table)
     }
 
     pub fn builtin(name: &str) -> Result<Self, String> {
@@ -434,17 +445,19 @@ impl PlotStyleTable {
 
 // ── Deflate helpers ───────────────────────────────────────────────────────────
 
-/// Decompress a CTB/STB file's raw bytes into the text content.
-///
-fn decompress_ctb(data: &[u8]) -> Result<String, String> {
+/// Decompress a CTB/STB file's raw bytes into the text content, reporting
+/// whether the real AutoCAD container was used. `false` means the permissive
+/// heuristic fallback (skip the first line, try zlib/deflate) accepted it.
+fn decompress_ctb(data: &[u8]) -> Result<(String, bool), String> {
     // CTB and STB files share this container; only the embedded version tag
     // differs ("CTBVER1" vs "STBVER1"). Accept both so real AutoCAD STB files
     // take the structured path instead of falling through to the raw
     // deflate heuristic below (where they fail with a confusing zlib error).
     const CTB_PREFIX: &[u8] = b"PIAFILEVERSION_2.0,CTBVER1,compress\r\npmzlibcodec";
     const STB_PREFIX: &[u8] = b"PIAFILEVERSION_2.0,STBVER1,compress\r\npmzlibcodec";
+    let structured = data.starts_with(CTB_PREFIX) || data.starts_with(STB_PREFIX);
     let mut decoded = Vec::new();
-    if data.starts_with(CTB_PREFIX) || data.starts_with(STB_PREFIX) {
+    if structured {
         if data.len() < 60 {
             return Err("CTB header is truncated".into());
         }
@@ -490,7 +503,8 @@ fn decompress_ctb(data: &[u8]) -> Result<String, String> {
     if decoded.last() == Some(&0) {
         decoded.pop();
     }
-    String::from_utf8(decoded).map_err(|e| format!("CTB text is not UTF-8: {e}"))
+    let text = String::from_utf8(decoded).map_err(|e| format!("CTB text is not UTF-8: {e}"))?;
+    Ok((text, structured))
 }
 
 /// Compress plot-style text content as a CTB/STB file.
@@ -694,6 +708,7 @@ fn parse_plot_style_text(text: &str, name: String, is_stb: bool) -> Result<PlotS
     Ok(PlotStyleTable {
         name,
         is_stb,
+        structured: false,
         description,
         scale_factor,
         apply_factor,
@@ -785,10 +800,34 @@ mod round_trip_tests {
     fn stb_container_headers_parse() {
         let mut bytes =
             compress_ctb(PlotStyleTable::identity("x").to_text().as_bytes()).expect("compress");
-        // "PIAFILEVERSION_2.0," is 18 bytes, so 19..22 holds the "CTB" tag.
+        // "PIAFILEVERSION_2.0," is 19 bytes, so 19..22 holds the "CTB" tag.
         bytes[19..22].copy_from_slice(b"STB");
         let table = PlotStyleTable::from_bytes("mystyles.stb", &bytes).expect("stb parses");
         assert!(table.is_stb);
+    }
+
+    /// The parse route must be visible to callers: only real AutoCAD
+    /// containers may be registered permanently, while heuristic parses stay
+    /// loadable for the session only.
+    #[test]
+    fn only_container_parses_are_flagged_structured() {
+        let container =
+            compress_ctb(PlotStyleTable::identity("x").to_text().as_bytes()).expect("compress");
+        assert!(PlotStyleTable::from_bytes("a.ctb", &container)
+            .unwrap()
+            .structured);
+
+        // The same payload without the container header still loads through
+        // the permissive heuristic, but must not claim the structured route.
+        use std::io::Write;
+        let mut enc =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(b"description=\"loose\n").unwrap();
+        let zlib = enc.finish().unwrap();
+        let mut loose = b"any first line\n".to_vec();
+        loose.extend_from_slice(&zlib);
+        let table = PlotStyleTable::from_bytes("b.ctb", &loose).unwrap();
+        assert!(!table.structured);
     }
 
     /// Named tables are refused with the actual limitation, not a generic

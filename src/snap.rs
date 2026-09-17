@@ -2491,37 +2491,64 @@ fn wire_plane(wire: &WireModel) -> Option<WirePlane> {
     Some(WirePlane { origin, axis_x, axis_y, normal: axis_x.cross(axis_y).normalize() })
 }
 
-/// The f64 endpoints behind a `TangentGeom::Line`. The geom itself stores
-/// f32, which quantises survey-scale coordinates by centimetres; the wire's
-/// tessellation points (a double-single pair) hold the same vertices in full
-/// precision, so when a consecutive point pair matches the geom, use it.
-fn line_geom_endpoints_f64(wire: &WireModel, p1: [f32; 3], p2: [f32; 3]) -> (DVec3, DVec3) {
-    if wire.points.len() == 2 {
-        return (wp_f64(wire, 0), wp_f64(wire, 1));
-    }
-    let f32_pair = (Vec3::from_array(p1).as_dvec3(), Vec3::from_array(p2).as_dvec3());
-    // The f64 pair matches the geom's own segment when it sits within the
-    // f32 cast's rounding error (≤ 0.5 ulp of the coordinate magnitude).
-    // Take the CLOSEST pair, not the first within tolerance: adjacent
-    // polyline vertices can sit closer together than the quantisation at
-    // survey scale, and a first-match scan would then grab a neighbour's
-    // segment.
-    let mag = p1.iter().chain(p2.iter()).fold(0.0f32, |m, c| m.max(c.abs()));
-    let tol = (mag * f32::EPSILON) as f64 + 1e-9;
-    let mut best: Option<(f64, DVec3, DVec3)> = None;
+/// Lookup key for [`line_endpoint_map`]: the f32 bit patterns of the six
+/// endpoint coordinates with the two lowest mantissa bits cleared (a ~4-ulp
+/// grid). The geom's stored f32 and the f32 cast of the wire's double-single
+/// reconstruction sit within an ulp of each other, so both quantise into the
+/// same bucket; distinct segments only collide when they share an endpoint
+/// to well below snap distinguishability.
+type LineGeomKey = ([u32; 3], [u32; 3]);
+
+fn line_geom_key(p1: [f32; 3], p2: [f32; 3]) -> LineGeomKey {
+    const MASK: u32 = !0b11;
+    let quantise =
+        |p: [f32; 3]| [p[0].to_bits() & MASK, p[1].to_bits() & MASK, p[2].to_bits() & MASK];
+    (quantise(p1), quantise(p2))
+}
+
+/// One-shot map from a `TangentGeom::Line`'s quantised f32 endpoint pair to
+/// the wire's full-precision f64 pair behind it, so every Line geom of the
+/// wire resolves with an O(1) lookup instead of rescanning the whole
+/// tessellation per geom (which made `curves_in_frame` O(points × geoms) for
+/// every wire pair on every snap). First-wins on quantisation collisions:
+/// adjacent vertices closer than the grid are indistinguishable at snap
+/// scale anyway.
+fn line_endpoint_map(wire: &WireModel) -> HashMap<LineGeomKey, (DVec3, DVec3)> {
+    let mut map =
+        HashMap::with_capacity_and_hasher(wire.points.len() / 2 + 1, Default::default());
     for index in 0..wire.points.len().saturating_sub(1) {
         let a = wp_f64(wire, index);
         let b = wp_f64(wire, index + 1);
-        // NaN separators split runs; either side being NaN never matches.
+        // NaN separators split runs; neither side of them can match a geom.
         if !a.is_finite() || !b.is_finite() {
             continue;
         }
-        let miss = (a - f32_pair.0).length_squared() + (b - f32_pair.1).length_squared();
-        if miss <= 4.0 * tol * tol && best.map_or(true, |(m, _, _)| miss < m) {
-            best = Some((miss, a, b));
-        }
+        let key = line_geom_key(a.as_vec3().to_array(), b.as_vec3().to_array());
+        map.entry(key).or_insert((a, b));
     }
-    best.map(|(_, a, b)| (a, b)).unwrap_or(f32_pair)
+    map
+}
+
+/// The f64 endpoints behind a `TangentGeom::Line`. The geom itself stores
+/// f32, which quantises survey-scale coordinates by centimetres; the wire's
+/// tessellation points (a double-single pair) hold the same vertices in full
+/// precision, so resolve the geom through [`line_endpoint_map`] (built once
+/// per wire by the caller). A geom that misses the map falls back to its own
+/// f32 pair widened — exactly the no-match behaviour of the scan this
+/// replaced.
+fn line_geom_endpoints_f64(
+    wire: &WireModel,
+    p1: [f32; 3],
+    p2: [f32; 3],
+    endpoints: &HashMap<LineGeomKey, (DVec3, DVec3)>,
+) -> (DVec3, DVec3) {
+    if wire.points.len() == 2 {
+        return (wp_f64(wire, 0), wp_f64(wire, 1));
+    }
+    endpoints
+        .get(&line_geom_key(p1, p2))
+        .copied()
+        .unwrap_or((Vec3::from_array(p1).as_dvec3(), Vec3::from_array(p2).as_dvec3()))
 }
 
 /// Decompose a wire into its analytic curves inside `frame`.
@@ -2549,10 +2576,14 @@ fn curves_in_frame(wire: &WireModel, frame: &WirePlane, tol: f64) -> Option<Vec<
     };
 
     let mut curves = Vec::with_capacity(wire.tangent_geoms.len());
+    // Built on the FIRST Line geom and shared by every geom of this wire:
+    // one O(points) pass instead of an O(points) scan per Line geom.
+    let mut line_endpoints: Option<HashMap<LineGeomKey, (DVec3, DVec3)>> = None;
     for geom in &wire.tangent_geoms {
         let curve = match geom {
             TangentGeom::Line { p1, p2 } => {
-                let (p1, p2) = line_geom_endpoints_f64(wire, *p1, *p2);
+                let endpoints = line_endpoints.get_or_insert_with(|| line_endpoint_map(wire));
+                let (p1, p2) = line_geom_endpoints_f64(wire, *p1, *p2, endpoints);
                 (frame.contains(p1, tol) && frame.contains(p2, tol)).then(|| {
                     let (start, end) = (frame.to_2d(p1), frame.to_2d(p2));
                     // A crossing can sit exactly on a segment endpoint (the
@@ -2668,6 +2699,9 @@ fn exact_curve_intersections(wire_a: &WireModel, wire_b: &WireModel) -> Option<V
         return None;
     }
 
+    // NOTE: the nominal 1e-9 request is dominated by PLANE_TOL —
+    // `max(1e-9, PLANE_TOL)` is effectively 1e-7 here, matching the plane
+    // membership tolerance the frame reduction above already applied.
     let tolerance = cadkernel::geom2d::Tolerance::new(1e-9_f64.max(PLANE_TOL));
     let linear = tolerance.linear();
     let mut points: Vec<DVec3> = Vec::new();
@@ -4259,6 +4293,11 @@ mod ext_tests {
         ];
         let wire =
             entity_edge_snap_wire(&chains, "42".to_owned(), [0.8, 0.8, 0.85, 1.0]).expect("wire");
+        // Segment pairs stay NaN-separated across CHAIN junctions too (3 + 3
+        // + 1 = 7 pairs → 6 separators), so Midpoint never pairs the last
+        // vertex of one chain with the first vertex of the next.
+        let separators = wire.key_vertices.iter().filter(|p| !p[0].is_finite()).count();
+        assert_eq!(separators, 6);
         let wires = [wire];
         let mut snapper = Snapper::default();
         snapper.snap_enabled = true;
@@ -4283,24 +4322,107 @@ mod ext_tests {
         );
     }
 
-    #[test]
-    fn edge_snap_wire_caps_runaway_meshes() {
-        use crate::scene::model::mesh_model::{edge_snap_wire, SNAP_EDGE_WIRE_MAX_POINTS};
-        let segment = ([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
-        // Each pair costs up to 3 points (2 endpoints + a NaN separator), so
-        // a third of the cap fits and the full cap must not.
-        let pairs = std::iter::repeat(segment).take(SNAP_EDGE_WIRE_MAX_POINTS / 3);
-        assert!(edge_snap_wire("ok".into(), [1.0; 4], false, pairs).is_some());
-        let pairs = std::iter::repeat(segment).take(SNAP_EDGE_WIRE_MAX_POINTS);
+    /// Inverse of [`snap_one`]: the same camera scaffolding, asserting that
+    /// nothing snap-enabled lands anywhere near `near`.
+    fn snap_none(snapper: &mut Snapper, wires: &[WireModel], near: DVec3) {
+        // Zoomed out: 1 world unit ≈ 5 px, same as `snap_one`.
+        let view_rot = Mat4::from_scale(Vec3::splat(0.01));
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1000.0,
+            height: 1000.0,
+        };
+        let eye = DVec3::new(near.x, near.y, 500.0);
+        let cursor_screen = world_to_screen(near, view_rot, eye, bounds);
+        let res = snapper.snap(
+            near, cursor_screen, wires, view_rot, eye, bounds, Vec3::ZERO,
+            (Vec3::X, Vec3::Y, Vec3::Z), None,
+        );
         assert!(
-            edge_snap_wire("too big".into(), [1.0; 4], false, pairs).is_none(),
-            "meshes past the point cap must ship no snap wire"
+            res.is_none(),
+            "nothing must snap near {near:?}, got {:?}",
+            res.map(|r| (r.snap_type, r.world))
         );
     }
 
     #[test]
+    fn edge_snap_wire_disjoint_edges_have_no_phantom_midpoint() {
+        use crate::scene::model::mesh_model::edge_snap_wire;
+        // Two DISJOINT triangles 10 units apart, fed exactly like
+        // `MeshLodSet::snap_edge_wire` feeds `edge_snap_wire` (three segment
+        // pairs per triangle).
+        let triangle = |ox: f64| {
+            let a = [ox, 0.0, 0.0];
+            let b = [ox + 1.0, 0.0, 0.0];
+            let c = [ox + 0.5, 1.0, 0.0];
+            [(a, b), (b, c), (c, a)]
+        };
+        let pairs = triangle(0.0).into_iter().chain(triangle(10.0));
+        let wire = edge_snap_wire("t".into(), [1.0; 4], false, pairs).expect("wire");
+        // `key_vertices` must separate the segment pairs with NaN exactly
+        // like `points` does. Without the separators, every Midpoint consumer
+        // pairs the LAST vertex of one edge with the FIRST vertex of the next
+        // — here triangle 0's (0,0,0) with triangle 10's (10,0,0) — and
+        // fabricates a floating midpoint between unrelated edges.
+        let separators = wire.key_vertices.iter().filter(|p| !p[0].is_finite()).count();
+        assert_eq!(separators, 5, "one NaN separator between each of the 6 pairs");
+
+        let wires = [wire];
+        let mut snapper = Snapper::default();
+        snapper.snap_enabled = true;
+        snapper.enabled = [SnapType::Midpoint].into_iter().collect();
+        // The junction's phantom midpoint would sit at (5, 0, 0); the nearest
+        // true midpoint is ~4.3 world units away, far outside the aperture.
+        snap_none(&mut snapper, &wires, DVec3::new(5.0, 0.0, 0.0));
+        // Sanity: a true edge midpoint still snaps through key_vertices.
+        snap_one(
+            &mut snapper,
+            &wires,
+            DVec3::new(0.6, 0.05, 0.0),
+            SnapType::Midpoint,
+            DVec3::new(0.5, 0.0, 0.0),
+        );
+    }
+
+    #[test]
+    fn edge_snap_wire_caps_runaway_meshes() {
+        use crate::scene::model::mesh_model::{edge_snap_wire, SNAP_EDGE_WIRE_MAX_POINTS};
+        let segment = |i: usize| ([i as f64, 0.0, 0.0], [(i + 1) as f64, 0.0, 0.0]);
+        let segment_count = |wire: &WireModel| {
+            // One NaN separator between neighbouring pairs → runs − 1.
+            wire.points.iter().filter(|p| !p[0].is_finite()).count() + 1
+        };
+        // Each pair costs up to 3 points (2 endpoints + a NaN separator), so
+        // a third of the point cap in SEGMENTS fits without decimation.
+        let fitting = SNAP_EDGE_WIRE_MAX_POINTS / 3;
+        let wire = edge_snap_wire("ok".into(), [1.0; 4], false, (0..fitting).map(segment))
+            .expect("wire at the segment budget");
+        assert_eq!(segment_count(&wire), fitting);
+        assert!(wire.points.len() <= SNAP_EDGE_WIRE_MAX_POINTS);
+
+        // Past the budget the wire is DECIMATED, not dropped: the segment
+        // pairs are uniformly subsampled down to the budget so dense meshes
+        // keep (partial) endpoint coverage instead of losing their edge wire
+        // — and with it all endpoint snap — entirely.
+        let total = SNAP_EDGE_WIRE_MAX_POINTS; // 3x the segment budget
+        let wire = edge_snap_wire("decimated".into(), [1.0; 4], false, (0..total).map(segment))
+            .expect("over-cap mesh must still ship a decimated snap wire");
+        let kept = segment_count(&wire);
+        assert!(kept < total, "over-cap wire must be decimated, kept {kept}");
+        assert!(
+            wire.points.len() <= SNAP_EDGE_WIRE_MAX_POINTS,
+            "decimated wire must honour the point cap ({} points)",
+            wire.points.len()
+        );
+        // The first and last source segments survive decimation, so both ends
+        // of the mesh stay endpoint-snappable.
+        assert!(wire.key_vertices.contains(&[0.0, 0.0, 0.0]));
+        assert!(wire.key_vertices.contains(&[total as f64, 0.0, 0.0]));
+    }
+
+    #[test]
     fn scene_solid_with_mesh_cache_snaps_endpoint_midpoint_nearest() {
-        use crate::scene::model::mesh_model::MeshLodSet;
         use crate::scene::Scene;
         use acadrust::entities::Solid3D;
 

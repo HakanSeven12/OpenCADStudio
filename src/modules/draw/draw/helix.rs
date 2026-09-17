@@ -353,6 +353,21 @@ impl CadCommand for HelixCommand {
         }
     }
 
+    // The Final step's dynamic box is the helix height — a span along the
+    // plane normal — but its typed value would otherwise resolve into an
+    // in-plane point anchored at the last pick, and `on_point` commits that
+    // point's distance from the center as the height: a wrong value whenever
+    // the previous pick (e.g. the top radius) wasn't the center. This is the
+    // only entry route on web, where the canvas — not the command line —
+    // holds keyboard focus. `on_text_input` parses the same string the
+    // command-line path would (keywords and `parse_typed_length`), so both
+    // entry routes behave identically (#1082). The Base/TopRadius steps keep
+    // committing typed digits as points: their distance from the center IS
+    // the radius.
+    fn dyn_commit_as_text(&self) -> bool {
+        self.step == Step::Final
+    }
+
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let value = text.trim();
         let keyword = value.to_ascii_uppercase();

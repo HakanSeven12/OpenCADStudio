@@ -1771,4 +1771,476 @@ mod tests {
             "EXTRUDE must finish after the typed height"
         );
     }
+
+    /// (min, max) of `coord` over every wire point of the Solid3D entities in
+    /// tab 0's document. Lets the typed-value regression tests below assert
+    /// the committed geometry (the height / swept size), not just that some
+    /// solid appeared.
+    fn solid_wire_extent(
+        app: &OpenCADStudio,
+        coord: impl Fn(&acadrust::types::Vector3) -> f64,
+    ) -> Option<(f64, f64)> {
+        let mut extent: Option<(f64, f64)> = None;
+        for entity in app.tabs[0].scene.document.entities() {
+            let acadrust::EntityType::Solid3D(solid) = entity else {
+                continue;
+            };
+            for point in solid.wires.iter().flat_map(|wire| wire.points.iter()) {
+                let value = coord(point);
+                extent = Some(match extent {
+                    Some((low, high)) => (low.min(value), high.max(value)),
+                    None => (value, value),
+                });
+            }
+        }
+        extent
+    }
+
+    fn solid_count(app: &OpenCADStudio) -> usize {
+        app.tabs[0]
+            .scene
+            .document
+            .entities()
+            .filter(|e| matches!(e, acadrust::EntityType::Solid3D(_)))
+            .count()
+    }
+
+    /// The native twin of `extrude_typed_height_from_dyn_field`: the same
+    /// EXTRUDE Height step driven through the focused command line
+    /// (`CommandInput` → `CommandSubmit`) — the route a desktop user whose
+    /// command line holds keyboard focus takes. Both routes must extrude by
+    /// the typed height (#1082).
+    #[test]
+    fn extrude_typed_height_from_command_line() {
+        use crate::app::Message;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        // A closed rectangle in the XY plane.
+        use acadrust::entities::LwVertex;
+        use acadrust::types::Vector2;
+        let rect = acadrust::LwPolyline {
+            vertices: [
+                (-10.0, -10.0),
+                (10.0, -10.0),
+                (10.0, 10.0),
+                (-10.0, 10.0),
+            ]
+            .iter()
+            .map(|(x, y)| LwVertex::new(Vector2::new(*x, *y)))
+            .collect(),
+            is_closed: true,
+            ..Default::default()
+        };
+        let handle = app.tabs[0]
+            .scene
+            .document
+            .add_entity(acadrust::EntityType::LwPolyline(rect))
+            .unwrap();
+
+        let _ = app.update(Message::CommandInput("EXTRUDE".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.feed_command(crate::command::StepInput::EntityPick(
+            handle,
+            glam::DVec3::new(-10.0, -10.0, 0.0),
+        ));
+        // Bare Enter finishes selection → Height step.
+        let _ = app.update(Message::CommandFinalize);
+
+        // Focused command line: the typed height goes through the input
+        // widget, not the dynamic-input field buffer.
+        let _ = app.update(Message::CommandInput("5".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+
+        let (min_z, max_z) =
+            solid_wire_extent(&app, |p| p.z).expect("typed height must extrude");
+        assert!(
+            (max_z - min_z - 5.0).abs() < 1e-6,
+            "extruded extent must be the typed 5, got {min_z}..{max_z}"
+        );
+        assert!(
+            app.tabs[0].active_cmd.is_none(),
+            "EXTRUDE must finish after the typed height"
+        );
+    }
+
+    /// Issue #1082 class regression for CYLINDER: the Height prompt accepts
+    /// keyword letters (2Point/Axis), so on web the typed digits land in the
+    /// dynamic-input Height box and the commit must parse them as the scalar
+    /// height instead of resolving an in-plane point whose height is ~0.
+    #[test]
+    fn cylinder_typed_height_from_dyn_field() {
+        use crate::app::Message;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+
+        let _ = app.update(Message::CommandInput("CYLINDER".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        // Base center and radius through the command line.
+        let _ = app.update(Message::CommandInput("0,0".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.update(Message::CommandInput("3".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        // → Height step with a Height dynamic-input box.
+        assert!(
+            app.tabs[0]
+                .dyn_fields
+                .iter()
+                .any(|f| f.role == crate::command::DynRole::Height)
+        );
+
+        for ch in ["5"] {
+            let _ = app.update(Message::CommandAppendChar(ch.to_string()));
+        }
+        assert_eq!(app.command_line.input, "");
+        assert!(
+            app.tabs[0]
+                .dyn_fields
+                .iter()
+                .any(|f| f.buffer.as_deref() == Some("5"))
+        );
+
+        let _ = app.update(Message::CommandFinalize);
+
+        let (min_z, max_z) = solid_wire_extent(&app, |p| p.z)
+            .expect("typed height must build the cylinder");
+        assert!(
+            (max_z - 5.0).abs() < 1e-6 && min_z.abs() < 1e-6,
+            "cylinder height must be the typed 5, got {min_z}..{max_z}"
+        );
+        assert!(
+            app.tabs[0].active_cmd.is_none(),
+            "CYLINDER must finish after the typed height"
+        );
+    }
+
+    /// Issue #1082 class regression for BOX (and WEDGE, which shares
+    /// `BoxStep::Height`): the typed height must commit as the scalar height,
+    /// not resolve to an in-plane point whose plane-normal ordinate is ~0.
+    #[test]
+    fn box_and_wedge_typed_height_from_dyn_field() {
+        use crate::app::Message;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+
+        // ── BOX: 10×5 footprint, typed height 7 ──────────────────────────
+        let _ = app.update(Message::CommandInput("BOX".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.update(Message::CommandInput("0,0".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.update(Message::CommandInput("10,5".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        assert!(
+            app.tabs[0]
+                .dyn_fields
+                .iter()
+                .any(|f| f.role == crate::command::DynRole::Height)
+        );
+        for ch in ["7"] {
+            let _ = app.update(Message::CommandAppendChar(ch.to_string()));
+        }
+        let _ = app.update(Message::CommandFinalize);
+
+        assert_eq!(solid_count(&app), 1, "BOX must commit after the typed height");
+        let (min_x, max_x) = solid_wire_extent(&app, |p| p.x).expect("box solid");
+        let (min_y, max_y) = solid_wire_extent(&app, |p| p.y).expect("box solid");
+        let (min_z, max_z) = solid_wire_extent(&app, |p| p.z).expect("box solid");
+        assert!(
+            (min_x - 0.0).abs() < 1e-6
+                && (max_x - 10.0).abs() < 1e-6
+                && (min_y - 0.0).abs() < 1e-6
+                && (max_y - 5.0).abs() < 1e-6,
+            "box footprint must stay 10×5, got x {min_x}..{max_x}, y {min_y}..{max_y}"
+        );
+        assert!(
+            (min_z - 0.0).abs() < 1e-6 && (max_z - 7.0).abs() < 1e-6,
+            "box height must be the typed 7, got {min_z}..{max_z}"
+        );
+        assert!(app.tabs[0].active_cmd.is_none());
+
+        // ── WEDGE: same Height step (BoxStep::Height), typed height 9 ────
+        let _ = app.update(Message::CommandInput("WEDGE".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.update(Message::CommandInput("0,0".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.update(Message::CommandInput("10,5".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        assert!(
+            app.tabs[0]
+                .dyn_fields
+                .iter()
+                .any(|f| f.role == crate::command::DynRole::Height)
+        );
+        for ch in ["9"] {
+            let _ = app.update(Message::CommandAppendChar(ch.to_string()));
+        }
+        let _ = app.update(Message::CommandFinalize);
+
+        assert_eq!(solid_count(&app), 2, "WEDGE must commit after the typed height");
+        let (min_z, max_z) = solid_wire_extent(&app, |p| p.z).expect("wedge solid");
+        assert!(
+            (min_z - 0.0).abs() < 1e-6 && (max_z - 9.0).abs() < 1e-6,
+            "wedge height must be the typed 9 (aggregate over both solids), got {min_z}..{max_z}"
+        );
+        assert!(app.tabs[0].active_cmd.is_none());
+    }
+
+    /// Issue #1082 class regression for CONE and PYRAMID: their Height (and
+    /// HeightAfterTopRadius) prompts accept keyword letters, so the typed
+    /// digits must commit through `on_text_input` as the scalar height. Both
+    /// legs drive the Top-radius sub-prompt first so the committed solid is a
+    /// frustum whose top face lands in the wireframe (an apex cone's wires
+    /// carry only the base ellipse), and so the shared
+    /// `HeightAfterTopRadius` arm is covered too.
+    #[test]
+    fn cone_and_pyramid_typed_height_from_dyn_field() {
+        use crate::app::Message;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+
+        // ── CONE: base center 0,0 radius 3, top radius 1, typed height 5 ─
+        let _ = app.update(Message::CommandInput("CONE".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.update(Message::CommandInput("0,0".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.update(Message::CommandInput("3".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        assert!(
+            app.tabs[0]
+                .dyn_fields
+                .iter()
+                .any(|f| f.role == crate::command::DynRole::Height)
+        );
+        // Top-radius sub-prompt, then the height (HeightAfterTopRadius).
+        let _ = app.update(Message::CommandInput("T".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.update(Message::CommandInput("1".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        assert!(
+            app.tabs[0]
+                .dyn_fields
+                .iter()
+                .any(|f| f.role == crate::command::DynRole::Height)
+        );
+        for ch in ["5"] {
+            let _ = app.update(Message::CommandAppendChar(ch.to_string()));
+        }
+        let _ = app.update(Message::CommandFinalize);
+
+        assert_eq!(solid_count(&app), 1, "CONE must commit after the typed height");
+        let (min_z, max_z) = solid_wire_extent(&app, |p| p.z).expect("cone solid");
+        let (.., max_r) = solid_wire_extent(&app, |p| p.x.hypot(p.y)).expect("cone solid");
+        assert!(
+            (max_r - 3.0).abs() < 1e-6,
+            "cone base radius must stay 3, got {max_r}"
+        );
+        assert!(
+            min_z.abs() < 1e-6 && (max_z - 5.0).abs() < 1e-6,
+            "cone height must be the typed 5, got {min_z}..{max_z}"
+        );
+        assert!(app.tabs[0].active_cmd.is_none());
+
+        // ── PYRAMID: base center 0,0 radius 3, top radius 2, typed height 8
+        let _ = app.update(Message::CommandInput("PYRAMID".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.update(Message::CommandInput("0,0".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.update(Message::CommandInput("3".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        assert!(
+            app.tabs[0]
+                .dyn_fields
+                .iter()
+                .any(|f| f.role == crate::command::DynRole::Height)
+        );
+        let _ = app.update(Message::CommandInput("T".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.update(Message::CommandInput("2".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        assert!(
+            app.tabs[0]
+                .dyn_fields
+                .iter()
+                .any(|f| f.role == crate::command::DynRole::Height)
+        );
+        for ch in ["8"] {
+            let _ = app.update(Message::CommandAppendChar(ch.to_string()));
+        }
+        let _ = app.update(Message::CommandFinalize);
+
+        assert_eq!(
+            solid_count(&app),
+            2,
+            "PYRAMID must commit after the typed height"
+        );
+        let (min_z, max_z) = solid_wire_extent(&app, |p| p.z).expect("pyramid solid");
+        assert!(
+            min_z.abs() < 1e-6 && (max_z - 8.0).abs() < 1e-6,
+            "pyramid height must be the typed 8 (aggregate over both solids), got {min_z}..{max_z}"
+        );
+        assert!(app.tabs[0].active_cmd.is_none());
+    }
+
+    /// Issue #1082 class regression for HELIX: at the Final (height) prompt
+    /// the unfixed dyn commit resolves the typed span into an in-plane point
+    /// anchored at the last pick and commits that point's distance from the
+    /// center as the height — a wrong value whenever the previous pick wasn't
+    /// the center. Entering the top radius through its dynamic box anchors
+    /// the height prompt at (3,0,0), setting up exactly that case.
+    #[test]
+    fn helix_typed_height_from_dyn_field() {
+        use crate::app::Message;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+
+        let _ = app.update(Message::CommandInput("HELIX".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        // Center, then a typed base radius.
+        let _ = app.update(Message::CommandInput("0,0".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.update(Message::CommandInput("2".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        // Pick the top radius through the dynamic-input field (the only web
+        // route): the resolved point (3,0,0) becomes the anchor/last point,
+        // off the center — exactly the case where an unfixed point-resolved
+        // typed height would commit the wrong value.
+        for ch in ["3"] {
+            let _ = app.update(Message::CommandAppendChar(ch.to_string()));
+        }
+        let _ = app.update(Message::CommandFinalize);
+        // → Final step with a Distance dynamic-input box.
+        assert!(
+            app.tabs[0]
+                .dyn_fields
+                .iter()
+                .any(|f| f.role == crate::command::DynRole::Distance)
+        );
+        assert_eq!(app.last_point, Some(glam::DVec3::new(3.0, 0.0, 0.0)));
+
+        for ch in ["5"] {
+            let _ = app.update(Message::CommandAppendChar(ch.to_string()));
+        }
+        assert_eq!(app.command_line.input, "");
+        assert!(
+            app.tabs[0]
+                .dyn_fields
+                .iter()
+                .any(|f| f.buffer.as_deref() == Some("5"))
+        );
+
+        let _ = app.update(Message::CommandFinalize);
+
+        let helix = app.tabs[0]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| match e {
+                acadrust::EntityType::Helix(helix) => Some(helix.clone()),
+                _ => None,
+            })
+            .expect("typed height must create the helix");
+        let height = helix.turn_height * helix.turns;
+        assert!(
+            (height - 5.0).abs() < 1e-6,
+            "helix height must be the typed 5, got {height}"
+        );
+        assert!(
+            (helix.axis_vector.z - 1.0).abs() < 1e-9,
+            "helix axis must stay the plane normal"
+        );
+        assert!(
+            app.tabs[0].active_cmd.is_none(),
+            "HELIX must finish after the typed height"
+        );
+    }
+
+    /// Issue #1082 class regression for SWEEP's reference-scale prompts: the
+    /// typed reference length must be parsed as a length (advancing to the
+    /// new-length prompt), and the typed new length must set the scale
+    /// (new/reference) — visible in the swept solid's size. Unfixed, the
+    /// typed reference length is dropped as a stray first reference point.
+    #[test]
+    fn sweep_typed_scale_lengths_from_dyn_field() {
+        use crate::app::Message;
+        use acadrust::types::Vector3;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        // A unit circle profile swept along a vertical line path.
+        let mut circle = acadrust::Circle::new();
+        circle.radius = 1.0;
+        let profile = app.tabs[0]
+            .scene
+            .document
+            .add_entity(acadrust::EntityType::Circle(circle))
+            .unwrap();
+        let path = app.tabs[0]
+            .scene
+            .document
+            .add_entity(acadrust::EntityType::Line(acadrust::Line::from_points(
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(0.0, 0.0, 10.0),
+            )))
+            .unwrap();
+
+        let _ = app.update(Message::CommandInput("SWEEP".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        // Select the profile, bare Enter finishes selection → path prompt.
+        let _ = app.feed_command(crate::command::StepInput::SelectionComplete(vec![profile]));
+        let _ = app.update(Message::CommandFinalize);
+        // Enter the reference-scale sub-prompt through the command line.
+        let _ = app.update(Message::CommandInput("SCALE".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.update(Message::CommandInput("REFERENCE".to_string()));
+        let _ = app.update(Message::CommandSubmit);
+        // → ReferenceLength prompt with dynamic-input boxes showing.
+        assert!(!app.tabs[0].dyn_fields.is_empty());
+
+        // Typed reference length 2 commits through the dyn-field buffer.
+        for ch in ["2"] {
+            let _ = app.update(Message::CommandAppendChar(ch.to_string()));
+        }
+        assert_eq!(app.command_line.input, "");
+        let _ = app.update(Message::CommandFinalize);
+        let prompt = app.tabs[0]
+            .active_cmd
+            .as_ref()
+            .map(|c| c.prompt())
+            .unwrap_or_default();
+        assert!(
+            prompt.to_lowercase().contains("new length"),
+            "typed reference length must advance to the new-length prompt, got: {prompt}"
+        );
+
+        // Typed new length 6 → scale 6/2 = 3 → back to the path prompt.
+        for ch in ["6"] {
+            let _ = app.update(Message::CommandAppendChar(ch.to_string()));
+        }
+        let _ = app.update(Message::CommandFinalize);
+        let prompt = app.tabs[0]
+            .active_cmd
+            .as_ref()
+            .map(|c| c.prompt())
+            .unwrap_or_default();
+        assert!(
+            prompt.to_lowercase().contains("sweep path"),
+            "typed new length must return to the path prompt, got: {prompt}"
+        );
+
+        // Picking the path finishes the sweep: the unit circle must have been
+        // scaled by 3, so the swept solid's wires reach radius 3.
+        let _ = app.feed_command(crate::command::StepInput::EntityPick(
+            path,
+            glam::DVec3::new(0.0, 0.0, 5.0),
+        ));
+
+        let (.., max_r) = solid_wire_extent(&app, |p| p.x.hypot(p.y))
+            .expect("sweep must create a solid");
+        assert!(
+            (max_r - 3.0).abs() < 1e-3,
+            "swept radius must be the profile 1 × scale 3, got {max_r}"
+        );
+        assert!(
+            app.tabs[0].active_cmd.is_none(),
+            "SWEEP must finish after the path pick"
+        );
+    }
 }

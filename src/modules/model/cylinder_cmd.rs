@@ -779,6 +779,18 @@ impl CadCommand for CylinderCommand {
             _ => None,
         }
     }
+
+    // The Height step's dynamic box is a span along the base-plane normal,
+    // not a point in the drawing plane. Without this, a typed value committed
+    // from the box (the only route on web, where the canvas — not the command
+    // line — holds keyboard focus) is resolved into an in-plane point whose
+    // height projects to ~0 and `commit_height` silently re-prompts.
+    // `on_text_input` parses the same string the command-line path would
+    // (keywords and `parse_typed_length`), so both entry routes behave
+    // identically (#1082).
+    fn dyn_commit_as_text(&self) -> bool {
+        matches!(self.step, Step::Height)
+    }
 }
 
 fn push_break(points: &mut Vec<[f32; 3]>) {

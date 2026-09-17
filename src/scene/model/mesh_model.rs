@@ -10,37 +10,96 @@ use super::wire_model::WireModel;
 /// of the mesh converters' `SNAP_TABLE_MAX_VERTICES`: a mesh dense enough to
 /// exceed this has edges far too close together to pick apart at snap
 /// aperture size, and duplicating them into the wire set would cost more
-/// memory than the whole rest of the interaction set.
+/// memory than the whole rest of the interaction set. The builder budgets
+/// SEGMENTS against this (each costs two endpoints plus a NaN separator) and
+/// decimates rather than dropping when it is exceeded.
 pub const SNAP_EDGE_WIRE_MAX_POINTS: usize = 100_000;
+
+/// Segment budget implied by [`SNAP_EDGE_WIRE_MAX_POINTS`]: S segments cost
+/// `3·S − 1` wire points (two endpoints each plus a NaN separator between
+/// neighbours), so the point cap admits at most `(cap + 1) / 3` segments.
+const MAX_EDGE_SEGMENTS: usize = (SNAP_EDGE_WIRE_MAX_POINTS + 1) / 3;
+
+/// Halve `kept` in place, retaining every second segment (indices 0, 2, …).
+fn halve_kept_segments(kept: &mut Vec<([f64; 3], [f64; 3])>) {
+    let mut write = 0;
+    for read in (0..kept.len()).step_by(2) {
+        kept[write] = kept[read];
+        write += 1;
+    }
+    kept.truncate(write);
+}
 
 /// Build the interaction-only edge wire shared by every volume entity
 /// (3D solids, regions, bodies, surfaces, plain meshes).
 ///
 /// `pairs` yields one `(a, b)` world-space segment per edge. The wire carries
 /// the segments as NaN-separated point pairs (so `points` never chains two
-/// unrelated edges together) plus the same pairs in `key_vertices` (so
-/// Endpoint/Midpoint snap sees every true edge end / edge middle, not the
-/// ends of an artificial chain). It is `display_visible: false` /
-/// `plot_visible: false`: the mesh pipeline already draws these edges, the
-/// wire exists so the SNAPPER and the proximity pick see them exactly like
-/// any 2-D entity's geometry (#1030).
+/// unrelated edges together) plus the same NaN-separated pairs in
+/// `key_vertices` (so Endpoint/Midpoint snap sees every true edge end / edge
+/// middle, not the ends of an artificial chain between unrelated edges —
+/// Midpoint consumers treat consecutive `key_vertices` as one segment). It is
+/// `display_visible: false` / `plot_visible: false`: the mesh pipeline
+/// already draws these edges, the wire exists so the SNAPPER and the
+/// proximity pick see them exactly like any 2-D entity's geometry (#1030).
 ///
-/// Returns `None` when the edge count exceeds [`SNAP_EDGE_WIRE_MAX_POINTS`].
+/// Past [`MAX_EDGE_SEGMENTS`] the wire is not dropped but DECIMATED: the
+/// segment pairs are uniformly subsampled (every Nth, N a power of two, with
+/// the first and last segments always retained) down to the budget. Dropping
+/// the wire outright used to cost dense meshes ALL endpoint snap; decimation
+/// keeps partial coverage at the same bounded memory. The tradeoff: mid-wire
+/// edges thin out (their Midpoint/Nearest coverage becomes sparser) while
+/// both ends of the mesh stay snap-reachable.
+///
+/// Returns `None` only when `pairs` yields no segments at all.
 pub fn edge_snap_wire(
     name: String,
     color: [f32; 4],
     selected: bool,
     pairs: impl Iterator<Item = ([f64; 3], [f64; 3])>,
 ) -> Option<WireModel> {
-    let mut points: Vec<[f32; 3]> = Vec::new();
-    let mut points_low: Vec<[f32; 3]> = Vec::new();
-    let mut key_vertices: Vec<[f64; 3]> = Vec::new();
+    // ── Segment selection with bounded memory ─────────────────────────────
+    // Stream the pairs and keep at most MAX_EDGE_SEGMENTS of them: whenever
+    // the kept buffer fills, halve it and double the stride. That is uniform
+    // "every Nth" subsampling (power-of-two N) without ever buffering more
+    // than the budget — a runaway mesh costs O(cap) here, not O(edges), and
+    // its (already resident) tessellation is never duplicated.
+    let mut kept: Vec<([f64; 3], [f64; 3])> = Vec::new();
+    let mut stride = 1usize;
+    let mut total = 0usize;
+    let mut last_pair: Option<([f64; 3], [f64; 3])> = None;
+    for pair in pairs {
+        if total % stride == 0 {
+            if kept.len() >= MAX_EDGE_SEGMENTS {
+                halve_kept_segments(&mut kept);
+                stride *= 2;
+            }
+            kept.push(pair);
+        }
+        last_pair = Some(pair);
+        total += 1;
+    }
+    // Force-retain the final segment so decimation never removes the far end
+    // of the mesh: `(total - 1) % stride != 0` proves it is not already kept
+    // (every kept entry sits at an index that is a multiple of `stride`).
+    if let Some(last) = last_pair {
+        if (total - 1) % stride != 0 {
+            if kept.len() >= MAX_EDGE_SEGMENTS {
+                halve_kept_segments(&mut kept);
+            }
+            kept.push(last);
+        }
+    }
+
+    let mut points: Vec<[f32; 3]> = Vec::with_capacity(kept.len().saturating_mul(3));
+    let mut points_low: Vec<[f32; 3]> = Vec::with_capacity(kept.len().saturating_mul(3));
+    let mut key_vertices: Vec<[f64; 3]> = Vec::with_capacity(kept.len().saturating_mul(3));
     let mut aabb = WireModel::UNBOUNDED_AABB;
-    let mut extend = |p: [f64; 3]| {
+    let extend = |p: [f64; 3], aabb: &mut [f32; 4]| {
         let (x, y) = (p[0] as f32, p[1] as f32);
         if x.is_finite() && y.is_finite() {
-            if aabb == WireModel::UNBOUNDED_AABB {
-                aabb = [x, y, x, y];
+            if *aabb == WireModel::UNBOUNDED_AABB {
+                *aabb = [x, y, x, y];
             } else {
                 aabb[0] = aabb[0].min(x);
                 aabb[1] = aabb[1].min(y);
@@ -49,16 +108,14 @@ pub fn edge_snap_wire(
             }
         }
     };
-    for (a, b) in pairs {
-        if points.len() + 2 > SNAP_EDGE_WIRE_MAX_POINTS {
-            return None;
-        }
-        if !points.is_empty() {
+    for (index, (a, b)) in kept.into_iter().enumerate() {
+        if index > 0 {
             points.push([f32::NAN; 3]);
             points_low.push([0.0; 3]);
-            if points.len() + 2 > SNAP_EDGE_WIRE_MAX_POINTS {
-                return None;
-            }
+            // Mirrors `points`: without this separator Midpoint would pair
+            // the last vertex of one edge with the first vertex of the next
+            // and fabricate a floating midpoint between unrelated edges.
+            key_vertices.push([f64::NAN; 3]);
         }
         for p in [a, b] {
             let (hx, lx) = WireModel::split_ds(p[0]);
@@ -67,7 +124,7 @@ pub fn edge_snap_wire(
             points.push([hx, hy, hz]);
             points_low.push([lx, ly, lz]);
             key_vertices.push(p);
-            extend(p);
+            extend(p, &mut aabb);
         }
     }
     if points.is_empty() {

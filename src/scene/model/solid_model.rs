@@ -273,7 +273,8 @@ pub fn edge_wires(body: &Body) -> Vec<acadrust::entities::Wire> {
 /// (`Solid3D::wires` and friends — pre-computed B-rep edge chains, also set
 /// on the temporary live-section entity). Each chain contributes its
 /// consecutive point pairs as snap segments (#1030). Returns `None` when the
-/// chains carry no usable segments or exceed the shared snap-wire point cap.
+/// chains carry no usable segments; past the shared snap-wire point cap
+/// `edge_snap_wire` decimates instead of dropping.
 pub fn entity_edge_snap_wire(
     chains: &[acadrust::entities::Wire],
     name: String,

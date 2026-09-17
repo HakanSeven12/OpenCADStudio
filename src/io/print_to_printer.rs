@@ -117,11 +117,16 @@ fn windows_printers() -> std::io::Result<Vec<String>> {
     // but on Windows 11 it can miss per-user network printers that only the
     // spooler RPC (level 2) reports (#1261a). The level-2 query is expensive —
     // it opens every remote connection and can wait out RPC timeouts on dead
-    // print servers — so it only runs when the cached query came back empty;
-    // machines whose level-4 list works never pay for it. (The flags stay
-    // LOCAL|CONNECTIONS on purpose: the EnumPrintersW documentation restricts
-    // level 4 to exactly those flags, and PRINTER_ENUM_NETWORK is only valid
-    // with level 1, so completeness comes from the level-2 retry, not flags.)
+    // print servers — so it only runs when the cached list looks incomplete:
+    // either it came back empty, or it does not contain the configured
+    // default printer, which is exactly the case where the default is one of
+    // the hidden per-user connections. Machines whose level-4 list already
+    // covers the default never pay for it. A level-2 failure is not fatal:
+    // the level-4 names stand and the default merge below still guarantees
+    // the default is offered. (The flags stay LOCAL|CONNECTIONS on purpose:
+    // the EnumPrintersW documentation restricts level 4 to exactly those
+    // flags, and PRINTER_ENUM_NETWORK is only valid with level 1, so
+    // completeness comes from the level-2 retry, not flags.)
     let mut names = enum_printer_names(
         4,
         PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS,
@@ -129,18 +134,26 @@ fn windows_printers() -> std::io::Result<Vec<String>> {
         // pPrinterName is the first field of PRINTER_INFO_4W.
         0,
     )?;
-    if names.is_empty() {
-        names = enum_printer_names(
+    let default = windows_default_printer();
+    let hides_default = default
+        .as_ref()
+        .is_some_and(|name| !names.iter().any(|n| n.eq_ignore_ascii_case(name)));
+    if names.is_empty() || hides_default {
+        // Errors here are deliberately swallowed: falling through with the
+        // level-4 names still lets the default merge below run.
+        if let Ok(extra) = enum_printer_names(
             2,
             PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS,
             std::mem::size_of::<PRINTER_INFO_2W>(),
             // pPrinterName is the second pointer field of PRINTER_INFO_2W.
             std::mem::size_of::<usize>(),
-        )?;
+        ) {
+            names.extend(extra);
+        }
     }
     // The spooler's own default is authoritative even when enumeration missed
     // it; always offer it explicitly so the list can never hide it (#1261b).
-    if let Some(default) = windows_default_printer() {
+    if let Some(default) = default {
         if !names.iter().any(|name| name.eq_ignore_ascii_case(&default)) {
             names.push(default);
         }
@@ -301,6 +314,18 @@ fn windows_default_printer() -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
+/// Build the `lpParameters` string for the shell `printto` verb. The verb
+/// passes four arguments — file, printer, driver, port — and registered PDF
+/// handlers quote each slot (Acrobat: `/t "%1" "%2" "%3" "%4"`), i.e. they
+/// whitespace-tokenise the parameter string. A bare printer name therefore
+/// shatters on spaces ("Microsoft Print to PDF" becomes printer=Microsoft,
+/// driver=Print, port=to PDF) and the job is lost with all UI suppressed.
+/// Quote the name and pass the empty driver/port slots handlers expect.
+#[cfg(target_os = "windows")]
+fn printto_params(printer: &str) -> String {
+    format!("\"{printer}\" \"\" \"\"")
+}
+
 /// Probe the spooler for `name` before dispatching a job (#1261c).
 /// `OpenPrinterW` with no `PRINTER_DEFAULTSW` is a pure
 /// existence/permission check: it spools nothing and shows no UI, and gives a
@@ -368,10 +393,23 @@ fn describe_shell_execute_failure(code: u32) -> &'static str {
 #[cfg(all(test, target_os = "windows"))]
 mod printer_buffer_tests {
     use super::{
-        describe_shell_execute_failure, ensure_printer_exists, windows_default_printer,
-        windows_printer_names,
+        describe_shell_execute_failure, ensure_printer_exists, printto_params,
+        windows_default_printer, windows_printer_names,
     };
     use windows_sys::Win32::Graphics::Printing::{PRINTER_INFO_2W, PRINTER_INFO_4W};
+
+    /// The `printto` parameters are whitespace-tokenised by registered PDF
+    /// handlers (Acrobat: `/t "%1" "%2" "%3" "%4"`), so the printer name must
+    /// arrive quoted with the empty driver/port slots padded — a bare
+    /// multi-word name used to split into printer/driver/port garbage.
+    #[test]
+    fn printto_params_quote_the_printer_and_pad_empty_slots() {
+        assert_eq!(
+            printto_params("Microsoft Print to PDF"),
+            "\"Microsoft Print to PDF\" \"\" \"\""
+        );
+        assert_eq!(printto_params("LaserJet"), "\"LaserJet\" \"\" \"\"");
+    }
 
     #[test]
     fn printer_names_stay_within_the_returned_buffer() {
@@ -682,8 +720,15 @@ fn dispatch_to_printer_opts(path: &std::path::Path, opts: &PrintOptions) -> Resu
         if let Some(name) = &target {
             ensure_printer_exists(name)?;
         }
+        // One construction point serves both the resolved default and a
+        // named selection (`target` covers the two); the name is quoted via
+        // `printto_params` so handlers cannot tokenize it on spaces.
         let (verb, params, label) = match &target {
-            Some(name) => (wide("printto"), Some(wide(name)), name.clone()),
+            Some(name) => (
+                wide("printto"),
+                Some(wide(&printto_params(name))),
+                name.clone(),
+            ),
             None => (wide("print"), None, "default printer".to_string()),
         };
         let params_ptr = params

@@ -3260,6 +3260,11 @@ pub enum Message {
     /// Web never constructs it — printing opens the PDF preview instead.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     PrintResult(Result<String, String>),
+    /// Printers enumerated off the UI thread for the Plot dialog's dropdown;
+    /// the dialog opens immediately and the list lands whenever the spooler
+    /// query finishes. Web never constructs it — it has no system printers.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    PrintersListed(Vec<String>),
     /// Open the full Plot / Print dialog (seeds state from the layout).
     PlotDialogOpen,
     /// An edit inside the Plot / Print dialog.
@@ -3290,8 +3295,12 @@ pub enum Message {
     /// Open file dialog to load a CTB/STB plot style table.
     PlotStyleLoad,
     /// Callback when the user picks (or cancels) a CTB/STB file.
-    /// `Ok(None)` = cancelled; `Err` = the picked file failed to parse.
-    PlotStyleLoaded(Result<Option<crate::io::plot_style::PlotStyleTable>, String>),
+    /// `Ok(None)` = cancelled; `Err` = the picked file failed to parse. The
+    /// table carries an optional non-fatal note for the command line (e.g.
+    /// registration kept an already-registered table of the same name).
+    PlotStyleLoaded(
+        Result<Option<(crate::io::plot_style::PlotStyleTable, Option<String>)>, String>,
+    ),
     /// Clear the active plot style table.
     PlotStyleClear,
     /// Open/close the Plot Style panel.

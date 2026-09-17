@@ -4041,7 +4041,6 @@ impl OpenCADStudio {
             .collect();
         // Keep session-only choices while loading drawing fields from the layout.
         let d = &mut self.plot_dialog;
-        d.printers = crate::io::print_to_printer::list_printers();
         d.plot_styles = crate::io::plot_style::available_ctb_names();
         d.scales = scales;
         d.plot_views = plot_views;
@@ -4124,6 +4123,21 @@ impl OpenCADStudio {
             }
         }
         self.active_modal = Some(crate::app::ModalKind::Plot);
+        // Enumerating printers can block for seconds on spooler RPC (dead
+        // print servers), so it must not run on the UI thread: open the
+        // dialog immediately and let the printer dropdown populate when the
+        // worker replies with Message::PrintersListed. The list is session
+        // state on the dialog, so the late assignment re-renders the pick
+        // list without touching the user's selection. Native only — the web
+        // build has no system printers and offers PDF output alone.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            background_task(
+                crate::io::print_to_printer::list_printers,
+                Message::PrintersListed,
+            )
+        }
+        #[cfg(target_arch = "wasm32")]
         Task::none()
     }
 

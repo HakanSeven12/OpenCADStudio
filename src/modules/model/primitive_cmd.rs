@@ -3405,6 +3405,33 @@ impl CadCommand for PrimitiveCommand {
         }
         self.height_step.then(|| self.cursor_height(cursor))
     }
+
+    // The height prompts' dynamic boxes are spans along the working-plane
+    // normal, not points in the drawing plane. These steps accept keyword
+    // letters (2Point / Axis endpoint / Top radius), so without this a typed
+    // value committed from the box (the only route on web, where the canvas —
+    // not the command line — holds keyboard focus) is resolved into an
+    // in-plane point whose height projects to ~0 and the commit is silently
+    // dropped with a re-prompt. `on_text_input` parses the same string the
+    // command-line path would (keywords and `parse_typed_length`), so both
+    // entry routes behave identically (#1082). BOX and WEDGE share
+    // `BoxStep::Height`; the 2Point/AxisEndpoint sub-steps keep committing
+    // as points, and SPHERE/TORUS radius steps type digits as in-plane
+    // distances by design.
+    fn dyn_commit_as_text(&self) -> bool {
+        match self.shape {
+            Shape::Cone => matches!(
+                self.cone_step,
+                ConeStep::Height | ConeStep::HeightAfterTopRadius
+            ),
+            Shape::Pyramid => matches!(
+                self.pyramid_step,
+                PyramidStep::Height | PyramidStep::HeightAfterTopRadius
+            ),
+            Shape::Box | Shape::Wedge => self.box_step == BoxStep::Height,
+            _ => false,
+        }
+    }
 }
 
 // ── Footprint preview ───────────────────────────────────────────────────────

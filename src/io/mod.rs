@@ -1523,19 +1523,47 @@ mod save_failure_tests {
 // ── Plot Style Table ──────────────────────────────────────────────────────
 
 /// Show a file-open dialog and load the selected CTB or STB file.
-pub async fn pick_plot_style() -> Option<plot_style::PlotStyleTable> {
+/// `Ok(None)` means the user cancelled the dialog; `Err` carries a parse
+/// failure so it reaches the command line instead of dying silently (the
+/// legacy-CTB complaint in #1261d was partly that a file which failed to
+/// parse produced no feedback at all).
+pub async fn pick_plot_style() -> Result<Option<plot_style::PlotStyleTable>, String> {
     let dialog = crate::sys::file_dialog()
         .set_title(crate::t!("Load Plot Style Table").as_ref())
-        .add_filter(crate::t!("Plot Style Tables").as_ref(), &["ctb", "CTB"])
-        .add_filter(crate::t!("CTB Files").as_ref(), &["ctb", "CTB"])
+        .add_filter(
+            crate::t!("Plot Style Tables").as_ref(),
+            &["ctb", "stb", "CTB", "STB"],
+        )
         .add_filter(crate::t!("All Files").as_ref(), &["*"]);
     #[cfg(not(target_arch = "wasm32"))]
     let dialog = match plot_style::ensure_plot_styles_dir() {
         Ok(dir) => dialog.set_directory(dir),
         Err(_) => dialog,
     };
-    let handle = dialog.pick_file().await?;
-    plot_style::PlotStyleTable::load(&crate::sys::handle_path(&handle)).ok()
+    let Some(handle) = dialog.pick_file().await else {
+        return Ok(None);
+    };
+    let path = crate::sys::handle_path(&handle);
+    let table = plot_style::PlotStyleTable::load(&path).map_err(|error| {
+        crate::tf!(
+            "Could not load plot style table '{}': {error}",
+            path.display()
+        )
+        .into_owned()
+    })?;
+    // Loading a table registers it, the way AutoCAD does: copy it next to the
+    // built-ins so it stays in the Plot dialog's table list after restart.
+    // Failures are non-fatal — the table is already applied to this plot.
+    #[cfg(not(target_arch = "wasm32"))]
+    if !table.is_stb {
+        if let (Ok(dir), Some(file_name)) = (plot_style::plot_styles_dir(), path.file_name()) {
+            let registered = dir.join(file_name);
+            if !registered.exists() {
+                let _ = std::fs::copy(&path, &registered);
+            }
+        }
+    }
+    Ok(Some(table))
 }
 
 // ── Image file picker ─────────────────────────────────────────────────────

@@ -8340,7 +8340,7 @@ impl OpenCADStudio {
             Message::PlotStyleLoad => {
                 Task::perform(crate::io::pick_plot_style(), Message::PlotStyleLoaded)
             }
-            Message::PlotStyleLoaded(Some(table)) => {
+            Message::PlotStyleLoaded(Ok(Some(table))) => {
                 if table.is_stb {
                     self.command_line.push_error(
                         crate::t!(
@@ -8368,7 +8368,14 @@ impl OpenCADStudio {
                 self.plot_dialog.plot_styles = crate::io::plot_style::available_ctb_names();
                 Task::none()
             }
-            Message::PlotStyleLoaded(None) => Task::none(),
+            // The user closed the file dialog without picking anything.
+            Message::PlotStyleLoaded(Ok(None)) => Task::none(),
+            // A picked table that failed to parse used to vanish silently
+            // (`.ok()` collapsed it into "cancelled"); surface it instead.
+            Message::PlotStyleLoaded(Err(error)) => {
+                self.command_line.push_error(&error);
+                Task::none()
+            }
             Message::PlotStyleClear => {
                 self.active_plot_style = None;
                 self.plot_dialog.style_name.clear();

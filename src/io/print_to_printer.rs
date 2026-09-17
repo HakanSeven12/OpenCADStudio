@@ -3,7 +3,8 @@
 // Desktop strategy:
 //   1. Render the drawing to a temporary PDF (reusing the PDF export pipeline).
 //   2. Send that PDF to the system printer with `lp` (Linux/macOS) or
-//      `ShellExecute PRINT` (Windows).
+//      `ShellExecute PRINTTO` on Windows, naming the exact target printer —
+//      including the spooler's own default when none was selected.
 //
 // The function is async so the UI remains responsive while the job is queued.
 //
@@ -108,10 +109,65 @@ pub fn list_printers() -> Vec<String> {
 
 #[cfg(target_os = "windows")]
 fn windows_printers() -> std::io::Result<Vec<String>> {
-    use windows_sys::Win32::Foundation::{GetLastError, ERROR_INSUFFICIENT_BUFFER};
     use windows_sys::Win32::Graphics::Printing::{
-        EnumPrintersW, PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL,
+        PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL, PRINTER_INFO_2W, PRINTER_INFO_4W,
     };
+
+    // Level 4 is served from the local registry cache and returns instantly,
+    // but on Windows 11 it can miss per-user network printers that only the
+    // spooler RPC (level 2) reports (#1261a). The level-2 query is expensive —
+    // it opens every remote connection and can wait out RPC timeouts on dead
+    // print servers — so it only runs when the cached query came back empty;
+    // machines whose level-4 list works never pay for it. (The flags stay
+    // LOCAL|CONNECTIONS on purpose: the EnumPrintersW documentation restricts
+    // level 4 to exactly those flags, and PRINTER_ENUM_NETWORK is only valid
+    // with level 1, so completeness comes from the level-2 retry, not flags.)
+    let mut names = enum_printer_names(
+        4,
+        PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS,
+        std::mem::size_of::<PRINTER_INFO_4W>(),
+        // pPrinterName is the first field of PRINTER_INFO_4W.
+        0,
+    )?;
+    if names.is_empty() {
+        names = enum_printer_names(
+            2,
+            PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS,
+            std::mem::size_of::<PRINTER_INFO_2W>(),
+            // pPrinterName is the second pointer field of PRINTER_INFO_2W.
+            std::mem::size_of::<usize>(),
+        )?;
+    }
+    // The spooler's own default is authoritative even when enumeration missed
+    // it; always offer it explicitly so the list can never hide it (#1261b).
+    if let Some(default) = windows_default_printer() {
+        if !names.iter().any(|name| name.eq_ignore_ascii_case(&default)) {
+            names.push(default);
+        }
+    }
+    // Windows treats printer names case-insensitively, so merge away case
+    // variants between the two queries as well.
+    names.sort_by_key(|name| name.to_ascii_lowercase());
+    names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    Ok(names)
+}
+
+/// Query the spooler with `EnumPrintersW` at `level` and return the sorted,
+/// deduplicated printer names. `record_bytes` is the byte size of the level's
+/// `PRINTER_INFO_*W` record and `name_offset` the byte offset of its
+/// `pPrinterName` field.
+#[cfg(target_os = "windows")]
+fn enum_printer_names(
+    level: u32,
+    flags: u32,
+    record_bytes: usize,
+    name_offset: usize,
+) -> std::io::Result<Vec<String>> {
+    use windows_sys::Win32::Foundation::{GetLastError, ERROR_INSUFFICIENT_BUFFER};
+    use windows_sys::Win32::Graphics::Printing::EnumPrintersW;
+
+    debug_assert!(record_bytes % std::mem::size_of::<usize>() == 0);
+    debug_assert!(name_offset % std::mem::size_of::<usize>() == 0);
 
     let mut bytes_needed = 0;
     let mut printer_count = 0;
@@ -129,9 +185,9 @@ fn windows_printers() -> std::io::Result<Vec<String>> {
         // aligned, writable allocation of buffer_bytes bytes.
         let success = unsafe {
             EnumPrintersW(
-                PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS,
+                flags,
                 std::ptr::null(),
-                4,
+                level,
                 data,
                 buffer_bytes,
                 &mut bytes_needed,
@@ -139,7 +195,12 @@ fn windows_printers() -> std::io::Result<Vec<String>> {
             )
         };
         if success != 0 {
-            return windows_printer_names(&buffer, printer_count as usize);
+            return windows_printer_names(
+                &buffer,
+                printer_count as usize,
+                record_bytes,
+                name_offset,
+            );
         }
         let error = unsafe { GetLastError() };
         if error != ERROR_INSUFFICIENT_BUFFER || bytes_needed <= buffer_bytes {
@@ -156,28 +217,37 @@ fn windows_printers() -> std::io::Result<Vec<String>> {
 }
 
 #[cfg(target_os = "windows")]
-fn windows_printer_names(buffer: &[usize], printer_count: usize) -> std::io::Result<Vec<String>> {
+fn windows_printer_names(
+    buffer: &[usize],
+    printer_count: usize,
+    record_bytes: usize,
+    name_offset: usize,
+) -> std::io::Result<Vec<String>> {
     use std::io::{Error, ErrorKind};
-    use windows_sys::Win32::Graphics::Printing::PRINTER_INFO_4W;
 
-    const {
-        assert!(std::mem::align_of::<usize>() >= std::mem::align_of::<PRINTER_INFO_4W>());
+    if record_bytes == 0 || name_offset + std::mem::size_of::<usize>() > record_bytes {
+        return Err(Error::from(ErrorKind::InvalidInput));
     }
     let buffer_bytes = std::mem::size_of_val(buffer);
-    if printer_count > buffer_bytes / std::mem::size_of::<PRINTER_INFO_4W>() {
+    if printer_count > buffer_bytes / record_bytes {
         return Err(Error::from(ErrorKind::InvalidData));
     }
-    // SAFETY: the initialized buffer is aligned and large enough for these
-    // records. Raw pointer fields are validated before reading any names.
-    let records = unsafe {
-        std::slice::from_raw_parts(buffer.as_ptr().cast::<PRINTER_INFO_4W>(), printer_count)
-    };
+    let base = buffer.as_ptr().cast::<u8>();
     let mut names = Vec::with_capacity(printer_count);
-    for record in records {
-        if record.pPrinterName.is_null() {
+    for index in 0..printer_count {
+        let field = index * record_bytes + name_offset;
+        if field > buffer_bytes || buffer_bytes - field < std::mem::size_of::<usize>() {
+            return Err(Error::from(ErrorKind::InvalidData));
+        }
+        // SAFETY: the field lies inside the buffer; `read_unaligned` accepts
+        // any address, and PRINTER_INFO_4W/_2W layouts keep their leading
+        // pointer fields at word multiples so this reads the real pointer.
+        let printer_name =
+            unsafe { base.add(field).cast::<usize>().read_unaligned() } as *const u16;
+        if printer_name.is_null() {
             continue;
         }
-        let offset = (record.pPrinterName as usize)
+        let offset = (printer_name as usize)
             .checked_sub(buffer.as_ptr() as usize)
             .filter(|offset| *offset < buffer_bytes && offset % 2 == 0)
             .ok_or(Error::from(ErrorKind::InvalidData))?;
@@ -201,15 +271,118 @@ fn windows_printer_names(buffer: &[usize], printer_count: usize) -> std::io::Res
     Ok(names)
 }
 
+/// The spooler's configured default printer, if any. `GetDefaultPrinterW` is
+/// the only source that matches what every other Windows application means by
+/// "default printer" (#1261b): the shell `print` verb instead hands the file
+/// to the registered PDF handler, which applies its own — often different —
+/// default, or just opens the viewer (#1261c).
+#[cfg(target_os = "windows")]
+fn windows_default_printer() -> Option<String> {
+    use windows_sys::Win32::Foundation::{GetLastError, ERROR_INSUFFICIENT_BUFFER};
+    use windows_sys::Win32::Graphics::Printing::GetDefaultPrinterW;
+
+    let mut capacity = 0u32;
+    // First call sizes the buffer: it fails with ERROR_INSUFFICIENT_BUFFER
+    // when a default exists (capacity then includes the NUL terminator), and
+    // with e.g. ERROR_FILE_NOT_FOUND when no default is configured at all.
+    if unsafe { GetDefaultPrinterW(std::ptr::null_mut(), &mut capacity) } != 0 {
+        return None;
+    }
+    if unsafe { GetLastError() } != ERROR_INSUFFICIENT_BUFFER || capacity == 0 {
+        return None;
+    }
+    let mut buffer = vec![0u16; capacity as usize];
+    if unsafe { GetDefaultPrinterW(buffer.as_mut_ptr(), &mut capacity) } == 0 {
+        return None;
+    }
+    let length = buffer.iter().position(|&unit| unit == 0).unwrap_or(0);
+    let name = String::from_utf16_lossy(&buffer[..length]);
+    let trimmed = name.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+/// Probe the spooler for `name` before dispatching a job (#1261c).
+/// `OpenPrinterW` with no `PRINTER_DEFAULTSW` is a pure
+/// existence/permission check: it spools nothing and shows no UI, and gives a
+/// decisive error where the PDF handler would otherwise swallow a bad printer
+/// name while `ShellExecuteExW` still reports success.
+#[cfg(target_os = "windows")]
+fn ensure_printer_exists(name: &str) -> Result<(), String> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{
+        GetLastError, ERROR_ACCESS_DENIED, ERROR_INVALID_PRINTER_NAME,
+    };
+    use windows_sys::Win32::Graphics::Printing::{ClosePrinter, OpenPrinterW, PRINTER_HANDLE};
+
+    let wide: Vec<u16> = OsStr::new(name).encode_wide().chain(Some(0)).collect();
+    let mut handle = PRINTER_HANDLE::default();
+    // SAFETY: `wide` is NUL-terminated and `handle` is an out-parameter.
+    if unsafe { OpenPrinterW(wide.as_ptr(), &mut handle, std::ptr::null()) } == 0 {
+        let error = unsafe { GetLastError() };
+        return Err(match error {
+            ERROR_INVALID_PRINTER_NAME => {
+                format!("printer '{name}' is not installed on this computer")
+            }
+            ERROR_ACCESS_DENIED => format!("access to printer '{name}' was denied"),
+            error => format!("Windows could not open printer '{name}' (error {error})"),
+        });
+    }
+    if !handle.Value.is_null() {
+        // SAFETY: the handle was just returned by a successful OpenPrinterW.
+        unsafe { ClosePrinter(handle) };
+    }
+    Ok(())
+}
+
+/// Human-readable reasons for the failure codes `ShellExecuteExW` reports.
+/// Per the ShellExecute documentation, `hInstApp` values in 1..=32 are the
+/// `SE_ERR_*` instance codes; anything else came from `GetLastError`.
+#[cfg(target_os = "windows")]
+fn describe_shell_execute_failure(code: u32) -> &'static str {
+    use windows_sys::Win32::Foundation::ERROR_NO_ASSOCIATION;
+    use windows_sys::Win32::UI::Shell::{
+        SE_ERR_ACCESSDENIED, SE_ERR_ASSOCINCOMPLETE, SE_ERR_DDEBUSY, SE_ERR_DDEFAIL,
+        SE_ERR_DDETIMEOUT, SE_ERR_DLLNOTFOUND, SE_ERR_FNF, SE_ERR_NOASSOC, SE_ERR_OOM,
+        SE_ERR_PNF, SE_ERR_SHARE,
+    };
+    match code {
+        0 => "the operating system is out of memory or resources",
+        SE_ERR_FNF => "the rendered PDF file could not be found",
+        SE_ERR_PNF => "the path to the rendered PDF file could not be found",
+        SE_ERR_ACCESSDENIED => "Windows denied access to the print command",
+        SE_ERR_OOM => "not enough memory to start the PDF application",
+        SE_ERR_SHARE => "a sharing violation occurred while opening the PDF",
+        SE_ERR_ASSOCINCOMPLETE => "the PDF file association is invalid or incomplete",
+        SE_ERR_DDETIMEOUT => "the PDF application did not respond in time (DDE timeout)",
+        SE_ERR_DDEFAIL => "the DDE print transaction failed",
+        SE_ERR_DDEBUSY => "the PDF application was busy (DDE busy)",
+        SE_ERR_DLLNOTFOUND => "a DLL required by the print handler is missing",
+        SE_ERR_NOASSOC | ERROR_NO_ASSOCIATION => {
+            "Windows has no PDF application registered with Print support"
+        }
+        _ => "unknown ShellExecute failure",
+    }
+}
+
 #[cfg(all(test, target_os = "windows"))]
 mod printer_buffer_tests {
-    use super::windows_printer_names;
-    use windows_sys::Win32::Graphics::Printing::PRINTER_INFO_4W;
+    use super::{
+        describe_shell_execute_failure, ensure_printer_exists, windows_default_printer,
+        windows_printer_names,
+    };
+    use windows_sys::Win32::Graphics::Printing::{PRINTER_INFO_2W, PRINTER_INFO_4W};
 
     #[test]
     fn printer_names_stay_within_the_returned_buffer() {
-        assert!(windows_printer_names(&[], 0).unwrap().is_empty());
-        assert!(windows_printer_names(&[], 1).is_err());
+        assert!(
+            windows_printer_names(&[], 0, std::mem::size_of::<PRINTER_INFO_4W>(), 0)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            windows_printer_names(&[], 1, std::mem::size_of::<PRINTER_INFO_4W>(), 0).is_err()
+        );
         let mut buffer = vec![0usize; 16];
         let name_offset = std::mem::size_of::<PRINTER_INFO_4W>();
         let name: Vec<u16> = "Printer \u{03b1}\0".encode_utf16().collect();
@@ -224,15 +397,84 @@ mod printer_buffer_tests {
             std::ptr::copy_nonoverlapping(name.as_ptr(), name_ptr, name.len());
             (*record).pPrinterName = name_ptr;
             assert_eq!(
-                windows_printer_names(&buffer, 1).unwrap(),
+                windows_printer_names(&buffer, 1, std::mem::size_of::<PRINTER_INFO_4W>(), 0)
+                    .unwrap(),
                 ["Printer \u{03b1}"]
             );
             (*record).pPrinterName = buffer.as_mut_ptr().cast::<u16>().wrapping_sub(1);
-            assert!(windows_printer_names(&buffer, 1).is_err());
+            assert!(
+                windows_printer_names(&buffer, 1, std::mem::size_of::<PRINTER_INFO_4W>(), 0)
+                    .is_err()
+            );
             (*record).pPrinterName = name_ptr;
         }
         buffer[name_offset / std::mem::size_of::<usize>()..].fill(usize::MAX);
-        assert!(windows_printer_names(&buffer, 1).is_err());
+        assert!(
+            windows_printer_names(&buffer, 1, std::mem::size_of::<PRINTER_INFO_4W>(), 0).is_err()
+        );
+    }
+
+    /// Level 2 records keep `pPrinterName` in the second field; the name
+    /// reader must honour the layout it is given.
+    #[test]
+    fn level2_names_read_the_second_field() {
+        let record_bytes = std::mem::size_of::<PRINTER_INFO_2W>();
+        let mut buffer = vec![0usize; record_bytes / std::mem::size_of::<usize>() + 8];
+        let name: Vec<u16> = "Net \u{263a}\0".encode_utf16().collect();
+        // SAFETY: the aligned allocation holds the record and UTF-16 name.
+        unsafe {
+            let record = buffer.as_mut_ptr().cast::<PRINTER_INFO_2W>();
+            let name_ptr = buffer
+                .as_mut_ptr()
+                .cast::<u8>()
+                .add(record_bytes)
+                .cast::<u16>();
+            std::ptr::copy_nonoverlapping(name.as_ptr(), name_ptr, name.len());
+            (*record).pServerName = std::ptr::null_mut();
+            (*record).pPrinterName = name_ptr;
+        }
+        assert_eq!(
+            windows_printer_names(&buffer, 1, record_bytes, std::mem::size_of::<usize>())
+                .unwrap(),
+            ["Net \u{263a}"]
+        );
+        // Pointing the reader at the wrong offset sees the null pServerName
+        // instead and yields no names.
+        assert!(
+            windows_printer_names(&buffer, 1, record_bytes, 0)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn shell_failures_are_described() {
+        use windows_sys::Win32::Foundation::ERROR_NO_ASSOCIATION;
+        use windows_sys::Win32::UI::Shell::{SE_ERR_DDETIMEOUT, SE_ERR_FNF, SE_ERR_NOASSOC};
+        assert!(describe_shell_execute_failure(SE_ERR_FNF).contains("PDF"));
+        assert!(describe_shell_execute_failure(SE_ERR_DDETIMEOUT).contains("respond"));
+        assert!(describe_shell_execute_failure(SE_ERR_NOASSOC).contains("Print support"));
+        assert!(describe_shell_execute_failure(ERROR_NO_ASSOCIATION).contains("Print support"));
+        assert!(describe_shell_execute_failure(0).contains("memory"));
+        assert!(!describe_shell_execute_failure(9_999).is_empty());
+    }
+
+    /// Opening a printer by name spools nothing — it is a pure spooler
+    /// lookup — so a bogus name must surface a clear error naming it.
+    #[test]
+    fn a_missing_printer_surfaces_a_clear_error() {
+        let error = ensure_printer_exists("ocs-no-such-printer-3f9c").unwrap_err();
+        assert!(error.contains("ocs-no-such-printer-3f9c"), "{error}");
+    }
+
+    /// The machine's real default cannot be asserted in a unit test; check
+    /// only the invariant that a resolved default is a usable name.
+    #[test]
+    fn a_resolved_default_printer_is_a_trimmed_non_empty_name() {
+        if let Some(name) = windows_default_printer() {
+            assert!(!name.is_empty());
+            assert_eq!(name.trim(), name);
+        }
     }
 }
 
@@ -416,9 +658,33 @@ fn dispatch_to_printer_opts(path: &std::path::Path, opts: &PrintOptions) -> Resu
 
         let wide = |s: &str| -> Vec<u16> { OsStr::new(s).encode_wide().chain(Some(0)).collect() };
         let path_wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-        let (verb, params, label) = match opts.printer.as_deref() {
-            Some(p) if !p.is_empty() => (wide("printto"), Some(wide(p)), p.to_string()),
-            _ => (wide("print"), None, "default printer".to_string()),
+        // Resolve what the job actually targets (#1261b). The dialog's
+        // "System default printer" arrives as `printer: None`; the old code
+        // then used the shell `print` verb, which defers to the registered
+        // PDF application — whose default printer is frequently not the
+        // system default, or which just opens the viewer. Resolve the
+        // spooler's own default and address it explicitly through `printto`,
+        // exactly like a named printer; only fall back to the bare `print`
+        // verb when Windows itself reports no default printer. This is
+        // resolved once per dispatch so the "Sent to printer: X" message
+        // names the printer that really received the job.
+        let target = opts
+            .printer
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .or_else(windows_default_printer);
+        // A printer that disappeared since the dialog enumerated it (unplugged
+        // USB device, deleted network share) would be silently handed to the
+        // PDF application: ShellExecute would "succeed" while nothing prints
+        // (#1261c). Probe the spooler first so it fails loudly here instead.
+        if let Some(name) = &target {
+            ensure_printer_exists(name)?;
+        }
+        let (verb, params, label) = match &target {
+            Some(name) => (wide("printto"), Some(wide(name)), name.clone()),
+            None => (wide("print"), None, "default printer".to_string()),
         };
         let params_ptr = params
             .as_ref()
@@ -446,7 +712,13 @@ fn dispatch_to_printer_opts(path: &std::path::Path, opts: &PrintOptions) -> Resu
                         "Windows has no PDF application registered with Print support.".into(),
                     );
                 }
-                return Err(format!("Windows print dispatch failed (code {code})"));
+                // Note: a non-zero return from ShellExecuteExW only means the
+                // PDF handler accepted the job; whether it actually spools is
+                // unobservable here without real hardware.
+                return Err(format!(
+                    "Windows print dispatch to '{label}' failed (code {code}): {}",
+                    describe_shell_execute_failure(code),
+                ));
             }
         }
         Ok(label)

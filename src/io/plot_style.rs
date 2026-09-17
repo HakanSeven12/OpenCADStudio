@@ -264,11 +264,21 @@ impl PlotStyleTable {
         let path = Path::new(name);
         if path.components().count() != 1
             || !matches!(path.components().next(), Some(Component::Normal(_)))
-            || !path
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("ctb"))
+            || !path.extension().is_some_and(|ext| {
+                ext.eq_ignore_ascii_case("ctb") || ext.eq_ignore_ascii_case("stb")
+            })
         {
             return Err(format!("Invalid plot style name: {name}"));
+        }
+        // STB (named) tables parse but the plotter is color-dependent, so
+        // refuse them with the actual reason instead of a generic error.
+        if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("stb"))
+        {
+            return Err(format!(
+                "Named plot style tables (.stb) cannot be applied to color-dependent plots: {name}"
+            ));
         }
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -427,9 +437,14 @@ impl PlotStyleTable {
 /// Decompress a CTB/STB file's raw bytes into the text content.
 ///
 fn decompress_ctb(data: &[u8]) -> Result<String, String> {
-    const PREFIX: &[u8] = b"PIAFILEVERSION_2.0,CTBVER1,compress\r\npmzlibcodec";
+    // CTB and STB files share this container; only the embedded version tag
+    // differs ("CTBVER1" vs "STBVER1"). Accept both so real AutoCAD STB files
+    // take the structured path instead of falling through to the raw
+    // deflate heuristic below (where they fail with a confusing zlib error).
+    const CTB_PREFIX: &[u8] = b"PIAFILEVERSION_2.0,CTBVER1,compress\r\npmzlibcodec";
+    const STB_PREFIX: &[u8] = b"PIAFILEVERSION_2.0,STBVER1,compress\r\npmzlibcodec";
     let mut decoded = Vec::new();
-    if data.starts_with(PREFIX) {
+    if data.starts_with(CTB_PREFIX) || data.starts_with(STB_PREFIX) {
         if data.len() < 60 {
             return Err("CTB header is truncated".into());
         }
@@ -762,6 +777,27 @@ mod round_trip_tests {
     fn saved_and_reloaded(table: &PlotStyleTable) -> PlotStyleTable {
         let bytes = compress_ctb(table.to_text().as_bytes()).expect("compress");
         PlotStyleTable::from_bytes(table.name.clone(), &bytes).expect("reload")
+    }
+
+    /// Real AutoCAD .stb files use the same container with an `STBVER1` tag;
+    /// they must decompress instead of dying in the deflate fallback.
+    #[test]
+    fn stb_container_headers_parse() {
+        let mut bytes =
+            compress_ctb(PlotStyleTable::identity("x").to_text().as_bytes()).expect("compress");
+        // "PIAFILEVERSION_2.0," is 18 bytes, so 19..22 holds the "CTB" tag.
+        bytes[19..22].copy_from_slice(b"STB");
+        let table = PlotStyleTable::from_bytes("mystyles.stb", &bytes).expect("stb parses");
+        assert!(table.is_stb);
+    }
+
+    /// Named tables are refused with the actual limitation, not a generic
+    /// invalid-name error (and without touching the file system).
+    #[test]
+    fn load_named_rejects_stb_with_reason() {
+        let error = PlotStyleTable::load_named("mystyles.stb").unwrap_err();
+        assert!(error.contains("stb"), "{error}");
+        assert!(error.contains("color-dependent"), "{error}");
     }
 
     /// Saving a table keeps its global scale factor, which scales every

@@ -1887,7 +1887,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Opening OCS Discussions for help and questions..." => Some(("view", "opening-ocs-discussions-for-help-and-questions")),
         "Opening OCS Web..." => Some(("view", "opening-ocs-web")),
         "Opening the command reference..." => Some(("view", "opening-the-command-reference")),
-        "The browser cannot open a typed path; pick the file instead." => Some(("display", "browser-cannot-open-typed-path")),
+        "The browser cannot open a typed path; pick the file instead." => Some(("view", "browser-cannot-open-typed-path")),
         "\"{name}\" could not be sized from its header and decoding it exceeded the {limit} MB image limit of this build — it cannot be attached." => Some(("file", "image-refusal-unknown-size")),
         "\"{name}\" is already loaded with different contents; the existing file was kept." => Some(("view", "already-loaded-different-contents-kept")),
         "Opening Patreon page..." => Some(("view", "opening-patreon-page")),
@@ -4628,6 +4628,9 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Remote image \"{url}\" could not be fetched: the server returned HTTP {status}." => Some(("common", "remote-image-url-could-not-be-fetched-the-server-returned-http-status")),
         "Remote image \"{url}\" was not loaded: it exceeds the 64 MB remote-image limit." => Some(("common", "remote-image-url-was-not-loaded-it-exceeds-the-64-mb-remote-image-limit")),
         "Remote image \"{url}\" could not be fetched: the request timed out." => Some(("common", "remote-image-url-could-not-be-fetched-the-request-timed-out")),
+        "Restore all" => Some(("file", "restore-all")),
+        "Restoring {} drawing(s)…" => Some(("file", "restoring-drawing-s")),
+        "Session had {count} open drawing(s)." => Some(("file", "session-had-open-drawing-s")),
         _ => None,
     }
 }

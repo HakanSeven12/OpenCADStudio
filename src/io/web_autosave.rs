@@ -123,6 +123,20 @@ pub(crate) fn recovered_name(drawing: &str) -> String {
     format!("{stem}{RECOVERED_MARKER}.{ext}")
 }
 
+/// The open plan for a "Restore all" batch: one `(recovered tab name,
+/// snapshot key)` pair per pending snapshot, in the pending list's order —
+/// the same order the one-at-a-time prompts would have offered them
+/// (newest first), and the order the batch's reads are fired in. The keys
+/// travel unchanged: each snapshot is consumed only by its own successful
+/// open, exactly like a single restore.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // unit-tested on native
+pub(crate) fn restore_all_plan(entries: &[WebAutosaveEntry]) -> Vec<(String, String)> {
+    entries
+        .iter()
+        .map(|entry| (recovered_name(&entry.name), entry.name.clone()))
+        .collect()
+}
+
 /// Overwrite (or create) the snapshot for `name`. The optional thumbnail is
 /// written alongside as `.thumb`; passing `None` removes any stale one.
 #[cfg(target_arch = "wasm32")]
@@ -368,6 +382,30 @@ mod tests {
         assert_eq!(
             evicted.iter().map(|name| name.as_str()).collect::<Vec<_>>(),
             ["d0.dwg", "d1.dwg", "d2.dwg", "d3.dwg"]
+        );
+    }
+
+    #[test]
+    fn restore_all_keeps_the_pending_order_and_maps_only_the_names() {
+        let entries = vec![
+            entry("new.dwg", 300.0),
+            entry("mid.dwg", 200.0),
+            entry("plan (recovered).dxf", 100.0),
+        ];
+        let plan = restore_all_plan(&entries);
+        assert_eq!(
+            plan.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
+            [
+                "new (recovered).dwg",
+                "mid (recovered).dwg",
+                "plan (recovered).dxf"
+            ]
+        );
+        // Keys ride along unchanged — consumption stays keyed by the exact
+        // snapshot identity, never by the display name.
+        assert_eq!(
+            plan.iter().map(|(_, key)| key.as_str()).collect::<Vec<_>>(),
+            ["new.dwg", "mid.dwg", "plan (recovered).dxf"]
         );
     }
 

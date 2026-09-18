@@ -45,6 +45,7 @@
     <link data-trunk rel="copy-file" href="web/videos.json" />
     <link data-trunk rel="copy-file" href="web/locale-labels.json" />
     <link data-trunk rel="copy-file" href="web/ocs-control.js" />
+    <link data-trunk rel="copy-file" href="web/sw.js" />
   </head>
   <body>
     <div id="loading">
@@ -53,6 +54,21 @@
       <div class="sub">Loading…</div>
     </div>
     <script src="ocs-control.js" defer></script>
+    <script>
+      // Offline support: register the service worker. It is copied next to
+      // this page by Trunk (see the copy-file link in <head>), so the
+      // relative URL resolves to /app/sw.js and the registration scope is
+      // /app/ — the whole app. Registered immediately (not on load) so the
+      // worker starts capturing this visit's asset requests as early as
+      // possible. sw.js never reloads the page on update: a new worker
+      // waits until every tab on the old version has closed.
+      (() => {
+        if (!("serviceWorker" in navigator)) return;
+        navigator.serviceWorker.register("sw.js").catch(error => {
+          console.warn("service worker registration failed; offline support disabled:", error);
+        });
+      })();
+    </script>
     <script>
       (() => {
         const splash = document.getElementById("loading");

@@ -30,6 +30,12 @@ pub mod xref;
 pub(crate) mod web_autosave;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod web_drop;
+// Same split as web_autosave: the ?file= deep-link parser (and its tests) are
+// pure and compile everywhere; the fetch/open half is wasm-only.
+pub(crate) mod web_link;
+// Same split again: the session-memory serialization half (and its tests)
+// compile everywhere; the localStorage half is wasm-only.
+pub(crate) mod web_session;
 // Minimal in-memory ZIP writer (classic format, flate2 CRC/deflate) used by
 // the web ARCHIVE/ETRANSMIT transmittal download.
 pub mod zip;

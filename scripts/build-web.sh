@@ -1,5 +1,6 @@
 #!/bin/sh
-# Canonical web bundle build: Trunk plus a fonts sanity sync.
+# Canonical web bundle build: Trunk plus a fonts sanity sync and a service
+# worker cache-version stamp.
 #
 # Trunk's copy-dir pipeline always copies web/fonts in full, but its final
 # "apply staging to dist" step wipes the old dist and then moves dist/app/.stage
@@ -10,6 +11,13 @@
 # This wrapper therefore re-syncs web/fonts into dist/app/fonts after a
 # successful Trunk build and verifies every font byte-for-byte, so a bundle
 # produced through it can never ship without the font set.
+#
+# The wrapper also stamps the service worker's cache version: web/sw.js ships
+# a "v1" placeholder (fine for `trunk serve`), but a deployed bundle must get
+# a fresh cache name on every build or clients would keep serving the previous
+# deploy's ~55 MB of cached assets. The hash covers every file in the finished
+# bundle (fonts re-sync included, sw.js itself excluded), so any content
+# change — or any Trunk re-hash of the wasm — produces a new version.
 #
 # Usage: sh scripts/build-web.sh [extra trunk build args]
 #   local:  sh scripts/build-web.sh
@@ -46,4 +54,19 @@ for font in web/fonts/*.ttf; do
     }
     count=$((count + 1))
 done
-echo "web bundle built; verified $count fonts in dist/app/fonts"
+# Stamp the service worker's cache version from the finished bundle. Every
+# file in dist/app except sw.js itself feeds the hash: the deployed sw.js
+# then carries a cache name unique to exactly this bundle's contents, and its
+# activate handler deletes any older cache.
+[ -f dist/app/sw.js ] || {
+    echo "build-web.sh: dist/app/sw.js missing — is web/sw.js still listed as a copy-file link in web-app.html?" >&2
+    exit 1
+}
+bundle_hash=$(find dist/app -type f ! -name sw.js -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c 1-12)
+sed -i "s/^const CACHE_VERSION = \"[^\"]*\";/const CACHE_VERSION = \"$bundle_hash\";/" dist/app/sw.js
+grep -q "^const CACHE_VERSION = \"$bundle_hash\";" dist/app/sw.js || {
+    echo "error: failed to stamp the cache version into dist/app/sw.js" >&2
+    exit 1
+}
+
+echo "web bundle built; verified $count fonts in dist/app/fonts; sw.js cache version $bundle_hash"

@@ -1170,7 +1170,9 @@ mod web_fetch {
     /// The actual request. `GET url` with an abort signal armed at
     /// [`TIMEOUT_MS`]; the body is refused past [`MAX_BYTES`] using the
     /// declared `Content-Length` first and the received length second.
-    async fn fetch_once(url: &str) -> Result<Vec<u8>, RemoteFetchError> {
+    /// `pub(crate)` so the `?file=` deep link can fetch its drawing through
+    /// this exact reader (see `io::web_link`).
+    pub(crate) async fn fetch_once(url: &str) -> Result<Vec<u8>, RemoteFetchError> {
         use wasm_bindgen::JsCast;
         use wasm_bindgen_futures::JsFuture;
 
@@ -1261,6 +1263,10 @@ pub use web_fetch::{
     take_outcome as take_remote_fetch_outcome, take_overflowed,
     RemoteFetchError, RemoteFetchOutcome,
 };
+// The capped streaming reader itself, shared with the `?file=` deep-link
+// fetch (`io::web_link`) so both doors enforce the same 64 MB / 8 s bounds.
+#[cfg(target_arch = "wasm32")]
+pub(crate) use web_fetch::fetch_once as fetch_url_bytes;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {

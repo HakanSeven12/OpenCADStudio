@@ -291,6 +291,14 @@ impl OpenCADStudio {
         let task = self.update_inner(msg);
         self.refresh_gpu_status();
         self.show_next_startup_modal();
+        // A Restore-all batch finished settling on this message: now that
+        // the last restored open has inserted its tab, focus the tab the
+        // remembered session had active (web session memory).
+        #[cfg(target_arch = "wasm32")]
+        if self.web_session_focus_pending {
+            self.web_session_focus_pending = false;
+            self.select_remembered_session_tab();
+        }
         self.sync_open_command_history();
         // Close the document-level first-touch transaction started by
         // push_undo_snapshot at this message boundary.
@@ -1135,10 +1143,26 @@ impl OpenCADStudio {
                 }
             },
 
+            // The `?file=` boot deep link settled. Queued bytes are drained by
+            // the control poll's drop queue like any drop — nothing to say
+            // until that open starts (or its parse error surfaces there).
+            #[cfg(target_arch = "wasm32")]
+            Message::WebLinkSettled(outcome) => {
+                use crate::io::web_link::LinkOutcome;
+                match outcome {
+                    LinkOutcome::Queued => {}
+                    LinkOutcome::Info(text) => self.command_line.push_info(&text),
+                    LinkOutcome::Error(text) => self.command_line.push_error(&text),
+                }
+                Task::none()
+            },
+
             #[cfg(target_arch = "wasm32")]
             Message::WebAutosavesScanned(result) => self.on_web_autosaves_scanned(result),
             #[cfg(target_arch = "wasm32")]
             Message::WebAutosaveRestore => self.on_web_autosave_restore(),
+            #[cfg(target_arch = "wasm32")]
+            Message::WebAutosaveRestoreAll => self.on_web_autosave_restore_all(),
             #[cfg(target_arch = "wasm32")]
             Message::WebAutosaveDiscard => self.on_web_autosave_discard(),
             #[cfg(target_arch = "wasm32")]

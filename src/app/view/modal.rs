@@ -1599,8 +1599,15 @@ impl OpenCADStudio {
                     .first()
                     .map(|entry| entry.name.clone())
                     .unwrap_or_default();
+                let pending = self.web_autosave_pending.len();
+                // What the crashed session had open, when it remembered.
+                let session_drawings = self
+                    .web_session
+                    .as_ref()
+                    .map(|session| session.tabs.len())
+                    .filter(|count| *count > 0);
                 automatic_flow(ex, |flow| {
-                    autosave_restore_dialog_window(&name, flow)
+                    autosave_restore_dialog_window(&name, pending, session_drawings, flow)
                 })
             }
         })
@@ -1777,36 +1784,68 @@ fn unsaved_changes_dialog_window(
 
 /// Web crash-recovery prompt: an autosave snapshot of `name` is newer than
 /// the drawing's last save. Restore opens it as a recovered tab; Discard
-/// deletes the snapshot. Mirrors the unsaved-changes dialog's layout.
+/// deletes the snapshot. With more than one snapshot still pending, "Restore
+/// all" puts the whole remaining list through the same guarded open queue.
+/// When the crashed session left a tab list behind, a muted line says how
+/// much it had open. Mirrors the unsaved-changes dialog's layout.
 #[cfg(target_arch = "wasm32")]
 fn autosave_restore_dialog_window(
     name: &str,
+    pending: usize,
+    session_drawings: Option<usize>,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'static, Message> {
-    container(
-        column![
-            text(crate::tf!(
-                "\"{name}\" has an autosave copy newer than the last save."
-            ))
-            .size(14),
-            iced::widget::Space::new().height(4),
+    let mut body = column![text(crate::tf!(
+        "\"{name}\" has an autosave copy newer than the last save."
+    ))
+    .size(14)]
+    .spacing(0);
+    if let Some(count) = session_drawings {
+        body = body
+            .push(iced::widget::Space::new().height(4))
+            .push(
+                text(crate::tf!("Session had {count} open drawing(s).", count = count))
+                    .size(12)
+                    .style(dialog_muted_text_style),
+            );
+    }
+    body = body
+        .push(iced::widget::Space::new().height(4))
+        .push(
             text(t!("Restore it as a recovered tab, or discard the copy."))
                 .size(12)
                 .style(dialog_muted_text_style),
-            iced::widget::Space::new().height(20),
-            row![
-                dialog_button(t!("Restore"), Message::WebAutosaveRestore, button::primary),
-                iced::widget::Space::new().width(8),
-                dialog_button(t!("Discard"), Message::WebAutosaveDiscard, button::danger),
-            ],
-        ]
-        .spacing(0),
-    )
-    .style(dialog_body_style)
-    .center_x(sizing.width)
-    .center_y(sizing.height)
-    .padding([24, 28])
-    .into()
+        )
+        .push(iced::widget::Space::new().height(20));
+    let mut buttons = row![dialog_button(
+        t!("Restore"),
+        Message::WebAutosaveRestore,
+        button::primary
+    )];
+    // Only worth its width once there is a batch to take in one click.
+    if pending > 1 {
+        buttons = buttons
+            .push(iced::widget::Space::new().width(8))
+            .push(dialog_button(
+                t!("Restore all"),
+                Message::WebAutosaveRestoreAll,
+                button::secondary,
+            ));
+    }
+    buttons = buttons
+        .push(iced::widget::Space::new().width(8))
+        .push(dialog_button(
+            t!("Discard"),
+            Message::WebAutosaveDiscard,
+            button::danger,
+        ));
+    body = body.push(buttons);
+    container(body)
+        .style(dialog_body_style)
+        .center_x(sizing.width)
+        .center_y(sizing.height)
+        .padding([24, 28])
+        .into()
 }
 
 #[cfg(not(target_arch = "wasm32"))]

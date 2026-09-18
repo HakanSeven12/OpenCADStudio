@@ -164,6 +164,9 @@ web-sys = { version = "=0.3.85", features = [
     "Event",
     "ReadableStreamDefaultReader",
     "ReadableStream",
+    # The ?file= boot deep link reads location.search and compares the link's
+    # origin against the page's (io::web_link).
+    "Location",
 ] }
 iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39", features = ["webgl", "fira-sans"] }
 

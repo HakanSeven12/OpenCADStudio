@@ -89,6 +89,8 @@ The project is under active development. Keep backups of important production dr
 
 Use the [web app](https://www.opencadstudio.com) for immediate access with no installation. Drawings are selected through the browser and saved as local downloads.
 
+The web app also accepts a `?file=` URL parameter, so a shared or embedded link can open a drawing directly: `?file=<url-encoded https://example.com/plan.dwg>` fetches and opens that drawing (only `http(s)` URLs ending in a `.dwg`/`.dxf` name), while `?file=plan.dwg` reopens a drawing previously opened in the same browser. Opening from another origin is announced on the command line before the fetch starts.
+
 Use the desktop application for native file associations, file-manager thumbnails, system printing, PDF output, external plugins, command scripts, and headless automation. Release builds are available for Windows, Linux, and Apple Silicon macOS.
 
 ## Install
@@ -180,6 +182,8 @@ never go missing from the bundle):
 ```bash
 sh scripts/build-web.sh
 ```
+
+The bundle ships a service worker (`web/sw.js`, deployed at `/app/sw.js`) that caches the app shell: after one online visit the app starts fully offline and the ~55 MB wasm bundle is served from the browser cache instead of re-downloaded. `build-web.sh` stamps a hash of the finished bundle into `sw.js` as the cache version, so every deploy ships a fresh cache and stale ones are cleaned up automatically.
 
 ## Automation
 

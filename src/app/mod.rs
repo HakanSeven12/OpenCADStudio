@@ -736,6 +736,25 @@ pub(super) struct OpenCADStudio {
     /// prompt still has to offer, one at a time.
     #[cfg(target_arch = "wasm32")]
     web_autosave_pending: Vec<crate::io::web_autosave::WebAutosaveEntry>,
+    /// Snapshots a "Restore all" click still expects to settle (opened,
+    /// failed, cancelled, unreadable, or rejected by the open queue). Each
+    /// settle funnels through `queue_next_web_autosave_prompt`, which counts
+    /// this down; reaching zero arms `web_session_focus_pending`.
+    #[cfg(target_arch = "wasm32")]
+    web_autosave_restore_all_remaining: usize,
+    /// A Restore-all batch finished settling — apply the remembered
+    /// session's active tab at the next message boundary, after the last
+    /// restored open has actually inserted its tab (`web_autosave_opened`
+    /// runs before that insertion, so applying there would pick against a
+    /// tab list still missing the last restore).
+    #[cfg(target_arch = "wasm32")]
+    web_session_focus_pending: bool,
+    /// The tab list the previous session remembered (localStorage), loaded
+    /// after the boot autosave scan. Advisory only: it feeds the restore
+    /// modal's session line and the post-restore tab selection — nothing is
+    /// ever auto-opened from it.
+    #[cfg(target_arch = "wasm32")]
+    web_session: Option<crate::io::web_session::WebSession>,
     /// The snapshot whose recovered open is in flight: `(autosave key,
     /// open id)`. The OPFS copy is the only one, so it is deleted only
     /// once the open with exactly that id succeeds — identity, never the
@@ -2045,6 +2064,11 @@ pub enum Message {
     /// Web: an asynchronous OPFS copy written after Save is ready for recents.
     #[cfg(target_arch = "wasm32")]
     WebRecentStored(Result<PathBuf, String>),
+    /// Web: the `?file=` boot deep link settled — its bytes entered the
+    /// guarded open queue, or a notice/error text for the command line
+    /// (recent copy missing, refused or failed fetch).
+    #[cfg(target_arch = "wasm32")]
+    WebLinkSettled(crate::io::web_link::LinkOutcome),
     /// Web: the boot scan finished — these autosave snapshots are newer than
     /// the drawings' last saved copies (newest first).
     #[cfg(target_arch = "wasm32")]
@@ -2052,6 +2076,12 @@ pub enum Message {
     /// Web: restore the offered autosave snapshot into a recovered tab.
     #[cfg(target_arch = "wasm32")]
     WebAutosaveRestore,
+    /// Web: restore EVERY pending autosave snapshot — each is read and
+    /// enqueued through the guarded open queue with its own key (the poll
+    /// opens them sequentially); a snapshot is still consumed only after its
+    /// own open succeeds.
+    #[cfg(target_arch = "wasm32")]
+    WebAutosaveRestoreAll,
     /// Web: delete the offered autosave snapshot (and offer the next, if any).
     #[cfg(target_arch = "wasm32")]
     WebAutosaveDiscard,
@@ -3895,6 +3925,12 @@ impl OpenCADStudio {
             #[cfg(target_arch = "wasm32")]
             web_autosave_pending: Vec::new(),
             #[cfg(target_arch = "wasm32")]
+            web_autosave_restore_all_remaining: 0,
+            #[cfg(target_arch = "wasm32")]
+            web_session_focus_pending: false,
+            #[cfg(target_arch = "wasm32")]
+            web_session: None,
+            #[cfg(target_arch = "wasm32")]
             web_autosave_consumed: None,
             #[cfg(target_arch = "wasm32")]
             web_autosave_clear_after: Vec::new(),
@@ -4443,6 +4479,46 @@ impl OpenCADStudio {
             crate::io::web_autosave::scan(),
             Message::WebAutosavesScanned,
         );
+        // URL deep link (`?file=…`): a shareable/embeddable link that opens a
+        // drawing at boot. An http(s) URL is fetched with the same capped
+        // streaming reader the remote-image fetch uses and handed to the
+        // guarded drop-open queue; a bare name reads the OPFS recent copy the
+        // same way `open_recent_web` does. Everything else (other schemes,
+        // non-.dwg/.dxf URL tails) is refused with a console warning — the
+        // same scheme gate the image fetch applies. Pure parsing/validation
+        // lives in `io::web_link` and is unit-tested there.
+        let deep_link: Task<Message> = {
+            let search = web_sys::window()
+                .and_then(|window| window.location().search().ok())
+                .unwrap_or_default();
+            match crate::io::web_link::parse_link(&search) {
+                crate::io::web_link::ParsedLink::Target(target) => {
+                    // Opening a URL from the query string is an implicit trust
+                    // decision: name the origin before the fetch starts (info
+                    // only — the bytes still go through the parse + recovery
+                    // machinery like any other open). Same-origin links stay
+                    // quiet: that drawing already comes from this site.
+                    if let crate::io::web_link::LinkTarget::Url { url, name } = &target {
+                        if !crate::io::web_link::same_origin(url) {
+                            let origin = crate::io::web_link::display_origin(url)
+                                .unwrap_or_else(|| url.clone());
+                            s.command_line
+                                .push_info(&format!("Opening {name} from {origin}…"));
+                        }
+                    }
+                    Task::perform(crate::io::web_link::open_link(target), |outcome| {
+                        Message::WebLinkSettled(outcome)
+                    })
+                }
+                crate::io::web_link::ParsedLink::Ignored(refusal, value) => {
+                    web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(
+                        &crate::io::web_link::refusal_warning(refusal, &value),
+                    ));
+                    Task::none()
+                }
+                crate::io::web_link::ParsedLink::Absent => Task::none(),
+            }
+        };
         (
             s,
             Task::batch([
@@ -4453,6 +4529,7 @@ impl OpenCADStudio {
                 discussions,
                 thumbs_fetch,
                 autosave_scan,
+                deep_link,
             ]),
         )
     }

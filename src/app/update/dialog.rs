@@ -240,6 +240,10 @@ impl OpenCADStudio {
                 // last selection. #21.
                 self.sync_ribbon_layers();
                 self.sync_ribbon_from_selection();
+                // The tab list just shrank: refresh the remembered
+                // session list (web session memory).
+                #[cfg(target_arch = "wasm32")]
+                self.persist_web_session();
                 return Task::batch([close_win, self.continue_tab_close_queue()]);
             }
             Some(crate::app::PendingClose::Quit) => {

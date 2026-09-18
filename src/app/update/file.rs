@@ -1698,6 +1698,10 @@ impl OpenCADStudio {
                 .set(crate::app::OPEN_PHASE_FINALIZING, 10000, 1, 1);
         }
         self.opening.take();
+        // The tab list just changed (and the active tab with it): remember
+        // it for the next boot's restore flow (web session memory).
+        #[cfg(target_arch = "wasm32")]
+        self.persist_web_session();
         let pending_open_task = if let Some(report) = recovery_report {
             self.recovery_report = Some(report);
             self.active_modal = Some(crate::app::ModalKind::Recovery);
@@ -2231,6 +2235,9 @@ impl OpenCADStudio {
         );
         self.tabs[i].scene.document.version = version;
         self.tabs[i].recovery_save_as_required = false;
+        // A save may have renamed the tab (Save As): refresh the remembered
+        // session list (web session memory).
+        self.persist_web_session();
         let snapshot_is_current = self.tabs[i].scene.geometry_epoch == geometry_epoch
             && self.tabs[i].edit_revision == edit_revision
             && self.tabs[i].scene.camera_generation == camera_generation;
@@ -3342,12 +3349,16 @@ impl OpenCADStudio {
     /// restore prompt (behind any already-queued startup modal). An empty
     /// scan — a fresh profile, or everything already cleaned up — must not
     /// surface an empty "Recover Drawing" modal, so the prompt is only
-    /// queued when there is something to offer.
+    /// queued when there is something to offer. The remembered session list
+    /// is loaded right after the scan: it never opens anything itself, it
+    /// only names what the session had (a line in the restore modal) and
+    /// picks the active tab once restores complete.
     #[cfg(target_arch = "wasm32")]
     pub(super) fn on_web_autosaves_scanned(
         &mut self,
         result: Result<Vec<crate::io::web_autosave::WebAutosaveEntry>, String>,
     ) -> Task<Message> {
+        self.web_session = crate::io::web_session::load();
         let Ok(mut entries) = result else {
             // Best-effort feature: no storage access, no prompt.
             return Task::none();
@@ -3382,6 +3393,44 @@ impl OpenCADStudio {
             async move { crate::io::web_autosave::read(&read_key).await },
             move |result| Message::WebAutosaveBytes(open_name, key, result),
         )
+    }
+
+    /// "Restore all": the whole pending list goes through the exact same
+    /// guarded path as a single restore — one read per snapshot, then
+    /// `enqueue_restore` with its own key, and the 50 ms poll opens them
+    /// sequentially. Nothing about consumption changes: each snapshot is
+    /// still deleted only when its own open succeeds (matched by open id),
+    /// and any failure (unreadable, parse error, cancel) keeps that
+    /// snapshot in OPFS for the next boot. The batch counts its settles in
+    /// `web_autosave_restore_all_remaining`; every settle path funnels
+    /// through `queue_next_web_autosave_prompt`, so the countdown — and the
+    /// remembered session's tab selection when it hits zero — needs no
+    /// extra bookkeeping sites.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn on_web_autosave_restore_all(&mut self) -> Task<Message> {
+        // Fewer than two pending: this is just Restore.
+        if self.web_autosave_pending.len() < 2 {
+            return self.on_web_autosave_restore();
+        }
+        let entries = std::mem::take(&mut self.web_autosave_pending);
+        self.web_autosave_restore_all_remaining = entries.len();
+        self.close_active_modal();
+        self.command_line.push_info(
+            crate::tf!("Restoring {} drawing(s)…", entries.len()).as_ref(),
+        );
+        let reads = crate::io::web_autosave::restore_all_plan(&entries)
+            .into_iter()
+            .map(|(open_name, key)| {
+                // Same contract as the single restore: the key travels with
+                // the bytes so the deletion marker is recorded by open id.
+                let read_key = key.clone();
+                Task::perform(
+                    async move { crate::io::web_autosave::read(&read_key).await },
+                    move |result| Message::WebAutosaveBytes(open_name, key, result),
+                )
+            })
+            .collect::<Vec<_>>();
+        Task::batch(reads)
     }
 
     /// The recovered drawing opened: its autosave snapshot — held back until
@@ -3477,12 +3526,77 @@ impl OpenCADStudio {
     }
 
     /// Re-offer the remaining boot snapshots once the current one settled.
-    /// No-op when none are left (or the modal is already queued).
+    /// No-op when none are left (or the modal is already queued). This is
+    /// also the single funnel every restore settle runs through (opened,
+    /// failed, cancelled, unreadable, or queue-rejected), so a Restore-all
+    /// batch counts down here — and when its last snapshot settles, the
+    /// remembered session decides which tab ends up active.
     #[cfg(target_arch = "wasm32")]
     pub(super) fn queue_next_web_autosave_prompt(&mut self) {
+        if self.web_autosave_restore_all_remaining > 0 {
+            self.web_autosave_restore_all_remaining -= 1;
+            if self.web_autosave_restore_all_remaining == 0 {
+                // Applied at the next message boundary: the last restore's
+                // settle (`web_autosave_opened`) runs BEFORE its own open
+                // inserts the tab, so focusing here could not see it yet.
+                self.web_session_focus_pending = true;
+            }
+        }
         if !self.web_autosave_pending.is_empty() {
             self.queue_autosave_restore_prompt();
         }
+    }
+
+    /// A Restore-all batch has fully settled: focus the tab the crashed
+    /// session remembered as active, if it actually came back (or is open
+    /// under its own name). Restored tabs carry the "(recovered)" marker —
+    /// `recovered_name` maps the remembered name onto it idempotently. A
+    /// no-op without remembered memory, or when the remembered tab did not
+    /// return; the last-opened tab then stays active, which is fine. Called
+    /// from the after-message hook (`web_session_focus_pending`), so the
+    /// whole settle batch — including the last tab insertion — is done.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn select_remembered_session_tab(&mut self) {
+        let Some(session) = self.web_session.as_ref() else {
+            return;
+        };
+        let Some(remembered) = session.tabs.get(session.active) else {
+            return;
+        };
+        let recovered = crate::io::web_autosave::recovered_name(remembered);
+        let Some(index) = self.tabs.iter().position(|tab| {
+            let name = tab.tab_display_name();
+            name == remembered.as_str() || name == recovered
+        }) else {
+            return;
+        };
+        self.active_tab = index;
+        // The active tab changed under the ribbon; re-sync its chips like
+        // every other tab switch does (#21).
+        self.sync_ribbon_layers();
+        self.sync_ribbon_styles();
+        self.sync_ribbon_from_selection();
+    }
+
+    /// Remember the open-tab list (names + active index) in localStorage —
+    /// the web session memory the next boot's restore flow consults. Cheap
+    /// by design: a small `Vec<String>` + index, rewritten in full. Called
+    /// on every save/open/close; the Start tab is not a drawing and is
+    /// skipped, with the active index remapped onto the filtered list.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn persist_web_session(&self) {
+        let mut names: Vec<String> = Vec::new();
+        let mut active = 0;
+        for (index, tab) in self.tabs.iter().enumerate() {
+            if tab.is_start {
+                continue;
+            }
+            if index == self.active_tab {
+                active = names.len();
+            }
+            names.push(tab.tab_display_name());
+        }
+        crate::io::web_session::persist(&names, active);
     }
 
     /// Delete the `.sv$` autosave recovery files for all open drawings. They

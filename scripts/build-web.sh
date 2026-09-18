@@ -29,8 +29,9 @@ trunk build --release --dist dist/app --public-url /app/ "$@"
 # Mirror the font sources over the bundle and verify the copy-dir output.
 mkdir -p dist/app/fonts
 # Hard-fail with a clear message when there are no fonts to verify.
-first_font=$(echo web/fonts/*.ttf)
-if [ ! -e "$first_font" ]; then
+# (find | head -1 survives multiple matches and spaces in paths.)
+first_font=$(find web/fonts -name '*.ttf' -print 2>/dev/null | head -n 1)
+if [ -z "$first_font" ]; then
   echo "build-web.sh: no .ttf fonts found under web/fonts — nothing to ship or verify" >&2
   exit 1
 fi

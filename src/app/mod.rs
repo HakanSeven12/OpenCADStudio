@@ -2411,6 +2411,11 @@ pub enum Message {
     /// `None` = cancelled.
     #[cfg(target_arch = "wasm32")]
     CenterlineLinetypeFilePicked(Option<(String, String)>),
+    /// Web DATALINK: the picked .csv file's name and raw bytes — registered
+    /// in the picked-source registry, then fed to the same table-insert path
+    /// the native typed-path command uses. `None` = cancelled.
+    #[cfg(target_arch = "wasm32")]
+    DataLinkCsvPicked(Option<(String, Vec<u8>)>),
     /// Append one typed character to the command-line input from the
     /// global key-press subscription. Used when the text-input widget
     /// itself isn't focused (focus parked on viewport / button / etc.)
@@ -4403,6 +4408,16 @@ impl OpenCADStudio {
     fn boot_web() -> (Self, Task<Message>) {
         #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let mut s = Self::new();
+        // A web host that intends to automate can opt in before the first
+        // control request by setting `opencadstudio.automation` to "1" in
+        // localStorage (the same pre-load mechanism the settings use): the
+        // startup donation prompt then never queues (#1349).
+        if web_sys::window().and_then(|window| window.local_storage().ok().flatten()).and_then(
+            |storage| storage.get_item("opencadstudio.automation").ok().flatten(),
+        ) == Some("1".to_string())
+        {
+            s.control.automation_seen = true;
+        }
         s.queue_startup_prompts();
         let focus = s.focus_cmd_input();
         let primary_font =

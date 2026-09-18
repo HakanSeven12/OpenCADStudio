@@ -106,6 +106,10 @@ pub(super) struct State {
     completed: VecDeque<(String, Value, Value)>,
     owner: Option<(u64, String)>,
     pub enabled: bool,
+    /// Set by the first control request of the session (or by a web host's
+    /// boot-time opt-in): while control is enabled, startup prompts that
+    /// would block automation — the donation prompt — are suppressed (#1349).
+    pub automation_seen: bool,
     serial: u64,
     events: VecDeque<Value>,
     pub(super) routing: bool,
@@ -346,7 +350,37 @@ impl OpenCADStudio {
     pub(super) fn control_state(&self) -> Value {
         let tab = &self.tabs[self.active_tab];
         let command = tab.active_cmd.as_deref().map(active_command_metadata);
-        json!({"ok":true,"protocol":1,"session_id":session_id(),"version":env!("OCS_APP_VERSION"),
+        // Protocol 2 adds the web in-memory `open` (base64 bytes); protocol 1
+        // requests remain accepted unchanged.
+        // The web-only `open_bytes` push below is the sole mutation, so
+        // native builds see the binding as immutable.
+        #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
+        let mut capabilities = vec![
+            "commands",
+            "command_manifest",
+            "step_input",
+            "batch",
+            "compact_results",
+            "entity_pick",
+            "structure_pick",
+            "selection",
+            "properties",
+            "records",
+            "record_schemas",
+            "record_filters",
+            "atomic_record_updates",
+            "layers",
+            "history",
+            "documents",
+            "events",
+            "capture",
+            "viewport_capture",
+            "measure",
+            "spatial_query",
+        ];
+        #[cfg(target_arch = "wasm32")]
+        capabilities.push("open_bytes");
+        json!({"ok":true,"protocol":2,"session_id":session_id(),"version":env!("OCS_APP_VERSION"),
             "mode":if self.main_window.is_some(){"gui"}else{"headless"},"enabled":self.control.enabled,
             "document_id":tab.id,"revision":tab.edit_revision,"geometry_revision":tab.scene.geometry_epoch,"camera_revision":tab.scene.camera_generation,
             "plugins":plugin_ids(),
@@ -361,11 +395,23 @@ impl OpenCADStudio {
             "mtext_editor":self.mtext_editor.as_ref().map(|e|json!({"text":e.content.text(),"height":e.height,"style":e.style})),
             "text_editor":self.text_inline.is_some(),"event_cursor":self.control.serial,
             "operation":self.control.pending.as_ref().map(|p| &p.id),
-            "capabilities":["commands","command_manifest","step_input","batch","compact_results","entity_pick","structure_pick","selection","properties","records","record_schemas","record_filters","atomic_record_updates","layers","history","documents","events","capture","viewport_capture","measure","spatial_query"]
+            "capabilities":capabilities
         })
     }
 
     pub(super) fn control_request(&mut self, req: Value) -> (Value, Task<Message>) {
+        // First control contact marks the session automated (#1349): a
+        // DonationPrompt that is still queued (not yet shown) is dropped so
+        // automation never waits behind it, and `queue_startup_prompts`
+        // stops queueing one. A prompt already on screen stays — a human
+        // may be reading it; clients close it with `close_modal`.
+        if !self.control.automation_seen && self.control.enabled {
+            self.control.automation_seen = true;
+            if self.active_modal != Some(super::ModalKind::DonationPrompt) {
+                self.pending_startup_modals
+                    .retain(|kind| kind != &super::ModalKind::DonationPrompt);
+            }
+        }
         let op = req["op"].as_str().unwrap_or("");
         let query = matches!(
             op,
@@ -391,9 +437,12 @@ impl OpenCADStudio {
                 Task::none(),
             );
         }
-        if req["protocol"].as_u64().is_some_and(|v| v != 1) {
+        if req["protocol"]
+            .as_u64()
+            .is_some_and(|v| !(1..=2).contains(&v))
+        {
             return (
-                failure("protocol_mismatch", "Protocol 1 required"),
+                failure("protocol_mismatch", "Protocol 1 or 2 required"),
                 Task::none(),
             );
         }
@@ -684,9 +733,46 @@ impl OpenCADStudio {
         let i = self.active_tab;
         Ok(match req["op"].as_str().unwrap_or("") {
             "new" => self.update(Message::TabNew),
-            "open" => self.update(Message::OpenExternal(std::path::PathBuf::from(string(
-                req, "path",
-            )?))),
+            "open" => {
+                // Web automation opens in-memory drawings (#1349): decode the
+                // base64 payload and route the bytes through the guarded open
+                // queue drag-and-drop uses, so no OPFS copy or file picker is
+                // involved.
+                #[cfg(target_arch = "wasm32")]
+                if req["data_base64"].as_str().is_some() {
+                    let name = string(req, "name")?.to_owned();
+                    let encoded = string(req, "data_base64")?;
+                    let bytes = base64::Engine::decode(
+                        &base64::engine::general_purpose::STANDARD,
+                        encoded,
+                    )
+                    .map_err(|_| failure("invalid_data", "data_base64 is not valid base64"))?;
+                    if !crate::io::web_drop::enqueue_open(name.clone(), bytes) {
+                        return Err(failure("busy", "Web open queue full"));
+                    }
+                    // The queue is normally drained by the control poll; drain
+                    // it now through the same guarded path so this operation
+                    // stays pending until the open settles instead of
+                    // completing before the drawing exists.
+                    let task = self.update(Message::PollWebControl);
+                    if self.opening.as_ref().is_none_or(|opening| opening.name != name) {
+                        // Another open holds the slot; the poll opens this
+                        // entry once it frees, after this operation settles.
+                        self.set_control_result(json!({"queued": true, "name": name}));
+                    }
+                    return Ok(task);
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                if req["data_base64"].as_str().is_some() {
+                    return Err(failure(
+                        "invalid_request",
+                        "data_base64 open is web-only; supply a native path",
+                    ));
+                }
+                self.update(Message::OpenExternal(std::path::PathBuf::from(string(
+                    req, "path",
+                )?)))
+            }
             "activate" => {
                 let i = self
                     .tabs

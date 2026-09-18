@@ -720,32 +720,45 @@ fn append_pdf_page(
             Text(&'a PlotWire),
         }
 
+        // Stacking contract (#1345): the entity's draw-order depth — the same
+        // per-entity label the editor feeds its clip-z bias — decides the
+        // z order, so a hatch DRAWORDER-to-back/front interleaves with wires
+        // exactly like the viewport. The kind rank only breaks *exact* depth
+        // ties, and mirrors the editor's own pass order there: hatch fills →
+        // raster images → mesh/wire fills → wire strokes → text → wipeout
+        // masks last (the editor's `wipeout.render_pass` runs after wires to
+        // mask them). Never pin a whole kind between others regardless of
+        // depth.
         let mut draw_items =
             Vec::with_capacity(wires.len() * 2 + hatches.len() + wipeouts.len() + images.len());
         let mut sequence = 0usize;
-        for wire in wires {
-            if !wire.fill_tris.is_empty() {
-                draw_items.push((wire.draw_depth, 0u8, sequence, DrawItem::WireFill(wire)));
-                sequence += 1;
-            }
-            draw_items.push((wire.draw_depth, 2u8, sequence, DrawItem::Wire(wire)));
-            sequence += 1;
-            if !wire.text_verts.is_empty() {
-                draw_items.push((wire.draw_depth, 3u8, sequence, DrawItem::Text(wire)));
-                sequence += 1;
-            }
-        }
-        for hatch in wipeouts.iter().chain(hatches.iter()) {
+        for hatch in hatches {
             draw_items.push((hatch.draw_depth, 1u8, sequence, DrawItem::Hatch(hatch)));
             sequence += 1;
         }
         for image in images {
             draw_items.push((
                 image.image.draw_depth,
-                1u8,
+                2u8,
                 sequence,
                 DrawItem::Image(image),
             ));
+            sequence += 1;
+        }
+        for wire in wires {
+            if !wire.fill_tris.is_empty() {
+                draw_items.push((wire.draw_depth, 3u8, sequence, DrawItem::WireFill(wire)));
+                sequence += 1;
+            }
+            draw_items.push((wire.draw_depth, 4u8, sequence, DrawItem::Wire(wire)));
+            sequence += 1;
+            if !wire.text_verts.is_empty() {
+                draw_items.push((wire.draw_depth, 5u8, sequence, DrawItem::Text(wire)));
+                sequence += 1;
+            }
+        }
+        for wipeout in wipeouts {
+            draw_items.push((wipeout.draw_depth, 6u8, sequence, DrawItem::Hatch(wipeout)));
             sequence += 1;
         }
         draw_items.sort_by(|a, b| {
@@ -1259,6 +1272,8 @@ fn emit_wire_fills(
                     line_weight_px: wire.line_weight_px,
                     angle_offset: 0.0,
                     scale: 1.0 / scale.max(1.0e-6),
+                    // Ordering was decided by the DrawItem sort outside; this
+                    // model only carries pattern/style data for emit_hatch.
                     draw_depth: wire.depth_override.unwrap_or(0.0),
                 };
                 emit_hatch(
@@ -2332,6 +2347,265 @@ mod tests {
             "registered image did not grow the PDF: {} !> {} + 1500",
             bytes.len(),
             bare_bytes.len()
+        );
+    }
+
+    // ── draw-order stacking tests (#1345) ───────────────────────────────
+    // The PDF z order must follow the per-entity draw-order depth exactly like
+    // the editor viewport (SORTENTS / DRAWORDER): kind grouping may only break
+    // exact depth ties, in the editor's own pass order. Each test asserts the
+    // SEQUENCE of drawing operators inside the decoded page content stream.
+
+    fn solid_hatch(name: &str, depth: f32, color: [f32; 4]) -> HatchModel {
+        HatchModel {
+            pattern_origin: None,
+            render_instance: None,
+            boundary: std::sync::Arc::new(vec![
+                [10.0, 10.0],
+                [40.0, 10.0],
+                [40.0, 40.0],
+                [10.0, 40.0],
+            ]),
+            boundary_wcs: None,
+            world_origin: [0.0, 0.0],
+            fill_plane: None,
+            fill_plane_boundary: None,
+            boundary_exterior: None,
+            boundary_sources: None,
+            boundary_paths: None,
+            style: acadrust::entities::HatchStyleType::Normal,
+            pattern: crate::scene::model::hatch_model::HatchPattern::Solid,
+            name: name.into(),
+            color,
+            aci: 0,
+            line_weight_px: 1.0,
+            angle_offset: 0.0,
+            scale: 1.0,
+            draw_depth: depth,
+        }
+    }
+
+    fn line_wire(name: &str, depth: f32, color: [f32; 4]) -> PlotWire {
+        PlotWire {
+            wire: WireModel::solid(
+                name.into(),
+                vec![[5.0, 5.0, 0.0], [45.0, 45.0, 0.0]],
+                color,
+                false,
+            ),
+            draw_depth: depth,
+        }
+    }
+
+    /// Decode the page's drawing operators out of the page content stream.
+    /// printpdf zlib-compresses streams, but very short ones can be stored
+    /// raw — so each `stream…endstream` body is inflated when possible and
+    /// identified by the white page-background op every plotted page starts
+    /// with (`1 1 1 rg`).
+    fn page_content_stream(bytes: &[u8]) -> Vec<u8> {
+        use std::io::Read;
+        let mut search = 0;
+        while let Some(rel) = bytes[search..].windows(6).position(|w| w == b"stream") {
+            let start = search + rel;
+            let mut body = start + 6;
+            while body < bytes.len() && (bytes[body] == b'\r' || bytes[body] == b'\n') {
+                body += 1;
+            }
+            let end = bytes[body..]
+                .windows(9)
+                .position(|w| w == b"endstream")
+                .map(|i| body + i)
+                .unwrap_or(bytes.len());
+            let raw = &bytes[body..end];
+            let mut inflated = Vec::new();
+            let decoded = flate2::read::ZlibDecoder::new(raw)
+                .read_to_end(&mut inflated)
+                .ok()
+                .filter(|_| !inflated.is_empty())
+                .map(|_| inflated)
+                .unwrap_or_else(|| raw.to_vec());
+            if decoded.windows(8).any(|w| w == b"1 1 1 rg") {
+                return decoded;
+            }
+            search = end;
+        }
+        panic!("no page content stream found in the PDF");
+    }
+
+    /// Byte offset of the paint operator for a fill of `color` (e.g.
+    /// `1 0 0 rg` … `f*`), searched from `from`.
+    fn fill_op_pos(stream: &[u8], color: &str, from: usize) -> usize {
+        let token = color.as_bytes();
+        let start = stream[from..]
+            .windows(token.len())
+            .position(|w| w == token)
+            .map(|i| from + i)
+            .unwrap_or_else(|| panic!("no {color:?} fill color op in stream"));
+        stream[start..]
+            .windows(2)
+            .position(|w| w == b"f*")
+            .map(|i| start + i)
+            .unwrap_or_else(|| panic!("fill color {color:?} has no f* paint op"))
+    }
+
+    /// Byte offset of the stroke operator for a stroke color (e.g.
+    /// `1 0 0 RG` … `S`), searched from `from`.
+    fn stroke_op_pos(stream: &[u8], color: &str, from: usize) -> usize {
+        let token = color.as_bytes();
+        let start = stream[from..]
+            .windows(token.len())
+            .position(|w| w == token)
+            .map(|i| from + i)
+            .unwrap_or_else(|| panic!("no {color:?} stroke color op in stream"));
+        stream[start..]
+            .windows(3)
+            .position(|w| w == b"\nS\n")
+            .map(|i| start + i)
+            .unwrap_or_else(|| panic!("stroke color {color:?} has no S paint op"))
+    }
+
+    fn render_stream(page: PdfPageInput) -> Vec<u8> {
+        let bytes = render_pdf_bytes(&[page], None).expect("page renders");
+        assert!(bytes.starts_with(b"%PDF"));
+        page_content_stream(&bytes)
+    }
+
+    const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+    const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
+    const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+    const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+
+    #[test]
+    fn hatch_draworder_back_plots_under_lines() {
+        let mut page = test_page(vec![
+            line_wire("70001", 0.10, BLUE),
+            line_wire("70002", 0.20, GREEN),
+        ]);
+        page.content.hatches = vec![solid_hatch("70003", -0.50, RED)];
+        let stream = render_stream(page);
+        let hatch = fill_op_pos(&stream, "1 0 0 rg", 0);
+        let blue = stroke_op_pos(&stream, "0 0 1 RG", 0);
+        let green = stroke_op_pos(&stream, "0 1 0 RG", 0);
+        assert!(
+            hatch < blue && hatch < green,
+            "DRAWORDER-to-back hatch must paint before the lines: {hatch} !< {blue}/{green}"
+        );
+        assert!(blue < green, "wire depths 0.10 < 0.20 must stack in order");
+    }
+
+    #[test]
+    fn hatch_draworder_front_plots_over_lines() {
+        let mut page = test_page(vec![
+            line_wire("70001", 0.10, BLUE),
+            line_wire("70002", 0.20, GREEN),
+        ]);
+        page.content.hatches = vec![solid_hatch("70003", 0.50, RED)];
+        let stream = render_stream(page);
+        let hatch = fill_op_pos(&stream, "1 0 0 rg", 0);
+        let blue = stroke_op_pos(&stream, "0 0 1 RG", 0);
+        let green = stroke_op_pos(&stream, "0 1 0 RG", 0);
+        assert!(
+            blue < hatch && green < hatch,
+            "DRAWORDER-to-front hatch must paint after the lines: {blue}/{green} !< {hatch}"
+        );
+    }
+
+    #[test]
+    fn overlapping_hatches_stack_by_draw_order() {
+        // Red above blue…
+        let mut page = test_page(Vec::new());
+        page.content.hatches = vec![
+            solid_hatch("70010", 0.40, RED),
+            solid_hatch("70011", -0.40, BLUE),
+        ];
+        let stream = render_stream(page);
+        let blue = fill_op_pos(&stream, "0 0 1 rg", 0);
+        let red = fill_op_pos(&stream, "1 0 0 rg", 0);
+        assert!(blue < red, "deeper hatch paints first: {blue} !< {red}");
+        // …and the mirrored DRAWORDER flips them.
+        let mut page = test_page(Vec::new());
+        page.content.hatches = vec![
+            solid_hatch("70010", -0.40, RED),
+            solid_hatch("70011", 0.40, BLUE),
+        ];
+        let stream = render_stream(page);
+        let blue = fill_op_pos(&stream, "0 0 1 rg", 0);
+        let red = fill_op_pos(&stream, "1 0 0 rg", 0);
+        assert!(
+            red < blue,
+            "mirrored draw order must flip the paint order: {red} !< {blue}"
+        );
+    }
+
+    #[test]
+    fn stacking_interleaves_hatches_and_wires_by_depth() {
+        // Hatch below the wire, hatch above the wire — the wire must sit
+        // BETWEEN the two fills. Kind pinning (all hatches under or over all
+        // wires) is exactly the bug: entity depth decides.
+        let mut page = test_page(vec![line_wire("70020", 0.00, BLACK)]);
+        page.content.hatches = vec![
+            solid_hatch("70021", 0.30, GREEN),
+            solid_hatch("70022", -0.30, BLUE),
+        ];
+        let stream = render_stream(page);
+        let blue = fill_op_pos(&stream, "0 0 1 rg", 0);
+        let black = stroke_op_pos(&stream, "0 0 0 RG", 0);
+        let green = fill_op_pos(&stream, "0 1 0 rg", 0);
+        assert!(
+            blue < black && black < green,
+            "wire must interleave: blue hatch {blue} < line {black} < green hatch {green}"
+        );
+    }
+
+    #[test]
+    fn equal_depth_keeps_linework_over_hatch_fill() {
+        // Exact tie → the editor's pass order: hatch fill first, wire stroke
+        // after, so linework stays visible over an equal-depth fill.
+        let mut page = test_page(vec![line_wire("70030", 0.0, BLACK)]);
+        page.content.hatches = vec![solid_hatch("70031", 0.0, RED)];
+        let stream = render_stream(page);
+        let hatch = fill_op_pos(&stream, "1 0 0 rg", 0);
+        let black = stroke_op_pos(&stream, "0 0 0 RG", 0);
+        assert!(
+            hatch < black,
+            "tied wire must paint after the hatch: {hatch} !< {black}"
+        );
+    }
+
+    #[test]
+    fn wipeout_masks_tied_wires_but_honors_depth() {
+        let wipeout = |depth: f32| solid_hatch("WIPEOUT_FILL", depth, [1.0; 4]);
+        // Tie: wipeouts paint after wires (the editor's wipeout pass runs
+        // last so the mask covers tied linework).
+        let mut page = test_page(vec![line_wire("70040", 0.0, BLACK)]);
+        page.content.wipeouts = vec![wipeout(0.0)];
+        let stream = render_stream(page);
+        // Wipeout fills white — take the LAST white fill (the page background
+        // rectangle is white too, but it paints first).
+        let mut wipe = None;
+        let mut search = 0;
+        while let Some(rel) = stream[search..].windows(8).position(|w| w == b"1 1 1 rg") {
+            let color_at = search + rel;
+            let paint = fill_op_pos(&stream, "1 1 1 rg", color_at);
+            wipe = Some(paint);
+            search = paint + 1;
+        }
+        let last_wipe = wipe.expect("a white wipeout fill reaches the stream");
+        let black = stroke_op_pos(&stream, "0 0 0 RG", 0);
+        assert!(
+            black < last_wipe,
+            "tied wipeout must mask the wire: {black} !< {last_wipe}"
+        );
+        // Below the wire (DRAWORDER under): depth wins and the wire paints
+        // back on top of the mask.
+        let mut page = test_page(vec![line_wire("70040", 0.0, BLACK)]);
+        page.content.wipeouts = vec![wipeout(-0.5)];
+        let stream = render_stream(page);
+        let wipe = fill_op_pos(&stream, "1 1 1 rg", 0);
+        let black = stroke_op_pos(&stream, "0 0 0 RG", 0);
+        assert!(
+            wipe < black,
+            "deeper wipeout must paint before the wire: {wipe} !< {black}"
         );
     }
 

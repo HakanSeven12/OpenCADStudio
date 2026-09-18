@@ -11982,6 +11982,79 @@ mod journal_tests {
         assert!(!after_erase.contains_key(&h2.value()));
     }
 
+    // #1345: the plot path must re-read each hatch's draw-order label from
+    // the depth map — the cached hatch model bakes 0.0 at seed time, and a
+    // stale value made every exported hatch stack at depth 0 regardless of
+    // DRAWORDER (SORTENTS).
+    #[test]
+    fn plot_hatches_carry_current_draw_order_depth() {
+        use acadrust::entities::{BoundaryEdge, BoundaryPath, Hatch, Line, PolylineEdge};
+        use acadrust::objects::{ObjectType, SortEntitiesTable};
+        use acadrust::types::{Vector2, Vector3};
+
+        let mut hatch = Hatch::solid();
+        let mut path = BoundaryPath::new();
+        path.edges.push(BoundaryEdge::Polyline(PolylineEdge::new(
+            vec![
+                Vector2::new(0.0, 0.0),
+                Vector2::new(10.0, 0.0),
+                Vector2::new(10.0, 10.0),
+                Vector2::new(0.0, 10.0),
+            ],
+            true,
+        )));
+        hatch.add_path(path);
+
+        let mut s = Scene::new();
+        let line = s.add_entity(EntityType::Line(Line::from_points(
+            Vector3::new(0.0, 5.0, 0.0),
+            Vector3::new(10.0, 5.0, 0.0),
+        )));
+        let hatch_handle = s.add_entity(EntityType::Hatch(hatch));
+
+        // Model-tab export path: hatches must carry their live depth label.
+        let plotted = s.paper_plot_hatches();
+        assert_eq!(plotted.len(), 1, "the hatch must reach the plot list");
+        let depth_map = s.draw_depth_map();
+        let expected = depth_map[&hatch_handle.value()][0];
+        assert_eq!(
+            plotted[0].draw_depth, expected,
+            "plot hatch depth must equal the live depth-map label"
+        );
+        assert!(
+            plotted[0].draw_depth > depth_map[&line.value()][0],
+            "later entity (hatch) starts in front of the line"
+        );
+        drop(depth_map);
+
+        // DRAWORDER-to-back the hatch: sort key below every effective key,
+        // exactly like the command writes into the block's SortEntitiesTable.
+        let block = s.model_space_block_handle();
+        let table_handle = s.document.allocate_handle();
+        let mut table = SortEntitiesTable::for_block(block);
+        table.handle = table_handle;
+        table.add_entry(hatch_handle, Handle::new(1));
+        s.document
+            .objects
+            .insert(table_handle, ObjectType::SortEntitiesTable(table));
+        s.bump_entities(&[(hatch_handle, ChangeKind::Modified)]);
+        s.invalidate_draw_depth();
+
+        let depth_map = s.draw_depth_map();
+        let back = depth_map[&hatch_handle.value()][0];
+        let line_depth = depth_map[&line.value()][0];
+        drop(depth_map);
+        assert!(
+            back < line_depth,
+            "sort table must move the hatch behind the line ({back} !< {line_depth})"
+        );
+        let plotted = s.paper_plot_hatches();
+        assert_eq!(
+            plotted[0].draw_depth, back,
+            "plot hatch depth must follow DRAWORDER (stale 0.0 = the #1345 bug)"
+        );
+    }
+
     #[test]
     fn category_gate_keeps_unrelated_caches_warm() {
         let mut s = Scene::new();

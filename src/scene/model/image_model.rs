@@ -664,19 +664,27 @@ fn native_footprint(format: Option<image::ImageFormat>, color: Option<image::Col
         image::ColorType::Rgba32F => 16,
         _ => 4,
     });
-    // A 16-bit frame and its RGBA conversion can coexist; an 8-bit one is
-    // converted with at most a small row buffer in flight.
-    let peak_bpp = if native_bpp > 4 { native_bpp + 4 } else { 4 };
-    let codec_factor = match format {
-        Some(image::ImageFormat::Tiff) => 3,
-        _ => 1,
+    // `DynamicImage::into_rgba8` only MOVES for Rgba8; every other layout
+    // allocates the RGBA destination while the native buffer is still
+    // alive, so both coexist (image 0.25 buffer.rs cast_in_color_space).
+    let peak_bpp = if native_bpp == 4 { 4 } else { native_bpp + 4 };
+    // GIF decodes the frame into its own buffer while the screen-sized
+    // output buffer is live — two RGBA-sized allocations coexist.
+    let peak_bpp = match format {
+        Some(image::ImageFormat::Gif) => peak_bpp.max(8),
+        _ => peak_bpp,
     };
+    // tiff 0.11 splits the given budget between the frame buffer and the
+    // chunk scratch (a TOTAL cap), so no multiplier is needed: the honest
+    // peak is the coexisting native+RGBA pair, already in peak_bpp.
+    let codec_factor = 1;
     NativeFootprint { peak_bpp, codec_factor }
 }
 
 /// Budget decision for probed pixel dimensions. Pure and cfg-independent
 /// when the budgets are passed explicitly, so tests can probe arbitrary
 /// budgets; the decode path always passes this target's constants.
+#[cfg_attr(not(test), allow(dead_code))]
 fn tier_for(
     width: u32,
     height: u32,
@@ -807,6 +815,10 @@ fn decode_with_budgets<R: std::io::BufRead + std::io::Seek>(
     // 0.25); the tier already folded that factor in, and the allowance
     // matches it so an in-tier TIFF never codec-refuses.
     let mut limits = image::Limits::default();
+    // tiff 0.11 SPLITS this cap between the frame buffer and chunk scratch
+    // (a total ceiling), so the plain budget is the right allowance; the
+    // ×3 multiplier that image's older tiff codec needed would instead
+    // admit hostile chunk transients up to 3× the budget.
     limits.max_alloc = Some(match reader.format() {
         Some(image::ImageFormat::Gif) => probed
             .map(|(width, height, _, _)| {
@@ -814,7 +826,6 @@ fn decode_with_budgets<R: std::io::BufRead + std::io::Seek>(
             })
             .unwrap_or(max_decode_bytes)
             .min(max_decode_bytes),
-        Some(image::ImageFormat::Tiff) => max_decode_bytes.saturating_mul(3),
         _ => max_decode_bytes,
     });
     reader.limits(limits);

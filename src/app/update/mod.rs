@@ -2453,6 +2453,12 @@ impl OpenCADStudio {
             #[cfg(target_arch = "wasm32")]
             Message::ScriptFilePicked(None) => Task::none(),
 
+            // Web DATALINK: the picked .csv's bytes arrived — register them
+            // as the link's in-session source, then run the same table-insert
+            // path the native typed-path command feeds.
+            #[cfg(target_arch = "wasm32")]
+            Message::DataLinkCsvPicked(picked) => self.on_datalink_csv_picked(picked),
+
             // Web CENTERLTYPEFILE: the picked .lin/.dnl file's text arrived —
             // load its linetypes, then record the setting under the file's
             // name (the native command reads the typed path inside

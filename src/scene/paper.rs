@@ -562,6 +562,12 @@ impl Scene {
                 .unwrap_or(true)
         };
         let mut models = Vec::new();
+        // Cached hatch models bake `draw_depth: 0.0` at document load; the
+        // canvas path re-reads the label per frame but this plot path used to
+        // clone the stale value, so every top-level hatch exported at depth 0
+        // and DRAWORDER (SORTENTS) never reached the PDF (#1345). Refresh the
+        // per-entity label here exactly like `hatch_models_for_view`.
+        let depths = self.draw_depth_map();
         for (&handle, model) in self.hatches.iter() {
             let Some(source) = self.document.get_entity(handle) else {
                 continue;
@@ -609,6 +615,7 @@ impl Scene {
             hatch.color = style.0;
             hatch.aci = style.4;
             hatch.line_weight_px = style.3;
+            hatch.draw_depth = depths.get(&handle.value()).map_or(0.0, |d| d[0]);
             if let EntityType::Hatch(dxf) = entity {
                 if let model::hatch_model::HatchPattern::Pattern(_) = &hatch.pattern {
                     if dxf.pattern.lines.is_empty() {

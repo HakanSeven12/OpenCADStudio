@@ -156,3 +156,45 @@ The repeatable live-editor evaluation draws three isolated entities in one batch
 ```sh
 python3 docs/automation/mcp_eval.py target/debug/OpenCADStudio
 ```
+
+## Web automation
+
+The web build exposes the same control protocol (protocol 2; protocol 1 requests are still accepted unchanged) through two wasm exports on `window.wasmBindings`:
+
+- `ocs_control_submit(requestJson)` returns a ticket id immediately.
+- `ocs_control_take(ticketId)` returns the JSON reply once the app has settled the request, or `null` while it runs.
+
+`web/ocs-control.js` (loaded by `web-app.html`) wraps that pair in a small promise API:
+
+```js
+await window.ocsControl.ready;              // resolves when the bridge exists
+window.addEventListener("ocs-ready", () => {}); // ...or listen for the one-shot event
+const state = await window.ocsControl.request({op: "state"});
+const reply = await window.ocsControl.request({
+  op: "run", request_id: "line-1",
+  document_id: state.document_id, revision: state.revision,
+  cmd: "LINE 0,0 10,0",
+});
+```
+
+`request` resolves with the final reply, following an `accepted`/`running` operation through `op: "operation"` until it completes, fails, or waits for input. It rejects on timeout (default 120 s, override with `{timeoutMs, pollMs}`) or when the bridge is missing.
+
+### Opening an in-memory drawing (web only)
+
+The `open` operation accepts base64 bytes instead of a path, so automation can open drawings it already holds in memory — no OPFS copy, no file picker. The bytes go through the same guarded open queue drag-and-drop uses:
+
+```js
+const bytes = new Uint8Array(await file.arrayBuffer());
+let binary = "";
+for (const byte of bytes) binary += String.fromCharCode(byte);
+await window.ocsControl.request({
+  op: "open", request_id: "open-1", name: "plan.dwg",
+  data_base64: btoa(binary),
+});
+```
+
+The operation stays pending until the open settles; if another open holds the slot, the reply reports `result.queued` and the poll opens the drawing as soon as the slot frees. `state.capabilities` lists `open_bytes` on the web build. Native builds keep the path-based `open` and reject `data_base64` with `invalid_request`.
+
+### Startup prompts during automation
+
+The first control request of a session marks it automated: a donation prompt that has not been shown yet is dropped, and no new one is queued while control stays enabled. A prompt already on screen is left for its reader — close it with `{"op":"action","name":"close_modal"}`. A web host that intends to automate from the first page load can set `localStorage["opencadstudio.automation"] = "1"` before loading the app so the prompt never appears (the same pre-load mechanism the settings use).

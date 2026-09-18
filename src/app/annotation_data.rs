@@ -1108,6 +1108,34 @@ impl OpenCADStudio {
         Task::none()
     }
 
+    /// Web DATALINK: the picked .csv's bytes arrived. They are registered in
+    /// the picked-source registry — so `DATALINKUPDATE` re-reads them
+    /// in-session instead of failing on the absent filesystem — and fed to
+    /// the same table-insert path the native typed-path command uses.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn on_datalink_csv_picked(
+        &mut self,
+        picked: Option<(String, Vec<u8>)>,
+    ) -> Task<Message> {
+        let Some((name, bytes)) = picked else {
+            return Task::none();
+        };
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        if !register_picked_source(&name, Arc::new(bytes)) {
+            if let Some(name) = take_last_collision().take() {
+                self.command_line.push_warning(
+                    crate::tf!(
+                        "\"{name}\" is already loaded from another folder with different contents; re-picking it was ignored to keep the existing link."
+                    )
+                    .as_ref(),
+                );
+            }
+            return Task::none();
+        }
+        self.place_data_link_table(&text, &name);
+        Task::none()
+    }
+
     pub(super) fn on_data_link_browse(&mut self) -> Task<Message> {
         Task::perform(
             async {

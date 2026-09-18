@@ -149,6 +149,9 @@ web-sys = { version = "=0.3.85", features = [
     "EventInit",
     "EventTarget",
     "BeforeUnloadEvent",
+    # COLORSCHEME SYSTEM resolves prefers-color-scheme through a media
+    # query listener read at boot and on every re-run.
+    "MediaQueryList",
     "console",
     "Node",
     "HtmlElement",

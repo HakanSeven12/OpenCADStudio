@@ -264,6 +264,27 @@ pub async fn pick_linetype_file_web() -> Option<(String, String)> {
     Some((name, String::from_utf8_lossy(&bytes).into_owned()))
 }
 
+/// Web DATALINK: pick the .csv through the browser and read its raw bytes —
+/// the stand-in for the typed path the native command reads with
+/// `std::fs::read_to_string`. The caller registers the bytes in the
+/// picked-source registry so the link re-reads in-session. `None` = the user
+/// cancelled.
+#[cfg(target_arch = "wasm32")]
+pub async fn pick_datalink_csv_web() -> Option<(String, Vec<u8>)> {
+    let Some(handle) = crate::sys::file_dialog()
+        .set_title(crate::t!("Link a CSV data source").as_ref())
+        .add_filter(crate::t!("CSV Files").as_ref(), &["csv", "txt", "CSV", "TXT"])
+        .add_filter(crate::t!("All Files").as_ref(), &["*"])
+        .pick_file()
+        .await
+    else {
+        return None;
+    };
+    let name = handle.file_name();
+    let bytes = handle.read().await;
+    Some((name, bytes))
+}
+
 /// Load a CAD file from a known path. Parsing and cache building run on a
 /// dedicated OS thread so the async executor stays free for rendering during
 /// the load. Writes phase markers into `phase` so the UI can show

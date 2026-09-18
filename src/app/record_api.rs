@@ -1104,6 +1104,37 @@ fn requested_handle(request: &Value) -> Result<acadrust::Handle, String> {
         .ok_or_else(|| "set_properties requires a hexadecimal handle".to_string())
 }
 
+/// Compare-and-set equality for `set_properties` (#1348): serde_json keeps
+/// `10` and `10.0` as distinct numbers, and a JavaScript client cannot even
+/// send `10.0` (`JSON.stringify(10.0) === "10"`), so plain `Value` equality
+/// never matches a whole-number float. Numbers compare by value; strings,
+/// bools and null stay exact; objects and arrays recurse.
+fn json_values_match(stored: &Value, expected: &Value) -> bool {
+    match (stored, expected) {
+        (Value::Number(stored), Value::Number(expected)) => match (stored.as_f64(), expected.as_f64()) {
+            (Some(stored), Some(expected)) => stored == expected,
+            // Out-of-range or arbitrary-precision numbers keep exact equality.
+            _ => stored == expected,
+        },
+        (Value::Object(stored), Value::Object(expected)) => {
+            stored.len() == expected.len()
+                && stored.iter().all(|(key, value)| {
+                    expected
+                        .get(key)
+                        .is_some_and(|expected| json_values_match(value, expected))
+                })
+        }
+        (Value::Array(stored), Value::Array(expected)) => {
+            stored.len() == expected.len()
+                && stored
+                    .iter()
+                    .zip(expected)
+                    .all(|(stored, expected)| json_values_match(stored, expected))
+        }
+        _ => stored == expected,
+    }
+}
+
 fn apply_updates(
     properties: &mut Value,
     request: &Value,
@@ -1136,7 +1167,7 @@ fn apply_updates(
             .pointer_mut(path)
             .ok_or_else(|| format!("property does not exist: {path}"))?;
         if let Some(expected) = update.get("expected") {
-            if target != expected {
+            if !json_values_match(target, expected) {
                 return Err(format!("property changed before update: {path}"));
             }
         }
@@ -1871,5 +1902,69 @@ mod tests {
             "compare",
         );
         assert_eq!(compare["code"], "invalid_update", "{compare}");
+    }
+
+    #[test]
+    fn set_properties_expected_matches_whole_number_floats_by_value() {
+        // Both directions of the #1348 mismatch: serde_json keeps 10 and 10.0
+        // as different numbers, and a JS client can only send the integer.
+        assert!(super::json_values_match(&json!(10.0), &json!(10)));
+        assert!(super::json_values_match(&json!(10), &json!(10.0)));
+        // A stale value must still be rejected: value comparison, not a
+        // number-type blind spot.
+        assert!(!super::json_values_match(&json!(10.0), &json!(10.5)));
+        assert!(!super::json_values_match(&json!(10), &json!(10.5)));
+        // Non-numerics keep exact structural equality.
+        assert!(!super::json_values_match(&json!(10), &json!("10")));
+        assert!(!super::json_values_match(&json!(10), &json!(true)));
+        assert!(!super::json_values_match(&json!(null), &json!(10)));
+        // Nested objects and arrays recurse by key/index.
+        assert!(super::json_values_match(
+            &json!({"x":12.0,"y":34.0,"z":[5.0]}),
+            &json!({"x":12,"y":34,"z":[5]}),
+        ));
+        assert!(!super::json_values_match(
+            &json!({"x":12.0,"y":34.0}),
+            &json!({"x":12,"y":34.5}),
+        ));
+        assert!(!super::json_values_match(
+            &json!({"x":12.0,"y":34.0}),
+            &json!({"x":12.0}),
+        ));
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let entity = app.tabs[i]
+            .scene
+            .add_entity(EntityType::Insert(Insert::new("A", Vector3::new(12.0, 34.0, 5.0))));
+        let handle = format!("{:X}", entity.value());
+
+        // A scalar whole-number float matches an integer expected value.
+        let moved = execute(
+            &mut app,
+            json!({"op":"set_properties","collection":"entities","handle":handle,
+                "updates":[{"path":"/insert_point/x","expected":12,"value":20.0}]}),
+            "scalar",
+        );
+        assert_eq!(moved["status"], "completed", "{moved}");
+
+        // A nested expected object matches the stored whole-number floats.
+        let nested = execute(
+            &mut app,
+            json!({"op":"set_properties","collection":"entities","handle":handle,
+                "updates":[{"path":"/insert_point","expected":{"x":20,"y":34,"z":5},"value":{"x":20,"y":34,"z":6}}]}),
+            "nested",
+        );
+        assert_eq!(nested["status"], "completed", "{nested}");
+
+        // A genuinely stale nested value is still rejected.
+        let stale = execute(
+            &mut app,
+            json!({"op":"set_properties","collection":"entities","handle":handle,
+                "updates":[{"path":"/insert_point","expected":{"x":20,"y":34,"z":5},"value":{"x":0,"y":0,"z":0}}]}),
+            "stale",
+        );
+        assert_eq!(stale["code"], "invalid_update", "{stale}");
     }
 }

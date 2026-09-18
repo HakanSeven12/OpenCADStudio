@@ -883,6 +883,14 @@ impl OpenCADStudio {
     pub(in crate::app) fn apply_config(&mut self, cfg: crate::app::config::AppConfig) {
         self.apply_settings(&cfg.settings);
         self.ui_theme = cfg.theme.clone();
+        // A saved `System` scheme re-resolves at boot: the stored palette is
+        // whatever the last resolution produced, so refresh it alongside the
+        // live theme (COLORSCHEME SYSTEM documents this boot-time read).
+        if self.ui_theme.name.eq_ignore_ascii_case("System") {
+            self.ui_theme.palette = crate::app::config::UiThemePalette::from_iced(
+                crate::app::config::resolve_system_theme().seed(),
+            );
+        }
         self.active_theme = self.ui_theme.to_iced();
         self.theme_color_inputs = self.ui_theme.palette.hex_values();
         self.model_space = cfg.model_space;

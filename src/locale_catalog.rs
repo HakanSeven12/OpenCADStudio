@@ -645,6 +645,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Color Temperature" => Some(("properties", "color-temperature")),
         "Color override (#RRGGBB):" => Some(("styles", "color-override-rrggbb")),
         "Color scheme set to '{name}'." => Some(("view", "color-scheme-set-to-name")),
+        "Color scheme set to 'System' (currently {name})." => Some(("view", "color-scheme-set-to-system-currently-name")),
         "Color {}" => Some(("ui", "color")),
         "Column count" => Some(("properties", "column-count")),
         "Column gutter" => Some(("properties", "column-gutter")),

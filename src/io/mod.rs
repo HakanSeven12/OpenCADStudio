@@ -1900,8 +1900,13 @@ pub async fn pick_image_file() -> Result<(PathBuf, u32, u32), String> {
     let decoded = crate::scene::model::image_model::resolve_image(&reference).ok_or_else(|| {
         // An over-budget decode refusal explains itself (dims + limit);
         // anything else stays the generic unsupported/corrupt message.
-        crate::scene::model::image_model::take_decode_refusals()
-            .pop()
+        // Only a note naming THIS pick explains its failure; the queue may
+        // also hold refusals queued by concurrent re-resolution of other
+        // references, which must survive for their own drains.
+        crate::scene::model::image_model::decode_refusals()
+            .iter()
+            .find(|note| note.contains(short.as_str()))
+            .cloned()
             .unwrap_or_else(|| format!("Unsupported or corrupt image \"{short}\""))
     })?;
     // Entity sizing truth: the file's ORIGINAL pixel dimensions, not the

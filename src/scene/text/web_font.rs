@@ -244,7 +244,7 @@ pub fn script_of(ch: char) -> Option<Script> {
         0x0900..=0x097F | 0xA8E0..=0xA8FF => Script::Devanagari,
         // Georgian: Asomtavruli/Nuskhuri, Mtavruli capitals, and the legacy
         // Supplement (khutsuri round mkhedruli).
-        0x10A0..=0x10FF | 0x1C90..=0x1CBF | 0x2D00..=0x2D5F => Script::Georgian,
+        0x10A0..=0x10FF | 0x1C90..=0x1CBF | 0x2D00..=0x2D2F => Script::Georgian,
         // Hangul → always Korean; kana → always Japanese.
         0x1100..=0x11FF | 0x3130..=0x318F | 0xAC00..=0xD7A3 => Script::Korean,
         0x3040..=0x30FF | 0x31F0..=0x31FF => Script::Japanese,

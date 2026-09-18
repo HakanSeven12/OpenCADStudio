@@ -173,6 +173,14 @@ Start the development server:
 trunk serve
 ```
 
+Build the deployable bundle (runs the release Trunk build, then re-syncs and
+verifies `web/fonts` in `dist/app/fonts`, so the fonts the app fetches can
+never go missing from the bundle):
+
+```bash
+sh scripts/build-web.sh
+```
+
 ## Automation
 
 The desktop binary supports one-shot conversion, a persistent headless server, and a client-neutral MCP endpoint for AI applications:

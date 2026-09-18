@@ -667,16 +667,34 @@ fn decode_with_budgets<R: std::io::BufRead + std::io::Seek>(
         tier_for(width, height, max_decode_bytes, max_display_pixels)
     });
 
+    // Trust the probe, not the decoder limits: `Limits::reserve` checks the
+    // decoder's NATIVE bytes-per-pixel, so a grayscale/RGB JPEG/PNG/BMP over
+    // the RGBA budget decodes fine and then `into_rgba8()` balloons to up to
+    // 4x it — exactly the tab death this exists to prevent. The probed
+    // dimensions already prove it cannot fit; refuse without decoding.
+    if tier == DecodeTier::OverBudget {
+        return DecodeAttempt::Refused {
+            width: probed.map_or(0, |(width, _)| width),
+            height: probed.map_or(0, |(_, height)| height),
+        };
+    }
+
     let mut reader = match open().and_then(|reader| reader.with_guessed_format()) {
         Ok(reader) => reader,
         Err(_) => return DecodeAttempt::Failed,
     };
-    // The decoder enforces the decode budget itself (`Limits::reserve`
-    // checks the output allocation up front), so a too-large image errors
-    // here instead of allocating first. This also RAISES the image crate's
-    // 512 MiB default on native, where the budget is 4 GB.
+    // For formats that FIT the budget, the limits still guard runaway
+    // allocations mid-decode. TIFF additionally stacks its own intermediate
+    // scratch buffers on top of the reserve (empirically ~3x the frame size
+    // in image 0.25), so refusing an in-budget TIFF at face value would
+    // produce a note claiming e.g. "400 MB, over the 512 MB limit".
+    let tiff = matches!(reader.format(), Some(image::ImageFormat::Tiff));
     let mut limits = image::Limits::default();
-    limits.max_alloc = Some(max_decode_bytes);
+    limits.max_alloc = Some(if tiff {
+        max_decode_bytes.saturating_mul(3)
+    } else {
+        max_decode_bytes
+    });
     reader.limits(limits);
     let img = match reader.decode() {
         Ok(img) => img,
@@ -747,7 +765,7 @@ fn refusal_message(path: &str, width: u32, height: u32) -> String {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string());
-    let decoded_mb = width as u64 * height as u64 * 4 / (1024 * 1024);
+    let decoded_mb = (width as u64).saturating_mul(height as u64).saturating_mul(4) / (1024 * 1024);
     let limit_mb = MAX_DECODE_BYTES / (1024 * 1024);
     crate::tf!(
         "\"{name}\" is {width}×{height} px and would decode to {decoded} MB, over the {limit} MB image limit of this build — it cannot be attached. Images within the limit are attached at a reduced display resolution when needed.",
@@ -768,6 +786,17 @@ fn refusal_notes() -> &'static Mutex<Vec<String>> {
 }
 
 /// Take and clear every recorded decode refusal (most recent last).
+/// Peek without draining — callers that only want THEIR note (the pick
+/// path) must not consume refusals queued for other references.
+pub fn decode_refusals() -> Vec<String> {
+    refusal_notes()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
+/// Take and clear — for the drains that own every queued note (the poll and
+/// the open-settle paths).
 pub fn take_decode_refusals() -> Vec<String> {
     let mut notes = refusal_notes().lock().unwrap_or_else(|error| error.into_inner());
     std::mem::take(&mut *notes)

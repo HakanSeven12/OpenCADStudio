@@ -56,7 +56,7 @@ sub /tmp/NotoArmenianMerged.ttf "U+0000-024F,U+1E00-1EFF,U+2000-206F,U+0530-058F
 
 dl /tmp/NotoGeorgian.ttf "$RAW/NotoSansGeorgian/hinted/ttf/NotoSansGeorgian-Regular.ttf"
 merge /tmp/NotoGeorgian.ttf /tmp/NotoGeorgianMerged.ttf
-sub /tmp/NotoGeorgianMerged.ttf "U+0000-024F,U+1E00-1EFF,U+2000-206F,U+10A0-10FF,U+1C90-1CBF,U+2D00-2D5F" georgian.ttf
+sub /tmp/NotoGeorgianMerged.ttf "U+0000-024F,U+1E00-1EFF,U+2000-206F,U+10A0-10FF,U+1C90-1CBF,U+2D00-2D2F" georgian.ttf
 
 # CJK comes from the noto-cjk repo (CFF/OTF; ttf-parser reads CFF outlines) and
 # is split by language: Simplified Chinese, Traditional Chinese, Japanese and

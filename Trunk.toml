@@ -1,6 +1,6 @@
 # Trunk config for the web (wasm) build of Open CAD Studio (issue #45).
 #
-# Build:   trunk build --release
+# Build:   sh scripts/build-web.sh  (trunk build --release + fonts sync/verify)
 # Dev:     trunk serve
 #
 # Requires: rustup target add wasm32-unknown-unknown

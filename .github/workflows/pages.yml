@@ -107,7 +107,10 @@ jobs:
           tool: wasm-bindgen@${{ steps.wasm-bindgen-version.outputs.version }}
 
       - name: Build web bundle
-        run: trunk build --locked --release --public-url /app/ --dist dist/app --html-output index.html web-app.html
+        # scripts/build-web.sh runs the same Trunk build and then verifies the
+        # font set landed in dist/app/fonts, so a deploy can never silently
+        # ship without the fonts the app fetches from fonts/*.ttf.
+        run: sh scripts/build-web.sh --locked --html-output index.html web-app.html
 
       - name: Check out current website
         uses: actions/checkout@v4

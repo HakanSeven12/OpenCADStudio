@@ -4,8 +4,6 @@
 // from the RasterImage entity's insertion point, u/v vectors, and pixel size.
 
 use std::collections::HashMap;
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// One textured triangle vertex of an image's visible region: an RTE-split
@@ -380,6 +378,15 @@ pub struct DecodedImage {
     pub pixels: Arc<Vec<u8>>,
     pub width: u32,
     pub height: u32,
+    /// The SOURCE FILE's pixel dimensions (from the pre-decode header probe),
+    /// which remain the entity's sizing truth even when `width`/`height`/
+    /// `pixels` were display-capped: the `ImageModel` world quad comes from
+    /// the entity's own `size` (never from these fields), and a downsampled
+    /// buffer keeps the aspect ratio, so the on-paper footprint never
+    /// shrinks — while the PDF exporter derives effective DPI from placement
+    /// size × stored pixels and self-corrects.
+    pub source_width: u32,
+    pub source_height: u32,
 }
 
 type ImageCacheEntry = Arc<OnceLock<Option<DecodedImage>>>;
@@ -488,11 +495,14 @@ pub fn clear_image_cache() {
 }
 
 /// Resolve an image reference to decoded pixels, memoised per path. Handles a
-/// local file and — on native builds — an `http`/`https` URL. Returns `None`
-/// for anything that can't be shown (missing file, offline, decode error, or a
-/// URL on the web build). The result — including a `None` — is cached so the
-/// raster loader and the unresolved-reference placeholder agree on one answer
-/// without fetching twice.
+/// local file and an `http`/`https` URL (fetched synchronously natively; on
+/// the web the first resolve kicks a background fetch and returns `None` —
+/// the placeholder shows until the fetched bytes land and the poll
+/// re-resolves). Returns `None` for anything that can't be shown (missing
+/// file, offline, decode error, or a fetch still in flight on the web build).
+/// The result — including a `None` — is cached so the raster loader and the
+/// unresolved-reference placeholder agree on one answer without fetching
+/// twice.
 pub fn resolve_image(path: &str) -> Option<DecodedImage> {
     let path = path.trim();
     if path.is_empty() {
@@ -515,52 +525,279 @@ pub fn resolve_image(path: &str) -> Option<DecodedImage> {
 /// dropped — the only source on the web, where the reference is a name-only
 /// path), then the filesystem (native), then any registered file that merely
 /// shares the name (a drawing's foreign absolute path vs a dropped file).
-/// `http`/`https` references stay a native-only network fetch.
+/// `http`/`https` references are a network fetch — synchronous on native, a
+/// one-shot background fetch on the web whose bytes register under the URL
+/// (so the exact URL and any same-name path both resolve afterwards).
 fn decode_reference(path: &str) -> Option<DecodedImage> {
     let lower = path.to_ascii_lowercase();
     if lower.starts_with("http://") || lower.starts_with("https://") {
+        // The web fetch registers its bytes under the URL itself; a
+        // re-resolve (after the poll re-populates) must read them instead of
+        // spawning another fetch.
+        #[cfg(target_arch = "wasm32")]
+        if let Some(bytes) = registered_bytes(path) {
+            return decode_or_note(decode_from_memory(&bytes), path);
+        }
         let bytes = fetch_remote(path)?;
-        return decode_from_memory(&bytes);
+        return decode_or_note(decode_from_memory(&bytes), path);
     }
     if let Some(bytes) = registered_bytes(path) {
-        return decode_from_memory(&bytes);
+        return decode_or_note(decode_from_memory(&bytes), path);
     }
     #[cfg(not(target_arch = "wasm32"))]
-    if let Some(decoded) = decode_from_file(path) {
+    if let Some(decoded) = decode_or_note(decode_from_file(path), path) {
         return Some(decoded);
     }
     registered_bytes_by_name(path)
         .as_deref()
-        .and_then(|bytes| decode_from_memory(bytes))
+        .and_then(|bytes| decode_or_note(decode_from_memory(bytes), path))
 }
 
-/// Decode in-memory image bytes (picked file, drop, or network body) to RGBA.
-fn decode_from_memory(bytes: &[u8]) -> Option<DecodedImage> {
-    let img = image::load_from_memory(bytes).ok()?;
-    rgba_image(img)
+// ── Decode budgets (display-LOD bounding) ───────────────────────────────────
+//
+// A 500 MB aerial/GIS TIFF can decode to multiple GB of RGBA — enough to kill
+// a browser tab, and a 20000×20000 raster alone is a >1 GB GPU texture (the
+// image pipeline tiles whatever it receives past `max_texture_dimension_2d`,
+// so the CPU-side cost is the real problem). Every decode therefore passes
+// two per-target budgets, applied in `decode_with_budgets` below:
+
+/// Ceiling on a full RGBA decode (`width × height × 4`). Decodes that would
+/// exceed it run with `image::Limits` pinned to the budget, so the decoder
+/// errors instead of ballooning the heap; this module turns that error into a
+/// localized refusal (see `refusal_message`) — the pixels are simply not
+/// available at full size. Desktops have RAM to spare and rarely hit theirs;
+/// wasm lives inside a browser tab whose heap the decode must not pop.
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_DECODE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+/// wasm: 512 MB of decoded RGBA — comfortably inside a tab's heap.
+#[cfg(target_arch = "wasm32")]
+const MAX_DECODE_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Ceiling on the STORED pixel count — what feeds the GPU upload, the PDF
+/// embed, and (on wasm) the session heap. Images over it still decode, up to
+/// `MAX_DECODE_BYTES`, but are Lanczos3-downsampled to the cap before
+/// entering an `ImageModel`; the original BYTES stay registered for a future
+/// re-decode, and `DecodedImage::source_width/height` keep the file's true
+/// dimensions as the entity's sizing truth. Native plots may want the extra
+/// headroom (8192² = 67.1 Mpx); the browser keeps a stricter cap
+/// (4096² = 16.8 Mpx) to bound both heap and texture upload.
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_DISPLAY_PIXELS: u64 = 8192 * 8192;
+#[cfg(target_arch = "wasm32")]
+const MAX_DISPLAY_PIXELS: u64 = 4096 * 4096;
+
+/// How a probed image size may be decoded under the budgets above.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DecodeTier {
+    /// Store the decoded pixels untouched.
+    Full,
+    /// Decode fully, then downsample to the display cap before storing.
+    Downsample,
+    /// Full RGBA would exceed `MAX_DECODE_BYTES`. The decode still runs with
+    /// the budget enforced through `image::Limits`: it succeeds on a build
+    /// with headroom (native) or errors into a refusal (wasm).
+    OverBudget,
+}
+
+/// Budget decision for probed pixel dimensions. Pure and cfg-independent
+/// when the budgets are passed explicitly, so tests can probe arbitrary
+/// budgets; the decode path always passes this target's constants.
+fn tier_for(
+    width: u32,
+    height: u32,
+    max_decode_bytes: u64,
+    max_display_pixels: u64,
+) -> DecodeTier {
+    let pixels = width as u64 * height as u64;
+    if pixels.saturating_mul(4) > max_decode_bytes {
+        DecodeTier::OverBudget
+    } else if pixels > max_display_pixels {
+        DecodeTier::Downsample
+    } else {
+        DecodeTier::Full
+    }
+}
+
+/// Largest dimensions that keep `width × height` within `cap` while
+/// preserving the aspect ratio: each side floors (so the product never
+/// exceeds the cap while both sides stay above 1 px) and clamps to 1 px — a
+/// degenerate strip may then stay slightly over, since it cannot shrink
+/// further. Images already within the cap pass through unchanged.
+fn downsample_to_cap(width: u32, height: u32, cap: u64) -> (u32, u32) {
+    let pixels = width as u64 * height as u64;
+    if width == 0 || height == 0 || pixels <= cap {
+        return (width, height);
+    }
+    let scale = (cap as f64 / pixels as f64).sqrt();
+    let shrink = |dim: u32| {
+        let scaled = (dim as f64 * scale).floor() as u64;
+        scaled.clamp(1, dim as u64) as u32
+    };
+    (shrink(width), shrink(height))
+}
+
+/// Outcome of one tiered decode attempt.
+enum DecodeAttempt {
+    /// Pixels decoded — and display-capped when the tier called for it —
+    /// ready to store.
+    Decoded(DecodedImage),
+    /// The decoder's limits rejected the image: full RGBA would exceed
+    /// `MAX_DECODE_BYTES`. Carries the probed dimensions for the refusal
+    /// note; the caller decides how to surface it.
+    Refused { width: u32, height: u32 },
+    /// Unreadable, unsupported, or corrupt.
+    Failed,
+}
+
+/// Decode an image through the budget tiers. The header dimensions are
+/// probed BEFORE any pixel decode, so the tiers act on size alone; `open` is
+/// called twice — once for the probe, once for the decode — because both
+/// passes consume the reader.
+fn decode_with_budgets<R: std::io::BufRead + std::io::Seek>(
+    open: impl Fn() -> std::io::Result<image::ImageReader<R>>,
+    max_decode_bytes: u64,
+    max_display_pixels: u64,
+) -> DecodeAttempt {
+    // Probe pass: header dimensions only, no pixel decode.
+    let probed = open()
+        .and_then(|reader| reader.with_guessed_format())
+        .ok()
+        .and_then(|reader| reader.into_dimensions().ok());
+    let tier = probed.map_or(DecodeTier::Full, |(width, height)| {
+        tier_for(width, height, max_decode_bytes, max_display_pixels)
+    });
+
+    let mut reader = match open().and_then(|reader| reader.with_guessed_format()) {
+        Ok(reader) => reader,
+        Err(_) => return DecodeAttempt::Failed,
+    };
+    // The decoder enforces the decode budget itself (`Limits::reserve`
+    // checks the output allocation up front), so a too-large image errors
+    // here instead of allocating first. This also RAISES the image crate's
+    // 512 MiB default on native, where the budget is 4 GB.
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(max_decode_bytes);
+    reader.limits(limits);
+    let img = match reader.decode() {
+        Ok(img) => img,
+        Err(image::ImageError::Limits(_)) => {
+            return DecodeAttempt::Refused {
+                width: probed.map_or(0, |(width, _)| width),
+                height: probed.map_or(0, |(_, height)| height),
+            };
+        }
+        Err(_) => return DecodeAttempt::Failed,
+    };
+
+    let rgba = img.into_rgba8();
+    let (width, height) = rgba.dimensions();
+    // Display cap: an OverBudget decode that succeeded (native headroom) is
+    // necessarily over the cap too — the budgets' invariant guarantees it —
+    // so both capping tiers downsample before storing.
+    let (target_w, target_h) = match tier {
+        DecodeTier::Full => (width, height),
+        DecodeTier::Downsample | DecodeTier::OverBudget => {
+            downsample_to_cap(width, height, max_display_pixels)
+        }
+    };
+    let rgba = if target_w != width || target_h != height {
+        image::imageops::resize(&rgba, target_w, target_h, image::imageops::FilterType::Lanczos3)
+    } else {
+        rgba
+    };
+    let (stored_w, stored_h) = rgba.dimensions();
+    // Sizing truth: the file's probed dimensions, not the (possibly reduced)
+    // buffer's, so placement and aspect come from the original raster.
+    let (source_width, source_height) = probed.unwrap_or((stored_w, stored_h));
+    DecodeAttempt::Decoded(DecodedImage {
+        pixels: Arc::new(rgba.into_raw()),
+        width: stored_w,
+        height: stored_h,
+        source_width,
+        source_height,
+    })
+}
+
+/// Decode in-memory image bytes (picked file, drop, or network body) to RGBA,
+/// bounded by the decode/display budgets.
+fn decode_from_memory(bytes: &[u8]) -> DecodeAttempt {
+    decode_with_budgets(
+        || Ok(image::ImageReader::new(std::io::Cursor::new(bytes))),
+        MAX_DECODE_BYTES,
+        MAX_DISPLAY_PIXELS,
+    )
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn decode_from_file(path: &str) -> Option<DecodedImage> {
-    let img = image::open(Path::new(path)).ok()?;
-    rgba_image(img)
+fn decode_from_file(path: &str) -> DecodeAttempt {
+    decode_with_budgets(
+        || image::ImageReader::open(path),
+        MAX_DECODE_BYTES,
+        MAX_DISPLAY_PIXELS,
+    )
 }
 
-fn rgba_image(img: image::DynamicImage) -> Option<DecodedImage> {
-    let rgba = img.into_rgba8();
-    let (width, height) = rgba.dimensions();
-    Some(DecodedImage {
-        pixels: Arc::new(rgba.into_raw()),
-        width,
-        height,
-    })
+/// Localized over-budget refusal for `path`: names the image, its probed
+/// dimensions, the decoded size the budget rejected, and the limit itself.
+/// TIFFs rejected here have no fallback path — the `tiff` crate is only a
+/// transitive dependency (via `image`'s tiff feature) and is deliberately
+/// not promoted to a direct one, so the refusal IS the handling.
+fn refusal_message(path: &str, width: u32, height: u32) -> String {
+    let name = std::path::Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string());
+    let decoded_mb = width as u64 * height as u64 * 4 / (1024 * 1024);
+    let limit_mb = MAX_DECODE_BYTES / (1024 * 1024);
+    crate::tf!(
+        "\"{name}\" is {width}×{height} px and would decode to {decoded} MB, over the {limit} MB image limit of this build — it cannot be attached. Images within the limit are attached at a reduced display resolution when needed.",
+        name = name,
+        width = width,
+        height = height,
+        decoded = decoded_mb,
+        limit = limit_mb
+    )
+    .into_owned()
+}
+
+/// Over-budget refusals recorded by `decode_or_note`, drained by the UI
+/// (open/drop settle, image pick) to reach the command line.
+fn refusal_notes() -> &'static Mutex<Vec<String>> {
+    static NOTES: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+    NOTES.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Take and clear every recorded decode refusal (most recent last).
+pub fn take_decode_refusals() -> Vec<String> {
+    let mut notes = refusal_notes().lock().unwrap_or_else(|error| error.into_inner());
+    std::mem::take(&mut *notes)
+}
+
+/// Store one decode outcome: pixels pass through, a refusal is noted for the
+/// UI, and anything else is a plain `None` (broken-reference placeholder).
+fn decode_or_note(attempt: DecodeAttempt, path: &str) -> Option<DecodedImage> {
+    match attempt {
+        DecodeAttempt::Decoded(decoded) => Some(decoded),
+        DecodeAttempt::Refused { width, height } => {
+            // Several references can name the same over-budget file; keep
+            // one note per distinct message so the command line is not
+            // spammed by a drawing that inserts it repeatedly.
+            let message = refusal_message(path, width, height);
+            let mut notes = refusal_notes().lock().unwrap_or_else(|error| error.into_inner());
+            if notes.last() != Some(&message) {
+                notes.push(message);
+            }
+            None
+        }
+        DecodeAttempt::Failed => None,
+    }
 }
 
 /// Fetch a remote image reference. `http`/`https` only (the caller checks the
 /// scheme, so `file://` and other schemes are never followed); bounded by a
 /// request timeout and a response-size cap so a slow or hostile URL can't hang
-/// the load or exhaust memory. Never runs on the web build — a browser has no
-/// synchronous fetch and would hit CORS on a cross-origin image anyway.
+/// the load or exhaust memory. Native builds fetch synchronously through
+/// `ureq`; the web build defers to [`fetch_remote`] in the wasm block below.
 #[cfg(not(target_arch = "wasm32"))]
 fn fetch_remote(url: &str) -> Option<Vec<u8>> {
     let agent = crate::network::agent(std::time::Duration::from_secs(8));
@@ -580,10 +817,209 @@ fn fetch_remote(url: &str) -> Option<Vec<u8>> {
         .ok()
 }
 
+// ── Web remote raster fetch ────────────────────────────────────────────────
+//
+// A browser has no synchronous fetch, so the wasm `fetch_remote` can only
+// START the request: the first resolve of an `http`/`https` reference spawns
+// a background task, memoises the miss, and leaves the placeholder showing.
+// When the task settles it registers its bytes under the URL (the same
+// source registry a pick or drop uses) and queues an outcome for the 50 ms
+// control poll, which re-resolves the drawing's image models — the exact
+// flow a dropped raster file already takes.
 #[cfg(target_arch = "wasm32")]
-fn fetch_remote(_url: &str) -> Option<Vec<u8>> {
+mod web_fetch {
+    use super::register_source;
+    use std::collections::{HashSet, VecDeque};
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    /// Bodies above this are refused (with a surfaced note) before and after
+    /// the read, so a hostile URL can't exhaust wasm memory. The web cap is
+    /// roomier than the native 32 MB because there is no streaming reader
+    /// behind a `fetch()` body here.
+    const MAX_BYTES: u64 = 64 * 1024 * 1024;
+    /// Connect+body deadline, mirroring the native agent timeout.
+    const TIMEOUT_MS: i32 = 8000;
+    /// Outcomes the poll hasn't drained yet; a stuck app can't grow this
+    /// without bound. Same cap convention as the drop queues.
+    const OUTCOME_CAP: usize = 32;
+
+    /// Why a remote fetch failed. Kept structured so the surface (command
+    /// line) localizes the sentence; the URL travels alongside.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum RemoteFetchError {
+        /// The request never produced a response: offline, DNS, refused, or
+        /// (most commonly on the web) a CORS block — the surfaced note says
+        /// so, because a CORS failure looks like an opaque network error to
+        /// the page.
+        Network,
+        /// The server answered with a non-OK status (404, 500, …).
+        Status(u16),
+        /// The declared or received body exceeded [`MAX_BYTES`].
+        TooLarge,
+        /// The abort deadline fired first.
+        Timeout,
+    }
+
+    /// A settled background fetch, drained by the app's control poll.
+    #[derive(Debug)]
+    pub enum RemoteFetchOutcome {
+        /// Bytes landed in the source registry under this URL/name — the
+        /// poll re-resolves image models referencing it (exact URL or a
+        /// same-file-name path both match).
+        Loaded(String),
+        /// The fetch failed; the caller localizes [`RemoteFetchError`].
+        Failed(String, RemoteFetchError),
+    }
+
+    fn attempted() -> &'static Mutex<HashSet<String>> {
+        static ATTEMPTED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+        ATTEMPTED.get_or_init(|| Mutex::new(HashSet::new()))
+    }
+
+    fn outcomes() -> &'static Mutex<VecDeque<RemoteFetchOutcome>> {
+        static OUTCOMES: OnceLock<Mutex<VecDeque<RemoteFetchOutcome>>> = OnceLock::new();
+        OUTCOMES.get_or_init(|| Mutex::new(VecDeque::new()))
+    }
+
+    /// Queue a settled outcome for the poll. Extras beyond the cap are
+    /// dropped with a console warning, mirroring the drop queues.
+    fn push_outcome(outcome: RemoteFetchOutcome) {
+        let mut queue = outcomes()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if queue.len() >= OUTCOME_CAP {
+            drop(queue);
+            web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(
+                "ocs: remote-image outcome queue full; dropping an outcome",
+            ));
+            return;
+        }
+        queue.push_back(outcome);
+    }
+
+    /// Pop the oldest settled remote fetch the poll has not handled yet.
+    pub fn take_outcome() -> Option<RemoteFetchOutcome> {
+        outcomes()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .pop_front()
+    }
+
+    /// Why did the `fetch()` promise reject? An abort arrives as a
+    /// `DOMException` named `AbortError`; everything else (a `TypeError`,
+    /// in practice) is a network-level failure the page cannot distinguish
+    /// from a CORS block.
+    fn rejection_kind(error: &wasm_bindgen::JsValue) -> RemoteFetchError {
+        use wasm_bindgen::JsCast;
+        match error.dyn_ref::<web_sys::DomException>() {
+            Some(exception) if exception.name() == "AbortError" => RemoteFetchError::Timeout,
+            _ => RemoteFetchError::Network,
+        }
+    }
+
+    /// The actual request. `GET url` with an abort signal armed at
+    /// [`TIMEOUT_MS`]; the body is refused past [`MAX_BYTES`] using the
+    /// declared `Content-Length` first and the received length second.
+    async fn fetch_once(url: &str) -> Result<Vec<u8>, RemoteFetchError> {
+        use wasm_bindgen::JsCast;
+        use wasm_bindgen_futures::JsFuture;
+
+        let window = web_sys::window().ok_or(RemoteFetchError::Network)?;
+        let controller =
+            web_sys::AbortController::new().map_err(|_| RemoteFetchError::Network)?;
+        let init = web_sys::RequestInit::new();
+        init.set_method("GET");
+        init.set_signal(Some(&controller.signal()));
+        let request = web_sys::Request::new_with_str_and_init(url, &init)
+            .map_err(|_| RemoteFetchError::Network)?;
+        // Arm the deadline. The one-shot closure outlives the await on
+        // purpose: aborting a settled request is a no-op, and clearing the
+        // timer would need a handle threaded through the error paths for no
+        // behavioural gain.
+        let abort = wasm_bindgen::closure::Closure::once_into_js(move || controller.abort());
+        let abort = js_sys::Function::from(abort);
+        window
+            .set_timeout_with_callback_and_timeout_and_arguments(
+                abort.as_ref(),
+                TIMEOUT_MS,
+                &js_sys::Array::new(),
+            )
+            .map_err(|_| RemoteFetchError::Network)?;
+
+        let response = JsFuture::from(window.fetch_with_request(&request))
+            .await
+            .map_err(|error| rejection_kind(&error))?
+            .dyn_into::<web_sys::Response>()
+            .map_err(|_| RemoteFetchError::Network)?;
+        if !response.ok() {
+            return Err(RemoteFetchError::Status(response.status()));
+        }
+        // Pre-check the declared size so an oversized body is refused before
+        // it is buffered; the received length is checked again after the
+        // read (chunked replies carry no Content-Length).
+        let declared = response
+            .headers()
+            .get("Content-Length")
+            .ok()
+            .flatten()
+            .and_then(|value| value.trim().parse::<u64>().ok());
+        if declared.is_some_and(|declared| declared > MAX_BYTES) {
+            return Err(RemoteFetchError::TooLarge);
+        }
+        let buffer = JsFuture::from(
+            response
+                .array_buffer()
+                .map_err(|_| RemoteFetchError::Network)?,
+        )
+        .await
+        .map_err(|error| rejection_kind(&error))?;
+        let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+        if bytes.len() as u64 > MAX_BYTES {
+            return Err(RemoteFetchError::TooLarge);
+        }
+        Ok(bytes)
+    }
+
+    /// Start the background fetch for `url` if one hasn't been attempted this
+    /// session. Each URL is fetched at most once: successes register under
+    /// the URL (and survive `clear_image_cache` — they live in the source
+    /// registry), and failures stay unretried like the font store's `Failed`
+    /// state, so a hostile or dead URL cannot be re-hammered by every scene
+    /// rebuild.
+    pub fn spawn(url: &str) {
+        let url = url.trim().to_string();
+        {
+            let mut attempted = attempted()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if !attempted.insert(url.clone()) {
+                return;
+            }
+        }
+        wasm_bindgen_futures::spawn_local(async move {
+            match fetch_once(&url).await {
+                Ok(bytes) => {
+                    register_source(&url, Arc::new(bytes));
+                    push_outcome(RemoteFetchOutcome::Loaded(url));
+                }
+                Err(error) => push_outcome(RemoteFetchOutcome::Failed(url, error)),
+            }
+        });
+    }
+}
+
+/// Web: kick the one-shot background fetch and miss now — the placeholder
+/// shows until the poll sees the registered bytes (see `web_fetch` above).
+#[cfg(target_arch = "wasm32")]
+fn fetch_remote(url: &str) -> Option<Vec<u8>> {
+    web_fetch::spawn(url);
     None
 }
+
+#[cfg(target_arch = "wasm32")]
+pub use web_fetch::{
+    take_outcome as take_remote_fetch_outcome, RemoteFetchError, RemoteFetchOutcome,
+};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
@@ -677,5 +1113,128 @@ mod tests {
         assert!(!same_file_name("site.png", "site.jpg"));
         assert!(!same_file_name("", ""));
         assert!(!same_file_name("C:\\dir\\", "dir"));
+    }
+
+    // ── Display-LOD budgets ──────────────────────────────────────────────
+
+    /// The tier decision is exact at the budget boundaries and monotone in
+    /// size, and u32 extremes must not overflow into a wrong tier.
+    #[test]
+    fn decode_tiers_split_at_the_budget_boundaries() {
+        // Well within both budgets.
+        assert_eq!(tier_for(64, 64, 1_000_000, 10_000), DecodeTier::Full);
+        // Pixels over the display cap while RGBA stays within the decode
+        // budget: decode, then downsample before storing.
+        assert_eq!(tier_for(400, 400, 1_000_000, 10_000), DecodeTier::Downsample);
+        // RGBA over the decode budget.
+        assert_eq!(tier_for(2_000, 2_000, 1_000_000, 10_000), DecodeTier::OverBudget);
+        // Exact boundary counts stay in the lower tier (limits are ">").
+        assert_eq!(tier_for(50, 200, 1_000_000, 10_000), DecodeTier::Full);
+        assert_eq!(tier_for(500, 500, 1_000_000, 1_000_000), DecodeTier::Full);
+        // Extreme dimensions: the u64 math saturates rather than wrapping.
+        assert_eq!(
+            tier_for(u32::MAX, u32::MAX, u64::MAX, u64::MAX),
+            DecodeTier::Full
+        );
+        assert_eq!(
+            tier_for(u32::MAX, u32::MAX, MAX_DECODE_BYTES, MAX_DISPLAY_PIXELS),
+            DecodeTier::OverBudget
+        );
+    }
+
+    /// The per-target constants keep their invariant: the decode budget can
+    /// always hold a display-capped image's RGBA, so an OverBudget image
+    /// that nevertheless decodes (native headroom) always downsamples too.
+    #[test]
+    fn budget_constants_are_consistent() {
+        assert!(MAX_DECODE_BYTES >= MAX_DISPLAY_PIXELS * 4);
+        assert!(MAX_DISPLAY_PIXELS > 0);
+    }
+
+    /// Downsample targets keep the aspect ratio, stay within the cap, and
+    /// never collapse a dimension below 1 px.
+    #[test]
+    fn downsample_targets_preserve_aspect_and_cap() {
+        // Within the cap (or degenerate): untouched.
+        assert_eq!(downsample_to_cap(100, 50, 10_000), (100, 50));
+        assert_eq!(downsample_to_cap(0, 50, 10_000), (0, 50));
+        // Over the cap: the product fits while both sides exceed 1 px, and
+        // the aspect survives to within rounding (unless a side is too
+        // small to express it — a 3 px side clamps to 1 px by design).
+        for (width, height) in [(4097u32, 4096u32), (20000, 15000), (12345, 6700), (3, 20000000)] {
+            let cap = 4096u64 * 4096;
+            let (w, h) = downsample_to_cap(width, height, cap);
+            assert!((w as u64) * h as u64 <= cap, "{width}×{height} -> {w}×{h} over cap");
+            assert!(w >= 1 && h >= 1);
+            if w >= 8 && h >= 8 {
+                let aspect = width as f64 / height as f64;
+                assert!(
+                    (w as f64 / h as f64 - aspect).abs() / aspect < 0.05,
+                    "{width}×{height} -> {w}×{h} lost the aspect"
+                );
+            }
+        }
+        // A degenerate strip: the 1 px side cannot shrink further, so the
+        // other side alone absorbs the reduction.
+        let (w, h) = downsample_to_cap(100_000_000, 1, 4096 * 4096);
+        assert_eq!(h, 1);
+        assert!(w < 100_000_000);
+        // Extreme reduction bottoms out at 1×1, never 0.
+        assert_eq!(downsample_to_cap(50_000, 50_000, 1), (1, 1));
+    }
+
+    /// A real decode keeps the metadata-vs-buffer split: the stored buffer
+    /// obeys the display cap while `source_*` keep the file's true pixel
+    /// dimensions, and a decode over the decode budget is refused with its
+    /// probed dimensions instead of allocating.
+    #[test]
+    fn decode_budgets_split_metadata_from_pixels() {
+        let bytes = png_bytes(120, 80, 0x5a);
+        let open = || Ok(image::ImageReader::new(std::io::Cursor::new(&bytes)));
+        // Full tier: buffer and metadata agree.
+        match decode_with_budgets(open, 1_000_000, 1_000_000) {
+            DecodeAttempt::Decoded(image) => {
+                assert_eq!((image.width, image.height), (120, 80));
+                assert_eq!((image.source_width, image.source_height), (120, 80));
+                assert_eq!(image.pixels.len(), 120 * 80 * 4);
+            }
+            _ => panic!("a small png must decode"),
+        }
+        // Display cap only: the buffer shrinks (aspect kept, ≤ cap), the
+        // metadata does not — the sizing truth survives the reduction.
+        match decode_with_budgets(open, 1_000_000, 3_000) {
+            DecodeAttempt::Decoded(image) => {
+                assert_eq!((image.source_width, image.source_height), (120, 80));
+                assert!((image.width as u64) * image.height as u64 <= 3_000);
+                assert!(image.width >= 1 && image.height >= 1);
+                assert_eq!(
+                    image.pixels.len(),
+                    image.width as usize * image.height as usize * 4
+                );
+                assert!((image.width as f64 / image.height as f64 - 1.5).abs() < 0.1);
+            }
+            _ => panic!("a display-capped png must still decode"),
+        }
+        // Decode budget below the full RGBA size: refused, carrying the
+        // probed dimensions — no allocation was needed to discover them.
+        match decode_with_budgets(open, 1_000, 1_000_000) {
+            DecodeAttempt::Refused { width, height } => assert_eq!((width, height), (120, 80)),
+            _ => panic!("an over-budget png must be refused"),
+        }
+    }
+
+    /// Refusals flow through `decode_or_note` into the note queue once per
+    /// distinct message, carrying the dimensions and the file name.
+    #[test]
+    fn refusals_are_noted_once_per_message() {
+        let _ = take_decode_refusals();
+        let refuse = || DecodeAttempt::Refused { width: 30000, height: 30000 };
+        assert!(decode_or_note(refuse(), "C:/gis/aerial.tif").is_none());
+        assert!(decode_or_note(refuse(), "C:/gis/aerial.tif").is_none());
+        let notes = take_decode_refusals();
+        assert_eq!(notes.len(), 1, "duplicate messages collapse: {notes:?}");
+        assert!(notes[0].contains("30000×30000"), "dimensions in: {}", notes[0]);
+        assert!(notes[0].contains("aerial.tif"), "file name in: {}", notes[0]);
+        assert!(take_decode_refusals().is_empty(), "the drain cleared the queue");
     }
 }

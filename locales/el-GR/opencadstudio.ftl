@@ -1874,6 +1874,10 @@ common =
     .geometric = Γεωμετρικοί
     .dimensional = Διαστατικοί
     .show-hide = Εμφάνιση/Απόκρυψη
+    .remote-image-url-could-not-be-fetched-the-network-request-failed-offline-dns-or-cors = Η απομακρυσμένη εικόνα "__ocs_fmt_0__" δεν μπόρεσε να ανακτηθεί: το αίτημα δικτύου απέτυχε (εκτός σύνδεσης, DNS ή CORS).
+    .remote-image-url-could-not-be-fetched-the-server-returned-http-status = Η απομακρυσμένη εικόνα "__ocs_fmt_0__" δεν μπόρεσε να ανακτηθεί: ο διακομιστής επέστρεψε HTTP __ocs_fmt_1__.
+    .remote-image-url-was-not-loaded-it-exceeds-the-64-mb-remote-image-limit = Η απομακρυσμένη εικόνα "__ocs_fmt_0__" δεν φορτώθηκε: υπερβαίνει το όριο των 64 MB για απομακρυσμένες εικόνες.
+    .remote-image-url-could-not-be-fetched-the-request-timed-out = Η απομακρυσμένη εικόνα "__ocs_fmt_0__" δεν μπόρεσε να ανακτηθεί: το αίτημα έληξε χρονικά.
 
 errors =
     .save-warning = Προειδοποίηση αποθήκευσης
@@ -1991,6 +1995,7 @@ file =
     .pick-the-file-again-to-load-its-contents = Επιλέξτε ξανά το αρχείο για να φορτώσετε το περιεχόμενό του στο πρόγραμμα περιήγησης.
     .adding-folders-is-not-available-in-the-browser = Η προσθήκη φακέλων δεν είναι διαθέσιμη στο πρόγραμμα περιήγησης. Προσθέστε αρχεία σχεδίων αντί για αυτό.
     .drawing-not-loaded-in-the-browser = Το σχέδιο δεν έχει φορτωθεί στο πρόγραμμα περιήγησης: __ocs_fmt_0__.
+    .image-over-the-decode-limit-cannot-be-attached = Το "__ocs_fmt_0__" είναι __ocs_fmt_1__×__ocs_fmt_2__ px και η αποκωδικοποίησή του θα απαιτούσε __ocs_fmt_3__ MB, πάνω από το όριο __ocs_fmt_4__ MB για εικόνες σε αυτή την έκδοση — δεν μπορεί να επισυναφθεί. Οι εικόνες εντός του ορίου επισυνάπτονται κατά ανάγκη αυτόματα σε μειωμένη ανάλυση εμφάνισης.
 
 selection =
     .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  Επιλέξτε αντικείμενα (__ocs_arg_count__ επιλεγμένα, Enter για εφαρμογή):

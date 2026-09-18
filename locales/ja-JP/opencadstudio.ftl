@@ -1865,6 +1865,10 @@ common =
     .geometric = 幾何拘束
     .dimensional = 寸法拘束
     .show-hide = 表示/非表示
+    .remote-image-url-could-not-be-fetched-the-network-request-failed-offline-dns-or-cors = リモート画像 "__ocs_fmt_0__" を取得できませんでした: ネットワークリクエストが失敗しました（オフライン、DNS、または CORS）。
+    .remote-image-url-could-not-be-fetched-the-server-returned-http-status = リモート画像 "__ocs_fmt_0__" を取得できませんでした: サーバーが HTTP __ocs_fmt_1__ を返しました。
+    .remote-image-url-was-not-loaded-it-exceeds-the-64-mb-remote-image-limit = リモート画像 "__ocs_fmt_0__" は読み込まれませんでした: リモート画像の 64 MB 上限を超えています。
+    .remote-image-url-could-not-be-fetched-the-request-timed-out = リモート画像 "__ocs_fmt_0__" を取得できませんでした: リクエストがタイムアウトしました。
 
 errors =
     .save-warning = 保存の警告
@@ -1982,6 +1986,7 @@ file =
     .pick-the-file-again-to-load-its-contents = ブラウザーに内容を読み込むには、ファイルをもう一度選択してください。
     .adding-folders-is-not-available-in-the-browser = ブラウザーではフォルダーを追加できません。代わりに図面ファイルを追加してください。
     .drawing-not-loaded-in-the-browser = 図面がブラウザーに読み込まれていません: __ocs_fmt_0__。
+    .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" は __ocs_fmt_1__×__ocs_fmt_2__ px で、デコードすると __ocs_fmt_3__ MB 必要となり、このビルドの __ocs_fmt_4__ MB の画像上限を超えるため添付できません。上限内の画像は、必要に応じて自動的に低下させた表示解像度で添付されます。
 
 selection =
     .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  オブジェクトを選択（__ocs_arg_count__ 個選択、Enter で適用）:

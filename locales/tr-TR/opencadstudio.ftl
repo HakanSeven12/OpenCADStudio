@@ -1859,6 +1859,10 @@ common =
     .geometric = Geometrik
     .dimensional = Boyutsal
     .show-hide = Göster/Gizle
+    .remote-image-url-could-not-be-fetched-the-network-request-failed-offline-dns-or-cors = "__ocs_fmt_0__" uzak görüntüsü getirilemedi: ağ isteği başarısız oldu (çevrimdışı, DNS veya CORS).
+    .remote-image-url-could-not-be-fetched-the-server-returned-http-status = "__ocs_fmt_0__" uzak görüntüsü getirilemedi: sunucu HTTP __ocs_fmt_1__ döndürdü.
+    .remote-image-url-was-not-loaded-it-exceeds-the-64-mb-remote-image-limit = "__ocs_fmt_0__" uzak görüntüsü yüklenmedi: 64 MB uzak görüntü sınırını aşıyor.
+    .remote-image-url-could-not-be-fetched-the-request-timed-out = "__ocs_fmt_0__" uzak görüntüsü getirilemedi: istek zaman aşımına uğradı.
 
 errors =
     .save-warning = Kaydetme Uyarısı
@@ -1975,6 +1979,7 @@ file =
     .pick-the-file-again-to-load-its-contents = İçeriğini tarayıcıya yüklemek için dosyayı yeniden seçin.
     .adding-folders-is-not-available-in-the-browser = Tarayıcıda klasör ekleme kullanılamıyor. Bunun yerine çizim dosyaları ekleyin.
     .drawing-not-loaded-in-the-browser = Çizim tarayıcıya yüklenmedi: __ocs_fmt_0__.
+    .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" __ocs_fmt_1__×__ocs_fmt_2__ px boyutunda ve çözümlendiğinde __ocs_fmt_3__ MB gerektirir; bu sürümün __ocs_fmt_4__ MB görsel sınırını aştığından eklenemez. Sınır içindeki görseller gerektiğinde otomatik olarak düşürülmüş görüntü çözünürlüğüyle eklenir.
 
 selection =
     .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  Nesneleri seçin (__ocs_arg_count__ seçili, uygulamak için Enter):

@@ -28,6 +28,8 @@ pub enum Script {
     Latin,
     Cyrillic,
     Greek,
+    Armenian,
+    Georgian,
     Arabic,
     Hebrew,
     Thai,
@@ -46,6 +48,8 @@ impl Script {
             Script::Latin => "fonts/latin.ttf",
             Script::Cyrillic => "fonts/cyrillic.ttf",
             Script::Greek => "fonts/greek.ttf",
+            Script::Armenian => "fonts/armenian.ttf",
+            Script::Georgian => "fonts/georgian.ttf",
             Script::Arabic => "fonts/arabic.ttf",
             Script::Hebrew => "fonts/hebrew.ttf",
             Script::Thai => "fonts/thai.ttf",
@@ -66,6 +70,8 @@ impl Script {
             Script::Latin
             | Script::Cyrillic
             | Script::Greek
+            | Script::Armenian
+            | Script::Georgian
             | Script::Arabic
             | Script::Hebrew
             | Script::Thai
@@ -85,6 +91,8 @@ impl Script {
             8 => Script::Japanese,
             9 => Script::Korean,
             10 => Script::TraditionalChinese,
+            11 => Script::Armenian,
+            12 => Script::Georgian,
             _ => Script::Latin,
         }
     }
@@ -103,6 +111,8 @@ impl Script {
             Script::Japanese => 8,
             Script::Korean => 9,
             Script::TraditionalChinese => 10,
+            Script::Armenian => 11,
+            Script::Georgian => 12,
         }
     }
 }
@@ -139,7 +149,9 @@ pub fn scripts_for_language_tag(language: &str) -> Vec<Script> {
             "el" => Some(Script::Greek),
             "he" | "yi" => Some(Script::Hebrew),
             "hi" | "mr" | "ne" => Some(Script::Devanagari),
+            "hy" => Some(Script::Armenian),
             "ja" => Some(Script::Japanese),
+            "ka" => Some(Script::Georgian),
             "ko" => Some(Script::Korean),
             "ru" | "uk" | "bg" | "sr" => Some(Script::Cyrillic),
             "th" => Some(Script::Thai),
@@ -213,17 +225,26 @@ pub fn set_cjk_lang_from_codepage(code_page: &str) -> bool {
 
 /// The script font that covers `ch`, or `None` for control / uncovered code
 /// points. Ranges mirror the subset unicode ranges in `web/fonts/generate.sh`.
+/// Chars outside every range (scripts with no shipped subset, e.g. most
+/// South-East Asian and African scripts) return `None` and render nothing —
+/// see `ttf_glyph::build_fallback`.
 #[cfg(target_arch = "wasm32")]
 pub fn script_of(ch: char) -> Option<Script> {
     Some(match ch as u32 {
         0x0000..=0x024F | 0x1E00..=0x1EFF | 0x2000..=0x206F => Script::Latin,
         0x0370..=0x03FF | 0x1F00..=0x1FFF => Script::Greek,
         0x0400..=0x052F | 0x2DE0..=0x2DFF | 0xA640..=0xA69F => Script::Cyrillic,
+        // Armenian sits directly below Hebrew in the block layout (ends at
+        // U+058F; Hebrew starts at U+0590), plus its presentation ligatures.
+        0x0530..=0x058F | 0xFB13..=0xFB17 => Script::Armenian,
         0x0590..=0x05FF | 0xFB1D..=0xFB4F => Script::Hebrew,
         0x0600..=0x06FF | 0x0750..=0x077F | 0x08A0..=0x08FF | 0xFB50..=0xFDFF | 0xFE70..=0xFEFF => {
             Script::Arabic
         }
         0x0900..=0x097F | 0xA8E0..=0xA8FF => Script::Devanagari,
+        // Georgian: Asomtavruli/Nuskhuri, Mtavruli capitals, and the legacy
+        // Supplement (khutsuri round mkhedruli).
+        0x10A0..=0x10FF | 0x1C90..=0x1CBF | 0x2D00..=0x2D5F => Script::Georgian,
         // Hangul → always Korean; kana → always Japanese.
         0x1100..=0x11FF | 0x3130..=0x318F | 0xAC00..=0xD7A3 => Script::Korean,
         0x3040..=0x30FF | 0x31F0..=0x31FF => Script::Japanese,

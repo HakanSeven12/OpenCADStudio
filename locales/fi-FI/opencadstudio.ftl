@@ -1874,6 +1874,10 @@ common =
     .geometric = Geometriset
     .dimensional = Mitalliset
     .show-hide = Näytä/Piilota
+    .remote-image-url-could-not-be-fetched-the-network-request-failed-offline-dns-or-cors = Etäkuvaa "__ocs_fmt_0__" ei voitu noutaa: verkkopyyntö epäonnistui (ei verkkoyhteyttä, DNS tai CORS).
+    .remote-image-url-could-not-be-fetched-the-server-returned-http-status = Etäkuvaa "__ocs_fmt_0__" ei voitu noutaa: palvelin palautti HTTP __ocs_fmt_1__.
+    .remote-image-url-was-not-loaded-it-exceeds-the-64-mb-remote-image-limit = Etäkuvaa "__ocs_fmt_0__" ei ladattu: se ylittää etäkuvien 64 MB:n rajan.
+    .remote-image-url-could-not-be-fetched-the-request-timed-out = Etäkuvaa "__ocs_fmt_0__" ei voitu noutaa: pyyntö aikakatkesi.
 
 errors =
     .save-warning = Tallenna varoitus
@@ -1991,6 +1995,7 @@ file =
     .pick-the-file-again-to-load-its-contents = Valitse tiedosto uudelleen lataaksesi sen sisällön selaimeen.
     .adding-folders-is-not-available-in-the-browser = Kansioiden lisääminen ei ole käytettävissä selaimessa. Lisää sen sijaan piirustustiedostoja.
     .drawing-not-loaded-in-the-browser = Piirustusta ei ole ladattu selaimeen: __ocs_fmt_0__.
+    .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" on __ocs_fmt_1__×__ocs_fmt_2__ px ja sen purkaminen veisi __ocs_fmt_3__ MB, yli tämän version __ocs_fmt_4__ MB:n kuvarajan — sitä ei voi liittää. Rajan sisällä olevat kuvat liitetään tarvittaessa automaattisesti pienemmällä näyttötarkkuudella.
 
 selection =
     .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__ Valitse objektit (__ocs_arg_count__ valittu, Enter käytettäväksi):

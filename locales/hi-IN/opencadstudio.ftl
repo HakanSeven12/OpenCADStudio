@@ -1863,6 +1863,10 @@ common =
     .geometric = ज्यामितीय
     .dimensional = आयामी
     .show-hide = दिखाएँ/छिपाएँ
+    .remote-image-url-could-not-be-fetched-the-network-request-failed-offline-dns-or-cors = रिमोट इमेज "__ocs_fmt_0__" लाया नहीं जा सका: नेटवर्क अनुरोध विफल हो गया (ऑफ़लाइन, DNS या CORS)।
+    .remote-image-url-could-not-be-fetched-the-server-returned-http-status = रिमोट इमेज "__ocs_fmt_0__" लाया नहीं जा सका: सर्वर ने HTTP __ocs_fmt_1__ लौटाया।
+    .remote-image-url-was-not-loaded-it-exceeds-the-64-mb-remote-image-limit = रिमोट इमेज "__ocs_fmt_0__" लोड नहीं किया गया: यह रिमोट इमेज की 64 MB सीमा से बड़ा है।
+    .remote-image-url-could-not-be-fetched-the-request-timed-out = रिमोट इमेज "__ocs_fmt_0__" लाया नहीं जा सका: अनुरोध का समय समाप्त हो गया।
 
 errors =
     .save-warning = चेतावनी सहेजें
@@ -1980,6 +1984,7 @@ file =
     .pick-the-file-again-to-load-its-contents = ब्राउज़र में इसकी सामग्री लोड करने के लिए फ़ाइल को फिर से चुनें।
     .adding-folders-is-not-available-in-the-browser = ब्राउज़र में फ़ोल्डर जोड़ना उपलब्ध नहीं है। इसके बजाय ड्रॉइंग फ़ाइलें जोड़ें।
     .drawing-not-loaded-in-the-browser = ड्रॉइंग ब्राउज़र में लोड नहीं है: __ocs_fmt_0__।
+    .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" __ocs_fmt_1__×__ocs_fmt_2__ px है और इसे डिकोड करने पर __ocs_fmt_3__ MB लगेगा, जो इस बिल्ड की __ocs_fmt_4__ MB छवि सीमा से अधिक है — इसे संलग्न नहीं किया जा सकता। सीमा के भीतर की छवियाँ आवश्यकता पड़ने पर स्वचालित रूप से घटी हुई डिस्प्ले रिज़ॉल्यूशन पर संलग्न की जाती हैं।
 
 selection =
     .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__ ऑब्जेक्ट चुनें (__ocs_arg_count__ चयनित, लागू करने के लिए Enter दबाएँ):

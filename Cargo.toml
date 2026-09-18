@@ -41,7 +41,11 @@ dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 # implementation for the inline (fallback/native) path and the worker path.
 ocs_save = { path = "crates/ocs_save" }
 flate2 = "1"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
+# Raster decode set: png/jpeg/bmp/tiff plus webp/gif (both pure-Rust in
+# image 0.25, so the wasm target stays C-free). Every format named here must
+# also appear in the IMAGE picker filter (io::pick_image_file) and the web
+# drop filter (io::web_drop::is_image_name).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff", "webp", "gif"] }
 hayro = "0.7.1"
 # PDF writer shared by desktop export and the web export/preview/print path.
 printpdf = { version = "0.9.1", default-features = false, features = ["images"] }
@@ -124,6 +128,16 @@ web-sys = { version = "=0.3.85", features = [
     "WritableStream",
     "Url",
     "Response",
+    # The wasm remote-raster fetch (image_model::fetch_remote_web) builds a
+    # `Request` with an `AbortController` signal for its deadline; the fetch
+    # rejection is classified via `DomException` (AbortError = timeout) and
+    # the body size is pre-checked against the Content-Length `Headers`.
+    "Request",
+    "RequestInit",
+    "AbortController",
+    "AbortSignal",
+    "DomException",
+    "Headers",
     "Worker",
     "WorkerOptions",
     "WorkerType",

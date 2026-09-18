@@ -278,8 +278,8 @@ fn is_drawing_name(name: &str) -> bool {
 }
 
 /// The decodable raster set matches the IMAGE picker's filter (and the `image`
-/// crate features the app builds with) — anything else would queue bytes that
-/// can only ever fail to decode.
+/// crate features the app builds with: png/jpeg/bmp/tiff/webp/gif) — anything
+/// else would queue bytes that can only ever fail to decode.
 fn is_image_name(name: &str) -> bool {
     matches!(
         name.rsplit('.')
@@ -287,13 +287,13 @@ fn is_image_name(name: &str) -> bool {
             .unwrap_or_default()
             .to_ascii_lowercase()
             .as_str(),
-        "png" | "jpg" | "jpeg" | "bmp" | "tiff" | "tif"
+        "png" | "jpg" | "jpeg" | "bmp" | "tiff" | "tif" | "webp" | "gif"
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_drawing_name;
+    use super::{is_drawing_name, is_image_name};
 
     #[test]
     fn drawing_names_use_the_worker_convention() {
@@ -305,5 +305,31 @@ mod tests {
         assert!(!is_drawing_name("dwgx"));
         assert!(!is_drawing_name("plan.dwg.txt"));
         assert!(!is_drawing_name(""));
+    }
+
+    #[test]
+    fn image_names_match_the_picker_filter() {
+        for name in [
+            "site.png",
+            "photo.JPG",
+            "scan.Jpeg",
+            "tile.bmp",
+            "map.tiff",
+            "map.TIF",
+            "hero.webp",
+            "icon.WEBP",
+            "anim.gif",
+            "ANIM.GIF",
+        ] {
+            assert!(is_image_name(name), "{name} should be accepted");
+        }
+        // Formats the `image` features do not decode must not queue bytes.
+        for name in ["clip.avif", "pix.heic", "raw.svg", "logo.ico", "noext"] {
+            assert!(!is_image_name(name), "{name} should be rejected");
+        }
+        // A dot-less uppercase name is its own extension, mirroring the
+        // drawing-name convention above.
+        assert!(is_image_name("WEBP"));
+        assert!(is_image_name("GIF"));
     }
 }

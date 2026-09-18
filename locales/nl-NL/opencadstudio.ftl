@@ -1875,6 +1875,10 @@ common =
     .geometric = Geometrisch
     .dimensional = Maatvoering
     .show-hide = Tonen/Verbergen
+    .remote-image-url-could-not-be-fetched-the-network-request-failed-offline-dns-or-cors = Externe afbeelding "__ocs_fmt_0__" kon niet worden opgehaald: het netwerkverzoek is mislukt (offline, DNS of CORS).
+    .remote-image-url-could-not-be-fetched-the-server-returned-http-status = Externe afbeelding "__ocs_fmt_0__" kon niet worden opgehaald: de server gaf HTTP __ocs_fmt_1__ terug.
+    .remote-image-url-was-not-loaded-it-exceeds-the-64-mb-remote-image-limit = Externe afbeelding "__ocs_fmt_0__" is niet geladen: deze overschrijdt de limiet van 64 MB voor externe afbeeldingen.
+    .remote-image-url-could-not-be-fetched-the-request-timed-out = Externe afbeelding "__ocs_fmt_0__" kon niet worden opgehaald: het verzoek is verlopen.
 
 errors =
     .save-warning = Waarschuwing opslaan
@@ -1992,6 +1996,7 @@ file =
     .pick-the-file-again-to-load-its-contents = Kies het bestand opnieuw om de inhoud ervan in de browser te laden.
     .adding-folders-is-not-available-in-the-browser = Mappen toevoegen is niet beschikbaar in de browser. Voeg in plaats daarvan tekeningbestanden toe.
     .drawing-not-loaded-in-the-browser = Tekening is niet geladen in de browser: __ocs_fmt_0__.
+    .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" is __ocs_fmt_1__×__ocs_fmt_2__ px en zou bij het decoderen __ocs_fmt_3__ MB nodig hebben, boven de __ocs_fmt_4__ MB afbeeldingslimiet van deze build — het kan niet worden bijgevoegd. Afbeeldingen binnen de limiet worden zo nodig automatisch met een verlaagde weergaveresolutie bijgevoegd.
 
 selection =
     .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__ Selecteer objecten (__ocs_arg_count__ geselecteerd, Voer in om toe te passen):

@@ -1874,6 +1874,10 @@ common =
     .geometric = 기하 구속
     .dimensional = 치수 구속
     .show-hide = 표시/숨기기
+    .remote-image-url-could-not-be-fetched-the-network-request-failed-offline-dns-or-cors = 원격 이미지 "__ocs_fmt_0__"을(를) 가져올 수 없습니다: 네트워크 요청이 실패했습니다(오프라인, DNS 또는 CORS).
+    .remote-image-url-could-not-be-fetched-the-server-returned-http-status = 원격 이미지 "__ocs_fmt_0__"을(를) 가져올 수 없습니다: 서버가 HTTP __ocs_fmt_1__을(를) 반환했습니다.
+    .remote-image-url-was-not-loaded-it-exceeds-the-64-mb-remote-image-limit = 원격 이미지 "__ocs_fmt_0__"이(가) 로드되지 않았습니다: 원격 이미지 64 MB 제한을 초과합니다.
+    .remote-image-url-could-not-be-fetched-the-request-timed-out = 원격 이미지 "__ocs_fmt_0__"을(를) 가져올 수 없습니다: 요청 시간이 초과되었습니다.
 
 errors =
     .save-warning = 경고 저장
@@ -1991,6 +1995,7 @@ file =
     .pick-the-file-again-to-load-its-contents = 콘텐츠를 브라우저에 로드하려면 파일을 다시 선택하세요.
     .adding-folders-is-not-available-in-the-browser = 브라우저에서는 폴더를 추가할 수 없습니다. 대신 도면 파일을 추가하세요.
     .drawing-not-loaded-in-the-browser = 도면이 브라우저에 로드되지 않았습니다: __ocs_fmt_0__.
+    .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__"은(는) __ocs_fmt_1__×__ocs_fmt_2__ px이며 디코딩 시 __ocs_fmt_3__ MB가 필요해 이 빌드의 __ocs_fmt_4__ MB 이미지 한도를 초과하므로 첨부할 수 없습니다. 한도 이내의 이미지는 필요할 때 자동으로 낮춘 표시 해상도로 첨부됩니다.
 
 selection =
     .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__ 객체 선택(__ocs_arg_count__ 선택, Enter 적용):

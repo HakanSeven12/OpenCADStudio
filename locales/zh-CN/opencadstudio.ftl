@@ -1862,6 +1862,10 @@ common =
     .geometric = 几何
     .dimensional = 标注
     .show-hide = 显示/隐藏
+    .remote-image-url-could-not-be-fetched-the-network-request-failed-offline-dns-or-cors = 无法获取远程图像 "__ocs_fmt_0__"：网络请求失败（离线、DNS 或 CORS）。
+    .remote-image-url-could-not-be-fetched-the-server-returned-http-status = 无法获取远程图像 "__ocs_fmt_0__"：服务器返回 HTTP __ocs_fmt_1__。
+    .remote-image-url-was-not-loaded-it-exceeds-the-64-mb-remote-image-limit = 远程图像 "__ocs_fmt_0__" 未加载：超过 64 MB 的远程图像限制。
+    .remote-image-url-could-not-be-fetched-the-request-timed-out = 无法获取远程图像 "__ocs_fmt_0__"：请求超时。
 
 errors =
     .save-warning = 保存警告
@@ -1979,6 +1983,7 @@ file =
     .pick-the-file-again-to-load-its-contents = 请重新选择文件以将其内容加载到浏览器中。
     .adding-folders-is-not-available-in-the-browser = 浏览器中无法添加文件夹。请改为添加图形文件。
     .drawing-not-loaded-in-the-browser = 图形未加载到浏览器中：__ocs_fmt_0__。
+    .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__"为 __ocs_fmt_1__×__ocs_fmt_2__ 像素，解码需要 __ocs_fmt_3__ MB，超过此版本的 __ocs_fmt_4__ MB 图像上限，因此无法附着。上限内的图像在需要时会自动以降低的显示分辨率附着。
 
 selection =
     .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  选择对象（已选择 __ocs_arg_count__ 个，按 Enter 应用）：

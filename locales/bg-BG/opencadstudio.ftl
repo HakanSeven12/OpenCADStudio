@@ -1874,6 +1874,10 @@ common =
     .geometric = Геометрични
     .dimensional = Размерни
     .show-hide = Показване/скриване
+    .remote-image-url-could-not-be-fetched-the-network-request-failed-offline-dns-or-cors = Отдалеченото изображение "__ocs_fmt_0__" не можа да бъде извлечено: мрежовата заявка се провали (без връзка, DNS или CORS).
+    .remote-image-url-could-not-be-fetched-the-server-returned-http-status = Отдалеченото изображение "__ocs_fmt_0__" не можа да бъде извлечено: сървърът върна HTTP __ocs_fmt_1__.
+    .remote-image-url-was-not-loaded-it-exceeds-the-64-mb-remote-image-limit = Отдалеченото изображение "__ocs_fmt_0__" не беше заредено: надвишава ограничението от 64 MB за отдалечени изображения.
+    .remote-image-url-could-not-be-fetched-the-request-timed-out = Отдалеченото изображение "__ocs_fmt_0__" не можа да бъде извлечено: заявката надвиши времето за изчакване.
 
 errors =
     .save-warning = Предупреждение при запазване
@@ -1991,6 +1995,7 @@ file =
     .pick-the-file-again-to-load-its-contents = Изберете файла отново, за да заредите съдържанието му в браузъра.
     .adding-folders-is-not-available-in-the-browser = Добавянето на папки не е налично в браузъра. Вместо това добавете файлове с чертежи.
     .drawing-not-loaded-in-the-browser = Чертежът не е зареден в браузъра: __ocs_fmt_0__.
+    .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" е __ocs_fmt_1__×__ocs_fmt_2__ px и при декодиране би заемала __ocs_fmt_3__ MB — над __ocs_fmt_4__ MB лимита за изображения на тази версия, затова не може да бъде прикачена. Изображенията в рамките на лимита се прикачват автоматично с намалена разделителна способност при нужда.
 
 selection =
     .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  Избери обекти (__ocs_arg_count__ избрани, Enter за прилагане):

@@ -1887,6 +1887,10 @@ common =
     .geometric = هندسي
     .dimensional = بُعدي
     .show-hide = إظهار/إخفاء
+    .remote-image-url-could-not-be-fetched-the-network-request-failed-offline-dns-or-cors = تعذر جلب الصورة البعيدة "__ocs_fmt_0__": فشل طلب الشبكة (دون اتصال، أو DNS، أو CORS).
+    .remote-image-url-could-not-be-fetched-the-server-returned-http-status = تعذر جلب الصورة البعيدة "__ocs_fmt_0__": أرجع الخادم HTTP __ocs_fmt_1__.
+    .remote-image-url-was-not-loaded-it-exceeds-the-64-mb-remote-image-limit = لم يتم تحميل الصورة البعيدة "__ocs_fmt_0__": إنها تتجاوز حد 64 MB للصور البعيدة.
+    .remote-image-url-could-not-be-fetched-the-request-timed-out = تعذر جلب الصورة البعيدة "__ocs_fmt_0__": انتهت مهلة الطلب.
 
 errors =
     .save-warning = تحذير الحفظ
@@ -2004,6 +2008,7 @@ file =
     .pick-the-file-again-to-load-its-contents = اختر الملف مرة أخرى لتحميل محتوياته في المتصفح.
     .adding-folders-is-not-available-in-the-browser = إضافة المجلدات غير متاحة في المتصفح. أضف ملفات الرسومات بدلاً من ذلك.
     .drawing-not-loaded-in-the-browser = رسم غير محمّل في المتصفح: __ocs_fmt_0__.
+    .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" بأبعاد __ocs_fmt_1__×__ocs_fmt_2__ بكسل ويتطلب فك ترميزه __ocs_fmt_3__ ميغابايت، وهو فوق حد __ocs_fmt_4__ ميغابايت للصور في هذا الإصدار — لا يمكن إرفاقه. تُرفَق الصور ضمن الحد تلقائيًا بدقة عرض مخفَّضة عند الحاجة.
 
 selection =
     .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  حدد الكائنات (__ocs_arg_count__ محدد، Enter للتطبيق):

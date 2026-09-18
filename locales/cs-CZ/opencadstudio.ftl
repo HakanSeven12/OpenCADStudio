@@ -1874,6 +1874,10 @@ common =
     .geometric = Geometrické
     .dimensional = Rozměrové
     .show-hide = Zobrazit/skrýt
+    .remote-image-url-could-not-be-fetched-the-network-request-failed-offline-dns-or-cors = Vzdálený obrázek "__ocs_fmt_0__" se nepodařilo stáhnout: síťový požadavek selhal (offline, DNS nebo CORS).
+    .remote-image-url-could-not-be-fetched-the-server-returned-http-status = Vzdálený obrázek "__ocs_fmt_0__" se nepodařilo stáhnout: server vrátil HTTP __ocs_fmt_1__.
+    .remote-image-url-was-not-loaded-it-exceeds-the-64-mb-remote-image-limit = Vzdálený obrázek "__ocs_fmt_0__" nebyl načten: překračuje limit 64 MB pro vzdálené obrázky.
+    .remote-image-url-could-not-be-fetched-the-request-timed-out = Vzdálený obrázek "__ocs_fmt_0__" se nepodařilo stáhnout: vypršel časový limit požadavku.
 
 errors =
     .save-warning = Uložit varování
@@ -1991,6 +1995,7 @@ file =
     .pick-the-file-again-to-load-its-contents = Vyberte soubor znovu, abyste načetli jeho obsah do prohlížeče.
     .adding-folders-is-not-available-in-the-browser = Přidávání složek není v prohlížeči k dispozici. Místo toho přidejte soubory výkresů.
     .drawing-not-loaded-in-the-browser = Výkres není v prohlížeči načten: __ocs_fmt_0__.
+    .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" má __ocs_fmt_1__×__ocs_fmt_2__ px a při dekódování by zabrala __ocs_fmt_3__ MB, přes limit __ocs_fmt_4__ MB pro obrázky v této verzi — nelze ji připojit. Obrázky v rámci limitu se podle potřeby připojují automaticky se sníženým rozlišením zobrazení.
 
 selection =
     .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__ Vyberte objekty (vybráno __ocs_arg_count__, použít Enter):

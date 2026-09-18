@@ -1874,6 +1874,10 @@ common =
     .geometric = 幾何
     .dimensional = 標註
     .show-hide = 顯示/隱藏
+    .remote-image-url-could-not-be-fetched-the-network-request-failed-offline-dns-or-cors = 無法擷取遠端影像 "__ocs_fmt_0__"：網路請求失敗（離線、DNS 或 CORS）。
+    .remote-image-url-could-not-be-fetched-the-server-returned-http-status = 無法擷取遠端影像 "__ocs_fmt_0__"：伺服器傳回 HTTP __ocs_fmt_1__。
+    .remote-image-url-was-not-loaded-it-exceeds-the-64-mb-remote-image-limit = 遠端影像 "__ocs_fmt_0__" 未載入：超過 64 MB 的遠端影像限制。
+    .remote-image-url-could-not-be-fetched-the-request-timed-out = 無法擷取遠端影像 "__ocs_fmt_0__"：請求逾時。
 
 errors =
     .save-warning = 儲存警告
@@ -1991,6 +1995,7 @@ file =
     .pick-the-file-again-to-load-its-contents = 請重新選擇檔案，將其內容載入瀏覽器。
     .adding-folders-is-not-available-in-the-browser = 瀏覽器中無法新增資料夾。請改為新增圖面檔案。
     .drawing-not-loaded-in-the-browser = 圖面未載入瀏覽器：__ocs_fmt_0__。
+    .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__"為 __ocs_fmt_1__×__ocs_fmt_2__ 像素，解碼需要 __ocs_fmt_3__ MB，超過此組建的 __ocs_fmt_4__ MB 影像上限，因此無法貼附。上限內的影像會在需要時自動以降低的顯示解析度貼附。
 
 selection =
     .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  選擇物件（已選擇 __ocs_arg_count__ 個，按 Enter 套用）：

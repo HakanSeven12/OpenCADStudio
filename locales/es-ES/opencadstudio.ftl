@@ -1875,6 +1875,10 @@ common =
     .geometric = Geométricas
     .dimensional = Dimensionales
     .show-hide = Mostrar/Ocultar
+    .remote-image-url-could-not-be-fetched-the-network-request-failed-offline-dns-or-cors = La imagen remota «__ocs_fmt_0__» no se pudo descargar: la solicitud de red falló (sin conexión, DNS o CORS).
+    .remote-image-url-could-not-be-fetched-the-server-returned-http-status = La imagen remota «__ocs_fmt_0__» no se pudo descargar: el servidor devolvió HTTP __ocs_fmt_1__.
+    .remote-image-url-was-not-loaded-it-exceeds-the-64-mb-remote-image-limit = La imagen remota «__ocs_fmt_0__» no se cargó: supera el límite de 64 MB para imágenes remotas.
+    .remote-image-url-could-not-be-fetched-the-request-timed-out = La imagen remota «__ocs_fmt_0__» no se pudo descargar: la solicitud agotó el tiempo de espera.
 
 errors =
     .save-warning = Advertencia de guardado
@@ -1992,6 +1996,7 @@ file =
     .pick-the-file-again-to-load-its-contents = Vuelve a elegir el archivo para cargar su contenido en el navegador.
     .adding-folders-is-not-available-in-the-browser = Añadir carpetas no está disponible en el navegador. Añade archivos de dibujos en su lugar.
     .drawing-not-loaded-in-the-browser = Dibujo no cargado en el navegador: __ocs_fmt_0__.
+    .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" tiene __ocs_fmt_1__×__ocs_fmt_2__ px y al decodificarse ocuparía __ocs_fmt_3__ MB, por encima del límite de __ocs_fmt_4__ MB por imagen de esta versión; no se puede adjuntar. Las imágenes dentro del límite se adjuntan automáticamente con una resolución de visualización reducida cuando es necesario.
 
 selection =
     .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  Seleccione objetos (__ocs_arg_count__ seleccionados, Enter para aplicar):

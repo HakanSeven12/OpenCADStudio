@@ -1872,12 +1872,16 @@ mod plot_style_registration_tests {
 /// mirroring the PDF-underlay pick. Decoding then comes from those bytes, and
 /// the entity the IMAGE command commits resolves through the same registry
 /// instead of a `image::open` on a path that only exists natively.
+///
+/// The filter names exactly the formats the `image` crate features build
+/// (Cargo.toml) — png/jpeg/bmp/tiff/webp/gif — and `io::web_drop` accepts the
+/// same set for drops.
 pub async fn pick_image_file() -> Result<(PathBuf, u32, u32), String> {
     let handle = crate::sys::file_dialog()
         .set_title(crate::t!("Select Image File").as_ref())
         .add_filter(
             crate::t!("Images").as_ref(),
-            &["png", "jpg", "jpeg", "bmp", "tiff", "tif"],
+            &["png", "jpg", "jpeg", "bmp", "tiff", "tif", "webp", "gif"],
         )
         .add_filter(crate::t!("PNG").as_ref(), &["png"])
         .add_filter(crate::t!("JPEG").as_ref(), &["jpg", "jpeg"])
@@ -1893,9 +1897,17 @@ pub async fn pick_image_file() -> Result<(PathBuf, u32, u32), String> {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| reference.clone());
     crate::scene::model::image_model::register_source(&reference, bytes);
-    let decoded = crate::scene::model::image_model::resolve_image(&reference)
-        .ok_or_else(|| format!("Unsupported or corrupt image \"{short}\""))?;
-    Ok((path, decoded.width, decoded.height))
+    let decoded = crate::scene::model::image_model::resolve_image(&reference).ok_or_else(|| {
+        // An over-budget decode refusal explains itself (dims + limit);
+        // anything else stays the generic unsupported/corrupt message.
+        crate::scene::model::image_model::take_decode_refusals()
+            .pop()
+            .unwrap_or_else(|| format!("Unsupported or corrupt image \"{short}\""))
+    })?;
+    // Entity sizing truth: the file's ORIGINAL pixel dimensions, not the
+    // display-capped buffer's, so a downsampled aerial still places at its
+    // true aspect and default size (the cap is a rendering detail).
+    Ok((path, decoded.source_width, decoded.source_height))
 }
 
 /// Save `doc` to `path` with the given DXF version, overriding `doc.version`.

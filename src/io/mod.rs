@@ -1905,7 +1905,7 @@ pub async fn pick_image_file() -> Result<(PathBuf, u32, u32), String> {
         // references, which must survive for their own drains.
         crate::scene::model::image_model::decode_refusals()
             .iter()
-            .find(|note| note.contains(short.as_str()))
+            .find(|note| note.contains(&format!("\"{}\"", short)))
             .cloned()
             .unwrap_or_else(|| format!("Unsupported or corrupt image \"{short}\""))
     })?;

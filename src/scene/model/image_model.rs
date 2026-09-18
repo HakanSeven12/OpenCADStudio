@@ -135,6 +135,19 @@ impl ImageModel {
     pub fn from_raster_image(img: &acadrust::entities::RasterImage) -> Option<Self> {
         let w = img.size.x;
         let h = img.size.y;
+        // A degenerate or non-finite size/vectors (hostile entity data)
+        // produce NaN placement math that aborts whole PDF exports; treat
+        // it as an unresolvable reference instead.
+        if !(w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0) {
+            return None;
+        }
+        let vector_ok = |v: &acadrust::Vector3| {
+            let (x, y, z) = (v.x, v.y, v.z);
+            x.is_finite() && y.is_finite() && z.is_finite() && (x != 0.0 || y != 0.0 || z != 0.0)
+        };
+        if !vector_ok(&img.u_vector) || !vector_ok(&img.v_vector) {
+            return None;
+        }
         // Model-space geometry is drawn in (WCS - world_offset) so large UTM-
         // scale coordinates stay within f32 precision; offset the image too.
         // Corners come from a large insertion point plus small u/v spans.
@@ -396,6 +409,14 @@ fn image_cache() -> &'static Mutex<HashMap<String, ImageCacheEntry>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Insertion order of the source cache's keys, so by-name resolution has a
+/// deterministic winner (the MOST RECENT registration) instead of HashMap's
+/// unspecified iteration order.
+fn source_order() -> &'static Mutex<Vec<String>> {
+    static ORDER: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+    ORDER.get_or_init(|| Mutex::new(Vec::new()))
+}
+
 fn source_cache() -> &'static Mutex<HashMap<String, Arc<Vec<u8>>>> {
     static SOURCES: OnceLock<Mutex<HashMap<String, Arc<Vec<u8>>>>> = OnceLock::new();
     SOURCES.get_or_init(|| Mutex::new(HashMap::new()))
@@ -428,10 +449,18 @@ pub(crate) fn same_file_name(a: &str, b: &str) -> bool {
 /// finally supplies a missing reference) re-decodes instead of replaying a
 /// stale success or a cached failure.
 pub fn register_source(path: &str, bytes: Arc<Vec<u8>>) {
-    source_cache()
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .insert(path.to_string(), bytes);
+    {
+        let mut sources = source_cache()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if !sources.contains_key(path) {
+            source_order()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .push(path.to_string());
+        }
+        sources.insert(path.to_string(), bytes);
+    }
     if let Ok(mut cache) = image_cache().lock() {
         cache.retain(|cached, _| !same_file_name(cached, path));
     }
@@ -466,10 +495,17 @@ fn registered_bytes_by_name(path: &str) -> Option<Arc<Vec<u8>>> {
     let cache = source_cache()
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    cache
+    // Deterministic winner: walk the insertion order newest-first so the
+    // most recent drop/pick wins, instead of HashMap iteration order.
+    let order = source_order()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    order
         .iter()
-        .find(|(key, _)| same_file_name(key, path))
-        .map(|(_, bytes)| Arc::clone(bytes))
+        .rev()
+        .filter(|key| cache.contains_key(*key))
+        .find(|key| same_file_name(key, path))
+        .and_then(|key| cache.get(key).cloned())
 }
 
 /// Original image file bytes registered for a reference, resolved the way
@@ -593,10 +629,49 @@ enum DecodeTier {
     Full,
     /// Decode fully, then downsample to the display cap before storing.
     Downsample,
-    /// Full RGBA would exceed `MAX_DECODE_BYTES`. The decode still runs with
-    /// the budget enforced through `image::Limits`: it succeeds on a build
-    /// with headroom (native) or errors into a refusal (wasm).
+    /// The decode's peak memory would exceed `MAX_DECODE_BYTES`. The probe
+    /// bills the peak of the decoder's NATIVE bytes per pixel and the final
+    /// RGBA buffer (4/px): both transiently coexist mid-decode on 16-bit
+    /// formats, and the decoder's own limits reserve at native bpp — so an
+    /// image is refused up front when either exceeds the budget, without
+    /// decoding.
     OverBudget,
+}
+
+/// The decoder's own memory accounting for a format: how many bytes per
+/// pixel the DECODE transiently needs (native layout, plus the RGBA output
+/// where they coexist) and any codec-specific scratch multiplier on top.
+struct NativeFootprint {
+    /// Peak bytes per pixel during decode (native bpp + RGBA where both
+    /// live simultaneously; plain 8-bit formats overlap them in place).
+    peak_bpp: u64,
+    /// Extra codec scratch allowance the decoder stacks on the reserve
+    /// (image's TIFF codec needs ~3x in the worst strip/tile layout).
+    codec_factor: u64,
+}
+
+fn native_footprint(format: Option<image::ImageFormat>, color: Option<image::ColorType>) -> NativeFootprint {
+    let native_bpp = color.map_or(4u64, |color| match color {
+        image::ColorType::L8 => 1,
+        image::ColorType::La8 => 2,
+        image::ColorType::Rgb8 => 3,
+        image::ColorType::Rgba8 => 4,
+        image::ColorType::L16 => 2,
+        image::ColorType::La16 => 4,
+        image::ColorType::Rgb16 => 6,
+        image::ColorType::Rgba16 => 8,
+        image::ColorType::Rgb32F => 12,
+        image::ColorType::Rgba32F => 16,
+        _ => 4,
+    });
+    // A 16-bit frame and its RGBA conversion can coexist; an 8-bit one is
+    // converted with at most a small row buffer in flight.
+    let peak_bpp = if native_bpp > 4 { native_bpp + 4 } else { 4 };
+    let codec_factor = match format {
+        Some(image::ImageFormat::Tiff) => 3,
+        _ => 1,
+    };
+    NativeFootprint { peak_bpp, codec_factor }
 }
 
 /// Budget decision for probed pixel dimensions. Pure and cfg-independent
@@ -608,8 +683,26 @@ fn tier_for(
     max_decode_bytes: u64,
     max_display_pixels: u64,
 ) -> DecodeTier {
+    tier_for_native(width, height, 4, 1, max_decode_bytes, max_display_pixels)
+}
+
+/// [`tier_for`] with the probed format's native footprint: the caller
+/// supplies the probe's color type and format so 16-bit images are billed
+/// at what their decode actually allocates.
+fn tier_for_native(
+    width: u32,
+    height: u32,
+    peak_bpp: u64,
+    codec_factor: u64,
+    max_decode_bytes: u64,
+    max_display_pixels: u64,
+) -> DecodeTier {
     let pixels = width as u64 * height as u64;
-    if pixels.saturating_mul(4) > max_decode_bytes {
+    if pixels
+        .saturating_mul(peak_bpp)
+        .saturating_mul(codec_factor)
+        > max_decode_bytes
+    {
         DecodeTier::OverBudget
     } else if pixels > max_display_pixels {
         DecodeTier::Downsample
@@ -658,24 +751,45 @@ fn decode_with_budgets<R: std::io::BufRead + std::io::Seek>(
     max_decode_bytes: u64,
     max_display_pixels: u64,
 ) -> DecodeAttempt {
-    // Probe pass: header dimensions only, no pixel decode.
+    // Probe pass: header dimensions AND color type, no pixel decode. The
+    // probe reader carries the full budget too so constructing a decoder on
+    // a huge-but-in-budget header cannot itself fail on image's default
+    // 512 MiB probe limits.
     let probed = open()
         .and_then(|reader| reader.with_guessed_format())
         .ok()
-        .and_then(|reader| reader.into_dimensions().ok());
-    let tier = probed.map_or(DecodeTier::Full, |(width, height)| {
-        tier_for(width, height, max_decode_bytes, max_display_pixels)
+        .and_then(|mut reader| {
+            let format = reader.format();
+            let mut probe_limits = image::Limits::default();
+            probe_limits.max_alloc = Some(max_decode_bytes);
+            reader.limits(probe_limits);
+            use image::ImageDecoder as _;
+            let decoder = reader.into_decoder().ok()?;
+            let (width, height) = decoder.dimensions();
+            let color = decoder.color_type();
+            Some((width, height, format, color))
+        });
+    let tier = probed.map_or(DecodeTier::Full, |(width, height, format, color)| {
+        let footprint = native_footprint(format, Some(color));
+        tier_for_native(
+            width,
+            height,
+            footprint.peak_bpp,
+            footprint.codec_factor,
+            max_decode_bytes,
+            max_display_pixels,
+        )
     });
 
-    // Trust the probe, not the decoder limits: `Limits::reserve` checks the
-    // decoder's NATIVE bytes-per-pixel, so a grayscale/RGB JPEG/PNG/BMP over
-    // the RGBA budget decodes fine and then `into_rgba8()` balloons to up to
-    // 4x it — exactly the tab death this exists to prevent. The probed
-    // dimensions already prove it cannot fit; refuse without decoding.
+    // Trust the probe, not the decoder limits: the tier above bills the
+    // decode's real peak (native bpp, codec scratch), so an OverBudget
+    // image provably cannot fit; refuse without decoding. This covers the
+    // grayscale/RGB over-RGBA-budget balloon AND the 16-bit formats whose
+    // native layout is double the RGBA size.
     if tier == DecodeTier::OverBudget {
         return DecodeAttempt::Refused {
-            width: probed.map_or(0, |(width, _)| width),
-            height: probed.map_or(0, |(_, height)| height),
+            width: probed.map_or(0, |(width, _, _, _)| width),
+            height: probed.map_or(0, |(_, height, _, _)| height),
         };
     }
 
@@ -684,24 +798,32 @@ fn decode_with_budgets<R: std::io::BufRead + std::io::Seek>(
         Err(_) => return DecodeAttempt::Failed,
     };
     // For formats that FIT the budget, the limits still guard runaway
-    // allocations mid-decode. TIFF additionally stacks its own intermediate
-    // scratch buffers on top of the reserve (empirically ~3x the frame size
-    // in image 0.25), so refusing an in-budget TIFF at face value would
-    // produce a note claiming e.g. "400 MB, over the 512 MB limit".
-    let tiff = matches!(reader.format(), Some(image::ImageFormat::Tiff));
+    // allocations mid-decode. GIF is special: the probe reads the LOGICAL
+    // SCREEN, but a crafted frame may declare itself arbitrarily larger
+    // and the gif crate does not enforce frame-vs-screen consistency — so
+    // the frame buffer is capped to the probed size plus slack, refusing
+    // frame bombs into the existing Refused path. TIFF stacks its own
+    // intermediate scratch on top of the reserve (~3x worst case in image
+    // 0.25); the tier already folded that factor in, and the allowance
+    // matches it so an in-tier TIFF never codec-refuses.
     let mut limits = image::Limits::default();
-    limits.max_alloc = Some(if tiff {
-        max_decode_bytes.saturating_mul(3)
-    } else {
-        max_decode_bytes
+    limits.max_alloc = Some(match reader.format() {
+        Some(image::ImageFormat::Gif) => probed
+            .map(|(width, height, _, _)| {
+                (width as u64).saturating_mul(height as u64).saturating_mul(4) + 64 * 1024 * 1024
+            })
+            .unwrap_or(max_decode_bytes)
+            .min(max_decode_bytes),
+        Some(image::ImageFormat::Tiff) => max_decode_bytes.saturating_mul(3),
+        _ => max_decode_bytes,
     });
     reader.limits(limits);
     let img = match reader.decode() {
         Ok(img) => img,
         Err(image::ImageError::Limits(_)) => {
             return DecodeAttempt::Refused {
-                width: probed.map_or(0, |(width, _)| width),
-                height: probed.map_or(0, |(_, height)| height),
+                width: probed.map_or(0, |(width, _, _, _)| width),
+                height: probed.map_or(0, |(_, height, _, _)| height),
             };
         }
         Err(_) => return DecodeAttempt::Failed,
@@ -726,7 +848,7 @@ fn decode_with_budgets<R: std::io::BufRead + std::io::Seek>(
     let (stored_w, stored_h) = rgba.dimensions();
     // Sizing truth: the file's probed dimensions, not the (possibly reduced)
     // buffer's, so placement and aspect come from the original raster.
-    let (source_width, source_height) = probed.unwrap_or((stored_w, stored_h));
+    let (source_width, source_height) = probed.map_or((stored_w, stored_h), |(w, h, _, _)| (w, h));
     DecodeAttempt::Decoded(DecodedImage {
         pixels: Arc::new(rgba.into_raw()),
         width: stored_w,
@@ -765,6 +887,16 @@ fn refusal_message(path: &str, width: u32, height: u32) -> String {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string());
+    if width == 0 || height == 0 {
+        // The probe could not determine a size (exotic header) — do not
+        // print a self-contradictory "0x0 px" figure.
+        return crate::tf!(
+            "\"{name}\" could not be sized from its header and decoding it exceeded the {limit} MB image limit of this build — it cannot be attached.",
+            name = name,
+            limit = MAX_DECODE_BYTES / (1024 * 1024)
+        )
+        .into_owned();
+    }
     let decoded_mb = (width as u64).saturating_mul(height as u64).saturating_mul(4) / (1024 * 1024);
     let limit_mb = MAX_DECODE_BYTES / (1024 * 1024);
     crate::tf!(
@@ -921,9 +1053,30 @@ mod web_fetch {
             web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(
                 "ocs: remote-image outcome queue full; dropping an outcome",
             ));
+            // The dropped outcome may be a Loaded whose rebuild trigger is
+            // lost; remember that so the next poll does one unconditional
+            // image re-resolution instead of waiting for another event.
+            *overflowed()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
             return;
         }
         queue.push_back(outcome);
+    }
+
+    /// Whether an outcome was dropped at the cap and a catch-up rebuild is
+    /// owed. [`take_overflowed`] consumes it.
+    fn overflowed() -> &'static Mutex<bool> {
+        static FLAG: OnceLock<Mutex<bool>> = OnceLock::new();
+        FLAG.get_or_init(|| Mutex::new(false))
+    }
+
+    /// Consume the dropped-outcome flag (see [`overflowed`]).
+    pub fn take_overflowed() -> bool {
+        let mut flag = overflowed()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::mem::replace(&mut *flag, false)
     }
 
     /// Pop the oldest settled remote fetch the poll has not handled yet.
@@ -944,6 +1097,58 @@ mod web_fetch {
             Some(exception) if exception.name() == "AbortError" => RemoteFetchError::Timeout,
             _ => RemoteFetchError::Network,
         }
+    }
+
+    /// Read a response body incrementally, refusing past [`MAX_BYTES`] the
+    /// moment the cap is crossed (not after buffering the whole body).
+    async fn stream_body_capped(
+        window: &web_sys::Window,
+        response: &web_sys::Response,
+    ) -> Result<Vec<u8>, RemoteFetchError> {
+        use wasm_bindgen::JsCast;
+        use wasm_bindgen_futures::JsFuture;
+
+        let Some(stream) = response.body() else {
+            // No stream API (or already consumed): fall back to buffering,
+            // with the received-length check still applying after.
+            let buffer = JsFuture::from(
+                response.array_buffer().map_err(|_| RemoteFetchError::Network)?,
+            )
+            .await
+            .map_err(|error| rejection_kind(&error))?;
+            let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+            if bytes.len() as u64 > MAX_BYTES {
+                return Err(RemoteFetchError::TooLarge);
+            }
+            return Ok(bytes);
+        };
+        let reader = stream.get_reader().dyn_into::<web_sys::ReadableStreamDefaultReader>()
+            .map_err(|_| RemoteFetchError::Network)?;
+        let mut bytes: Vec<u8> = Vec::new();
+        loop {
+            let chunk = JsFuture::from(reader.read())
+                .await
+                .map_err(|error| rejection_kind(&error))?;
+            let done = js_sys::Reflect::get(&chunk, &wasm_bindgen::JsValue::from_str("done"))
+                .ok()
+                .and_then(|value| value.as_bool())
+                .unwrap_or(true);
+            if done {
+                break;
+            }
+            let value = js_sys::Reflect::get(&chunk, &wasm_bindgen::JsValue::from_str("value"))
+                .map_err(|_| RemoteFetchError::Network)?;
+            let view = js_sys::Uint8Array::new(&value);
+            if bytes.len() as u64 + view.length() as u64 > MAX_BYTES {
+                // Release the reader lock so the underlying connection can
+                // be torn down, then refuse.
+                let _ = JsFuture::from(reader.cancel()).await;
+                return Err(RemoteFetchError::TooLarge);
+            }
+            bytes.extend_from_slice(&view.to_vec());
+        }
+        let _ = window; // reader holds the stream; window kept for symmetry
+        Ok(bytes)
     }
 
     /// The actual request. `GET url` with an abort signal armed at
@@ -984,8 +1189,9 @@ mod web_fetch {
             return Err(RemoteFetchError::Status(response.status()));
         }
         // Pre-check the declared size so an oversized body is refused before
-        // it is buffered; the received length is checked again after the
-        // read (chunked replies carry no Content-Length).
+        // it is buffered; then STREAM the body, aborting the moment the
+        // received bytes pass MAX_BYTES — array_buffer() would materialize
+        // a hostile chunked reply in full before any check could fire.
         let declared = response
             .headers()
             .get("Content-Length")
@@ -995,18 +1201,7 @@ mod web_fetch {
         if declared.is_some_and(|declared| declared > MAX_BYTES) {
             return Err(RemoteFetchError::TooLarge);
         }
-        let buffer = JsFuture::from(
-            response
-                .array_buffer()
-                .map_err(|_| RemoteFetchError::Network)?,
-        )
-        .await
-        .map_err(|error| rejection_kind(&error))?;
-        let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
-        if bytes.len() as u64 > MAX_BYTES {
-            return Err(RemoteFetchError::TooLarge);
-        }
-        Ok(bytes)
+        stream_body_capped(&window, &response).await
     }
 
     /// Start the background fetch for `url` if one hasn't been attempted this
@@ -1047,7 +1242,8 @@ fn fetch_remote(url: &str) -> Option<Vec<u8>> {
 
 #[cfg(target_arch = "wasm32")]
 pub use web_fetch::{
-    take_outcome as take_remote_fetch_outcome, RemoteFetchError, RemoteFetchOutcome,
+    take_outcome as take_remote_fetch_outcome, take_overflowed,
+    RemoteFetchError, RemoteFetchOutcome,
 };
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

@@ -448,6 +448,14 @@ impl OpenCADStudio {
                     }
                 }
                 registered.extend(fetched);
+                if crate::scene::model::image_model::take_overflowed() {
+                    // A settled fetch's rebuild trigger was dropped at the
+                    // outcome cap; do one unconditional catch-up pass over
+                    // every registered name.
+                    registered.extend(
+                        crate::scene::model::image_model::registered_image_names(),
+                    );
+                }
                 if !registered.is_empty() {
                     for tab in self.tabs.iter_mut() {
                         tab.scene.resolve_registered_image_names(&registered);

@@ -64,8 +64,9 @@ impl OpenCADStudio {
                 {
                     // Web: every dirty saved tab is serialized and downloaded
                     // in one pass — see `saveall_web` for the flow.
-                    self.saveall_web();
+                    return Some(self.saveall_web());
                 }
+                #[cfg(not(target_arch = "wasm32"))]
                 return Some(Task::none());
             }
             "SAVEAS" => return Some(Task::done(Message::SaveAs)),
@@ -222,7 +223,13 @@ impl OpenCADStudio {
                     }
                 }
                 #[cfg(target_arch = "wasm32")]
-                self.archive_web(i, cmd);
+                {
+                    // The drawing serialization runs on the serializer
+                    // worker; the ZIP assembly + download continue in the
+                    // completion message (`archive_web` below).
+                    let task = self.archive_web(i, cmd);
+                    return Some(Task::batch([task, self.finish_dispatch(cmd)]));
+                }
             }
 
             "EXIT" | "QUIT" => {
@@ -519,14 +526,14 @@ fn parse_background_color(args: &[&str]) -> Option<[f32; 4]> {
 // silently dropped, the web counterpart of native's missing-file skip.
 #[cfg(target_arch = "wasm32")]
 impl OpenCADStudio {
-    pub(in crate::app) fn archive_web(&mut self, i: usize, cmd: &str) {
+    pub(in crate::app) fn archive_web(&mut self, i: usize, cmd: &str) -> Task<Message> {
         use crate::io::zip::ZipEntry;
 
         let Some(src) = self.tabs[i].current_path.clone() else {
             self.command_line.push_error(
                 crate::t!("ARCHIVE: save the drawing first (it has no file path yet).").as_ref(),
             );
-            return;
+            return Task::none();
         };
         let stem = src
             .file_stem()
@@ -550,19 +557,12 @@ impl OpenCADStudio {
         self.stamp_header_sysvars(i);
         self.sync_solid_models_for_save(i);
         self.tabs[i].scene.sync_native_parametric_graph();
-        // The drawing itself: the same serialization a web Save performs
-        // (native copies the last-saved file; the web build has none, so the
-        // current document is re-serialized).
-        let drawing = match crate::io::save_to_bytes(&self.tabs[i].scene.document, &ext, version) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                self.command_line.push_error(
-                    crate::tf!("{cmd}: cannot package the drawing ({e}).").as_ref(),
-                );
-                return;
-            }
-        };
-        let mut entries: Vec<ZipEntry> = vec![ZipEntry::new(filename, drawing)];
+
+        // The dependency set (xrefs, raster images, PDF underlays, plot
+        // tables) is collected here, at command time — cheap in-memory
+        // registry reads — so the transmittal matches the drawing snapshot
+        // serialized below even if the tab changes while the writer runs.
+        let mut deps: Vec<ZipEntry> = Vec::new();
         let mut skipped: Vec<String> = Vec::new();
 
         // Xrefs — the block-record walk native copies. Opened, dropped,
@@ -574,7 +574,7 @@ impl OpenCADStudio {
                 match crate::io::xref::find_registered_source(&br.xref_path)
                     .and_then(|key| crate::io::xref::registered_bytes(&key))
                 {
-                    Some(bytes) => push_entry(&mut entries, name, (*bytes).clone()),
+                    Some(bytes) => push_entry(&mut deps, name, (*bytes).clone()),
                     None => push_skipped(&mut skipped, &name),
                 }
             }
@@ -589,7 +589,7 @@ impl OpenCADStudio {
                 }
                 match crate::scene::model::image_model::registered_source_bytes(&img.file_path) {
                     Some(bytes) => push_entry(
-                        &mut entries,
+                        &mut deps,
                         transmit_file_name(&img.file_path),
                         (*bytes).clone(),
                     ),
@@ -608,7 +608,7 @@ impl OpenCADStudio {
                 }
                 match crate::scene::model::pdf_raster::registered_source_bytes(&def.file_path) {
                     Some(bytes) => push_entry(
-                        &mut entries,
+                        &mut deps,
                         transmit_file_name(&def.file_path),
                         (*bytes).clone(),
                     ),
@@ -643,12 +643,61 @@ impl OpenCADStudio {
                 continue;
             }
             match crate::io::plot_style::session_table(&name) {
-                Some(bytes) => push_entry(&mut entries, name, (*bytes).clone()),
+                Some(bytes) => push_entry(&mut deps, name, (*bytes).clone()),
                 None => push_skipped(&mut skipped, &name),
             }
         }
 
+        // The drawing itself: the same worker-routed serialization a web
+        // Save performs (native copies the last-saved file; the web build
+        // has none, so the current document is re-serialized). The ZIP
+        // assembly and download are cheap and stay on the main thread —
+        // they continue in the completion message.
         let zip_name = format!("{stem}_transmit.zip");
+        let prepared = crate::io::prepare_document_for_save(&self.tabs[i].scene.document, version);
+        let cmd = cmd.to_string();
+        Task::perform(
+            async move { crate::io::serialize_prepared_document(&prepared, &ext).await },
+            move |result| Message::WebArchiveSerialized {
+                cmd,
+                zip_name,
+                filename,
+                deps,
+                skipped,
+                result,
+            },
+        )
+    }
+
+    /// Web ARCHIVE completion: the serializer worker (or the inline
+    /// fallback) produced the drawing bytes. Assemble the transmittal ZIP —
+    /// the drawing entry first, then the dependencies under the same
+    /// name-collision rule the synchronous pass used — download it and
+    /// report, including the skipped-dependency lines.
+    pub(in crate::app) fn on_web_archive_serialized(
+        &mut self,
+        cmd: String,
+        zip_name: String,
+        filename: String,
+        deps: Vec<crate::io::zip::ZipEntry>,
+        skipped: Vec<String>,
+        result: Result<Vec<u8>, String>,
+    ) -> Task<Message> {
+        use crate::io::zip::ZipEntry;
+
+        let drawing = match result {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                self.command_line.push_error(
+                    crate::tf!("{cmd}: cannot package the drawing ({e}).").as_ref(),
+                );
+                return Task::none();
+            }
+        };
+        let mut entries: Vec<ZipEntry> = vec![ZipEntry::new(filename, drawing)];
+        for dep in deps {
+            push_entry(&mut entries, dep.name, dep.data);
+        }
         match crate::io::zip::build_zip(&entries) {
             Ok(zip) => {
                 crate::sys::download_bytes(&zip_name, &zip);
@@ -670,6 +719,7 @@ impl OpenCADStudio {
                     .as_ref(),
             );
         }
+        Task::none()
     }
 }
 

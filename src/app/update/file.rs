@@ -1708,53 +1708,97 @@ impl OpenCADStudio {
         let i = self.active_tab;
         let document = self.tabs[i].scene.document.clone();
         let handles: Vec<_> = self.tabs[i].scene.selected.iter().copied().collect();
-        let worker_name = block_name.clone();
-        let worker_path = path.clone();
-        background_task(
-            move || {
-                let document = if worker_name == "*" {
-                    crate::modules::insert::wblock::extract_entities_to_doc(&document, &handles)
-                } else {
-                    crate::modules::insert::wblock::extract_block_to_doc(&document, &worker_name)
-                }
-                .map_err(|e| e.to_string())?;
-                #[cfg(not(target_arch = "wasm32"))]
-                {
+        // Native: extraction and the file write both run on a background
+        // thread, unchanged.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let worker_name = block_name.clone();
+            let worker_path = path.clone();
+            background_task(
+                move || {
+                    let document =
+                        if worker_name == "*" {
+                            crate::modules::insert::wblock::extract_entities_to_doc(
+                                &document, &handles,
+                            )
+                        } else {
+                            crate::modules::insert::wblock::extract_block_to_doc(
+                                &document, &worker_name,
+                            )
+                        }
+                        .map_err(|e| e.to_string())?;
                     crate::io::save(&document, &worker_path).map_err(|e| e.to_string())
+                },
+                move |result| Message::WblockWriteFinished(block_name, path, result),
+            )
+        }
+        // Web: extraction is pure document manipulation (it reads the clone
+        // above and builds a fresh document) — run it inline on the main
+        // thread as the prepare step, together with the shared save
+        // preparation, then hand the DWG/DXF writer pass to the serializer
+        // worker the way the web Save flow does
+        // (`serialize_prepared_document` falls back inline when the worker
+        // cannot help). Completion (`WebWblockSerialized`) delivers the
+        // browser download plus the same `WblockWriteFinished` command-line
+        // bookkeeping.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let extracted = if block_name == "*" {
+                crate::modules::insert::wblock::extract_entities_to_doc(&document, &handles)
+            } else {
+                crate::modules::insert::wblock::extract_block_to_doc(&document, &block_name)
+            }
+            .map_err(|e| e.to_string());
+            let document = match extracted {
+                Ok(document) => document,
+                // Same reporting the background path used for a failed
+                // extraction — straight through the existing message.
+                Err(error) => {
+                    return Task::done(Message::WblockWriteFinished(
+                        block_name,
+                        path,
+                        Err(error),
+                    ))
                 }
-                // Web: no filesystem behind the name-only path — serialize to
-                // bytes (the same document version `save` would pick, format
-                // from the chosen file name) and hand the browser a download,
-                // the way the other web exports do.
-                #[cfg(target_arch = "wasm32")]
-                {
-                    let ext = worker_path
-                        .extension()
-                        .map(|ext| ext.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "dwg".to_string());
-                    let bytes = crate::io::save_to_bytes(&document, &ext, document.version)?;
-                    let name = worker_path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "block.dwg".into());
-                    crate::sys::download_bytes(&name, &bytes);
-                    Ok(())
-                }
-            },
-            move |result| Message::WblockWriteFinished(block_name, path, result),
-        )
+            };
+            let ext = path
+                .extension()
+                .map(|ext| ext.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "dwg".to_string());
+            let filename = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "block.dwg".into());
+            let version = document.version;
+            let prepared = crate::io::prepare_document_for_save(&document, version);
+            Task::perform(
+                async move { crate::io::serialize_prepared_document(&prepared, &ext).await },
+                move |result| Message::WebWblockSerialized {
+                    block_name,
+                    path,
+                    filename,
+                    result,
+                },
+            )
+        }
     }
 
     /// Web SAVEALL: every dirty tab that already has a name-only path is
-    /// serialized and downloaded in one pass — the same
-    /// `save_to_bytes` + `download_bytes` route a single Save takes. The
-    /// browser may ask once for permission to download several files, which
-    /// is the platform's price. Clean tabs are skipped (re-downloading
-    /// identical bytes is noise); tabs with no path still need SAVEAS.
+    /// serialized and downloaded in one pass — the worker-routed counterpart
+    /// of a single web Save. Each tab is prepared (state sync + clone +
+    /// style/dimension bake) once up front on the main thread, then the
+    /// DWG/DXF writer passes run serially on the serializer worker — the
+    /// same single-future structure the autosave round uses. The browser may
+    /// ask once for permission to download several files, which is the
+    /// platform's price. Clean tabs are skipped (re-downloading identical
+    /// bytes is noise); tabs with no path still need SAVEAS. Completion
+    /// (`on_web_saveall_serialized`) fires the downloads and clears each
+    /// tab's dirty flag — but only if the tab did not change while its
+    /// writer ran.
     #[cfg(target_arch = "wasm32")]
-    pub(in crate::app) fn saveall_web(&mut self) {
-        let mut saved = 0usize;
+    pub(in crate::app) fn saveall_web(&mut self) -> Task<Message> {
         let mut skipped = 0usize;
+        let mut pending: Vec<(crate::app::WebSaveallEntry, acadrust::CadDocument)> = Vec::new();
         for t in 0..self.tabs.len() {
             if self.tabs[t].is_start {
                 continue;
@@ -1781,19 +1825,91 @@ impl OpenCADStudio {
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.to_string_lossy().into_owned());
-            match crate::io::save_to_bytes(&self.tabs[t].scene.document, &ext, version) {
-                Ok(bytes) => {
-                    crate::sys::download_bytes(&filename, &bytes);
-                    self.tabs[t].scene.document.version = version;
-                    self.tabs[t].dirty = false;
-                    self.tabs[t].recovery_save_as_required = false;
-                    saved += 1;
+            // Race guard (the same snapshot a single web Save takes): the
+            // markers are read after the state syncs, so completion only
+            // clears the dirty flag if the tab did not change while the
+            // writer ran off-thread.
+            let tab = &self.tabs[t];
+            let entry = crate::app::WebSaveallEntry {
+                tab_id: tab.id,
+                path,
+                filename,
+                ext,
+                version,
+                geometry_epoch: tab.scene.geometry_epoch,
+                edit_revision: tab.edit_revision,
+                camera_generation: tab.scene.camera_generation,
+                // Placeholder — the serialization future below overwrites
+                // it before the completion message is built.
+                result: Ok(Vec::new()),
+            };
+            pending.push((
+                entry,
+                crate::io::prepare_document_for_save(&tab.scene.document, version),
+            ));
+        }
+        if pending.is_empty() {
+            self.report_saveall_web(0, skipped);
+            return Task::none();
+        }
+        Task::perform(
+            async move {
+                let mut results = Vec::with_capacity(pending.len());
+                for (mut entry, prepared) in pending {
+                    entry.result =
+                        crate::io::serialize_prepared_document(&prepared, &entry.ext).await;
+                    results.push(entry);
                 }
-                Err(error) => self
-                    .command_line
-                    .push_error(crate::tf!("SAVEALL: {} failed: {error}", path.display()).as_ref()),
+                results
+            },
+            move |results| Message::WebSaveallSerialized { skipped, results },
+        )
+    }
+
+    /// Web SAVEALL completion: the serializer worker (or inline fallback)
+    /// produced each tab's bytes. The download is the only artifact of a
+    /// tab's save — fire it even if the tab was closed while serialization
+    /// was in flight. Bookkeeping matches the old synchronous pass (version
+    /// stamped, recovery flag cleared, dirty cleared under the race guard,
+    /// one error line per failed tab), then the shared summary line.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn on_web_saveall_serialized(
+        &mut self,
+        skipped: usize,
+        results: Vec<crate::app::WebSaveallEntry>,
+    ) -> Task<Message> {
+        let mut saved = 0usize;
+        for entry in results {
+            match entry.result {
+                Ok(bytes) => {
+                    crate::sys::download_bytes(&entry.filename, &bytes);
+                    saved += 1;
+                    let Some(i) = self.tabs.iter().position(|tab| tab.id == entry.tab_id) else {
+                        continue;
+                    };
+                    self.tabs[i].scene.document.version = entry.version;
+                    self.tabs[i].recovery_save_as_required = false;
+                    let snapshot_is_current = self.tabs[i].scene.geometry_epoch
+                        == entry.geometry_epoch
+                        && self.tabs[i].edit_revision == entry.edit_revision
+                        && self.tabs[i].scene.camera_generation == entry.camera_generation;
+                    if snapshot_is_current {
+                        self.tabs[i].dirty = false;
+                    }
+                }
+                Err(error) => self.command_line.push_error(
+                    crate::tf!("SAVEALL: {} failed: {error}", entry.path.display()).as_ref(),
+                ),
             }
         }
+        self.report_saveall_web(saved, skipped);
+        Task::none()
+    }
+
+    /// The SAVEALL summary line — shared by the nothing-queued early return
+    /// and the worker completion.
+    #[cfg(target_arch = "wasm32")]
+    fn report_saveall_web(&mut self, saved: usize, skipped: usize) {
         self.command_line.push_output(
             crate::tf!(
                 "SAVEALL: saved {saved} drawing(s){}.",
@@ -2152,7 +2268,12 @@ impl OpenCADStudio {
     fn finish_web_save(&mut self, saved: bool) -> Task<Message> {
         if self.save_dialog_for_unsaved {
             if saved {
-                if let Some(crate::app::PendingClose::Tab(id)) = self.pending_close.take() {
+                // Only a Tab pending is consumed here; a Quit pending must
+                // survive to continue the quit after this save.
+                if let Some(crate::app::PendingClose::Tab(id)) =
+                    self.pending_close
+                        .take_if(|pending| matches!(pending, crate::app::PendingClose::Tab(_)))
+                {
                     // Resolve the id NOW: tabs may have closed while the
                     // serialization ran, shifting every stored index.
                     if let Some(index) = self.tabs.iter().position(|tab| tab.id == id) {

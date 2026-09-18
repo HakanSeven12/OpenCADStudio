@@ -79,14 +79,18 @@ pub(crate) fn register_picked_source(path: &str, bytes: Arc<Vec<u8>>) -> bool {
     let mut cache = picked_sources()
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    let replaced = cache
-        .get(path)
-        .is_some_and(|old| old.as_slice() != bytes.as_slice());
-    if replaced {
-        take_last_collision().replace(file_name_of(path));
+    let Some(old) = cache.get(path) else {
+        cache.insert(path.to_string(), bytes);
+        return true;
+    };
+    if old.as_slice() == bytes.as_slice() {
+        return true;
     }
-    cache.insert(path.to_string(), bytes);
-    !replaced
+    // Refuse AND keep the old bytes: overwriting would silently retarget
+    // every reference reading this name. The name is remembered so the
+    // browse handlers can tell the user why their pick did nothing.
+    take_last_collision().replace(file_name_of(path));
+    false
 }
 
 /// The name whose re-pick was refused because different bytes are already
@@ -1141,7 +1145,7 @@ impl OpenCADStudio {
         if let Some(name) = take_last_collision().take() {
             self.command_line.push_warning(
                 crate::tf!(
-                    "\"{name}\" is already loaded from another folder with different                      contents; re-picking it was ignored to keep the existing link."
+                    "\"{name}\" is already loaded from another folder with different contents; re-picking it was ignored to keep the existing link."
                 )
                 .as_ref(),
             );
@@ -1533,6 +1537,13 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_data_extraction_browse_settings_result(&mut self, path: Option<PathBuf>) -> Task<Message> {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(name) = take_last_collision().take() {
+            self.data_extraction.error = crate::tf!(
+                "\"{name}\" is already loaded with different contents; the existing file was kept."
+            )
+            .into_owned();
+        }
         if let Some(path) = path {
             self.data_extraction.settings_path = path.to_string_lossy().into_owned();
             if self.data_extraction.begin != ExtractionBegin::New {
@@ -1721,6 +1732,23 @@ impl OpenCADStudio {
 
 #[cfg(test)]
 mod tests {
+    /// A refused same-name re-pick must KEEP the old bytes: overwriting
+    /// would silently retarget every reference reading that name.
+    #[test]
+    fn collision_refusal_keeps_the_registered_bytes() {
+        register_picked_source("a.csv", Arc::new(b"old".to_vec()));
+        let fresh = register_picked_source("a.csv", Arc::new(b"new".to_vec()));
+        assert!(!fresh, "differing bytes under a live name are refused");
+        assert_eq!(
+            picked_source_bytes("a.csv").as_ref().map(|b| b.as_slice()),
+            Some(&b"old"[..]),
+            "the old registration survives the refusal"
+        );
+        // Identical bytes are a no-op accept.
+        assert!(register_picked_source("a.csv", Arc::new(b"old".to_vec())));
+    }
+
+
     use super::*;
 
     #[test]

@@ -120,6 +120,11 @@ fn parsed_cache() -> &'static Mutex<HashMap<String, acadrust::ReadOutcome>> {
 /// drawing's xref references will be matched against. Registering supersedes
 /// any eager parse cached for the same file, so a re-pick (or a drop that
 /// finally supplies a missing reference) reloads from the new bytes.
+///
+/// Names are bare on the web, so two DISTINCT same-named drawings cannot be
+/// told apart: the newest registration wins for resolution, ARCHIVE, and
+/// XRELOAD alike — consistent with what the drawing itself displays, but a
+/// fundamental browser limit (native distinguishes them by folder).
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // mirrors image_model::register_source
 pub fn register_source(name: &str, bytes: Arc<Vec<u8>>) {
     {
@@ -829,6 +834,47 @@ mod tests {
             registered_bytes(registered).map(|bytes| bytes.as_ref().clone()),
             Some(vec![1, 2, 3])
         );
+    }
+
+    /// Beyond SOURCE_CAP registrations the oldest leave first, and a
+    /// re-registration of a live name neither evicts nor duplicates it.
+    #[test]
+    fn source_registry_evicts_oldest_beyond_the_cap() {
+        for i in 0..(SOURCE_CAP + 2) {
+            register_source(&format!("f{i}.dwg"), Arc::new(vec![i as u8]));
+        }
+        let (map_len, order_len, has_newest, has_oldest) = {
+            // Scoped: the guard must drop before register_source locks again.
+            let cache = source_cache()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            (
+                cache.0.len(),
+                cache.1.len(),
+                cache.0.contains_key(&format!("f{}.dwg", SOURCE_CAP + 1)),
+                cache.0.contains_key("f0.dwg"),
+            )
+        };
+        assert_eq!(map_len, SOURCE_CAP);
+        assert_eq!(order_len, SOURCE_CAP);
+        assert!(has_newest);
+        assert!(!has_oldest);
+        // Re-registering a live name refreshes its bytes without reordering.
+        register_source(&format!("f{}.dwg", SOURCE_CAP + 1), Arc::new(vec![255]));
+        let (order_len, refreshed) = {
+            let cache = source_cache()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            (
+                cache.1.len(),
+                cache
+                    .0
+                    .get(&format!("f{}.dwg", SOURCE_CAP + 1))
+                    .map(|b| b.to_vec()),
+            )
+        };
+        assert_eq!(order_len, SOURCE_CAP, "no duplicate order entry");
+        assert_eq!(refreshed, Some(vec![255]));
     }
 
     #[test]

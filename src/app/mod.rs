@@ -1367,6 +1367,25 @@ pub(super) struct PendingExternalChange {
     set_current_path: bool,
 }
 
+/// One tab's slot in a web SAVEALL round (`saveall_web`): the tab identity,
+/// download name and race-guard markers snapshot when serialization started,
+/// plus the writer result — the future fills `result` in before the
+/// completion message is built. The web counterpart of native's
+/// `SaveOutcome`, minus the path/continuation bookkeeping SAVEALL never had.
+#[derive(Debug, Clone)]
+#[cfg(target_arch = "wasm32")]
+pub struct WebSaveallEntry {
+    tab_id: u64,
+    path: PathBuf,
+    filename: String,
+    ext: String,
+    version: acadrust::DxfVersion,
+    geometry_epoch: u64,
+    edit_revision: u64,
+    camera_generation: u64,
+    result: Result<Vec<u8>, String>,
+}
+
 #[derive(Debug, Clone)]
 #[cfg(not(target_arch = "wasm32"))]
 pub struct SaveOutcome {
@@ -2321,6 +2340,38 @@ pub enum Message {
         geometry_epoch: u64,
         edit_revision: u64,
         camera_generation: u64,
+        result: Result<Vec<u8>, String>,
+    },
+    /// Web WBLOCK: the serializer worker (or the inline fallback) produced
+    /// the block document bytes; download them under `filename`, then run
+    /// the same command-line bookkeeping as `WblockWriteFinished`.
+    #[cfg(target_arch = "wasm32")]
+    WebWblockSerialized {
+        block_name: String,
+        path: std::path::PathBuf,
+        filename: String,
+        result: Result<Vec<u8>, String>,
+    },
+    /// Web SAVEALL round completion: one entry per tab serialized on the
+    /// worker (or the inline fallback). Downloads fire per entry; dirty
+    /// flags clear only for tabs whose serialized snapshot is still current
+    /// (the same race guard a single web Save uses).
+    #[cfg(target_arch = "wasm32")]
+    WebSaveallSerialized {
+        skipped: usize,
+        results: Vec<WebSaveallEntry>,
+    },
+    /// Web ARCHIVE/ETRANSMIT completion: the serializer worker (or the
+    /// inline fallback) produced the drawing bytes; assemble the transmittal
+    /// ZIP from the dependencies collected at command time, download it and
+    /// report — including the skipped-dependency lines.
+    #[cfg(target_arch = "wasm32")]
+    WebArchiveSerialized {
+        cmd: String,
+        zip_name: String,
+        filename: String,
+        deps: Vec<crate::io::zip::ZipEntry>,
+        skipped: Vec<String>,
         result: Result<Vec<u8>, String>,
     },
     /// Retry the failed save after the other application releases the file.

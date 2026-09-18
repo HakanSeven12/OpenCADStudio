@@ -149,11 +149,11 @@ pub fn build_zip(entries: &[ZipEntry]) -> Result<Vec<u8>, String> {
 
     let central_offset = u32::try_from(out.len())
         .map_err(|_| "archive exceeds the 4 GiB classic-ZIP limit".to_string())?;
-    if central_offset == u32::MAX {
-        return Err("archive exceeds the classic-ZIP limit".to_string());
-    }
     let central_size = u32::try_from(central.len())
         .map_err(|_| "archive exceeds the 4 GiB classic-ZIP limit".to_string())?;
+    if central_offset == u32::MAX || central_size == u32::MAX {
+        return Err("archive exceeds the classic-ZIP limit".to_string());
+    }
     out.extend_from_slice(&central);
 
     // End of central directory record — no archive comment.

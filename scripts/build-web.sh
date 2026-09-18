@@ -62,8 +62,11 @@ done
     echo "build-web.sh: dist/app/sw.js missing — is web/sw.js still listed as a copy-file link in web-app.html?" >&2
     exit 1
 }
-bundle_hash=$(find dist/app -type f ! -name sw.js -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c 1-12)
-sed -i "s/^const CACHE_VERSION = \"[^\"]*\";/const CACHE_VERSION = \"$bundle_hash\";/" dist/app/sw.js
+# Portable hashing: macOS ships shasum (no sha256sum) and BSD sed needs an
+# explicit -i suffix — both handled so local builds work everywhere.
+if command -v sha256sum >/dev/null 2>&1; then H="sha256sum"; else H="shasum -a 256"; fi
+bundle_hash=$(find dist/app -type f ! -name sw.js -print0 | LC_ALL=C sort -z | xargs -0 $H | $H | cut -c 1-12)
+sed -i.bak "s/^const CACHE_VERSION = \"[^\"]*\";/const CACHE_VERSION = \"$bundle_hash\";/" dist/app/sw.js && rm -f dist/app/sw.js.bak
 grep -q "^const CACHE_VERSION = \"$bundle_hash\";" dist/app/sw.js || {
     echo "error: failed to stamp the cache version into dist/app/sw.js" >&2
     exit 1

@@ -183,7 +183,7 @@ never go missing from the bundle):
 sh scripts/build-web.sh
 ```
 
-The bundle ships a service worker (`web/sw.js`, deployed at `/app/sw.js`) that caches the app shell: after one online visit the app starts fully offline and the ~55 MB wasm bundle is served from the browser cache instead of re-downloaded. `build-web.sh` stamps a hash of the finished bundle into `sw.js` as the cache version, so every deploy ships a fresh cache and stale ones are cleaned up automatically.
+The bundle ships a service worker (`web/sw.js`, deployed at `/app/sw.js`) that caches the app shell: after a first online visit registers it, the assets are captured on the following visit and the app then starts fully offline, the ~55 MB wasm bundle served from the browser cache instead of re-downloaded. A long-lived installed window keeps running its current version until all its tabs close (no mid-session disruption); the next launch picks up the update. `build-web.sh` stamps a hash of the finished bundle into `sw.js` as the cache version, so every deploy ships a fresh cache and stale ones are cleaned up automatically. `/app/` carries its own web app manifest, so the editor itself can be installed as a standalone app.
 
 ## Automation
 

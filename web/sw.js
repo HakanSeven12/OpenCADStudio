@@ -89,9 +89,13 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       (async () => {
         const cache = await caches.open(CACHE_NAME);
+        // Only the scope root is the app shell: caching any other in-scope
+        // navigation here would store e.g. a font or JSON body under the
+        // shell key and serve it for every offline navigation.
+        const isShell = new URL(request.url).pathname === SHELL_URL.pathname;
         try {
           const fresh = await fetch(request);
-          await put(cache, SHELL_URL, fresh);
+          if (isShell) await put(cache, SHELL_URL, fresh);
           return fresh;
         } catch {
           const cached = await cache.match(SHELL_URL);

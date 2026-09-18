@@ -297,7 +297,7 @@ impl OpenCADStudio {
         #[cfg(target_arch = "wasm32")]
         if self.web_session_focus_pending {
             self.web_session_focus_pending = false;
-            self.select_remembered_session_tab();
+            return self.select_remembered_session_tab();
         }
         self.sync_open_command_history();
         // Close the document-level first-touch transaction started by

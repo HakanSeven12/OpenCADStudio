@@ -1501,6 +1501,15 @@ impl OpenCADStudio {
             self.apply_display_defaults(idx);
             idx
         };
+        // A Restore-all batch's LAST restore inserts its tab here — one
+        // async round AFTER its settle message. The focus flag therefore
+        // also fires here: the message-boundary hook alone could run
+        // before this insertion and be overwritten by it.
+        #[cfg(target_arch = "wasm32")]
+        if self.web_session_focus_pending && self.web_autosave_restore_all_remaining == 0 {
+            self.web_session_focus_pending = false;
+            self.select_remembered_session_tab();
+        }
 
         let mut recovery_report = recovery_needed.then(|| {
             crate::io::recovery::RecoveryReport::recovered(
@@ -3556,19 +3565,19 @@ impl OpenCADStudio {
     /// from the after-message hook (`web_session_focus_pending`), so the
     /// whole settle batch — including the last tab insertion — is done.
     #[cfg(target_arch = "wasm32")]
-    pub(super) fn select_remembered_session_tab(&mut self) {
+    pub(super) fn select_remembered_session_tab(&mut self) -> Task<Message> {
         let Some(session) = self.web_session.as_ref() else {
-            return;
+            return Task::none();
         };
         let Some(remembered) = session.tabs.get(session.active) else {
-            return;
+            return Task::none();
         };
         let recovered = crate::io::web_autosave::recovered_name(remembered);
         let Some(index) = self.tabs.iter().position(|tab| {
             let name = tab.tab_display_name();
             name == remembered.as_str() || name == recovered
         }) else {
-            return;
+            return Task::none();
         };
         self.active_tab = index;
         // The active tab changed under the ribbon; re-sync its chips like
@@ -3576,6 +3585,8 @@ impl OpenCADStudio {
         self.sync_ribbon_layers();
         self.sync_ribbon_styles();
         self.sync_ribbon_from_selection();
+    
+        Task::none()
     }
 
     /// Remember the open-tab list (names + active index) in localStorage —

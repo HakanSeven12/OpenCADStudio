@@ -755,9 +755,13 @@ impl OpenCADStudio {
                     // stays pending until the open settles instead of
                     // completing before the drawing exists.
                     let task = self.update(Message::PollWebControl);
-                    if self.opening.as_ref().is_none_or(|opening| opening.name != name) {
-                        // Another open holds the slot; the poll opens this
-                        // entry once it frees, after this operation settles.
+                    // Another open holds the slot; the poll opens this entry
+                    // once it frees, after this operation settles. Report
+                    // `queued` whenever the slot was busy at submit — the
+                    // name check skipped same-named in-flight opens, making
+                    // the op look completed with an empty result before the
+                    // queued entry had opened.
+                    if self.opening.is_some() {
                         self.set_control_result(json!({"queued": true, "name": name}));
                     }
                     return Ok(task);

@@ -21,7 +21,10 @@
   let readyResolve;
   const ready = new Promise(resolve => { readyResolve = resolve; });
   const settle = () => {
-    readyResolve(window.ocsControl);
+    // apiObject is assigned to window.ocsControl at the END of this IIFE;
+    // resolve with the local reference so a synchronous bridge (script
+    // injected late) cannot settle `ready` with undefined.
+    readyResolve(apiObject);
     window.dispatchEvent(new Event("ocs-ready"));
   };
   const poll = setInterval(() => {
@@ -68,5 +71,7 @@
     return reply;
   }
 
-  window.ocsControl = {ready, request};
+  const apiObject = {ready, request};
+
+  window.ocsControl = apiObject;
 })();

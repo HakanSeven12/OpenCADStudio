@@ -1111,11 +1111,27 @@ fn requested_handle(request: &Value) -> Result<acadrust::Handle, String> {
 /// bools and null stay exact; objects and arrays recurse.
 fn json_values_match(stored: &Value, expected: &Value) -> bool {
     match (stored, expected) {
-        (Value::Number(stored), Value::Number(expected)) => match (stored.as_f64(), expected.as_f64()) {
-            (Some(stored), Some(expected)) => stored == expected,
-            // Out-of-range or arbitrary-precision numbers keep exact equality.
-            _ => stored == expected,
-        },
+        (Value::Number(stored), Value::Number(expected)) => {
+            // Integers compare exactly (a u64 beyond f64 precision must not
+            // round-trip-match a float); mixed integer/float matches only
+            // when the float is whole and equals the integer.
+            match (stored.as_u64(), expected.as_u64()) {
+                (Some(stored), Some(expected)) => stored == expected,
+                (Some(stored), None) => match expected.as_f64() {
+                    Some(expected) => expected.fract() == 0.0 && expected >= 0.0 && stored as f64 == expected,
+                    None => false,
+                },
+                (None, Some(expected)) => match stored.as_f64() {
+                    Some(stored) => stored.fract() == 0.0 && stored >= 0.0 && expected as f64 == stored,
+                    None => false,
+                },
+                _ => match (stored.as_i64(), expected.as_i64(), stored.as_f64(), expected.as_f64()) {
+                    (Some(stored), Some(expected), _, _) => stored == expected,
+                    (_, _, Some(stored), Some(expected)) => stored == expected,
+                    _ => stored == expected,
+                },
+            }
+        }
         (Value::Object(stored), Value::Object(expected)) => {
             stored.len() == expected.len()
                 && stored.iter().all(|(key, value)| {

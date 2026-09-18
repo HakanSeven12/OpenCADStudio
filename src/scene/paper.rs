@@ -566,7 +566,7 @@ impl Scene {
         // canvas path re-reads the label per frame but this plot path used to
         // clone the stale value, so every top-level hatch exported at depth 0
         // and DRAWORDER (SORTENTS) never reached the PDF (#1345). Refresh the
-        // per-entity label here exactly like `hatch_models_for_view`.
+        // per-entity label here exactly like `synced_hatch_models`.
         let depths = self.draw_depth_map();
         for (&handle, model) in self.hatches.iter() {
             let Some(source) = self.document.get_entity(handle) else {

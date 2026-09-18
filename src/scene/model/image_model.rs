@@ -665,9 +665,14 @@ fn native_footprint(format: Option<image::ImageFormat>, color: Option<image::Col
         _ => 4,
     });
     // `DynamicImage::into_rgba8` only MOVES for Rgba8; every other layout
-    // allocates the RGBA destination while the native buffer is still
-    // alive, so both coexist (image 0.25 buffer.rs cast_in_color_space).
-    let peak_bpp = if native_bpp == 4 { 4 } else { native_bpp + 4 };
+    // — including the 4 B/px La16 — allocates the RGBA destination while
+    // the native buffer is still alive, so both coexist (image 0.25
+    // buffer.rs cast_in_color_space).
+    let peak_bpp = if matches!(color, Some(image::ColorType::Rgba8)) {
+        4
+    } else {
+        native_bpp + 4
+    };
     // GIF decodes the frame into its own buffer while the screen-sized
     // output buffer is live — two RGBA-sized allocations coexist.
     let peak_bpp = match format {
@@ -1260,6 +1265,39 @@ pub use web_fetch::{
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+
+    /// The decode peak per layout: into_rgba8 is a MOVE for Rgba8 only —
+    /// every other layout pays native + RGBA coexisting. GIF additionally
+    /// carries the screen-sized output beside a (clamped) frame buffer.
+    #[test]
+    fn native_footprint_peaks_match_the_coexistence_math() {
+        use image::ColorType;
+        let png = image::ImageFormat::Png;
+        let gif = image::ImageFormat::Gif;
+        let cases = [
+            (ColorType::L8, 5u64),
+            (ColorType::La8, 6),
+            (ColorType::Rgb8, 7),
+            (ColorType::Rgba8, 4),
+            (ColorType::L16, 6),
+            // 4 B/px but NOT a move — the La16 hole this test pins.
+            (ColorType::La16, 8),
+            (ColorType::Rgb16, 10),
+            (ColorType::Rgba16, 12),
+            (ColorType::Rgb32F, 16),
+            (ColorType::Rgba32F, 20),
+        ];
+        for (color, expected) in cases {
+            assert_eq!(
+                native_footprint(Some(png), Some(color)).peak_bpp,
+                expected,
+                "{color:?}"
+            );
+        }
+        assert_eq!(native_footprint(Some(gif), Some(ColorType::Rgba8)).peak_bpp, 8);
+        assert_eq!(native_footprint(None, None).peak_bpp, 8);
+    }
+
 
     /// Encode a small deterministic PNG entirely in memory — the same codec
     /// `decode_from_memory` reads, so no fixture file is needed.

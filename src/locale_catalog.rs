@@ -1887,6 +1887,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Opening OCS Discussions for help and questions..." => Some(("view", "opening-ocs-discussions-for-help-and-questions")),
         "Opening OCS Web..." => Some(("view", "opening-ocs-web")),
         "Opening the command reference..." => Some(("view", "opening-the-command-reference")),
+        "The browser cannot open a typed path; pick the file instead." => Some(("display", "browser-cannot-open-typed-path")),
         "\"{name}\" could not be sized from its header and decoding it exceeded the {limit} MB image limit of this build — it cannot be attached." => Some(("file", "image-refusal-unknown-size")),
         "\"{name}\" is already loaded with different contents; the existing file was kept." => Some(("view", "already-loaded-different-contents-kept")),
         "Opening Patreon page..." => Some(("view", "opening-patreon-page")),

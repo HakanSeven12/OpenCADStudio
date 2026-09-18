@@ -1059,9 +1059,33 @@ impl OpenCADStudio {
                 }
                 if e.recovery_available {
                     if let Some(opening) = self.opening.as_mut() {
-                        opening.recovery_error = Some(e.message);
+                        let recovery_message = e.message.clone();
+                        opening.recovery_error = Some(recovery_message.clone());
                         opening.recovery_read_stats = e.read_stats;
                         self.active_modal = Some(super::ModalKind::RecoveryPrompt);
+                        // A control-routed open (automation) must not park
+                        // behind a modal nobody may answer: settle the
+                        // operation as failed with the parse error. The
+                        // prompt stays for a human; automation retries with
+                        // the recovery op if it wants the content.
+                        // A control-routed open (automation) must not park
+                        // behind a modal nobody may answer: settle the
+                        // operation as failed with the parse error. The
+                        // prompt stays for a human; automation can retry
+                        // through the recovery flow if it wants the content.
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            let settled = serde_json::json!({
+                                "ok": false,
+                                "status": "failed",
+                                "code": "recovery_required",
+                                "error": format!(
+                                    "the drawing is damaged and needs a recovery decision: {}",
+                                    recovery_message
+                                ),
+                            });
+                            self.set_control_result(settled);
+                        }
                         return Task::none();
                     }
                 }

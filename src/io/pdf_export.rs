@@ -2597,11 +2597,18 @@ mod tests {
             "tied wipeout must mask the wire: {black} !< {last_wipe}"
         );
         // Below the wire (DRAWORDER under): depth wins and the wire paints
-        // back on top of the mask.
+        // back on top of the mask. The page BACKGROUND is also a white
+        // rectangle: skip past its `re` operator so the probe cannot
+        // accidentally measure the background if a future serializer
+        // paints it.
         let mut page = test_page(vec![line_wire("70040", 0.0, BLACK)]);
         page.content.wipeouts = vec![wipeout(-0.5)];
         let stream = render_stream(page);
-        let wipe = fill_op_pos(&stream, "1 1 1 rg", 0);
+        let background = stream
+            .windows(2)
+            .position(|w| w == b"re")
+            .expect("the page background rectangle serializes");
+        let wipe = fill_op_pos(&stream, "1 1 1 rg", background);
         let black = stroke_op_pos(&stream, "0 0 0 RG", 0);
         assert!(
             wipe < black,

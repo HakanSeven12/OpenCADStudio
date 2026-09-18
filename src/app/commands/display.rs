@@ -1601,7 +1601,16 @@ impl OpenCADStudio {
                 // then runs from `DataLinkCsvPicked`.
                 #[cfg(target_arch = "wasm32")]
                 {
-                    let _ = path;
+                    // Say the typed argument is superseded — a silent
+                    // redirect looks like the input was lost.
+                    if !path.trim().is_empty() {
+                        self.command_line.push_info(
+                            crate::t!(
+                                "The browser cannot open a typed path; pick the file instead."
+                            )
+                            .as_ref(),
+                        );
+                    }
                     return Some(Task::perform(
                         crate::io::pick_datalink_csv_web(),
                         Message::DataLinkCsvPicked,

@@ -2283,6 +2283,13 @@ impl OpenCADStudio {
                     }
                     return self.continue_tab_close_queue();
                 }
+            } else if matches!(self.pending_close, Some(crate::app::PendingClose::Quit)) {
+                // Mirror the native Quit continuation: offer to save the
+                // next dirty tab, or finish the quit.
+                if self.tabs.iter().any(|tab| tab.dirty) {
+                    return self.open_unsaved_dialog_window();
+                }
+                return Task::batch([self.close_unsaved_dialog_window(), self.exit_app()]);
             } else if self.pending_close.is_some() {
                 return self.open_unsaved_dialog_window();
             }

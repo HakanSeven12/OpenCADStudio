@@ -312,3 +312,23 @@ pub(crate) async fn modified_ms(name: &str) -> Option<f64> {
         .ok()?;
     Some(file.last_modified())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::name_hash;
+
+    /// Canonical FNV-1a 64 over the raw name bytes — the reference vector
+    /// from the spec's test suite.
+    #[test]
+    fn name_hash_is_fnv1a64() {
+        assert_eq!(name_hash(""), "cbf29ce484222325");
+        assert_eq!(name_hash("a"), "af63dc4c8601ec8c");
+        assert_eq!(name_hash("foobar"), "85944171f73967e8");
+    }
+
+    #[test]
+    fn name_hash_distinguishes_case_and_extension() {
+        assert_ne!(name_hash("a.dwg"), name_hash("A.dwg"));
+        assert_ne!(name_hash("a.dwg"), name_hash("a.dxf"));
+    }
+}

@@ -1885,6 +1885,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Opening OCS Discussions for help and questions..." => Some(("view", "opening-ocs-discussions-for-help-and-questions")),
         "Opening OCS Web..." => Some(("view", "opening-ocs-web")),
         "Opening the command reference..." => Some(("view", "opening-the-command-reference")),
+        "\"{name}\" is already loaded with different contents; the existing file was kept." => Some(("file", "already-loaded-different-contents-kept")),
         "Opening Patreon page..." => Some(("view", "opening-patreon-page")),
         "Opening feedback page..." => Some(("view", "opening-feedback-page")),
         "Opening file" => Some(("ui", "opening-file")),

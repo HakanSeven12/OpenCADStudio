@@ -76,7 +76,7 @@ shared: native renders the same modals too, so the desktop is effectively
 single-window now. A modal's backdrop dims and blocks clicks but does not
 dismiss; the ✕ button closes it.
 
-### Parallelism — web: single-threaded
+### Parallelism — web: main thread plus one parse/serialize worker
 `wasm32` has no threads without SharedArrayBuffer (which needs COOP/COEP
 headers GitHub Pages can't set). `crate::par::prelude` re-exports `rayon` on
 native and sequential `std` iterators on wasm, so the same call sites run in

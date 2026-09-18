@@ -290,3 +290,20 @@ fn is_image_name(name: &str) -> bool {
         "png" | "jpg" | "jpeg" | "bmp" | "tiff" | "tif"
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::is_drawing_name;
+
+    #[test]
+    fn drawing_names_use_the_worker_convention() {
+        assert!(is_drawing_name("plan.dwg"));
+        assert!(is_drawing_name("PLAN.DXF"));
+        assert!(is_drawing_name("DWG"));
+        assert!(is_drawing_name("dxf"));
+        assert!(!is_drawing_name("plan.png"));
+        assert!(!is_drawing_name("dwgx"));
+        assert!(!is_drawing_name("plan.dwg.txt"));
+        assert!(!is_drawing_name(""));
+    }
+}

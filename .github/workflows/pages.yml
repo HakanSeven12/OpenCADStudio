@@ -130,7 +130,8 @@ jobs:
         env:
           OCS_PATREON_TOKEN: ${{ secrets.OCS_PATREON_TOKEN }}
         run: |
-          nix develop --command python3 - <<'PY'
+          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
+          python3 - <<'PY'
           import json
           import os
           import urllib.parse
@@ -239,6 +240,7 @@ jobs:
           )
           print(f"supporters: {len(supporters)}")
           PY
+          EOF
 
       # Publish separate light/dark charts for stars and release downloads.
       - name: Generate project growth charts
@@ -252,7 +254,8 @@ jobs:
       # unavailable during deployment.
       - name: Generate videos.json
         run: |
-          nix develop --command python3 - <<'PY'
+          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
+          python3 - <<'PY'
           import json
           import re
           import shutil
@@ -309,6 +312,7 @@ jobs:
 
           print(f"videos: {len(json.loads(output.read_text(encoding='utf-8')))}")
           PY
+          EOF
 
       # Publish a public snapshot of GitHub discussions.
       - name: Generate discussions.json

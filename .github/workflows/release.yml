@@ -57,7 +57,7 @@ jobs:
 
       - name: Prepare AppDir
         run: |
-          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
+          SCRIPT=$(cat <<'EOF'
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
@@ -68,6 +68,8 @@ jobs:
           rsvg-convert -w 256 -h 256 assets/logo.svg \
             -o AppDir/usr/share/icons/hicolor/256x256/apps/io.github.HakanSeven12.OpenCadStudio.png
           EOF
+          )
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
       - name: Pack shared Linux payload
         run: nix develop --command tar -C AppDir -czf linux-payload.tar.gz usr
@@ -82,16 +84,18 @@ jobs:
 
       - name: Download linuxdeploy
         run: |
-          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
+          SCRIPT=$(cat <<'EOF'
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           chmod +x linuxdeploy-x86_64.AppImage
           EOF
+          )
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
       - name: Build AppImage
         env:
           APPIMAGE_EXTRACT_AND_RUN: 1
         run: |
-          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
+          SCRIPT=$(cat <<'EOF'
           ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
             --desktop-file AppDir/usr/share/applications/io.github.HakanSeven12.OpenCadStudio.desktop \
@@ -99,17 +103,21 @@ jobs:
             --output appimage
           mv Open*CAD*Studio*.AppImage OpenCADStudio.AppImage
           EOF
+          )
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
       - name: Upload AppImage to release
         if: env.RELEASE_TAG != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
+          SCRIPT=$(cat <<'EOF'
           ASSET=OpenCADStudio-${{ env.RELEASE_TAG }}-linux-x86_64.AppImage
           mv OpenCADStudio.AppImage "$ASSET"
           gh release upload ${{ env.RELEASE_TAG }} "$ASSET" --clobber --repo ${{ github.repository }}
           EOF
+          )
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
   build-snap:
     needs: build-appimage
@@ -149,12 +157,14 @@ jobs:
       - name: Set package version
         id: package
         run: |
-          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
+          SCRIPT=$(cat <<'EOF'
           VERSION=$(python3 scripts/release.py versions --tag "$RELEASE_TAG" | sed -n 's/^version=//p')
           test -n "$VERSION"
           sed -i "s/^version: .*/version: '$VERSION'/" snap/snapcraft.yaml
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           EOF
+          )
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
       - name: Build snap
         id: snapcraft
@@ -169,11 +179,13 @@ jobs:
           SNAP: ${{ steps.snapcraft.outputs.snap }}
           VERSION: ${{ steps.package.outputs.version }}
         run: |
-          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
+          SCRIPT=$(cat <<'EOF'
           PACKAGE="OpenCADStudio-v${VERSION}-linux-x86_64.snap"
           mv "$SNAP" "$PACKAGE"
           echo "snap=$PACKAGE" >> "$GITHUB_OUTPUT"
           EOF
+          )
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
       - name: Upload snap to release
         if: env.RELEASE_TAG != ''

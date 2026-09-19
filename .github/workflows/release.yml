@@ -160,6 +160,9 @@ jobs:
         id: snapcraft
         uses: snapcore/action-build@v1
 
+      - name: Restore snap manifest
+        run: git checkout -- snap/snapcraft.yaml
+
       - name: Normalize snap package name
         id: snap_asset
         env:

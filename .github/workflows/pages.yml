@@ -89,6 +89,9 @@ jobs:
           )
           nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
+      - name: Verify wasm target
+        run: nix develop --command rustc --print target-libdir --target wasm32-unknown-unknown > /dev/null
+
       - name: Build web bundle
         run: nix develop --command trunk build --locked --release --public-url /app/ --dist dist/app --html-output index.html web-app.html
 

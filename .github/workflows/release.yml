@@ -196,7 +196,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SNAP: ${{ steps.snap_asset.outputs.snap }}
-        run: nix develop --command gh release upload "${{ env.RELEASE_TAG }}" "$SNAP" --clobber
+        run: nix develop --command gh release upload "${{ env.RELEASE_TAG }}" "$SNAP" --clobber --repo ${{ github.repository }}
 
       - name: Upload snap as workflow artifact
         if: env.RELEASE_TAG == ''

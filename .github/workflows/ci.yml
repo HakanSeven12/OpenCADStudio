@@ -30,7 +30,7 @@ jobs:
         run: nix develop --command cargo fmt --all --check
       - name: Run clippy
         run: nix develop --command cargo clippy --locked --workspace --all-targets -- -D warnings
-      - name: Run library tests
+      - name: Run workspace tests
         run: nix develop --command cargo test --locked --workspace
 
   web:

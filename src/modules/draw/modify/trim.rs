@@ -3859,6 +3859,23 @@ mod tests {
             "the shared vertex appears once, not twice: {pts:?}"
         );
     }
+
+    #[test]
+    fn preview_sampling_skips_edge_on_polyline2d_arc_segments() {
+        use acadrust::entities::{Polyline2D, Vertex2D};
+
+        let mut pl = Polyline2D::new();
+        let mut start = Vertex2D::new(Vector3::new(0.0, 0.0, 0.0));
+        start.bulge = 1.0;
+        pl.vertices = vec![start, Vertex2D::new(Vector3::new(2.0, 0.0, 0.0))];
+        pl.normal = Vector3::new(1.0, 0.0, 0.0);
+
+        let pts = preview_sample_xy(&EntityType::Polyline2D(pl));
+        assert!(
+            pts.is_empty(),
+            "edge-on arc segments are skipped instead of panicking: {pts:?}"
+        );
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -4086,6 +4103,9 @@ fn preview_sample_xy(e: &EntityType) -> Vec<[f64; 2]> {
                     }
                     _ => sample_entity_xy(&seg),
                 };
+                if sp.is_empty() {
+                    continue;
+                }
                 if pts.last() == sp.first() {
                     pts.extend_from_slice(&sp[1..]);
                 } else {

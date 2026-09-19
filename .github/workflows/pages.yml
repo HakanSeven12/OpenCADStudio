@@ -39,6 +39,7 @@ jobs:
     steps:
       - name: Resolve release source
         id: source
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
@@ -70,10 +71,13 @@ jobs:
           # release tag; a shallow clone would label the build `+g<hash>`.
           fetch-depth: 0
 
+      - uses: ./.github/actions/setup-nix
+
       - name: Validate release version
         env:
           RELEASE_TAG: ${{ steps.source.outputs.tag }}
         run: |
+          SCRIPT=$(cat <<'EOF'
           git merge-base --is-ancestor "$RELEASE_TAG" HEAD
           if [ -f scripts/release.py ]; then
             python3 scripts/release.py versions --tag "$RELEASE_TAG"
@@ -81,63 +85,64 @@ jobs:
             VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
             test "v$VERSION" = "$RELEASE_TAG"
           fi
+          EOF
+          )
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install trunk
-        uses: taiki-e/install-action@v2
-        with:
-          tool: trunk
-
-      - name: Read wasm-bindgen version
-        id: wasm-bindgen-version
-        shell: bash
-        run: |
-          VERSION=$(sed -n '/name = "wasm-bindgen"/{n;s/version = "\(.*\)"/\1/p;q;}' Cargo.lock)
-          test -n "$VERSION"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Install wasm-bindgen CLI
-        uses: taiki-e/install-action@v2
-        with:
-          tool: wasm-bindgen@${{ steps.wasm-bindgen-version.outputs.version }}
+      - name: Verify wasm target
+        run: nix develop --command rustc --print target-libdir --target wasm32-unknown-unknown > /dev/null
 
       - name: Build web bundle
-        run: trunk build --locked --release --public-url /app/ --dist dist/app --html-output index.html web-app.html
+        run: nix develop --command trunk build --locked --release --public-url /app/ --dist dist/app --html-output index.html web-app.html
 
       - name: Check out current website
         uses: actions/checkout@v4
         with:
           ref: main
-          path: website
+          path: website-source
 
       - name: Validate website
-        working-directory: website
-        run: python3 scripts/test_site.py
+        run: |
+          SCRIPT=$(cat <<'EOF'
+          cd "$GITHUB_WORKSPACE/website-source"
+          python3 scripts/test_site.py
+          EOF
+          )
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
       - name: Assemble landing page
-        working-directory: website
-        run: sh scripts/assemble-site.sh "$GITHUB_WORKSPACE/dist"
+        run: |
+          SCRIPT=$(cat <<'EOF'
+          cd "$GITHUB_WORKSPACE/website-source"
+          sh "$GITHUB_WORKSPACE/website-source/scripts/assemble-site.sh" "$GITHUB_WORKSPACE/dist"
+          EOF
+          )
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
       - name: Record website source
-        working-directory: website
-        run: git rev-parse HEAD > "$GITHUB_WORKSPACE/dist/site-version.txt"
+        run: |
+          SCRIPT=$(cat <<'EOF'
+          cd "$GITHUB_WORKSPACE/website-source"
+          git rev-parse HEAD > "$GITHUB_WORKSPACE/dist/site-version.txt"
+          EOF
+          )
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
       - name: Record release version and source
         env:
           RELEASE_TAG: ${{ steps.source.outputs.tag }}
           RELEASE_COMMIT: ${{ steps.source.outputs.commit }}
         run: |
+          SCRIPT=$(cat <<'EOF'
           jq -n --arg version "${RELEASE_TAG#v}" --arg commit "$RELEASE_COMMIT" \
             '{version: $version, commit: $commit}' > dist/app/release.json
+          EOF
+          )
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
       # GitHub Pages runs Jekyll, which ignores files; opt out so the
       # wasm-bindgen output is served verbatim.
-      - run: touch dist/.nojekyll
+      - run: nix develop --command touch dist/.nojekyll
 
       # The web app can't call the Patreon API directly (CORS + the token would
       # be exposed in the bundle), so generate the supporters list server-side
@@ -147,6 +152,7 @@ jobs:
         env:
           OCS_PATREON_TOKEN: ${{ secrets.OCS_PATREON_TOKEN }}
         run: |
+          SCRIPT=$(cat <<'EOF'
           python3 - <<'PY'
           import json
           import os
@@ -256,12 +262,15 @@ jobs:
           )
           print(f"supporters: {len(supporters)}")
           PY
+          EOF
+          )
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
       # Publish separate light/dark charts for stars and release downloads.
       - name: Generate project growth charts
         env:
           GITHUB_TOKEN: ${{ secrets.OCS_GITHUB_TOKEN }}
-        run: python3 website/scripts/generate-star-history.py --output-dir dist
+        run: nix develop --command python3 website-source/scripts/generate-star-history.py --output-dir dist
 
       # Browsers cannot reliably fetch YouTube playlist/oEmbed responses because
       # of CORS. Build a same-origin listing and thumbnail directory for the
@@ -269,6 +278,7 @@ jobs:
       # unavailable during deployment.
       - name: Generate videos.json
         run: |
+          SCRIPT=$(cat <<'EOF'
           python3 - <<'PY'
           import json
           import re
@@ -326,12 +336,16 @@ jobs:
 
           print(f"videos: {len(json.loads(output.read_text(encoding='utf-8')))}")
           PY
+          EOF
+          )
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
       # Publish a public snapshot of GitHub discussions.
       - name: Generate discussions.json
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          SCRIPT=$(cat <<'EOF'
           QUERY='
             query($owner: String!, $name: String!) {
               repository(owner: $owner, name: $name) {
@@ -376,6 +390,9 @@ jobs:
                   })' \
             > dist/app/discussions.json
           echo "discussions: $(jq 'length' dist/app/discussions.json)"
+          EOF
+          )
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
       - uses: actions/upload-pages-artifact@v3
         with:

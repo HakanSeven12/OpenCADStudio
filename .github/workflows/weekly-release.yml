@@ -34,19 +34,24 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+      - uses: ./.github/actions/setup-nix
       - name: Validate release automation
-        run: python3 scripts/test_release.py
+        run: nix develop --command python3 scripts/test_release.py
       - name: Prepare release and verify published notes
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
           PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
         run: |
+          SCRIPT=$(cat <<'EOF'
           if [ "$PUBLISH" = true ]; then
             python3 scripts/release.py prepare --publish
           else
             python3 scripts/release.py prepare
           fi
+          EOF
+          )
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
   # GITHUB_TOKEN releases do not trigger release events, so call both builds.
   web:

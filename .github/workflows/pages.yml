@@ -99,7 +99,7 @@ jobs:
           path: website
 
       - name: Validate website
-        run: nix develop "$GITHUB_WORKSPACE/website" --command python3 "$GITHUB_WORKSPACE/website/scripts/test_site.py"
+        run: nix develop --command python3 "$GITHUB_WORKSPACE/website/scripts/test_site.py"
 
       - name: Assemble landing page
         run: |
@@ -108,7 +108,7 @@ jobs:
           sh "$GITHUB_WORKSPACE/website/scripts/assemble-site.sh" "$GITHUB_WORKSPACE/dist"
           EOF
           )
-          nix develop "$GITHUB_WORKSPACE/website" --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
       - name: Record website source
         run: |
@@ -117,7 +117,7 @@ jobs:
           git rev-parse HEAD > "$GITHUB_WORKSPACE/dist/site-version.txt"
           EOF
           )
-          nix develop "$GITHUB_WORKSPACE/website" --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
       - name: Record release version and source
         env:

@@ -25,6 +25,9 @@ jobs:
   prepare:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: 'nix develop --command bash --noprofile --norc -euo pipefail {0}'
     outputs:
       ready: ${{ steps.release.outputs.ready }}
       tag: ${{ steps.release.outputs.tag }}
@@ -34,6 +37,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+      - uses: ./.github/actions/setup-nix
       - name: Validate release automation
         run: python3 scripts/test_release.py
       - name: Prepare release and verify published notes

@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flake:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+      - name: Run flake checks
+        run: nix flake check --print-build-logs
+
+  rust:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: 'nix develop --command bash --noprofile --norc -euo pipefail {0}'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Run clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Run library tests
+        run: cargo test --locked --workspace --lib
+
+  web:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: 'nix develop --command bash --noprofile --norc -euo pipefail {0}'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+      - name: Build web bundle
+        run: trunk build --locked --release --public-url /app/ --dist dist/app --html-output index.html web-app.html
+      - name: Validate website assembly
+        run: python3 scripts/test_site.py
+      - name: Validate locale lookups
+        run: python3 scripts/test_locales.py
+
+  release-automation:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: 'nix develop --command bash --noprofile --norc -euo pipefail {0}'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+      - name: Test release automation
+        run: python3 scripts/test_release.py

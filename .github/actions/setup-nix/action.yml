@@ -1,0 +1,14 @@
+name: Setup Nix
+description: Install Nix and enable the shared binary cache for flake-based CI jobs
+
+runs:
+  using: composite
+  steps:
+    - name: Install Nix
+      uses: DeterminateSystems/nix-installer-action@main
+      with:
+        extra-conf: |
+          experimental-features = nix-command flakes
+
+    - name: Enable Magic Nix Cache
+      uses: DeterminateSystems/magic-nix-cache-action@main

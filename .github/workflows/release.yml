@@ -33,6 +33,9 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write
+    defaults:
+      run:
+        shell: 'nix develop --command bash --noprofile --norc -euo pipefail {0}'
 
     steps:
       - name: Checkout
@@ -43,21 +46,11 @@ jobs:
           # release tag; a shallow clone would label the build `+g<hash>`.
           fetch-depth: 0
 
+      - uses: ./.github/actions/setup-nix
+
       - name: Validate package versions
         id: version
-        shell: bash
         run: python3 scripts/release.py versions --tag "$RELEASE_TAG"
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y \
-            libgl1-mesa-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev \
-            libxkbcommon-dev libwayland-dev libfontconfig1-dev libfreetype6-dev \
-            librsvg2-bin fuse libfuse2
 
       - name: Build
         env:
@@ -122,6 +115,9 @@ jobs:
     permissions:
       actions: read
       contents: write
+    defaults:
+      run:
+        shell: 'nix develop --command bash --noprofile --norc -euo pipefail {0}'
     env:
       SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
 
@@ -134,9 +130,10 @@ jobs:
           # release tag; a shallow clone would label the build `+g<hash>`.
           fetch-depth: 0
 
+      - uses: ./.github/actions/setup-nix
+
       - name: Validate package versions
         id: version
-        shell: bash
         run: python3 scripts/release.py versions --tag "$RELEASE_TAG"
 
       - name: Download shared Linux payload
@@ -542,10 +539,14 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: read
+    defaults:
+      run:
+        shell: 'nix develop --command bash --noprofile --norc -euo pipefail {0}'
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.commit || github.sha }}
+      - uses: ./.github/actions/setup-nix
       - name: Verify native release assets and notes
         env:
           GH_TOKEN: ${{ github.token }}

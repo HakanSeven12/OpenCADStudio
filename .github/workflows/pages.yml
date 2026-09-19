@@ -33,12 +33,16 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: 'nix develop --command bash --noprofile --norc -euo pipefail {0}'
     outputs:
       tag: ${{ steps.source.outputs.tag }}
       commit: ${{ steps.source.outputs.commit }}
     steps:
       - name: Resolve release source
         id: source
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
@@ -70,6 +74,8 @@ jobs:
           # release tag; a shallow clone would label the build `+g<hash>`.
           fetch-depth: 0
 
+      - uses: ./.github/actions/setup-nix
+
       - name: Validate release version
         env:
           RELEASE_TAG: ${{ steps.source.outputs.tag }}
@@ -81,30 +87,6 @@ jobs:
             VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
             test "v$VERSION" = "$RELEASE_TAG"
           fi
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install trunk
-        uses: taiki-e/install-action@v2
-        with:
-          tool: trunk
-
-      - name: Read wasm-bindgen version
-        id: wasm-bindgen-version
-        shell: bash
-        run: |
-          VERSION=$(sed -n '/name = "wasm-bindgen"/{n;s/version = "\(.*\)"/\1/p;q;}' Cargo.lock)
-          test -n "$VERSION"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Install wasm-bindgen CLI
-        uses: taiki-e/install-action@v2
-        with:
-          tool: wasm-bindgen@${{ steps.wasm-bindgen-version.outputs.version }}
 
       - name: Build web bundle
         run: trunk build --locked --release --public-url /app/ --dist dist/app --html-output index.html web-app.html

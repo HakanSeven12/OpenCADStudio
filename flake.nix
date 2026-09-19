@@ -132,9 +132,15 @@
               fontconfig
               freetype
               git
+              python3
+              nodejs
+              gh
+              jq
+              wget
+              # CI and local automation scripts rely on these CLIs so GitHub
+              # Actions and contributors can share the same flake-defined env.
               # Web build: `trunk build` per Trunk.toml. wasm-bindgen-cli must
-              # match the wasm-bindgen version Cargo.lock resolves, the same
-              # constraint .github/workflows/pages.yml:83 reads out of the lock.
+              # match the wasm-bindgen version Cargo.lock resolves.
               trunk
               wasm-bindgen-cli
               # Rasterises assets/logo.svg for packaging, as release.yml does.

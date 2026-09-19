@@ -1,16 +1,18 @@
 use acadrust::entities::Insert;
 use acadrust::types::{Matrix3, Transform, Vector3};
-use acadrust::{EntityType, Handle};
+use acadrust::{CadDocument, EntityType, Handle};
 use glam::Vec3;
 
 use crate::command::EntityTransform;
-use crate::entities::common::{edit_angle_prop as edit_angle, edit_prop as edit, parse_f64, ro_prop as ro, square_grip};
+use crate::entities::common::{
+    edit_angle_prop as edit_angle, edit_prop as edit, parse_f64, ro_prop as ro, square_grip,
+};
 use crate::entities::traits::Grippable;
 
-use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::model::wire_model::WireModel;
 use crate::scene::cache::block_cache;
 use crate::scene::convert::tessellate;
+use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::scene::model::wire_model::WireModel;
 use crate::scene::view::render;
 
 /// Grip ids from here up address the INSERT's attributes — `BASE + i` is
@@ -23,6 +25,59 @@ const ATTRIBUTE_GRIP_BASE: usize = 1;
 /// itself declines a locked position.
 fn attribute_is_movable(att: &acadrust::entities::AttributeEntity) -> bool {
     !att.flags.constant && !att.flags.invisible
+}
+
+fn attribute_is_render_visible(
+    document: &CadDocument,
+    visibility: i16,
+    attribute: &acadrust::entities::AttributeEntity,
+) -> bool {
+    let layer_visible = document
+        .layers
+        .get(&attribute.common.layer)
+        .is_none_or(|layer| !layer.flags.off && !layer.flags.frozen);
+    layer_visible
+        && visibility != 0
+        && (visibility == 2 || (!attribute.common.invisible && !attribute.flags.invisible))
+}
+
+fn insert_attribute_block_scale(
+    insert: &Insert,
+    annotation_scale: f32,
+    scale_policy: crate::scene::BlockScalePolicy,
+) -> f64 {
+    if scale_policy == crate::scene::BlockScalePolicy::FromInsert
+        && insert
+            .common
+            .extended_data
+            .get_record("AcAnnotativeData")
+            .is_some()
+    {
+        annotation_scale as f64
+    } else {
+        1.0
+    }
+}
+
+fn scale_attribute_for_insert(
+    insert: &Insert,
+    attribute: &mut acadrust::entities::AttributeEntity,
+    block_scale: f64,
+) {
+    if (block_scale - 1.0).abs() <= 1.0e-6 {
+        return;
+    }
+    let insertion = insert.insert_point;
+    let scale_about = |point: Vector3| {
+        Vector3::new(
+            insertion.x + (point.x - insertion.x) * block_scale,
+            insertion.y + (point.y - insertion.y) * block_scale,
+            insertion.z + (point.z - insertion.z) * block_scale,
+        )
+    };
+    attribute.height *= block_scale;
+    attribute.insertion_point = scale_about(attribute.insertion_point);
+    attribute.alignment_point = scale_about(attribute.alignment_point);
 }
 
 fn grips(ins: &Insert) -> Vec<GripDef> {
@@ -44,6 +99,42 @@ fn grips(ins: &Insert) -> Vec<GripDef> {
             ..grip
         })
     }));
+    out
+}
+
+pub(crate) fn visible_attribute_grips(
+    document: &CadDocument,
+    insert: &Insert,
+    annotation_scale: f32,
+) -> Vec<GripDef> {
+    let w = Matrix3::arbitrary_axis(insert.normal) * insert.insert_point;
+    let mut out = vec![square_grip(0, glam::DVec3::new(w.x, w.y, w.z))];
+    let visibility = document.header.attribute_visibility;
+    let block_scale = insert_attribute_block_scale(
+        insert,
+        annotation_scale,
+        crate::scene::BlockScalePolicy::FromInsert,
+    );
+    out.extend(
+        insert
+            .attributes
+            .iter()
+            .enumerate()
+            .filter_map(|(i, attribute)| {
+                if !attribute_is_movable(attribute)
+                    || !attribute_is_render_visible(document, visibility, attribute)
+                {
+                    return None;
+                }
+                let mut attribute = attribute.clone();
+                scale_attribute_for_insert(insert, &mut attribute, block_scale);
+                let grip = Grippable::grips(&attribute).into_iter().next()?;
+                Some(GripDef {
+                    id: ATTRIBUTE_GRIP_BASE + i,
+                    ..grip
+                })
+            }),
+    );
     out
 }
 
@@ -230,45 +321,14 @@ pub(crate) fn insert_attribute_entities(
     if visibility == 0 || insert.attributes.is_empty() {
         return Vec::new();
     }
-    let block_scale = if scale_policy
-        == crate::scene::BlockScalePolicy::FromInsert
-        && insert
-            .common
-            .extended_data
-            .get_record("AcAnnotativeData")
-            .is_some()
-    {
-        annotation_scale as f64
-    } else {
-        1.0
-    };
-    let insertion = insert.insert_point;
-    let scale_about = |point: Vector3| {
-        Vector3::new(
-            insertion.x + (point.x - insertion.x) * block_scale,
-            insertion.y + (point.y - insertion.y) * block_scale,
-            insertion.z + (point.z - insertion.z) * block_scale,
-        )
-    };
+    let block_scale = insert_attribute_block_scale(insert, annotation_scale, scale_policy);
     insert
         .attributes
         .iter()
-        .filter(|attribute| {
-            let layer_visible = document
-                .layers
-                .get(&attribute.common.layer)
-                .is_none_or(|layer| !layer.flags.off && !layer.flags.frozen);
-            layer_visible
-                && (visibility == 2
-                    || (!attribute.common.invisible && !attribute.flags.invisible))
-        })
+        .filter(|attribute| attribute_is_render_visible(document, visibility, attribute))
         .map(|attribute| {
             let mut attribute = attribute.clone();
-            if (block_scale - 1.0).abs() > 1.0e-6 {
-                attribute.height *= block_scale;
-                attribute.insertion_point = scale_about(attribute.insertion_point);
-                attribute.alignment_point = scale_about(attribute.alignment_point);
-            }
+            scale_attribute_for_insert(insert, &mut attribute, block_scale);
             EntityType::AttributeEntity(attribute)
         })
         .collect()
@@ -368,6 +428,8 @@ pub(crate) fn append_insert_attribute_wires(
 mod tests {
     use super::*;
     use acadrust::entities::AttributeEntity;
+    use acadrust::tables::Layer;
+    use acadrust::xdata::ExtendedDataRecord;
 
     fn attribute(tag: &str, x: f64, y: f64) -> AttributeEntity {
         let mut att = AttributeEntity::new(tag.to_string(), format!("{tag}-value"));
@@ -380,6 +442,14 @@ mod tests {
         let mut ins = Insert::new("BLOCK", Vector3::new(0.0, 0.0, 0.0));
         ins.attributes = attributes;
         ins
+    }
+
+    fn document_with_layers(layers: Vec<Layer>) -> CadDocument {
+        let mut document = CadDocument::new();
+        for layer in layers {
+            document.layers.add_or_replace(layer);
+        }
+        document
     }
 
     /// #1259: selecting a block showed only the insertion grip, so there was no
@@ -443,5 +513,53 @@ mod tests {
         apply_grip(&mut ins, g[1].id, GripApply::Absolute(glam::DVec3::new(50.0, 50.0, 0.0)));
         assert_eq!(ins.attributes[3].insertion_point, Vector3::new(50.0, 50.0, 0.0));
         assert_eq!(ins.attributes[0].insertion_point, Vector3::new(1.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn visible_attribute_grips_match_render_visibility() {
+        let mut off_layer = Layer::new("OFF");
+        off_layer.flags.off = true;
+        let mut frozen_layer = Layer::new("FROZEN");
+        frozen_layer.flags.frozen = true;
+        let mut document = document_with_layers(vec![off_layer, frozen_layer]);
+        document.header.attribute_visibility = 1;
+
+        let mut common_invisible = attribute("TAG_COMMON_INVISIBLE", 1.0, 1.0);
+        common_invisible.common.invisible = true;
+        let mut off = attribute("TAG_OFF", 2.0, 2.0);
+        off.common.layer = "OFF".into();
+        let mut frozen = attribute("TAG_FROZEN", 3.0, 3.0);
+        frozen.common.layer = "FROZEN".into();
+        let visible = attribute("TAG_VISIBLE", 4.0, 4.0);
+        let ins = block_with(vec![common_invisible, off, frozen, visible]);
+
+        let grips = visible_attribute_grips(&document, &ins, 1.0);
+
+        assert_eq!(grips.len(), 2, "base grip plus only rendered attributes");
+        assert_eq!(grips[1].id, ATTRIBUTE_GRIP_BASE + 3);
+        assert_eq!(grips[1].world, glam::DVec3::new(4.0, 4.0, 0.0));
+
+        document.header.attribute_visibility = 0;
+        assert_eq!(
+            visible_attribute_grips(&document, &ins, 1.0).len(),
+            1,
+            "ATTMODE=0 should hide every attribute grip",
+        );
+    }
+
+    #[test]
+    fn visible_attribute_grips_scale_annotative_attributes() {
+        let document = CadDocument::new();
+        let mut insert = block_with(vec![attribute("TAG", 11.0, 10.0)]);
+        insert.insert_point = Vector3::new(10.0, 10.0, 0.0);
+        insert
+            .common
+            .extended_data
+            .add_record(ExtendedDataRecord::new("AcAnnotativeData"));
+
+        let grips = visible_attribute_grips(&document, &insert, 2.0);
+
+        assert_eq!(grips.len(), 2);
+        assert_eq!(grips[1].world, glam::DVec3::new(12.0, 10.0, 0.0));
     }
 }

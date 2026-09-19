@@ -125,6 +125,7 @@ pub(crate) fn visible_attribute_grips(
                     || attribute.lock_position
                     || attribute.flags.locked_position
                     || !attribute_is_render_visible(document, visibility, attribute)
+                {
                     return None;
                 }
                 let mut attribute = attribute.clone();

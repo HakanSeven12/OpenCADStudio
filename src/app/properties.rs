@@ -2683,6 +2683,13 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                     annotation_scale_handle,
                 );
                 let mut entity_grips = dispatch::grips(contextual.as_ref());
+                if let acadrust::EntityType::Insert(insert) = contextual.as_ref() {
+                    entity_grips = crate::entities::insert::visible_attribute_grips(
+                        &self.tabs[i].scene.document,
+                        insert,
+                        self.tabs[i].scene.annotation_scale,
+                    );
+                }
                 if crate::scene::model::solid_history::has_specialized_primitive_properties(
                     &self.tabs[i].scene.document,
                     handle,

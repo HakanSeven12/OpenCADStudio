@@ -780,7 +780,11 @@ bg={bg_ms:.1}ms n={view_count}"
                         .chain(self.otrack_cross)
                         .filter_map(|(base, _dir)| {
                             let b = ost_project(base, view_rot, eye, ob);
-                            (b.x.is_finite() && a.x.is_finite()).then_some((b, a))
+                            (b.x.is_finite()
+                                && b.y.is_finite()
+                                && a.x.is_finite()
+                                && a.y.is_finite())
+                                .then_some((b, a))
                         })
                         .collect()
                 }

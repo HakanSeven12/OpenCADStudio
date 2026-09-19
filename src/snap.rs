@@ -170,6 +170,7 @@ pub(crate) fn wire_source(wire: &WireModel) -> Option<DimensionAssociationSource
 /// Object-snap-tracking alignment: the cursor projected onto a ray from an
 /// acquired tracking point.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct OtrackHit {
     /// Cursor projected onto the tracking ray.
     pub aligned: DVec3,

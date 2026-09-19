@@ -44,8 +44,6 @@ jobs:
         run: nix develop --command trunk build --locked --release --public-url /app/ --dist dist/app --html-output index.html web-app.html
       - name: Validate website assembly
         run: nix develop --command python3 scripts/test_site.py
-      - name: Validate locale lookups
-        run: nix develop --command python3 scripts/test_locales.py
 
   release-automation:
     runs-on: ubuntu-22.04

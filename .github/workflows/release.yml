@@ -163,8 +163,13 @@ jobs:
           test -n "$VERSION"
           rm -rf .snap-build
           mkdir -p .snap-build
-          cp linux-payload.tar.gz .snap-build/
-          cp -R snap .snap-build/
+          shopt -s dotglob
+          for entry in * .*; do
+            case "$entry" in
+              .|..|.git|.snap-build) continue ;;
+            esac
+            cp -a "$entry" .snap-build/
+          done
           sed -i "s/^version: .*/version: '$VERSION'/" .snap-build/snap/snapcraft.yaml
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           EOF

@@ -99,12 +99,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
-          path: website
+          path: website-source
 
       - name: Validate website
         run: |
           SCRIPT=$(cat <<'EOF'
-          cd "$GITHUB_WORKSPACE/website"
+          cd "$GITHUB_WORKSPACE/website-source"
           python3 scripts/test_site.py
           EOF
           )
@@ -113,8 +113,8 @@ jobs:
       - name: Assemble landing page
         run: |
           SCRIPT=$(cat <<'EOF'
-          cd "$GITHUB_WORKSPACE/website"
-          sh "$GITHUB_WORKSPACE/website/scripts/assemble-site.sh" "$GITHUB_WORKSPACE/dist"
+          cd "$GITHUB_WORKSPACE/website-source"
+          sh "$GITHUB_WORKSPACE/website-source/scripts/assemble-site.sh" "$GITHUB_WORKSPACE/dist"
           EOF
           )
           nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
@@ -122,7 +122,7 @@ jobs:
       - name: Record website source
         run: |
           SCRIPT=$(cat <<'EOF'
-          cd "$GITHUB_WORKSPACE/website"
+          cd "$GITHUB_WORKSPACE/website-source"
           git rev-parse HEAD > "$GITHUB_WORKSPACE/dist/site-version.txt"
           EOF
           )
@@ -270,7 +270,7 @@ jobs:
       - name: Generate project growth charts
         env:
           GITHUB_TOKEN: ${{ secrets.OCS_GITHUB_TOKEN }}
-        run: nix develop --command python3 website/scripts/generate-star-history.py --output-dir dist
+        run: nix develop --command python3 website-source/scripts/generate-star-history.py --output-dir dist
 
       # Browsers cannot reliably fetch YouTube playlist/oEmbed responses because
       # of CORS. Build a same-origin listing and thumbnail directory for the

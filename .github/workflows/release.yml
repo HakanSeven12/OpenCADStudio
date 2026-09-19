@@ -154,14 +154,18 @@ jobs:
           name: linux-payload
           path: .
 
-      - name: Set package version
+      - name: Prepare snap project
         id: package
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           SCRIPT=$(cat <<'EOF'
           test -n "$VERSION"
-          sed -i "s/^version: .*/version: '$VERSION'/" snap/snapcraft.yaml
+          rm -rf .snap-build
+          mkdir -p .snap-build
+          cp linux-payload.tar.gz .snap-build/
+          cp -R snap .snap-build/
+          sed -i "s/^version: .*/version: '$VERSION'/" .snap-build/snap/snapcraft.yaml
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           EOF
           )
@@ -170,9 +174,8 @@ jobs:
       - name: Build snap
         id: snapcraft
         uses: snapcore/action-build@v1
-
-      - name: Restore snap manifest
-        run: git checkout -- snap/snapcraft.yaml
+        with:
+          path: .snap-build
 
       - name: Normalize snap package name
         id: snap_asset

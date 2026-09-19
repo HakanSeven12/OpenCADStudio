@@ -47,6 +47,7 @@ jobs:
 
       - name: Validate package versions
         id: version
+        shell: bash
         run: nix develop --command python3 scripts/release.py versions --tag "$RELEASE_TAG"
 
       - name: Build
@@ -136,6 +137,7 @@ jobs:
 
       - name: Validate package versions
         id: version
+        shell: bash
         run: nix develop --command python3 scripts/release.py versions --tag "$RELEASE_TAG"
 
       - name: Download shared Linux payload
@@ -146,10 +148,10 @@ jobs:
 
       - name: Set package version
         id: package
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
           nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
+          VERSION=$(python3 scripts/release.py versions --tag "$RELEASE_TAG" | sed -n 's/^version=//p')
+          test -n "$VERSION"
           sed -i "s/^version: .*/version: '$VERSION'/" snap/snapcraft.yaml
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           EOF

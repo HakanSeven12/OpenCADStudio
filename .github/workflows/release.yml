@@ -161,7 +161,7 @@ jobs:
         uses: snapcore/action-build@v1
 
       - name: Normalize snap package name
-        id: snap_package
+        id: snap_asset
         env:
           SNAP: ${{ steps.snapcraft.outputs.snap }}
           VERSION: ${{ steps.package.outputs.version }}
@@ -176,7 +176,7 @@ jobs:
         if: env.RELEASE_TAG != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SNAP: ${{ steps.snap_package.outputs.snap }}
+          SNAP: ${{ steps.snap_asset.outputs.snap }}
         run: nix develop --command gh release upload "${{ env.RELEASE_TAG }}" "$SNAP" --clobber
 
       - name: Upload snap as workflow artifact
@@ -184,14 +184,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: OpenCADStudio-v${{ steps.package.outputs.version }}-linux-x86_64-snap
-          path: ${{ steps.snap_package.outputs.snap }}
+          path: ${{ steps.snap_asset.outputs.snap }}
           if-no-files-found: error
 
       - name: Publish snap to edge
         if: env.RELEASE_TAG != '' && env.SNAPCRAFT_STORE_CREDENTIALS != ''
         uses: snapcore/action-publish@v1
         with:
-          snap: ${{ steps.snap_package.outputs.snap }}
+          snap: ${{ steps.snap_asset.outputs.snap }}
           release: edge
 
   build-windows:

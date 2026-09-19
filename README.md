@@ -145,7 +145,7 @@ From that shell, run the same commands CI does, for example:
 
 ```bash
 cargo fmt --all --check
-cargo test --locked --workspace --lib
+cargo test --locked --workspace
 trunk build --locked --release --public-url /app/ --dist dist/app --html-output index.html web-app.html
 python3 scripts/test_site.py
 python3 scripts/test_release.py

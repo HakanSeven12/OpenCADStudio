@@ -31,7 +31,7 @@ jobs:
       - name: Run clippy
         run: nix develop --command cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Run library tests
-        run: nix develop --command cargo test --locked --workspace --lib
+        run: nix develop --command cargo test --locked --workspace
 
   web:
     runs-on: ubuntu-22.04

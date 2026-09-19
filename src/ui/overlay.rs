@@ -962,7 +962,7 @@ pub fn selection_overlay<'a>(
     grip_clip: Option<iced::Rectangle>,
     ucs_icons: Vec<UcsIconParams>,
     ost_points: Vec<OstTrackPoint>,
-    otrack_line: Option<(Point, Point)>,
+    otrack_lines: Vec<(Point, Point)>,
     parallel_ref_marker: Option<Point>,
     show_viewcube: bool,
     dividers: Vec<iced::Rectangle>,
@@ -988,7 +988,7 @@ pub fn selection_overlay<'a>(
         grip_clip,
         ucs_icons,
         ost_points,
-        otrack_line,
+        otrack_lines,
         parallel_ref_marker,
         show_viewcube,
         dividers,
@@ -1029,11 +1029,12 @@ struct SelectionCanvas {
     /// entry carries hover/selected (grips).
     ucs_icons: Vec<UcsIconParams>,
     ost_points: Vec<OstTrackPoint>,
-    /// Active OTRACK alignment: (acquired tracking point, locked cursor), both
-    /// in screen space. Drawn as a dashed guide extended a little past the
-    /// cursor so the extension / tracking line the user snapped to is visible.
-    /// (#219)
-    otrack_line: Option<(Point, Point)>,
+    /// Active OTRACK alignments, each (acquired tracking point, locked cursor)
+    /// in screen space. Drawn as dashed guides extended a little past the
+    /// cursor so the extension / tracking line the user snapped to is visible
+    /// (#219). An intersection lock contributes both of its crossing vectors,
+    /// so the point reads as their meeting rather than a lone guide (#1313).
+    otrack_lines: Vec<(Point, Point)>,
     /// The acquired Parallel-snap reference point (screen), marked with a small
     /// ∥ glyph so the user sees which line is the parallel reference. (#277)
     parallel_ref_marker: Option<Point>,
@@ -2013,7 +2014,7 @@ impl canvas::Program<Message> for SelectionCanvas {
         // real angle from the acquired point through the lock and a little
         // beyond, dashed so it reads as a construction guide. This covers the
         // ortho (0°/90°), polar, and edge-extension cases uniformly (#219).
-        if let Some((base, tip)) = self.otrack_line {
+        for &(base, tip) in &self.otrack_lines {
             let dx = tip.x - base.x;
             let dy = tip.y - base.y;
             let len = (dx * dx + dy * dy).sqrt();

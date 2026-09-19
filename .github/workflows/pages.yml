@@ -99,7 +99,13 @@ jobs:
           path: website
 
       - name: Validate website
-        run: nix develop --command python3 "$GITHUB_WORKSPACE/website/scripts/test_site.py"
+        run: |
+          SCRIPT=$(cat <<'EOF'
+          cd "$GITHUB_WORKSPACE/website"
+          python3 scripts/test_site.py
+          EOF
+          )
+          nix develop --command bash --noprofile --norc -euo pipefail -c "$SCRIPT"
 
       - name: Assemble landing page
         run: |

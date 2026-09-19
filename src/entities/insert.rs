@@ -121,9 +121,10 @@ pub(crate) fn visible_attribute_grips(
             .iter()
             .enumerate()
             .filter_map(|(i, attribute)| {
-                if !attribute_is_movable(attribute)
+                if attribute.flags.constant
+                    || attribute.lock_position
+                    || attribute.flags.locked_position
                     || !attribute_is_render_visible(document, visibility, attribute)
-                {
                     return None;
                 }
                 let mut attribute = attribute.clone();

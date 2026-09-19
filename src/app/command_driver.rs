@@ -104,6 +104,7 @@ impl OpenCADStudio {
         self.snapper.from_point = None;
         self.snapper.clear_tracking();
         self.otrack_active = None;
+        self.otrack_cross = None;
         self.otrack_kind = None;
         self.axis_lock_dir = None;
         self.dyn_user_reshaped = false;

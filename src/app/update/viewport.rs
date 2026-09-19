@@ -1479,6 +1479,7 @@ impl OpenCADStudio {
                 Some((base, dir))
             });
             self.otrack_active = otrack_hit.map(|hit| (hit.base, hit.dir)).or(drafting_guide);
+            self.otrack_cross = otrack_hit.and_then(|hit| hit.cross);
 
             self.otrack_kind = otrack_hit.map(|hit| hit.kind);
 
@@ -2190,6 +2191,7 @@ impl OpenCADStudio {
                 None
             };
             self.otrack_active = otrack_hit.map(|h| (h.base, h.dir));
+            self.otrack_cross = otrack_hit.and_then(|h| h.cross);
             self.otrack_kind = otrack_hit.map(|h| h.kind);
 
             // Parallel snap: with nothing else snapped or tracked, lock
@@ -2208,6 +2210,7 @@ impl OpenCADStudio {
                         (self.last_point, self.snapper.parallel_ref)
                     {
                         self.otrack_active = Some((base, dir.as_dvec3()));
+                        self.otrack_cross = None;
                     }
                     self.tabs[i].snap_result = Some(par);
                 }

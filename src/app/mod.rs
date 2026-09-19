@@ -501,6 +501,11 @@ pub(super) struct OpenCADStudio {
     /// cursor is on a tracking ray. Lets a typed distance place a point along
     /// the ray from the tracking point (issue #69). `None` when not aligned.
     otrack_active: Option<(glam::DVec3, glam::DVec3)>,
+    /// The vector `otrack_active` crosses, when the lock is the meeting of two
+    /// tracking vectors. Drawn beside the first so the user can see that the
+    /// point is their intersection; a typed distance still runs along
+    /// `otrack_active` alone. `None` for a single-ray alignment. (#1313)
+    otrack_cross: Option<(glam::DVec3, glam::DVec3)>,
     /// Active OTRACK ray kind, separate from typed-distance geometry.
     otrack_kind: Option<crate::snap::TrackingKind>,
     /// Whether Tangent snap was enabled before a tangent-pick command started.
@@ -3849,6 +3854,7 @@ impl OpenCADStudio {
             annotation_auto_scale: -4,
             last_saved_config: None,
             otrack_active: None,
+            otrack_cross: None,
             otrack_kind: None,
             clean_screen: false,
             quick_properties: false,

@@ -33,9 +33,6 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write
-    defaults:
-      run:
-        shell: 'nix develop --command bash --noprofile --norc -euo pipefail {0}'
 
     steps:
       - name: Checkout
@@ -50,15 +47,16 @@ jobs:
 
       - name: Validate package versions
         id: version
-        run: python3 scripts/release.py versions --tag "$RELEASE_TAG"
+        run: nix develop --command python3 scripts/release.py versions --tag "$RELEASE_TAG"
 
       - name: Build
         env:
           OCS_PATREON_TOKEN: ${{ secrets.OCS_PATREON_TOKEN }}
-        run: cargo build --locked --release
+        run: nix develop --command cargo build --locked --release
 
       - name: Prepare AppDir
         run: |
+          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
@@ -68,9 +66,10 @@ jobs:
           cp packaging/io.github.HakanSeven12.OpenCadStudio.metainfo.xml AppDir/usr/share/metainfo/
           rsvg-convert -w 256 -h 256 assets/logo.svg \
             -o AppDir/usr/share/icons/hicolor/256x256/apps/io.github.HakanSeven12.OpenCadStudio.png
+          EOF
 
       - name: Pack shared Linux payload
-        run: tar -C AppDir -czf linux-payload.tar.gz usr
+        run: nix develop --command tar -C AppDir -czf linux-payload.tar.gz usr
 
       - name: Upload shared Linux payload
         uses: actions/upload-artifact@v4
@@ -82,28 +81,34 @@ jobs:
 
       - name: Download linuxdeploy
         run: |
+          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           chmod +x linuxdeploy-x86_64.AppImage
+          EOF
 
       - name: Build AppImage
         env:
           APPIMAGE_EXTRACT_AND_RUN: 1
         run: |
+          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
           ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
             --desktop-file AppDir/usr/share/applications/io.github.HakanSeven12.OpenCadStudio.desktop \
             --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/io.github.HakanSeven12.OpenCadStudio.png \
             --output appimage
           mv Open*CAD*Studio*.AppImage OpenCADStudio.AppImage
+          EOF
 
       - name: Upload AppImage to release
         if: env.RELEASE_TAG != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
           ASSET=OpenCADStudio-${{ env.RELEASE_TAG }}-linux-x86_64.AppImage
           mv OpenCADStudio.AppImage "$ASSET"
           gh release upload ${{ env.RELEASE_TAG }} "$ASSET" --clobber --repo ${{ github.repository }}
+          EOF
 
   build-snap:
     needs: build-appimage
@@ -115,9 +120,6 @@ jobs:
     permissions:
       actions: read
       contents: write
-    defaults:
-      run:
-        shell: 'nix develop --command bash --noprofile --norc -euo pipefail {0}'
     env:
       SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
 
@@ -134,7 +136,7 @@ jobs:
 
       - name: Validate package versions
         id: version
-        run: python3 scripts/release.py versions --tag "$RELEASE_TAG"
+        run: nix develop --command python3 scripts/release.py versions --tag "$RELEASE_TAG"
 
       - name: Download shared Linux payload
         uses: actions/download-artifact@v4
@@ -147,8 +149,10 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
           sed -i "s/^version: .*/version: '$VERSION'/" snap/snapcraft.yaml
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          EOF
 
       - name: Build snap
         id: snapcraft
@@ -160,16 +164,18 @@ jobs:
           SNAP: ${{ steps.snapcraft.outputs.snap }}
           VERSION: ${{ steps.package.outputs.version }}
         run: |
+          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
           PACKAGE="OpenCADStudio-v${VERSION}-linux-x86_64.snap"
           mv "$SNAP" "$PACKAGE"
           echo "snap=$PACKAGE" >> "$GITHUB_OUTPUT"
+          EOF
 
       - name: Upload snap to release
         if: env.RELEASE_TAG != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SNAP: ${{ steps.snap_package.outputs.snap }}
-        run: gh release upload "${{ env.RELEASE_TAG }}" "$SNAP" --clobber
+        run: nix develop --command gh release upload "${{ env.RELEASE_TAG }}" "$SNAP" --clobber
 
       - name: Upload snap as workflow artifact
         if: env.RELEASE_TAG == ''
@@ -539,9 +545,6 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: read
-    defaults:
-      run:
-        shell: 'nix develop --command bash --noprofile --norc -euo pipefail {0}'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -550,4 +553,4 @@ jobs:
       - name: Verify native release assets and notes
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/release.py verify-native --tag "$RELEASE_TAG"
+        run: nix develop --command python3 scripts/release.py verify-native --tag "$RELEASE_TAG"

@@ -33,9 +33,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: 'nix develop --command bash --noprofile --norc -euo pipefail {0}'
     outputs:
       tag: ${{ steps.source.outputs.tag }}
       commit: ${{ steps.source.outputs.commit }}
@@ -80,6 +77,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ steps.source.outputs.tag }}
         run: |
+          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
           git merge-base --is-ancestor "$RELEASE_TAG" HEAD
           if [ -f scripts/release.py ]; then
             python3 scripts/release.py versions --tag "$RELEASE_TAG"
@@ -87,9 +85,10 @@ jobs:
             VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
             test "v$VERSION" = "$RELEASE_TAG"
           fi
+          EOF
 
       - name: Build web bundle
-        run: trunk build --locked --release --public-url /app/ --dist dist/app --html-output index.html web-app.html
+        run: nix develop --command trunk build --locked --release --public-url /app/ --dist dist/app --html-output index.html web-app.html
 
       - name: Check out current website
         uses: actions/checkout@v4
@@ -99,27 +98,29 @@ jobs:
 
       - name: Validate website
         working-directory: website
-        run: python3 scripts/test_site.py
+        run: nix develop --command python3 scripts/test_site.py
 
       - name: Assemble landing page
         working-directory: website
-        run: sh scripts/assemble-site.sh "$GITHUB_WORKSPACE/dist"
+        run: nix develop --command sh scripts/assemble-site.sh "$GITHUB_WORKSPACE/dist"
 
       - name: Record website source
         working-directory: website
-        run: git rev-parse HEAD > "$GITHUB_WORKSPACE/dist/site-version.txt"
+        run: nix develop --command bash --noprofile --norc -euo pipefail -c 'git rev-parse HEAD > "$GITHUB_WORKSPACE/dist/site-version.txt"'
 
       - name: Record release version and source
         env:
           RELEASE_TAG: ${{ steps.source.outputs.tag }}
           RELEASE_COMMIT: ${{ steps.source.outputs.commit }}
         run: |
+          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
           jq -n --arg version "${RELEASE_TAG#v}" --arg commit "$RELEASE_COMMIT" \
             '{version: $version, commit: $commit}' > dist/app/release.json
+          EOF
 
       # GitHub Pages runs Jekyll, which ignores files; opt out so the
       # wasm-bindgen output is served verbatim.
-      - run: touch dist/.nojekyll
+      - run: nix develop --command touch dist/.nojekyll
 
       # The web app can't call the Patreon API directly (CORS + the token would
       # be exposed in the bundle), so generate the supporters list server-side
@@ -129,7 +130,7 @@ jobs:
         env:
           OCS_PATREON_TOKEN: ${{ secrets.OCS_PATREON_TOKEN }}
         run: |
-          python3 - <<'PY'
+          nix develop --command python3 - <<'PY'
           import json
           import os
           import urllib.parse
@@ -243,7 +244,7 @@ jobs:
       - name: Generate project growth charts
         env:
           GITHUB_TOKEN: ${{ secrets.OCS_GITHUB_TOKEN }}
-        run: python3 website/scripts/generate-star-history.py --output-dir dist
+        run: nix develop --command python3 website/scripts/generate-star-history.py --output-dir dist
 
       # Browsers cannot reliably fetch YouTube playlist/oEmbed responses because
       # of CORS. Build a same-origin listing and thumbnail directory for the
@@ -251,7 +252,7 @@ jobs:
       # unavailable during deployment.
       - name: Generate videos.json
         run: |
-          python3 - <<'PY'
+          nix develop --command python3 - <<'PY'
           import json
           import re
           import shutil
@@ -314,6 +315,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          nix develop --command bash --noprofile --norc -euo pipefail <<'EOF'
           QUERY='
             query($owner: String!, $name: String!) {
               repository(owner: $owner, name: $name) {
@@ -358,6 +360,7 @@ jobs:
                   })' \
             > dist/app/discussions.json
           echo "discussions: $(jq 'length' dist/app/discussions.json)"
+          EOF
 
       - uses: actions/upload-pages-artifact@v3
         with:

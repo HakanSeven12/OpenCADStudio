@@ -23,41 +23,32 @@ jobs:
 
   rust:
     runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: 'nix develop --command bash --noprofile --norc -euo pipefail {0}'
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
       - name: Check formatting
-        run: cargo fmt --all --check
+        run: nix develop --command cargo fmt --all --check
       - name: Run clippy
-        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+        run: nix develop --command cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Run library tests
-        run: cargo test --locked --workspace --lib
+        run: nix develop --command cargo test --locked --workspace --lib
 
   web:
     runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: 'nix develop --command bash --noprofile --norc -euo pipefail {0}'
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
       - name: Build web bundle
-        run: trunk build --locked --release --public-url /app/ --dist dist/app --html-output index.html web-app.html
+        run: nix develop --command trunk build --locked --release --public-url /app/ --dist dist/app --html-output index.html web-app.html
       - name: Validate website assembly
-        run: python3 scripts/test_site.py
+        run: nix develop --command python3 scripts/test_site.py
       - name: Validate locale lookups
-        run: python3 scripts/test_locales.py
+        run: nix develop --command python3 scripts/test_locales.py
 
   release-automation:
     runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: 'nix develop --command bash --noprofile --norc -euo pipefail {0}'
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
       - name: Test release automation
-        run: python3 scripts/test_release.py
+        run: nix develop --command python3 scripts/test_release.py

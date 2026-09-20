@@ -96,6 +96,13 @@ pub enum IconId {
     Save,
     SaveAs,
     Print,
+    /// Existing built-in ribbon artwork promoted into the shared catalog.
+    /// The command ID gives the embedded SVG a stable identity while built-in
+    /// modules are migrated away from carrying duplicate asset references.
+    Ribbon {
+        command: &'static str,
+        svg: &'static [u8],
+    },
 }
 
 /// Resolve an icon ID to its source artwork.
@@ -145,6 +152,7 @@ pub const fn bytes(id: IconId) -> &'static [u8] {
         Save => SAVE,
         SaveAs => SAVE_AS,
         Print => PRINT,
+        Ribbon { svg, .. } => svg,
     }
 }
 

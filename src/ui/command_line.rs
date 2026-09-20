@@ -46,6 +46,9 @@ pub fn history_max_height(window_height: f32) -> f32 {
 
 /// How many autocomplete matches the suggestion popup shows at once.
 const AUTOCOMPLETE_LIMIT: usize = 8;
+/// Width shared by command icons and their empty placeholder so suggestion
+/// labels stay aligned even when only some commands have catalog artwork.
+const AUTOCOMPLETE_ICON_SIZE: f32 = 14.0;
 
 fn cmd_input_id() -> iced::widget::Id {
     iced::widget::Id::new(CMD_INPUT_ID)
@@ -779,11 +782,18 @@ impl CommandLine {
                 for (idx, cmd) in matches.iter().enumerate() {
                     let is_selected = idx == cursor;
                     let label = crate::ui::command_presentation::label(cmd, "");
-                    let mut suggestion = row![].spacing(6).align_y(iced::Center);
-                    if let Some(icon) = crate::ui::command_presentation::icon(cmd) {
-                        suggestion = suggestion
-                            .push(crate::ui::icon_catalog::render::<Message>(icon, 14.0, true));
-                    }
+                    let icon_slot: Element<'_, Message> =
+                        if let Some(icon) = crate::ui::command_presentation::icon(cmd) {
+                            crate::ui::icon_catalog::render::<Message>(
+                                icon,
+                                AUTOCOMPLETE_ICON_SIZE,
+                                true,
+                            )
+                        } else {
+                            Space::new()
+                                .width(Length::Fixed(AUTOCOMPLETE_ICON_SIZE))
+                                .into()
+                        };
                     let labels = if label.eq_ignore_ascii_case(cmd) {
                         column![text(cmd.clone()).size(11)]
                     } else {
@@ -799,7 +809,7 @@ impl CommandLine {
                         ]
                         .spacing(0)
                     };
-                    suggestion = suggestion.push(labels);
+                    let suggestion = row![icon_slot, labels].spacing(6).align_y(iced::Center);
                     let suggestion = button(suggestion)
                         .on_press(Message::CommandSuggestionPick(cmd.clone()))
                         .width(Length::Fill)

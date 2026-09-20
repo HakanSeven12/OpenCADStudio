@@ -39,6 +39,11 @@ pub(crate) fn tooltip_style(theme: &Theme) -> container::Style {
     widgets::tip_style(theme)
 }
 
+pub(crate) fn builtin_extension_command_presentations(
+) -> Vec<(&'static str, &'static str, &'static [u8], &'static str)> {
+    draw_panel::command_presentations()
+}
+
 // ── Ribbon state ───────────────────────────────────────────────────────────
 
 pub struct Ribbon {

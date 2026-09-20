@@ -126,6 +126,27 @@ const PANELS: &[Panel] = &[
     },
 ];
 
+pub(super) fn command_presentations(
+) -> Vec<(&'static str, &'static str, &'static [u8], &'static str)> {
+    PANELS
+        .iter()
+        .flat_map(|panel| {
+            let category = if panel.id == "modify_extension" {
+                "modify"
+            } else {
+                "draw"
+            };
+            panel.tools.iter().flat_map(move |tool| {
+                std::iter::once((tool.command, tool.label, tool.icon, category)).chain(
+                    tool.options
+                        .iter()
+                        .map(move |(command, label)| (*command, *label, tool.icon, category)),
+                )
+            })
+        })
+        .collect()
+}
+
 fn panel_for_dropdown(id: &str) -> Option<Panel> {
     PANELS.iter().copied().find(|panel| {
         panel.id == id

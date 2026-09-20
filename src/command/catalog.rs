@@ -94,7 +94,16 @@ impl CommandDescriptor {
     }
 
     pub fn translated_description(&self) -> Option<Cow<'static, str>> {
-        self.description_source.map(crate::i18n::translate)
+        self.description_source.map(|source| {
+            if source == RIBBON_DESCRIPTION_TEMPLATE {
+                crate::i18n::translate_args(
+                    source,
+                    &[("label", self.translated_label().into_owned())],
+                )
+            } else {
+                crate::i18n::translate(source)
+            }
+        })
     }
 }
 
@@ -107,6 +116,51 @@ pub struct Coverage {
     pub with_icons: usize,
     pub aliases: usize,
     pub validation_errors: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CoverageReport {
+    pub summary: Coverage,
+    pub derived_commands: Vec<&'static str>,
+    pub missing_descriptions: Vec<&'static str>,
+    pub missing_icons: Vec<&'static str>,
+}
+
+impl CoverageReport {
+    pub fn render_text(&self) -> String {
+        fn line(label: &str, commands: &[&str]) -> String {
+            if commands.is_empty() {
+                format!("{label}: none\n")
+            } else {
+                format!("{label} ({}): {}\n", commands.len(), commands.join(", "))
+            }
+        }
+
+        let mut output = format!(
+            "Command metadata coverage\n\
+             canonical: {}\n\
+             authored: {}\n\
+             derived: {}\n\
+             descriptions: {}\n\
+             icons: {}\n\
+             aliases: {}\n\
+             validation errors: {}\n",
+            self.summary.canonical_commands,
+            self.summary.authored_descriptors,
+            self.summary.derived_descriptors,
+            self.summary.with_descriptions,
+            self.summary.with_icons,
+            self.summary.aliases,
+            self.summary.validation_errors,
+        );
+        output.push_str(&line("Derived commands", &self.derived_commands));
+        output.push_str(&line(
+            "Commands without descriptions",
+            &self.missing_descriptions,
+        ));
+        output.push_str(&line("Commands without icons", &self.missing_icons));
+        output
+    }
 }
 
 pub struct CommandCatalog {
@@ -126,6 +180,8 @@ impl CommandCatalog {
                 .entry(id)
                 .or_insert_with(|| derived_descriptor(id));
         }
+
+        apply_builtin_ribbon_metadata(&mut descriptors);
 
         let mut authored = Vec::from(CORE_METADATA);
         authored.extend(
@@ -256,6 +312,29 @@ impl CommandCatalog {
             validation_errors: self.validation_errors.len(),
         }
     }
+
+    pub fn coverage_report(&self) -> CoverageReport {
+        let mut derived_commands = Vec::new();
+        let mut missing_descriptions = Vec::new();
+        let mut missing_icons = Vec::new();
+        for descriptor in self.descriptors.values() {
+            if descriptor.metadata_quality == MetadataQuality::Derived {
+                derived_commands.push(descriptor.id);
+            }
+            if descriptor.description_source.is_none() {
+                missing_descriptions.push(descriptor.id);
+            }
+            if descriptor.icon.is_none() {
+                missing_icons.push(descriptor.id);
+            }
+        }
+        CoverageReport {
+            summary: self.coverage(),
+            derived_commands,
+            missing_descriptions,
+            missing_icons,
+        }
+    }
 }
 
 static CATALOG: OnceLock<CommandCatalog> = OnceLock::new();
@@ -270,6 +349,10 @@ pub fn descriptor(command: &str) -> Option<&'static CommandDescriptor> {
 
 pub fn canonical_id(command: &str) -> Option<&'static str> {
     descriptor(command).map(|d| d.id)
+}
+
+pub fn coverage_report() -> CoverageReport {
+    all().coverage_report()
 }
 
 fn normalize_command(command: &str) -> &str {
@@ -300,6 +383,163 @@ fn derived_descriptor(id: &'static str) -> CommandDescriptor {
         icon: icon_catalog::command_icon(id),
         category: CommandCategory::Utility,
         metadata_quality: MetadataQuality::Derived,
+    }
+}
+
+const RIBBON_DESCRIPTION_TEMPLATE: &str = "Runs the %{label} command.";
+
+/// Promote the labels, categories and SVGs already authored for built-in
+/// ribbon tools into catalog-owned descriptors. Core metadata below can still
+/// override these values with a more specific description or shared IconId.
+fn apply_builtin_ribbon_metadata(descriptors: &mut BTreeMap<&'static str, CommandDescriptor>) {
+    use crate::modules::{IconKind, ModuleEvent, RibbonItem, ToolDef};
+
+    fn category(module: &str) -> CommandCategory {
+        match module {
+            "draw" => CommandCategory::Draw,
+            "modify" => CommandCategory::Modify,
+            "parametric" => CommandCategory::Parametric,
+            "model" => CommandCategory::Model,
+            "insert" => CommandCategory::Insert,
+            "annotate" => CommandCategory::Annotate,
+            "view" | "layout" => CommandCategory::View,
+            "manage" => CommandCategory::Manage,
+            _ => CommandCategory::Utility,
+        }
+    }
+
+    fn ribbon_category(module: &str, group: &str) -> CommandCategory {
+        match group {
+            "Modify" => CommandCategory::Modify,
+            "Annotation" | "Text" | "Dimensions" | "Centerlines" | "Leaders" | "Tables"
+            | "Markup" | "Annotation Scaling" => CommandCategory::Annotate,
+            "Layers" => CommandCategory::Layers,
+            "Block" | "Reference" | "Point Cloud" | "Attributes" | "Import" | "Content" => {
+                CommandCategory::Insert
+            }
+            "Clipboard" => CommandCategory::Clipboard,
+            "Viewport" | "Viewport Tools" | "Navigate" | "Model Viewports" | "Visual Style"
+            | "Projection" | "Preset" | "Palettes" | "Interface" => CommandCategory::View,
+            "Plot" => CommandCategory::File,
+            "Properties" | "Groups" | "Measure" | "Customization" | "Cleanup" | "Application"
+            | "Manage" => CommandCategory::Manage,
+            _ => category(module),
+        }
+    }
+
+    fn canonical_surface_id(
+        descriptors: &BTreeMap<&'static str, CommandDescriptor>,
+        command: &str,
+        fallback: &'static str,
+    ) -> &'static str {
+        let base = normalize_command(command)
+            .split_whitespace()
+            .next()
+            .unwrap_or(fallback);
+        if let Some(metadata) = CORE_METADATA.iter().find(|metadata| {
+            metadata.id.eq_ignore_ascii_case(base)
+                || metadata
+                    .aliases
+                    .iter()
+                    .any(|alias| alias.eq_ignore_ascii_case(base))
+        }) {
+            return metadata.id;
+        }
+        descriptors
+            .keys()
+            .find(|id| id.eq_ignore_ascii_case(base))
+            .copied()
+            .unwrap_or(fallback)
+    }
+
+    fn promote(
+        descriptors: &mut BTreeMap<&'static str, CommandDescriptor>,
+        command: &str,
+        fallback_id: &'static str,
+        label: &'static str,
+        icon: IconKind,
+        category: CommandCategory,
+    ) {
+        let id = canonical_surface_id(descriptors, command, fallback_id);
+        let icon = match icon {
+            IconKind::Svg(svg) => {
+                icon_catalog::command_icon(command).or(Some(IconId::Ribbon { command: id, svg }))
+            }
+            IconKind::Glyph(_) => icon_catalog::command_icon(command),
+        };
+        let descriptor = descriptors
+            .entry(id)
+            .or_insert_with(|| derived_descriptor(id));
+        descriptor.label_source = label.to_string();
+        descriptor.description_source = Some(RIBBON_DESCRIPTION_TEMPLATE);
+        descriptor.icon = icon;
+        descriptor.category = category;
+        descriptor.metadata_quality = MetadataQuality::Authored;
+    }
+
+    fn promote_tool(
+        descriptors: &mut BTreeMap<&'static str, CommandDescriptor>,
+        tool: &ToolDef,
+        category: CommandCategory,
+    ) {
+        if let ModuleEvent::Command(command) = &tool.event {
+            promote(
+                descriptors,
+                command,
+                tool.id,
+                tool.label,
+                tool.icon,
+                category,
+            );
+        }
+    }
+
+    for module in crate::modules::registry::all_modules() {
+        for group in module.ribbon_groups() {
+            let category = ribbon_category(module.id(), group.title);
+            for item in &group.tools {
+                match item {
+                    RibbonItem::Tool(tool)
+                    | RibbonItem::LabeledTool(tool)
+                    | RibbonItem::LargeTool(tool) => {
+                        promote_tool(descriptors, tool, category);
+                    }
+                    RibbonItem::Dropdown { items, .. }
+                    | RibbonItem::LabeledDropdown { items, .. }
+                    | RibbonItem::LargeDropdown { items, .. } => {
+                        for (command, label, icon) in items {
+                            promote(descriptors, command, command, label, *icon, category);
+                        }
+                    }
+                    RibbonItem::ToolGrid { columns }
+                    | RibbonItem::StyleComboGroup { rows: columns, .. } => {
+                        for tool in columns.iter().flatten() {
+                            promote_tool(descriptors, tool, category);
+                        }
+                    }
+                    RibbonItem::LayerComboGroup { row2, row3 } => {
+                        for tool in row2.iter().chain(row3) {
+                            promote_tool(descriptors, tool, category);
+                        }
+                    }
+                    RibbonItem::PropertiesGroup { match_prop } => {
+                        promote_tool(descriptors, match_prop, category);
+                    }
+                }
+            }
+        }
+    }
+
+    for (command, label, svg, owner) in crate::ui::ribbon::builtin_extension_command_presentations()
+    {
+        promote(
+            descriptors,
+            command,
+            command,
+            label,
+            IconKind::Svg(svg),
+            category(owner),
+        );
     }
 }
 
@@ -721,6 +961,25 @@ mod tests {
     fn every_ribbon_command_resolves_to_a_descriptor() {
         use crate::modules::{ModuleEvent, RibbonItem};
         let mut missing = Vec::new();
+        let mut derived = Vec::new();
+        let mut missing_descriptions = Vec::new();
+        let mut missing_icons = Vec::new();
+        let mut check = |command: &str| match descriptor(command) {
+            None => missing.push(command.to_string()),
+            Some(descriptor) => {
+                if descriptor.metadata_quality == MetadataQuality::Derived {
+                    derived.push(command.to_string());
+                }
+                if descriptor.description_source.is_none() {
+                    missing_descriptions.push(command.to_string());
+                }
+                if crate::ui::command_presentation::icon(command)
+                    .is_none_or(|icon| crate::ui::icon_catalog::bytes(icon).is_empty())
+                {
+                    missing_icons.push(command.to_string());
+                }
+            }
+        };
         for module in crate::modules::registry::all_modules() {
             for group in module.ribbon_groups() {
                 for item in &group.tools {
@@ -729,44 +988,34 @@ mod tests {
                         | RibbonItem::LabeledTool(tool)
                         | RibbonItem::LargeTool(tool) => {
                             if let ModuleEvent::Command(command) = &tool.event {
-                                if descriptor(command).is_none() {
-                                    missing.push(command.clone());
-                                }
+                                check(command);
                             }
                         }
                         RibbonItem::Dropdown { items, .. }
                         | RibbonItem::LabeledDropdown { items, .. }
                         | RibbonItem::LargeDropdown { items, .. } => {
                             for (command, _, _) in items {
-                                if descriptor(command).is_none() {
-                                    missing.push((*command).to_string());
-                                }
+                                check(command);
                             }
                         }
                         RibbonItem::ToolGrid { columns }
                         | RibbonItem::StyleComboGroup { rows: columns, .. } => {
                             for tool in columns.iter().flatten() {
                                 if let ModuleEvent::Command(command) = &tool.event {
-                                    if descriptor(command).is_none() {
-                                        missing.push(command.clone());
-                                    }
+                                    check(command);
                                 }
                             }
                         }
                         RibbonItem::LayerComboGroup { row2, row3 } => {
                             for tool in row2.iter().chain(row3) {
                                 if let ModuleEvent::Command(command) = &tool.event {
-                                    if descriptor(command).is_none() {
-                                        missing.push(command.clone());
-                                    }
+                                    check(command);
                                 }
                             }
                         }
                         RibbonItem::PropertiesGroup { match_prop } => {
                             if let ModuleEvent::Command(command) = &match_prop.event {
-                                if descriptor(command).is_none() {
-                                    missing.push(command.clone());
-                                }
+                                check(command);
                             }
                         }
                     }
@@ -775,9 +1024,68 @@ mod tests {
         }
         missing.sort();
         missing.dedup();
+        derived.sort();
+        derived.dedup();
+        missing_descriptions.sort();
+        missing_descriptions.dedup();
+        missing_icons.sort();
+        missing_icons.dedup();
         assert!(
             missing.is_empty(),
             "ribbon commands missing descriptors: {missing:?}"
         );
+        assert!(
+            derived.is_empty(),
+            "built-in ribbon commands still using derived metadata: {derived:?}"
+        );
+        assert!(
+            missing_descriptions.is_empty(),
+            "built-in ribbon commands missing descriptions: {missing_descriptions:?}"
+        );
+        assert!(
+            missing_icons.is_empty(),
+            "built-in ribbon commands missing icons: {missing_icons:?}"
+        );
+    }
+
+    #[test]
+    fn coverage_report_lists_every_remaining_fallback() {
+        let report = coverage_report();
+        assert_eq!(
+            report.derived_commands.len(),
+            report.summary.derived_descriptors
+        );
+        assert!(report
+            .derived_commands
+            .windows(2)
+            .all(|ids| ids[0] <= ids[1]));
+        assert!(report.render_text().contains("Command metadata coverage"));
+    }
+
+    #[test]
+    fn every_builtin_extension_command_has_complete_metadata() {
+        for (command, _, _, _) in crate::ui::ribbon::builtin_extension_command_presentations() {
+            let descriptor = descriptor(command)
+                .unwrap_or_else(|| panic!("extension command {command} has no descriptor"));
+            assert_eq!(
+                descriptor.metadata_quality,
+                MetadataQuality::Authored,
+                "{command} still uses derived metadata"
+            );
+            assert!(
+                descriptor.description_source.is_some(),
+                "{command} has no description"
+            );
+            assert!(
+                crate::ui::command_presentation::icon(command)
+                    .is_some_and(|icon| { !crate::ui::icon_catalog::bytes(icon).is_empty() }),
+                "{command} has no icon"
+            );
+            assert_ne!(
+                descriptor.category,
+                CommandCategory::Utility,
+                "{command} has no extension-panel category"
+            );
+        }
     }
 }

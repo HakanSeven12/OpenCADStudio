@@ -10,9 +10,9 @@
 // With 2 pairs: translate + rotate (+ optional uniform scale to fit)
 // With 3 pairs: rigid 3D placement without scaling
 
+use crate::t;
 use acadrust::Handle;
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, EntityTransform};
 use crate::scene::model::wire_model::WireModel;
@@ -82,10 +82,7 @@ impl CadCommand for AlignCommand {
             AlignState::Src3 => "ALIGN  Specify 3rd source point or <continue>:".into(),
             AlignState::Dst3 => "ALIGN  Specify 3rd destination point:".into(),
             AlignState::AskScale => {
-                t!(
-                    "ALIGN  Scale objects based on alignment points? [Yes / No] <No>:"
-                )
-                .into_owned()
+                t!("ALIGN  Scale objects based on alignment points? [Yes / No] <No>:").into_owned()
             }
         }
     }
@@ -112,7 +109,9 @@ impl CadCommand for AlignCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
-        if !pt.is_finite() { return CmdResult::NeedPoint; }
+        if !pt.is_finite() {
+            return CmdResult::NeedPoint;
+        }
         match self.state {
             AlignState::Gathering => CmdResult::NeedPoint,
             AlignState::Src1 => {
@@ -144,7 +143,11 @@ impl CadCommand for AlignCommand {
                 CmdResult::NeedPoint
             }
             AlignState::Src3 => {
-                let frame = [self.src1.unwrap().to_array(), self.src2.unwrap().to_array(), pt.to_array()];
+                let frame = [
+                    self.src1.unwrap().to_array(),
+                    self.src2.unwrap().to_array(),
+                    pt.to_array(),
+                ];
                 if cadkernel::space::align_point_pairs(&frame, &frame, false).is_none() {
                     return CmdResult::NeedPoint;
                 }
@@ -207,9 +210,7 @@ impl CadCommand for AlignCommand {
         }
 
         match text.trim().to_ascii_lowercase().as_str() {
-            "y" | "yes" | "scale" => {
-                Some(self.compute_align(true))
-            }
+            "y" | "yes" | "scale" => Some(self.compute_align(true)),
 
             "n" | "no" | "don't scale" | "dont scale" | "noscale" => {
                 Some(self.compute_align(false))
@@ -219,34 +220,34 @@ impl CadCommand for AlignCommand {
         }
     }
     fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
-    fn line(a: DVec3, b: DVec3, name: &str) -> WireModel {
-        WireModel::solid(
-            name.into(),
-            vec![
-                [a.x as f32, a.y as f32, a.z as f32],
-                [b.x as f32, b.y as f32, b.z as f32],
-            ],
-            WireModel::CYAN,
-            false,
-        )
-    }
-
-    let mut out = Vec::new();
-
-    // Keep the first completed alignment pair visible while defining
-    // the second pair and while choosing the scale option.
-    if let (Some(src1), Some(dst1)) = (self.src1, self.dst1) {
-        match self.state {
-            AlignState::Src2
-            | AlignState::Dst2
-            | AlignState::Src3
-            | AlignState::Dst3
-            | AlignState::AskScale => {
-                out.push(line(src1, dst1, "align_pair_1"));
-            }
-            _ => {}
+        fn line(a: DVec3, b: DVec3, name: &str) -> WireModel {
+            WireModel::solid(
+                name.into(),
+                vec![
+                    [a.x as f32, a.y as f32, a.z as f32],
+                    [b.x as f32, b.y as f32, b.z as f32],
+                ],
+                WireModel::CYAN,
+                false,
+            )
         }
-    }
+
+        let mut out = Vec::new();
+
+        // Keep the first completed alignment pair visible while defining
+        // the second pair and while choosing the scale option.
+        if let (Some(src1), Some(dst1)) = (self.src1, self.dst1) {
+            match self.state {
+                AlignState::Src2
+                | AlignState::Dst2
+                | AlignState::Src3
+                | AlignState::Dst3
+                | AlignState::AskScale => {
+                    out.push(line(src1, dst1, "align_pair_1"));
+                }
+                _ => {}
+            }
+        }
 
         match self.state {
             // First source has been picked: stretch its reference line
@@ -288,28 +289,39 @@ impl CadCommand for AlignCommand {
 impl AlignCommand {
     fn compute_align(&self, with_scale: bool) -> CmdResult {
         let (Some(s1), Some(d1), Some(s2), Some(d2)) = (self.src1, self.dst1, self.src2, self.dst2)
-            else { return CmdResult::NeedPoint; };
+        else {
+            return CmdResult::NeedPoint;
+        };
         let mut source = vec![s1.to_array(), s2.to_array()];
         let mut target = vec![d1.to_array(), d2.to_array()];
         if let (Some(s3), Some(d3)) = (self.src3, self.dst3) {
             source.push(s3.to_array());
             target.push(d3.to_array());
         }
-        let Some(matrix) = cadkernel::space::align_point_pairs(&source, &target, with_scale)
-            else { return CmdResult::NeedPoint; };
-        CmdResult::TransformSelected(self.handles.clone(), EntityTransform::Affine(
-            acadrust::types::Transform::from_matrix(acadrust::types::Matrix4 { m: matrix }),
-        ))
+        let Some(matrix) = cadkernel::space::align_point_pairs(&source, &target, with_scale) else {
+            return CmdResult::NeedPoint;
+        };
+        CmdResult::TransformSelected(
+            self.handles.clone(),
+            EntityTransform::Affine(acadrust::types::Transform::from_matrix(
+                acadrust::types::Matrix4 { m: matrix },
+            )),
+        )
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["ALIGN"] });  // AlignCommand
-// ALIGNLEFT/ALIGNHCENTER/ALIGNRIGHT/ALIGNTOP/ALIGNVCENTER/ALIGNBOTTOM: one-shot
-// bounding-box alignment, dispatched directly (no CadCommand of their own) by
-// `OpenCADStudio::align_selected_bounds` in `src/app/commands/inquiry.rs`.
+inventory::submit!(crate::command::CommandRegistration { names: &["ALIGN"] }); // AlignCommand
+                                                                               // ALIGNLEFT/ALIGNHCENTER/ALIGNRIGHT/ALIGNTOP/ALIGNVCENTER/ALIGNBOTTOM: one-shot
+                                                                               // bounding-box alignment, dispatched directly (no CadCommand of their own) by
+                                                                               // `OpenCADStudio::align_selected_bounds` in `src/app/commands/inquiry.rs`.
 inventory::submit!(crate::command::CommandRegistration {
     names: &[
-        "ALIGNLEFT", "ALIGNHCENTER", "ALIGNRIGHT", "ALIGNTOP", "ALIGNVCENTER", "ALIGNBOTTOM",
+        "ALIGNLEFT",
+        "ALIGNHCENTER",
+        "ALIGNRIGHT",
+        "ALIGNTOP",
+        "ALIGNVCENTER",
+        "ALIGNBOTTOM",
     ],
 });
 
@@ -325,11 +337,17 @@ mod tests {
         let origin = DVec3::new(5.0, 6.0, 7.0);
         let target = [origin, origin + DVec3::Y, origin + DVec3::Z];
 
-        assert!(matches!(command.on_point(DVec3::splat(f64::NAN)), CmdResult::NeedPoint));
+        assert!(matches!(
+            command.on_point(DVec3::splat(f64::NAN)),
+            CmdResult::NeedPoint
+        ));
         for point in [source[0], target[0], source[1], target[1]] {
             assert!(matches!(command.on_point(point), CmdResult::NeedPoint));
         }
-        assert!(matches!(command.on_point(DVec3::X * 2.0), CmdResult::NeedPoint));
+        assert!(matches!(
+            command.on_point(DVec3::X * 2.0),
+            CmdResult::NeedPoint
+        ));
         assert!(matches!(command.state, AlignState::Src3));
         assert!(matches!(command.on_point(source[2]), CmdResult::NeedPoint));
 
@@ -350,8 +368,14 @@ mod tests {
     fn one_pair_still_translates_without_requesting_a_frame() {
         let handle = Handle::new(3);
         let mut command = AlignCommand::with_selection(vec![handle]);
-        assert!(matches!(command.on_point(DVec3::new(1.0, 2.0, 3.0)), CmdResult::NeedPoint));
-        assert!(matches!(command.on_point(DVec3::new(4.0, 6.0, 8.0)), CmdResult::NeedPoint));
+        assert!(matches!(
+            command.on_point(DVec3::new(1.0, 2.0, 3.0)),
+            CmdResult::NeedPoint
+        ));
+        assert!(matches!(
+            command.on_point(DVec3::new(4.0, 6.0, 8.0)),
+            CmdResult::NeedPoint
+        ));
         assert!(matches!(
             command.on_enter(),
             CmdResult::TransformSelected(handles, EntityTransform::Translate(delta))

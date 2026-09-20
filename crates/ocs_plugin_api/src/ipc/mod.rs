@@ -23,13 +23,13 @@ pub mod client;
 #[cfg(feature = "host")]
 pub mod protocol;
 #[cfg(feature = "host")]
+pub mod proxy;
+#[cfg(feature = "host")]
 pub mod server;
 #[cfg(feature = "host")]
 pub mod transport;
 #[cfg(feature = "host")]
 pub mod v4;
-#[cfg(feature = "host")]
-pub mod proxy;
 
 #[cfg(all(test, feature = "host"))]
 mod tests {

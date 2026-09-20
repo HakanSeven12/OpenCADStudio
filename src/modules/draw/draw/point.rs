@@ -3,9 +3,9 @@
 // Command:  POINT (PO)
 //   POINT commits one entity and exits. MULTIPOINT stays active.
 
+use crate::t;
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Point as CadPoint};
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -38,7 +38,11 @@ impl PointCommand {
 
 impl CadCommand for PointCommand {
     fn name(&self) -> &'static str {
-        if self.multiple { "MULTIPOINT" } else { "POINT" }
+        if self.multiple {
+            "MULTIPOINT"
+        } else {
+            "POINT"
+        }
     }
     fn prompt(&self) -> String {
         crate::t!("POINT  Specify point:").into_owned()
@@ -76,10 +80,11 @@ impl CadCommand for PointCommand {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["POINT", "MULTIPOINT"] });  // PointCommand
-// Point display style system variables + dialog.
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["POINT", "MULTIPOINT"]
+}); // PointCommand
+    // Point display style system variables + dialog.
 inventory::submit!(crate::command::CommandRegistration {
     names: &["PDMODE", "PDSIZE", "DDPTYPE"]
 });

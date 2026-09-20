@@ -34,7 +34,6 @@ impl DeviceCapabilities {
     pub fn supports_batched_hatch(self) -> bool {
         self.max_storage_buffers_per_shader_stage >= Self::HATCH_STORAGE_BINDINGS
     }
-
 }
 
 #[cfg(test)]

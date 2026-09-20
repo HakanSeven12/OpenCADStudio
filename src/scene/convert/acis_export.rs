@@ -2,8 +2,8 @@
 //!
 //! Analytic surfaces remain analytic instead of becoming facets.
 
-use cadkernel::acis::append;
 use acadrust::entities::acis::{SabReader, SabWriter, SatDocument};
+use cadkernel::acis::append;
 use cadkernel::brep::Body;
 
 /// Returns `None` when the body contains an unsupported record form.
@@ -48,11 +48,8 @@ mod tests {
 
     #[test]
     fn a_curved_loft_round_trips_through_text_and_binary_acis() {
-        let body = cadkernel::brep::loft(&[
-            circle_section(0.0, 5.0),
-            circle_section(10.0, 2.0),
-        ])
-        .unwrap();
+        let body =
+            cadkernel::brep::loft(&[circle_section(0.0, 5.0), circle_section(10.0, 2.0)]).unwrap();
         assert!(body.validate().is_empty());
 
         let mut document = SatDocument::new();

@@ -16,7 +16,7 @@ use crate::ipc::protocol::{
     HostResponse, HostToPlugin, PluginRequest, PluginResponse, PluginToHost, RunnerHandshake,
 };
 use crate::ipc::transport::{recv, send};
-use crate::shm::{DocumentViewInfo, SharedDocumentReader, DocumentViewData};
+use crate::shm::{DocumentViewData, DocumentViewInfo, SharedDocumentReader};
 
 /// Shared registry of active interactive commands, keyed by host-assigned id.
 pub type InteractiveRegistry = Rc<RefCell<HashMap<u64, Box<dyn InteractiveCommand>>>>;
@@ -60,7 +60,10 @@ impl IpcClient {
         &self,
         req: PluginRequest,
     ) -> Result<PluginResponse, crate::ipc::transport::TransportError> {
-        send(&mut self.stream.borrow_mut(), &PluginToHost::Request(Box::new(req)))?;
+        send(
+            &mut self.stream.borrow_mut(),
+            &PluginToHost::Request(Box::new(req)),
+        )?;
         loop {
             match recv::<HostToPlugin>(&mut self.stream.borrow_mut())? {
                 HostToPlugin::Response(resp) => return Ok(*resp),
@@ -388,16 +391,18 @@ impl HostApi for PluginHostApi {
             }
         }
         match self.doc_view.borrow().as_ref() {
-            Some(info) => match SharedDocumentReader::<DocumentViewData>::open(Path::new(&info.path)) {
-                Ok(reader) => Box::new(reader),
-                Err(e) => {
-                    eprintln!(
-                        "[plugin] failed to open document view at {}: {e}",
-                        info.path
-                    );
-                    Box::new(EmptyDocumentReader)
+            Some(info) => {
+                match SharedDocumentReader::<DocumentViewData>::open(Path::new(&info.path)) {
+                    Ok(reader) => Box::new(reader),
+                    Err(e) => {
+                        eprintln!(
+                            "[plugin] failed to open document view at {}: {e}",
+                            info.path
+                        );
+                        Box::new(EmptyDocumentReader)
+                    }
                 }
-            },
+            }
             None => Box::new(EmptyDocumentReader),
         }
     }
@@ -495,7 +500,11 @@ mod tests {
                 },
                 other => panic!("unexpected: {other:?}"),
             }
-            send(&mut peer, &HostToPlugin::Response(Box::new(PluginResponse::Ok))).unwrap();
+            send(
+                &mut peer,
+                &HostToPlugin::Response(Box::new(PluginResponse::Ok)),
+            )
+            .unwrap();
         });
         api.push_info("hello host");
         peer_handle.join().unwrap();
@@ -552,7 +561,10 @@ mod tests {
             EntityType::Point(Point::new()),
         ]);
         peer_handle.join().unwrap();
-        assert_eq!(handles, vec![Handle::new(10), Handle::new(11), Handle::new(12)]);
+        assert_eq!(
+            handles,
+            vec![Handle::new(10), Handle::new(11), Handle::new(12)]
+        );
     }
 
     #[test]
@@ -567,7 +579,11 @@ mod tests {
                 },
                 other => panic!("unexpected: {other:?}"),
             }
-            send(&mut peer, &HostToPlugin::Response(Box::new(PluginResponse::Bool(true)))).unwrap();
+            send(
+                &mut peer,
+                &HostToPlugin::Response(Box::new(PluginResponse::Bool(true))),
+            )
+            .unwrap();
         });
         assert!(api.update_entity(EntityType::Point(Point::new())));
         peer_handle.join().unwrap();
@@ -587,7 +603,11 @@ mod tests {
                 },
                 other => panic!("unexpected: {other:?}"),
             }
-            send(&mut peer, &HostToPlugin::Response(Box::new(PluginResponse::Bool(true)))).unwrap();
+            send(
+                &mut peer,
+                &HostToPlugin::Response(Box::new(PluginResponse::Bool(true))),
+            )
+            .unwrap();
         });
         assert!(api.remove_entity(Handle::new(7)));
         peer_handle.join().unwrap();

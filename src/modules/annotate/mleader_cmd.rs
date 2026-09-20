@@ -212,9 +212,9 @@ impl MLeaderCommand {
             ml.context.text_height = source.height;
             ml.context.text_width = source.rectangle_width;
             ml.context.text_rotation = source.rotation;
-            ml.context.text_direction = source.dwg_x_direction.unwrap_or_else(|| {
-                Vector3::new(source.rotation.cos(), source.rotation.sin(), 0.0)
-            });
+            ml.context.text_direction = source
+                .dwg_x_direction
+                .unwrap_or_else(|| Vector3::new(source.rotation.cos(), source.rotation.sin(), 0.0));
             ml.context.line_spacing_factor = source.line_spacing_factor;
             ml.context.line_spacing_style = source.line_spacing_style;
             ml.text_color = source.common.color;
@@ -239,20 +239,16 @@ impl MLeaderCommand {
             let (attachment, alignment) = match source.attachment_point {
                 acadrust::entities::mtext::AttachmentPoint::TopCenter
                 | acadrust::entities::mtext::AttachmentPoint::MiddleCenter
-                | acadrust::entities::mtext::AttachmentPoint::BottomCenter => {
-                    (
-                        acadrust::entities::multileader::TextAttachmentPointType::Center,
-                        acadrust::entities::TextAlignmentType::Center,
-                    )
-                }
+                | acadrust::entities::mtext::AttachmentPoint::BottomCenter => (
+                    acadrust::entities::multileader::TextAttachmentPointType::Center,
+                    acadrust::entities::TextAlignmentType::Center,
+                ),
                 acadrust::entities::mtext::AttachmentPoint::TopRight
                 | acadrust::entities::mtext::AttachmentPoint::MiddleRight
-                | acadrust::entities::mtext::AttachmentPoint::BottomRight => {
-                    (
-                        acadrust::entities::multileader::TextAttachmentPointType::Right,
-                        acadrust::entities::TextAlignmentType::Right,
-                    )
-                }
+                | acadrust::entities::mtext::AttachmentPoint::BottomRight => (
+                    acadrust::entities::multileader::TextAttachmentPointType::Right,
+                    acadrust::entities::TextAlignmentType::Right,
+                ),
                 _ => (
                     acadrust::entities::multileader::TextAttachmentPointType::Left,
                     acadrust::entities::TextAlignmentType::Left,
@@ -299,7 +295,12 @@ impl MLeaderCommand {
         if length <= 1.0e-12 {
             return point;
         }
-        let candidates = [angle, -angle, std::f64::consts::PI - angle, angle - std::f64::consts::PI];
+        let candidates = [
+            angle,
+            -angle,
+            std::f64::consts::PI - angle,
+            angle - std::f64::consts::PI,
+        ];
         let current = delta.y.atan2(delta.x);
         let chosen = candidates
             .into_iter()
@@ -373,9 +374,18 @@ impl CadCommand for MLeaderCommand {
                 CmdOption::new("Layer", "LA"),
                 CmdOption::new("Exit", "X"),
             ],
-            Step::LeaderType => ["Straight", "Spline", "None"].into_iter().map(|v| CmdOption::new(v, v)).collect(),
-            Step::Landing => ["Yes", "No"].into_iter().map(|v| CmdOption::new(v, v)).collect(),
-            Step::ContentType => ["MText", "Block", "None"].into_iter().map(|v| CmdOption::new(v, v)).collect(),
+            Step::LeaderType => ["Straight", "Spline", "None"]
+                .into_iter()
+                .map(|v| CmdOption::new(v, v))
+                .collect(),
+            Step::Landing => ["Yes", "No"]
+                .into_iter()
+                .map(|v| CmdOption::new(v, v))
+                .collect(),
+            Step::ContentType => ["MText", "Block", "None"]
+                .into_iter()
+                .map(|v| CmdOption::new(v, v))
+                .collect(),
             Step::BlockSource => self
                 .block_sources
                 .iter()
@@ -386,7 +396,10 @@ impl CadCommand for MLeaderCommand {
                 .iter()
                 .map(|name| CmdOption::new(name, name))
                 .collect(),
-            Step::FirstAngle | Step::SecondAngle => ["Any", "15", "30", "45", "60", "90"].into_iter().map(|v| CmdOption::new(v, v)).collect(),
+            Step::FirstAngle | Step::SecondAngle => ["Any", "15", "30", "45", "60", "90"]
+                .into_iter()
+                .map(|v| CmdOption::new(v, v))
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -693,19 +706,17 @@ fn build_mleader(
     let to_right = (elbow_pt - arrow_pt).dot(ux.as_dvec3()) >= 0.0;
     let sign = if to_right { 1.0 } else { -1.0 };
     let landing = ux * (sign as f32);
-    ml.context.text_attachment_point =
-        if to_right {
-            acadrust::entities::multileader::TextAttachmentPointType::Left
-        } else {
-            acadrust::entities::multileader::TextAttachmentPointType::Right
-        };
+    ml.context.text_attachment_point = if to_right {
+        acadrust::entities::multileader::TextAttachmentPointType::Left
+    } else {
+        acadrust::entities::multileader::TextAttachmentPointType::Right
+    };
 
     ml.context.text_rotation = (ux.y as f64).atan2(ux.x as f64);
     ml.context.text_direction = Vector3::new(ux.x as f64, ux.y as f64, 0.0);
 
     if let Some(root) = ml.context.leader_roots.first_mut() {
-        root.direction =
-            Vector3::new(landing.x as f64, landing.y as f64, 0.0);
+        root.direction = Vector3::new(landing.x as f64, landing.y as f64, 0.0);
 
         root.connection_point = elbow_v3;
         root.landing_distance = landing_distance;
@@ -779,9 +790,9 @@ fn preview_wire(pts: &[Vec3], arrow_size: f32) -> WireModel {
         render_instance: None,
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
-            dash_from_start: false,
-            dash_align_end: None,
-            text_verts: Vec::new(),
+        dash_from_start: false,
+        dash_align_end: None,
+        text_verts: Vec::new(),
         name: "mleader_preview".into(),
         points,
         points_low: Vec::new(),
@@ -821,6 +832,7 @@ fn arrowhead_wings(tip: Vec3, next: Vec3, size: f32) -> [Vec3; 2] {
     ]
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["MLEADER"] });  // MLeaderCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["MLEADER"]
+}); // MLeaderCommand

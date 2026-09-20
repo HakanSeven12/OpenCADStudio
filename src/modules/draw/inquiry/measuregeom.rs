@@ -14,9 +14,9 @@
 // All arithmetic is kept in f64 (picked points stay full precision; downcasting
 // to f32 loses several hundredths of a unit at survey-scale coordinates).
 
+use crate::t;
 use acadrust::{EntityType, Handle};
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -142,7 +142,10 @@ impl MeasureGeomCommand {
 
     /// AREA readout: shoelace area (f64, relative to first vertex) + perimeter.
     fn area_msg(plane: WorkingPlane, points: &[DVec3]) -> String {
-        let points = points.iter().map(|point| plane.to_local(*point)).collect::<Vec<_>>();
+        let points = points
+            .iter()
+            .map(|point| plane.to_local(*point))
+            .collect::<Vec<_>>();
         let n = points.len();
         let origin = points[0];
         let mut area_sum = 0.0f64;

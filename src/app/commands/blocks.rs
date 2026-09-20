@@ -10,28 +10,23 @@ impl OpenCADStudio {
                     .push_output(crate::tf!("XREF  Reloaded \"{}\"", info.name).as_ref());
             }
             crate::io::xref::XrefStatus::Recovered => {
-                self.command_line.push_error(crate::tf!(
-                    "XREF  Reloaded with repairs: \"{}\"",
-                    info.name
-                ).as_ref());
+                self.command_line.push_error(
+                    crate::tf!("XREF  Reloaded with repairs: \"{}\"", info.name).as_ref(),
+                );
             }
             crate::io::xref::XrefStatus::NotFound => {
-                self.command_line.push_error(crate::tf!(
-                    "XREF  Not found: \"{}\" ({})",
-                    info.name, info.path
-                ).as_ref());
+                self.command_line.push_error(
+                    crate::tf!("XREF  Not found: \"{}\" ({})", info.name, info.path).as_ref(),
+                );
             }
             crate::io::xref::XrefStatus::Failed => {
-                self.command_line.push_error(crate::tf!(
-                    "XREF  Reload failed: \"{}\" ({})",
-                    info.name, info.path
-                ).as_ref());
+                self.command_line.push_error(
+                    crate::tf!("XREF  Reload failed: \"{}\" ({})", info.name, info.path).as_ref(),
+                );
             }
             crate::io::xref::XrefStatus::Unloaded => {
-                self.command_line.push_info(crate::tf!(
-                    "XREF  Unloaded (skipped): \"{}\"",
-                    info.name
-                ).as_ref());
+                self.command_line
+                    .push_info(crate::tf!("XREF  Unloaded (skipped): \"{}\"", info.name).as_ref());
             }
         }
     }
@@ -101,12 +96,18 @@ impl OpenCADStudio {
                         } else {
                             "model space"
                         };
-                        self.command_line.push_output(crate::tf!(
-                            "Base point ({}, {}, {}) set for {space}.",
-                            nums[0], nums[1], z
-                        ).as_ref());
+                        self.command_line.push_output(
+                            crate::tf!(
+                                "Base point ({}, {}, {}) set for {space}.",
+                                nums[0],
+                                nums[1],
+                                z
+                            )
+                            .as_ref(),
+                        );
                     } else {
-                        self.command_line.push_error(crate::t!("Usage: BASE <x> <y> [z]").as_ref());
+                        self.command_line
+                            .push_error(crate::t!("Usage: BASE <x> <y> [z]").as_ref());
                     }
                 }
             }
@@ -117,8 +118,9 @@ impl OpenCADStudio {
                 if self.mtext_editor.as_ref().is_some_and(|e| e.show_preview) {
                     return match self.mtext_selected_text() {
                         Some(text) => {
-                            self.command_line
-                                .push_info(crate::t!("Copied selected text to clipboard.").as_ref());
+                            self.command_line.push_info(
+                                crate::t!("Copied selected text to clipboard.").as_ref(),
+                            );
                             Some(iced::clipboard::write(text).discard())
                         }
                         None => Some(Task::none()),
@@ -141,10 +143,8 @@ impl OpenCADStudio {
                         &handles,
                     );
                     let count = self.copy_entities_to_clipboard(i, &handles, base);
-                    self.command_line.push_info(crate::tf!(
-                        "{} object(s) copied to clipboard.",
-                        count
-                    ).as_ref());
+                    self.command_line
+                        .push_info(crate::tf!("{} object(s) copied to clipboard.", count).as_ref());
                 }
             }
 
@@ -186,12 +186,15 @@ impl OpenCADStudio {
                 if coords.len() == 3 && !handles.is_empty() {
                     let base = glam::DVec3::new(coords[0], coords[1], coords[2]);
                     let count = self.copy_entities_to_clipboard(i, &handles, base);
-                    self.command_line.push_info(crate::tf!(
-                        "{} object(s) copied to clipboard (base {:.3},{:.3}).",
-                        count,
-                        base.x,
-                        base.y
-                    ).as_ref());
+                    self.command_line.push_info(
+                        crate::tf!(
+                            "{} object(s) copied to clipboard (base {:.3},{:.3}).",
+                            count,
+                            base.x,
+                            base.y
+                        )
+                        .as_ref(),
+                    );
                 }
             }
 
@@ -252,10 +255,13 @@ impl OpenCADStudio {
                     self.tabs[i].dirty = true;
                     self.refresh_layer_panel();
                     self.refresh_properties();
-                    self.command_line.push_output(crate::tf!(
-                        "PASTEORIG: {} object(s) pasted at original coordinates.",
-                        count
-                    ).as_ref());
+                    self.command_line.push_output(
+                        crate::tf!(
+                            "PASTEORIG: {} object(s) pasted at original coordinates.",
+                            count
+                        )
+                        .as_ref(),
+                    );
                 }
             }
 
@@ -327,7 +333,9 @@ impl OpenCADStudio {
                             self.command_line.push_info(&cmd.prompt());
                             self.tabs[i].active_cmd = Some(Box::new(cmd));
                         }
-                        Err(e) => self.command_line.push_error(crate::tf!("PASTEBLOCK: {e}").as_ref()),
+                        Err(e) => self
+                            .command_line
+                            .push_error(crate::tf!("PASTEBLOCK: {e}").as_ref()),
                     }
                 }
             }
@@ -355,8 +363,9 @@ impl OpenCADStudio {
             "INSERT" => {
                 let blocks = self.tabs[i].scene.custom_block_names();
                 if blocks.is_empty() {
-                    self.command_line
-                        .push_error(crate::t!("No user-defined blocks found in this drawing.").as_ref());
+                    self.command_line.push_error(
+                        crate::t!("No user-defined blocks found in this drawing.").as_ref(),
+                    );
                 } else {
                     use crate::modules::insert::insert_block::InsertBlockCommand;
                     let ranked = self.ranked_block_names(&blocks);
@@ -376,8 +385,9 @@ impl OpenCADStudio {
             "MINSERT" => {
                 let blocks = self.tabs[i].scene.custom_block_names();
                 if blocks.is_empty() {
-                    self.command_line
-                        .push_error(crate::t!("No user-defined blocks found in this drawing.").as_ref());
+                    self.command_line.push_error(
+                        crate::t!("No user-defined blocks found in this drawing.").as_ref(),
+                    );
                 } else {
                     use crate::modules::insert::minsert::MinsertCommand;
                     let ranked = self.ranked_block_names(&blocks);
@@ -408,14 +418,17 @@ impl OpenCADStudio {
                 let arg = cmd.trim_start_matches("ATTSYNC").trim();
                 let blocks = self.tabs[i].scene.custom_block_names();
                 if arg.is_empty() {
-                    self.command_line.push_info(crate::tf!(
-                        "Usage: ATTSYNC <block name>.  Blocks: {}",
-                        if blocks.is_empty() {
-                            "(none)".to_string()
-                        } else {
-                            blocks.join(", ")
-                        }
-                    ).as_ref());
+                    self.command_line.push_info(
+                        crate::tf!(
+                            "Usage: ATTSYNC <block name>.  Blocks: {}",
+                            if blocks.is_empty() {
+                                "(none)".to_string()
+                            } else {
+                                blocks.join(", ")
+                            }
+                        )
+                        .as_ref(),
+                    );
                     return Some(Task::none());
                 }
                 let Some(block) = blocks.iter().find(|b| b.eq_ignore_ascii_case(arg)).cloned()
@@ -449,9 +462,7 @@ impl OpenCADStudio {
                     .filter_map(|entity| match entity {
                         acadrust::EntityType::Insert(insert)
                             if insert.block_name.eq_ignore_ascii_case(&block)
-                                && !self.tabs[i]
-                                    .scene
-                                    .is_layer_locked(insert.common.handle) =>
+                                && !self.tabs[i].scene.is_layer_locked(insert.common.handle) =>
                         {
                             Some(insert.common.handle)
                         }
@@ -459,9 +470,8 @@ impl OpenCADStudio {
                     })
                     .collect();
                 if inserts.is_empty() {
-                    self.command_line.push_error(
-                        crate::t!("ATTSYNC: no editable block references.").as_ref(),
-                    );
+                    self.command_line
+                        .push_error(crate::t!("ATTSYNC: no editable block references.").as_ref());
                     return Some(Task::none());
                 }
                 self.push_undo_snapshot(i, "ATTSYNC");
@@ -473,9 +483,8 @@ impl OpenCADStudio {
                     else {
                         continue;
                     };
-                    ins.attributes.retain(|a| {
-                        attdefs.iter().any(|(t, _)| t.eq_ignore_ascii_case(&a.tag))
-                    });
+                    ins.attributes
+                        .retain(|a| attdefs.iter().any(|(t, _)| t.eq_ignore_ascii_case(&a.tag)));
                     for (tag, default) in &attdefs {
                         if !ins
                             .attributes
@@ -487,7 +496,7 @@ impl OpenCADStudio {
                                     tag.clone(),
                                     default.clone(),
                                 ));
-                            }
+                        }
                     }
                     synced += 1;
                     changes.push((ins.common.handle, crate::scene::ChangeKind::Modified));
@@ -512,20 +521,21 @@ impl OpenCADStudio {
                     .names()
                     .map(|s| s.to_string())
                     .collect();
-                self.command_line.push_output(crate::tf!(
-                    "Blocks ({}): {}",
-                    blocks.len(),
-                    if blocks.is_empty() {
-                        "(none)".to_string()
-                    } else {
-                        blocks.join(", ")
-                    }
-                ).as_ref());
-                self.command_line.push_output(crate::tf!(
-                    "Layers ({}): {}",
-                    layers.len(),
-                    layers.join(", ")
-                ).as_ref());
+                self.command_line.push_output(
+                    crate::tf!(
+                        "Blocks ({}): {}",
+                        blocks.len(),
+                        if blocks.is_empty() {
+                            "(none)".to_string()
+                        } else {
+                            blocks.join(", ")
+                        }
+                    )
+                    .as_ref(),
+                );
+                self.command_line.push_output(
+                    crate::tf!("Layers ({}): {}", layers.len(), layers.join(", ")).as_ref(),
+                );
             }
 
             // BLOCKPALETTE / BLOCKSPALETTE — toggle the docked Insert Block panel.
@@ -582,7 +592,11 @@ impl OpenCADStudio {
                 if self.show_external_references {
                     // Always open expanded so the panel is immediately usable;
                     // dock it on the right if the user closed it from the layout.
-                    if self.dock.location(crate::ui::dock::PanelId::ExternalReferences).is_none() {
+                    if self
+                        .dock
+                        .location(crate::ui::dock::PanelId::ExternalReferences)
+                        .is_none()
+                    {
                         self.dock.dock(
                             crate::ui::dock::PanelId::ExternalReferences,
                             crate::app::config::DockSide::Right,
@@ -594,7 +608,12 @@ impl OpenCADStudio {
                 }
             }
 
-            cmd if cmd.eq_ignore_ascii_case("XREF") || cmd.to_ascii_uppercase().starts_with("XREF ") || cmd.eq_ignore_ascii_case("-XREF") || cmd.to_ascii_uppercase().starts_with("-XREF ") => {                // XREF sub-option dispatcher (Task 5). The verb is
+            cmd if cmd.eq_ignore_ascii_case("XREF")
+                || cmd.to_ascii_uppercase().starts_with("XREF ")
+                || cmd.eq_ignore_ascii_case("-XREF")
+                || cmd.to_ascii_uppercase().starts_with("-XREF ") =>
+            {
+                // XREF sub-option dispatcher (Task 5). The verb is
                 // case-insensitive; arguments split on whitespace.
                 // `-XREF` is accepted as an alias for industry muscle memory
                 // (modern CAD opens the palette on `XREF`); bare `XREF` keeps
@@ -632,21 +651,22 @@ impl OpenCADStudio {
                         &self.tabs[i].xref_stat_cache.0,
                     );
                     if entries.is_empty() {
-                        self.command_line
-                            .push_output(crate::t!("XREF  No external references in this drawing.").as_ref());
+                        self.command_line.push_output(
+                            crate::t!("XREF  No external references in this drawing.").as_ref(),
+                        );
                     } else {
-                        self.command_line.push_output(crate::t!("XREF  External references:").as_ref());
+                        self.command_line
+                            .push_output(crate::t!("XREF  External references:").as_ref());
                         for entry in &entries {
                             let path = if entry.saved_path.is_empty() {
                                 "(no path)".to_string()
                             } else {
                                 entry.saved_path.clone()
                             };
-                            let suffix =
-                                match entry.ref_type {
-                                    crate::io::xref_model::RefType::Overlay => " [Overlay]",
-                                    crate::io::xref_model::RefType::Attach => " [Attach]",
-                                };
+                            let suffix = match entry.ref_type {
+                                crate::io::xref_model::RefType::Overlay => " [Overlay]",
+                                crate::io::xref_model::RefType::Attach => " [Attach]",
+                            };
                             self.command_line
                                 .push_output(&format!("  {} — {}{}", entry.name, path, suffix));
                         }
@@ -677,10 +697,9 @@ impl OpenCADStudio {
                             .iter()
                             .any(|e| crate::io::xref_model::wildcard_match(&e.name, pattern));
                         if !any {
-                            self.command_line.push_error(crate::tf!(
-                                "XREF: no references match '{}'.",
-                                pattern
-                            ).as_ref());
+                            self.command_line.push_error(
+                                crate::tf!("XREF: no references match '{}'.", pattern).as_ref(),
+                            );
                             return Some(self.finish_dispatch(cmd));
                         }
                     }
@@ -690,13 +709,12 @@ impl OpenCADStudio {
                             // (so the listing agrees) with fresh stat
                             // baselines on the next palette refresh.
                             let reload_keys: Vec<u64> = {
-                                let entries =
-                                    crate::io::xref::collect_entries_with_prev(
-                                        &self.tabs[i].scene.document,
-                                        base_dir,
-                                        self.tabs[i].xref_unloaded.as_set(),
-                                        &self.tabs[i].xref_stat_cache.0,
-                                    );
+                                let entries = crate::io::xref::collect_entries_with_prev(
+                                    &self.tabs[i].scene.document,
+                                    base_dir,
+                                    self.tabs[i].xref_unloaded.as_set(),
+                                    &self.tabs[i].xref_stat_cache.0,
+                                );
                                 // Drawing references only (mirrors the palette
                                 // Reload): image/PDF rows keep their flags
                                 // untouched and nested rows report per-entry
@@ -706,9 +724,7 @@ impl OpenCADStudio {
                                 for e in &entries {
                                     let hit = pattern.is_empty()
                                         || pattern == "*"
-                                        || crate::io::xref_model::wildcard_match(
-                                            &e.name, pattern,
-                                        );
+                                        || crate::io::xref_model::wildcard_match(&e.name, pattern);
                                     if !hit {
                                         continue;
                                     }
@@ -718,10 +734,13 @@ impl OpenCADStudio {
                                             e.name
                                         ).as_ref());
                                     } else if e.kind != crate::io::xref_model::RefKind::DwgXref {
-                                        self.command_line.push_error(crate::tf!(
-                                            "{}: reload applies to drawing references only.",
-                                            e.name
-                                        ).as_ref());
+                                        self.command_line.push_error(
+                                            crate::tf!(
+                                                "{}: reload applies to drawing references only.",
+                                                e.name
+                                            )
+                                            .as_ref(),
+                                        );
                                     } else {
                                         keys.push(e.key);
                                     }
@@ -741,7 +760,8 @@ impl OpenCADStudio {
                                 self.tabs[i].xref_unloaded.remove(key);
                                 self.tabs[i].xref_stat_cache.remove(key);
                             }
-                            let handles: rustc_hash::FxHashSet<acadrust::types::Handle> = self.tabs[i]
+                            let handles: rustc_hash::FxHashSet<acadrust::types::Handle> = self.tabs
+                                [i]
                                 .scene
                                 .document
                                 .block_records
@@ -756,13 +776,12 @@ impl OpenCADStudio {
                             );
                             // Targeted reload updates only the selected rows.
                             {
-                                let fresh =
-                                    crate::io::xref::collect_entries_with_prev(
-                                        &self.tabs[i].scene.document,
-                                        base_dir,
-                                        self.tabs[i].xref_unloaded.as_set(),
-                                        &self.tabs[i].xref_stat_cache.0,
-                                    );
+                                let fresh = crate::io::xref::collect_entries_with_prev(
+                                    &self.tabs[i].scene.document,
+                                    base_dir,
+                                    self.tabs[i].xref_unloaded.as_set(),
+                                    &self.tabs[i].xref_stat_cache.0,
+                                );
                                 for e in &fresh {
                                     if !reload_keys.contains(&e.key) {
                                         continue;
@@ -785,10 +804,9 @@ impl OpenCADStudio {
                                     .collect()
                             };
                             if matched.is_empty() {
-                                self.command_line.push_error(crate::tf!(
-                                    "XREF: no references match '{}'.",
-                                    pattern
-                                ).as_ref());
+                                self.command_line.push_error(
+                                    crate::tf!("XREF: no references match '{}'.", pattern).as_ref(),
+                                );
                             } else {
                                 for info in matched {
                                     self.report_xref_status(info);
@@ -797,8 +815,12 @@ impl OpenCADStudio {
                             self.post_ref_op(i);
                         }
                     } else {
-                        self.command_line
-                            .push_error(crate::t!("XREF  Save the drawing first to resolve relative XREF paths.").as_ref());
+                        self.command_line.push_error(
+                            crate::t!(
+                                "XREF  Save the drawing first to resolve relative XREF paths."
+                            )
+                            .as_ref(),
+                        );
                     }
                 } else if op.eq_ignore_ascii_case("Unload") {
                     // Unload <pattern> (empty/* = all): drop merged content
@@ -825,10 +847,9 @@ impl OpenCADStudio {
                         })
                         .collect();
                     if matched.is_empty() {
-                        self.command_line.push_error(crate::tf!(
-                            "XREF: no references match '{}'.",
-                            pattern
-                        ).as_ref());
+                        self.command_line.push_error(
+                            crate::tf!("XREF: no references match '{}'.", pattern).as_ref(),
+                        );
                     } else {
                         self.push_undo_snapshot(i, "XREF-UNLOAD");
                         let mut done = 0usize;
@@ -845,10 +866,9 @@ impl OpenCADStudio {
                                 e.key,
                             ) {
                                 Ok(name) => {
-                                    self.command_line.push_output(crate::tf!(
-                                        "XREF: unloaded \"{}\".",
-                                        name
-                                    ).as_ref());
+                                    self.command_line.push_output(
+                                        crate::tf!("XREF: unloaded \"{}\".", name).as_ref(),
+                                    );
                                     self.tabs[i].xref_unloaded.add(e.key);
                                     done += 1;
                                 }
@@ -884,10 +904,9 @@ impl OpenCADStudio {
                         })
                         .collect();
                     if matched.is_empty() {
-                        self.command_line.push_error(crate::tf!(
-                            "XREF: no references match '{}'.",
-                            pattern
-                        ).as_ref());
+                        self.command_line.push_error(
+                            crate::tf!("XREF: no references match '{}'.", pattern).as_ref(),
+                        );
                     } else {
                         self.push_undo_snapshot(i, "XREF-DETACH");
                         let mut done = 0usize;
@@ -904,10 +923,9 @@ impl OpenCADStudio {
                                 e.key,
                             ) {
                                 Ok(name) => {
-                                    self.command_line.push_output(crate::tf!(
-                                        "XREF: detached \"{}\".",
-                                        name
-                                    ).as_ref());
+                                    self.command_line.push_output(
+                                        crate::tf!("XREF: detached \"{}\".", name).as_ref(),
+                                    );
                                     self.tabs[i].xref_unloaded.remove(&e.key);
                                     self.tabs[i].xref_stat_cache.remove(&e.key);
                                     done += 1;
@@ -923,14 +941,20 @@ impl OpenCADStudio {
                     // Path Find <old> <new> → prefix rewrite across all;
                     // Path <pattern> <new path> → verbatim per-ref store.
                     let after_op = rest.get(op.len()..).unwrap_or("").trim();
-                    if after_op.split_whitespace().next().is_some_and(|w| w.eq_ignore_ascii_case("Find")) {
+                    if after_op
+                        .split_whitespace()
+                        .next()
+                        .is_some_and(|w| w.eq_ignore_ascii_case("Find"))
+                    {
                         // Find & Replace: tokens are Find <old> <new...>
                         // (`new` keeps spaces via remainder slice).
                         let toks: Vec<&str> = after_op.split_whitespace().collect();
                         let (old, new) = if toks.len() >= 3 {
                             // Find the exact token index for old to avoid substring
                             // contamination (e.g. "in" matching inside "Find").
-                            if let Some(idx) = toks.iter().position(|t| t.eq_ignore_ascii_case(&toks[1])) {
+                            if let Some(idx) =
+                                toks.iter().position(|t| t.eq_ignore_ascii_case(&toks[1]))
+                            {
                                 let pos = after_op.find(toks[idx]).unwrap_or(0) + toks[idx].len();
                                 (toks[idx].to_string(), after_op[pos..].trim().to_string())
                             } else {
@@ -940,7 +964,9 @@ impl OpenCADStudio {
                             (String::new(), String::new())
                         };
                         if old.is_empty() || new.is_empty() {
-                            self.command_line.push_error(crate::t!("Usage: XREF Path Find <old> <new>").as_ref());
+                            self.command_line.push_error(
+                                crate::t!("Usage: XREF Path Find <old> <new>").as_ref(),
+                            );
                         } else {
                             self.push_undo_snapshot(i, "XREF-PATH");
                             let n = crate::io::xref::replace_path_prefix(
@@ -948,10 +974,9 @@ impl OpenCADStudio {
                                 &old,
                                 &new,
                             );
-                            self.command_line.push_output(crate::tf!(
-                                "XREF: updated {} reference(s).",
-                                n
-                            ).as_ref());
+                            self.command_line.push_output(
+                                crate::tf!("XREF: updated {} reference(s).", n).as_ref(),
+                            );
                             if n > 0 {
                                 self.post_ref_op(i);
                             }
@@ -968,7 +993,9 @@ impl OpenCADStudio {
                                 .unwrap_or_default()
                         };
                         if pattern.is_empty() || new_raw.is_empty() {
-                            self.command_line.push_error(crate::t!("Usage: XREF Path <pattern> <new path>").as_ref());
+                            self.command_line.push_error(
+                                crate::t!("Usage: XREF Path <pattern> <new path>").as_ref(),
+                            );
                         } else {
                             let base_dir: std::path::PathBuf = self.tabs[i]
                                 .current_path
@@ -983,13 +1010,14 @@ impl OpenCADStudio {
                             );
                             let matched: Vec<_> = entries
                                 .iter()
-                                .filter(|e| crate::io::xref_model::wildcard_match(&e.name, &pattern))
+                                .filter(|e| {
+                                    crate::io::xref_model::wildcard_match(&e.name, &pattern)
+                                })
                                 .collect();
                             if matched.is_empty() {
-                                self.command_line.push_error(crate::tf!(
-                                    "XREF: no references match '{}'.",
-                                    pattern
-                                ).as_ref());
+                                self.command_line.push_error(
+                                    crate::tf!("XREF: no references match '{}'.", pattern).as_ref(),
+                                );
                             } else {
                                 self.push_undo_snapshot(i, "XREF-PATH");
                                 let mut done = 0usize;
@@ -1000,10 +1028,13 @@ impl OpenCADStudio {
                                         &new_raw,
                                     ) {
                                         Ok(name) => {
-                                            self.command_line.push_output(crate::tf!(
-                                                "XREF: Path set for \"{}\" — Reload to apply.",
-                                                name
-                                            ).as_ref());
+                                            self.command_line.push_output(
+                                                crate::tf!(
+                                                    "XREF: Path set for \"{}\" — Reload to apply.",
+                                                    name
+                                                )
+                                                .as_ref(),
+                                            );
                                             done += 1;
                                         }
                                         Err(msg) => self.command_line.push_error(msg.as_str()),
@@ -1029,12 +1060,19 @@ impl OpenCADStudio {
                         None
                     };
                     let Some(pathtype) = pathtype else {
-                        self.command_line.push_error(crate::t!("Usage: XREF Pathtype <Full|Relative|None> [pattern]").as_ref());
+                        self.command_line.push_error(
+                            crate::t!("Usage: XREF Pathtype <Full|Relative|None> [pattern]")
+                                .as_ref(),
+                        );
                         return Some(self.finish_dispatch(cmd));
                     };
                     let Some(host) = self.tabs[i].current_path.clone() else {
-                        self.command_line
-                            .push_error(crate::t!("XREF  Save the drawing first to resolve relative XREF paths.").as_ref());
+                        self.command_line.push_error(
+                            crate::t!(
+                                "XREF  Save the drawing first to resolve relative XREF paths."
+                            )
+                            .as_ref(),
+                        );
                         return Some(self.finish_dispatch(cmd));
                     };
                     let base_dir: std::path::PathBuf = host
@@ -1056,10 +1094,13 @@ impl OpenCADStudio {
                         })
                         .collect();
                     if matched.is_empty() {
-                        self.command_line.push_error(crate::tf!(
-                            "XREF: no references match '{}'.",
-                            if pattern.is_empty() { "*" } else { &pattern }
-                        ).as_ref());
+                        self.command_line.push_error(
+                            crate::tf!(
+                                "XREF: no references match '{}'.",
+                                if pattern.is_empty() { "*" } else { &pattern }
+                            )
+                            .as_ref(),
+                        );
                     } else {
                         self.push_undo_snapshot(i, "XREF-PATHTYPE");
                         let mut done = 0usize;
@@ -1071,10 +1112,13 @@ impl OpenCADStudio {
                                 &host,
                             ) {
                                 Ok(_) => {
-                                    self.command_line.push_output(crate::tf!(
-                                        "XREF: Path set for \"{}\" — Reload to apply.",
-                                        e.name
-                                    ).as_ref());
+                                    self.command_line.push_output(
+                                        crate::tf!(
+                                            "XREF: Path set for \"{}\" — Reload to apply.",
+                                            e.name
+                                        )
+                                        .as_ref(),
+                                    );
                                     done += 1;
                                 }
                                 Err(msg) => self.command_line.push_error(msg.as_str()),
@@ -1110,14 +1154,17 @@ impl OpenCADStudio {
                         })
                         .collect();
                     if matched.is_empty() {
-                        self.command_line.push_error(crate::tf!(
-                            "XREF: no references match '{}'.",
-                            pattern
-                        ).as_ref());
+                        self.command_line.push_error(
+                            crate::tf!("XREF: no references match '{}'.", pattern).as_ref(),
+                        );
                     } else {
                         let Some(host) = self.tabs[i].current_path.clone() else {
-                            self.command_line
-                                .push_error(crate::t!("XREF  Save the drawing first to resolve relative XREF paths.").as_ref());
+                            self.command_line.push_error(
+                                crate::t!(
+                                    "XREF  Save the drawing first to resolve relative XREF paths."
+                                )
+                                .as_ref(),
+                            );
                             return Some(self.finish_dispatch(cmd));
                         };
                         let host_dir: std::path::PathBuf = host
@@ -1142,10 +1189,10 @@ impl OpenCADStudio {
                             ) {
                                 Ok(outcome) => {
                                     if outcome.unremapped == 0 {
-                                        self.command_line.push_output(crate::tf!(
-                                            "XREF: bound \"{}\".",
-                                            outcome.name
-                                        ).as_ref());
+                                        self.command_line.push_output(
+                                            crate::tf!("XREF: bound \"{}\".", outcome.name)
+                                                .as_ref(),
+                                        );
                                     } else {
                                         self.command_line.push_output(crate::tf!(
                                             "XREF: bound \"{}\" with {} unremapped style handles (see bind limitations).",
@@ -1186,10 +1233,9 @@ impl OpenCADStudio {
                         })
                         .collect();
                     if matched.is_empty() {
-                        self.command_line.push_error(crate::tf!(
-                            "XREF: no references match '{}'.",
-                            pattern
-                        ).as_ref());
+                        self.command_line.push_error(
+                            crate::tf!("XREF: no references match '{}'.", pattern).as_ref(),
+                        );
                     } else {
                         self.push_undo_snapshot(i, "XREF-OVERLAY");
                         let mut done = 0usize;
@@ -1200,10 +1246,9 @@ impl OpenCADStudio {
                                 crate::io::xref_model::RefType::Overlay,
                             ) {
                                 Ok(name) => {
-                                    self.command_line.push_output(crate::tf!(
-                                        "XREF: \"{}\" set to Overlay.",
-                                        name
-                                    ).as_ref());
+                                    self.command_line.push_output(
+                                        crate::tf!("XREF: \"{}\" set to Overlay.", name).as_ref(),
+                                    );
                                     done += 1;
                                 }
                                 Err(msg) => self.command_line.push_error(msg.as_str()),
@@ -1221,10 +1266,9 @@ impl OpenCADStudio {
                     if after.is_empty() {
                         return Some(Task::done(Message::XAttachPick));
                     }
-                    let cmd =
-                        crate::modules::insert::xattach::XAttachCommand::with_path(
-                            after.to_string(),
-                        );
+                    let cmd = crate::modules::insert::xattach::XAttachCommand::with_path(
+                        after.to_string(),
+                    );
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
@@ -1241,16 +1285,15 @@ impl OpenCADStudio {
                 // again) with fresh stat baselines on the next refresh.
                 if let Some(path) = &self.tabs[i].current_path.clone() {
                     if let Some(base_dir) = path.parent() {
-                        let reload_keys: Vec<u64> =
-                            crate::io::xref::collect_entries_with_prev(
-                                &self.tabs[i].scene.document,
-                                base_dir,
-                                self.tabs[i].xref_unloaded.as_set(),
-                                &self.tabs[i].xref_stat_cache.0,
-                            )
-                            .iter()
-                            .map(|e| e.key)
-                            .collect();
+                        let reload_keys: Vec<u64> = crate::io::xref::collect_entries_with_prev(
+                            &self.tabs[i].scene.document,
+                            base_dir,
+                            self.tabs[i].xref_unloaded.as_set(),
+                            &self.tabs[i].xref_stat_cache.0,
+                        )
+                        .iter()
+                        .map(|e| e.key)
+                        .collect();
                         self.push_undo_snapshot(i, "XREF-RELOAD");
                         for key in &reload_keys {
                             self.tabs[i].xref_unloaded.remove(key);
@@ -1264,13 +1307,12 @@ impl OpenCADStudio {
                         // baselines for every currently-Loaded entry so no row
                         // reports false Stale.
                         {
-                            let fresh =
-                                crate::io::xref::collect_entries_with_prev(
-                                    &self.tabs[i].scene.document,
-                                    base_dir,
-                                    self.tabs[i].xref_unloaded.as_set(),
-                                    &self.tabs[i].xref_stat_cache.0,
-                                );
+                            let fresh = crate::io::xref::collect_entries_with_prev(
+                                &self.tabs[i].scene.document,
+                                base_dir,
+                                self.tabs[i].xref_unloaded.as_set(),
+                                &self.tabs[i].xref_stat_cache.0,
+                            );
                             for e in &fresh {
                                 if e.status == crate::io::xref_model::RefStatus::Loaded {
                                     if let Some(m) = e.modified {
@@ -1285,8 +1327,10 @@ impl OpenCADStudio {
                         self.post_ref_op(i);
                     }
                 } else {
-                    self.command_line
-                        .push_error(crate::t!("XREF  Save the drawing first to resolve relative XREF paths.").as_ref());
+                    self.command_line.push_error(
+                        crate::t!("XREF  Save the drawing first to resolve relative XREF paths.")
+                            .as_ref(),
+                    );
                 }
             }
 
@@ -1314,15 +1358,16 @@ impl OpenCADStudio {
                     Some(p) => {
                         return Some(Task::done(Message::OpenRecent(std::path::PathBuf::from(p))))
                     }
-                    None => self
-                        .command_line
-                        .push_error(crate::t!("XOPEN: select an external reference (xref) to open.").as_ref()),
+                    None => self.command_line.push_error(
+                        crate::t!("XOPEN: select an external reference (xref) to open.").as_ref(),
+                    ),
                 }
             }
 
             "NCOPY" | "NCOPYALL" => {
                 let command = crate::modules::draw::modify::ncopy::NcopyCommand::new(
-                    &self.tabs[i].scene.document, self.ncopy_bind,
+                    &self.tabs[i].scene.document,
+                    self.ncopy_bind,
                 );
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
@@ -1521,7 +1566,13 @@ mod tests {
         assert!(out.contains("Path set"), "got: {out:?}");
         let i = app.active_tab;
         assert_eq!(
-            app.tabs[i].scene.document.block_records.get("PLAN").unwrap().xref_path,
+            app.tabs[i]
+                .scene
+                .document
+                .block_records
+                .get("PLAN")
+                .unwrap()
+                .xref_path,
             "new\\raw path.dwg"
         );
     }
@@ -1544,7 +1595,11 @@ mod tests {
         let h = app.tabs[i].scene.document.allocate_handle();
         let mut def = ImageDefinition::with_dimensions("img.png", 8, 8);
         def.handle = h;
-        app.tabs[i].scene.document.objects.insert(h, ObjectType::ImageDefinition(def));
+        app.tabs[i]
+            .scene
+            .document
+            .objects
+            .insert(h, ObjectType::ImageDefinition(def));
         // Reference it so collect_entries lists it.
         let mut img = acadrust::entities::RasterImage::new(
             "img.png",
@@ -1553,9 +1608,16 @@ mod tests {
             8.0,
         );
         img.definition_handle = Some(h);
-        app.tabs[i].scene.document.add_entity(acadrust::EntityType::RasterImage(img)).unwrap();
+        app.tabs[i]
+            .scene
+            .document
+            .add_entity(acadrust::EntityType::RasterImage(img))
+            .unwrap();
         let out = run_capture(&mut app, "XREF Overlay img.png");
-        assert!(out.contains("overlays apply to drawing references only"), "got: {out:?}");
+        assert!(
+            out.contains("overlays apply to drawing references only"),
+            "got: {out:?}"
+        );
     }
 
     #[test]
@@ -1569,7 +1631,11 @@ mod tests {
         let h = app.tabs[i].scene.document.allocate_handle();
         let mut def = ImageDefinition::with_dimensions("img.png", 8, 8);
         def.handle = h;
-        app.tabs[i].scene.document.objects.insert(h, ObjectType::ImageDefinition(def));
+        app.tabs[i]
+            .scene
+            .document
+            .objects
+            .insert(h, ObjectType::ImageDefinition(def));
         let mut img = acadrust::entities::RasterImage::new(
             "img.png",
             acadrust::types::Vector3::ZERO,
@@ -1577,12 +1643,22 @@ mod tests {
             8.0,
         );
         img.definition_handle = Some(h);
-        app.tabs[i].scene.document.add_entity(acadrust::EntityType::RasterImage(img)).unwrap();
+        app.tabs[i]
+            .scene
+            .document
+            .add_entity(acadrust::EntityType::RasterImage(img))
+            .unwrap();
         app.tabs[i].current_path = Some(std::path::PathBuf::from("C:/Drawings/host.dwg"));
         app.tabs[i].xref_unloaded.add(h.value());
         let out = run_capture(&mut app, "XREF Reload img.png");
-        assert!(out.contains("reload applies to drawing references only"), "got: {out:?}");
-        assert!(!out.contains("no references match"), "spurious no-match, got: {out:?}");
+        assert!(
+            out.contains("reload applies to drawing references only"),
+            "got: {out:?}"
+        );
+        assert!(
+            !out.contains("no references match"),
+            "spurious no-match, got: {out:?}"
+        );
         assert!(
             app.tabs[i].xref_unloaded.is_unloaded(h.value()),
             "image flag must stay untouched"
@@ -1623,7 +1699,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "ocs_xref_nested_{}_{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let mut host_doc = acadrust::CadDocument::new();
@@ -1650,7 +1729,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "ocs_xref_bind_cli_{}_{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let mut xref_doc = acadrust::CadDocument::new();
@@ -1685,7 +1767,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "ocs_xref_bind_limited_{}_{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let mut xref_doc = acadrust::CadDocument::new();
@@ -1704,7 +1789,10 @@ mod tests {
         let i = app.active_tab;
         app.tabs[i].current_path = Some(dir.join("app.dwg"));
         let out = run_capture(&mut app, "XREF Bind PLAN");
-        assert!(out.contains("with 1 unremapped style handles (see bind limitations)"), "got: {out:?}");
+        assert!(
+            out.contains("with 1 unremapped style handles (see bind limitations)"),
+            "got: {out:?}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1723,7 +1811,10 @@ mod tests {
             .insert(h, ObjectType::UnderlayDefinition(def));
         app.tabs[i].current_path = Some(std::env::temp_dir().join("ocs_xref_bind_host.dwg"));
         let out = run_capture(&mut app, "XREF Bind doc.pdf");
-        assert!(out.contains("PDF bind (vector import) is not available"), "got: {out:?}");
+        assert!(
+            out.contains("PDF bind (vector import) is not available"),
+            "got: {out:?}"
+        );
     }
 
     #[test]
@@ -1732,7 +1823,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "ocs_xref_bind_nested_{}_{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let mut host_doc = acadrust::CadDocument::new();
@@ -1769,13 +1863,23 @@ mod tests {
             Some(&base),
         );
         assert!(
-            app.tabs[i].scene.document.block_records.get(&name).is_some(),
+            app.tabs[i]
+                .scene
+                .document
+                .block_records
+                .get(&name)
+                .is_some(),
             "prepare must create the definition"
         );
         app.commit_undo_delta(i, pending);
         app.undo_active_tab();
         assert!(
-            app.tabs[i].scene.document.block_records.get(&name).is_none(),
+            app.tabs[i]
+                .scene
+                .document
+                .block_records
+                .get(&name)
+                .is_none(),
             "undo after XATTACH must remove the definition"
         );
     }
@@ -1789,12 +1893,15 @@ mod tests {
         let mut app = fresh_app();
         add_dwg_xref(&mut app, "PLAN", "old/plan.dwg");
         let i = app.active_tab;
-        app.tabs[i].current_path =
-            Some(std::path::PathBuf::from("C:/Drawings/host.dwg"));
+        app.tabs[i].current_path = Some(std::path::PathBuf::from("C:/Drawings/host.dwg"));
         let out = run_capture(&mut app, "XREF Reload PLAN");
         assert!(!out.contains("no references match"), "got: {out:?}");
         assert_eq!(
-            app.tabs[i].history.pending.as_ref().map(|p| p.label.as_str()),
+            app.tabs[i]
+                .history
+                .pending
+                .as_ref()
+                .map(|p| p.label.as_str()),
             Some("XREF-RELOAD"),
             "reload must push an undo snapshot, got: {out:?}"
         );
@@ -1845,7 +1952,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "ocs_xref_reload_skew_{}_{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let a_path = dir.join("plan_a.dwg");
@@ -1857,8 +1967,22 @@ mod tests {
         add_dwg_xref(&mut app, "PLAN-B", &b_path.to_string_lossy());
         let i = app.active_tab;
         app.tabs[i].current_path = Some(dir.join("app.dwg"));
-        let key_a = app.tabs[i].scene.document.block_records.get("PLAN-A").unwrap().handle.value();
-        let key_b = app.tabs[i].scene.document.block_records.get("PLAN-B").unwrap().handle.value();
+        let key_a = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PLAN-A")
+            .unwrap()
+            .handle
+            .value();
+        let key_b = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PLAN-B")
+            .unwrap()
+            .handle
+            .value();
         let out = run_capture(&mut app, "XREF Reload PLAN-A");
         assert!(!out.contains("no references match"), "got: {out:?}");
         assert!(
@@ -1877,7 +2001,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "ocs_xref_bind_undo_{}_{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let mut xref_doc = acadrust::CadDocument::new();
@@ -1902,17 +2029,30 @@ mod tests {
         // Resolve first so `PLAN|*` names exist pre-bind.
         let out = run_capture(&mut app, "XREF Reload PLAN");
         assert!(out.contains("Reloaded"), "got: {out:?}");
-        assert!(app.tabs[i].scene.document.layers.get("PLAN|WALLS").is_some());
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("PLAN|WALLS")
+            .is_some());
         let out = run_capture(&mut app, "XREF Bind PLAN");
         assert!(out.contains("bound \"PLAN\""), "got: {out:?}");
-        assert!(app.tabs[i].scene.document.layers.get("PLAN$0$WALLS").is_some());
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("PLAN$0$WALLS")
+            .is_some());
 
         app.undo_active_tab();
         let doc = &app.tabs[i].scene.document;
         let br = doc.block_records.get("PLAN").unwrap();
         assert!(br.flags.is_xref, "undo must restore the xref flag");
         assert_eq!(br.xref_path, saved, "undo must restore the xref path");
-        assert!(doc.layers.get("PLAN|WALLS").is_some(), "undo must restore `|` names");
+        assert!(
+            doc.layers.get("PLAN|WALLS").is_some(),
+            "undo must restore `|` names"
+        );
         assert!(
             !doc.layers.names().any(|n| n.contains("PLAN$0")),
             "undo must drop the bound names"

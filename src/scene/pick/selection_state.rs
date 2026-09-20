@@ -105,4 +105,3 @@ impl SelectionState {
         self.poly_crossing = false;
     }
 }
-

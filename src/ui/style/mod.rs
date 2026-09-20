@@ -1,17 +1,17 @@
+pub mod anno_object_scale;
+pub mod common;
 pub mod dimstyle;
+pub mod form;
+pub mod fusion_theme;
 pub mod mleaderstyle;
 pub mod mlstyle;
 pub mod plotstyle;
-pub mod textstyle;
-pub mod tablestyle;
 pub mod point_style;
-pub mod style_list;
 pub mod scale_manager;
-pub mod anno_object_scale;
+pub mod style_list;
 pub mod style_manager;
-pub mod common;
-pub mod form;
-pub mod fusion_theme;
+pub mod tablestyle;
+pub mod textstyle;
 
 #[cfg(test)]
 mod common_tests {
@@ -43,6 +43,9 @@ mod common_tests {
         // It passes only after we have proven the divergence; before that it would be
         // meaningless. We keep it as documentation.
         let divergent = true;
-        assert!(divergent, "btn_s in plotstyle.rs:41 and style_manager.rs:299 differ — do not dedup");
+        assert!(
+            divergent,
+            "btn_s in plotstyle.rs:41 and style_manager.rs:299 differ — do not dedup"
+        );
     }
 }

@@ -14,13 +14,11 @@
 //! edits, undo and repaint live in the update handler (`Message::AttrEditorApply`).
 
 use crate::app::Message;
+use crate::t;
 use acadrust::entities::{HorizontalAlignment, VerticalAlignment};
 use acadrust::types::{Color as AcadColor, LineWeight};
-use iced::widget::{
-    button, checkbox, column, container, row, scrollable, text, text_input, Space,
-};
+use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input, Space};
 use iced::{Background, Border, Element, Length, Theme};
-use crate::t;
 use std::borrow::Cow;
 use std::fmt;
 
@@ -67,21 +65,77 @@ pub struct AttrRow {
 /// standard text-justification list. The stored labels are the English source
 /// texts; `justify_label` / `justify_from_label` translate both directions.
 pub const JUSTIFY: &[(&str, HorizontalAlignment, VerticalAlignment)] = &[
-    ("Left", HorizontalAlignment::Left, VerticalAlignment::Baseline),
-    ("Center", HorizontalAlignment::Center, VerticalAlignment::Baseline),
-    ("Right", HorizontalAlignment::Right, VerticalAlignment::Baseline),
-    ("Aligned", HorizontalAlignment::Aligned, VerticalAlignment::Baseline),
-    ("Middle", HorizontalAlignment::Middle, VerticalAlignment::Baseline),
+    (
+        "Left",
+        HorizontalAlignment::Left,
+        VerticalAlignment::Baseline,
+    ),
+    (
+        "Center",
+        HorizontalAlignment::Center,
+        VerticalAlignment::Baseline,
+    ),
+    (
+        "Right",
+        HorizontalAlignment::Right,
+        VerticalAlignment::Baseline,
+    ),
+    (
+        "Aligned",
+        HorizontalAlignment::Aligned,
+        VerticalAlignment::Baseline,
+    ),
+    (
+        "Middle",
+        HorizontalAlignment::Middle,
+        VerticalAlignment::Baseline,
+    ),
     ("Fit", HorizontalAlignment::Fit, VerticalAlignment::Baseline),
-    ("Top Left", HorizontalAlignment::Left, VerticalAlignment::Top),
-    ("Top Center", HorizontalAlignment::Center, VerticalAlignment::Top),
-    ("Top Right", HorizontalAlignment::Right, VerticalAlignment::Top),
-    ("Middle Left", HorizontalAlignment::Left, VerticalAlignment::Middle),
-    ("Middle Center", HorizontalAlignment::Center, VerticalAlignment::Middle),
-    ("Middle Right", HorizontalAlignment::Right, VerticalAlignment::Middle),
-    ("Bottom Left", HorizontalAlignment::Left, VerticalAlignment::Bottom),
-    ("Bottom Center", HorizontalAlignment::Center, VerticalAlignment::Bottom),
-    ("Bottom Right", HorizontalAlignment::Right, VerticalAlignment::Bottom),
+    (
+        "Top Left",
+        HorizontalAlignment::Left,
+        VerticalAlignment::Top,
+    ),
+    (
+        "Top Center",
+        HorizontalAlignment::Center,
+        VerticalAlignment::Top,
+    ),
+    (
+        "Top Right",
+        HorizontalAlignment::Right,
+        VerticalAlignment::Top,
+    ),
+    (
+        "Middle Left",
+        HorizontalAlignment::Left,
+        VerticalAlignment::Middle,
+    ),
+    (
+        "Middle Center",
+        HorizontalAlignment::Center,
+        VerticalAlignment::Middle,
+    ),
+    (
+        "Middle Right",
+        HorizontalAlignment::Right,
+        VerticalAlignment::Middle,
+    ),
+    (
+        "Bottom Left",
+        HorizontalAlignment::Left,
+        VerticalAlignment::Bottom,
+    ),
+    (
+        "Bottom Center",
+        HorizontalAlignment::Center,
+        VerticalAlignment::Bottom,
+    ),
+    (
+        "Bottom Right",
+        HorizontalAlignment::Right,
+        VerticalAlignment::Bottom,
+    ),
 ];
 
 /// The justification label for an (h, v) pair (defaults to "Left"). Kept in
@@ -149,7 +203,11 @@ fn field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
     };
     text_input::Style {
         background: Background::Color(palette.background.base.color),
-        border: Border { color: border, width: 1.0, radius: 3.0.into() },
+        border: Border {
+            color: border,
+            width: 1.0,
+            radius: 3.0.into(),
+        },
         icon: palette.background.base.text,
         placeholder: palette.background.base.text.scale_alpha(0.48),
         value: palette.background.base.text,
@@ -236,7 +294,10 @@ fn localized_pick_field<'a>(
     on_select: impl Fn(String) -> Message + 'a,
     width: Length,
 ) -> Element<'a, Message> {
-    let options = options.into_iter().map(LocalizedChoice::new).collect::<Vec<_>>();
+    let options = options
+        .into_iter()
+        .map(LocalizedChoice::new)
+        .collect::<Vec<_>>();
     let selected = selected.map(LocalizedChoice::new);
     let pl = iced::widget::pick_list(selected, options, |value| value.to_string())
         .on_select(move |choice: LocalizedChoice| on_select(choice.raw))
@@ -246,7 +307,11 @@ fn localized_pick_field<'a>(
     field_row(label, pl.into(), width)
 }
 
-fn tab_button<'a>(label: Cow<'static, str>, this: AttrTab, active: AttrTab) -> Element<'a, Message> {
+fn tab_button<'a>(
+    label: Cow<'static, str>,
+    this: AttrTab,
+    active: AttrTab,
+) -> Element<'a, Message> {
     let is_active = this == active;
     button(text(label).size(11))
         .padding([4, 12])
@@ -261,14 +326,14 @@ fn tab_button<'a>(label: Cow<'static, str>, this: AttrTab, active: AttrTab) -> E
                 _ => palette.background.weak,
             };
             button::Style {
-            background: Some(Background::Color(pair.color)),
-            text_color: pair.text,
-            border: Border {
-                color: palette.background.neutral.color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
+                background: Some(Background::Color(pair.color)),
+                text_color: pair.text,
+                border: Border {
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
             }
         })
         .into()
@@ -298,16 +363,16 @@ pub fn view_window<'a>(
         .style(button::primary);
     let toolbar = container(
         row![
-            text(t!("Block:  %{block}", block = block)).size(12).style(muted_style),
+            text(t!("Block:  %{block}", block = block))
+                .size(12)
+                .style(muted_style),
             Space::new().width(width),
             apply,
         ]
         .align_y(iced::Center),
     )
     .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(
-            theme.palette().background.weak.color
-        )),
+        background: Some(Background::Color(theme.palette().background.weak.color)),
         ..Default::default()
     })
     .width(width)
@@ -321,22 +386,23 @@ pub fn view_window<'a>(
     .spacing(2);
 
     let body: Element<'_, Message> = if rows.is_empty() {
-        text(t!("This block has no attributes.")).size(13).style(muted_style).into()
+        text(t!("This block has no attributes."))
+            .size(13)
+            .style(muted_style)
+            .into()
     } else {
         match tab {
             AttrTab::Attribute => attribute_tab(rows, selected, width, height),
             AttrTab::TextOptions => {
                 text_options_tab(&rows[selected.min(rows.len() - 1)], styles, width, height)
             }
-            AttrTab::Properties => {
-                properties_tab(
-                    &rows[selected.min(rows.len() - 1)],
-                    layers,
-                    linetypes,
-                    width,
-                    height,
-                )
-            }
+            AttrTab::Properties => properties_tab(
+                &rows[selected.min(rows.len() - 1)],
+                layers,
+                linetypes,
+                width,
+                height,
+            ),
         }
     };
 
@@ -347,9 +413,7 @@ pub fn view_window<'a>(
 
     container(column![toolbar, hdivider(width), content])
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.base.color
-            )),
+            background: Some(Background::Color(theme.palette().background.base.color)),
             ..Default::default()
         })
         .width(width)
@@ -441,16 +505,39 @@ fn text_options_tab<'a>(
     let justify_sel = Some(justify_label(r.h_align, r.v_align).to_string());
 
     column![
-        pick_field(t!("Text Style"), styles, style_sel, |s| {
-            Message::AttrEditorTextStyle(s)
-        }, width),
-        localized_pick_field(t!("Justification"), justify_opts, justify_sel, |s| {
-            Message::AttrEditorJustify(s)
-        }, width),
+        pick_field(
+            t!("Text Style"),
+            styles,
+            style_sel,
+            |s| { Message::AttrEditorTextStyle(s) },
+            width
+        ),
+        localized_pick_field(
+            t!("Justification"),
+            justify_opts,
+            justify_sel,
+            |s| { Message::AttrEditorJustify(s) },
+            width
+        ),
         edit_field(t!("Height"), &r.height, Message::AttrEditorHeight, width),
-        edit_field(t!("Rotation"), &r.rotation, Message::AttrEditorRotation, width),
-        edit_field(t!("Width Factor"), &r.width_factor, Message::AttrEditorWidth, width),
-        edit_field(t!("Oblique Angle"), &r.oblique, Message::AttrEditorOblique, width),
+        edit_field(
+            t!("Rotation"),
+            &r.rotation,
+            Message::AttrEditorRotation,
+            width
+        ),
+        edit_field(
+            t!("Width Factor"),
+            &r.width_factor,
+            Message::AttrEditorWidth,
+            width
+        ),
+        edit_field(
+            t!("Oblique Angle"),
+            &r.oblique,
+            Message::AttrEditorOblique,
+            width
+        ),
         field_row(
             Cow::Borrowed(""),
             checkbox(r.backwards)
@@ -505,17 +592,33 @@ fn properties_tab<'a>(
     let lw_opts = lw_options();
     let lw_sel = LwItem(r.line_weight);
     let lw = iced::widget::pick_list(Some(lw_sel), lw_opts, |value| value.to_string())
-    .on_select(|it: LwItem| Message::AttrEditorLineweight(it.0))
-    .text_size(13)
-    .padding([3, 6])
-    .width(width);
+        .on_select(|it: LwItem| Message::AttrEditorLineweight(it.0))
+        .text_size(13)
+        .padding([3, 6])
+        .width(width);
 
     column![
-        pick_field(t!("Layer"), layers, layer_sel, Message::AttrEditorLayer, width),
-        localized_pick_field(t!("Linetype"), linetypes, lt_sel, Message::AttrEditorLinetype, width),
-        localized_pick_field(t!("Color"), color_opts, color_sel, |s| {
-            Message::AttrEditorColor(s)
-        }, width),
+        pick_field(
+            t!("Layer"),
+            layers,
+            layer_sel,
+            Message::AttrEditorLayer,
+            width
+        ),
+        localized_pick_field(
+            t!("Linetype"),
+            linetypes,
+            lt_sel,
+            Message::AttrEditorLinetype,
+            width
+        ),
+        localized_pick_field(
+            t!("Color"),
+            color_opts,
+            color_sel,
+            |s| { Message::AttrEditorColor(s) },
+            width
+        ),
         field_row(t!("Lineweight"), lw.into(), width),
     ]
     .spacing(8)

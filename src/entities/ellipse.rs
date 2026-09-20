@@ -177,16 +177,52 @@ fn properties(ell: &Ellipse) -> Vec<PropSection> {
             edit(t!("Radius ratio").as_ref(), "ratio", ell.minor_axis_ratio),
             edit(t!("Start angle").as_ref(), "start_angle", start_angle),
             edit(t!("End angle").as_ref(), "end_angle", end_angle),
-            ro(t!("Major axis vector X").as_ref(), "major_x", format_length(major_vec.x)),
-            ro(t!("Major axis vector Y").as_ref(), "major_y", format_length(major_vec.y)),
-            ro(t!("Major axis vector Z").as_ref(), "major_z", format_length(major_vec.z)),
-            ro(t!("Minor axis vector X").as_ref(), "minor_x", format_length(minor_vec.x)),
-            ro(t!("Minor axis vector Y").as_ref(), "minor_y", format_length(minor_vec.y)),
-            ro(t!("Minor axis vector Z").as_ref(), "minor_z", format_length(minor_vec.z)),
+            ro(
+                t!("Major axis vector X").as_ref(),
+                "major_x",
+                format_length(major_vec.x),
+            ),
+            ro(
+                t!("Major axis vector Y").as_ref(),
+                "major_y",
+                format_length(major_vec.y),
+            ),
+            ro(
+                t!("Major axis vector Z").as_ref(),
+                "major_z",
+                format_length(major_vec.z),
+            ),
+            ro(
+                t!("Minor axis vector X").as_ref(),
+                "minor_x",
+                format_length(minor_vec.x),
+            ),
+            ro(
+                t!("Minor axis vector Y").as_ref(),
+                "minor_y",
+                format_length(minor_vec.y),
+            ),
+            ro(
+                t!("Minor axis vector Z").as_ref(),
+                "minor_z",
+                format_length(minor_vec.z),
+            ),
             ro(t!("Area").as_ref(), "area", format_area(props.area)),
-            ro(t!("Start parameter").as_ref(), "start_param", format!("{:.4}", ell.start_parameter)),
-            ro(t!("End parameter").as_ref(), "end_param", format!("{:.4}", ell.end_parameter)),
-            ro(t!("Length").as_ref(), "length", format_length(props.perimeter)),
+            ro(
+                t!("Start parameter").as_ref(),
+                "start_param",
+                format!("{:.4}", ell.start_parameter),
+            ),
+            ro(
+                t!("End parameter").as_ref(),
+                "end_param",
+                format!("{:.4}", ell.end_parameter),
+            ),
+            ro(
+                t!("Length").as_ref(),
+                "length",
+                format_length(props.perimeter),
+            ),
             edit(t!("Normal X").as_ref(), "normal_x", ell.normal.x),
             edit(t!("Normal Y").as_ref(), "normal_y", ell.normal.y),
             edit(t!("Normal Z").as_ref(), "normal_z", ell.normal.z),
@@ -470,8 +506,14 @@ mod grip_tests {
         // major=10 (+X), minor=5 (+Y). Drag the minor grip to (0,11), past major.
         let mut e = ell(10.0, 0.5);
         apply_grip(&mut e, 2, GripApply::Absolute(DVec3::new(0.0, 11.0, 0.0)));
-        assert!((xy_len(&e) - 11.0).abs() < 1e-9, "major follows the drag to 11");
-        assert!(e.major_axis.x.abs() < 1e-9, "major points +Y after the swap");
+        assert!(
+            (xy_len(&e) - 11.0).abs() < 1e-9,
+            "major follows the drag to 11"
+        );
+        assert!(
+            e.major_axis.x.abs() < 1e-9,
+            "major points +Y after the swap"
+        );
         assert!(
             (xy_len(&e) * e.minor_axis_ratio - 10.0).abs() < 1e-9,
             "minor holds the old major length (10)"

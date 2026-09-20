@@ -5,13 +5,15 @@ use acadrust::entities::{AttributeDefinition, AttributeEntity};
 use acadrust::types::Vector3;
 
 use crate::command::EntityTransform;
-use crate::entities::common::{edit_angle_prop as edit_angle, edit_prop as edit, parse_f64, ro_prop as ro, square_grip};
+use crate::entities::common::{
+    edit_angle_prop as edit_angle, edit_prop as edit, parse_f64, ro_prop as ro, square_grip,
+};
 use crate::entities::text_support::{
     layout_mtext, resolve_dxf_special_chars, resolve_text_style, text_local_bounds,
     MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
 };
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
-use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke, RenderEntity, RenderObject};
+use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
+use crate::scene::convert::acad_to_render::{GlyphRun, RenderEntity, RenderObject, TextStroke};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;
 use crate::scene::text::lff;
@@ -265,25 +267,24 @@ fn build_attr_render(input: AttrTextInputs<'_>, document: &acadrust::CadDocument
             width_factor,
             oblique_angle,
         );
-        let (anchor_local_x, anchor_local_y) =
-            if let Some(b) = bounds {
-                // Horizontal anchor uses the pen advance box so leading /
-                // trailing spaces keep their width.
-                let ax = match input.horizontal_alignment {
-                    AHA::Left => 0.0,
-                    AHA::Center | AHA::Middle => b.advance * 0.5,
-                    AHA::Right | AHA::Aligned | AHA::Fit => b.advance,
-                };
-                let ay = match input.vertical_alignment {
-                    AVA::Baseline => 0.0,
-                    AVA::Bottom => b.ink_min[1],
-                    AVA::Middle => (b.ink_min[1] + b.ink_max[1]) * 0.5,
-                    AVA::Top => b.ink_max[1],
-                };
-                (ax, ay)
-            } else {
-                (0.0, 0.0)
+        let (anchor_local_x, anchor_local_y) = if let Some(b) = bounds {
+            // Horizontal anchor uses the pen advance box so leading /
+            // trailing spaces keep their width.
+            let ax = match input.horizontal_alignment {
+                AHA::Left => 0.0,
+                AHA::Center | AHA::Middle => b.advance * 0.5,
+                AHA::Right | AHA::Aligned | AHA::Fit => b.advance,
             };
+            let ay = match input.vertical_alignment {
+                AVA::Baseline => 0.0,
+                AVA::Bottom => b.ink_min[1],
+                AVA::Middle => (b.ink_min[1] + b.ink_max[1]) * 0.5,
+                AVA::Top => b.ink_max[1],
+            };
+            (ax, ay)
+        } else {
+            (0.0, 0.0)
+        };
         let line_offset_y = -(i as f32) * line_height;
         let local_y_for_line = anchor_local_y - line_offset_y;
         let origin: [f64; 2] = [
@@ -479,12 +480,32 @@ impl PropertyEditable for AttributeDefinition {
                 self.height,
                 crate::entities::common::style_fixed_height(&self.text_style).is_none(),
             ),
-            edit_angle(t!("Rotation").as_ref(), "att_rot", self.rotation.to_degrees()),
+            edit_angle(
+                t!("Rotation").as_ref(),
+                "att_rot",
+                self.rotation.to_degrees(),
+            ),
             edit(t!("Width factor").as_ref(), "att_wf", self.width_factor),
-            edit_angle(t!("Obliquing").as_ref(), "att_ob", self.oblique_angle.to_degrees()),
-            edit(t!("Text alignment X").as_ref(), "att_ax", self.alignment_point.x),
-            edit(t!("Text alignment Y").as_ref(), "att_ay", self.alignment_point.y),
-            edit(t!("Text alignment Z").as_ref(), "att_az", self.alignment_point.z),
+            edit_angle(
+                t!("Obliquing").as_ref(),
+                "att_ob",
+                self.oblique_angle.to_degrees(),
+            ),
+            edit(
+                t!("Text alignment X").as_ref(),
+                "att_ax",
+                self.alignment_point.x,
+            ),
+            edit(
+                t!("Text alignment Y").as_ref(),
+                "att_ay",
+                self.alignment_point.y,
+            ),
+            edit(
+                t!("Text alignment Z").as_ref(),
+                "att_az",
+                self.alignment_point.z,
+            ),
             ro(
                 t!("Boundary width").as_ref(),
                 "att_field_len",
@@ -524,11 +545,31 @@ impl PropertyEditable for AttributeDefinition {
             PropSection {
                 title: t!("Misc").into_owned(),
                 props: vec![
-                    ro(t!("Invisible").as_ref(), "att_invisible", bool_yn(self.flags.invisible)),
-                    ro(t!("Constant").as_ref(), "att_constant", bool_yn(self.flags.constant)),
-                    ro(t!("Verify").as_ref(), "att_verify", bool_yn(self.flags.verify)),
-                    ro(t!("Preset").as_ref(), "att_preset", bool_yn(self.flags.preset)),
-                    ro(t!("Lock position").as_ref(), "att_lock_pos", bool_yn(self.lock_position)),
+                    ro(
+                        t!("Invisible").as_ref(),
+                        "att_invisible",
+                        bool_yn(self.flags.invisible),
+                    ),
+                    ro(
+                        t!("Constant").as_ref(),
+                        "att_constant",
+                        bool_yn(self.flags.constant),
+                    ),
+                    ro(
+                        t!("Verify").as_ref(),
+                        "att_verify",
+                        bool_yn(self.flags.verify),
+                    ),
+                    ro(
+                        t!("Preset").as_ref(),
+                        "att_preset",
+                        bool_yn(self.flags.preset),
+                    ),
+                    ro(
+                        t!("Lock position").as_ref(),
+                        "att_lock_pos",
+                        bool_yn(self.lock_position),
+                    ),
                     Property {
                         label: t!("Multiple lines").into_owned(),
                         field: "att_mtext_flag",
@@ -756,12 +797,32 @@ impl PropertyEditable for AttributeEntity {
                         self.height,
                         crate::entities::common::style_fixed_height(&self.text_style).is_none(),
                     ),
-                    edit_angle(t!("Rotation").as_ref(), "atte_rot", self.rotation.to_degrees()),
+                    edit_angle(
+                        t!("Rotation").as_ref(),
+                        "atte_rot",
+                        self.rotation.to_degrees(),
+                    ),
                     edit(t!("Width factor").as_ref(), "atte_wf", self.width_factor),
-                    edit_angle(t!("Obliquing").as_ref(), "atte_ob", self.oblique_angle.to_degrees()),
-                    edit(t!("Text alignment X").as_ref(), "atte_ax", self.alignment_point.x),
-                    edit(t!("Text alignment Y").as_ref(), "atte_ay", self.alignment_point.y),
-                    edit(t!("Text alignment Z").as_ref(), "atte_az", self.alignment_point.z),
+                    edit_angle(
+                        t!("Obliquing").as_ref(),
+                        "atte_ob",
+                        self.oblique_angle.to_degrees(),
+                    ),
+                    edit(
+                        t!("Text alignment X").as_ref(),
+                        "atte_ax",
+                        self.alignment_point.x,
+                    ),
+                    edit(
+                        t!("Text alignment Y").as_ref(),
+                        "atte_ay",
+                        self.alignment_point.y,
+                    ),
+                    edit(
+                        t!("Text alignment Z").as_ref(),
+                        "atte_az",
+                        self.alignment_point.z,
+                    ),
                     ro(
                         t!("Boundary width").as_ref(),
                         "atte_field_len",
@@ -790,15 +851,31 @@ impl PropertyEditable for AttributeEntity {
                         "atte_backward",
                         bool_yn(self.text_generation_flags & 0x2 != 0),
                     ),
-                    ro(t!("Invisible").as_ref(), "atte_invisible", bool_yn(self.flags.invisible)),
+                    ro(
+                        t!("Invisible").as_ref(),
+                        "atte_invisible",
+                        bool_yn(self.flags.invisible),
+                    ),
                     ro(
                         t!("Multiple lines").as_ref(),
                         "atte_mtext_flag",
                         mtext_flag_str(self.mtext_flag),
                     ),
-                    ro(t!("Constant").as_ref(), "atte_constant", bool_yn(self.flags.constant)),
-                    ro(t!("Verify").as_ref(), "atte_verify", bool_yn(self.flags.verify)),
-                    ro(t!("Preset").as_ref(), "atte_preset", bool_yn(self.flags.preset)),
+                    ro(
+                        t!("Constant").as_ref(),
+                        "atte_constant",
+                        bool_yn(self.flags.constant),
+                    ),
+                    ro(
+                        t!("Verify").as_ref(),
+                        "atte_verify",
+                        bool_yn(self.flags.verify),
+                    ),
+                    ro(
+                        t!("Preset").as_ref(),
+                        "atte_preset",
+                        bool_yn(self.flags.preset),
+                    ),
                     ro(
                         t!("Lock position").as_ref(),
                         "atte_lock_pos",

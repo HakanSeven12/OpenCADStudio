@@ -1,12 +1,20 @@
+use crate::command::{CadCommand, CmdOption, CmdResult};
 use acadrust::Handle;
 use glam::DVec3;
-use crate::command::{CadCommand, CmdOption, CmdResult};
 
 static MODE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(255);
-pub fn mode() -> u8 { MODE.load(std::sync::atomic::Ordering::Relaxed) }
-pub fn set_mode(value: u8) { MODE.store(value, std::sync::atomic::Ordering::Relaxed); }
+pub fn mode() -> u8 {
+    MODE.load(std::sync::atomic::Ordering::Relaxed)
+}
+pub fn set_mode(value: u8) {
+    MODE.store(value, std::sync::atomic::Ordering::Relaxed);
+}
 
-pub fn apply_mask(common: &mut acadrust::entities::EntityCommon, mask: u8, change_byblock: bool) -> bool {
+pub fn apply_mask(
+    common: &mut acadrust::entities::EntityCommon,
+    mask: u8,
+    change_byblock: bool,
+) -> bool {
     let before = common.clone();
     if mask & 1 != 0 && (change_byblock || common.color != acadrust::types::Color::ByBlock) {
         common.color = acadrust::types::Color::ByLayer;
@@ -17,7 +25,9 @@ pub fn apply_mask(common: &mut acadrust::entities::EntityCommon, mask: u8, chang
         common.linetype = "ByLayer".to_string();
         common.linetype_handle = None;
     }
-    if mask & 4 != 0 && (change_byblock || common.line_weight != acadrust::types::LineWeight::ByBlock) {
+    if mask & 4 != 0
+        && (change_byblock || common.line_weight != acadrust::types::LineWeight::ByBlock)
+    {
         common.line_weight = acadrust::types::LineWeight::ByLayer;
     }
     if mask & 8 != 0 && (change_byblock || common.material_flags != 1) {
@@ -28,13 +38,20 @@ pub fn apply_mask(common: &mut acadrust::entities::EntityCommon, mask: u8, chang
         common.plotstyle_flags = 0;
         common.plotstyle_handle = None;
     }
-    if mask & 128 != 0 && (change_byblock || common.transparency != acadrust::types::Transparency::BY_BLOCK) {
+    if mask & 128 != 0
+        && (change_byblock || common.transparency != acadrust::types::Transparency::BY_BLOCK)
+    {
         common.transparency = acadrust::types::Transparency::BY_LAYER;
     }
     *common != before
 }
 
-enum Step { Selection, Settings, ByBlock, Blocks }
+enum Step {
+    Selection,
+    Settings,
+    ByBlock,
+    Blocks,
+}
 
 pub struct SetByLayerCommand {
     selected: Vec<Handle>,
@@ -46,9 +63,19 @@ pub struct SetByLayerCommand {
 
 impl SetByLayerCommand {
     pub fn new(selected: Vec<Handle>) -> Self {
-        let step = if selected.is_empty() { Step::Selection } else { Step::ByBlock };
+        let step = if selected.is_empty() {
+            Step::Selection
+        } else {
+            Step::ByBlock
+        };
         let pending_mode = mode();
-        Self { selected, step, change_byblock: pending_mode & 32 != 0, include_blocks: pending_mode & 64 != 0, pending_mode }
+        Self {
+            selected,
+            step,
+            change_byblock: pending_mode & 32 != 0,
+            include_blocks: pending_mode & 64 != 0,
+            pending_mode,
+        }
     }
 
     fn answer(&mut self, yes: bool) -> CmdResult {
@@ -59,33 +86,58 @@ impl SetByLayerCommand {
                 CmdResult::NeedPoint
             }
             Step::Blocks => {
-                let flags = (self.pending_mode & !(32 | 64)) | if self.change_byblock { 32 } else { 0 } | if yes { 64 } else { 0 };
+                let flags = (self.pending_mode & !(32 | 64))
+                    | if self.change_byblock { 32 } else { 0 }
+                    | if yes { 64 } else { 0 };
                 set_mode(flags);
                 CmdResult::Relaunch(
-                format!("SETBYLAYER_APPLY {} {}", u8::from(self.change_byblock), u8::from(yes)),
-                self.selected.clone(),
-            ) },
+                    format!(
+                        "SETBYLAYER_APPLY {} {}",
+                        u8::from(self.change_byblock),
+                        u8::from(yes)
+                    ),
+                    self.selected.clone(),
+                )
+            }
             Step::Selection | Step::Settings => CmdResult::NeedPoint,
         }
     }
 }
 
 impl CadCommand for SetByLayerCommand {
-    fn name(&self) -> &'static str { "SETBYLAYER" }
+    fn name(&self) -> &'static str {
+        "SETBYLAYER"
+    }
     fn prompt(&self) -> String {
         match self.step {
             Step::Selection => "Select objects or [Settings]:".into(),
             Step::Settings => {
-                let active = [(1, "Color"), (2, "Linetype"), (4, "Lineweight"), (128, "Transparency"), (8, "Material")]
-                    .into_iter().filter_map(|(bit, label)| (self.pending_mode & bit != 0).then_some(label))
-                    .collect::<Vec<_>>().join(" ");
+                let active = [
+                    (1, "Color"),
+                    (2, "Linetype"),
+                    (4, "Lineweight"),
+                    (128, "Transparency"),
+                    (8, "Material"),
+                ]
+                .into_iter()
+                .filter_map(|(bit, label)| (self.pending_mode & bit != 0).then_some(label))
+                .collect::<Vec<_>>()
+                .join(" ");
                 format!("Current active settings: {active}\nEnter a property to toggle [Color/LType/LWeight/Transparency/Material]:")
             }
-            Step::ByBlock => format!("Change ByBlock to ByLayer? [Yes/No] <{}>:", if self.change_byblock { "Yes" } else { "No" }),
-            Step::Blocks => format!("Include blocks? [Yes/No] <{}>:", if self.include_blocks { "Yes" } else { "No" }),
+            Step::ByBlock => format!(
+                "Change ByBlock to ByLayer? [Yes/No] <{}>:",
+                if self.change_byblock { "Yes" } else { "No" }
+            ),
+            Step::Blocks => format!(
+                "Include blocks? [Yes/No] <{}>:",
+                if self.include_blocks { "Yes" } else { "No" }
+            ),
         }
     }
-    fn is_selection_gathering(&self) -> bool { matches!(self.step, Step::Selection) }
+    fn is_selection_gathering(&self) -> bool {
+        matches!(self.step, Step::Selection)
+    }
     fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
         self.selected = handles;
         CmdResult::NeedPoint
@@ -93,21 +145,41 @@ impl CadCommand for SetByLayerCommand {
     fn options(&self) -> Vec<CmdOption> {
         match self.step {
             Step::Selection => vec![CmdOption::new("Settings", "S")],
-            Step::Settings => vec![CmdOption::new("Color", "C"), CmdOption::new("LType", "LT"), CmdOption::new("LWeight", "LW"), CmdOption::new("Transparency", "T"), CmdOption::new("Material", "M")],
+            Step::Settings => vec![
+                CmdOption::new("Color", "C"),
+                CmdOption::new("LType", "LT"),
+                CmdOption::new("LWeight", "LW"),
+                CmdOption::new("Transparency", "T"),
+                CmdOption::new("Material", "M"),
+            ],
             _ => vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")],
         }
     }
-    fn wants_text_input(&self) -> bool { true }
-    fn on_point(&mut self, _: DVec3) -> CmdResult { CmdResult::NeedPoint }
+    fn wants_text_input(&self) -> bool {
+        true
+    }
+    fn on_point(&mut self, _: DVec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
     fn on_enter(&mut self) -> CmdResult {
         if matches!(self.step, Step::Settings) {
             self.step = Step::Selection;
             return CmdResult::NeedPoint;
         }
         if self.is_selection_gathering() {
-            if self.selected.is_empty() { CmdResult::Cancel }
-            else { self.step = Step::ByBlock; CmdResult::NeedPoint }
-        } else { self.answer(if matches!(self.step, Step::ByBlock) { self.change_byblock } else { self.include_blocks }) }
+            if self.selected.is_empty() {
+                CmdResult::Cancel
+            } else {
+                self.step = Step::ByBlock;
+                CmdResult::NeedPoint
+            }
+        } else {
+            self.answer(if matches!(self.step, Step::ByBlock) {
+                self.change_byblock
+            } else {
+                self.include_blocks
+            })
+        }
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let text = text.trim().trim_start_matches('_').to_uppercase();
@@ -115,7 +187,9 @@ impl CadCommand for SetByLayerCommand {
             return if matches!(text.as_str(), "S" | "SETTINGS") {
                 self.step = Step::Settings;
                 Some(CmdResult::NeedPoint)
-            } else { None };
+            } else {
+                None
+            };
         }
         if matches!(self.step, Step::Settings) {
             let bit = match text.as_str() {
@@ -139,18 +213,33 @@ impl CadCommand for SetByLayerCommand {
 
 pub struct ModeCommand;
 impl CadCommand for ModeCommand {
-    fn name(&self) -> &'static str { "SETBYLAYERMODE" }
-    fn prompt(&self) -> String { format!("Enter new value for SETBYLAYERMODE <{}>:", mode()) }
-    fn wants_text_input(&self) -> bool { true }
-    fn on_point(&mut self, _: DVec3) -> CmdResult { CmdResult::NeedPoint }
-    fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
+    fn name(&self) -> &'static str {
+        "SETBYLAYERMODE"
+    }
+    fn prompt(&self) -> String {
+        format!("Enter new value for SETBYLAYERMODE <{}>:", mode())
+    }
+    fn wants_text_input(&self) -> bool {
+        true
+    }
+    fn on_point(&mut self, _: DVec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         Some(if let Ok(value) = text.trim().parse::<u8>() {
-            set_mode(value); CmdResult::Cancel
-        } else { CmdResult::NeedPoint })
+            set_mode(value);
+            CmdResult::Cancel
+        } else {
+            CmdResult::NeedPoint
+        })
     }
 }
-inventory::submit!(crate::command::CommandRegistration { names: &["SETBYLAYERMODE", "-SETBYLAYER"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["SETBYLAYERMODE", "-SETBYLAYER"]
+});
 
 #[cfg(test)]
 mod tests {
@@ -189,9 +278,19 @@ mod tests {
     fn selection_settings_are_committed_with_the_apply_answers() {
         set_mode(255);
         let mut command = SetByLayerCommand::new(Vec::new());
-        assert!(matches!(command.on_text_input("settings"), Some(CmdResult::NeedPoint)));
-        assert!(matches!(command.on_text_input("color"), Some(CmdResult::NeedPoint)));
-        assert_eq!(mode(), 255, "settings stay pending until the command applies");
+        assert!(matches!(
+            command.on_text_input("settings"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("color"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            mode(),
+            255,
+            "settings stay pending until the command applies"
+        );
         assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
         command.on_selection_complete(vec![Handle::new(1)]);
         assert!(matches!(command.on_enter(), CmdResult::NeedPoint));

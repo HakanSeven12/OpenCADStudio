@@ -2,9 +2,9 @@
 
 use crate::app::Message;
 use crate::t;
+use crate::ui::style::common::muted_style;
 use iced::widget::{canvas, checkbox, column, container, row, text, text_input};
 use iced::{mouse, Color, Element, Length, Point, Rectangle, Size, Theme};
-use crate::ui::style::common::muted_style;
 use std::borrow::Cow;
 use std::fmt;
 
@@ -142,11 +142,17 @@ fn enum_row<'a>(
     row![
         text(label).size(11).style(muted_style).width(165),
         iced::widget::pick_list(
-            Some(EnumChoice { code: selected, label: selected_label }),
+            Some(EnumChoice {
+                code: selected,
+                label: selected_label
+            }),
             choices(values),
             |value| value.to_string(),
         )
-        .on_select(move |choice| Message::MLeaderStyleSetEnum { field, value: choice.code })
+        .on_select(move |choice| Message::MLeaderStyleSetEnum {
+            field,
+            value: choice.code
+        })
         .text_size(11)
         .width(220),
     ]
@@ -181,7 +187,10 @@ fn handle_row<'a>(
     row![
         text(label).size(11).style(muted_style).width(165),
         iced::widget::pick_list(Some(selected), options, |value| value.to_string())
-            .on_select(move |value| Message::MLeaderStyleSetHandle { field, value: value.code })
+            .on_select(move |value| Message::MLeaderStyleSetHandle {
+                field,
+                value: value.code
+            })
             .text_size(11)
             .width(220),
     ]
@@ -206,7 +215,10 @@ const ATTACHMENTS: [(&str, &str); 11] = [
     ("MiddleOfBottomLine", "Middle of bottom line"),
     ("BottomOfBottomLine", "Bottom of bottom line"),
     ("BottomLine", "Bottom line"),
-    ("BottomOfTopLineUnderlineBottomLine", "Underline bottom line"),
+    (
+        "BottomOfTopLineUnderlineBottomLine",
+        "Underline bottom line",
+    ),
     ("BottomOfTopLineUnderlineTopLine", "Underline top line"),
     ("BottomOfTopLineUnderlineAll", "Underline all text"),
     ("CenterOfText", "Center of text"),
@@ -314,12 +326,32 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
         let scale = if self.annotative {
             1.0
         } else {
-            self.scale.trim().parse::<f32>().unwrap_or(1.0).abs().clamp(0.35, 2.2)
+            self.scale
+                .trim()
+                .parse::<f32>()
+                .unwrap_or(1.0)
+                .abs()
+                .clamp(0.35, 2.2)
         };
         let head = Point::new(34.0, bounds.height - 37.0);
-        let angle1 = self.first_angle.trim().parse::<f32>().unwrap_or(28.0).to_radians();
-        let angle2 = self.second_angle.trim().parse::<f32>().unwrap_or(0.0).to_radians();
-        let points = self.max_points.trim().parse::<usize>().unwrap_or(2).clamp(2, 5);
+        let angle1 = self
+            .first_angle
+            .trim()
+            .parse::<f32>()
+            .unwrap_or(28.0)
+            .to_radians();
+        let angle2 = self
+            .second_angle
+            .trim()
+            .parse::<f32>()
+            .unwrap_or(0.0)
+            .to_radians();
+        let points = self
+            .max_points
+            .trim()
+            .parse::<usize>()
+            .unwrap_or(2)
+            .clamp(2, 5);
         let elbow = Point::new(
             head.x + 105.0 * scale * angle1.cos().abs().max(0.25),
             head.y - 70.0 * scale * angle1.sin().abs().max(0.2),
@@ -342,7 +374,10 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
             style: canvas::Style::Solid(line_color),
             width,
             line_dash: if dashed {
-                canvas::LineDash { segments: &[7.0, 4.0], offset: 0 }
+                canvas::LineDash {
+                    segments: &[7.0, 4.0],
+                    offset: 0,
+                }
             } else {
                 canvas::LineDash::default()
             },
@@ -355,7 +390,8 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
                     for step in 1..=18 {
                         let t = step as f32 / 18.0;
                         let x = head.x + (elbow.x - head.x) * t;
-                        let y = head.y + (elbow.y - head.y) * t - (t * std::f32::consts::PI).sin() * 15.0;
+                        let y = head.y + (elbow.y - head.y) * t
+                            - (t * std::f32::consts::PI).sin() * 15.0;
                         builder.line_to(Point::new(x, y));
                     }
                 });
@@ -365,7 +401,11 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
                     builder.move_to(head);
                     for index in 1..points {
                         let t = index as f32 / (points - 1) as f32;
-                        let bend = if index + 1 == points { 0.0 } else { (index as f32 * 7.0) % 14.0 - 7.0 };
+                        let bend = if index + 1 == points {
+                            0.0
+                        } else {
+                            (index as f32 * 7.0) % 14.0 - 7.0
+                        };
                         builder.line_to(Point::new(
                             head.x + (elbow.x - head.x) * t,
                             head.y + (elbow.y - head.y) * t + bend,
@@ -375,12 +415,32 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
                 frame.stroke(&path, stroke.clone());
             }
             if self.landing && self.dogleg {
-                let gap = self.break_gap.trim().parse::<f32>().unwrap_or(0.0).abs().clamp(0.0, 8.0);
-                frame.stroke(&canvas::Path::line(elbow, Point::new((elbow.x + tail.x) * 0.5 - gap, elbow.y)), stroke.clone());
-                frame.stroke(&canvas::Path::line(Point::new((elbow.x + tail.x) * 0.5 + gap, elbow.y), tail), stroke.clone());
+                let gap = self
+                    .break_gap
+                    .trim()
+                    .parse::<f32>()
+                    .unwrap_or(0.0)
+                    .abs()
+                    .clamp(0.0, 8.0);
+                frame.stroke(
+                    &canvas::Path::line(elbow, Point::new((elbow.x + tail.x) * 0.5 - gap, elbow.y)),
+                    stroke.clone(),
+                );
+                frame.stroke(
+                    &canvas::Path::line(Point::new((elbow.x + tail.x) * 0.5 + gap, elbow.y), tail),
+                    stroke.clone(),
+                );
             }
         }
-        let arrow = self.arrow_size.trim().parse::<f32>().unwrap_or(0.18).abs().mul_add(12.0, 4.0).clamp(5.0, 18.0) * scale;
+        let arrow = self
+            .arrow_size
+            .trim()
+            .parse::<f32>()
+            .unwrap_or(0.18)
+            .abs()
+            .mul_add(12.0, 4.0)
+            .clamp(5.0, 18.0)
+            * scale;
         let arrow_code = self.arrow_name_code.to_ascii_uppercase();
         if arrow_code.contains("DOT") {
             frame.fill(&canvas::Path::circle(head, arrow * 0.42), line_color);
@@ -390,7 +450,9 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
                     Point::new(head.x - arrow * 0.35, head.y + arrow * 0.65),
                     Point::new(head.x + arrow * 0.35, head.y - arrow * 0.65),
                 ),
-                canvas::Stroke::default().with_color(line_color).with_width(width),
+                canvas::Stroke::default()
+                    .with_color(line_color)
+                    .with_width(width),
             );
         } else if arrow_code.contains("BOX") {
             frame.fill(
@@ -415,16 +477,29 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
                 });
                 frame.stroke(
                     &open_path,
-                    canvas::Stroke::default().with_color(line_color).with_width(width),
+                    canvas::Stroke::default()
+                        .with_color(line_color)
+                        .with_width(width),
                 );
             } else {
                 frame.fill(&arrow_path, line_color);
             }
         }
-        let landing_gap = self.landing_gap.trim().parse::<f32>().unwrap_or(0.09).abs().mul_add(8.0, 5.0).clamp(5.0, 24.0);
+        let landing_gap = self
+            .landing_gap
+            .trim()
+            .parse::<f32>()
+            .unwrap_or(0.09)
+            .abs()
+            .mul_add(8.0, 5.0)
+            .clamp(5.0, 24.0);
         let content_origin = Point::new(tail.x + landing_gap, tail.y);
         if self.content_type == "Block" {
-            let scales = self.block_scale.iter().map(|value| value.trim().parse::<f32>().unwrap_or(1.0).abs()).collect::<Vec<_>>();
+            let scales = self
+                .block_scale
+                .iter()
+                .map(|value| value.trim().parse::<f32>().unwrap_or(1.0).abs())
+                .collect::<Vec<_>>();
             let (scale_x, scale_y) = if self.enable_block_scale {
                 (scales[0].clamp(0.3, 2.5), scales[1].clamp(0.3, 2.5))
             } else {
@@ -432,7 +507,11 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
             };
             let size = Size::new(42.0 * scale_x, 30.0 * scale_y);
             let rotation = if self.enable_block_rotation {
-                self.block_rotation.trim().parse::<f32>().unwrap_or(0.0).to_radians()
+                self.block_rotation
+                    .trim()
+                    .parse::<f32>()
+                    .unwrap_or(0.0)
+                    .to_radians()
             } else {
                 0.0
             };
@@ -442,10 +521,7 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
                 content_origin.x + size.width * 0.5
             };
             frame.with_save(|frame| {
-                frame.translate(iced::Vector::new(
-                    center_x,
-                    content_origin.y,
-                ));
+                frame.translate(iced::Vector::new(center_x, content_origin.y));
                 frame.rotate(iced::Radians(rotation));
                 let top_left = Point::new(-size.width * 0.5, -size.height * 0.5);
                 let rect = canvas::Path::rectangle(top_left, size);
@@ -455,10 +531,7 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
                     canvas::Stroke::default().with_color(color).with_width(1.5),
                 );
                 frame.stroke(
-                    &canvas::Path::line(
-                        top_left,
-                        Point::new(size.width * 0.5, size.height * 0.5),
-                    ),
+                    &canvas::Path::line(top_left, Point::new(size.width * 0.5, size.height * 0.5)),
                     canvas::Stroke::default().with_color(color),
                 );
             });
@@ -470,16 +543,34 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
             } else {
                 self.default_text.clone()
             };
-            let text_size = self.text_height.trim().parse::<f32>().unwrap_or(0.18).abs().mul_add(22.0, 8.0).clamp(9.0, 19.0) * scale;
-            let box_width = (content.chars().count() as f32 * text_size * 0.55 + 14.0).clamp(60.0, bounds.width - content_origin.x - 8.0);
-            let box_height = text_size + 12.0 + self.align_space.trim().parse::<f32>().unwrap_or(0.0).abs().min(8.0);
+            let text_size = self
+                .text_height
+                .trim()
+                .parse::<f32>()
+                .unwrap_or(0.18)
+                .abs()
+                .mul_add(22.0, 8.0)
+                .clamp(9.0, 19.0)
+                * scale;
+            let box_width = (content.chars().count() as f32 * text_size * 0.55 + 14.0)
+                .clamp(60.0, bounds.width - content_origin.x - 8.0);
+            let box_height = text_size
+                + 12.0
+                + self
+                    .align_space
+                    .trim()
+                    .parse::<f32>()
+                    .unwrap_or(0.0)
+                    .abs()
+                    .min(8.0);
             let attachment_offset = if self.attachment_direction == "Horizontal" {
                 match self.left_attachment_code.as_str() {
                     "TopOfTopLine" | "BottomOfTopLineUnderlineTopLine" => box_height * 0.5,
                     "MiddleOfTopLine" => box_height * 0.25,
                     "MiddleOfBottomLine" => -box_height * 0.25,
-                    "BottomOfBottomLine" | "BottomLine"
-                    | "BottomOfTopLineUnderlineBottomLine" => -box_height * 0.5,
+                    "BottomOfBottomLine" | "BottomLine" | "BottomOfTopLineUnderlineBottomLine" => {
+                        -box_height * 0.5
+                    }
                     _ => 0.0,
                 }
             } else {
@@ -488,8 +579,13 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
             let content_y = content_origin.y + attachment_offset;
             if self.text_frame {
                 frame.stroke(
-                    &canvas::Path::rectangle(Point::new(content_origin.x, content_y - box_height * 0.5), Size::new(box_width, box_height)),
-                    canvas::Stroke::default().with_color(aci_color(&self.text_color, ink)).with_width(1.0),
+                    &canvas::Path::rectangle(
+                        Point::new(content_origin.x, content_y - box_height * 0.5),
+                        Size::new(box_width, box_height),
+                    ),
+                    canvas::Stroke::default()
+                        .with_color(aci_color(&self.text_color, ink))
+                        .with_width(1.0),
                 );
             }
             let align = if self.text_always_left || self.text_alignment == "Left" {
@@ -550,10 +646,18 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
                 self.top_attachment,
                 self.bottom_attachment,
                 self.block_connection,
-                if self.enable_block_rotation { &self.block_rotation } else { "0" },
+                if self.enable_block_rotation {
+                    &self.block_rotation
+                } else {
+                    "0"
+                },
                 "°",
                 self.block_scale[2],
-                if self.annotative { t!("Annotative") } else { t!("Drawing scale") },
+                if self.annotative {
+                    t!("Annotative")
+                } else {
+                    t!("Drawing scale")
+                },
             ),
             position: Point::new(10.0, 9.0),
             color: ink.scale_alpha(0.55),
@@ -574,63 +678,230 @@ pub fn view_window<'a>(
         (_, None) => text(t!("Select a style to view details.")).size(11).into(),
         (0, Some(style)) => column![
             input_row(t!("Description"), "", v.description, "description"),
-            enum_row(t!("Path type"), &[("Invisible", "None"), ("StraightLineSegments", "Straight"), ("Spline", "Spline")], format!("{:?}", style.path_type), "path_type"),
-            color_row(t!("Line color"), v.line_color, "line_color", v.color_open == Some("line_color")),
+            enum_row(
+                t!("Path type"),
+                &[
+                    ("Invisible", "None"),
+                    ("StraightLineSegments", "Straight"),
+                    ("Spline", "Spline")
+                ],
+                format!("{:?}", style.path_type),
+                "path_type"
+            ),
+            color_row(
+                t!("Line color"),
+                v.line_color,
+                "line_color",
+                v.color_open == Some("line_color")
+            ),
             row![
-                text(t!("Line weight")).size(11).style(muted_style).width(165),
+                text(t!("Line weight"))
+                    .size(11)
+                    .style(muted_style)
+                    .width(165),
                 iced::widget::pick_list(
                     Some(crate::ui::properties::LwItem(style.line_weight)),
                     crate::ui::properties::lw_options(),
                     |value| value.to_string(),
                 )
                 .on_select(|item| Message::MLeaderStyleLineWeightChanged(item.0))
-                .text_size(11).width(220),
-            ].spacing(8).align_y(iced::Center),
-            handle_row(t!("Line type"), v.lt_opts.clone(), v.line_type_name.clone(), "line_type_handle"),
-            handle_row(t!("Arrowhead"), v.arrow_opts.clone(), v.arrowhead_name.clone(), "arrowhead_handle"),
-            input_row(t!("Arrowhead size"), "0.18", v.arrowhead_size, "arrowhead_size"),
+                .text_size(11)
+                .width(220),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+            handle_row(
+                t!("Line type"),
+                v.lt_opts.clone(),
+                v.line_type_name.clone(),
+                "line_type_handle"
+            ),
+            handle_row(
+                t!("Arrowhead"),
+                v.arrow_opts.clone(),
+                v.arrowhead_name.clone(),
+                "arrowhead_handle"
+            ),
+            input_row(
+                t!("Arrowhead size"),
+                "0.18",
+                v.arrowhead_size,
+                "arrowhead_size"
+            ),
             input_row(t!("Break gap size"), "0.125", v.break_gap, "break_gap"),
-        ].spacing(8).into(),
+        ]
+        .spacing(8)
+        .into(),
         (1, Some(style)) => column![
             toggle(t!("Enable landing"), style.enable_landing, "enable_landing"),
             toggle(t!("Enable dogleg"), style.enable_dogleg, "enable_dogleg"),
-            input_row(t!("Landing distance"), "8.0", v.landing_distance, "landing_distance"),
+            input_row(
+                t!("Landing distance"),
+                "8.0",
+                v.landing_distance,
+                "landing_distance"
+            ),
             input_row(t!("Landing gap"), "0.09", v.landing_gap, "landing_gap"),
             input_row(t!("Maximum leader points"), "2", v.max_points, "max_points"),
-            input_row(t!("First segment angle"), "0", v.first_seg_angle, "first_seg_angle"),
-            input_row(t!("Second segment angle"), "0", v.second_seg_angle, "second_seg_angle"),
-            if style.is_annotative { readonly_row(t!("Scale factor"), t!("By annotation scale")) } else { input_row(t!("Scale factor"), "1.0", v.scale_factor, "scale_factor") },
+            input_row(
+                t!("First segment angle"),
+                "0",
+                v.first_seg_angle,
+                "first_seg_angle"
+            ),
+            input_row(
+                t!("Second segment angle"),
+                "0",
+                v.second_seg_angle,
+                "second_seg_angle"
+            ),
+            if style.is_annotative {
+                readonly_row(t!("Scale factor"), t!("By annotation scale"))
+            } else {
+                input_row(t!("Scale factor"), "1.0", v.scale_factor, "scale_factor")
+            },
             input_row(t!("Alignment spacing"), "4.0", v.align_space, "align_space"),
-            enum_row(t!("Leader draw order"), &LEADER_DRAW_ORDERS, format!("{:?}", style.leader_draw_order), "leader_draw_order"),
-            enum_row(t!("Multileader draw order"), &MULTILEADER_DRAW_ORDERS, format!("{:?}", style.multileader_draw_order), "multileader_draw_order"),
+            enum_row(
+                t!("Leader draw order"),
+                &LEADER_DRAW_ORDERS,
+                format!("{:?}", style.leader_draw_order),
+                "leader_draw_order"
+            ),
+            enum_row(
+                t!("Multileader draw order"),
+                &MULTILEADER_DRAW_ORDERS,
+                format!("{:?}", style.multileader_draw_order),
+                "multileader_draw_order"
+            ),
             toggle(t!("Annotative"), style.is_annotative, "annotative"),
-        ].spacing(8).into(),
+        ]
+        .spacing(8)
+        .into(),
         (2, Some(style)) => column![
-            enum_row(t!("Content type"), &[("None", "None"), ("Block", "Block"), ("MText", "Text"), ("Tolerance", "Tolerance")], format!("{:?}", style.content_type), "content_type"),
+            enum_row(
+                t!("Content type"),
+                &[
+                    ("None", "None"),
+                    ("Block", "Block"),
+                    ("MText", "Text"),
+                    ("Tolerance", "Tolerance")
+                ],
+                format!("{:?}", style.content_type),
+                "content_type"
+            ),
             input_row(t!("Default text"), "", v.default_text, "default_text"),
-            handle_row(t!("Text style"), v.textstyle_opts.clone(), v.text_style_name.clone(), "text_style_handle"),
+            handle_row(
+                t!("Text style"),
+                v.textstyle_opts.clone(),
+                v.text_style_name.clone(),
+                "text_style_handle"
+            ),
             input_row(t!("Text height"), "0.18", v.text_height, "text_height"),
-            color_row(t!("Text color"), v.text_color, "text_color", v.color_open == Some("text_color")),
-            enum_row(t!("Text angle"), &[("ParallelToLastLeaderLine", "Parallel to last segment"), ("Horizontal", "Horizontal"), ("Optimized", "Optimized")], format!("{:?}", style.text_angle_type), "text_angle_type"),
-            enum_row(t!("Text alignment"), &[("Left", "Left"), ("Center", "Center"), ("Right", "Right")], format!("{:?}", style.text_alignment), "text_alignment"),
-            enum_row(t!("Attachment direction"), &[("Horizontal", "Horizontal"), ("Vertical", "Vertical")], format!("{:?}", style.text_attachment_direction), "text_attachment_direction"),
-            enum_row(t!("Left attachment"), &ATTACHMENTS, format!("{:?}", style.text_left_attachment), "text_left_attachment"),
-            enum_row(t!("Right attachment"), &ATTACHMENTS, format!("{:?}", style.text_right_attachment), "text_right_attachment"),
-            enum_row(t!("Top attachment"), &ATTACHMENTS, format!("{:?}", style.text_top_attachment), "text_top_attachment"),
-            enum_row(t!("Bottom attachment"), &ATTACHMENTS, format!("{:?}", style.text_bottom_attachment), "text_bottom_attachment"),
-            row![toggle(t!("Text frame"), style.text_frame, "text_frame"), toggle(t!("Always left align"), style.text_always_left, "text_always_left")].spacing(18),
-        ].spacing(8).into(),
+            color_row(
+                t!("Text color"),
+                v.text_color,
+                "text_color",
+                v.color_open == Some("text_color")
+            ),
+            enum_row(
+                t!("Text angle"),
+                &[
+                    ("ParallelToLastLeaderLine", "Parallel to last segment"),
+                    ("Horizontal", "Horizontal"),
+                    ("Optimized", "Optimized")
+                ],
+                format!("{:?}", style.text_angle_type),
+                "text_angle_type"
+            ),
+            enum_row(
+                t!("Text alignment"),
+                &[("Left", "Left"), ("Center", "Center"), ("Right", "Right")],
+                format!("{:?}", style.text_alignment),
+                "text_alignment"
+            ),
+            enum_row(
+                t!("Attachment direction"),
+                &[("Horizontal", "Horizontal"), ("Vertical", "Vertical")],
+                format!("{:?}", style.text_attachment_direction),
+                "text_attachment_direction"
+            ),
+            enum_row(
+                t!("Left attachment"),
+                &ATTACHMENTS,
+                format!("{:?}", style.text_left_attachment),
+                "text_left_attachment"
+            ),
+            enum_row(
+                t!("Right attachment"),
+                &ATTACHMENTS,
+                format!("{:?}", style.text_right_attachment),
+                "text_right_attachment"
+            ),
+            enum_row(
+                t!("Top attachment"),
+                &ATTACHMENTS,
+                format!("{:?}", style.text_top_attachment),
+                "text_top_attachment"
+            ),
+            enum_row(
+                t!("Bottom attachment"),
+                &ATTACHMENTS,
+                format!("{:?}", style.text_bottom_attachment),
+                "text_bottom_attachment"
+            ),
+            row![
+                toggle(t!("Text frame"), style.text_frame, "text_frame"),
+                toggle(
+                    t!("Always left align"),
+                    style.text_always_left,
+                    "text_always_left"
+                )
+            ]
+            .spacing(18),
+        ]
+        .spacing(8)
+        .into(),
         (_, Some(style)) => column![
-            handle_row(t!("Block"), v.block_opts.clone(), v.block_content_name.clone(), "block_content_handle"),
-            color_row(t!("Block color"), v.block_color, "block_color", v.color_open == Some("block_color")),
-            enum_row(t!("Block connection"), &BLOCK_CONNECTIONS, format!("{:?}", style.block_content_connection), "block_content_connection"),
-            input_row(t!("Block rotation"), "0", v.block_rotation, "block_rotation"),
+            handle_row(
+                t!("Block"),
+                v.block_opts.clone(),
+                v.block_content_name.clone(),
+                "block_content_handle"
+            ),
+            color_row(
+                t!("Block color"),
+                v.block_color,
+                "block_color",
+                v.color_open == Some("block_color")
+            ),
+            enum_row(
+                t!("Block connection"),
+                &BLOCK_CONNECTIONS,
+                format!("{:?}", style.block_content_connection),
+                "block_content_connection"
+            ),
+            input_row(
+                t!("Block rotation"),
+                "0",
+                v.block_rotation,
+                "block_rotation"
+            ),
             input_row(t!("Block scale X"), "1.0", v.block_scale_x, "block_scale_x"),
             input_row(t!("Block scale Y"), "1.0", v.block_scale_y, "block_scale_y"),
             input_row(t!("Block scale Z"), "1.0", v.block_scale_z, "block_scale_z"),
-            toggle(t!("Enable block scale"), style.enable_block_scale, "enable_block_scale"),
-            toggle(t!("Enable block rotation"), style.enable_block_rotation, "enable_block_rotation"),
-        ].spacing(8).into(),
+            toggle(
+                t!("Enable block scale"),
+                style.enable_block_scale,
+                "enable_block_scale"
+            ),
+            toggle(
+                t!("Enable block rotation"),
+                style.enable_block_rotation,
+                "enable_block_rotation"
+            ),
+        ]
+        .spacing(8)
+        .into(),
     };
     let preview: Element<'a, Message> = if let Some(style) = style {
         canvas(LeaderPreviewCanvas {
@@ -660,23 +931,45 @@ pub fn view_window<'a>(
             text_angle: format!("{:?}", style.text_angle_type),
             text_alignment: format!("{:?}", style.text_alignment),
             attachment_direction: format!("{:?}", style.text_attachment_direction),
-            left_attachment: choice_label(&ATTACHMENTS, format!("{:?}", style.text_left_attachment)),
+            left_attachment: choice_label(
+                &ATTACHMENTS,
+                format!("{:?}", style.text_left_attachment),
+            ),
             left_attachment_code: format!("{:?}", style.text_left_attachment),
-            right_attachment: choice_label(&ATTACHMENTS, format!("{:?}", style.text_right_attachment)),
+            right_attachment: choice_label(
+                &ATTACHMENTS,
+                format!("{:?}", style.text_right_attachment),
+            ),
             top_attachment: choice_label(&ATTACHMENTS, format!("{:?}", style.text_top_attachment)),
-            bottom_attachment: choice_label(&ATTACHMENTS, format!("{:?}", style.text_bottom_attachment)),
+            bottom_attachment: choice_label(
+                &ATTACHMENTS,
+                format!("{:?}", style.text_bottom_attachment),
+            ),
             text_frame: style.text_frame,
             text_always_left: style.text_always_left,
             block_name: handle_label(&v.block_content_name),
             block_color: v.block_color.to_string(),
-            block_connection: choice_label(&BLOCK_CONNECTIONS, format!("{:?}", style.block_content_connection)),
+            block_connection: choice_label(
+                &BLOCK_CONNECTIONS,
+                format!("{:?}", style.block_content_connection),
+            ),
             block_connection_code: format!("{:?}", style.block_content_connection),
             block_rotation: v.block_rotation.to_string(),
-            block_scale: [v.block_scale_x.to_string(), v.block_scale_y.to_string(), v.block_scale_z.to_string()],
+            block_scale: [
+                v.block_scale_x.to_string(),
+                v.block_scale_y.to_string(),
+                v.block_scale_z.to_string(),
+            ],
             enable_block_scale: style.enable_block_scale,
             enable_block_rotation: style.enable_block_rotation,
-            leader_draw_order: choice_label(&LEADER_DRAW_ORDERS, format!("{:?}", style.leader_draw_order)),
-            multileader_draw_order: choice_label(&MULTILEADER_DRAW_ORDERS, format!("{:?}", style.multileader_draw_order)),
+            leader_draw_order: choice_label(
+                &LEADER_DRAW_ORDERS,
+                format!("{:?}", style.leader_draw_order),
+            ),
+            multileader_draw_order: choice_label(
+                &MULTILEADER_DRAW_ORDERS,
+                format!("{:?}", style.multileader_draw_order),
+            ),
             description: v.description.to_string(),
         })
         .width(Length::Fill)
@@ -709,15 +1002,20 @@ pub fn view_window<'a>(
                 summary,
                 on_select: Message::MLeaderStyleDialogCompare,
             }),
-            tabs: [t!("Leader Format"), t!("Leader Structure"), t!("Content"), t!("Block Content")]
-                .into_iter()
-                .enumerate()
-                .map(|(tab, label)| crate::ui::style::style_manager::EditorTab {
-                    label,
-                    active: v.tab == tab as u8,
-                    on_press: Message::MLeaderStyleDialogTab(tab as u8),
-                })
-                .collect(),
+            tabs: [
+                t!("Leader Format"),
+                t!("Leader Structure"),
+                t!("Content"),
+                t!("Block Content"),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(tab, label)| crate::ui::style::style_manager::EditorTab {
+                label,
+                active: v.tab == tab as u8,
+                on_press: Message::MLeaderStyleDialogTab(tab as u8),
+            })
+            .collect(),
             content,
         },
     );

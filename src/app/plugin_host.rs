@@ -7,9 +7,9 @@ use acadrust::xdata::ExtendedDataRecord;
 use ocs_plugin_api::host::{CadDocument, EntityType, Handle, HostApi};
 use ocs_plugin_api::shm::{DocumentSnapshotStore, DocumentViewData};
 
+use super::OpenCADStudio;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::plugin::v4_support;
-use super::OpenCADStudio;
 
 /// Session adapter: one active document tab, command line, undo.
 pub(crate) struct HostSession<'a> {
@@ -44,7 +44,10 @@ impl<'a> HostSession<'a> {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn document_view_v4(&mut self, tab_id: u64) -> Option<ocs_plugin_api::shm::DocumentViewInfo> {
+    pub fn document_view_v4(
+        &mut self,
+        tab_id: u64,
+    ) -> Option<ocs_plugin_api::shm::DocumentViewInfo> {
         if tab_id != self.tab_id() {
             return None;
         }
@@ -68,7 +71,9 @@ impl<'a> HostSession<'a> {
 
     pub fn document_view(&mut self) -> Option<ocs_plugin_api::shm::DocumentViewInfo> {
         if self.doc_store.is_none() {
-            let mut store = DocumentSnapshotStore::<DocumentViewData>::new(self.tab as u64, 8 * 1024 * 1024).ok()?;
+            let mut store =
+                DocumentSnapshotStore::<DocumentViewData>::new(self.tab as u64, 8 * 1024 * 1024)
+                    .ok()?;
             store.publish(&self.document().into()).ok()?;
             self.doc_store = Some(store);
         }
@@ -194,7 +199,11 @@ impl<'a> HostSession<'a> {
         if self.app.tabs[self.tab].scene.is_layer_locked(handle) {
             return false;
         }
-        let app_handle = self.document().app_ids.get(app_name).map(|a| a.handle.value());
+        let app_handle = self
+            .document()
+            .app_ids
+            .get(app_name)
+            .map(|a| a.handle.value());
         let Some(entity) = self.document_mut().get_entity_mut(handle) else {
             return false;
         };
@@ -451,10 +460,7 @@ impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
         use ocs_plugin_api::ipc::protocol::InteractiveEvent;
         let result = self
             .process
-            .interactive_event(
-                self.command_id,
-                InteractiveEvent::Point([pt.x, pt.y, pt.z]),
-            )
+            .interactive_event(self.command_id, InteractiveEvent::Point([pt.x, pt.y, pt.z]))
             .map(plugin_step_to_result)
             .unwrap_or(crate::command::CmdResult::Cancel);
         self.refresh();
@@ -605,7 +611,10 @@ mod tests {
         assert!(host.update_entity(edited));
 
         // Same handle, edit applied, geometry re-tessellated.
-        let got = host.document().get_entity(h).expect("entity kept its handle");
+        let got = host
+            .document()
+            .get_entity(h)
+            .expect("entity kept its handle");
         assert_eq!(got.common().layer, "PLUGIN_EDIT");
         assert_ne!(
             host.app.tabs[0].scene.geometry_epoch, epoch_before,
@@ -709,12 +718,18 @@ mod tests {
             host.start_interactive(Box::new(PlacePoint { got_first: false }));
         }
         assert!(app.tabs[0].active_cmd.is_some());
-        for pt in [glam::DVec3::new(0.0, 0.0, 0.0), glam::DVec3::new(5.0, 5.0, 0.0)] {
+        for pt in [
+            glam::DVec3::new(0.0, 0.0, 0.0),
+            glam::DVec3::new(5.0, 5.0, 0.0),
+        ] {
             let r = app.tabs[0].active_cmd.as_mut().unwrap().on_point(pt);
             let _ = app.apply_cmd_result(r);
         }
         assert_eq!(app.tabs[0].scene.document.entities().count(), 1);
-        assert!(app.tabs[0].active_cmd.is_none(), "command should have ended");
+        assert!(
+            app.tabs[0].active_cmd.is_none(),
+            "command should have ended"
+        );
     }
 
     /// A plugin command that picks an existing object, then marks it.
@@ -786,9 +801,10 @@ mod tests {
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
         let info = host.document_view().unwrap();
-        let reader =
-            ocs_plugin_api::shm::SharedDocumentReader::<ocs_plugin_api::shm::DocumentViewData>::open(std::path::Path::new(&info.path))
-                .unwrap();
+        let reader = ocs_plugin_api::shm::SharedDocumentReader::<
+            ocs_plugin_api::shm::DocumentViewData,
+        >::open(std::path::Path::new(&info.path))
+        .unwrap();
         assert_eq!(reader.entity_count(), 0);
 
         host.add_entity(acadrust::EntityType::Point(acadrust::entities::Point::at(
@@ -837,9 +853,10 @@ mod tests {
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
         let info = host.document_view().unwrap();
-        let reader =
-            ocs_plugin_api::shm::SharedDocumentReader::<ocs_plugin_api::shm::DocumentViewData>::open(std::path::Path::new(&info.path))
-                .unwrap();
+        let reader = ocs_plugin_api::shm::SharedDocumentReader::<
+            ocs_plugin_api::shm::DocumentViewData,
+        >::open(std::path::Path::new(&info.path))
+        .unwrap();
 
         let h = host.add_entity(EntityType::Point(Point::at(acadrust::types::Vector3::new(
             1.0, 2.0, 0.0,

@@ -57,8 +57,13 @@ fn axis_frame(helix: &Helix) -> Option<(Vec3, Vec3, Vec3)> {
         .map(|curve| Vec3::from(curve.tangent_at(0.0)))
         .and_then(Vec3::normalize)
         .or_else(|| perpendicular(axis))?;
-    let (axis, radial, _) = HelixCurve::frame_from_points(base.to_array(),point(helix.axis_vector).to_array(),point(helix.start_point).to_array(),tangent.to_array())?;
-    Some((base,Vec3::from(axis),Vec3::from(radial)))
+    let (axis, radial, _) = HelixCurve::frame_from_points(
+        base.to_array(),
+        point(helix.axis_vector).to_array(),
+        point(helix.start_point).to_array(),
+        tangent.to_array(),
+    )?;
+    Some((base, Vec3::from(axis), Vec3::from(radial)))
 }
 
 fn base_radius(helix: &Helix) -> Option<f64> {
@@ -72,7 +77,9 @@ fn radius_from_axis(helix: &Helix, value: Vec3) -> Option<f64> {
 }
 
 fn top_radius(helix: &Helix) -> f64 {
-    if helix.turns == 0.0 { return helix.radius; }
+    if helix.turns == 0.0 {
+        return helix.radius;
+    }
     spline_curve(&helix.spline)
         .map(|curve| Vec3::from(curve.point_at(1.0)))
         .and_then(|endpoint| radius_from_axis(helix, endpoint))
@@ -150,7 +157,9 @@ fn rebuild_with_radial(helix: &mut Helix, top_radius: f64, radial: Option<Vec3>)
     let Some(mut curve) = kernel_curve(helix, top_radius) else {
         return false;
     };
-    if let Some(radial) = radial { curve.start_direction = radial.to_array(); }
+    if let Some(radial) = radial {
+        curve.start_direction = radial.to_array();
+    }
     let Some(nurbs) = curve.nurbs() else {
         return false;
     };
@@ -209,7 +218,10 @@ fn properties(helix: &Helix) -> Vec<PropSection> {
     let height = helix.turns * helix.turn_height;
     let top_radius = top_radius(helix);
     let curve = kernel_curve(helix, top_radius);
-    let turn_slope = curve.as_ref().and_then(HelixCurve::turn_slope).unwrap_or(0.0);
+    let turn_slope = curve
+        .as_ref()
+        .and_then(HelixCurve::turn_slope)
+        .unwrap_or(0.0);
     let total_length = curve.as_ref().and_then(HelixCurve::length).unwrap_or(0.0);
     let constrain = match helix.constraint {
         HelixConstraint::TurnHeight => t!("Turn Height").into_owned(),
@@ -234,15 +246,32 @@ fn properties(helix: &Helix) -> Vec<PropSection> {
             edit(t!("Position X").as_ref(), "position_x", base.x),
             edit(t!("Position Y").as_ref(), "position_y", base.y),
             edit(t!("Position Z").as_ref(), "position_z", base.z),
-            choice(t!("Constrain").as_ref(), "constrain", &constrain, &constraint_options),
+            choice(
+                t!("Constrain").as_ref(),
+                "constrain",
+                &constrain,
+                &constraint_options,
+            ),
             edit(t!("Height").as_ref(), "height", height),
             edit(t!("Turns").as_ref(), "turns", helix.turns),
             edit(t!("Turn height").as_ref(), "turn_height", helix.turn_height),
-            edit(t!("Base radius").as_ref(), "base_radius", base_radius(helix).unwrap_or(0.0)),
+            edit(
+                t!("Base radius").as_ref(),
+                "base_radius",
+                base_radius(helix).unwrap_or(0.0),
+            ),
             edit(t!("Top radius").as_ref(), "top_radius", top_radius),
             choice(t!("Twist").as_ref(), "twist", &twist, &twist_options),
-            ro(t!("Turn slope").as_ref(), "turn_slope", format_angle(turn_slope)),
-            ro(t!("Total length").as_ref(), "total_length", format_length(total_length)),
+            ro(
+                t!("Turn slope").as_ref(),
+                "turn_slope",
+                format_angle(turn_slope),
+            ),
+            ro(
+                t!("Total length").as_ref(),
+                "total_length",
+                format_length(total_length),
+            ),
         ],
     }]
 }
@@ -297,9 +326,12 @@ fn apply_geom_prop(helix: &mut Helix, field: &str, value: &str) {
             if helix.turns == 0.0 && number != 0.0 {
                 return;
             }
-            if number < 0.0 { helix.axis_vector = vector(-point(helix.axis_vector)); }
+            if number < 0.0 {
+                helix.axis_vector = vector(-point(helix.axis_vector));
+            }
             let number = number.abs();
-            if helix.constraint == HelixConstraint::TurnHeight && helix.turn_height.abs() > EPSILON {
+            if helix.constraint == HelixConstraint::TurnHeight && helix.turn_height.abs() > EPSILON
+            {
                 let turns = number / helix.turn_height;
                 if turns < 0.0 {
                     return;
@@ -310,8 +342,9 @@ fn apply_geom_prop(helix: &mut Helix, field: &str, value: &str) {
             }
         }
         "turns" if number >= 0.0 => {
-            if number == 0.0 { helix.turns = 0.0; }
-            else if helix.constraint == HelixConstraint::TurnHeight {
+            if number == 0.0 {
+                helix.turns = 0.0;
+            } else if helix.constraint == HelixConstraint::TurnHeight {
                 helix.turns = number;
             } else {
                 helix.turns = number;
@@ -319,8 +352,9 @@ fn apply_geom_prop(helix: &mut Helix, field: &str, value: &str) {
             }
         }
         "turn_height" if number >= 0.0 => {
-            if number == 0.0 { helix.turn_height = 0.0; }
-            else if helix.constraint == HelixConstraint::Turns {
+            if number == 0.0 {
+                helix.turn_height = 0.0;
+            } else if helix.constraint == HelixConstraint::Turns {
                 helix.turn_height = number;
             } else {
                 let turns = old_height / number;
@@ -336,7 +370,9 @@ fn apply_geom_prop(helix: &mut Helix, field: &str, value: &str) {
                 return;
             };
             helix.start_point = vector(base + start_direction * number);
-            if !rebuild_with_radial(helix, top, Some(start_direction)) { *helix = original; }
+            if !rebuild_with_radial(helix, top, Some(start_direction)) {
+                *helix = original;
+            }
             return;
         }
         "top_radius" if number >= 0.0 => {
@@ -355,7 +391,9 @@ fn apply_geom_prop(helix: &mut Helix, field: &str, value: &str) {
 fn apply_grip(helix: &mut Helix, grip_id: usize, apply: GripApply) {
     let original = helix.clone();
     let top = top_radius(helix);
-    let Some(base_radius) = base_radius(helix) else { return; };
+    let Some(base_radius) = base_radius(helix) else {
+        return;
+    };
     let Some((base, axis, start_direction)) = axis_frame(helix) else {
         return;
     };
@@ -400,7 +438,8 @@ fn apply_grip(helix: &mut Helix, grip_id: usize, apply: GripApply) {
                 return;
             }
             let target_axis = axis_vector / height;
-            if helix.constraint == HelixConstraint::TurnHeight && helix.turn_height.abs() > EPSILON {
+            if helix.constraint == HelixConstraint::TurnHeight && helix.turn_height.abs() > EPSILON
+            {
                 helix.axis_vector = vector(target_axis * helix.turn_height.signum());
                 helix.turns = height / helix.turn_height.abs();
             } else {
@@ -408,8 +447,8 @@ fn apply_grip(helix: &mut Helix, grip_id: usize, apply: GripApply) {
                 helix.turn_height = height / helix.turns.max(EPSILON);
             }
             let new_axis = point(helix.axis_vector);
-            let start_direction = projected_direction(start_direction, new_axis)
-                .or_else(|| perpendicular(new_axis));
+            let start_direction =
+                projected_direction(start_direction, new_axis).or_else(|| perpendicular(new_axis));
             let Some(start_direction) = start_direction else {
                 *helix = original;
                 return;
@@ -427,7 +466,8 @@ fn apply_grip(helix: &mut Helix, grip_id: usize, apply: GripApply) {
             if height.abs() <= EPSILON {
                 return;
             }
-            if helix.constraint == HelixConstraint::TurnHeight && helix.turn_height.abs() > EPSILON {
+            if helix.constraint == HelixConstraint::TurnHeight && helix.turn_height.abs() > EPSILON
+            {
                 let turns = height / helix.turn_height;
                 if turns <= EPSILON {
                     return;
@@ -453,18 +493,23 @@ fn apply_transform(helix: &mut Helix, transform: &EntityTransform) {
         EntityTransform::Translate(delta) => {
             acadrust::Entity::translate(helix, Vector3::new(delta.x, delta.y, delta.z));
         }
-        EntityTransform::Rotate { center, axis, angle_rad } => {
+        EntityTransform::Rotate {
+            center,
+            axis,
+            angle_rad,
+        } => {
             crate::scene::view::transform::apply_standard_transform(
-                helix,
-                *center,
-                *axis,
-                *angle_rad,
+                helix, *center, *axis, *angle_rad,
             );
         }
         EntityTransform::Scale { center, factor } => {
             crate::scene::view::transform::apply_standard_scale(helix, *center, *factor);
         }
-        EntityTransform::Mirror { p1, p2, working_normal } => {
+        EntityTransform::Mirror {
+            p1,
+            p2,
+            working_normal,
+        } => {
             let reflection = crate::scene::view::transform::reflection_about_working_line(
                 *p1,
                 *p2,
@@ -590,15 +635,20 @@ mod tests {
         assert_eq!(once.handedness, helix.handedness);
         let original_curve = spline_curve(&helix.spline).unwrap();
         let once_curve = spline_curve(&once.spline).unwrap();
-        assert!(Vec3::from(once_curve.point_at(0.0))
-            .distance(Vec3::from(original_curve.point_at(1.0))) < 1.0e-9);
+        assert!(
+            Vec3::from(once_curve.point_at(0.0)).distance(Vec3::from(original_curve.point_at(1.0)))
+                < 1.0e-9
+        );
 
         let twice = reversed(&once).expect("second reversal");
         assert!((twice.radius - helix.radius).abs() < 1.0e-12);
         let twice_curve = spline_curve(&twice.spline).unwrap();
         for parameter in [0.0, 0.2, 0.5, 0.8, 1.0] {
-            assert!(Vec3::from(twice_curve.point_at(parameter))
-                .distance(Vec3::from(original_curve.point_at(parameter))) < 1.0e-8);
+            assert!(
+                Vec3::from(twice_curve.point_at(parameter))
+                    .distance(Vec3::from(original_curve.point_at(parameter)))
+                    < 1.0e-8
+            );
         }
     }
 }

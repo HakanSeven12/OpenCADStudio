@@ -2,16 +2,17 @@ use acadrust::entities::{Text, TextHorizontalAlignment as HA, TextVerticalAlignm
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
-    edit_angle_prop as edit_angle, edit_prop as edit, num_prop as num_row, parse_f64, ro_prop as ro, square_grip,
+    edit_angle_prop as edit_angle, edit_prop as edit, num_prop as num_row, parse_f64,
+    ro_prop as ro, square_grip,
 };
 use crate::entities::text_support::{
     resolve_dxf_special_chars, resolve_text_style, text_local_bounds,
 };
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
-use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke, RenderEntity, RenderObject};
-use crate::scene::text::lff;
+use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
+use crate::scene::convert::acad_to_render::{GlyphRun, RenderEntity, RenderObject, TextStroke};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;
+use crate::scene::text::lff;
 use crate::t;
 
 /// Combined single-line-text justification (horizontal × vertical) shown as one
@@ -236,8 +237,7 @@ pub fn text_run_placement_at_scale(
             oblique_angle,
         ) {
             if base_bounds.advance > 1.0e-6 {
-                let scale =
-                    (span as f32 / annotation_scale / base_bounds.advance).max(1.0e-6);
+                let scale = (span as f32 / annotation_scale / base_bounds.advance).max(1.0e-6);
                 if matches!(t.horizontal_alignment, HA::Aligned) {
                     height *= scale;
                 } else {
@@ -354,10 +354,7 @@ fn grips(t: &Text) -> Vec<GripDef> {
     );
     let mut grips = vec![square_grip(0, insertion)];
     if let Some(point) = t.alignment_point {
-        grips.push(square_grip(
-            1,
-            glam::DVec3::new(point.x, point.y, point.z),
-        ));
+        grips.push(square_grip(1, glam::DVec3::new(point.x, point.y, point.z)));
     }
     grips
 }
@@ -368,8 +365,8 @@ fn properties(t: &Text, text_style_names: &[String]) -> Vec<PropSection> {
     // other justification anchors on the alignment point (and recomputes the
     // insertion point), except Aligned/Fit which are true two-point spans where
     // both points are live.
-    let is_plain_left = matches!(t.horizontal_alignment, HA::Left)
-        && matches!(t.vertical_alignment, VA::Baseline);
+    let is_plain_left =
+        matches!(t.horizontal_alignment, HA::Left) && matches!(t.vertical_alignment, VA::Baseline);
     let is_aligned = matches!(t.horizontal_alignment, HA::Aligned);
     let is_two_point = matches!(t.horizontal_alignment, HA::Aligned | HA::Fit);
     // The visible Properties palette exposes Text alignment as calculated
@@ -415,11 +412,8 @@ fn properties(t: &Text, text_style_names: &[String]) -> Vec<PropSection> {
                     label: t!("Justify").into_owned(),
                     field: "justify",
                     value: PropValue::Choice {
-                        selected: text_justify_str(
-                            &t.horizontal_alignment,
-                            &t.vertical_alignment,
-                        )
-                        .to_string(),
+                        selected: text_justify_str(&t.horizontal_alignment, &t.vertical_alignment)
+                            .to_string(),
                         options: [
                             "Left",
                             "Center",
@@ -448,8 +442,7 @@ fn properties(t: &Text, text_style_names: &[String]) -> Vec<PropSection> {
                     t!("Height").as_ref(),
                     "height",
                     t.height,
-                    !is_aligned
-                        && crate::entities::common::style_fixed_height(&t.style).is_none(),
+                    !is_aligned && crate::entities::common::style_fixed_height(&t.style).is_none(),
                 ),
                 if is_two_point {
                     ro(
@@ -461,7 +454,11 @@ fn properties(t: &Text, text_style_names: &[String]) -> Vec<PropSection> {
                     edit_angle(t!("Rotation").as_ref(), "rotation", t.rotation.to_degrees())
                 },
                 edit(t!("Width factor").as_ref(), "width_factor", t.width_factor),
-                edit_angle(t!("Obliquing").as_ref(), "oblique_angle", t.oblique_angle.to_degrees()),
+                edit_angle(
+                    t!("Obliquing").as_ref(),
+                    "oblique_angle",
+                    t.oblique_angle.to_degrees(),
+                ),
                 num_row(t!("Text alignment X").as_ref(), "align_x", ax, false),
                 num_row(t!("Text alignment Y").as_ref(), "align_y", ay, false),
                 num_row(t!("Text alignment Z").as_ref(), "align_z", az, false),
@@ -585,18 +582,12 @@ fn apply_geom_prop(t: &mut Text, field: &str, value: &str) {
             // Calculated display rows are intentionally not writable.
             return;
         }
-        "height"
-            if v > 0.0 && !matches!(t.horizontal_alignment, HA::Aligned) =>
-        {
-            t.height = v
-        }
+        "height" if v > 0.0 && !matches!(t.horizontal_alignment, HA::Aligned) => t.height = v,
         "rotation" if !matches!(t.horizontal_alignment, HA::Aligned | HA::Fit) => {
             t.rotation = v.to_radians()
         }
         "width_factor" if v > 0.0 => t.width_factor = v,
-        "oblique_angle" if (-85.0..=85.0).contains(&v) => {
-            t.oblique_angle = v.to_radians()
-        }
+        "oblique_angle" if (-85.0..=85.0).contains(&v) => t.oblique_angle = v.to_radians(),
         _ => {}
     }
 }
@@ -679,7 +670,11 @@ impl Grippable for Text {
         ]
     }
 
-    fn apply_grip_menu(&mut self, _grip_id: usize, _action: crate::scene::model::object::GripMenuAction) {
+    fn apply_grip_menu(
+        &mut self,
+        _grip_id: usize,
+        _action: crate::scene::model::object::GripMenuAction,
+    ) {
         // Move-with-Text falls through to Stretch (single grip moves
         // the whole text); Rotate needs a follow-up angle handled by
         // `apply_grip_menu_value`.
@@ -729,7 +724,11 @@ mod tests {
 
         // For Arabic text with default HA::Left, origin should be shifted left
         // so the right edge of the text sits at the insertion point (X = 10.0).
-        assert!(placement.origin[0] < 10.0, "Arabic text origin must be to the left of insertion point: origin_x={}", placement.origin[0]);
+        assert!(
+            placement.origin[0] < 10.0,
+            "Arabic text origin must be to the left of insertion point: origin_x={}",
+            placement.origin[0]
+        );
     }
 }
 

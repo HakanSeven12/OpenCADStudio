@@ -56,12 +56,10 @@ impl CadCommand for MoveCommand {
 
     fn prompt(&self) -> String {
         match &self.step {
-            Step::Base => crate::tr!(
-                "command-move", "base",
-                count = (self.handles.len() as i64),
-            ),
+            Step::Base => crate::tr!("command-move", "base", count = (self.handles.len() as i64),),
             Step::Target(base) => crate::tr!(
-                "command-move", "target",
+                "command-move",
+                "target",
                 x = format!("{:.3}", base.x),
                 y = format!("{:.3}", base.y),
             ),
@@ -92,10 +90,9 @@ impl CadCommand for MoveCommand {
                 )
             }
             // The point (typically typed as `dx,dy`) is the displacement itself.
-            Step::Displacement => CmdResult::TransformSelected(
-                self.handles.clone(),
-                EntityTransform::Translate(pt),
-            ),
+            Step::Displacement => {
+                CmdResult::TransformSelected(self.handles.clone(), EntityTransform::Translate(pt))
+            }
         }
     }
 
@@ -121,10 +118,9 @@ impl CadCommand for MoveCommand {
         match self.step {
             // Commercial solutions: Enter at the second point uses the base point as the
             // displacement from the origin.
-            Step::Target(base) => CmdResult::TransformSelected(
-                self.handles.clone(),
-                EntityTransform::Translate(base),
-            ),
+            Step::Target(base) => {
+                CmdResult::TransformSelected(self.handles.clone(), EntityTransform::Translate(base))
+            }
             _ => CmdResult::Cancel,
         }
     }
@@ -153,7 +149,7 @@ impl CadCommand for MoveCommand {
             false,
         ));
         out
-    } 
+    }
 }
 
 #[cfg(test)]
@@ -183,7 +179,11 @@ mod tests {
     fn enter_at_second_point_uses_base_as_displacement() {
         let mut cmd = MoveCommand::new(vec![Handle::new(1)], vec![]);
         cmd.on_point(DVec3::new(5.0, -2.0, 0.0));
-        assert_eq!(keywords(&cmd), [""], "Enter is the only option at the second point");
+        assert_eq!(
+            keywords(&cmd),
+            [""],
+            "Enter is the only option at the second point"
+        );
         match cmd.on_enter() {
             CmdResult::TransformSelected(_, EntityTransform::Translate(d)) => {
                 assert_eq!(d, DVec3::new(5.0, -2.0, 0.0));

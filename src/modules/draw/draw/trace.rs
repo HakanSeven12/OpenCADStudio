@@ -11,10 +11,10 @@
 // so the planar point-pick path is used (every vertex shares the polyline
 // elevation, taken from the first point's Z).
 
+use crate::t;
 use acadrust::entities::{LwPolyline, LwVertex};
 use acadrust::types::{Vector2, Vector3};
 use acadrust::EntityType;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -198,4 +198,4 @@ impl CadCommand for TraceCommand {
 }
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["TRACE"] });  // TraceCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["TRACE"] }); // TraceCommand

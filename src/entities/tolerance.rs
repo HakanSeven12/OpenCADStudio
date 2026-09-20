@@ -2,7 +2,7 @@ use acadrust::entities::Tolerance;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip};
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::scene::convert::acad_to_render::{
     GlyphRun, RenderEntity, RenderObject, TextPlane, TextStroke,
 };
@@ -179,20 +179,8 @@ pub(crate) fn resolve_dim_style<'a>(
 ///
 /// This is where the pen LANDS, so it carries the font's letter spacing past
 /// the final glyph — which is what puts the gap between one run and the next.
-fn run_advance(
-    text: &str,
-    font: &str,
-    height: f32,
-    width_factor: f32,
-    oblique: f32,
-) -> f32 {
-    crate::entities::text_support::text_local_bounds(
-        font,
-        text,
-        height,
-        width_factor,
-        oblique,
-    )
+fn run_advance(text: &str, font: &str, height: f32, width_factor: f32, oblique: f32) -> f32 {
+    crate::entities::text_support::text_local_bounds(font, text, height, width_factor, oblique)
         .map(|b| b.advance)
         .unwrap_or(0.0)
 }
@@ -202,9 +190,7 @@ fn run_advance(
 /// Glyph geometry is authored against a 9-unit cap height, so a font's spacing
 /// scales with the character height like everything else.
 fn letter_spacing(font: &str, height: f32, width_factor: f32) -> f32 {
-    crate::scene::text::font_face::Face::resolve(font).letter_spacing()
-        * height
-        / 9.0
+    crate::scene::text::font_face::Face::resolve(font).letter_spacing() * height / 9.0
         * width_factor
 }
 
@@ -301,14 +287,12 @@ fn tessellate_tolerance(
         .unwrap_or(tol.text_height) as f32;
     let h = if h > 1e-6 { h } else { 2.5_f32 };
 
-    let text_style_name = crate::entities::dim_override::handle(
-        xd,
-        crate::entities::dim_override::DIMTXSTY,
-    )
-    .and_then(|handle| doc.text_styles.iter().find(|entry| entry.handle == handle))
-    .map(|entry| entry.name.as_str())
-    .or_else(|| style.map(|style| style.dimtxsty.as_str()))
-    .unwrap_or("Standard");
+    let text_style_name =
+        crate::entities::dim_override::handle(xd, crate::entities::dim_override::DIMTXSTY)
+            .and_then(|handle| doc.text_styles.iter().find(|entry| entry.handle == handle))
+            .map(|entry| entry.name.as_str())
+            .or_else(|| style.map(|style| style.dimtxsty.as_str()))
+            .unwrap_or("Standard");
     let text_style = crate::entities::text_support::resolve_text_style(text_style_name, doc);
 
     // A compartment is a PROPORTION of the character height: it spans -h..+h
@@ -333,9 +317,8 @@ fn tessellate_tolerance(
     // (`len()`) would make each one two or three cells wide.
     // A compartment's runs come from different fonts, so each is measured in its
     // own before they are summed.
-    let cell_width = |cell: &Cell| -> f32 {
-        (content_width(cell, h, &text_style) + 2.0 * pad).max(min_cell_w)
-    };
+    let cell_width =
+        |cell: &Cell| -> f32 { (content_width(cell, h, &text_style) + 2.0 * pad).max(min_cell_w) };
     let row_widths: Vec<Vec<f32>> = rows
         .iter()
         .map(|row| row.iter().map(|c| cell_width(c)).collect())
@@ -362,13 +345,7 @@ fn tessellate_tolerance(
         let rw: f32 = widths.iter().sum();
         let y0 = row_bottom(ri);
         let y1 = y0 + cell_h;
-        box_out.push(vec![
-            [0.0, y0],
-            [rw, y0],
-            [rw, y1],
-            [0.0, y1],
-            [0.0, y0],
-        ]);
+        box_out.push(vec![[0.0, y0], [rw, y0], [rw, y1], [0.0, y1], [0.0, y0]]);
     }
 
     // ── Compartment dividers, within each row ─────────────────────────────
@@ -408,16 +385,15 @@ fn tessellate_tolerance(
                             text_style.oblique_angle,
                         )
                     };
-                    let (local_strokes, _) =
-                        lff::tessellate_text_ex(
-                            [0.0, 0.0],
-                            h,
-                            0.0,
-                            width_factor,
-                            oblique,
-                            &font,
-                            &text,
-                        );
+                    let (local_strokes, _) = lff::tessellate_text_ex(
+                        [0.0, 0.0],
+                        h,
+                        0.0,
+                        width_factor,
+                        oblique,
+                        &font,
+                        &text,
+                    );
                     let strokes: Vec<Vec<[f32; 2]>> = local_strokes
                         .into_iter()
                         .filter(|pl: &Vec<[f32; 2]>| !pl.is_empty())
@@ -442,16 +418,13 @@ fn tessellate_tolerance(
     (box_out, cells)
 }
 
-pub(crate) fn preview_strokes(
-    tol: &Tolerance,
-    doc: &acadrust::CadDocument,
-) -> Vec<Vec<[f32; 2]>> {
+pub(crate) fn preview_strokes(tol: &Tolerance, doc: &acadrust::CadDocument) -> Vec<Vec<[f32; 2]>> {
     tessellate_tolerance(tol, doc).0
 }
 
 fn frame_basis(tol: &Tolerance) -> (glam::DVec3, glam::DVec3) {
-    let normal = glam::DVec3::new(tol.normal.x, tol.normal.y, tol.normal.z)
-        .normalize_or(glam::DVec3::Z);
+    let normal =
+        glam::DVec3::new(tol.normal.x, tol.normal.y, tol.normal.z).normalize_or(glam::DVec3::Z);
     let direction = glam::DVec3::new(tol.direction.x, tol.direction.y, tol.direction.z);
     let fallback = crate::scene::view::transform::ocs_axes((normal.x, normal.y, normal.z)).0;
     let fallback = glam::DVec3::new(fallback.0, fallback.1, fallback.2);
@@ -491,38 +464,33 @@ impl RenderConvertible for Tolerance {
         let style = resolve_dim_style(self, document);
         let xd = &self.common.extended_data;
         let explicit_color = |index: Option<i16>| {
-            index.filter(|value| !matches!(value, 0 | 256)).map(|value| {
-                let [red, green, blue, _] = crate::scene::convert::tess_util::aci_to_rgba(
-                    &acadrust::types::Color::from_index(value),
-                );
-                [red, green, blue]
-            })
+            index
+                .filter(|value| !matches!(value, 0 | 256))
+                .map(|value| {
+                    let [red, green, blue, _] = crate::scene::convert::tess_util::aci_to_rgba(
+                        &acadrust::types::Color::from_index(value),
+                    );
+                    [red, green, blue]
+                })
         };
         let color_value = |color: &acadrust::types::Color| {
-            let [red, green, blue, _] =
-                crate::scene::convert::tess_util::aci_to_rgba(color);
+            let [red, green, blue, _] = crate::scene::convert::tess_util::aci_to_rgba(color);
             [red, green, blue]
         };
-        let frame_color = if let Some(index) = crate::entities::dim_override::int(
-            xd,
-            crate::entities::dim_override::DIMCLRD,
-        ) {
-            explicit_color(Some(index))
-        } else if let Some(color) =
-            style.and_then(|entry| entry.dimclrd_true_color.as_ref())
+        let frame_color = if let Some(index) =
+            crate::entities::dim_override::int(xd, crate::entities::dim_override::DIMCLRD)
         {
+            explicit_color(Some(index))
+        } else if let Some(color) = style.and_then(|entry| entry.dimclrd_true_color.as_ref()) {
             Some(color_value(color))
         } else {
             explicit_color(style.map(|entry| entry.dimclrd))
         };
-        let text_color = if let Some(index) = crate::entities::dim_override::int(
-            xd,
-            crate::entities::dim_override::DIMCLRT,
-        ) {
-            explicit_color(Some(index))
-        } else if let Some(color) =
-            style.and_then(|entry| entry.dimclrt_true_color.as_ref())
+        let text_color = if let Some(index) =
+            crate::entities::dim_override::int(xd, crate::entities::dim_override::DIMCLRT)
         {
+            explicit_color(Some(index))
+        } else if let Some(color) = style.and_then(|entry| entry.dimclrt_true_color.as_ref()) {
             Some(color_value(color))
         } else {
             explicit_color(style.map(|entry| entry.dimclrt))
@@ -547,10 +515,8 @@ impl RenderConvertible for Tolerance {
             groups.push(TextStroke {
                 strokes: cell.strokes,
                 origin: [
-                    ins.x + x_axis.x * cell.origin[0] as f64
-                        + y_axis.x * cell.origin[1] as f64,
-                    ins.y + x_axis.y * cell.origin[0] as f64
-                        + y_axis.y * cell.origin[1] as f64,
+                    ins.x + x_axis.x * cell.origin[0] as f64 + y_axis.x * cell.origin[1] as f64,
+                    ins.y + x_axis.y * cell.origin[0] as f64 + y_axis.y * cell.origin[1] as f64,
                 ],
                 color: text_color,
                 fill_tris: vec![],
@@ -638,7 +604,11 @@ impl PropertyEditable for Tolerance {
                             options: text_style_names.to_vec(),
                         },
                     },
-                    edit(t!("Text height").as_ref(), "tol_text_height", self.text_height),
+                    edit(
+                        t!("Text height").as_ref(),
+                        "tol_text_height",
+                        self.text_height,
+                    ),
                 ],
             },
             PropSection {

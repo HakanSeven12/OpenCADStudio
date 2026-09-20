@@ -97,7 +97,7 @@ pub(crate) fn path_matches_file(path: &Path, file: &File) -> std::io::Result<boo
 fn windows_file_identity(file: &File) -> std::io::Result<(u32, u64)> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
     };
 
     let mut info = BY_HANDLE_FILE_INFORMATION::default();

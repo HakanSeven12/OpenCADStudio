@@ -43,17 +43,13 @@ impl OpenCADStudio {
             let index = (start + offset) % matches.len();
             let target = matches[index];
             let centered = match target {
-                FindMatchKey::Entity(handle) => {
-                    self.tabs[i].scene.center_camera_on_entity(handle)
-                }
+                FindMatchKey::Entity(handle) => self.tabs[i].scene.center_camera_on_entity(handle),
                 FindMatchKey::BlockEntityInInsert { entity, insert } => self.tabs[i]
                     .scene
                     .center_camera_on_block_entity(insert, entity),
-                FindMatchKey::InsertAttribute { insert, index } => {
-                    self.tabs[i]
-                        .scene
-                        .center_camera_on_insert_attribute(insert, index)
-                }
+                FindMatchKey::InsertAttribute { insert, index } => self.tabs[i]
+                    .scene
+                    .center_camera_on_insert_attribute(insert, index),
             };
             if !centered {
                 continue;
@@ -65,7 +61,8 @@ impl OpenCADStudio {
                 index + 1,
                 matches.len(),
                 match_label(target)
-            ).into_owned();
+            )
+            .into_owned();
             self.tabs[i].scene.deselect_all();
             self.tabs[i]
                 .scene
@@ -99,7 +96,8 @@ impl OpenCADStudio {
         let search = self.find_replace.search.clone();
         let replacement = self.find_replace.replacement.clone();
         if match_is_locked(&self.tabs[i].scene, target) {
-            self.find_replace.status = crate::t!("The matching object is on a locked layer.").into_owned();
+            self.find_replace.status =
+                crate::t!("The matching object is on a locked layer.").into_owned();
             return;
         }
         self.push_undo_snapshot(i, "FIND/REPLACE");
@@ -117,10 +115,7 @@ impl OpenCADStudio {
         }
 
         let handle = match_document_handle(target);
-        if self.tabs[i]
-            .scene
-            .entity_belongs_to_active_space(handle)
-        {
+        if self.tabs[i].scene.entity_belongs_to_active_space(handle) {
             self.invalidate_property_targets(i, &[handle]);
         } else {
             // A block-definition edit must rebuild the definition cache; an
@@ -134,10 +129,11 @@ impl OpenCADStudio {
         self.find_replace.status = crate::tf!(
             "Replaced 1 occurrence in {}; {remaining} matching object(s) remain.",
             match_label(target)
-        ).into_owned();
-        self.command_line.push_output(crate::tf!(
-            "FIND/REPLACE: replaced 1 occurrence of \"{search}\"."
-        ).as_ref());
+        )
+        .into_owned();
+        self.command_line.push_output(
+            crate::tf!("FIND/REPLACE: replaced 1 occurrence of \"{search}\".").as_ref(),
+        );
         self.refresh_properties();
     }
 
@@ -171,9 +167,8 @@ impl OpenCADStudio {
             if count > 0 {
                 replaced += count;
                 let handle = match_document_handle(target);
-                changed_outside_active_space |= !self.tabs[i]
-                    .scene
-                    .entity_belongs_to_active_space(handle);
+                changed_outside_active_space |=
+                    !self.tabs[i].scene.entity_belongs_to_active_space(handle);
                 if !changed.contains(&handle) {
                     changed.push(handle);
                 }
@@ -195,10 +190,11 @@ impl OpenCADStudio {
         self.find_replace.status = crate::tf!(
             "Replaced {replaced} occurrence(s) in {} object(s).",
             changed.len()
-        ).into_owned();
-        self.command_line.push_output(crate::tf!(
-            "FIND/REPLACE: replaced {replaced} occurrence(s) of \"{search}\"."
-        ).as_ref());
+        )
+        .into_owned();
+        self.command_line.push_output(
+            crate::tf!("FIND/REPLACE: replaced {replaced} occurrence(s) of \"{search}\".").as_ref(),
+        );
         self.refresh_properties();
     }
 
@@ -267,12 +263,8 @@ impl OpenCADStudio {
                     continue;
                 }
                 let mut visited = Vec::new();
-                if block_contains_entity(
-                    &scene.document,
-                    &insert.block_name,
-                    entity,
-                    &mut visited,
-                ) {
+                if block_contains_entity(&scene.document, &insert.block_name, entity, &mut visited)
+                {
                     matches.push(FindMatchKey::BlockEntityInInsert {
                         entity,
                         insert: insert.common.handle,
@@ -335,12 +327,8 @@ fn replace_match_text(
             let Some(attribute) = entity.attributes.get_mut(index) else {
                 return 0;
             };
-            let (value, count) = replace_case_insensitive(
-                attribute.get_value(),
-                search,
-                replacement,
-                replace_all,
-            );
+            let (value, count) =
+                replace_case_insensitive(attribute.get_value(), search, replacement, replace_all);
             if count > 0 {
                 attribute.set_value(value);
             }
@@ -374,11 +362,7 @@ fn match_label(target: FindMatchKey) -> String {
     match target {
         FindMatchKey::Entity(handle) => crate::tf!("handle {:X}", handle.value()).into_owned(),
         FindMatchKey::BlockEntityInInsert { entity, insert } => {
-            crate::tf!(
-                "block {:X}, text {:X}",
-                insert.value(),
-                entity.value()
-            ).into_owned()
+            crate::tf!("block {:X}, text {:X}", insert.value(), entity.value()).into_owned()
         }
         FindMatchKey::InsertAttribute { insert, index } => {
             crate::tf!("block {:X}, attribute {}", insert.value(), index + 1).into_owned()

@@ -47,4 +47,3 @@ impl CadCommand for AnnotationScaleSelectionCommand {
         CmdResult::Cancel
     }
 }
-

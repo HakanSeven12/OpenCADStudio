@@ -178,10 +178,7 @@ impl Scene {
     /// Return `handles` plus every member of a selectable group containing one
     /// of them. Selection and rollover highlighting share this expansion so the
     /// preview matches what a click will select.
-    pub fn handles_expanded_for_selectable_groups(
-        &self,
-        handles: &[Handle],
-    ) -> HashSet<Handle> {
+    pub fn handles_expanded_for_selectable_groups(&self, handles: &[Handle]) -> HashSet<Handle> {
         let mut expanded: HashSet<Handle> = handles.iter().copied().collect();
         let wanted: HashSet<Handle> = handles.iter().copied().collect();
         for obj in self.document.objects.values() {

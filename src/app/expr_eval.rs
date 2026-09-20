@@ -43,7 +43,9 @@ fn tokenize(input: &str) -> Result<Vec<Token>, ()> {
             '/' => tokens.push(Token::Slash),
             '^' => tokens.push(Token::Caret),
             '%' => tokens.push(Token::Percent),
-            c if c.is_ascii_digit() || (c == '.' && chars.peek().map_or(false, |c| c.is_ascii_digit())) => {
+            c if c.is_ascii_digit()
+                || (c == '.' && chars.peek().map_or(false, |c| c.is_ascii_digit())) =>
+            {
                 let mut num_str = String::new();
                 if c == '.' {
                     num_str.push('.');
@@ -192,7 +194,13 @@ impl Parser {
                     self.advance();
                     let right = self.parse_power(depth + 1)?;
                     if right == 0.0 {
-                        return Ok(if left > 0.0 { f64::INFINITY } else if left < 0.0 { f64::NEG_INFINITY } else { f64::NAN });
+                        return Ok(if left > 0.0 {
+                            f64::INFINITY
+                        } else if left < 0.0 {
+                            f64::NEG_INFINITY
+                        } else {
+                            f64::NAN
+                        });
                     }
                     left = left / right;
                 }
@@ -310,44 +318,66 @@ impl Parser {
         let n = args.len();
         match name {
             "abs" => {
-                if n != 1 { return Err(()); }
+                if n != 1 {
+                    return Err(());
+                }
                 Ok(args[0].abs())
             }
             "sin" => {
-                if n != 1 { return Err(()); }
+                if n != 1 {
+                    return Err(());
+                }
                 Ok(args[0].sin())
             }
             "cos" => {
-                if n != 1 { return Err(()); }
+                if n != 1 {
+                    return Err(());
+                }
                 Ok(args[0].cos())
             }
             "tan" => {
-                if n != 1 { return Err(()); }
+                if n != 1 {
+                    return Err(());
+                }
                 Ok(args[0].tan())
             }
             "sqrt" => {
-                if n != 1 { return Err(()); }
+                if n != 1 {
+                    return Err(());
+                }
                 Ok(args[0].sqrt().max(0.0))
             }
             "ceil" => {
-                if n != 1 { return Err(()); }
+                if n != 1 {
+                    return Err(());
+                }
                 Ok(args[0].ceil())
             }
             "floor" => {
-                if n != 1 { return Err(()); }
+                if n != 1 {
+                    return Err(());
+                }
                 Ok(args[0].floor())
             }
             "round" => {
-                if n != 1 { return Err(()); }
+                if n != 1 {
+                    return Err(());
+                }
                 Ok(args[0].round())
             }
             "log" => {
-                if n != 1 { return Err(()); }
-                if args[0] <= 0.0 { return Err(()); }
+                if n != 1 {
+                    return Err(());
+                }
+                if args[0] <= 0.0 {
+                    return Err(());
+                }
                 Ok(args[0].ln())
             }
             "exp" => {
-                if n != 1 { return Err(()); }
+                if n != 1 {
+                    return Err(());
+                }
                 Ok(args[0].exp())
             }
             "atand" => {
@@ -360,13 +390,17 @@ impl Parser {
                 }
             }
             "ptdist" => {
-                if n != 4 { return Err(()); }
+                if n != 4 {
+                    return Err(());
+                }
                 let dx = args[2] - args[0];
                 let dy = args[3] - args[1];
                 Ok((dx * dx + dy * dy).sqrt())
             }
             "ptangle" => {
-                if n != 4 { return Err(()); }
+                if n != 4 {
+                    return Err(());
+                }
                 let dx = args[2] - args[0];
                 let dy = args[3] - args[1];
                 Ok(dy.atan2(dx))
@@ -720,13 +754,21 @@ mod tests {
     #[test]
     fn deeply_nested_parens_returns_none() {
         let expr = "(".repeat(1000) + "1" + &")".repeat(1000);
-        assert_eq!(eval_number(&expr), None, "deeply nested expression should be rejected");
+        assert_eq!(
+            eval_number(&expr),
+            None,
+            "deeply nested expression should be rejected"
+        );
     }
 
     #[test]
     fn moderately_nested_parens_still_evaluate() {
         let expr = "(".repeat(30) + "1" + &")".repeat(30);
-        assert_eq!(eval_number(&expr), Some(1.0), "moderately nested expression should evaluate");
+        assert_eq!(
+            eval_number(&expr),
+            Some(1.0),
+            "moderately nested expression should evaluate"
+        );
     }
 
     #[test]

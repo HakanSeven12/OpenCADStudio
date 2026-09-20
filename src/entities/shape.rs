@@ -5,16 +5,18 @@
 // but apply the SHAPE's own rotation / oblique / width factor so the marker
 // gives a rough indication of the glyph orientation.
 
-use acadrust::entities::Shape;
 use crate::t;
+use acadrust::entities::Shape;
 
 use crate::command::EntityTransform;
-use crate::entities::common::{edit_angle_prop as edit_angle, edit_prop as edit, ro_prop as ro, square_grip};
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::entities::common::{
+    edit_angle_prop as edit_angle, edit_prop as edit, ro_prop as ro, square_grip,
+};
+use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::model::object::{GripApply, GripDef, PropSection, Property, PropValue};
-use crate::scene::view::transform;
+use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;
+use crate::scene::view::transform;
 
 // ── Marker geometry ───────────────────────────────────────────────────────────
 
@@ -258,7 +260,11 @@ impl PropertyEditable for Shape {
             title: t!("Geometry").into_owned(),
             props: vec![
                 ro(t!("Name").as_ref(), "shp_name", self.shape_name.clone()),
-                ro(t!("Number").as_ref(), "shp_number", self.shape_number.to_string()),
+                ro(
+                    t!("Number").as_ref(),
+                    "shp_number",
+                    self.shape_number.to_string(),
+                ),
                 Property {
                     label: t!("Style").into_owned(),
                     field: "shp_style",
@@ -267,14 +273,26 @@ impl PropertyEditable for Shape {
                         options: text_style_names.to_vec(),
                     },
                 },
-                ro(t!("Style Handle").as_ref(), "shp_style_handle", style_handle_display),
+                ro(
+                    t!("Style Handle").as_ref(),
+                    "shp_style_handle",
+                    style_handle_display,
+                ),
                 edit(t!("Insert X").as_ref(), "shp_ix", self.insertion_point.x),
                 edit(t!("Insert Y").as_ref(), "shp_iy", self.insertion_point.y),
                 edit(t!("Insert Z").as_ref(), "shp_iz", self.insertion_point.z),
                 edit(t!("Size").as_ref(), "shp_sz", self.size),
-                edit_angle(t!("Rotation").as_ref(), "shp_rot", self.rotation.to_degrees()),
+                edit_angle(
+                    t!("Rotation").as_ref(),
+                    "shp_rot",
+                    self.rotation.to_degrees(),
+                ),
                 edit(t!("Width Factor").as_ref(), "shp_xs", self.relative_x_scale),
-                edit_angle(t!("Oblique Angle").as_ref(), "shp_ob", self.oblique_angle.to_degrees()),
+                edit_angle(
+                    t!("Oblique Angle").as_ref(),
+                    "shp_ob",
+                    self.oblique_angle.to_degrees(),
+                ),
                 edit(t!("Normal X").as_ref(), "shp_nx", self.normal.x),
                 edit(t!("Normal Y").as_ref(), "shp_ny", self.normal.y),
                 edit(t!("Normal Z").as_ref(), "shp_nz", self.normal.z),

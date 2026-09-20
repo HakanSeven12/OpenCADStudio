@@ -8,9 +8,9 @@
 //           No  → keep the original, add a mirrored copy
 //           Yes → flip the original in place (no copy kept)
 
+use crate::t;
 use acadrust::Handle;
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, EntityTransform, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -29,7 +29,10 @@ enum Step {
     P1,
     P2(DVec3),
     /// Both mirror-line points fixed; waiting on the erase-source answer.
-    AskErase { p1: DVec3, p2: DVec3 },
+    AskErase {
+        p1: DVec3,
+        p2: DVec3,
+    },
 }
 
 pub struct MirrorCommand {
@@ -162,31 +165,17 @@ impl CadCommand for MirrorCommand {
         let mut out: Vec<WireModel> = self
             .wire_models
             .iter()
-            .map(|w| {
-                w.mirrored_in_plane(
-                    p1.as_vec3(),
-                    p2.as_vec3(),
-                    self.plane.z.as_vec3(),
-                )
-            })
+            .map(|w| w.mirrored_in_plane(p1.as_vec3(), p2.as_vec3(), self.plane.z.as_vec3()))
             .collect();
         // Text ghosts honour MIRRTEXT: on → true glyph mirror (full reflection);
         // off → keep glyphs readable, relocate to the mirror-symmetric position
         // by reflecting the box centre and translating.
         for (w, center) in &self.text_ghosts {
             if self.mirror_text {
-                out.push(w.mirrored_in_plane(
-                    p1.as_vec3(),
-                    p2.as_vec3(),
-                    self.plane.z.as_vec3(),
-                ));
+                out.push(w.mirrored_in_plane(p1.as_vec3(), p2.as_vec3(), self.plane.z.as_vec3()));
             } else {
-                let reflected = crate::scene::view::transform::reflected_point(
-                    *center,
-                    p1,
-                    p2,
-                    self.plane.z,
-                );
+                let reflected =
+                    crate::scene::view::transform::reflected_point(*center, p1, p2, self.plane.z);
                 let delta = (reflected - *center).as_vec3();
                 out.push(w.translated(delta));
             }

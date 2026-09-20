@@ -108,7 +108,10 @@ impl JoggedRadiusDimensionCommand {
         dimension.override_center = v3(override_center);
         dimension.jog_point = v3(jog);
         dimension.jog_angle = self.defaults.jog_angle;
-        dimension.base.style_name.clone_from(&self.defaults.style_name);
+        dimension
+            .base
+            .style_name
+            .clone_from(&self.defaults.style_name);
         dimension.base.text_middle_point = v3(text_position);
         dimension.base.insertion_point = v3(text_position);
         dimension.base.text_user_positioned = true;
@@ -135,9 +138,7 @@ impl JoggedRadiusDimensionCommand {
         );
 
         CmdResult::CommitDimension {
-            entity: plane.place_entity(EntityType::Dimension(Dimension::LargeRadial(
-                dimension,
-            ))),
+            entity: plane.place_entity(EntityType::Dimension(Dimension::LargeRadial(dimension))),
             association,
             preserve_base_style: false,
             continue_command: false,
@@ -166,10 +167,9 @@ impl CadCommand for JoggedRadiusDimensionCommand {
             Step::OverrideCenter(_) => {
                 t!("DIMJOGGED  Specify center location override:").into_owned()
             }
-            Step::DimLine { .. } => t!(
-                "DIMJOGGED  Specify dimension line location  [Mtext/Text/Angle]:"
-            )
-            .into_owned(),
+            Step::DimLine { .. } => {
+                t!("DIMJOGGED  Specify dimension line location  [Mtext/Text/Angle]:").into_owned()
+            }
             Step::Jog { .. } => t!("DIMJOGGED  Specify jog location:").into_owned(),
         }
     }
@@ -201,13 +201,7 @@ impl CadCommand for JoggedRadiusDimensionCommand {
                 override_center,
                 chord,
                 text_position,
-            } => self.commit_dimension(
-                source,
-                override_center,
-                chord,
-                text_position,
-                point,
-            ),
+            } => self.commit_dimension(source, override_center, chord, text_position, point),
         }
     }
 
@@ -242,9 +236,7 @@ impl CadCommand for JoggedRadiusDimensionCommand {
     }
 
     fn options(&self) -> Vec<CmdOption> {
-        if matches!(self.step, Step::DimLine { .. })
-            && !self.awaiting_text
-            && !self.awaiting_angle
+        if matches!(self.step, Step::DimLine { .. }) && !self.awaiting_text && !self.awaiting_angle
         {
             vec![
                 CmdOption::new("MText", "MTEXT"),
@@ -439,12 +431,7 @@ fn project_jog(override_center: DVec3, chord: DVec3, point: DVec3) -> DVec3 {
     override_center + line * factor
 }
 
-fn jog_break(
-    chord: DVec3,
-    jog: DVec3,
-    override_center: DVec3,
-    jog_angle: f64,
-) -> (DVec3, DVec3) {
+fn jog_break(chord: DVec3, jog: DVec3, override_center: DVec3, jog_angle: f64) -> (DVec3, DVec3) {
     let radial = (chord - override_center).normalize_or_zero();
     let (sin, cos) = jog_angle.sin_cos();
     let transverse = DVec3::new(

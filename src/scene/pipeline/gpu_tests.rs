@@ -68,28 +68,44 @@ fn block_edits_preserve_cache_coordinates_and_arena_partition() {
     let first = block(1, 10.0);
     let second = block(2, 20.0);
     let depth = rustc_hash::FxHashMap::from_iter([(1, [0.1, 0.01]), (2, [0.2, 0.01])]);
-    let original = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth, &mut block_geometry);
-    let unchanged = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth, &mut block_geometry);
+    let original = pipeline.upload_block_wires(
+        &device,
+        &queue,
+        &[&first, &second],
+        &depth,
+        &mut block_geometry,
+    );
+    let unchanged = pipeline.upload_block_wires(
+        &device,
+        &queue,
+        &[&first, &second],
+        &depth,
+        &mut block_geometry,
+    );
     assert_eq!(original[0].geometry_id(), unchanged[0].geometry_id());
     assert_eq!(original[0].instance_count, 2);
 
-    let removed = pipeline.upload_block_wires(&device, &queue, &[&second], &depth, &mut block_geometry);
+    let removed =
+        pipeline.upload_block_wires(&device, &queue, &[&second], &depth, &mut block_geometry);
     assert_ne!(
         original[0].geometry_id(),
         removed[0].geometry_id(),
         "removing the base instance must replace vertices baked at its old position"
     );
     let moved = block(2, 30.0);
-    let moved_gpu = pipeline.upload_block_wires(&device, &queue, &[&moved], &depth, &mut block_geometry);
+    let moved_gpu =
+        pipeline.upload_block_wires(&device, &queue, &[&moved], &depth, &mut block_geometry);
     assert_ne!(removed[0].geometry_id(), moved_gpu[0].geometry_id());
-    let restored = pipeline.upload_block_wires(&device, &queue, &[&first, &second], &depth, &mut block_geometry);
+    let restored = pipeline.upload_block_wires(
+        &device,
+        &queue,
+        &[&first, &second],
+        &depth,
+        &mut block_geometry,
+    );
     assert_ne!(moved_gpu[0].geometry_id(), restored[0].geometry_id());
     assert_eq!(restored[0].instance_count, 2);
-    assert_eq!(
-        block_geometry.len(),
-        1,
-        "discard obsolete geometry"
-    );
+    assert_eq!(block_geometry.len(), 1, "discard obsolete geometry");
 
     let line = WireModel {
         render_instance: None,
@@ -462,12 +478,14 @@ fn test_selected_circle_arc_ellipse_highlight_overlay() {
 
     let mut circle_wire = WireModel::default();
     circle_wire.name = "circle_wire".into();
-    circle_wire.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::PlanarCircle {
-        center: [0.0, 0.0, 0.0],
-        axis_x: [1.0, 0.0, 0.0],
-        axis_y: [0.0, 1.0, 0.0],
-        radius: 10.0,
-    });
+    circle_wire
+        .tangent_geoms
+        .push(crate::scene::model::wire_model::TangentGeom::PlanarCircle {
+            center: [0.0, 0.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 10.0,
+        });
 
     let handle = acadrust::Handle::new(100);
     let mut selected_handles = rustc_hash::FxHashSet::default();
@@ -548,8 +566,18 @@ fn test_selected_circle_arc_ellipse_highlight_overlay() {
         &mut encoder,
         &target,
         iced::Rectangle::with_size(iced::Size::new(512.0, 512.0)),
-        iced::Rectangle { x: 0, y: 0, width: 512, height: 512 },
-        iced::Rectangle { x: 0, y: 0, width: 512, height: 512 },
+        iced::Rectangle {
+            x: 0,
+            y: 0,
+            width: 512,
+            height: 512,
+        },
+        iced::Rectangle {
+            x: 0,
+            y: 0,
+            width: 512,
+            height: 512,
+        },
         [0.0, 0.0, 0.0, 1.0],
         false,
         false,
@@ -575,14 +603,16 @@ fn test_thick_and_tapered_arc_gpu_rendering() {
     // 1. Wide circular arc with pick triangles
     let mut wide_arc = WireModel::default();
     wide_arc.name = "wide_arc".into();
-    wide_arc.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::Arc {
-        center: [50.0, 50.0, 0.0],
-        axis_x: [1.0, 0.0, 0.0],
-        axis_y: [0.0, 1.0, 0.0],
-        radius: 30.0,
-        start_angle: 0.0,
-        end_angle: std::f64::consts::PI,
-    });
+    wide_arc
+        .tangent_geoms
+        .push(crate::scene::model::wire_model::TangentGeom::Arc {
+            center: [50.0, 50.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 30.0,
+            start_angle: 0.0,
+            end_angle: std::f64::consts::PI,
+        });
     wide_arc.world_width = 10.0;
     wide_arc.color = [1.0, 0.2, 0.2, 1.0];
     wide_arc.pick_tris = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
@@ -591,14 +621,16 @@ fn test_thick_and_tapered_arc_gpu_rendering() {
     // 2. Tapered circular arc
     let mut tapered_arc = WireModel::default();
     tapered_arc.name = "tapered_arc".into();
-    tapered_arc.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::Arc {
-        center: [150.0, 50.0, 0.0],
-        axis_x: [1.0, 0.0, 0.0],
-        axis_y: [0.0, 1.0, 0.0],
-        radius: 40.0,
-        start_angle: 0.2,
-        end_angle: 2.8,
-    });
+    tapered_arc
+        .tangent_geoms
+        .push(crate::scene::model::wire_model::TangentGeom::Arc {
+            center: [150.0, 50.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 40.0,
+            start_angle: 0.2,
+            end_angle: 2.8,
+        });
     tapered_arc.world_width = 16.0;
     tapered_arc.taper_widths = vec![2.0, 16.0];
     tapered_arc.color = [0.2, 0.8, 1.0, 1.0];
@@ -637,8 +669,18 @@ fn test_thick_and_tapered_arc_gpu_rendering() {
         &mut encoder,
         &target,
         iced::Rectangle::with_size(iced::Size::new(512.0, 512.0)),
-        iced::Rectangle { x: 0, y: 0, width: 512, height: 512 },
-        iced::Rectangle { x: 0, y: 0, width: 512, height: 512 },
+        iced::Rectangle {
+            x: 0,
+            y: 0,
+            width: 512,
+            height: 512,
+        },
+        iced::Rectangle {
+            x: 0,
+            y: 0,
+            width: 512,
+            height: 512,
+        },
         [0.0, 0.0, 0.0, 1.0],
         false,
         false,
@@ -674,22 +716,26 @@ fn test_tilted_3d_donut_and_thick_arc_gpu_rendering() {
     // Donut circular arc segments
     let mut donut = WireModel::default();
     donut.name = "donut".into();
-    donut.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::Arc {
-        center: [50.0, 50.0, 0.0],
-        axis_x: [1.0, 0.0, 0.0],
-        axis_y: [0.0, 1.0, 0.0],
-        radius: 30.0,
-        start_angle: 0.0,
-        end_angle: std::f64::consts::PI,
-    });
-    donut.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::Arc {
-        center: [50.0, 50.0, 0.0],
-        axis_x: [1.0, 0.0, 0.0],
-        axis_y: [0.0, 1.0, 0.0],
-        radius: 30.0,
-        start_angle: std::f64::consts::PI,
-        end_angle: std::f64::consts::TAU,
-    });
+    donut
+        .tangent_geoms
+        .push(crate::scene::model::wire_model::TangentGeom::Arc {
+            center: [50.0, 50.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 30.0,
+            start_angle: 0.0,
+            end_angle: std::f64::consts::PI,
+        });
+    donut
+        .tangent_geoms
+        .push(crate::scene::model::wire_model::TangentGeom::Arc {
+            center: [50.0, 50.0, 0.0],
+            axis_x: [1.0, 0.0, 0.0],
+            axis_y: [0.0, 1.0, 0.0],
+            radius: 30.0,
+            start_angle: std::f64::consts::PI,
+            end_angle: std::f64::consts::TAU,
+        });
     donut.world_width = 12.0;
     donut.color = [0.2, 0.9, 0.3, 1.0];
 
@@ -743,8 +789,18 @@ fn test_tilted_3d_donut_and_thick_arc_gpu_rendering() {
         &mut encoder,
         &target,
         iced::Rectangle::with_size(iced::Size::new(512.0, 512.0)),
-        iced::Rectangle { x: 0, y: 0, width: 512, height: 512 },
-        iced::Rectangle { x: 0, y: 0, width: 512, height: 512 },
+        iced::Rectangle {
+            x: 0,
+            y: 0,
+            width: 512,
+            height: 512,
+        },
+        iced::Rectangle {
+            x: 0,
+            y: 0,
+            width: 512,
+            height: 512,
+        },
         [0.0, 0.0, 0.0, 1.0],
         false,
         false,
@@ -770,14 +826,16 @@ fn test_selected_ellipse_overlay() {
 
     let mut ellipse_wire = WireModel::default();
     ellipse_wire.name = "ellipse_wire".into();
-    ellipse_wire.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::PlanarEllipse {
-        center: [0.0, 0.0, 0.0],
-        major_axis: [10.0, 0.0, 0.0],
-        normal: [0.0, 0.0, 1.0],
-        minor_axis_ratio: 0.5,
-        start_param: 0.0,
-        end_param: std::f64::consts::TAU,
-    });
+    ellipse_wire.tangent_geoms.push(
+        crate::scene::model::wire_model::TangentGeom::PlanarEllipse {
+            center: [0.0, 0.0, 0.0],
+            major_axis: [10.0, 0.0, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            minor_axis_ratio: 0.5,
+            start_param: 0.0,
+            end_param: std::f64::consts::TAU,
+        },
+    );
 
     let handle = acadrust::Handle::new(200);
     let mut selected_handles = rustc_hash::FxHashSet::default();
@@ -859,8 +917,18 @@ fn test_selected_ellipse_overlay() {
         &mut encoder,
         &target,
         iced::Rectangle::with_size(iced::Size::new(512.0, 512.0)),
-        iced::Rectangle { x: 0, y: 0, width: 512, height: 512 },
-        iced::Rectangle { x: 0, y: 0, width: 512, height: 512 },
+        iced::Rectangle {
+            x: 0,
+            y: 0,
+            width: 512,
+            height: 512,
+        },
+        iced::Rectangle {
+            x: 0,
+            y: 0,
+            width: 512,
+            height: 512,
+        },
         [0.0, 0.0, 0.0, 1.0],
         false,
         false,
@@ -931,8 +999,18 @@ fn test_pline_arc_switch_preview_and_render() {
                 &mut encoder,
                 &target,
                 iced::Rectangle::with_size(iced::Size::new(512.0, 512.0)),
-                iced::Rectangle { x: 0, y: 0, width: 512, height: 512 },
-                iced::Rectangle { x: 0, y: 0, width: 512, height: 512 },
+                iced::Rectangle {
+                    x: 0,
+                    y: 0,
+                    width: 512,
+                    height: 512,
+                },
+                iced::Rectangle {
+                    x: 0,
+                    y: 0,
+                    width: 512,
+                    height: 512,
+                },
                 [0.0, 0.0, 0.0, 1.0],
                 false,
                 false,

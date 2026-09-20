@@ -14,9 +14,17 @@ pub fn ui_name(e: &EntityType) -> &'static str {
     match e {
         EntityType::Point(_) => "Point",
         EntityType::Line(line)
-            if acadrust::entities::CenterMarkAssociation::read(&line.common.extended_data).is_some() => "Center Mark",
+            if acadrust::entities::CenterMarkAssociation::read(&line.common.extended_data)
+                .is_some() =>
+        {
+            "Center Mark"
+        }
         EntityType::Line(line)
-            if acadrust::entities::CenterLineAssociation::read(&line.common.extended_data).is_some() => "Center Line",
+            if acadrust::entities::CenterLineAssociation::read(&line.common.extended_data)
+                .is_some() =>
+        {
+            "Center Line"
+        }
         EntityType::Line(_) => "Line",
         EntityType::Circle(_) => "Circle",
         EntityType::Arc(_) => "Arc",
@@ -70,7 +78,10 @@ pub fn ui_name(e: &EntityType) -> &'static str {
             if matches!(
                 extended.data,
                 acadrust::entities::ExtendedEntityData::SectionObject(_)
-            ) => "Section Plane",
+            ) =>
+        {
+            "Section Plane"
+        }
         EntityType::Extended(_) => "Extended Entity",
         EntityType::Seqend(_) => "Seqend",
         EntityType::Unknown(_) => "Unknown",
@@ -164,7 +175,10 @@ pub fn dxf_name(e: &EntityType) -> &'static str {
             if matches!(
                 extended.data,
                 acadrust::entities::ExtendedEntityData::SectionObject(_)
-            ) => "SECTIONOBJECT",
+            ) =>
+        {
+            "SECTIONOBJECT"
+        }
         _ => "ENTITY",
     }
 }

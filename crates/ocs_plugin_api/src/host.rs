@@ -65,17 +65,31 @@ pub enum LogLevel {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum HostNotification {
-    InputLine { line: String },
+    InputLine {
+        line: String,
+    },
     Cancel,
-    DocumentChanged { version: u64 },
-    SelectionChanged { handles: Vec<Handle> },
+    DocumentChanged {
+        version: u64,
+    },
+    SelectionChanged {
+        handles: Vec<Handle>,
+    },
     Raw(Vec<u8>),
     /// V4 snapshot changed for a specific tab. Discriminant 5.
-    DocumentChangedV4 { tab_id: u64, version: u64 },
+    DocumentChangedV4 {
+        tab_id: u64,
+        version: u64,
+    },
     /// V4 tab closed notification. Discriminant 6.
-    DocumentTabClosed { tab_id: u64 },
+    DocumentTabClosed {
+        tab_id: u64,
+    },
     /// V4 selection changed for a specific tab. Discriminant 7.
-    SelectionChangedV4 { tab_id: u64, handles: Vec<Handle> },
+    SelectionChangedV4 {
+        tab_id: u64,
+        handles: Vec<Handle>,
+    },
     /// Fallback for notification variants added in future minor revisions.
     /// Carries the raw bincode payload so an older peer can ignore it without
     /// failing deserialization.
@@ -88,43 +102,34 @@ impl Serialize for HostNotification {
         match self {
             HostNotification::InputLine { line } => {
                 bytes.push(0);
-                bincode::serialize_into(&mut bytes, line)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, line).map_err(serde::ser::Error::custom)?;
             }
             HostNotification::Cancel => bytes.push(1),
             HostNotification::DocumentChanged { version } => {
                 bytes.push(2);
-                bincode::serialize_into(&mut bytes, version)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, version).map_err(serde::ser::Error::custom)?;
             }
             HostNotification::SelectionChanged { handles } => {
                 bytes.push(3);
-                bincode::serialize_into(&mut bytes, handles)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, handles).map_err(serde::ser::Error::custom)?;
             }
             HostNotification::Raw(data) => {
                 bytes.push(4);
-                bincode::serialize_into(&mut bytes, data)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, data).map_err(serde::ser::Error::custom)?;
             }
             HostNotification::DocumentChangedV4 { tab_id, version } => {
                 bytes.push(5);
-                bincode::serialize_into(&mut bytes, tab_id)
-                    .map_err(serde::ser::Error::custom)?;
-                bincode::serialize_into(&mut bytes, version)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, tab_id).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, version).map_err(serde::ser::Error::custom)?;
             }
             HostNotification::DocumentTabClosed { tab_id } => {
                 bytes.push(6);
-                bincode::serialize_into(&mut bytes, tab_id)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, tab_id).map_err(serde::ser::Error::custom)?;
             }
             HostNotification::SelectionChangedV4 { tab_id, handles } => {
                 bytes.push(7);
-                bincode::serialize_into(&mut bytes, tab_id)
-                    .map_err(serde::ser::Error::custom)?;
-                bincode::serialize_into(&mut bytes, handles)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, tab_id).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, handles).map_err(serde::ser::Error::custom)?;
             }
             HostNotification::Unknown(raw) => bytes.extend_from_slice(raw),
         }
@@ -173,14 +178,28 @@ impl<'de> Deserialize<'de> for HostNotification {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum PluginNotification {
-    Output { text: String },
-    Error { text: String },
-    Prompt { text: String },
-    Progress { percent: u8 },
-    Log { level: LogLevel, text: String },
+    Output {
+        text: String,
+    },
+    Error {
+        text: String,
+    },
+    Prompt {
+        text: String,
+    },
+    Progress {
+        percent: u8,
+    },
+    Log {
+        level: LogLevel,
+        text: String,
+    },
     Raw(Vec<u8>),
     /// V4 REPL status update. Discriminant 6.
-    ReplStatus { status: String, message: String },
+    ReplStatus {
+        status: String,
+        message: String,
+    },
     /// Fallback for notification variants added in future minor revisions.
     /// Carries the raw bincode payload so an older peer can ignore it without
     /// failing deserialization.
@@ -193,42 +212,33 @@ impl Serialize for PluginNotification {
         match self {
             PluginNotification::Output { text } => {
                 bytes.push(0);
-                bincode::serialize_into(&mut bytes, text)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, text).map_err(serde::ser::Error::custom)?;
             }
             PluginNotification::Error { text } => {
                 bytes.push(1);
-                bincode::serialize_into(&mut bytes, text)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, text).map_err(serde::ser::Error::custom)?;
             }
             PluginNotification::Prompt { text } => {
                 bytes.push(2);
-                bincode::serialize_into(&mut bytes, text)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, text).map_err(serde::ser::Error::custom)?;
             }
             PluginNotification::Progress { percent } => {
                 bytes.push(3);
-                bincode::serialize_into(&mut bytes, percent)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, percent).map_err(serde::ser::Error::custom)?;
             }
             PluginNotification::Log { level, text } => {
                 bytes.push(4);
-                bincode::serialize_into(&mut bytes, level)
-                    .map_err(serde::ser::Error::custom)?;
-                bincode::serialize_into(&mut bytes, text)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, level).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, text).map_err(serde::ser::Error::custom)?;
             }
             PluginNotification::Raw(data) => {
                 bytes.push(5);
-                bincode::serialize_into(&mut bytes, data)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, data).map_err(serde::ser::Error::custom)?;
             }
             PluginNotification::ReplStatus { status, message } => {
                 bytes.push(6);
-                bincode::serialize_into(&mut bytes, status)
-                    .map_err(serde::ser::Error::custom)?;
-                bincode::serialize_into(&mut bytes, message)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, status).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, message).map_err(serde::ser::Error::custom)?;
             }
             PluginNotification::Unknown(raw) => bytes.extend_from_slice(raw),
         }
@@ -258,8 +268,8 @@ impl<'de> Deserialize<'de> for PluginNotification {
                 .map(|percent| PluginNotification::Progress { percent })
                 .map_err(serde::de::Error::custom),
             4 => {
-                let (level, text): (LogLevel, String) = bincode::deserialize(rest)
-                    .map_err(serde::de::Error::custom)?;
+                let (level, text): (LogLevel, String) =
+                    bincode::deserialize(rest).map_err(serde::de::Error::custom)?;
                 Ok(PluginNotification::Log { level, text })
             }
             5 => bincode::deserialize(rest)
@@ -502,9 +512,7 @@ pub trait HostApi {
     /// Returns the optional `command_id` used to correlate the notification
     /// with a running command, and the notification payload. Long-running
     /// plugins should call this periodically to drain the bounded queue.
-    fn try_recv_notification(
-        &mut self,
-    ) -> Option<(Option<u64>, HostNotification)> {
+    fn try_recv_notification(&mut self) -> Option<(Option<u64>, HostNotification)> {
         None
     }
 

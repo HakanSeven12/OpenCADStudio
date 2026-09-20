@@ -186,11 +186,7 @@ impl SolidEdgeCommand {
         )
     }
 
-    fn preview_for_values(
-        &self,
-        value: f64,
-        other_value: f64,
-    ) -> Option<(Handle, Vec<WireModel>)> {
+    fn preview_for_values(&self, value: f64, other_value: f64) -> Option<(Handle, Vec<WireModel>)> {
         if !self.preview_active() {
             return None;
         }
@@ -210,12 +206,8 @@ impl SolidEdgeCommand {
             )
             .ok()?,
         };
-        let mut wires = crate::scene::model::solid_model::grip_preview_wires(
-            &result,
-            handle,
-            [0; 2],
-            false,
-        );
+        let mut wires =
+            crate::scene::model::solid_model::grip_preview_wires(&result, handle, [0; 2], false);
         for wire in &mut wires {
             wire.color = self.preview_color;
             wire.name = format!("{}-{}-PREVIEW", handle.value(), self.name());
@@ -226,8 +218,7 @@ impl SolidEdgeCommand {
     fn rebuild_preview(&mut self) {
         self.preview_wires.clear();
         self.preview_hidden.clear();
-        if let Some((handle, wires)) =
-            self.preview_for_values(self.default_value, self.other_value)
+        if let Some((handle, wires)) = self.preview_for_values(self.default_value, self.other_value)
         {
             self.preview_wires = wires;
             self.preview_hidden.push(handle);
@@ -359,11 +350,13 @@ impl CadCommand for SolidEdgeCommand {
             (_, EdgeStep::PreviewConfirm, _) => {
                 crate::t!("Press Enter to accept the fillet or [Radius]:").into_owned()
             }
-            (_, EdgeStep::Radius, _) if self.value_return == EdgeStep::PreviewConfirm => crate::tf!(
-                "Specify Radius or [Expression] <{:.4}>:",
-                self.default_value
-            )
-            .into_owned(),
+            (_, EdgeStep::Radius, _) if self.value_return == EdgeStep::PreviewConfirm => {
+                crate::tf!(
+                    "Specify Radius or [Expression] <{:.4}>:",
+                    self.default_value
+                )
+                .into_owned()
+            }
             (_, EdgeStep::Radius, _) => crate::tf!(
                 "Enter fillet radius or [Expression] <{:.4}>:",
                 self.default_value
@@ -376,18 +369,15 @@ impl CadCommand for SolidEdgeCommand {
 
     fn options(&self) -> Vec<CmdOption> {
         match (self.operation, self.step, self.selection_mode) {
-            (EdgeOperation::Chamfer, EdgeStep::Selecting, _) => vec![
-                CmdOption::new("Loop", "L"),
-                CmdOption::new("Distance", "D"),
-            ],
-            (EdgeOperation::Chamfer, EdgeStep::PickingLoop, _) => vec![
-                CmdOption::new("Edge", "E"),
-                CmdOption::new("Distance", "D"),
-            ],
-            (EdgeOperation::Chamfer, EdgeStep::LoopConfirm, _) => vec![
-                CmdOption::new("Accept", "A"),
-                CmdOption::new("Next", "N"),
-            ],
+            (EdgeOperation::Chamfer, EdgeStep::Selecting, _) => {
+                vec![CmdOption::new("Loop", "L"), CmdOption::new("Distance", "D")]
+            }
+            (EdgeOperation::Chamfer, EdgeStep::PickingLoop, _) => {
+                vec![CmdOption::new("Edge", "E"), CmdOption::new("Distance", "D")]
+            }
+            (EdgeOperation::Chamfer, EdgeStep::LoopConfirm, _) => {
+                vec![CmdOption::new("Accept", "A"), CmdOption::new("Next", "N")]
+            }
             (EdgeOperation::Chamfer, EdgeStep::PreviewConfirm, _) => {
                 vec![CmdOption::new("Distance", "D")]
             }
@@ -401,19 +391,17 @@ impl CadCommand for SolidEdgeCommand {
                 CmdOption::new("Loop", "L"),
                 CmdOption::new("Radius", "R"),
             ],
-            (EdgeOperation::Fillet, EdgeStep::Selecting, EdgeSelectionMode::Chain) => vec![
-                CmdOption::new("Edge", "E"),
-                CmdOption::new("Radius", "R"),
-            ],
+            (EdgeOperation::Fillet, EdgeStep::Selecting, EdgeSelectionMode::Chain) => {
+                vec![CmdOption::new("Edge", "E"), CmdOption::new("Radius", "R")]
+            }
             (EdgeOperation::Fillet, EdgeStep::PickingLoop, _) => vec![
                 CmdOption::new("Edge", "E"),
                 CmdOption::new("Chain", "C"),
                 CmdOption::new("Radius", "R"),
             ],
-            (EdgeOperation::Fillet, EdgeStep::LoopConfirm, _) => vec![
-                CmdOption::new("Accept", "A"),
-                CmdOption::new("Next", "N"),
-            ],
+            (EdgeOperation::Fillet, EdgeStep::LoopConfirm, _) => {
+                vec![CmdOption::new("Accept", "A"), CmdOption::new("Next", "N")]
+            }
             (EdgeOperation::Fillet, EdgeStep::PreviewConfirm, _) => {
                 vec![CmdOption::new("Radius", "R")]
             }
@@ -444,10 +432,9 @@ impl CadCommand for SolidEdgeCommand {
         if !self.pick_allowed(handle) {
             return CmdResult::NeedPoint;
         }
-        let Some(seed) = self
-            .body(handle)
-            .and_then(|body| crate::scene::model::solid_model::nearest_edge(body, point.to_array()))
-        else {
+        let Some(seed) = self.body(handle).and_then(|body| {
+            crate::scene::model::solid_model::nearest_edge(body, point.to_array())
+        }) else {
             return CmdResult::NeedPoint;
         };
         self.handle = Some(handle);
@@ -457,8 +444,7 @@ impl CadCommand for SolidEdgeCommand {
             self.loop_candidates = edge_loops(self.body(handle).expect("pick body exists"), seed);
             if self.operation == EdgeOperation::Chamfer {
                 if let Some(base_face) = self.base_face {
-                    self.loop_candidates
-                        .retain(|(face, _)| *face == base_face);
+                    self.loop_candidates.retain(|(face, _)| *face == base_face);
                 }
             }
             self.loop_index = 0;
@@ -473,15 +459,18 @@ impl CadCommand for SolidEdgeCommand {
 
         if self.operation == EdgeOperation::Chamfer {
             if self.base_face.is_none() {
-                self.base_face = self.body(handle).and_then(|body| {
-                    nearest_edge_face(body, seed, point.to_array())
-                });
+                self.base_face = self
+                    .body(handle)
+                    .and_then(|body| nearest_edge_face(body, seed, point.to_array()));
             }
             let Some(base_face) = self.base_face else {
                 return CmdResult::NeedPoint;
             };
-            if !edge_belongs_to_face(self.body(handle).expect("pick body exists"), seed, base_face)
-            {
+            if !edge_belongs_to_face(
+                self.body(handle).expect("pick body exists"),
+                seed,
+                base_face,
+            ) {
                 return CmdResult::NeedPoint;
             }
             self.add_batch(vec![seed], point);
@@ -491,7 +480,9 @@ impl CadCommand for SolidEdgeCommand {
 
         let edges = match self.selection_mode {
             EdgeSelectionMode::Edge => vec![seed],
-            EdgeSelectionMode::Chain => edge_chain(self.body(handle).expect("pick body exists"), seed),
+            EdgeSelectionMode::Chain => {
+                edge_chain(self.body(handle).expect("pick body exists"), seed)
+            }
         };
         self.add_batch(edges, point);
         self.rebuild_preview();
@@ -675,7 +666,11 @@ impl CadCommand for SolidEdgeCommand {
         }
         let (batch, _) = self.selection_batches.pop()?;
         for edge in batch {
-            if let Some(index) = self.selected_edges.iter().position(|candidate| *candidate == edge) {
+            if let Some(index) = self
+                .selected_edges
+                .iter()
+                .position(|candidate| *candidate == edge)
+            {
                 self.selected_edges.remove(index);
             }
         }
@@ -683,10 +678,7 @@ impl CadCommand for SolidEdgeCommand {
             self.handle = None;
             self.base_face = None;
         }
-        self.last_pick = self
-            .selection_batches
-            .last()
-            .map(|(_, anchor)| *anchor);
+        self.last_pick = self.selection_batches.last().map(|(_, anchor)| *anchor);
         self.step = EdgeStep::Selecting;
         self.rebuild_preview();
         Some(CmdResult::NeedPoint)
@@ -731,8 +723,8 @@ impl CadCommand for SolidEdgeCommand {
             self.step,
             EdgeStep::Radius | EdgeStep::ChamferDistance1 | EdgeStep::ChamferDistance2
         )
-            .then(|| self.last_pick.map(|pick| cursor.distance(pick)))
-            .flatten()
+        .then(|| self.last_pick.map(|pick| cursor.distance(pick)))
+        .flatten()
     }
 
     fn on_preview_wires(&mut self, cursor: DVec3) -> Vec<WireModel> {
@@ -847,8 +839,7 @@ fn edge_chain(body: &Body, seed: EdgeKey) -> Vec<EdgeKey> {
                 if candidate.start != vertex && candidate.end != vertex {
                     continue;
                 }
-                let Some(candidate_tangent) =
-                    edge_tangent_from_vertex(body, candidate_key, vertex)
+                let Some(candidate_tangent) = edge_tangent_from_vertex(body, candidate_key, vertex)
                 else {
                     continue;
                 };

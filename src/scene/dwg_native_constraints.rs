@@ -624,11 +624,8 @@ impl<'a> GroupBuilder<'a> {
                 },
             );
         } else {
-            let arc = cadkernel::geom2d::BulgeArc::from_bulge(
-                [start.x, start.y],
-                [end.x, end.y],
-                bulge,
-            )?;
+            let arc =
+                cadkernel::geom2d::BulgeArc::from_bulge([start.x, start.y], [end.x, end.y], bulge)?;
             self.push_node(
                 node_id,
                 "AcConstrainedArc",
@@ -1730,9 +1727,7 @@ fn directional_axis_reference(
         return None;
     };
     match document.get_entity(entity)? {
-        EntityType::Text(_) | EntityType::MText(_) => {
-            Some(ParametricRef::text_baseline(entity))
-        }
+        EntityType::Text(_) | EntityType::MText(_) => Some(ParametricRef::text_baseline(entity)),
         EntityType::Ellipse(ellipse) => {
             let [origin, axis_x, axis_y] = *work_plane;
             let normal = Vector3::new(
@@ -1740,9 +1735,8 @@ fn directional_axis_reference(
                 axis_x.z * axis_y.x - axis_x.x * axis_y.z,
                 axis_x.x * axis_y.y - axis_x.y * axis_y.x,
             );
-            let to_world = |point: Vector3| {
-                origin + axis_x * point.x + axis_y * point.y + normal * point.z
-            };
+            let to_world =
+                |point: Vector3| origin + axis_x * point.x + axis_y * point.y + normal * point.z;
             let direction = (to_world(*end_point) - to_world(*start_point)).normalize();
             let major = ellipse.major_axis.normalize();
             let ellipse_normal = ellipse.normal.normalize();
@@ -2263,18 +2257,18 @@ pub(super) fn native_constraint_set(
                     };
                     let local_direction = datum_id.and_then(|datum_id| {
                         group.nodes.iter().find_map(|datum| {
-                            (datum.node_id == datum_id).then_some(&datum.data).and_then(|data| {
-                                match data {
+                            (datum.node_id == datum_id)
+                                .then_some(&datum.data)
+                                .and_then(|data| match data {
                                     AssocConstraintNodeData::Line { direction, .. } => {
                                         Some(*direction)
                                     }
                                     _ => None,
-                                }
-                            })
+                                })
                         })
                     });
-                    if let Some(world) =
-                        local_direction.and_then(|local| work_plane_vector(&group.work_plane, local))
+                    if let Some(world) = local_direction
+                        .and_then(|local| work_plane_vector(&group.work_plane, local))
                     {
                         constraint.axis_direction = Some(world);
                     }
@@ -2994,9 +2988,7 @@ mod tests {
                 .iter()
                 .find(|constraint| constraint.kind == ConstraintKind::Horizontal)
                 .unwrap();
-            assert!(
-                (horizontal.axis_direction.unwrap() - horizontal_direction).length() < 1.0e-12
-            );
+            assert!((horizontal.axis_direction.unwrap() - horizontal_direction).length() < 1.0e-12);
         }
     }
 
@@ -4374,5 +4366,4 @@ mod tests {
             assert_eq!(restored_sectors, sectors);
         }
     }
-
 }

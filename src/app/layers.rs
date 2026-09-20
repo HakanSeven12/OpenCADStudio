@@ -115,10 +115,7 @@ impl OpenCADStudio {
         let active_text = if text_names.contains(&active_text) {
             active_text
         } else {
-            text_names
-                .first()
-                .cloned()
-                .unwrap_or_default()
+            text_names.first().cloned().unwrap_or_default()
         };
 
         let dim_names: Vec<String> = doc.dim_styles.iter().map(|s| s.name.clone()).collect();
@@ -126,10 +123,7 @@ impl OpenCADStudio {
         let active_dim = if dim_names.contains(&active_dim) {
             active_dim
         } else {
-            dim_names
-                .first()
-                .cloned()
-                .unwrap_or_default()
+            dim_names.first().cloned().unwrap_or_default()
         };
 
         let mleader_names: Vec<String> = doc
@@ -143,22 +137,14 @@ impl OpenCADStudio {
                 }
             })
             .collect();
-        let current_mleader =
-            doc.header.current_mleader_style_name.clone();
+        let current_mleader = doc.header.current_mleader_style_name.clone();
 
-        let active_mleader =
-            mleader_names
-                .iter()
-                .find(|name| {
-                    name.eq_ignore_ascii_case(
-                        &current_mleader
-                    )
-                })
-                .cloned()
-                .or_else(|| {
-                    mleader_names.first().cloned()
-                })
-                .unwrap_or_default();
+        let active_mleader = mleader_names
+            .iter()
+            .find(|name| name.eq_ignore_ascii_case(&current_mleader))
+            .cloned()
+            .or_else(|| mleader_names.first().cloned())
+            .unwrap_or_default();
 
         let table_names: Vec<String> = doc
             .objects
@@ -175,10 +161,7 @@ impl OpenCADStudio {
         let active_table = if table_names.contains(&active_table) {
             active_table
         } else {
-            table_names
-                .first()
-                .cloned()
-                .unwrap_or_default()
+            table_names.first().cloned().unwrap_or_default()
         };
 
         let active_mleader2 = active_mleader.clone();

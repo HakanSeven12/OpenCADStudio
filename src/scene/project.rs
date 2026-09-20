@@ -154,7 +154,11 @@ impl Scene {
                         pcz,
                     ]
                 } else {
-                    [(pcx_d + u * scale_d) as f32, (pcy_d + v * scale_d) as f32, pcz]
+                    [
+                        (pcx_d + u * scale_d) as f32,
+                        (pcy_d + v * scale_d) as f32,
+                        pcz,
+                    ]
                 }
             };
             let in_vp = |x: f32, y: f32| x >= vp_x0 && x <= vp_x1 && y >= vp_y0 && y <= vp_y1;
@@ -165,16 +169,11 @@ impl Scene {
                         return view_height_eff;
                     }
                     let relative = marker.origin
-                        - glam::DVec3::new(
-                            display_center_x,
-                            display_center_y,
-                            display_center_z,
-                        );
+                        - glam::DVec3::new(display_center_x, display_center_y, display_center_z);
                     let depth = relative.x * view_fwd_d.0
                         + relative.y * view_fwd_d.1
                         + relative.z * view_fwd_d.2;
-                    view_height_eff * (camera_dist_d - depth).max(0.001)
-                        / camera_dist_d.max(0.001)
+                    view_height_eff * (camera_dist_d - depth).max(0.001) / camera_dist_d.max(0.001)
                 });
                 let projected_pts: Vec<[f32; 3]> = wire
                     .points
@@ -386,7 +385,12 @@ impl Scene {
     /// needs the equivalent paper-space geometry explicitly.
     pub fn viewport_plot_fills(
         &self,
-    ) -> (Vec<(WireModel, f32)>, Vec<HatchModel>, Vec<HatchModel>, Vec<crate::io::pdf_export::PlotImage>) {
+    ) -> (
+        Vec<(WireModel, f32)>,
+        Vec<HatchModel>,
+        Vec<HatchModel>,
+        Vec<crate::io::pdf_export::PlotImage>,
+    ) {
         use acadrust::entities::Viewport;
         use model::hatch_model::HatchPattern;
 
@@ -465,20 +469,31 @@ impl Scene {
             let frozen: rustc_hash::FxHashSet<Handle> =
                 viewport.frozen_layers.iter().copied().collect();
             let mut viewport_clips = vec![vec![
-                [xmin as f64, ymin as f64], [xmax as f64, ymin as f64],
-                [xmax as f64, ymax as f64], [xmin as f64, ymax as f64],
+                [xmin as f64, ymin as f64],
+                [xmax as f64, ymin as f64],
+                [xmax as f64, ymax as f64],
+                [xmin as f64, ymax as f64],
             ]];
             if !self.images.is_empty() && !viewport.clip_boundary_handle.is_null() {
-                let boundary = self.clip_boundary_polygon(
-                    viewport.clip_boundary_handle, viewport.center.z as f32);
+                let boundary = self
+                    .clip_boundary_polygon(viewport.clip_boundary_handle, viewport.center.z as f32);
                 if boundary.len() >= 3 {
-                    viewport_clips.push(boundary.iter().map(|p| [p[0] as f64, p[1] as f64]).collect());
+                    viewport_clips.push(
+                        boundary
+                            .iter()
+                            .map(|p| [p[0] as f64, p[1] as f64])
+                            .collect(),
+                    );
                 }
             }
-            for mut plot in self.placed_images(model_block, Some(&frozen),
+            for mut plot in self.placed_images(
+                model_block,
+                Some(&frozen),
                 self.viewport_scale_handle(viewport.common.handle),
-                self.annotation_all_visible(), Some(viewport.common.handle), true)
-            {
+                self.annotation_all_visible(),
+                Some(viewport.common.handle),
+                true,
+            ) {
                 let mut valid = true;
                 let mut project_point = |high: &mut [f32; 3], low: &mut [f32; 3]| {
                     let point = std::array::from_fn(|i| high[i] as f64 + low[i] as f64);
@@ -489,7 +504,12 @@ impl Scene {
                         valid = false;
                     }
                 };
-                for (high, low) in plot.image.corners.iter_mut().zip(&mut plot.image.corners_low) {
+                for (high, low) in plot
+                    .image
+                    .corners
+                    .iter_mut()
+                    .zip(&mut plot.image.corners_low)
+                {
                     project_point(high, low);
                 }
                 for vertex in &mut plot.image.verts {
@@ -507,10 +527,13 @@ impl Scene {
                 if !valid {
                     continue;
                 }
-                if [(0, xmin, xmax), (1, ymin, ymax)].iter().any(|&(axis, min, max)| {
-                    plot.image.verts.iter().all(|v| v.pos[axis] < min)
-                        || plot.image.verts.iter().all(|v| v.pos[axis] > max)
-                }) {
+                if [(0, xmin, xmax), (1, ymin, ymax)]
+                    .iter()
+                    .any(|&(axis, min, max)| {
+                        plot.image.verts.iter().all(|v| v.pos[axis] < min)
+                            || plot.image.verts.iter().all(|v| v.pos[axis] > max)
+                    })
+                {
                     continue;
                 }
                 plot.clips.extend(viewport_clips.iter().cloned());
@@ -533,9 +556,7 @@ impl Scene {
                         f32::NEG_INFINITY,
                     ];
                     for [a, b] in hatch.pattern_segments_for_plot() {
-                        let (Some(a), Some(b)) =
-                            (project(a[0], a[1]), project(b[0], b[1]))
-                        else {
+                        let (Some(a), Some(b)) = (project(a[0], a[1]), project(b[0], b[1])) else {
                             continue;
                         };
                         let Some((ax, ay, bx, by)) =
@@ -567,9 +588,7 @@ impl Scene {
                     }
                     continue;
                 }
-                if let Some(hatch) =
-                    project_plot_fill(hatch, &project_3d, xmin, ymin, xmax, ymax)
-                {
+                if let Some(hatch) = project_plot_fill(hatch, &project_3d, xmin, ymin, xmax, ymax) {
                     projected_hatches.push(hatch);
                 }
             }
@@ -589,7 +608,12 @@ impl Scene {
             }
         }
 
-        (pattern_wires, projected_hatches, projected_wipeouts, projected_images)
+        (
+            pattern_wires,
+            projected_hatches,
+            projected_wipeouts,
+            projected_images,
+        )
     }
 
     /// A content viewport's clip boundary, projected into that viewport's
@@ -710,21 +734,12 @@ pub(crate) fn clip_boundary_polygon_for_document(
             let vertices: Vec<([f64; 2], f64)> = polyline
                 .vertices
                 .iter()
-                .map(|vertex| {
-                    (
-                        [vertex.location.x, vertex.location.y],
-                        vertex.bulge,
-                    )
-                })
+                .map(|vertex| ([vertex.location.x, vertex.location.y], vertex.bulge))
                 .collect();
             sample_polyline_clip_boundary(
                 &vertices,
                 polyline.elevation,
-                (
-                    polyline.normal.x,
-                    polyline.normal.y,
-                    polyline.normal.z,
-                ),
+                (polyline.normal.x, polyline.normal.y, polyline.normal.z),
                 z,
             )
         }
@@ -732,45 +747,24 @@ pub(crate) fn clip_boundary_polygon_for_document(
             let vertices: Vec<([f64; 2], f64)> = polyline
                 .vertices
                 .iter()
-                .map(|vertex| {
-                    (
-                        [vertex.location.x, vertex.location.y],
-                        vertex.bulge,
-                    )
-                })
+                .map(|vertex| ([vertex.location.x, vertex.location.y], vertex.bulge))
                 .collect();
             sample_polyline_clip_boundary(
                 &vertices,
                 polyline.elevation,
-                (
-                    polyline.normal.x,
-                    polyline.normal.y,
-                    polyline.normal.z,
-                ),
+                (polyline.normal.x, polyline.normal.y, polyline.normal.z),
                 z,
             )
         }
         EntityType::Polyline(polyline) if polyline.is_closed() => polyline
             .vertices
             .iter()
-            .map(|vertex| {
-                [
-                    vertex.location.x as f32,
-                    vertex.location.y as f32,
-                    z,
-                ]
-            })
+            .map(|vertex| [vertex.location.x as f32, vertex.location.y as f32, z])
             .collect(),
         EntityType::Polyline3D(polyline) if polyline.flags.closed => polyline
             .vertices
             .iter()
-            .map(|vertex| {
-                [
-                    vertex.position.x as f32,
-                    vertex.position.y as f32,
-                    z,
-                ]
-            })
+            .map(|vertex| [vertex.position.x as f32, vertex.position.y as f32, z])
             .collect(),
         // Anything else that draws as a plane curve — a circle, an ellipse, a
         // bulged polyline, a spline — is sampled through its own geometry,
@@ -795,10 +789,7 @@ fn sample_polyline_clip_boundary(
         return Vec::new();
     }
     let to_wcs = |point: [f64; 2]| {
-        crate::scene::view::transform::ocs_point_to_wcs(
-            (point[0], point[1], elevation),
-            normal,
-        )
+        crate::scene::view::transform::ocs_point_to_wcs((point[0], point[1], elevation), normal)
     };
     let mut output = Vec::new();
     let first = to_wcs(vertices[0].0);
@@ -807,12 +798,9 @@ fn sample_polyline_clip_boundary(
         let (start, bulge) = vertices[index];
         let end_index = (index + 1) % vertices.len();
         let end = vertices[end_index].0;
-        if let Some(arc) =
-            crate::entities::common::BulgeArc::from_bulge(start, end, bulge)
-        {
-            let steps = ((arc.sweep.abs() / std::f64::consts::TAU * 64.0).ceil()
-                as usize)
-                .clamp(4, 64);
+        if let Some(arc) = crate::entities::common::BulgeArc::from_bulge(start, end, bulge) {
+            let steps =
+                ((arc.sweep.abs() / std::f64::consts::TAU * 64.0).ceil() as usize).clamp(4, 64);
             for step in 1..=steps {
                 if end_index == 0 && step == steps {
                     break;
@@ -863,11 +851,7 @@ where
         output.extend(clipped);
     };
     if let (Some(plane), Some(boundary)) = (fill.fill_plane, fill.fill_plane_boundary.as_deref()) {
-        let plane = cadkernel::space::Plane::from_axes(
-            plane.origin,
-            plane.x_axis,
-            plane.y_axis,
-        );
+        let plane = cadkernel::space::Plane::from_axes(plane.origin, plane.x_axis, plane.y_axis);
         for &[x, y] in boundary {
             if x.is_nan() || y.is_nan() {
                 flush_ring(&mut ring, &mut output);
@@ -944,12 +928,7 @@ fn polygon_edge_inside(point: [f32; 2], edge: u8, value: f32) -> bool {
     }
 }
 
-fn polygon_edge_intersection(
-    start: [f32; 2],
-    end: [f32; 2],
-    edge: u8,
-    value: f32,
-) -> [f32; 2] {
+fn polygon_edge_intersection(start: [f32; 2], end: [f32; 2], edge: u8, value: f32) -> [f32; 2] {
     if edge <= 1 {
         let dx = end[0] - start[0];
         let t = if dx.abs() > 1e-12 {
@@ -1100,8 +1079,7 @@ fn clip_polyline_to_rect(
                     let station = |t: f32| {
                         stations.map_or(0.0, |values| {
                             let start_station = values[start + j];
-                            start_station
-                                + (values[start + j + 1] - start_station) * t
+                            start_station + (values[start + j + 1] - start_station) * t
                         })
                     };
                     if !pen_down {

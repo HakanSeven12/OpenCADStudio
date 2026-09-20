@@ -58,9 +58,21 @@ pub struct ImageInstance {
 impl ImageInstance {
     pub fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
         const ATTRS: &[wgpu::VertexAttribute] = &[
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(ImageInstance, translation) as u64, shader_location: 3, format: wgpu::VertexFormat::Float32x3 },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(ImageInstance, translation_low) as u64, shader_location: 4, format: wgpu::VertexFormat::Float32x3 },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(ImageInstance, draw_depth) as u64, shader_location: 5, format: wgpu::VertexFormat::Float32 },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(ImageInstance, translation) as u64,
+                shader_location: 3,
+                format: wgpu::VertexFormat::Float32x3,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(ImageInstance, translation_low) as u64,
+                shader_location: 4,
+                format: wgpu::VertexFormat::Float32x3,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(ImageInstance, draw_depth) as u64,
+                shader_location: 5,
+                format: wgpu::VertexFormat::Float32,
+            },
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as u64,
@@ -223,8 +235,7 @@ impl ImageGpu {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format: wgpu::TextureFormat::Rgba8Unorm,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                     view_formats: &[],
                 });
                 queue.write_texture(
@@ -243,8 +254,7 @@ impl ImageGpu {
                         depth_or_array_layers: 1,
                     },
                 );
-                let tex_view =
-                    texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let tex_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("image.bind_group1"),
                     layout: bgl1,

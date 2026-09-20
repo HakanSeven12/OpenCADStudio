@@ -3,8 +3,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 const RELEASES_API: &str =
     "https://api.github.com/repos/HakanSeven12/OpenCADStudio/releases/latest";
-pub const RELEASES_PAGE: &str =
-    "https://github.com/HakanSeven12/OpenCADStudio/releases/latest";
+pub const RELEASES_PAGE: &str = "https://github.com/HakanSeven12/OpenCADStudio/releases/latest";
 
 /// Give release assets time to propagate before offering an update.
 #[cfg(not(target_arch = "wasm32"))]
@@ -41,7 +40,10 @@ fn fetch_latest_if_outdated() -> Option<UpdateInfo> {
     let agent = crate::network::agent(std::time::Duration::from_secs(5));
     let body = agent
         .get(RELEASES_API)
-        .header("User-Agent", concat!("OpenCADStudio/", env!("OCS_APP_VERSION")))
+        .header(
+            "User-Agent",
+            concat!("OpenCADStudio/", env!("OCS_APP_VERSION")),
+        )
         .header("Accept", "application/vnd.github+json")
         .call()
         .ok()?
@@ -57,12 +59,21 @@ fn fetch_latest_if_outdated() -> Option<UpdateInfo> {
         "-linux-x86_64.AppImage"
     };
     if !metadata.get("assets")?.as_array()?.iter().any(|asset| {
-        asset.get("name").and_then(|name| name.as_str()).is_some_and(|name| name.ends_with(suffix))
-            && asset.get("size").and_then(|size| size.as_u64()).unwrap_or(0) > 0
+        asset
+            .get("name")
+            .and_then(|name| name.as_str())
+            .is_some_and(|name| name.ends_with(suffix))
+            && asset
+                .get("size")
+                .and_then(|size| size.as_u64())
+                .unwrap_or(0)
+                > 0
     }) {
         return None;
     }
-    let latest = metadata.get("tag_name")?.as_str()?
+    let latest = metadata
+        .get("tag_name")?
+        .as_str()?
         .trim_start_matches('v')
         .to_string();
     if !is_newer(&latest, env!("OCS_APP_VERSION")) {
@@ -70,7 +81,8 @@ fn fetch_latest_if_outdated() -> Option<UpdateInfo> {
     }
     // Suppress the notification until the release is old enough for the
     // Actions build to have published binaries.
-    if let Some(published) = metadata.get("published_at")
+    if let Some(published) = metadata
+        .get("published_at")
         .and_then(|value| value.as_str())
         .and_then(parse_iso8601_utc)
     {
@@ -83,8 +95,15 @@ fn fetch_latest_if_outdated() -> Option<UpdateInfo> {
         }
     }
     // Release notes are optional; treat missing as empty.
-    let notes = metadata.get("body").and_then(|value| value.as_str()).unwrap_or_default().to_string();
-    Some(UpdateInfo { version: latest, body: notes })
+    let notes = metadata
+        .get("body")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    Some(UpdateInfo {
+        version: latest,
+        body: notes,
+    })
 }
 
 /// Parse a GitHub timestamp like `2026-05-29T12:34:56Z` into UNIX seconds.
@@ -93,8 +112,13 @@ fn fetch_latest_if_outdated() -> Option<UpdateInfo> {
 #[cfg(not(target_arch = "wasm32"))]
 fn parse_iso8601_utc(s: &str) -> Option<u64> {
     let b = s.as_bytes();
-    if b.len() != 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T'
-        || b[13] != b':' || b[16] != b':' || b[19] != b'Z'
+    if b.len() != 20
+        || b[4] != b'-'
+        || b[7] != b'-'
+        || b[10] != b'T'
+        || b[13] != b':'
+        || b[16] != b':'
+        || b[19] != b'Z'
     {
         return None;
     }
@@ -126,10 +150,7 @@ fn parse_iso8601_utc(s: &str) -> Option<u64> {
         return None;
     }
     Some(
-        days_since_epoch as u64 * 86_400
-            + hour as u64 * 3_600
-            + minute as u64 * 60
-            + second as u64,
+        days_since_epoch as u64 * 86_400 + hour as u64 * 3_600 + minute as u64 * 60 + second as u64,
     )
 }
 
@@ -139,7 +160,11 @@ fn is_newer(latest: &str, installed: &str) -> bool {
         let version = version.trim_start_matches('v');
         if let Some((year, week)) = version.split_once('.') {
             if year.len() == 4 && year.starts_with("20") && !week.contains('.') {
-                return Some(semver::Version::new(year.parse().ok()?, week.parse().ok()?, 0));
+                return Some(semver::Version::new(
+                    year.parse().ok()?,
+                    week.parse().ok()?,
+                    0,
+                ));
             }
         }
         semver::Version::parse(version).ok()

@@ -89,9 +89,11 @@ const PLANARITY_TOLERANCE: f64 = 1e-9;
 pub fn entity_curve(entity: &EntityType) -> Option<PlanarCurve> {
     match entity {
         EntityType::Line(line) => straight_curve(line.start, line.end, Straight::Segment),
-        EntityType::Ray(ray) => {
-            straight_curve(ray.base_point, ray.base_point + ray.direction, Straight::Ray)
-        }
+        EntityType::Ray(ray) => straight_curve(
+            ray.base_point,
+            ray.base_point + ray.direction,
+            Straight::Ray,
+        ),
         EntityType::XLine(line) => straight_curve(
             line.base_point,
             line.base_point + line.direction,
@@ -109,7 +111,9 @@ pub fn entity_curve(entity: &EntityType) -> Option<PlanarCurve> {
 
 /// Exact spatial source geometry for commands that traverse nonplanar curves.
 /// Curve construction and arc-length calculations remain in the kernel.
-pub fn entity_spatial_measurement(entity: &EntityType) -> Option<cadkernel::space::ArcLengthCurve3> {
+pub fn entity_spatial_measurement(
+    entity: &EntityType,
+) -> Option<cadkernel::space::ArcLengthCurve3> {
     use cadkernel::space::{ArcLengthCurve3, NurbsCurve3};
     let curve = match entity {
         EntityType::Polyline3D(polyline) => {
@@ -121,13 +125,18 @@ pub fn entity_spatial_measurement(entity: &EntityType) -> Option<cadkernel::spac
                     SmoothSurfaceType::None => return None,
                 };
                 let controls: Vec<_> = crate::entities::polyline::polyline3d_controls(polyline)
-                    .into_iter().map(|vertex| xyz(vertex.position)).collect();
-                let curve = NurbsCurve3::from_control_polygon(degree, &controls, polyline.is_closed())?;
+                    .into_iter()
+                    .map(|vertex| xyz(vertex.position))
+                    .collect();
+                let curve =
+                    NurbsCurve3::from_control_polygon(degree, &controls, polyline.is_closed())?;
                 return ArcLengthCurve3::from_nurbs(curve);
             }
-            let points: Vec<_> = polyline.vertices.iter().map(|vertex| {
-                [vertex.position.x, vertex.position.y, vertex.position.z]
-            }).collect();
+            let points: Vec<_> = polyline
+                .vertices
+                .iter()
+                .map(|vertex| [vertex.position.x, vertex.position.y, vertex.position.z])
+                .collect();
             return ArcLengthCurve3::from_polyline(&points, polyline.is_closed());
         }
         EntityType::Spline(spline) => {
@@ -135,10 +144,18 @@ pub fn entity_spatial_measurement(entity: &EntityType) -> Option<cadkernel::spac
                 crate::entities::spline::fit_nurbs3(spline)?
             } else {
                 let controls: Vec<_> = spline.control_points.iter().copied().map(xyz).collect();
-                let weights = if spline.weights.is_empty() { vec![1.0; controls.len()] }
-                    else { spline.weights.clone() };
-                NurbsCurve3::new_strict(spline.degree as usize, controls, spline.knots.clone(), weights)?
-                    .with_periodicity(spline.flags.periodic)
+                let weights = if spline.weights.is_empty() {
+                    vec![1.0; controls.len()]
+                } else {
+                    spline.weights.clone()
+                };
+                NurbsCurve3::new_strict(
+                    spline.degree as usize,
+                    controls,
+                    spline.knots.clone(),
+                    weights,
+                )?
+                .with_periodicity(spline.flags.periodic)
             }
         }
         _ => return None,
@@ -351,8 +368,7 @@ pub fn spline_curve(spline: &SplineEnt) -> Option<PlanarCurve> {
         for tangent in [spline.begin_tangent, spline.end_tangent] {
             let tangent = Vec3::from(xyz(tangent));
             if tangent.length_squared() > 1e-18
-                && tangent.dot(plane_normal).abs()
-                    > PLANARITY_TOLERANCE * tangent.length().max(1.0)
+                && tangent.dot(plane_normal).abs() > PLANARITY_TOLERANCE * tangent.length().max(1.0)
             {
                 return None;
             }
@@ -431,8 +447,7 @@ pub fn lwpolyline_world_xy(polyline: &LwPolylineEnt) -> Option<LwPolylineEnt> {
     if normal.x.abs() > 1e-12 || normal.y.abs() > 1e-12 || normal.z.abs() <= 1e-12 {
         return None;
     }
-    let Curve::Polyline(curve) = entity_curve_xy(&EntityType::LwPolyline(polyline.clone()))?
-    else {
+    let Curve::Polyline(curve) = entity_curve_xy(&EntityType::LwPolyline(polyline.clone()))? else {
         return None;
     };
     if curve.vertices.len() != polyline.vertices.len() {
@@ -855,7 +870,10 @@ mod tests {
         assert_eq!(solid.euler_characteristic(), 2);
         let document = acadrust::entities::acis::types::SatDocument::new();
         let (bodies, loss) = cadkernel::acis::lift(&document);
-        assert!(bodies.is_empty() && loss.is_empty(), "an empty document lifts to nothing");
+        assert!(
+            bodies.is_empty() && loss.is_empty(),
+            "an empty document lifts to nothing"
+        );
     }
 
     #[test]

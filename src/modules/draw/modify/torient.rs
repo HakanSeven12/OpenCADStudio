@@ -5,9 +5,9 @@
 //   Step 1: Wait for an angle (numerical input), Enter (Most Readable), or pick first point.
 //   Step 2: If first point picked, pick second point to define angle vector.
 
+use crate::t;
 use acadrust::Handle;
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, DynField};
 use crate::scene::model::wire_model::WireModel;
@@ -44,24 +44,29 @@ impl TorientCommand {
 
             match &mut new_entity {
                 EntityType::Text(text) => {
-                    let angle = new_angle_rad.unwrap_or_else(|| most_readable_angle(text.rotation, self.view_twist));
+                    let angle = new_angle_rad
+                        .unwrap_or_else(|| most_readable_angle(text.rotation, self.view_twist));
                     text.rotation = angle;
                     changed = true;
                 }
                 EntityType::MText(mtext) => {
-                    let angle = new_angle_rad.unwrap_or_else(|| most_readable_angle(mtext.rotation as f64, self.view_twist));
+                    let angle = new_angle_rad.unwrap_or_else(|| {
+                        most_readable_angle(mtext.rotation as f64, self.view_twist)
+                    });
                     mtext.rotation = angle as f64;
                     changed = true;
                 }
                 EntityType::AttributeDefinition(attdef) => {
-                    let angle = new_angle_rad.unwrap_or_else(|| most_readable_angle(attdef.rotation, self.view_twist));
+                    let angle = new_angle_rad
+                        .unwrap_or_else(|| most_readable_angle(attdef.rotation, self.view_twist));
                     attdef.rotation = angle;
                     changed = true;
                 }
                 EntityType::Insert(insert) => {
                     let mut block_changed = false;
                     for attr in &mut insert.attributes {
-                        let angle = new_angle_rad.unwrap_or_else(|| most_readable_angle(attr.rotation, self.view_twist));
+                        let angle = new_angle_rad
+                            .unwrap_or_else(|| most_readable_angle(attr.rotation, self.view_twist));
                         attr.rotation = angle;
                         block_changed = true;
                     }
@@ -87,7 +92,7 @@ impl TorientCommand {
 
 fn most_readable_angle(wcs_angle_rad: f64, view_twist: f64) -> f64 {
     let two_pi = 2.0 * std::f64::consts::PI;
-    
+
     // Calculate the angle as it appears on screen
     let mut screen_angle = (wcs_angle_rad - view_twist) % two_pi;
     if screen_angle < 0.0 {
@@ -102,7 +107,7 @@ fn most_readable_angle(wcs_angle_rad: f64, view_twist: f64) -> f64 {
     if screen_angle > half_pi + 1e-6 && screen_angle <= three_half_pi + 1e-6 {
         final_wcs_angle += std::f64::consts::PI;
     }
-    
+
     // Normalize final WCS angle
     final_wcs_angle %= two_pi;
     if final_wcs_angle < 0.0 {
@@ -118,7 +123,9 @@ impl CadCommand for TorientCommand {
 
     fn prompt(&self) -> String {
         match &self.step {
-            Step::AngleOrFirstPoint => t!("TORIENT  New absolute rotation <Most Readable>:").into_owned(),
+            Step::AngleOrFirstPoint => {
+                t!("TORIENT  New absolute rotation <Most Readable>:").into_owned()
+            }
             Step::SecondPoint { .. } => t!("TORIENT  Specify second point:").into_owned(),
         }
     }
@@ -164,7 +171,10 @@ impl CadCommand for TorientCommand {
             let first_point = first_point.as_vec3();
             vec![WireModel::solid(
                 "rubber_band".into(),
-                vec![[first_point.x, first_point.y, first_point.z], [pt.x, pt.y, pt.z]],
+                vec![
+                    [first_point.x, first_point.y, first_point.z],
+                    [pt.x, pt.y, pt.z],
+                ],
                 WireModel::CYAN,
                 false,
             )]
@@ -190,4 +200,6 @@ impl CadCommand for TorientCommand {
 }
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["TORIENT"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["TORIENT"]
+});

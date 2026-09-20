@@ -15,8 +15,7 @@ pub(super) fn sync_annotation_scale_header(scene: &mut Scene) {
     };
     let current = scene.document.header.current_annotation_scale.clone();
     let current_matches = scene.scale_list().into_iter().any(|(name, factor, _)| {
-        name.eq_ignore_ascii_case(&current)
-            && (factor - anno).abs() < 0.001 * anno.max(0.001)
+        name.eq_ignore_ascii_case(&current) && (factor - anno).abs() < 0.001 * anno.max(0.001)
     });
     let name = if current_matches {
         current

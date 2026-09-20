@@ -42,9 +42,9 @@ pub fn resolve_text_style(style_name: &str, document: &CadDocument) -> ResolvedT
                         // Fonts fetched from the community repository live in
                         // the per-user fonts folder — search it last.
                         .or_else(|| {
-                        crate::io::font_repo::local_font_file(file)
-                            .map(|path| path.to_string_lossy().into_owned())
-                    })
+                            crate::io::font_repo::local_font_file(file)
+                                .map(|path| path.to_string_lossy().into_owned())
+                        })
                 })
                 .flatten();
             if let Some(p) = shx_path {
@@ -432,7 +432,6 @@ impl MTextLine {
     }
 }
 
-
 /// Font-name stem: drop any path and extension, so a `\F` font path like
 /// `C:\\fonts\\arial.ttf` and a plain `\f` name `arial` resolve to the same font.
 fn font_stem(name: &str) -> String {
@@ -595,9 +594,7 @@ pub fn adapt_mtext_paragraphs(
                 // button applies, so imported italic text isn't shown upright.
                 oblique_rad: match p.oblique_angle {
                     Some(q) => (q as f32).to_radians(),
-                    None if p.font.as_ref().is_some_and(|f| f.italic) => {
-                        15.0_f32.to_radians()
-                    }
+                    None if p.font.as_ref().is_some_and(|f| f.italic) => 15.0_f32.to_radians(),
                     None => 0.0,
                 },
                 tracking: p.tracking.map(|t| t as f32).unwrap_or(1.0),
@@ -774,7 +771,11 @@ pub fn reorder_line_atoms(atoms: Vec<LayoutAtom>, is_rtl: bool) -> Vec<LayoutAto
             AtomKind::Word(w) => line_text.push_str(w),
             AtomKind::Space => line_text.push(' '),
             AtomKind::Tab => line_text.push('\t'),
-            AtomKind::Stack { numerator, denominator, .. } => {
+            AtomKind::Stack {
+                numerator,
+                denominator,
+                ..
+            } => {
                 line_text.push_str(numerator);
                 line_text.push('/');
                 line_text.push_str(denominator);
@@ -866,7 +867,12 @@ pub fn run_scale(state: &RunState, entity_h: f32, base_wf: f32) -> f32 {
 }
 
 pub fn resolve_font<'a>(state: &'a RunState, base: &'a str) -> std::borrow::Cow<'a, str> {
-    let Some(font) = state.font.as_deref().map(str::trim).filter(|f| !f.is_empty()) else {
+    let Some(font) = state
+        .font
+        .as_deref()
+        .map(str::trim)
+        .filter(|f| !f.is_empty())
+    else {
         return std::borrow::Cow::Borrowed(base);
     };
     if lff::is_builtin(font) {
@@ -1015,8 +1021,8 @@ pub fn wrap_paragraph(
                     .find(|ts| ts.position > local + 1e-4)
                     .map(|ts| !matches!(ts.kind, TabKind::Left))
                     .unwrap_or(false);
-                let new_w = next_tab_position(cur_w + start_x, tab_stops, indent_left, entity_h)
-                    - start_x;
+                let new_w =
+                    next_tab_position(cur_w + start_x, tab_stops, indent_left, entity_h) - start_x;
                 let max_w = line_max_w(subline_idx);
                 if new_w > max_w && !cur.is_empty() {
                     sublines.push(std::mem::take(&mut cur));
@@ -1062,9 +1068,9 @@ pub fn line_total_width(
 
 pub fn resolve_inline_color(c: &InlineColor) -> Option<[f32; 3]> {
     match c {
-        InlineColor::Aci(idx) => aci_to_rgb(*idx).map(|(r, g, b)| {
-            [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
-        }),
+        InlineColor::Aci(idx) => {
+            aci_to_rgb(*idx).map(|(r, g, b)| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0])
+        }
         InlineColor::True(rgb) => Some(*rgb),
     }
 }
@@ -1143,9 +1149,9 @@ pub fn flow_grip_axis(
     };
     let k = if vertical {
         match v_anchor {
-            MTextVAnchor::Top
-            | MTextVAnchor::MiddleOfTopLine
-            | MTextVAnchor::BottomOfTopLine => 1.0,
+            MTextVAnchor::Top | MTextVAnchor::MiddleOfTopLine | MTextVAnchor::BottomOfTopLine => {
+                1.0
+            }
             MTextVAnchor::Middle => 0.5,
             MTextVAnchor::Bottom | MTextVAnchor::MiddleOfBottomLine => -1.0,
         }
@@ -1245,8 +1251,7 @@ impl MTextColumns {
     }
 
     fn total_width(&self) -> f32 {
-        self.width * self.count as f32
-            + self.gutter.max(0.0) * self.count.saturating_sub(1) as f32
+        self.width * self.count as f32 + self.gutter.max(0.0) * self.count.saturating_sub(1) as f32
     }
 }
 
@@ -1300,7 +1305,11 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
     let base_font_name = opts.style.font_name.clone();
     let base_font = Face::resolve(&base_font_name);
     let base_wf_abs = opts.style.width_factor.max(0.01);
-    let base_wf = if opts.style.is_backward { -base_wf_abs } else { base_wf_abs };
+    let base_wf = if opts.style.is_backward {
+        -base_wf_abs
+    } else {
+        base_wf_abs
+    };
     let base_oblique = opts.style.oblique_angle;
     let entity_h = opts.height;
     let rect_w = opts.rect_w;
@@ -1632,8 +1641,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     mh * m * (5.0 / 3.0) * base_font.line_spacing()
                 }
                 _ if opts.exact_line_spacing => entity_gap,
-                _ => (mh * ls_factor * (5.0 / 3.0) * base_font.line_spacing())
-                    .max(entity_gap),
+                _ => (mh * ls_factor * (5.0 / 3.0) * base_font.line_spacing()).max(entity_gap),
             }
         })
         .collect();
@@ -2001,8 +2009,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             .get(i + 1)
             .is_none_or(|n| n.is_first_in_paragraph || n.column != sub.column);
         let (spread_letters, gap) = {
-            let justify =
-                matches!(sub.align, Some(ParagraphAlign::Justify)) && !is_last_in_para;
+            let justify = matches!(sub.align, Some(ParagraphAlign::Justify)) && !is_last_in_para;
             let distribute = matches!(sub.align, Some(ParagraphAlign::Distribute));
             let slack = (content_right - content_left).max(0.0) - line_w;
             if rect_w > 0.0 && (justify || distribute) && slack > 1e-6 {
@@ -2032,13 +2039,16 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             }
         };
 
-        let mut cursor_x = if opts.vertical_text { 0.0 } else { cursor_start };
+        let mut cursor_x = if opts.vertical_text {
+            0.0
+        } else {
+            cursor_start
+        };
         for (ai, atom) in sub.atoms.iter().enumerate() {
             match &atom.kind {
                 AtomKind::Word(text) => {
                     let run_h = atom.state.height_mul * entity_h;
-                    let signed_wf =
-                        base_wf.signum() * atom.state.width_mul * base_wf.abs();
+                    let signed_wf = base_wf.signum() * atom.state.width_mul * base_wf.abs();
                     let oblique = base_oblique + atom.state.oblique_rad;
                     let font_name = resolve_font(&atom.state, &base_font_name);
                     if opts.vertical_text {
@@ -2048,8 +2058,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         // own single-glyph run so the SDF path draws it at its
                         // cell origin; 1.4×height is the classic vertical cell
                         // advance.
-                        let color =
-                            atom.state.color.as_ref().and_then(resolve_inline_color);
+                        let color = atom.state.color.as_ref().and_then(resolve_inline_color);
                         let cell = run_h * 1.4;
                         // Word wrap, vertically: a word that would overrun the
                         // column limit moves WHOLE to the next column (the
@@ -2218,7 +2227,8 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             for ci in 0..count {
                                 let cx = cursor_x + ci as f32 * slot_w;
                                 let (ax, ay) = to_world(line_base_x, line_base_y, cx, ly);
-                                let (bx, by) = to_world(line_base_x, line_base_y, cx + slot_w, ly + run_h);
+                                let (bx, by) =
+                                    to_world(line_base_x, line_base_y, cx + slot_w, ly + run_h);
                                 glyph_boxes.push(GlyphBox {
                                     vis: atom.char_offset + count - 1 - ci,
                                     xmin: ax.min(bx),
@@ -2242,7 +2252,8 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                     None => (6.0 + face.letter_spacing() * tracking) * scale,
                                 };
                                 let (ax, ay) = to_world(line_base_x, line_base_y, cx, ly);
-                                let (bx, by) = to_world(line_base_x, line_base_y, cx + adv, ly + run_h);
+                                let (bx, by) =
+                                    to_world(line_base_x, line_base_y, cx + adv, ly + run_h);
                                 glyph_boxes.push(GlyphBox {
                                     vis: atom.char_offset + ci,
                                     xmin: ax.min(bx),
@@ -2354,18 +2365,14 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                     to_world(line_base_x, line_base_y, x0, top),
                                     to_world(line_base_x, line_base_y, x1, top),
                                 ];
-                                let xmin = corners
-                                    .iter()
-                                    .map(|p| p.0)
-                                    .fold(f32::INFINITY, f32::min);
+                                let xmin =
+                                    corners.iter().map(|p| p.0).fold(f32::INFINITY, f32::min);
                                 let xmax = corners
                                     .iter()
                                     .map(|p| p.0)
                                     .fold(f32::NEG_INFINITY, f32::max);
-                                let ymin = corners
-                                    .iter()
-                                    .map(|p| p.1)
-                                    .fold(f32::INFINITY, f32::min);
+                                let ymin =
+                                    corners.iter().map(|p| p.1).fold(f32::INFINITY, f32::min);
                                 let ymax = corners
                                     .iter()
                                     .map(|p| p.1)
@@ -2432,8 +2439,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         continue;
                     }
                     // Justify / distribute widen every word gap by `gap`.
-                    let adv =
-                        measure_space(&atom.state, entity_h, base_wf, &base_font_name) + gap;
+                    let adv = measure_space(&atom.state, entity_h, base_wf, &base_font_name) + gap;
                     // A space inside a decorated span carries the underline /
                     // overline / strike state but draws no glyph, so without this
                     // the rule breaks at every inter-word gap. Emit the decoration
@@ -2441,8 +2447,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     // exactly `measure_space`, so the rule meets the neighbours'.
                     if atom.state.underline || atom.state.overline || atom.state.strike {
                         let run_h = atom.state.height_mul * entity_h;
-                        let signed_wf =
-                            base_wf.signum() * atom.state.width_mul * base_wf.abs();
+                        let signed_wf = base_wf.signum() * atom.state.width_mul * base_wf.abs();
                         let oblique = base_oblique + atom.state.oblique_rad;
                         let font_name = resolve_font(&atom.state, &base_font_name);
                         let tracking = atom.state.tracking;
@@ -2451,8 +2456,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             2 => line_max_h - run_h,
                             _ => 0.0,
                         };
-                        let color =
-                            atom.state.color.as_ref().and_then(resolve_inline_color);
+                        let color = atom.state.color.as_ref().and_then(resolve_inline_color);
                         let lx = cursor_x;
                         let ly = valign_dy;
                         let origin: [f64; 2] = [
@@ -2484,8 +2488,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     if opts.want_glyph_boxes {
                         let run_h = atom.state.height_mul * entity_h;
                         let (ax, ay) = to_world(line_base_x, line_base_y, cursor_x, 0.0);
-                        let (bx, by) =
-                            to_world(line_base_x, line_base_y, cursor_x + adv, run_h);
+                        let (bx, by) = to_world(line_base_x, line_base_y, cursor_x + adv, run_h);
                         glyph_boxes.push(GlyphBox {
                             vis: atom.char_offset,
                             xmin: ax.min(bx),
@@ -2546,12 +2549,8 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                         );
                                     }
                                     AtomKind::Stack { .. } => {
-                                        field_w += atom_width(
-                                            next,
-                                            entity_h,
-                                            base_wf,
-                                            &base_font_name,
-                                        );
+                                        field_w +=
+                                            atom_width(next, entity_h, base_wf, &base_font_name);
                                     }
                                     _ => break,
                                 }
@@ -2570,12 +2569,8 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             cursor_x = sx - offset;
                         }
                         _ => {
-                            cursor_x = next_tab_position(
-                                cursor_x,
-                                &sub.tab_stops,
-                                tab_base,
-                                entity_h,
-                            );
+                            cursor_x =
+                                next_tab_position(cursor_x, &sub.tab_stops, tab_base, entity_h);
                         }
                     }
                 }
@@ -2793,7 +2788,11 @@ mod adapter_tests {
         assert!(up.oblique_rad.abs() < 1e-4, "got {}", up.oblique_rad);
         // An explicit `\Q` wins over the italic flag (no double slant).
         let (_, q) = first_run(&adapt_mtext_paragraphs("\\Q30;\\fArial|i1;x", 2.5, true));
-        assert!((q.oblique_rad - 30f32.to_radians()).abs() < 1e-4, "got {}", q.oblique_rad);
+        assert!(
+            (q.oblique_rad - 30f32.to_radians()).abs() < 1e-4,
+            "got {}",
+            q.oblique_rad
+        );
     }
 
     #[test]
@@ -2831,9 +2830,7 @@ mod adapter_tests {
         let lines = adapt_mtext_paragraphs("a\\Pb\\Pc", 2.5, true);
         assert_eq!(lines.len(), 3);
     }
-
 }
-
 
 #[cfg(test)]
 mod v_anchor_tests {
@@ -2943,17 +2940,26 @@ mod v_anchor_tests {
         // Case 1: Pure Arabic
         let words1 = ["بسم", " ", "الله", " ", "الرحمن", " ", "الرحيم"];
         let reordered1 = reorder_atoms(&words1, true);
-        assert_eq!(reordered1, vec!["الرحيم", " ", "الرحمن", " ", "الله", " ", "بسم"]);
+        assert_eq!(
+            reordered1,
+            vec!["الرحيم", " ", "الرحمن", " ", "الله", " ", "بسم"]
+        );
 
         // Case 2: Arabic with numbers
         let words2 = ["بسم", " ", "الله", " ", "123", " ", "الرحمن"];
         let reordered2 = reorder_atoms(&words2, true);
-        assert_eq!(reordered2, vec!["الرحمن", " ", "123", " ", "الله", " ", "بسم"]);
+        assert_eq!(
+            reordered2,
+            vec!["الرحمن", " ", "123", " ", "الله", " ", "بسم"]
+        );
 
         // Case 3: English with Arabic
         let words3 = ["Hello", " ", "بسم", " ", "الله", " ", "world"];
         let reordered3 = reorder_atoms(&words3, false);
-        assert_eq!(reordered3, vec!["Hello", " ", "الله", " ", "بسم", " ", "world"]);
+        assert_eq!(
+            reordered3,
+            vec!["Hello", " ", "الله", " ", "بسم", " ", "world"]
+        );
 
         // Case 4: Pure English
         let words4 = ["Hello", " ", "world"];
@@ -2966,7 +2972,17 @@ mod v_anchor_tests {
         let reordered_b = reorder_atoms(&words_b, true);
         assert_eq!(
             reordered_b,
-            vec!["2026 ", "is ", "here!", "שנה ", "שלום ", "مرحبا! ", "ہے۔ ", "اردو ", "یہ "]
+            vec![
+                "2026 ",
+                "is ",
+                "here!",
+                "שנה ",
+                "שלום ",
+                "مرحبا! ",
+                "ہے۔ ",
+                "اردو ",
+                "یہ "
+            ]
         );
 
         // Case 6: a word starting with multi-byte neutral punctuation must
@@ -2978,7 +2994,9 @@ mod v_anchor_tests {
 
     #[test]
     fn test_mtext_arabic_bidi_layout() {
-        use crate::entities::text_support::{layout_mtext, MTextRenderOpts, MTextVAnchor, ResolvedTextStyle};
+        use crate::entities::text_support::{
+            layout_mtext, MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
+        };
 
         let style = ResolvedTextStyle {
             font_name: "Standard".to_string(),
@@ -3013,7 +3031,11 @@ mod v_anchor_tests {
         // Stroke origins should increase monotonically in X (left to right visual order)
         let origins_x: Vec<f64> = layout.strokes.iter().map(|s| s.origin[0]).collect();
         for w in origins_x.windows(2) {
-            assert!(w[0] < w[1], "Each subsequent visual word must sit further to the right: {:?}", origins_x);
+            assert!(
+                w[0] < w[1],
+                "Each subsequent visual word must sit further to the right: {:?}",
+                origins_x
+            );
         }
 
         // For RTL text with rect_w == 0.0, the last visual word (which is "بسم", the first spoken word)
@@ -3023,7 +3045,10 @@ mod v_anchor_tests {
 
         // Glyph boxes should have is_rtl = true for Arabic words
         let rtl_boxes: Vec<_> = layout.glyph_boxes.iter().filter(|b| b.is_rtl).collect();
-        assert!(!rtl_boxes.is_empty(), "Arabic characters must produce is_rtl = true glyph boxes");
+        assert!(
+            !rtl_boxes.is_empty(),
+            "Arabic characters must produce is_rtl = true glyph boxes"
+        );
 
         // Test mixed multilingual string in wrapped box (rect_w = 200.0)
         let opts_mixed = MTextRenderOpts {
@@ -3046,7 +3071,11 @@ mod v_anchor_tests {
         assert!(!layout_mixed.strokes.is_empty());
         // In a wrapped box of width 200.0, RTL paragraph right-aligns:
         // the rightmost stroke group should end near 200.0
-        let max_origin = layout_mixed.strokes.iter().map(|s| s.origin[0]).fold(f64::NEG_INFINITY, f64::max);
+        let max_origin = layout_mixed
+            .strokes
+            .iter()
+            .map(|s| s.origin[0])
+            .fold(f64::NEG_INFINITY, f64::max);
         assert!(max_origin > 100.0, "RTL text in 200-width box should be right-aligned near the right margin (got max_origin={})", max_origin);
 
         // Test single Arabic word "ميل"
@@ -3069,6 +3098,9 @@ mod v_anchor_tests {
         let layout_mayl = layout_mtext(&opts_mayl);
         assert_eq!(layout_mayl.strokes.len(), 1);
         let s = &layout_mayl.strokes[0];
-        assert!(!s.strokes.is_empty() || !s.fill_tris.is_empty(), "Shaped glyphs must produce vector geometry");
+        assert!(
+            !s.strokes.is_empty() || !s.fill_tris.is_empty(),
+            "Shaped glyphs must produce vector geometry"
+        );
     }
 }

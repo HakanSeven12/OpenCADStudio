@@ -44,7 +44,10 @@ pub enum InteractiveEvent {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum RunnerHandshake {
     Token(String),
-    TokenV4 { token: String, protocol_version: u32 },
+    TokenV4 {
+        token: String,
+        protocol_version: u32,
+    },
 }
 
 /// Environment variable through which the host passes the pre-shared
@@ -131,13 +134,19 @@ pub enum PluginRequest {
     AddEntities(Vec<EntityType>),
     /// V4: ask the host to create/refresh a tab-keyed shared-memory document
     /// view and return the file path + current version.
-    OpenDocumentViewV4 { tab_id: u64 },
+    OpenDocumentViewV4 {
+        tab_id: u64,
+    },
     /// V4: ask the host to close the tab-keyed shared-memory document view.
-    CloseDocumentViewV4 { tab_id: u64 },
+    CloseDocumentViewV4 {
+        tab_id: u64,
+    },
     /// V4: ask the host for the stable tab identifier of the active tab.
     GetTabId,
     /// V5: ask the host for the filesystem path of the document in `tab_id`.
-    DocumentPath { tab_id: u64 },
+    DocumentPath {
+        tab_id: u64,
+    },
 }
 
 /// Responses the host sends back for `PluginRequest`.

@@ -1,5 +1,5 @@
-use cadkernel::space::polygon;
 use acadrust::{EntityType, Handle};
+use cadkernel::space::polygon;
 use glam::DVec3;
 
 use crate::command::{
@@ -7,11 +7,10 @@ use crate::command::{
 };
 use crate::entities::curve::entity_curve;
 use crate::entities::traits::EntityTypeOps;
-use crate::scene::model::wire_model::WireModel;
 use crate::modules::IconKind;
+use crate::scene::model::wire_model::WireModel;
 
-pub const ICON: IconKind =
-    IconKind::Svg(include_bytes!("../../../../assets/icons/area.svg"));
+pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../../assets/icons/area.svg"));
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum AreaMode {
     Single,
@@ -49,7 +48,10 @@ impl AreaCommand {
     }
 
     fn option(label: String, keyword: &str) -> CmdOption {
-        CmdOption { label, keyword: keyword.to_string() }
+        CmdOption {
+            label,
+            keyword: keyword.to_string(),
+        }
     }
 
     /// Area and perimeter of a ring of picked points.
@@ -59,7 +61,10 @@ impl AreaCommand {
     /// report its shadow.
     fn point_measurement(points: &[DVec3], close_perimeter: bool) -> AreaMeasurement {
         if points.len() < 2 {
-            return AreaMeasurement { area: 0.0, perimeter: Some(0.0) };
+            return AreaMeasurement {
+                area: 0.0,
+                perimeter: Some(0.0),
+            };
         }
         let ring: Vec<[f64; 3]> = points.iter().map(|p| [p.x, p.y, p.z]).collect();
         let perimeter = if close_perimeter {
@@ -155,7 +160,10 @@ impl AreaCommand {
             return None;
         }
 
-        let area = measured.iter().map(|(_, measurement)| measurement.area).sum();
+        let area = measured
+            .iter()
+            .map(|(_, measurement)| measurement.area)
+            .sum();
         let perimeter = measured
             .iter()
             .map(|(_, measurement)| measurement.perimeter)
@@ -168,41 +176,48 @@ impl AreaCommand {
     fn result_message(measurement: AreaMeasurement) -> String {
         match measurement.perimeter {
             Some(perimeter) => crate::tr!(
-                "area", "result",
+                "area",
+                "result",
                 area = format!("{:.4}", measurement.area),
                 perimeter = format!("{perimeter:.4}"),
             ),
-            None => crate::tr!("area", "result-area-only", area = format!("{:.4}", measurement.area)),
+            None => crate::tr!(
+                "area",
+                "result-area-only",
+                area = format!("{:.4}", measurement.area)
+            ),
         }
     }
 
     fn running_result_message(&self, measurement: AreaMeasurement) -> String {
         match measurement.perimeter {
             Some(perimeter) => crate::tr!(
-                "area", "running-result",
+                "area",
+                "running-result",
                 area = format!("{:.4}", measurement.area),
                 perimeter = format!("{perimeter:.4}"),
                 total_area = format!("{:.4}", self.total_area),
                 total_perimeter = format!("{:.4}", self.total_perimeter),
             ),
             None => crate::tr!(
-                "area", "running-result-area-only",
+                "area",
+                "running-result-area-only",
                 area = format!("{:.4}", measurement.area),
                 total_area = format!("{:.4}", self.total_area),
             ),
         }
     }
 
-    fn finish_measurement(
-        &mut self,
-        measurement: AreaMeasurement,
-        deselect: bool,
-    ) -> CmdResult {
+    fn finish_measurement(&mut self, measurement: AreaMeasurement, deselect: bool) -> CmdResult {
         if self.mode == AreaMode::Single {
             return CmdResult::Measurement(Self::result_message(measurement));
         }
 
-        let sign = if self.mode == AreaMode::Add { 1.0 } else { -1.0 };
+        let sign = if self.mode == AreaMode::Add {
+            1.0
+        } else {
+            -1.0
+        };
         self.total_area += sign * measurement.area;
         if let Some(perimeter) = measurement.perimeter {
             self.total_perimeter += sign * perimeter;
@@ -227,7 +242,8 @@ impl CadCommand for AreaCommand {
     fn prompt(&self) -> String {
         if self.objects_gathering {
             return crate::tr!(
-                "area", "prompt-objects",
+                "area",
+                "prompt-objects",
                 count = self.selected_entities.len()
             );
         }
@@ -326,7 +342,8 @@ impl CadCommand for AreaCommand {
             let Some((measurement, handles)) = self.selection_measurement() else {
                 self.selected_entities.clear();
                 return CmdResult::ReportMeasurementAndDeselect(crate::tr!(
-                    "area", "objects-not-measurable"
+                    "area",
+                    "objects-not-measurable"
                 ));
             };
             if self.mode != AreaMode::Single {
@@ -361,7 +378,11 @@ impl CadCommand for AreaCommand {
             return None;
         }
         let to_render = |p: DVec3| [p.x as f32, p.y as f32, p.z as f32];
-        let mut points = self.points.iter().map(|point| to_render(*point)).collect::<Vec<_>>();
+        let mut points = self
+            .points
+            .iter()
+            .map(|point| to_render(*point))
+            .collect::<Vec<_>>();
         points.push(to_render(point));
         points.push(to_render(self.points[0]));
         Some(WireModel {

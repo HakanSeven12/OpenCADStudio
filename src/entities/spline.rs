@@ -4,8 +4,8 @@ use cadkernel::space::{NurbsCurve3, Parameterization};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
-    dropdown_grip, edit_prop as edit, edit_scalar_prop as edit_scalar, parse_f64,
-    ro_prop as ro, round_grip, square_grip,
+    dropdown_grip, edit_prop as edit, edit_scalar_prop as edit_scalar, parse_f64, ro_prop as ro,
+    round_grip, square_grip,
 };
 use crate::entities::traits::RenderConvertible;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
@@ -31,8 +31,11 @@ pub(crate) fn fit_nurbs3(spline: &Spline) -> Option<NurbsCurve3> {
     if !uses_fit_method(spline) {
         return None;
     }
-    let mut points: Vec<_> = spline.fit_points.iter()
-        .map(|point| [point.x, point.y, point.z]).collect();
+    let mut points: Vec<_> = spline
+        .fit_points
+        .iter()
+        .map(|point| [point.x, point.y, point.z])
+        .collect();
     let parameterization = match spline.knot_parameterization {
         1 => Parameterization::Centripetal,
         2 => Parameterization::Uniform,
@@ -42,15 +45,25 @@ pub(crate) fn fit_nurbs3(spline: &Spline) -> Option<NurbsCurve3> {
         return NurbsCurve3::interpolate_periodic(&points, parameterization);
     }
     if spline.flags.closed && points.first() != points.last() {
-        if let Some(first) = points.first().copied() { points.push(first); }
+        if let Some(first) = points.first().copied() {
+            points.push(first);
+        }
     }
     let tangent = |value: acadrust::types::Vector3| {
         let value = [value.x, value.y, value.z];
-        (value.iter().map(|component| component * component).sum::<f64>() > 1e-18)
+        (value
+            .iter()
+            .map(|component| component * component)
+            .sum::<f64>()
+            > 1e-18)
             .then_some(value)
     };
-    NurbsCurve3::interpolate_fit(&points, tangent(spline.begin_tangent),
-        tangent(spline.end_tangent), parameterization)
+    NurbsCurve3::interpolate_fit(
+        &points,
+        tangent(spline.begin_tangent),
+        tangent(spline.end_tangent),
+        parameterization,
+    )
 }
 
 pub(crate) fn nurbs3(spline: &Spline) -> Option<NurbsCurve3> {
@@ -65,7 +78,11 @@ pub(crate) fn nurbs3(spline: &Spline) -> Option<NurbsCurve3> {
         };
         NurbsCurve3::new_strict(
             degree,
-            spline.control_points.iter().map(|point| [point.x, point.y, point.z]).collect(),
+            spline
+                .control_points
+                .iter()
+                .map(|point| [point.x, point.y, point.z])
+                .collect(),
             spline.knots.clone(),
             weights,
         )?
@@ -114,11 +131,15 @@ pub(crate) fn replace_with_nurbs(spline: &mut Spline, curve: &NurbsCurve3) {
     let mut fit_points = spline.fit_points.clone();
     spline.degree = curve.degree() as i32;
     spline.knots = curve.knots().to_vec();
-    spline.control_points = curve.control_points().iter()
-        .map(|point| acadrust::types::Vector3::new(point[0], point[1], point[2])).collect();
+    spline.control_points = curve
+        .control_points()
+        .iter()
+        .map(|point| acadrust::types::Vector3::new(point[0], point[1], point[2]))
+        .collect();
     spline.weights = curve.weights().to_vec();
     if !fit_points.is_empty() {
-        if let (Some(first), Some(point)) = (fit_points.first_mut(), spline.control_points.first()) {
+        if let (Some(first), Some(point)) = (fit_points.first_mut(), spline.control_points.first())
+        {
             *first = *point;
         }
         if let (Some(last), Some(point)) = (fit_points.last_mut(), spline.control_points.last()) {
@@ -128,7 +149,9 @@ pub(crate) fn replace_with_nurbs(spline: &mut Spline, curve: &NurbsCurve3) {
     spline.fit_points = fit_points;
     spline.begin_tangent = acadrust::types::Vector3::ZERO;
     spline.end_tangent = acadrust::types::Vector3::ZERO;
-    spline.flags.rational = spline.weights.windows(2)
+    spline.flags.rational = spline
+        .weights
+        .windows(2)
         .any(|pair| (pair[0] - pair[1]).abs() > 1e-12);
     spline.flags.closed = false;
     spline.flags.periodic = false;
@@ -165,9 +188,7 @@ fn to_render(spl: &Spline) -> RenderEntity {
                 // so the kernel has nothing to say about it and the solve
                 // here remains the only description of its shape.
                 None if spl.flags.periodic => periodic_fit_spline_polyline(spl),
-                None if spl.flags.closed => {
-                    catmull_rom_polyline(&spl.fit_points, true)
-                }
+                None if spl.flags.closed => catmull_rom_polyline(&spl.fit_points, true),
                 None => fit_spline_polyline(spl),
             };
             let snap = planar
@@ -325,9 +346,7 @@ pub(crate) fn measurement_polyline(spl: &Spline) -> Vec<[f64; 3]> {
             .collect()
     });
     match NurbsCurve3::new(degree, controls, spl.knots.clone(), weights) {
-        Some(curve) => {
-            curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
-        }
+        Some(curve) => curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE),
         None => spl.control_points.iter().map(|p| [p.x, p.y, p.z]).collect(),
     }
 }
@@ -600,12 +619,7 @@ pub(crate) fn control_vertex_count(spline: &Spline) -> usize {
     control_vertices(spline).len()
 }
 
-fn choice_prop(
-    label: &str,
-    field: &'static str,
-    selected: &str,
-    options: &[&str],
-) -> Property {
+fn choice_prop(label: &str, field: &'static str, selected: &str, options: &[&str]) -> Property {
     Property {
         label: label.into(),
         field,
@@ -768,8 +782,8 @@ fn properties(spline: &Spline) -> Vec<PropSection> {
     let show_fit = shows_fit_points(spline);
     let method = if show_fit { "Fit" } else { "Control Vertices" };
     let closed = spline.flags.closed || spline.flags.periodic;
-    let can_show_control = control_vertices(spline).len() >= 2
-        && !(fit_method && spline.flags.periodic);
+    let can_show_control =
+        control_vertices(spline).len() >= 2 && !(fit_method && spline.flags.periodic);
     let yes_no = |b: bool| if b { "Yes" } else { "No" };
     let knot_param = match spline.knot_parameterization {
         0 => "Chord",
@@ -865,7 +879,11 @@ fn properties(spline: &Spline) -> Vec<PropSection> {
         choice_prop(
             t!("CV frame").as_ref(),
             "cv_frame",
-            if spline.cv_frame_visible { "Show" } else { "Hide" },
+            if spline.cv_frame_visible {
+                "Show"
+            } else {
+                "Hide"
+            },
             &["Hide", "Show"],
         )
     } else {
@@ -1095,22 +1113,18 @@ fn apply_geom_prop(spline: &mut Spline, field: &str, value: &str) {
                 spline.fit_tolerance = v;
             }
         }
-        "start_tan_x" | "start_tan_y" | "start_tan_z" => {
-            match field {
-                "start_tan_x" => spline.begin_tangent.x = v,
-                "start_tan_y" => spline.begin_tangent.y = v,
-                "start_tan_z" => spline.begin_tangent.z = v,
-                _ => {}
-            }
-        }
-        "end_tan_x" | "end_tan_y" | "end_tan_z" => {
-            match field {
-                "end_tan_x" => spline.end_tangent.x = v,
-                "end_tan_y" => spline.end_tangent.y = v,
-                "end_tan_z" => spline.end_tangent.z = v,
-                _ => {}
-            }
-        }
+        "start_tan_x" | "start_tan_y" | "start_tan_z" => match field {
+            "start_tan_x" => spline.begin_tangent.x = v,
+            "start_tan_y" => spline.begin_tangent.y = v,
+            "start_tan_z" => spline.begin_tangent.z = v,
+            _ => {}
+        },
+        "end_tan_x" | "end_tan_y" | "end_tan_z" => match field {
+            "end_tan_x" => spline.end_tangent.x = v,
+            "end_tan_y" => spline.end_tangent.y = v,
+            "end_tan_z" => spline.end_tangent.z = v,
+            _ => {}
+        },
         _ => {}
     }
     spline.flags.planar = crate::entities::curve::spline_is_planar(spline);
@@ -1162,11 +1176,8 @@ fn apply_transform(spline: &mut Spline, t: &EntityTransform) {
         working_normal,
     } = t
     {
-        let transform = crate::scene::view::transform::reflection_about_working_line(
-            *p1,
-            *p2,
-            *working_normal,
-        );
+        let transform =
+            crate::scene::view::transform::reflection_about_working_line(*p1, *p2, *working_normal);
         acadrust::Entity::apply_transform(spline, &transform);
         spline.flags.planar = crate::entities::curve::spline_is_planar(spline);
         return;
@@ -1199,8 +1210,8 @@ impl crate::entities::traits::Grippable for Spline {
         use crate::scene::model::object::{GripMenuAction, GripMenuItem};
         if grip_id == SPLINE_MODE_GRIP_ID {
             let fit_method = uses_fit_method(self);
-            let can_show_control = control_vertices(self).len() >= 2
-                && !(fit_method && self.flags.periodic);
+            let can_show_control =
+                control_vertices(self).len() >= 2 && !(fit_method && self.flags.periodic);
             let can_show_fit = can_show_fit_points(self);
             return if !shows_fit_points(self) {
                 vec![
@@ -1411,8 +1422,7 @@ mod tests {
         assert!(!uses_fit_method(&spline));
         let after = nurbs3(&spline).unwrap().point_at(0.37);
         assert!(
-            cadkernel::space::Vec3::from(before)
-                .distance(cadkernel::space::Vec3::from(after))
+            cadkernel::space::Vec3::from(before).distance(cadkernel::space::Vec3::from(after))
                 < 1.0e-12
         );
     }

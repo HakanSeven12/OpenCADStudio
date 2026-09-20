@@ -195,9 +195,8 @@ pub fn font_metrics(path: &str) -> Option<(f64, f64)> {
 
 fn glyph_cache(
 ) -> &'static Mutex<HashMap<(String, u16), Option<Arc<crate::scene::text::lff::Glyph>>>> {
-    static C: OnceLock<
-        Mutex<HashMap<(String, u16), Option<Arc<crate::scene::text::lff::Glyph>>>>,
-    > = OnceLock::new();
+    static C: OnceLock<Mutex<HashMap<(String, u16), Option<Arc<crate::scene::text::lff::Glyph>>>>> =
+        OnceLock::new();
     C.get_or_init(|| Mutex::new(HashMap::new()))
 }
 

@@ -1,8 +1,5 @@
 // Exact profile sweeps stored as kernel B-reps and ACIS.
 
-use cadkernel::brep::{self, Body};
-use cadkernel::geom2d::{Arc, Curve, EllipseArc, Line};
-use cadkernel::space::{PlanarCurve, Plane, Vec3};
 use acadrust::entities::{EmbeddedEntity, LwPolyline, LwVertex, Spline};
 use acadrust::objects::{
     SolidHistoryLoft, SolidHistoryNodeBase, SolidHistoryOperation, SolidHistoryRevolve,
@@ -10,11 +7,15 @@ use acadrust::objects::{
 };
 use acadrust::types::{Vector2, Vector3};
 use acadrust::EntityType;
+use cadkernel::brep::{self, Body};
+use cadkernel::geom2d::{Arc, Curve, EllipseArc, Line};
+use cadkernel::space::{PlanarCurve, Plane, Vec3};
 
-use crate::entities::curve::entity_curve;
 pub use super::sweep_command_model::{
-    is_sweep_path, is_sweep_profile, sweep_record, sweep_selection_options, swept_surface_entity, swept_with_options,
+    is_sweep_path, is_sweep_profile, sweep_record, sweep_selection_options, swept_surface_entity,
+    swept_with_options,
 };
+use crate::entities::curve::entity_curve;
 
 /// A drawn profile, as the kernel wants it: the plane it lies in and the
 /// chain of pieces closing a loop in that plane.
@@ -130,9 +131,7 @@ fn planar_polygon_entity(entity: &EntityType) -> Option<PlanarCurve> {
     let normal = points[2..]
         .iter()
         .find_map(|point| first.cross(Vec3::from(*point) - origin).normalize())
-        .or_else(|| {
-            (!closed).then(|| first.cross(Vec3::Z).normalize().unwrap_or(Vec3::Y))
-        })?;
+        .or_else(|| (!closed).then(|| first.cross(Vec3::Z).normalize().unwrap_or(Vec3::Y)))?;
     let plane = Plane::orthonormal(points[0], first.to_array(), normal.to_array())?;
     let scale = points
         .iter()
@@ -148,10 +147,12 @@ fn planar_polygon_entity(entity: &EntityType) -> Option<PlanarCurve> {
     let vertices = points
         .iter()
         .map(|point| {
-            plane.project(*point).map(|position| cadkernel::geom2d::PolylineVertex {
-                position,
-                bulge: 0.0,
-            })
+            plane
+                .project(*point)
+                .map(|position| cadkernel::geom2d::PolylineVertex {
+                    position,
+                    bulge: 0.0,
+                })
         })
         .collect::<Option<Vec<_>>>()?;
     Some(PlanarCurve::new(
@@ -295,12 +296,7 @@ pub fn extruded_surface(
         return None;
     }
     let (profile, _) = extrusion_profile_of(entity)?;
-    brep::extrude_surface_tapered(
-        profile.plane,
-        &profile.pieces,
-        direction,
-        taper_angle,
-    )
+    brep::extrude_surface_tapered(profile.plane, &profile.pieces, direction, taper_angle)
 }
 
 pub fn extruded_along_path(
@@ -341,8 +337,8 @@ pub fn extruded_along_path(
     let Curve::Line(line) = curve.curve else {
         return None;
     };
-    let direction = Vec3::from(curve.plane.point_at(line.end))
-        - Vec3::from(curve.plane.point_at(line.start));
+    let direction =
+        Vec3::from(curve.plane.point_at(line.end)) - Vec3::from(curve.plane.point_at(line.start));
     brep::extrude_tapered(
         profile.plane,
         &profile.pieces,
@@ -365,9 +361,8 @@ pub fn straight_path_direction(path: &EntityType) -> Option<[f64; 3]> {
         return None;
     };
     Some(
-        (Vec3::from(curve.plane.point_at(line.end))
-            - Vec3::from(curve.plane.point_at(line.start)))
-        .to_array(),
+        (Vec3::from(curve.plane.point_at(line.end)) - Vec3::from(curve.plane.point_at(line.start)))
+            .to_array(),
     )
 }
 
@@ -423,12 +418,7 @@ pub fn revolved_surface(
     turn_revolved_body(body, from, axis, start_angle)
 }
 
-fn turn_revolved_body(
-    body: Body,
-    pivot: [f64; 3],
-    axis: [f64; 3],
-    angle: f64,
-) -> Option<Body> {
+fn turn_revolved_body(body: Body, pivot: [f64; 3], axis: [f64; 3], angle: f64) -> Option<Body> {
     if !angle.is_finite() {
         return None;
     }
@@ -526,10 +516,12 @@ pub fn swept(profile: &EntityType, path: &EntityType) -> Option<Body> {
                 .tessellate_within(scale * 1e-4)
                 .windows(2)
                 .filter(|pair| pair[0] != pair[1])
-                .map(|pair| Curve::Line(Line {
-                    start: pair[0],
-                    end: pair[1],
-                }))
+                .map(|pair| {
+                    Curve::Line(Line {
+                        start: pair[0],
+                        end: pair[1],
+                    })
+                })
                 .collect()
         }
         _ => return None,
@@ -599,24 +591,30 @@ pub fn embedded_path(entity: &EntityType) -> Option<EmbeddedEntity> {
             polyline.elevation = value.elevation;
             polyline.normal = value.normal;
             polyline.is_closed = value.is_closed();
-            polyline.vertices = value.vertices.iter().map(|vertex| {
-                let mut converted = LwVertex::new(Vector2::new(vertex.location.x, vertex.location.y));
-                converted.bulge = vertex.bulge;
-                converted
-            }).collect();
+            polyline.vertices = value
+                .vertices
+                .iter()
+                .map(|vertex| {
+                    let mut converted =
+                        LwVertex::new(Vector2::new(vertex.location.x, vertex.location.y));
+                    converted.bulge = vertex.bulge;
+                    converted
+                })
+                .collect();
             Some(EmbeddedEntity::LwPolyline(polyline))
         }
         EntityType::Spline(value) => Some(EmbeddedEntity::Spline(value.clone())),
         EntityType::Helix(value) => Some(EmbeddedEntity::Spline(value.spline.clone())),
         EntityType::Polyline3D(value) if value.vertices.len() >= 2 => {
-            let mut points = value.vertices.iter().map(|vertex| vertex.position).collect::<Vec<_>>();
+            let mut points = value
+                .vertices
+                .iter()
+                .map(|vertex| vertex.position)
+                .collect::<Vec<_>>();
             if value.is_closed() && points.first() != points.last() {
                 points.push(*points.first()?);
             }
-            let mut spline = Spline::from_control_points(
-                1,
-                points,
-            );
+            let mut spline = Spline::from_control_points(1, points);
             spline.flags.linear = true;
             spline.flags.planar = false;
             spline.flags.closed = value.is_closed();
@@ -714,11 +712,7 @@ pub fn extrusion_history(
         scale_factor: 1.0,
         sweep_entity_transform,
         path_entity_transform,
-        reference_point: Vector3::new(
-            reference_point[0],
-            reference_point[1],
-            reference_point[2],
-        ),
+        reference_point: Vector3::new(reference_point[0], reference_point[1], reference_point[2]),
         ..SolidHistorySweep::default()
     }))
 }
@@ -741,11 +735,7 @@ pub fn sweep_history(
         scale_factor: 1.0,
         sweep_entity_transform,
         path_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
-        reference_point: Vector3::new(
-            reference_point[0],
-            reference_point[1],
-            reference_point[2],
-        ),
+        reference_point: Vector3::new(reference_point[0], reference_point[1], reference_point[2]),
         ..SolidHistorySweep::default()
     }))
 }
@@ -842,10 +832,7 @@ fn circular_loft(profiles: &[EntityType]) -> Option<Body> {
     let tolerance = scale * 1e-9;
     let mut heights = Vec::with_capacity(sections.len());
     for (centre, radius, normal, _) in &sections {
-        if !radius.is_finite()
-            || *radius <= tolerance
-            || normal.dot(direction).abs() < 1.0 - 1e-9
-        {
+        if !radius.is_finite() || *radius <= tolerance || normal.dot(direction).abs() < 1.0 - 1e-9 {
             return None;
         }
         let offset = *centre - first.0;
@@ -862,7 +849,8 @@ fn circular_loft(profiles: &[EntityType]) -> Option<Body> {
     }
     let radial_seed = first.3 - direction * first.3.dot(direction);
     let radial = radial_seed.normalize()?;
-    let profile_plane = Plane::from_axes(first.0.to_array(), radial.to_array(), direction.to_array());
+    let profile_plane =
+        Plane::from_axes(first.0.to_array(), radial.to_array(), direction.to_array());
     let mut points = Vec::with_capacity(sections.len() + 2);
     points.push([0.0, 0.0]);
     points.extend(

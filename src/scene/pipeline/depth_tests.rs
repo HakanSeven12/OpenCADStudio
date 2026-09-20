@@ -107,8 +107,8 @@ fn color_at(bytes: &[u8], ndc_x: f32) -> [u32; 3] {
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn wipeout_respects_close_block_draw_order() {
-    use acadrust::{entities::Wipeout, types::Vector2, EntityType};
     use crate::scene::{model::wire_model::TangentGeom, Scene};
+    use acadrust::{entities::Wipeout, types::Vector2, EntityType};
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = block_on(instance.request_adapter(&Default::default())).expect("GPU adapter");
@@ -151,40 +151,58 @@ fn wipeout_respects_close_block_draw_order() {
             let wires: Vec<_> = [(-0.3, 1), (0.3, 2)]
                 .into_iter()
                 .map(|(x, id)| {
-                    let mut wire = WireModel::solid(
-                        id.to_string(),
-                        Vec::new(),
-                        [1.; 4],
-                        false,
-                    );
+                    let mut wire = WireModel::solid(id.to_string(), Vec::new(), [1.; 4], false);
                     let center = [x as f64 - 0.1, 0., 0.5];
                     let axis_x = [1., 0., 0.];
                     let axis_y = [0., 1., 0.];
                     match kind {
                         "circle" => wire.tangent_geoms.push(TangentGeom::PlanarCircle {
-                            center, axis_x, axis_y, radius: 0.1,
+                            center,
+                            axis_x,
+                            axis_y,
+                            radius: 0.1,
                         }),
                         "arc" => wire.tangent_geoms.push(TangentGeom::Arc {
-                            center, axis_x, axis_y, radius: 0.1,
+                            center,
+                            axis_x,
+                            axis_y,
+                            radius: 0.1,
                             start_angle: -std::f64::consts::FRAC_PI_2,
                             end_angle: std::f64::consts::FRAC_PI_2,
                         }),
                         "ellipse" => wire.tangent_geoms.push(TangentGeom::PlanarEllipse {
-                            center, major_axis: [0.1, 0., 0.], normal: [0., 0., 1.],
-                            minor_axis_ratio: 0.6, start_param: 0., end_param: std::f64::consts::TAU,
+                            center,
+                            major_axis: [0.1, 0., 0.],
+                            normal: [0., 0., 1.],
+                            minor_axis_ratio: 0.6,
+                            start_param: 0.,
+                            end_param: std::f64::consts::TAU,
                         }),
                         _ => wire.points = vec![[x, -0.65, 0.5], [x, 0.65, 0.5]],
                     }
                     wire
                 })
                 .collect();
-            pipeline.gpu_circles = std::sync::Arc::new(pipeline.upload_circles(&device, &queue, &wires, &depths));
-            pipeline.gpu_ellipses = std::sync::Arc::new(pipeline.upload_ellipses(&device, &queue, &wires, &depths));
+            pipeline.gpu_circles =
+                std::sync::Arc::new(pipeline.upload_circles(&device, &queue, &wires, &depths));
+            pipeline.gpu_ellipses =
+                std::sync::Arc::new(pipeline.upload_ellipses(&device, &queue, &wires, &depths));
             let bytes = pixels(&device, &queue, &mut pipeline, &uniforms, &wires, &depths);
-            assert_eq!(color_at(&bytes, -0.3), [0; 3], "mask must cover earlier {kind}");
-            assert_ne!(color_at(&bytes, 0.3), [0; 3], "mask erased later {kind}, packed={packed}");
+            assert_eq!(
+                color_at(&bytes, -0.3),
+                [0; 3],
+                "mask must cover earlier {kind}"
+            );
+            assert_ne!(
+                color_at(&bytes, 0.3),
+                [0; 3],
+                "mask erased later {kind}, packed={packed}"
+            );
         }
-        assert!(block_on(validation.pop()).is_none(), "GPU validation failed");
+        assert!(
+            block_on(validation.pop()).is_none(),
+            "GPU validation failed"
+        );
     }
 }
 

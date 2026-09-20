@@ -107,11 +107,7 @@ impl RecoveryReport {
             .filter_map(|(index, item)| {
                 let mut stats = item.read_stats.clone()?;
                 for diagnostic in &mut stats.diagnostics {
-                    diagnostic.message = redact_known_paths(
-                        &diagnostic.message,
-                        path,
-                        references,
-                    );
+                    diagnostic.message = redact_known_paths(&diagnostic.message, path, references);
                 }
                 Some((format!("reference-{:02}", index + 1), stats))
             })
@@ -123,8 +119,7 @@ impl RecoveryReport {
                 notifications
                     .iter()
                     .filter(|item| {
-                        item.notification_type
-                            == acadrust::notification::NotificationType::Error
+                        item.notification_type == acadrust::notification::NotificationType::Error
                     })
                     .count()
             });
@@ -138,13 +133,16 @@ impl RecoveryReport {
             })
             .collect();
         if notifications.omitted_count() > 0 {
-            diagnostics.insert(0, (
-                "truncated".to_string(),
-                format!(
-                    "{} additional parser notifications were omitted after the safety limit",
-                    notifications.omitted_count()
+            diagnostics.insert(
+                0,
+                (
+                    "truncated".to_string(),
+                    format!(
+                        "{} additional parser notifications were omitted after the safety limit",
+                        notifications.omitted_count()
+                    ),
                 ),
-            ));
+            );
         }
         for (index, reference) in references.iter().enumerate() {
             diagnostics.extend(reference.diagnostics.iter().map(|message| {
@@ -262,7 +260,10 @@ impl RecoveryReport {
         lines.push(format!("Reader version: {}", acadrust::VERSION));
         lines.push(format!("Reader revision: {}", reader_revision()));
         lines.push(format!("Platform: {}", diagnostic_platform()));
-        lines.push(format!("Created (Unix seconds): {}", self.created_unix_seconds));
+        lines.push(format!(
+            "Created (Unix seconds): {}",
+            self.created_unix_seconds
+        ));
         lines.push(format!(
             "File: {}",
             private_file_label(&self.file_name, self.source_sha256.as_deref())
@@ -290,7 +291,10 @@ impl RecoveryReport {
                     .unwrap_or_else(|| "unknown".to_string())
             ));
             lines.push(format!("Format version: {}", stats.source_version));
-            lines.push(format!("Maintenance version: {}", stats.maintenance_version));
+            lines.push(format!(
+                "Maintenance version: {}",
+                stats.maintenance_version
+            ));
             lines.push(format!("Recovery mode: {}", stats.recovery_mode));
             lines.push(format!("Stream completed: {}", stats.stream_completed));
             lines.push(format!("Source sections: {}", stats.source_sections));
@@ -326,7 +330,10 @@ impl RecoveryReport {
             "References recovered: {}",
             self.references_recovered
         ));
-        lines.push(format!("References unavailable: {}", self.references_missing));
+        lines.push(format!(
+            "References unavailable: {}",
+            self.references_missing
+        ));
         lines.push(format!("References failed: {}", self.references_failed));
         lines.push(format!("References skipped: {}", self.references_skipped));
         lines.push(format!(
@@ -361,10 +368,7 @@ impl RecoveryReport {
                     stats.skipped_source_records,
                 ));
                 for diagnostic in stats.diagnostics.iter().take(50) {
-                    lines.push(format!(
-                        "{name} {}",
-                        structured_diagnostic_line(diagnostic)
-                    ));
+                    lines.push(format!("{name} {}", structured_diagnostic_line(diagnostic)));
                 }
             }
         }
@@ -558,10 +562,7 @@ fn structured_diagnostic_line(diagnostic: &acadrust::ReadDiagnostic) -> String {
         .record_handle
         .map(|value| format!("0x{value:X}"))
         .unwrap_or_else(|| "-".to_string());
-    let record_type = diagnostic
-        .record_type
-        .as_deref()
-        .unwrap_or("-");
+    let record_type = diagnostic.record_type.as_deref().unwrap_or("-");
     format!(
         "[code={} stage={} section={} offset={} offset-basis={} line={} handle={} type={}] {}",
         diagnostic.code,
@@ -631,7 +632,9 @@ fn write_report(report: &RecoveryReport) -> Result<PathBuf, String> {
 
     if let Some(directory) = crate::config::config_dir().map(|path| path.join("recovery_logs")) {
         if let Err(error) = std::fs::create_dir_all(&directory) {
-            errors.push(format!("Could not create private recovery-log directory: {error}"));
+            errors.push(format!(
+                "Could not create private recovery-log directory: {error}"
+            ));
         } else {
             match write_unique(&directory, &file_name, &body) {
                 Ok(path) => return Ok(path),

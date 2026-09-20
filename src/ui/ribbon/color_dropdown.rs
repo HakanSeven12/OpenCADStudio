@@ -134,7 +134,9 @@ fn placeholder_swatch<'a>() -> Element<'a, Message> {
     .style(|theme: &Theme| {
         let palette = theme.palette();
         container::Style {
-            background: Some(Background::Color(palette.background.weak.color.scale_alpha(0.5))),
+            background: Some(Background::Color(
+                palette.background.weak.color.scale_alpha(0.5),
+            )),
             border: Border {
                 color: palette.background.neutral.color.scale_alpha(0.5),
                 width: 1.0,
@@ -147,16 +149,12 @@ fn placeholder_swatch<'a>() -> Element<'a, Message> {
 }
 
 fn divider<'a>() -> Element<'a, Message> {
-    container(
-        Space::new()
-            .width(Length::Fill)
-            .height(Length::Fixed(1.0)),
-    )
-    .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(theme.palette().background.neutral.color)),
-        ..Default::default()
-    })
-    .into()
+    container(Space::new().width(Length::Fill).height(Length::Fixed(1.0)))
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(theme.palette().background.neutral.color)),
+            ..Default::default()
+        })
+        .into()
 }
 
 fn logical_row<'a>(
@@ -190,12 +188,9 @@ fn logical_row<'a>(
     });
 
     button(
-        row![
-            swatch,
-            text(t!(label)).size(11),
-        ]
-        .spacing(8)
-        .align_y(iced::Center),
+        row![swatch, text(t!(label)).size(11),]
+            .spacing(8)
+            .align_y(iced::Center),
     )
     .on_press(Message::RibbonColorChanged(color))
     .style(popup_row_style)
@@ -205,18 +200,15 @@ fn logical_row<'a>(
 }
 
 fn more_colors_row<'a>(active_color: AcadColor) -> Element<'a, Message> {
-    button(
-        row![text(t!("Select Color...")).size(11)]
-            .align_y(iced::Center),
-    )
-    .on_press(Message::OpenColorWindow(
-        crate::app::ColorPickTarget::Ribbon,
-        active_color,
-    ))
-    .style(popup_row_style)
-    .padding([4, 4])
-    .width(Length::Fill)
-    .into()
+    button(row![text(t!("Select Color...")).size(11)].align_y(iced::Center))
+        .on_press(Message::OpenColorWindow(
+            crate::app::ColorPickTarget::Ribbon,
+            active_color,
+        ))
+        .style(popup_row_style)
+        .padding([4, 4])
+        .width(Length::Fill)
+        .into()
 }
 
 /// Builds the complete 5-section color dropdown panel element.

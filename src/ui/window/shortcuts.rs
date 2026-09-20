@@ -29,18 +29,16 @@ fn danger_input_style(
     let danger = theme.palette().danger.base;
     iced::widget::text_input::Style {
         background: Background::Color(theme.palette().danger.weak.color),
-        border: iced::border::rounded(4)
-            .color(danger.color)
-            .width(
-                if matches!(
-                    status,
-                    iced::widget::text_input::Status::Focused { is_hovered: _ }
-                ) {
-                    1.5
-                } else {
-                    1.0
-                },
-            ),
+        border: iced::border::rounded(4).color(danger.color).width(
+            if matches!(
+                status,
+                iced::widget::text_input::Status::Focused { is_hovered: _ }
+            ) {
+                1.5
+            } else {
+                1.0
+            },
+        ),
         icon: danger.color,
         placeholder: danger.color.scale_alpha(0.7),
         value: danger.text,
@@ -74,8 +72,7 @@ pub fn view_window<'a>(
 
     let head = container(
         row![
-            container(text(t!("Key")).size(11).style(muted_style))
-                .width(Length::Fixed(180.0)),
+            container(text(t!("Key")).size(11).style(muted_style)).width(Length::Fixed(180.0)),
             container(text(t!("Command")).size(11).style(muted_style)).width(sizing.width),
             Space::new().width(Length::Fixed(30.0)),
         ]
@@ -119,8 +116,7 @@ pub fn view_window<'a>(
                 .width(Length::Fixed(180.0))
                 .style(button::secondary)
         };
-        let unknown_command =
-            !command.is_empty() && unknown_commands.contains(command.trim());
+        let unknown_command = !command.is_empty() && unknown_commands.contains(command.trim());
         let command_box = text_input(t!("command").as_ref(), command)
             .on_input(move |value| Message::ShortcutEditorInput {
                 idx,
@@ -199,9 +195,11 @@ pub fn view_window<'a>(
     let stats = if reset_confirm {
         row![Space::new().width(Length::Fixed(0.0))]
     } else {
-        row![text(format!("{}: {}", t!("Number of shortcuts"), rows.len()))
-            .size(12)
-            .style(muted_style)]
+        row![
+            text(format!("{}: {}", t!("Number of shortcuts"), rows.len()))
+                .size(12)
+                .style(muted_style)
+        ]
     };
     // Reset asks for confirmation in place: the add/reset buttons are
     // replaced by the question with Yes / No.
@@ -284,9 +282,15 @@ pub fn view_window<'a>(
             Space::new().height(6),
             conflict_banner,
             Space::new().height(4),
-            row![stats, add_area, reset_area, Space::new().width(sizing.width), apply_area]
-                .spacing(8)
-                .align_y(iced::Center),
+            row![
+                stats,
+                add_area,
+                reset_area,
+                Space::new().width(sizing.width),
+                apply_area
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
         ]
         .spacing(6)
         .width(sizing.width)
@@ -296,9 +300,7 @@ pub fn view_window<'a>(
     .width(sizing.width)
     .height(sizing.height)
     .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(
-            theme.palette().background.base.color,
-        )),
+        background: Some(Background::Color(theme.palette().background.base.color)),
         ..Default::default()
     });
 
@@ -313,12 +315,7 @@ pub fn view_window<'a>(
             .height(Length::Fill)
             .style(|theme: &Theme| container::Style {
                 background: Some(Background::Color(
-                    theme
-                        .palette()
-                        .background
-                        .strongest
-                        .color
-                        .scale_alpha(0.55),
+                    theme.palette().background.strongest.color.scale_alpha(0.55),
                 )),
                 ..Default::default()
             }),
@@ -346,9 +343,7 @@ pub fn view_window<'a>(
     .padding(16)
     .width(Length::Fixed(320.0))
     .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(
-            theme.palette().background.base.color,
-        )),
+        background: Some(Background::Color(theme.palette().background.base.color)),
         border: iced::Border {
             color: theme.palette().background.neutral.color,
             width: 1.0,

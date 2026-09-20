@@ -13,9 +13,9 @@
 //   Polar array: copies rotated around a center point by a total angle.
 //   1. Center point → 2. Item count (text) → 3. Total angle in degrees (text)
 
+use crate::t;
 use acadrust::Handle;
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, EntityTransform, WorkingPlane};
 use crate::modules::draw::defaults;
@@ -115,11 +115,9 @@ impl ArrayRectCommand {
                 if r == 0 && c == 0 {
                     continue;
                 }
-                t.push(EntityTransform::Translate(plane.vector_to_world(DVec3::new(
-                    col_sp * c as f64,
-                    row_sp * r as f64,
-                    0.0,
-                ))));
+                t.push(EntityTransform::Translate(plane.vector_to_world(
+                    DVec3::new(col_sp * c as f64, row_sp * r as f64, 0.0),
+                )));
             }
         }
         t
@@ -406,9 +404,7 @@ impl CadCommand for ArrayPolarCommand {
             PolarStep::Count { center } => {
                 (center.as_vec3(), self.default_count, self.default_angle)
             }
-            PolarStep::Angle { center, count } => {
-                (center.as_vec3(), *count, self.default_angle)
-            }
+            PolarStep::Angle { center, count } => (center.as_vec3(), *count, self.default_angle),
         };
         let step_rad = total_deg.to_radians() / count as f64;
         let axis = self.plane.z.as_vec3();
@@ -456,14 +452,12 @@ impl CadCommand for ArrayPolarCommand {
 //   2. Enter item count (total, including the original at the path start)
 //   → Returns BatchCopy with Translate transforms derived from path samples.
 
-use acadrust::EntityType;
 use crate::entities::curve::entity_curve;
+use acadrust::EntityType;
 use std::f64::consts::PI as FPI;
 use std::f64::consts::TAU as FTAU;
 
 // ── Path geometry helpers ──────────────────────────────────────────────────
-
-
 
 // ── State machine ──────────────────────────────────────────────────────────
 
@@ -496,7 +490,8 @@ impl ArrayPathCommand {
             wire_models,
             all_entities,
             step: PathStep::SelectPath,
-            default_count: (defaults::get_array_path_count() as u32).clamp(2, MAX_ARRAY_ITEMS as u32),
+            default_count: (defaults::get_array_path_count() as u32)
+                .clamp(2, MAX_ARRAY_ITEMS as u32),
             pick_pt: DVec3::ZERO,
         }
     }
@@ -750,7 +745,9 @@ impl CadCommand for ArrayPathCommand {
                     .iter()
                     .map(|w| w.translated(delta.as_vec3()))
                     .collect::<Vec<_>>(),
-                EntityTransform::Rotate { center, angle_rad, .. } => self
+                EntityTransform::Rotate {
+                    center, angle_rad, ..
+                } => self
                     .wire_models
                     .iter()
                     .map(|w| w.rotated(center.as_vec3(), *angle_rad as f32))
@@ -1033,7 +1030,9 @@ impl CadCommand for Array3DCommand {
 }
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["ARRAY3D", "3DARRAY"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["ARRAY3D", "3DARRAY"]
+});
 
 #[cfg(test)]
 mod item_limit_tests {
@@ -1044,23 +1043,44 @@ mod item_limit_tests {
         assert!(array_items_within_limit(&[MAX_ARRAY_ITEMS]));
         assert!(!array_items_within_limit(&[MAX_ARRAY_ITEMS + 1]));
         assert!(!array_items_within_limit(&[1_000, 1_000]));
-        assert!(!array_items_within_limit(&[u32::MAX as u64, u32::MAX as u64, u32::MAX as u64]));
+        assert!(!array_items_within_limit(&[
+            u32::MAX as u64,
+            u32::MAX as u64,
+            u32::MAX as u64
+        ]));
     }
 
     #[test]
     fn oversized_counts_are_rejected_at_the_prompt() {
         let mut rect = ArrayRectCommand::new(vec![Handle::new(1)], Vec::new());
         assert!(rect.on_text_input("100000").is_none());
-        assert!(matches!(rect.on_text_input("100000"), Some(CmdResult::ReportError(_))));
+        assert!(matches!(
+            rect.on_text_input("100000"),
+            Some(CmdResult::ReportError(_))
+        ));
         assert!(matches!(rect.step, RectStep::Cols { rows: 100_000 }));
 
         let mut polar = ArrayPolarCommand::new(vec![Handle::new(1)], Vec::new());
-        polar.step = PolarStep::Count { center: DVec3::ZERO };
-        assert!(matches!(polar.on_text_input("4294967295"), Some(CmdResult::ReportError(_))));
+        polar.step = PolarStep::Count {
+            center: DVec3::ZERO,
+        };
+        assert!(matches!(
+            polar.on_text_input("4294967295"),
+            Some(CmdResult::ReportError(_))
+        ));
 
         let mut cube = Array3DCommand::new(vec![Handle::new(1)]);
-        assert!(matches!(cube.on_text_input("300"), Some(CmdResult::NeedPoint)));
-        assert!(matches!(cube.on_text_input("300"), Some(CmdResult::NeedPoint)));
-        assert!(matches!(cube.on_text_input("2"), Some(CmdResult::ReportError(_))));
+        assert!(matches!(
+            cube.on_text_input("300"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            cube.on_text_input("300"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            cube.on_text_input("2"),
+            Some(CmdResult::ReportError(_))
+        ));
     }
 }

@@ -4,19 +4,16 @@
 
 use rustc_hash::FxHashSet as HashSet;
 
+use crate::t;
 use iced::widget::{button, container, row, text};
 use iced::{Background, Element, Fill, Theme};
-use crate::t;
 
 use crate::app::Message;
 use crate::ui::statusbar::status_menu::Entry;
 
 /// - `types`: entity-type names present in the current layout.
 /// - `excluded`: types currently filtered out (unchecked).
-pub fn menu_entries(
-    types: Vec<String>,
-    excluded: &HashSet<String>,
-) -> Vec<Entry<'static>> {
+pub fn menu_entries(types: Vec<String>, excluded: &HashSet<String>) -> Vec<Entry<'static>> {
     // "Select All / Clear All" header, mirroring the OSNAP popup: Select All
     // clears every exclusion, Clear All excludes every present type.
     let has_types = !types.is_empty();
@@ -39,9 +36,7 @@ pub fn menu_entries(
 
     let divider = container(iced::widget::Space::new().height(1))
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.weak.color,
-            )),
+            background: Some(Background::Color(theme.palette().background.weak.color)),
             ..Default::default()
         })
         .width(Fill)
@@ -81,25 +76,18 @@ fn type_row(name: String, included: bool) -> Element<'static, Message> {
 
 fn empty_row() -> Element<'static, Message> {
     container(
-        text(t!("No objects")).size(11).style(|theme: &Theme| text::Style {
-            color: Some(
-                theme
-                    .palette()
-                    .background
-                    .base
-                    .text
-                    .scale_alpha(0.42),
-            ),
-        }),
+        text(t!("No objects"))
+            .size(11)
+            .style(|theme: &Theme| text::Style {
+                color: Some(theme.palette().background.base.text.scale_alpha(0.42)),
+            }),
     )
-        .padding([4, 10])
-        .into()
+    .padding([4, 10])
+    .into()
 }
 
 fn header_btn(label: &str, msg: Message, enabled: bool) -> Element<'_, Message> {
     let b = button(text(t!(label)).size(10));
     let b = if enabled { b.on_press(msg) } else { b };
-    b.style(button::secondary)
-    .padding([3, 8])
-    .into()
+    b.style(button::secondary).padding([3, 8]).into()
 }

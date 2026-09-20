@@ -36,8 +36,15 @@ pub fn tool() -> ToolDef {
 /// typed after the point pick, bare Enter keeps the default).
 enum XAttachStep {
     Point,
-    Scale { point: DVec3 },
-    Rotate { point: DVec3, sx: f64, sy: f64, sz: f64 },
+    Scale {
+        point: DVec3,
+    },
+    Rotate {
+        point: DVec3,
+        sx: f64,
+        sy: f64,
+        sz: f64,
+    },
 }
 
 pub struct XAttachCommand {
@@ -91,9 +98,7 @@ impl CadCommand for XAttachCommand {
             XAttachStep::Scale { .. } => {
                 t!("XATTACH  Specify scale factor <1.0> (X,Y,Z or pick Corner):").into_owned()
             }
-            XAttachStep::Rotate { .. } => {
-                t!("XATTACH  Specify rotation angle <0>:").into_owned()
-            }
+            XAttachStep::Rotate { .. } => t!("XATTACH  Specify rotation angle <0>:").into_owned(),
         }
     }
 
@@ -205,10 +210,7 @@ pub fn unique_block_name(stem: &str, taken: &[impl AsRef<str>]) -> String {
     let mut n = 1u32;
     loop {
         let candidate = format!("{stem}_{n}");
-        if !upper_taken
-            .iter()
-            .any(|t| *t == candidate.to_uppercase())
-        {
+        if !upper_taken.iter().any(|t| *t == candidate.to_uppercase()) {
             return candidate;
         }
         n += 1;
@@ -261,10 +263,7 @@ pub fn is_self_attach(
     let candidate = if is_absolute_xref_path(&joined) {
         joined
     } else if let Some(parent) = host_file.parent() {
-        parent
-            .join(&joined)
-            .to_string_lossy()
-            .replace('\\', "/")
+        parent.join(&joined).to_string_lossy().replace('\\', "/")
     } else {
         joined
     };
@@ -398,7 +397,10 @@ mod tests {
             resolve_xref_store_path("C:/Lib/plan.dwg", Some(base)),
             "C:/Lib/plan.dwg"
         );
-        assert_eq!(resolve_xref_store_path("refs/plan.dwg", None), "refs/plan.dwg");
+        assert_eq!(
+            resolve_xref_store_path("refs/plan.dwg", None),
+            "refs/plan.dwg"
+        );
     }
 
     #[test]
@@ -459,10 +461,7 @@ mod tests {
     #[test]
     fn placement_flow_triplet_and_typed_rotation() {
         let mut cmd = XAttachCommand::with_path("C:/refs/plan.dwg".to_string());
-        assert!(matches!(
-            cmd.on_point(DVec3::ZERO),
-            CmdResult::NeedPoint
-        ));
+        assert!(matches!(cmd.on_point(DVec3::ZERO), CmdResult::NeedPoint));
         assert!(matches!(
             cmd.on_text_input("2,3,4"),
             Some(CmdResult::NeedPoint)
@@ -481,10 +480,7 @@ mod tests {
     #[test]
     fn placement_flow_corner_pick_sets_xy_scale() {
         let mut cmd = XAttachCommand::with_path("C:/refs/plan.dwg".to_string());
-        assert!(matches!(
-            cmd.on_point(DVec3::ZERO),
-            CmdResult::NeedPoint
-        ));
+        assert!(matches!(cmd.on_point(DVec3::ZERO), CmdResult::NeedPoint));
         assert!(matches!(
             cmd.on_point(DVec3::new(3.0, 4.0, 0.0)),
             CmdResult::NeedPoint

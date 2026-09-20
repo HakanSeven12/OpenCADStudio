@@ -76,10 +76,14 @@ pub fn view_window<'a>(
 
     let conditions = column![
         checkbox(settings.tangent_must_share_point)
-            .label(crate::t!("Tangent objects must share an intersection point"))
+            .label(crate::t!(
+                "Tangent objects must share an intersection point"
+            ))
             .on_toggle(|_| Message::AutoConstrainToggleTangentPoint),
         checkbox(settings.perpendicular_must_intersect)
-            .label(crate::t!("Perpendicular objects must share an intersection point"))
+            .label(crate::t!(
+                "Perpendicular objects must share an intersection point"
+            ))
             .on_toggle(|_| Message::AutoConstrainTogglePerpendicularIntersection),
     ]
     .spacing(8);

@@ -7,10 +7,10 @@
 //! the style / scale managers' frame so it looks consistent.
 
 use crate::app::Message;
+use crate::t;
 use crate::ui::style::style_manager::{hdivider, muted_text_style, tb_button};
 use iced::widget::{column, container, mouse_area, row, scrollable, text, Space};
 use iced::{Background, Border, Element, Theme};
-use crate::t;
 
 /// `scales` is `(name, "paper:drawing" ratio, is_member)`. Every label is cloned
 /// into the widget tree, so the returned element borrows nothing from the args.
@@ -29,9 +29,7 @@ pub fn view_window(
         .align_y(iced::Center),
     )
     .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(
-            theme.palette().background.weak.color
-        )),
+        background: Some(Background::Color(theme.palette().background.weak.color)),
         ..Default::default()
     })
     .width(sizing.width)
@@ -48,9 +46,7 @@ pub fn view_window(
             ]
             .spacing(4)
             .align_y(iced::Center);
-            let cell = container(label)
-                .padding([4, 8])
-                .width(sizing.width);
+            let cell = container(label).padding([4, 8]).width(sizing.width);
             mouse_area(cell)
                 .on_press(Message::AnnoObjectScaleToggle(name.clone()))
                 .into()
@@ -61,13 +57,13 @@ pub fn view_window(
         .style(|theme: &Theme| {
             let palette = theme.palette();
             container::Style {
-            background: Some(Background::Color(palette.background.weak.color)),
-            border: Border {
-                color: palette.background.neutral.color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
+                background: Some(Background::Color(palette.background.weak.color)),
+                border: Border {
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
             }
         })
         .width(sizing.width)
@@ -76,9 +72,11 @@ pub fn view_window(
 
     let body = container(
         column![
-            text(t!("Click a scale to add or remove the object's representation for it."))
-                .size(10)
-                .style(muted_text_style),
+            text(t!(
+                "Click a scale to add or remove the object's representation for it."
+            ))
+            .size(10)
+            .style(muted_text_style),
             list,
         ]
         .spacing(6)
@@ -90,9 +88,7 @@ pub fn view_window(
 
     container(column![toolbar, hdivider(sizing.width), body])
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.base.color
-            )),
+            background: Some(Background::Color(theme.palette().background.base.color)),
             ..Default::default()
         })
         .width(sizing.width)

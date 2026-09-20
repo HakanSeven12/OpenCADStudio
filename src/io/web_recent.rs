@@ -90,10 +90,7 @@ pub async fn store_open(
                 return None;
             };
             if state.latest_id != pending_id {
-                return Some((
-                    state.latest_id,
-                    std::sync::Arc::clone(&state.latest_bytes),
-                ));
+                return Some((state.latest_id, std::sync::Arc::clone(&state.latest_bytes)));
             }
             state.active_writers = state.active_writers.saturating_sub(1);
             if state.active_writers == 0 {

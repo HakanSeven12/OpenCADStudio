@@ -1,5 +1,5 @@
-use acadrust::entities::{SectionSymbol, ViewBorder};
 use crate::t;
+use acadrust::entities::{SectionSymbol, ViewBorder};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_angle_prop, edit_prop, parse_f64, ro_prop, square_grip};
@@ -23,9 +23,9 @@ fn apply_entity_transform<T: acadrust::Entity>(entity: &mut T, transform: &Entit
         entity,
         transform,
         |entity, first, second| {
-            entity.apply_transform(
-                &crate::scene::view::transform::reflection_about_xy_line(first, second),
-            );
+            entity.apply_transform(&crate::scene::view::transform::reflection_about_xy_line(
+                first, second,
+            ));
         },
     );
 }
@@ -55,8 +55,7 @@ impl Grippable for SectionSymbol {
                 point.point.z += delta.z;
             }
             GripApply::Absolute(position) => {
-                point.point =
-                    acadrust::types::Vector3::new(position.x, position.y, position.z);
+                point.point = acadrust::types::Vector3::new(position.x, position.y, position.z);
             }
         }
         self.sync_display_fields();
@@ -86,43 +85,63 @@ impl PropertyEditable for SectionSymbol {
             PropSection {
                 title: t!("Section Symbol").into_owned(),
                 props: vec![
-                    edit_prop(t!("Symbol Scale").as_ref(), "section_scale", self.symbol_scale),
-                    ro_prop(t!("View Symbol Version").as_ref(),
+                    edit_prop(
+                        t!("Symbol Scale").as_ref(),
+                        "section_scale",
+                        self.symbol_scale,
+                    ),
+                    ro_prop(
+                        t!("View Symbol Version").as_ref(),
                         "section_view_version",
                         self.view_symbol_version.to_string(),
                     ),
-                    ro_prop(t!("Version").as_ref(), "section_version", self.version.to_string()),
-                    ro_prop(t!("Style").as_ref(),
+                    ro_prop(
+                        t!("Version").as_ref(),
+                        "section_version",
+                        self.version.to_string(),
+                    ),
+                    ro_prop(
+                        t!("Style").as_ref(),
                         "section_style",
                         handle_text(self.style_handle),
                     ),
-                    ro_prop(t!("View Representation").as_ref(),
+                    ro_prop(
+                        t!("View Representation").as_ref(),
                         "section_view_rep",
                         handle_text(self.view_rep_handle),
                     ),
-                    ro_prop(t!("View Symbol Flags").as_ref(),
+                    ro_prop(
+                        t!("View Symbol Flags").as_ref(),
                         "section_view_flags",
                         self.raw_view_symbol_70.to_string(),
                     ),
-                    ro_prop(t!("Point Count").as_ref(),
+                    ro_prop(
+                        t!("Point Count").as_ref(),
                         "section_point_count",
                         self.points.len().to_string(),
                     ),
-                    ro_prop(t!("Stored Point Counts").as_ref(),
+                    ro_prop(
+                        t!("Stored Point Counts").as_ref(),
                         "section_raw_counts",
                         format!(
                             "{}, {}, flags {}",
-                            self.raw_point_count_90,
-                            self.raw_point_record_count,
-                            self.raw_flags_90
+                            self.raw_point_count_90, self.raw_point_record_count, self.raw_flags_90
                         ),
                     ),
-                    ro_prop(t!("Identifier").as_ref(), "section_label", self.label.clone()),
+                    ro_prop(
+                        t!("Identifier").as_ref(),
+                        "section_label",
+                        self.label.clone(),
+                    ),
                 ],
             },
             PropSection {
                 title: t!("Section Points").into_owned(),
-                props: vec![ro_prop(t!("Records").as_ref(), "section_points", point_data)],
+                props: vec![ro_prop(
+                    t!("Records").as_ref(),
+                    "section_points",
+                    point_data,
+                )],
             },
         ]
     }
@@ -196,25 +215,34 @@ impl PropertyEditable for ViewBorder {
             props: vec![
                 edit_prop(t!("Center X").as_ref(), "view_border_x", self.center[0]),
                 edit_prop(t!("Center Y").as_ref(), "view_border_y", self.center[1]),
-                ro_prop(t!("Width").as_ref(),
+                ro_prop(
+                    t!("Width").as_ref(),
                     "view_border_width",
                     format!("{:.6}", self.max[0] - self.min[0]),
                 ),
-                ro_prop(t!("Height").as_ref(),
+                ro_prop(
+                    t!("Height").as_ref(),
                     "view_border_height",
                     format!("{:.6}", self.max[1] - self.min[1]),
                 ),
                 edit_prop(t!("Scale").as_ref(), "view_border_scale", self.scale),
-                edit_angle_prop(t!("Rotation").as_ref(),
+                edit_angle_prop(
+                    t!("Rotation").as_ref(),
                     "view_border_rotation",
                     self.rotation_angle.to_degrees(),
                 ),
-                ro_prop(t!("Version").as_ref(), "view_border_version", self.version.to_string()),
-                ro_prop(t!("Active Viewport").as_ref(),
+                ro_prop(
+                    t!("Version").as_ref(),
+                    "view_border_version",
+                    self.version.to_string(),
+                ),
+                ro_prop(
+                    t!("Active Viewport").as_ref(),
                     "view_border_viewport",
                     handle_text(self.active_viewport),
                 ),
-                ro_prop(t!("Scale Object").as_ref(),
+                ro_prop(
+                    t!("Scale Object").as_ref(),
                     "view_border_scale_handle",
                     handle_text(self.scale_handle),
                 ),

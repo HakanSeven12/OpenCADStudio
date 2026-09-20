@@ -84,12 +84,7 @@ impl Default for AutoConstrainSettings {
 impl AutoConstrainSettings {
     pub fn sanitize(&mut self) {
         let mut priority = Vec::with_capacity(AutoConstraintKind::ALL.len());
-        for kind in self
-            .priority
-            .iter()
-            .copied()
-            .chain(AutoConstraintKind::ALL)
-        {
+        for kind in self.priority.iter().copied().chain(AutoConstraintKind::ALL) {
             if !priority.contains(&kind) {
                 priority.push(kind);
             }
@@ -488,7 +483,10 @@ pub struct UserSettings {
     pub language: crate::i18n::Language,
     /// CLIPROMPTLINES: how many temporary prompt lines for a single command
     /// are displayed above the command window (0–50, Registry, default 3).
-    #[serde(default = "default_clipromptlines", deserialize_with = "deserialize_clipromptlines")]
+    #[serde(
+        default = "default_clipromptlines",
+        deserialize_with = "deserialize_clipromptlines"
+    )]
     pub cliprompt_lines: i32,
     /// COMMANDLINEFADETIME: how long command-line overlay history lines stay
     /// visible, in milliseconds (0–60000, default 3000). 0 skips transient lines.
@@ -720,7 +718,10 @@ mod tests {
             SnapType::Center,
             SnapType::Intersection,
         ] {
-            assert!(modes.contains(&expected), "{expected:?} is not in the default set");
+            assert!(
+                modes.contains(&expected),
+                "{expected:?} is not in the default set"
+            );
         }
 
         // The Snapper and the persisted default have to agree, or the running
@@ -731,12 +732,19 @@ mod tests {
     #[test]
     fn osmode_encodes_bits_and_suppress() {
         // Endpoint(1) + Midpoint(2) + Intersection(32) = 35, master on.
-        let on = [SnapType::Endpoint, SnapType::Midpoint, SnapType::Intersection];
+        let on = [
+            SnapType::Endpoint,
+            SnapType::Midpoint,
+            SnapType::Intersection,
+        ];
         assert_eq!(osmode_from_snaps(on.iter(), true), 35);
         // Master off sets the suppress bit (16384).
         assert_eq!(osmode_from_snaps(on.iter(), false), 35 | 16384);
         // OCS-only snaps carry no bit and are dropped.
-        assert_eq!(osmode_from_snaps([SnapType::Grid, SnapType::ObjectPick].iter(), true), 0);
+        assert_eq!(
+            osmode_from_snaps([SnapType::Grid, SnapType::ObjectPick].iter(), true),
+            0
+        );
     }
 
     #[test]

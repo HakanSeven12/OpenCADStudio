@@ -269,7 +269,10 @@ mod windows_impl {
     }
 
     fn wide(s: &str) -> Vec<u16> {
-        std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect()
+        std::ffi::OsStr::new(s)
+            .encode_wide()
+            .chain(Some(0))
+            .collect()
     }
 
     // Create `subkey` under HKCU and write `data` into `value` (None = the key's
@@ -298,9 +301,8 @@ mod windows_impl {
         let data_w = wide(data);
         // cbData counts bytes including the trailing NUL that `wide` appended.
         let cb = (data_w.len() * std::mem::size_of::<u16>()) as u32;
-        let rc = unsafe {
-            RegSetValueExW(hkey, name_ptr, 0, REG_SZ, data_w.as_ptr() as *const u8, cb)
-        };
+        let rc =
+            unsafe { RegSetValueExW(hkey, name_ptr, 0, REG_SZ, data_w.as_ptr() as *const u8, cb) };
         unsafe { RegCloseKey(hkey) };
         if rc != 0 {
             return Err(format!("RegSetValueExW failed ({rc}) for {subkey}"));
@@ -348,7 +350,11 @@ mod windows_impl {
     fn register_progid(exe: &str, progid: &str, description: &str) -> Result<(), String> {
         let base = format!(r"Software\Classes\{progid}");
         set_string(&base, None, description)?;
-        set_string(&format!(r"{base}\DefaultIcon"), None, &format!("\"{exe}\",0"))?;
+        set_string(
+            &format!(r"{base}\DefaultIcon"),
+            None,
+            &format!("\"{exe}\",0"),
+        )?;
         set_string(
             &format!(r"{base}\shell\open\command"),
             None,
@@ -377,7 +383,11 @@ mod windows_impl {
         set_string(APP_BASE, Some("FriendlyAppName"), "Open CAD Studio")?;
         // DefaultIcon is what Windows uses to show the app icon in the
         // "Open with" context-menu list and the "Choose another app" picker.
-        set_string(&format!(r"{APP_BASE}\DefaultIcon"), None, &format!("\"{exe}\",0"))?;
+        set_string(
+            &format!(r"{APP_BASE}\DefaultIcon"),
+            None,
+            &format!("\"{exe}\",0"),
+        )?;
         // Listing the extensions under SupportedTypes is what makes the app
         // appear in the "Open with → Choose another app" picker for them.
         set_string(&format!(r"{APP_BASE}\SupportedTypes"), Some(".dwg"), "")?;
@@ -420,9 +430,21 @@ mod windows_impl {
             Some("ApplicationDescription"),
             "2D/3D CAD application for DWG and DXF drawings.",
         )?;
-        set_string(&format!(r"{CAP}\FileAssociations"), Some(".dwg"), "OpenCADStudio.DWG")?;
-        set_string(&format!(r"{CAP}\FileAssociations"), Some(".dxf"), "OpenCADStudio.DXF")?;
-        set_string(&format!(r"{CAP}\FileAssociations"), Some(".bak"), "OpenCADStudio.BAK")?;
+        set_string(
+            &format!(r"{CAP}\FileAssociations"),
+            Some(".dwg"),
+            "OpenCADStudio.DWG",
+        )?;
+        set_string(
+            &format!(r"{CAP}\FileAssociations"),
+            Some(".dxf"),
+            "OpenCADStudio.DXF",
+        )?;
+        set_string(
+            &format!(r"{CAP}\FileAssociations"),
+            Some(".bak"),
+            "OpenCADStudio.BAK",
+        )?;
         set_string(
             r"Software\RegisteredApplications",
             Some("Open CAD Studio"),

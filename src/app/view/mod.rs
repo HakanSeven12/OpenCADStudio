@@ -612,7 +612,10 @@ bg={bg_ms:.1}ms n={view_count}"
             let control_polygon = tab.selected_handle.and_then(|handle| {
                 let spline = match tab.scene.document.get_entity(handle) {
                     Some(acadrust::EntityType::Spline(spline))
-                        if crate::entities::spline::shows_control_vertices(spline) => spline,
+                        if crate::entities::spline::shows_control_vertices(spline) =>
+                    {
+                        spline
+                    }
                     _ => return None,
                 };
                 if tab
@@ -784,7 +787,7 @@ bg={bg_ms:.1}ms n={view_count}"
                                 && b.y.is_finite()
                                 && a.x.is_finite()
                                 && a.y.is_finite())
-                                .then_some((b, a))
+                            .then_some((b, a))
                         })
                         .collect()
                 }
@@ -882,17 +885,19 @@ bg={bg_ms:.1}ms n={view_count}"
                         self.constraint_bar_mode,
                     )
                     .into_iter()
-                    .map(|(id, point, direction, label, is_conflicting, hover_points)| {
-                        let selected = tab.scene.selected_constraint == Some(id);
-                        (
-                            point,
-                            direction,
-                            label,
-                            is_conflicting,
-                            selected,
-                            hover_points,
-                        )
-                    })
+                    .map(
+                        |(id, point, direction, label, is_conflicting, hover_points)| {
+                            let selected = tab.scene.selected_constraint == Some(id);
+                            (
+                                point,
+                                direction,
+                                label,
+                                is_conflicting,
+                                selected,
+                                hover_points,
+                            )
+                        },
+                    )
                     .collect()
             };
             crate::ui::overlay::selection_overlay(
@@ -1119,8 +1124,12 @@ bg={bg_ms:.1}ms n={view_count}"
                         (None, _) if rectangle_values.is_some() => {
                             let (width, height) = rectangle_values.unwrap();
                             match f.role {
-                                crate::command::DynRole::Width => crate::entities::common::format_length(width),
-                                crate::command::DynRole::Height => crate::entities::common::format_length(height),
+                                crate::command::DynRole::Width => {
+                                    crate::entities::common::format_length(width)
+                                }
+                                crate::command::DynRole::Height => {
+                                    crate::entities::common::format_length(height)
+                                }
                                 _ => String::new(),
                             }
                         }
@@ -2718,7 +2727,9 @@ impl OpenCADStudio {
             } else {
                 Subscription::none()
             },
-            self.spacemouse.subscription().map(|_| Message::SpaceMouseWake),
+            self.spacemouse
+                .subscription()
+                .map(|_| Message::SpaceMouseWake),
             event::listen_with(|event, _, id| match event {
                 iced::Event::Window(window::Event::Focused) => {
                     Some(Message::SpaceMouseFocus(id, true))
@@ -2907,15 +2918,15 @@ impl OpenCADStudio {
             crate::ui::dock::PanelId::BlockPalette => {
                 crate::ui::window::block_palette::view(&self.block_palette, width, auto_collapse)
             }
-            crate::ui::dock::PanelId::ExternalReferences => self.xref_manager.view(
-                width,
-                auto_collapse,
-                tab.xref_missing,
-                &tab.scene.document,
-            ),
+            crate::ui::dock::PanelId::ExternalReferences => {
+                self.xref_manager
+                    .view(width, auto_collapse, tab.xref_missing, &tab.scene.document)
+            }
             crate::ui::dock::PanelId::Browser => crate::ui::window::browser::view(
                 &tab.scene.document,
-                tab.sketch_session.as_ref().map(|session| session.name.as_str()),
+                tab.sketch_session
+                    .as_ref()
+                    .map(|session| session.name.as_str()),
                 width,
                 auto_collapse,
             ),

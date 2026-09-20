@@ -1,14 +1,13 @@
 // ZOOM WINDOW command — pick two corners to define the zoom area.
 
-use glam::{DVec3, Vec3};
 use crate::t;
+use glam::{DVec3, Vec3};
 
 use crate::command::{CadCommand, CmdOption, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 
-pub const ICON: IconKind =
-    IconKind::Svg(include_bytes!("../../../assets/icons/zoom_window.svg"));
+pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/zoom_window.svg"));
 
 /// Ribbon button: zoom into a rectangle picked by two corners.
 pub fn tool() -> ToolDef {
@@ -108,7 +107,10 @@ impl CadCommand for ZoomWindowCommand {
         }
         let pt = pt.as_vec3();
         if let Some(p1) = self.first {
-            CmdResult::ZoomToWindow { p1: p1.as_dvec3(), p2: pt.as_dvec3() }
+            CmdResult::ZoomToWindow {
+                p1: p1.as_dvec3(),
+                p2: pt.as_dvec3(),
+            }
         } else {
             self.first = Some(pt);
             CmdResult::NeedPoint
@@ -130,7 +132,8 @@ impl CadCommand for ZoomWindowCommand {
         true
     }
 
-    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> { let pt = pt.as_vec3();
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
+        let pt = pt.as_vec3();
         let p1 = self.first?;
         let min = p1.min(pt);
         let max = p1.max(pt);

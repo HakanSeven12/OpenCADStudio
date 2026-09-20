@@ -2,9 +2,9 @@
 // selection's bounding box to a PDF (handled by the host). No dialog. (#325)
 
 use crate::command::{CadCommand, CmdResult};
+use crate::t;
 use acadrust::Handle;
 use glam::DVec3;
-use crate::t;
 
 pub struct QuickPrintCommand {
     /// Latest selection set, refreshed on every selection action.
@@ -13,7 +13,9 @@ pub struct QuickPrintCommand {
 
 impl QuickPrintCommand {
     pub fn new() -> Self {
-        Self { handles: Vec::new() }
+        Self {
+            handles: Vec::new(),
+        }
     }
 }
 

@@ -100,7 +100,12 @@ impl SectionPlaneCommand {
         ]
     }
 
-    fn frame_extents(&self, centre: DVec3, tangent: DVec3, vertical: DVec3) -> (f64, f64, f64, f64) {
+    fn frame_extents(
+        &self,
+        centre: DVec3,
+        tangent: DVec3,
+        vertical: DVec3,
+    ) -> (f64, f64, f64, f64) {
         let mut t_min = f64::INFINITY;
         let mut t_max = f64::NEG_INFINITY;
         let mut v_min = f64::INFINITY;
@@ -122,7 +127,12 @@ impl SectionPlaneCommand {
         } else {
             1.0
         };
-        (t_min - t_margin, t_max + t_margin, v_min - v_margin, v_max + v_margin)
+        (
+            t_min - t_margin,
+            t_max + t_margin,
+            v_min - v_margin,
+            v_max + v_margin,
+        )
     }
 
     fn entity(&self, vertices: Vec<DVec3>, vertical: DVec3, positive_view: bool) -> EntityType {
@@ -140,8 +150,12 @@ impl SectionPlaneCommand {
             SectionKind::Slice => (span / 60.0).max(1e-4),
             SectionKind::Boundary | SectionKind::Volume => span,
         };
-        let back_line_vertices = if matches!(self.kind, SectionKind::Boundary | SectionKind::Volume) {
-            vertices.iter().map(|point| *point + viewing * depth).collect()
+        let back_line_vertices = if matches!(self.kind, SectionKind::Boundary | SectionKind::Volume)
+        {
+            vertices
+                .iter()
+                .map(|point| *point + viewing * depth)
+                .collect()
         } else {
             Vec::new()
         };
@@ -185,7 +199,10 @@ impl SectionPlaneCommand {
         };
         let tangent = viewing.cross(vertical).normalize_or(DVec3::X);
         let (t_min, t_max, _, _) = self.frame_extents(point, tangent, vertical);
-        (vec![point + tangent * t_min, point + tangent * t_max], vertical)
+        (
+            vec![point + tangent * t_min, point + tangent * t_max],
+            vertical,
+        )
     }
 
     fn orthographic(&self, kind: Orthographic) -> EntityType {
@@ -324,7 +341,11 @@ impl CadCommand for SectionPlaneCommand {
                 CmdResult::NeedPoint
             }
             Step::DrawNext => {
-                if self.draw_points.last().is_some_and(|last| last.distance(point) <= 1e-9) {
+                if self
+                    .draw_points
+                    .last()
+                    .is_some_and(|last| last.distance(point) <= 1e-9)
+                {
                     self.notice = Some("SECTIONPLANE  Consecutive section points must differ:");
                 } else {
                     self.draw_points.push(point);
@@ -352,24 +373,26 @@ impl CadCommand for SectionPlaneCommand {
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let keyword = text.trim().to_ascii_uppercase();
         Some(match self.step {
-            Step::Locate => match keyword.as_str() {
-                "D" | "DRAW" | "DRAWSECTION" => {
-                    self.step = Step::DrawStart;
-                    CmdResult::NeedPoint
+            Step::Locate => {
+                match keyword.as_str() {
+                    "D" | "DRAW" | "DRAWSECTION" => {
+                        self.step = Step::DrawStart;
+                        CmdResult::NeedPoint
+                    }
+                    "O" | "ORTHO" | "ORTHOGRAPHIC" => {
+                        self.step = Step::Orthographic;
+                        CmdResult::NeedPoint
+                    }
+                    "T" | "TYPE" => {
+                        self.step = Step::Type;
+                        CmdResult::NeedPoint
+                    }
+                    _ => {
+                        self.notice = Some("SECTIONPLANE  Unknown option. Choose Draw section, Orthographic, or Type:");
+                        CmdResult::NeedPoint
+                    }
                 }
-                "O" | "ORTHO" | "ORTHOGRAPHIC" => {
-                    self.step = Step::Orthographic;
-                    CmdResult::NeedPoint
-                }
-                "T" | "TYPE" => {
-                    self.step = Step::Type;
-                    CmdResult::NeedPoint
-                }
-                _ => {
-                    self.notice = Some("SECTIONPLANE  Unknown option. Choose Draw section, Orthographic, or Type:");
-                    CmdResult::NeedPoint
-                }
-            },
+            }
             Step::Orthographic => {
                 let kind = match keyword.as_str() {
                     "F" | "FRONT" => Some(Orthographic::Front),
@@ -394,7 +417,9 @@ impl CadCommand for SectionPlaneCommand {
                 "B" | "BOUNDARY" => self.choose_kind(SectionKind::Boundary),
                 "V" | "VOLUME" => self.choose_kind(SectionKind::Volume),
                 _ => {
-                    self.notice = Some("SECTIONPLANE  Unknown type. Choose Plane, Slice, Boundary, or Volume:");
+                    self.notice = Some(
+                        "SECTIONPLANE  Unknown type. Choose Plane, Slice, Boundary, or Volume:",
+                    );
                     CmdResult::NeedPoint
                 }
             },
@@ -432,7 +457,11 @@ impl CadCommand for SectionPlaneCommand {
             self.step = Step::Through;
             return CmdResult::NeedPoint;
         }
-        let Some(face_normal) = self.picked_direction.take().filter(|normal| normal.length_squared() > 1e-18) else {
+        let Some(face_normal) = self
+            .picked_direction
+            .take()
+            .filter(|normal| normal.length_squared() > 1e-18)
+        else {
             self.notice = Some("SECTIONPLANE  Select a planar face or specify a point:");
             return CmdResult::NeedPoint;
         };
@@ -451,12 +480,20 @@ impl CadCommand for SectionPlaneCommand {
             return None;
         }
         self.draw_points.pop();
-        self.step = if self.draw_points.is_empty() { Step::DrawStart } else { Step::DrawNext };
+        self.step = if self.draw_points.is_empty() {
+            Step::DrawStart
+        } else {
+            Step::DrawNext
+        };
         Some(CmdResult::NeedPoint)
     }
 
     fn on_preview_wires(&mut self, point: DVec3) -> Vec<WireModel> {
-        let mut points = self.draw_points.iter().map(|p| p.to_array()).collect::<Vec<_>>();
+        let mut points = self
+            .draw_points
+            .iter()
+            .map(|p| p.to_array())
+            .collect::<Vec<_>>();
         match self.step {
             Step::Through => {
                 if let Some(first) = self.first {
@@ -505,10 +542,7 @@ mod tests {
 
     #[test]
     fn slice_uses_persistent_thickness_without_boundary_geometry() {
-        let mut command = SectionPlaneCommand::new(
-            Some((DVec3::ZERO, DVec3::splat(10.0))),
-            3,
-        );
+        let mut command = SectionPlaneCommand::new(Some((DVec3::ZERO, DVec3::splat(10.0))), 3);
         command.kind = SectionKind::Slice;
         let entity = command.entity(vec![DVec3::ZERO, DVec3::Y * 6.0], DVec3::Z, true);
         let (entity, section) = data(&entity);
@@ -516,16 +550,14 @@ mod tests {
         assert_eq!(section.state, 1);
         assert!(section.back_line_vertices.is_empty());
         assert!(crate::entities::extended::section_is_slice(entity));
-        assert!((crate::entities::extended::section_slice_depth(entity).unwrap() - 0.1).abs()
-            < 1e-12);
+        assert!(
+            (crate::entities::extended::section_slice_depth(entity).unwrap() - 0.1).abs() < 1e-12
+        );
     }
 
     #[test]
     fn boundary_keeps_a_real_back_line_and_no_slice_marker() {
-        let mut command = SectionPlaneCommand::new(
-            Some((DVec3::ZERO, DVec3::splat(10.0))),
-            1,
-        );
+        let mut command = SectionPlaneCommand::new(Some((DVec3::ZERO, DVec3::splat(10.0))), 1);
         command.kind = SectionKind::Boundary;
         let entity = command.entity(vec![DVec3::ZERO, DVec3::Y * 6.0], DVec3::Z, true);
         let (entity, section) = data(&entity);

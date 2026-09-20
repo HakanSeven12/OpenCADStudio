@@ -46,7 +46,8 @@ impl TangentConstraintCommand {
             }
             EntityType::Ellipse(_) => (ParametricRef::whole(handle), TangentOperand::Ellipse),
             EntityType::LwPolyline(_) | EntityType::Polyline2D(_) => {
-                let (source, _, _) = crate::scene::centerline::picked_source(entity, handle, point)?;
+                let (source, _, _) =
+                    crate::scene::centerline::picked_source(entity, handle, point)?;
                 let index = usize::try_from(source.segment_index).ok()?;
                 (ParametricRef::segment(handle, index), TangentOperand::Line)
             }
@@ -66,10 +67,7 @@ impl TangentConstraintCommand {
         )
     }
 
-    pub fn preselected_reference(
-        entity: &EntityType,
-        handle: Handle,
-    ) -> Option<ParametricRef> {
+    pub fn preselected_reference(entity: &EntityType, handle: Handle) -> Option<ParametricRef> {
         match entity {
             EntityType::Line(_)
             | EntityType::Circle(_)
@@ -141,9 +139,7 @@ impl CadCommand for TangentConstraintCommand {
             self.first = Some(pick);
             return CmdResult::NeedPoint;
         };
-        if first.reference == pick.reference
-            || !Self::pair_supported(first.operand, pick.operand)
-        {
+        if first.reference == pick.reference || !Self::pair_supported(first.operand, pick.operand) {
             return Self::invalid_selection();
         }
         CmdResult::AddTangentConstraint {

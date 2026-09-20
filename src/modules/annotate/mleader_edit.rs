@@ -125,11 +125,9 @@ impl CadCommand for MLeaderAddCommand {
                 return CmdResult::Cancel;
             }
             let h = *handle;
-                if let EntityType::MultiLeader(ref mut ml) = entity {
-                let points: Vec<Vector3> = pts
-                    .iter()
-                    .map(|p| Vector3::new(p.x, p.y, p.z))
-                    .collect();
+            if let EntityType::MultiLeader(ref mut ml) = entity {
+                let points: Vec<Vector3> =
+                    pts.iter().map(|p| Vector3::new(p.x, p.y, p.z)).collect();
                 let template_root = ml.context.leader_roots.first().cloned();
                 let template_line = template_root
                     .as_ref()
@@ -254,7 +252,8 @@ impl CadCommand for MLeaderRemoveCommand {
         CmdResult::NeedPoint
     }
 
-    fn on_point(&mut self, pt: DVec3) -> CmdResult { let pt = pt.as_vec3();
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        let pt = pt.as_vec3();
         if let RemoveStep::PickLeaderToRemove { handle, entity } = &mut self.step {
             if let Some(mut ent) = entity.take() {
                 let h = *handle;
@@ -266,21 +265,26 @@ impl CadCommand for MLeaderRemoveCommand {
                         .iter()
                         .enumerate()
                         .flat_map(|(root_index, root)| {
-                            root.lines.iter().enumerate().map(move |(line_index, line)| {
-                                let mut distance = line
-                                    .points
-                                    .windows(2)
-                                    .map(|segment| point_segment_distance_xy(pick, segment[0], segment[1]))
-                                    .fold(f64::INFINITY, f64::min);
-                                if let Some(last) = line.points.last().copied() {
-                                    distance = distance.min(point_segment_distance_xy(
-                                        pick,
-                                        last,
-                                        root.connection_point,
-                                    ));
-                                }
-                                (root_index, line_index, distance)
-                            })
+                            root.lines
+                                .iter()
+                                .enumerate()
+                                .map(move |(line_index, line)| {
+                                    let mut distance = line
+                                        .points
+                                        .windows(2)
+                                        .map(|segment| {
+                                            point_segment_distance_xy(pick, segment[0], segment[1])
+                                        })
+                                        .fold(f64::INFINITY, f64::min);
+                                    if let Some(last) = line.points.last().copied() {
+                                        distance = distance.min(point_segment_distance_xy(
+                                            pick,
+                                            last,
+                                            root.connection_point,
+                                        ));
+                                    }
+                                    (root_index, line_index, distance)
+                                })
                         })
                         .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
                     let Some((root_index, line_index, _)) = best else {
@@ -390,13 +394,11 @@ impl CadCommand for MLeaderAlignCommand {
                 };
                 CmdResult::NeedPoint
             }
-            AlignStep::PickEndDir { handles, from } => {
-                CmdResult::AlignMLeaders {
-                    handles: handles.clone(),
-                    from: *from,
-                    to: pt,
-                }
-            }
+            AlignStep::PickEndDir { handles, from } => CmdResult::AlignMLeaders {
+                handles: handles.clone(),
+                from: *from,
+                to: pt,
+            },
             _ => CmdResult::NeedPoint,
         }
     }
@@ -503,9 +505,9 @@ fn preview_wire(pts: &[Vec3]) -> WireModel {
         render_instance: None,
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
-            dash_from_start: false,
-            dash_align_end: None,
-            text_verts: Vec::new(),
+        dash_from_start: false,
+        dash_align_end: None,
+        text_verts: Vec::new(),
         name: "mleader_edit_preview".into(),
         points: pts.iter().map(|p| [p.x, p.y, p.z]).collect(),
         points_low: Vec::new(),
@@ -539,9 +541,16 @@ fn point_segment_distance_xy(point: Vector3, start: Vector3, end: Vector3) -> f6
 // Silence unused-import warning for MultiLeader and LeaderLine if not used in all paths
 fn _uses_ml_types(_ml: &MultiLeader, _ll: &LeaderLine) {}
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["MLEADERADD"] });  // MLeaderAddCommand
-inventory::submit!(crate::command::CommandRegistration { names: &["MLEADERALIGN"] });  // MLeaderAlignCommand
-inventory::submit!(crate::command::CommandRegistration { names: &["MLEADERCOLLECT"] });  // MLeaderCollectCommand
-inventory::submit!(crate::command::CommandRegistration { names: &["MLEADERREMOVE"] });  // MLeaderRemoveCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["MLEADERADD"]
+}); // MLeaderAddCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["MLEADERALIGN"]
+}); // MLeaderAlignCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["MLEADERCOLLECT"]
+}); // MLeaderCollectCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["MLEADERREMOVE"]
+}); // MLeaderRemoveCommand

@@ -10,9 +10,9 @@ use iced::Task;
 use super::{Message, ModalKind, OpenCADStudio};
 use crate::command::CadCommand;
 use crate::ui::window::annotation_data::{
-    DataExtractionField, DataExtractionState, DataLinkChoice, DataLinkField,
-    ExtractionBegin, ExtractionPage, ExtractionSource, LinkPathType, LinkRange,
-    TableInsertField, TableInsertion, TableSource,
+    DataExtractionField, DataExtractionState, DataLinkChoice, DataLinkField, ExtractionBegin,
+    ExtractionPage, ExtractionSource, LinkPathType, LinkRange, TableInsertField, TableInsertion,
+    TableSource,
 };
 
 #[derive(Clone)]
@@ -132,7 +132,9 @@ fn column_index(text: &str) -> Option<usize> {
             break;
         }
         any = true;
-        value = value.checked_mul(26)?.checked_add((byte.to_ascii_uppercase() - b'A' + 1) as usize)?;
+        value = value
+            .checked_mul(26)?
+            .checked_add((byte.to_ascii_uppercase() - b'A' + 1) as usize)?;
     }
     any.then_some(value.saturating_sub(1))
 }
@@ -151,7 +153,8 @@ fn crop_range(rows: Vec<Vec<String>>, range: &str) -> Result<Vec<Vec<String>>, S
     };
     let (r0, r1) = (r0.min(r1), r0.max(r1));
     let (c0, c1) = (c0.min(c1), c0.max(c1));
-    Ok(rows.into_iter()
+    Ok(rows
+        .into_iter()
         .skip(r0)
         .take(r1 - r0 + 1)
         .map(|row| {
@@ -185,10 +188,7 @@ fn workbook_metadata(path: &Path) -> Result<(Vec<String>, Vec<String>), String> 
 fn named_range_target(formula: &str) -> Option<(String, String)> {
     let formula = formula.trim().trim_start_matches('=');
     let (sheet, range) = formula.rsplit_once('!')?;
-    let sheet = sheet
-        .trim()
-        .trim_matches('\'')
-        .replace("''", "'");
+    let sheet = sheet.trim().trim_matches('\'').replace("''", "'");
     let range = range.replace('$', "");
     (!sheet.is_empty() && !range.is_empty()).then_some((sheet, range))
 }
@@ -199,7 +199,11 @@ pub(crate) fn read_tabular_file(
     range_kind: LinkRange,
     range_value: Option<&str>,
 ) -> Result<Vec<Vec<String>>, String> {
-    let ext = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     let (rows, cell_range) = if ext == "csv" || ext == "txt" {
         if range_kind == LinkRange::NamedRange {
             return Err(crate::t!("Named ranges require a spreadsheet file.").into_owned());
@@ -225,8 +229,9 @@ pub(crate) fn read_tabular_file(
                 .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
                 .map(|(_, formula)| formula.clone())
                 .ok_or_else(|| crate::t!("The named range was not found.").into_owned())?;
-            named_range_target(&formula)
-                .ok_or_else(|| crate::t!("The named range does not refer to a worksheet cell range.").into_owned())?
+            named_range_target(&formula).ok_or_else(|| {
+                crate::t!("The named range does not refer to a worksheet cell range.").into_owned()
+            })?
         } else {
             let selected_sheet = sheet
                 .filter(|value| !value.trim().is_empty())
@@ -251,7 +256,10 @@ pub(crate) fn read_tabular_file(
             (!cell_range.is_empty()).then_some(cell_range),
         )
     };
-    let rows = match cell_range.as_deref().filter(|value| !value.trim().is_empty()) {
+    let rows = match cell_range
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
         Some(value) => crop_range(rows, value)?,
         None => rows,
     };
@@ -263,13 +271,19 @@ pub(crate) fn read_tabular_file(
 }
 
 fn table_style_handle(doc: &CadDocument, name: &str) -> Option<Handle> {
-    doc.objects.iter().find_map(|(handle, object)| match object {
-        ObjectType::TableStyle(style) if style.name.eq_ignore_ascii_case(name) => Some(*handle),
-        _ => None,
-    })
+    doc.objects
+        .iter()
+        .find_map(|(handle, object)| match object {
+            ObjectType::TableStyle(style) if style.name.eq_ignore_ascii_case(name) => Some(*handle),
+            _ => None,
+        })
 }
 
-fn build_table(rows: &[Vec<String>], style: Option<Handle>, title: Option<&str>) -> acadrust::entities::Table {
+fn build_table(
+    rows: &[Vec<String>],
+    style: Option<Handle>,
+    title: Option<&str>,
+) -> acadrust::entities::Table {
     let columns = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
     let title_rows = usize::from(title.is_some_and(|value| !value.trim().is_empty()));
     let mut table = TableBuilder::new(rows.len().max(1) + title_rows, columns)
@@ -330,7 +344,11 @@ fn link_custom_data(sheet: &str, kind: LinkRange, range: Option<&str>) -> Vec<Da
             target: Handle::NULL,
             value: format!(
                 "range-kind:{}",
-                if kind == LinkRange::NamedRange { "named" } else { "cell" }
+                if kind == LinkRange::NamedRange {
+                    "named"
+                } else {
+                    "cell"
+                }
             ),
         });
         if let Some(range) = range.filter(|value| !value.trim().is_empty()) {
@@ -362,10 +380,7 @@ pub(crate) fn read_data_link(
     read_link_rows(doc, link)
 }
 
-pub(crate) fn data_link_write_path(
-    doc: &CadDocument,
-    handle: Handle,
-) -> Result<PathBuf, String> {
+pub(crate) fn data_link_write_path(doc: &CadDocument, handle: Handle) -> Result<PathBuf, String> {
     let link = data_link(doc, handle)
         .ok_or_else(|| crate::t!("The data link no longer exists.").into_owned())?;
     if link.option & 1 == 0 {
@@ -375,21 +390,42 @@ pub(crate) fn data_link_write_path(
     let writable = path
         .extension()
         .and_then(|value| value.to_str())
-        .is_some_and(|value| value.eq_ignore_ascii_case("csv") || value.eq_ignore_ascii_case("txt"));
+        .is_some_and(|value| {
+            value.eq_ignore_ascii_case("csv") || value.eq_ignore_ascii_case("txt")
+        });
     if !writable {
-        return Err(crate::t!("Writing linked data is supported for CSV and text sources.").into_owned());
+        return Err(
+            crate::t!("Writing linked data is supported for CSV and text sources.").into_owned(),
+        );
     }
     Ok(path)
 }
 
 fn entity_details(entity: &EntityType) -> String {
     match entity {
-        EntityType::Line(value) => format!("({:.3},{:.3},{:.3})-({:.3},{:.3},{:.3})", value.start.x, value.start.y, value.start.z, value.end.x, value.end.y, value.end.z),
-        EntityType::Circle(value) => format!("C({:.3},{:.3},{:.3}) R={:.3}", value.center.x, value.center.y, value.center.z, value.radius),
-        EntityType::Arc(value) => format!("C({:.3},{:.3},{:.3}) R={:.3} {:.1}°-{:.1}°", value.center.x, value.center.y, value.center.z, value.radius, value.start_angle.to_degrees(), value.end_angle.to_degrees()),
+        EntityType::Line(value) => format!(
+            "({:.3},{:.3},{:.3})-({:.3},{:.3},{:.3})",
+            value.start.x, value.start.y, value.start.z, value.end.x, value.end.y, value.end.z
+        ),
+        EntityType::Circle(value) => format!(
+            "C({:.3},{:.3},{:.3}) R={:.3}",
+            value.center.x, value.center.y, value.center.z, value.radius
+        ),
+        EntityType::Arc(value) => format!(
+            "C({:.3},{:.3},{:.3}) R={:.3} {:.1}°-{:.1}°",
+            value.center.x,
+            value.center.y,
+            value.center.z,
+            value.radius,
+            value.start_angle.to_degrees(),
+            value.end_angle.to_degrees()
+        ),
         EntityType::Text(value) => value.value.clone(),
         EntityType::MText(value) => value.value.clone(),
-        EntityType::Insert(value) => format!("{} @({:.3},{:.3},{:.3})", value.block_name, value.insert_point.x, value.insert_point.y, value.insert_point.z),
+        EntityType::Insert(value) => format!(
+            "{} @({:.3},{:.3},{:.3})",
+            value.block_name, value.insert_point.x, value.insert_point.y, value.insert_point.z
+        ),
         EntityType::LwPolyline(value) => format!("{} vertices", value.vertices.len()),
         EntityType::Polyline(value) => format!("{} vertices", value.vertices.len()),
         EntityType::Polyline2D(value) => format!("{} vertices", value.vertices.len()),
@@ -447,7 +483,9 @@ fn collect_drawing_paths(
         return Ok(());
     }
     if !path.is_dir() {
-        return Err(crate::tf!("Data source not found: %{path}", path = path.display()).into_owned());
+        return Err(
+            crate::tf!("Data source not found: %{path}", path = path.display()).into_owned(),
+        );
     }
     for entry in std::fs::read_dir(path).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
@@ -489,24 +527,45 @@ fn collect_type_counts(
     }
 }
 
-fn extraction_preview(state: &DataExtractionState, current: &CadDocument) -> Result<Vec<Vec<String>>, String> {
-    let allowed_types = state.objects.iter().filter(|value| value.checked).map(|value| value.name.clone()).collect::<BTreeSet<_>>();
-    let selected = state.selection_handles.iter().copied().collect::<BTreeSet<_>>();
+fn extraction_preview(
+    state: &DataExtractionState,
+    current: &CadDocument,
+) -> Result<Vec<Vec<String>>, String> {
+    let allowed_types = state
+        .objects
+        .iter()
+        .filter(|value| value.checked)
+        .map(|value| value.name.clone())
+        .collect::<BTreeSet<_>>();
+    let selected = state
+        .selection_handles
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
     let mut records = Vec::new();
     match state.source {
-        ExtractionSource::CurrentDrawing => collect_records(current, None, &allowed_types, &mut records),
-        ExtractionSource::CurrentSelection => collect_records(current, Some(&selected), &allowed_types, &mut records),
+        ExtractionSource::CurrentDrawing => {
+            collect_records(current, None, &allowed_types, &mut records)
+        }
+        ExtractionSource::CurrentSelection => {
+            collect_records(current, Some(&selected), &allowed_types, &mut records)
+        }
         ExtractionSource::DrawingsAndFolders => {
             if state.include_current {
                 collect_records(current, None, &allowed_types, &mut records);
             }
             for source in extraction_drawing_paths(state)? {
-                let doc = crate::io::load_file(&source).map_err(|error| format!("{}: {error}", source.display()))?;
+                let doc = crate::io::load_file(&source)
+                    .map_err(|error| format!("{}: {error}", source.display()))?;
                 collect_records(&doc, None, &allowed_types, &mut records);
             }
         }
     }
-    let props = state.properties.iter().filter(|value| value.checked).collect::<Vec<_>>();
+    let props = state
+        .properties
+        .iter()
+        .filter(|value| value.checked)
+        .collect::<Vec<_>>();
     if props.is_empty() {
         return Err(crate::t!("Select at least one property.").into_owned());
     }
@@ -514,7 +573,12 @@ fn extraction_preview(state: &DataExtractionState, current: &CadDocument) -> Res
     if state.show_name {
         header.push("Name".to_string());
     }
-    header.extend(props.iter().filter(|value| !(state.show_name && value.key == "type")).map(|value| value.name.clone()));
+    header.extend(
+        props
+            .iter()
+            .filter(|value| !(state.show_name && value.key == "type"))
+            .map(|value| value.name.clone()),
+    );
     if state.show_count {
         header.push("Count".to_string());
     }
@@ -526,7 +590,12 @@ fn extraction_preview(state: &DataExtractionState, current: &CadDocument) -> Res
             if state.show_name {
                 values.push(record.object_type.clone());
             }
-            values.extend(props.iter().filter(|value| !(state.show_name && value.key == "type")).map(|value| record.value(&value.key)));
+            values.extend(
+                props
+                    .iter()
+                    .filter(|value| !(state.show_name && value.key == "type"))
+                    .map(|value| record.value(&value.key)),
+            );
             *grouped.entry(values).or_default() += 1;
         }
         for (mut values, count) in grouped {
@@ -541,7 +610,12 @@ fn extraction_preview(state: &DataExtractionState, current: &CadDocument) -> Res
             if state.show_name {
                 values.push(record.object_type.clone());
             }
-            values.extend(props.iter().filter(|value| !(state.show_name && value.key == "type")).map(|value| record.value(&value.key)));
+            values.extend(
+                props
+                    .iter()
+                    .filter(|value| !(state.show_name && value.key == "type"))
+                    .map(|value| record.value(&value.key)),
+            );
             if state.show_count {
                 values.push("1".into());
             }
@@ -564,7 +638,12 @@ fn csv_escape(value: &str) -> String {
 fn rows_to_csv(rows: &[Vec<String>]) -> String {
     let mut csv = String::new();
     for row in rows {
-        csv.push_str(&row.iter().map(|value| csv_escape(value)).collect::<Vec<_>>().join(","));
+        csv.push_str(
+            &row.iter()
+                .map(|value| csv_escape(value))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
         csv.push('\n');
     }
     csv
@@ -574,8 +653,18 @@ fn save_extraction_settings(state: &DataExtractionState) -> Result<(), String> {
     if state.settings_path.trim().is_empty() {
         return Ok(());
     }
-    let object_types = state.objects.iter().filter(|value| value.checked).map(|value| value.name.clone()).collect::<Vec<_>>();
-    let properties = state.properties.iter().filter(|value| value.checked).map(|value| value.key.clone()).collect::<Vec<_>>();
+    let object_types = state
+        .objects
+        .iter()
+        .filter(|value| value.checked)
+        .map(|value| value.name.clone())
+        .collect::<Vec<_>>();
+    let properties = state
+        .properties
+        .iter()
+        .filter(|value| value.checked)
+        .map(|value| value.key.clone())
+        .collect::<Vec<_>>();
     let value = serde_json::json!({
         "version": 1,
         "source": match state.source {
@@ -603,36 +692,68 @@ fn save_extraction_settings(state: &DataExtractionState) -> Result<(), String> {
 
 fn load_extraction_settings(state: &mut DataExtractionState) -> Result<(), String> {
     let text = std::fs::read_to_string(&state.settings_path).map_err(|error| error.to_string())?;
-    let value: serde_json::Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|error| error.to_string())?;
     state.source = match value["source"].as_str() {
         Some("currentSelection") => ExtractionSource::CurrentSelection,
         Some("drawingsAndFolders") => ExtractionSource::DrawingsAndFolders,
         _ => ExtractionSource::CurrentDrawing,
     };
-    state.include_current = value["includeCurrent"].as_bool().unwrap_or(state.include_current);
-    state.include_subfolders = value["includeSubfolders"].as_bool().unwrap_or(state.include_subfolders);
+    state.include_current = value["includeCurrent"]
+        .as_bool()
+        .unwrap_or(state.include_current);
+    state.include_subfolders = value["includeSubfolders"]
+        .as_bool()
+        .unwrap_or(state.include_subfolders);
     if let Some(files) = value["sourceFiles"].as_array() {
         state.source_files = files
             .iter()
             .filter_map(|value| value.as_str().map(str::to_string))
             .collect();
     }
-    let object_types = value["objectTypes"].as_array().map(|values| values.iter().filter_map(|value| value.as_str()).collect::<BTreeSet<_>>()).unwrap_or_default();
+    let object_types = value["objectTypes"]
+        .as_array()
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
     for item in &mut state.objects {
         item.checked = object_types.is_empty() || object_types.contains(item.name.as_str());
     }
-    let properties = value["properties"].as_array().map(|values| values.iter().filter_map(|value| value.as_str()).collect::<BTreeSet<_>>()).unwrap_or_default();
+    let properties = value["properties"]
+        .as_array()
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
     for item in &mut state.properties {
         item.checked = properties.is_empty() || properties.contains(item.key.as_str());
     }
-    state.combine_identical = value["combineIdentical"].as_bool().unwrap_or(state.combine_identical);
+    state.combine_identical = value["combineIdentical"]
+        .as_bool()
+        .unwrap_or(state.combine_identical);
     state.show_count = value["showCount"].as_bool().unwrap_or(state.show_count);
     state.show_name = value["showName"].as_bool().unwrap_or(state.show_name);
     state.output_table = value["outputTable"].as_bool().unwrap_or(state.output_table);
     state.output_file = value["outputFile"].as_bool().unwrap_or(state.output_file);
-    state.output_path = value["outputPath"].as_str().unwrap_or(&state.output_path).to_string();
-    state.table_style = value["tableStyle"].as_str().unwrap_or(&state.table_style).to_string();
-    state.table_title = value["tableTitle"].as_str().unwrap_or(&state.table_title).to_string();
+    state.output_path = value["outputPath"]
+        .as_str()
+        .unwrap_or(&state.output_path)
+        .to_string();
+    state.table_style = value["tableStyle"]
+        .as_str()
+        .unwrap_or(&state.table_style)
+        .to_string();
+    state.table_title = value["tableTitle"]
+        .as_str()
+        .unwrap_or(&state.table_title)
+        .to_string();
     Ok(())
 }
 
@@ -669,7 +790,14 @@ impl OpenCADStudio {
         let links = data_link_choices(doc);
         let selected = selected
             .and_then(|handle| links.iter().find(|value| value.handle == handle).cloned())
-            .or_else(|| self.data_link_manager.selected.as_ref().and_then(|old| links.iter().find(|value| value.handle == old.handle).cloned()))
+            .or_else(|| {
+                self.data_link_manager.selected.as_ref().and_then(|old| {
+                    links
+                        .iter()
+                        .find(|value| value.handle == old.handle)
+                        .cloned()
+                })
+            })
             .or_else(|| links.first().cloned());
         let preview = selected
             .as_ref()
@@ -684,16 +812,32 @@ impl OpenCADStudio {
     pub(super) fn open_data_extraction(&mut self) {
         let i = self.active_tab;
         let doc = &self.tabs[i].scene.document;
-        let selection_handles = self.tabs[i].scene.selected_entities().into_iter().map(|(handle, _)| handle).collect::<Vec<_>>();
+        let selection_handles = self.tabs[i]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .map(|(handle, _)| handle)
+            .collect::<Vec<_>>();
         let mut counts = BTreeMap::<String, usize>::new();
         for entity in doc.entities() {
             if !matches!(entity, EntityType::Block(_) | EntityType::BlockEnd(_)) {
-                *counts.entry(crate::entities::names::dxf_name(entity).to_string()).or_default() += 1;
+                *counts
+                    .entry(crate::entities::names::dxf_name(entity).to_string())
+                    .or_default() += 1;
             }
         }
         let mut state = DataExtractionState::default();
         state.selection_handles = selection_handles;
-        state.objects = counts.into_iter().map(|(name, count)| crate::ui::window::annotation_data::ExtractionObject { name, checked: true, count }).collect();
+        state.objects = counts
+            .into_iter()
+            .map(
+                |(name, count)| crate::ui::window::annotation_data::ExtractionObject {
+                    name,
+                    checked: true,
+                    count,
+                },
+            )
+            .collect();
         state.table_styles = table_styles(doc);
         state.table_style = doc.header.current_table_style_name.clone();
         self.data_extraction = state;
@@ -737,7 +881,8 @@ impl OpenCADStudio {
             };
             let doc = &self.tabs[i].scene.document;
             let Some(link) = data_link(doc, choice.handle) else {
-                self.table_insert.error = crate::t!("The selected data link no longer exists.").into_owned();
+                self.table_insert.error =
+                    crate::t!("The selected data link no longer exists.").into_owned();
                 return Task::none();
             };
             let rows = match read_link_rows(doc, link) {
@@ -747,30 +892,57 @@ impl OpenCADStudio {
                     return Task::none();
                 }
             };
-            let table = build_table(&rows, table_style_handle(doc, &self.table_insert.style), None);
-            let command = crate::modules::annotate::data_link::DataLinkPlaceCommand::existing(table, choice.handle);
+            let table = build_table(
+                &rows,
+                table_style_handle(doc, &self.table_insert.style),
+                None,
+            );
+            let command = crate::modules::annotate::data_link::DataLinkPlaceCommand::existing(
+                table,
+                choice.handle,
+            );
             self.active_modal = None;
             self.reset_modal_geometry();
             self.command_line.push_info(&command.prompt());
             self.tabs[i].active_cmd = Some(Box::new(command));
             return Task::none();
         }
-        let parse_usize = |value: &str| value.trim().parse::<usize>().ok().filter(|value| *value > 0);
-        let parse_number = |value: &str| value.trim().parse::<f64>().ok().filter(|value| value.is_finite() && *value > 0.0);
+        let parse_usize = |value: &str| {
+            value
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .filter(|value| *value > 0)
+        };
+        let parse_number = |value: &str| {
+            value
+                .trim()
+                .parse::<f64>()
+                .ok()
+                .filter(|value| value.is_finite() && *value > 0.0)
+        };
         let (Some(columns), Some(data_rows), Some(column_width), Some(row_height)) = (
             parse_usize(&self.table_insert.columns),
             parse_usize(&self.table_insert.data_rows),
             parse_number(&self.table_insert.column_width),
             parse_number(&self.table_insert.row_height),
         ) else {
-            self.table_insert.error = crate::t!("Columns, rows, width, and height must be positive values.").into_owned();
+            self.table_insert.error =
+                crate::t!("Columns, rows, width, and height must be positive values.").into_owned();
             return Task::none();
         };
         let doc = &self.tabs[i].scene.document;
-        let style = doc.objects.iter().find_map(|(handle, object)| match object {
-            ObjectType::TableStyle(style) if style.name.eq_ignore_ascii_case(&self.table_insert.style) => Some((*handle, style)),
-            _ => None,
-        });
+        let style = doc
+            .objects
+            .iter()
+            .find_map(|(handle, object)| match object {
+                ObjectType::TableStyle(style)
+                    if style.name.eq_ignore_ascii_case(&self.table_insert.style) =>
+                {
+                    Some((*handle, style))
+                }
+                _ => None,
+            });
         let multiplier = self.tabs[i].scene.creation_annotation_multiplier();
         let command = crate::modules::annotate::table_cmd::TableCommand::configured(
             style,
@@ -798,7 +970,12 @@ impl OpenCADStudio {
         let mut n = 1usize;
         loop {
             let name = format!("Data Link {n}");
-            if !self.data_link_manager.links.iter().any(|link| link.name.eq_ignore_ascii_case(&name)) {
+            if !self
+                .data_link_manager
+                .links
+                .iter()
+                .any(|link| link.name.eq_ignore_ascii_case(&name))
+            {
                 self.data_link_manager.name = name;
                 break;
             }
@@ -831,7 +1008,8 @@ impl OpenCADStudio {
         let Some(choice) = self.data_link_manager.selected.clone() else {
             return Task::none();
         };
-        let Some(link) = data_link(&self.tabs[self.active_tab].scene.document, choice.handle) else {
+        let Some(link) = data_link(&self.tabs[self.active_tab].scene.document, choice.handle)
+        else {
             return Task::none();
         };
         self.data_link_manager.editing = true;
@@ -839,13 +1017,22 @@ impl OpenCADStudio {
         self.data_link_manager.name = link_display_name(link);
         let path = resolve_link_path(&self.tabs[self.active_tab].scene.document, link);
         self.data_link_manager.path = path.to_string_lossy().into_owned();
-        self.data_link_manager.path_type = match link.path_option { 2 => LinkPathType::Relative, 3 => LinkPathType::FileName, _ => LinkPathType::Full };
+        self.data_link_manager.path_type = match link.path_option {
+            2 => LinkPathType::Relative,
+            3 => LinkPathType::FileName,
+            _ => LinkPathType::Full,
+        };
         let (sheet, range_kind, range) = link_selection(link);
         let (sheets, named_ranges) = workbook_metadata(&path).unwrap_or_default();
         self.data_link_manager.sheets = sheets;
         self.data_link_manager.named_ranges = named_ranges;
         self.data_link_manager.sheet = sheet
-            .filter(|value| self.data_link_manager.sheets.iter().any(|candidate| candidate == value))
+            .filter(|value| {
+                self.data_link_manager
+                    .sheets
+                    .iter()
+                    .any(|candidate| candidate == value)
+            })
             .or_else(|| self.data_link_manager.sheets.first().cloned())
             .unwrap_or_default();
         self.data_link_manager.range = range.unwrap_or_default();
@@ -866,8 +1053,12 @@ impl OpenCADStudio {
             DataLinkField::Range(value) => self.data_link_manager.range = value,
             DataLinkField::Sheet(value) => self.data_link_manager.sheet = value,
             DataLinkField::AllowWrite(value) => self.data_link_manager.allow_write = value,
-            DataLinkField::UseSourceFormatting(value) => self.data_link_manager.use_source_formatting = value,
-            DataLinkField::UpdateSourceFormatting(value) => self.data_link_manager.update_source_formatting = value,
+            DataLinkField::UseSourceFormatting(value) => {
+                self.data_link_manager.use_source_formatting = value
+            }
+            DataLinkField::UpdateSourceFormatting(value) => {
+                self.data_link_manager.update_source_formatting = value
+            }
             DataLinkField::InsertTable(value) => self.data_link_manager.insert_table = value,
             DataLinkField::MoreOptions(value) => self.data_link_manager.more_options = value,
         }
@@ -880,7 +1071,10 @@ impl OpenCADStudio {
             async {
                 crate::sys::file_dialog()
                     .set_title(crate::t!("Choose a Spreadsheet File").as_ref())
-                    .add_filter(crate::t!("Spreadsheet Files").as_ref(), &["csv", "txt", "xls", "xlsx", "xlsb", "ods"])
+                    .add_filter(
+                        crate::t!("Spreadsheet Files").as_ref(),
+                        &["csv", "txt", "xls", "xlsx", "xlsb", "ods"],
+                    )
                     .add_filter(crate::t!("All Files").as_ref(), &["*"])
                     .pick_file()
                     .await
@@ -931,8 +1125,12 @@ impl OpenCADStudio {
             self.data_link_manager.status = crate::t!("Enter a data link name.").into_owned();
             return Task::none();
         }
-        if self.data_link_manager.links.iter().any(|link| link.name.eq_ignore_ascii_case(&name) && Some(link.handle) != self.data_link_manager.editing_handle) {
-            self.data_link_manager.status = crate::t!("A data link with that name already exists.").into_owned();
+        if self.data_link_manager.links.iter().any(|link| {
+            link.name.eq_ignore_ascii_case(&name)
+                && Some(link.handle) != self.data_link_manager.editing_handle
+        }) {
+            self.data_link_manager.status =
+                crate::t!("A data link with that name already exists.").into_owned();
             return Task::none();
         }
         let range = (self.data_link_manager.range_kind != LinkRange::EntireSheet)
@@ -953,8 +1151,20 @@ impl OpenCADStudio {
         };
         let stored_path = match self.data_link_manager.path_type {
             LinkPathType::Full => std::fs::canonicalize(&input_path).unwrap_or(input_path.clone()),
-            LinkPathType::Relative => self.tabs[i].scene.document.source_path.as_deref().map(Path::new).and_then(Path::parent).and_then(|parent| input_path.strip_prefix(parent).ok()).map(Path::to_path_buf).unwrap_or(input_path.clone()),
-            LinkPathType::FileName => input_path.file_name().map(PathBuf::from).unwrap_or(input_path.clone()),
+            LinkPathType::Relative => self.tabs[i]
+                .scene
+                .document
+                .source_path
+                .as_deref()
+                .map(Path::new)
+                .and_then(Path::parent)
+                .and_then(|parent| input_path.strip_prefix(parent).ok())
+                .map(Path::to_path_buf)
+                .unwrap_or(input_path.clone()),
+            LinkPathType::FileName => input_path
+                .file_name()
+                .map(PathBuf::from)
+                .unwrap_or(input_path.clone()),
         };
         self.push_undo_snapshot(i, "DATALINK");
         let handle = if let Some(handle) = self.data_link_manager.editing_handle {
@@ -962,9 +1172,14 @@ impl OpenCADStudio {
                 link.description = name;
                 link.tooltip = input_path.to_string_lossy().into_owned();
                 link.connection_string = stored_path.to_string_lossy().into_owned();
-                link.path_option = match self.data_link_manager.path_type { LinkPathType::Full => 1, LinkPathType::Relative => 2, LinkPathType::FileName => 3 };
+                link.path_option = match self.data_link_manager.path_type {
+                    LinkPathType::Full => 1,
+                    LinkPathType::Relative => 2,
+                    LinkPathType::FileName => 3,
+                };
                 link.option = i32::from(self.data_link_manager.allow_write);
-                link.flags = i32::from(self.data_link_manager.use_source_formatting) | (i32::from(self.data_link_manager.update_source_formatting) << 1);
+                link.flags = i32::from(self.data_link_manager.use_source_formatting)
+                    | (i32::from(self.data_link_manager.update_source_formatting) << 1);
                 link.status_flags = 1;
                 link.update_status = "Linked".into();
                 link.custom_data = link_custom_data(
@@ -977,13 +1192,27 @@ impl OpenCADStudio {
         } else {
             let handle = self.tabs[i].scene.document.allocate_handle();
             let mut object = ClassObject::new(ClassObjectData::DataLink(DataLink {
-                data_adapter: if input_path.extension().and_then(|value| value.to_str()).is_some_and(|value| value.eq_ignore_ascii_case("csv") || value.eq_ignore_ascii_case("txt")) { "CSV".into() } else { "Spreadsheet".into() },
+                data_adapter: if input_path
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|value| {
+                        value.eq_ignore_ascii_case("csv") || value.eq_ignore_ascii_case("txt")
+                    }) {
+                    "CSV".into()
+                } else {
+                    "Spreadsheet".into()
+                },
                 description: name,
                 tooltip: input_path.to_string_lossy().into_owned(),
                 connection_string: stored_path.to_string_lossy().into_owned(),
                 option: i32::from(self.data_link_manager.allow_write),
-                flags: i32::from(self.data_link_manager.use_source_formatting) | (i32::from(self.data_link_manager.update_source_formatting) << 1),
-                path_option: match self.data_link_manager.path_type { LinkPathType::Full => 1, LinkPathType::Relative => 2, LinkPathType::FileName => 3 },
+                flags: i32::from(self.data_link_manager.use_source_formatting)
+                    | (i32::from(self.data_link_manager.update_source_formatting) << 1),
+                path_option: match self.data_link_manager.path_type {
+                    LinkPathType::Full => 1,
+                    LinkPathType::Relative => 2,
+                    LinkPathType::FileName => 3,
+                },
                 status_flags: 1,
                 update_status: "Linked".into(),
                 custom_data: link_custom_data(
@@ -994,7 +1223,11 @@ impl OpenCADStudio {
                 ..DataLink::default()
             }));
             object.handle = handle;
-            self.tabs[i].scene.document.objects.insert(handle, ObjectType::ClassObject(object));
+            self.tabs[i]
+                .scene
+                .document
+                .objects
+                .insert(handle, ObjectType::ClassObject(object));
             handle
         };
         self.tabs[i].dirty = true;
@@ -1003,9 +1236,13 @@ impl OpenCADStudio {
         self.data_link_manager.preview = preview.clone();
         self.refresh_data_link_manager(Some(handle));
         if self.data_link_manager.insert_table {
-            let style = table_style_handle(&self.tabs[i].scene.document, &self.tabs[i].scene.document.header.current_table_style_name);
+            let style = table_style_handle(
+                &self.tabs[i].scene.document,
+                &self.tabs[i].scene.document.header.current_table_style_name,
+            );
             let table = build_table(&preview, style, None);
-            let command = crate::modules::annotate::data_link::DataLinkPlaceCommand::existing(table, handle);
+            let command =
+                crate::modules::annotate::data_link::DataLinkPlaceCommand::existing(table, handle);
             self.active_modal = None;
             self.reset_modal_geometry();
             self.command_line.push_info(&command.prompt());
@@ -1015,7 +1252,12 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_data_link_delete(&mut self) -> Task<Message> {
-        let Some(handle) = self.data_link_manager.selected.as_ref().map(|value| value.handle) else {
+        let Some(handle) = self
+            .data_link_manager
+            .selected
+            .as_ref()
+            .map(|value| value.handle)
+        else {
             return Task::none();
         };
         let i = self.active_tab;
@@ -1029,7 +1271,11 @@ impl OpenCADStudio {
                             cell.has_linked_data = false;
                             cell.data_link_rows = 0;
                             cell.data_link_columns = 0;
-                            cell.state.remove(acadrust::entities::table::CellStateFlags::LINKED | acadrust::entities::table::CellStateFlags::CONTENT_LOCKED | acadrust::entities::table::CellStateFlags::FORMAT_LOCKED);
+                            cell.state.remove(
+                                acadrust::entities::table::CellStateFlags::LINKED
+                                    | acadrust::entities::table::CellStateFlags::CONTENT_LOCKED
+                                    | acadrust::entities::table::CellStateFlags::FORMAT_LOCKED,
+                            );
                         }
                     }
                 }
@@ -1039,7 +1285,8 @@ impl OpenCADStudio {
         self.tabs[i].dirty = true;
         self.data_link_manager.selected = None;
         self.refresh_data_link_manager(None);
-        self.data_link_manager.status = crate::t!("Data link deleted; existing table values were retained.").into_owned();
+        self.data_link_manager.status =
+            crate::t!("Data link deleted; existing table values were retained.").into_owned();
         Task::none()
     }
 
@@ -1049,7 +1296,9 @@ impl OpenCADStudio {
         };
         let i = self.active_tab;
         let doc = &self.tabs[i].scene.document;
-        let Some(link) = data_link(doc, choice.handle) else { return Task::none(); };
+        let Some(link) = data_link(doc, choice.handle) else {
+            return Task::none();
+        };
         let rows = match read_link_rows(doc, link) {
             Ok(rows) => rows,
             Err(error) => {
@@ -1058,7 +1307,10 @@ impl OpenCADStudio {
             }
         };
         let style = table_style_handle(doc, &doc.header.current_table_style_name);
-        let command = crate::modules::annotate::data_link::DataLinkPlaceCommand::existing(build_table(&rows, style, None), choice.handle);
+        let command = crate::modules::annotate::data_link::DataLinkPlaceCommand::existing(
+            build_table(&rows, style, None),
+            choice.handle,
+        );
         self.active_modal = None;
         self.reset_modal_geometry();
         self.command_line.push_info(&command.prompt());
@@ -1086,12 +1338,32 @@ impl OpenCADStudio {
             DataExtractionField::Begin(value) => self.data_extraction.begin = value,
             DataExtractionField::SettingsPath(value) => self.data_extraction.settings_path = value,
             DataExtractionField::Source(value) => self.data_extraction.source = value,
-            DataExtractionField::IncludeCurrent(value) => self.data_extraction.include_current = value,
-            DataExtractionField::IncludeSubfolders(value) => self.data_extraction.include_subfolders = value,
-            DataExtractionField::Object(index, value) => if let Some(item) = self.data_extraction.objects.get_mut(index) { item.checked = value; },
-            DataExtractionField::Property(index, value) => if let Some(item) = self.data_extraction.properties.get_mut(index) { item.checked = value; },
-            DataExtractionField::Category(category, value) => if value { self.data_extraction.categories.insert(category); } else { self.data_extraction.categories.remove(&category); },
-            DataExtractionField::CombineIdentical(value) => self.data_extraction.combine_identical = value,
+            DataExtractionField::IncludeCurrent(value) => {
+                self.data_extraction.include_current = value
+            }
+            DataExtractionField::IncludeSubfolders(value) => {
+                self.data_extraction.include_subfolders = value
+            }
+            DataExtractionField::Object(index, value) => {
+                if let Some(item) = self.data_extraction.objects.get_mut(index) {
+                    item.checked = value;
+                }
+            }
+            DataExtractionField::Property(index, value) => {
+                if let Some(item) = self.data_extraction.properties.get_mut(index) {
+                    item.checked = value;
+                }
+            }
+            DataExtractionField::Category(category, value) => {
+                if value {
+                    self.data_extraction.categories.insert(category);
+                } else {
+                    self.data_extraction.categories.remove(&category);
+                }
+            }
+            DataExtractionField::CombineIdentical(value) => {
+                self.data_extraction.combine_identical = value
+            }
             DataExtractionField::ShowCount(value) => self.data_extraction.show_count = value,
             DataExtractionField::ShowName(value) => self.data_extraction.show_name = value,
             DataExtractionField::OutputTable(value) => self.data_extraction.output_table = value,
@@ -1140,20 +1412,25 @@ impl OpenCADStudio {
             .collect::<BTreeMap<_, _>>();
         self.data_extraction.objects = counts
             .into_iter()
-            .map(|(name, count)| crate::ui::window::annotation_data::ExtractionObject {
-                checked: previous
-                    .get(&name.to_ascii_lowercase())
-                    .copied()
-                    .unwrap_or(true),
-                name,
-                count,
-            })
+            .map(
+                |(name, count)| crate::ui::window::annotation_data::ExtractionObject {
+                    checked: previous
+                        .get(&name.to_ascii_lowercase())
+                        .copied()
+                        .unwrap_or(true),
+                    name,
+                    count,
+                },
+            )
             .collect();
         Ok(())
     }
 
     fn update_extraction_preview(&mut self) {
-        match extraction_preview(&self.data_extraction, &self.tabs[self.active_tab].scene.document) {
+        match extraction_preview(
+            &self.data_extraction,
+            &self.tabs[self.active_tab].scene.document,
+        ) {
             Ok(rows) => {
                 self.data_extraction.preview = rows;
                 self.data_extraction.error.clear();
@@ -1171,7 +1448,9 @@ impl OpenCADStudio {
             ExtractionPage::Refine => ExtractionPage::Properties,
             ExtractionPage::Output => ExtractionPage::Refine,
             ExtractionPage::TableStyle => ExtractionPage::Output,
-            ExtractionPage::Finish if self.data_extraction.output_table => ExtractionPage::TableStyle,
+            ExtractionPage::Finish if self.data_extraction.output_table => {
+                ExtractionPage::TableStyle
+            }
             ExtractionPage::Finish => ExtractionPage::Output,
         };
         self.data_extraction.error.clear();
@@ -1194,12 +1473,19 @@ impl OpenCADStudio {
                 self.data_extraction.page = ExtractionPage::Source;
             }
             ExtractionPage::Source => {
-                if self.data_extraction.source == ExtractionSource::CurrentSelection && self.data_extraction.selection_handles.is_empty() {
-                    self.data_extraction.error = crate::t!("No objects were selected when the wizard opened.").into_owned();
+                if self.data_extraction.source == ExtractionSource::CurrentSelection
+                    && self.data_extraction.selection_handles.is_empty()
+                {
+                    self.data_extraction.error =
+                        crate::t!("No objects were selected when the wizard opened.").into_owned();
                     return Task::none();
                 }
-                if self.data_extraction.source == ExtractionSource::DrawingsAndFolders && !self.data_extraction.include_current && self.data_extraction.source_files.is_empty() {
-                    self.data_extraction.error = crate::t!("Add a drawing or include the current drawing.").into_owned();
+                if self.data_extraction.source == ExtractionSource::DrawingsAndFolders
+                    && !self.data_extraction.include_current
+                    && self.data_extraction.source_files.is_empty()
+                {
+                    self.data_extraction.error =
+                        crate::t!("Add a drawing or include the current drawing.").into_owned();
                     return Task::none();
                 }
                 if let Err(error) = self.refresh_extraction_objects() {
@@ -1207,21 +1493,35 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 if self.data_extraction.objects.is_empty() {
-                    self.data_extraction.error = crate::t!("No extractable objects were found in the selected source.").into_owned();
+                    self.data_extraction.error =
+                        crate::t!("No extractable objects were found in the selected source.")
+                            .into_owned();
                     return Task::none();
                 }
                 self.data_extraction.page = ExtractionPage::Objects;
             }
             ExtractionPage::Objects => {
-                if !self.data_extraction.objects.iter().any(|value| value.checked) {
-                    self.data_extraction.error = crate::t!("Select at least one object type.").into_owned();
+                if !self
+                    .data_extraction
+                    .objects
+                    .iter()
+                    .any(|value| value.checked)
+                {
+                    self.data_extraction.error =
+                        crate::t!("Select at least one object type.").into_owned();
                     return Task::none();
                 }
                 self.data_extraction.page = ExtractionPage::Properties;
             }
             ExtractionPage::Properties => {
-                if !self.data_extraction.properties.iter().any(|value| value.checked) {
-                    self.data_extraction.error = crate::t!("Select at least one property.").into_owned();
+                if !self
+                    .data_extraction
+                    .properties
+                    .iter()
+                    .any(|value| value.checked)
+                {
+                    self.data_extraction.error =
+                        crate::t!("Select at least one property.").into_owned();
                     return Task::none();
                 }
                 self.data_extraction.page = ExtractionPage::Refine;
@@ -1235,13 +1535,20 @@ impl OpenCADStudio {
             }
             ExtractionPage::Output => {
                 if !self.data_extraction.output_table && !self.data_extraction.output_file {
-                    self.data_extraction.error = crate::t!("Choose at least one output.").into_owned();
+                    self.data_extraction.error =
+                        crate::t!("Choose at least one output.").into_owned();
                     return Task::none();
                 }
-                if self.data_extraction.output_file && self.data_extraction.output_path.trim().is_empty() {
+                if self.data_extraction.output_file
+                    && self.data_extraction.output_path.trim().is_empty()
+                {
                     return self.on_data_extraction_browse_output();
                 }
-                self.data_extraction.page = if self.data_extraction.output_table { ExtractionPage::TableStyle } else { ExtractionPage::Finish };
+                self.data_extraction.page = if self.data_extraction.output_table {
+                    ExtractionPage::TableStyle
+                } else {
+                    ExtractionPage::Finish
+                };
             }
             ExtractionPage::TableStyle => self.data_extraction.page = ExtractionPage::Finish,
             ExtractionPage::Finish => return self.on_data_extraction_finish(),
@@ -1251,17 +1558,33 @@ impl OpenCADStudio {
 
     pub(super) fn on_data_extraction_browse_settings(&mut self) -> Task<Message> {
         let save = self.data_extraction.begin == ExtractionBegin::New;
-        Task::perform(async move {
-            let dialog = crate::sys::file_dialog().set_title(crate::t!("Data Extraction Settings").as_ref()).add_filter(crate::t!("Data Extraction Settings").as_ref(), &["dxex"]).add_filter(crate::t!("All Files").as_ref(), &["*"]);
-            if save {
-                dialog.set_file_name("extraction.dxex").save_file().await.map(|handle| crate::sys::handle_path(&handle))
-            } else {
-                dialog.pick_file().await.map(|handle| crate::sys::handle_path(&handle))
-            }
-        }, Message::DataExtractionBrowseSettingsResult)
+        Task::perform(
+            async move {
+                let dialog = crate::sys::file_dialog()
+                    .set_title(crate::t!("Data Extraction Settings").as_ref())
+                    .add_filter(crate::t!("Data Extraction Settings").as_ref(), &["dxex"])
+                    .add_filter(crate::t!("All Files").as_ref(), &["*"]);
+                if save {
+                    dialog
+                        .set_file_name("extraction.dxex")
+                        .save_file()
+                        .await
+                        .map(|handle| crate::sys::handle_path(&handle))
+                } else {
+                    dialog
+                        .pick_file()
+                        .await
+                        .map(|handle| crate::sys::handle_path(&handle))
+                }
+            },
+            Message::DataExtractionBrowseSettingsResult,
+        )
     }
 
-    pub(super) fn on_data_extraction_browse_settings_result(&mut self, path: Option<PathBuf>) -> Task<Message> {
+    pub(super) fn on_data_extraction_browse_settings_result(
+        &mut self,
+        path: Option<PathBuf>,
+    ) -> Task<Message> {
         if let Some(path) = path {
             self.data_extraction.settings_path = path.to_string_lossy().into_owned();
             if self.data_extraction.begin != ExtractionBegin::New {
@@ -1276,24 +1599,38 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_data_extraction_add_drawings(&mut self) -> Task<Message> {
-        Task::perform(async {
-            crate::sys::file_dialog()
-                .set_title(crate::t!("Add Drawings").as_ref())
-                .add_filter(crate::t!("CAD Files").as_ref(), &["dwg", "dxf", "DWG", "DXF"])
-                .add_filter(crate::t!("All Files").as_ref(), &["*"])
-                .pick_files()
-                .await
-                .unwrap_or_default()
-                .into_iter()
-                .map(|handle| crate::sys::handle_path(&handle))
-                .collect()
-        }, Message::DataExtractionAddDrawingsResult)
+        Task::perform(
+            async {
+                crate::sys::file_dialog()
+                    .set_title(crate::t!("Add Drawings").as_ref())
+                    .add_filter(
+                        crate::t!("CAD Files").as_ref(),
+                        &["dwg", "dxf", "DWG", "DXF"],
+                    )
+                    .add_filter(crate::t!("All Files").as_ref(), &["*"])
+                    .pick_files()
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|handle| crate::sys::handle_path(&handle))
+                    .collect()
+            },
+            Message::DataExtractionAddDrawingsResult,
+        )
     }
 
-    pub(super) fn on_data_extraction_add_drawings_result(&mut self, paths: Vec<PathBuf>) -> Task<Message> {
+    pub(super) fn on_data_extraction_add_drawings_result(
+        &mut self,
+        paths: Vec<PathBuf>,
+    ) -> Task<Message> {
         for path in paths {
             let text = path.to_string_lossy().into_owned();
-            if !self.data_extraction.source_files.iter().any(|value| value.eq_ignore_ascii_case(&text)) {
+            if !self
+                .data_extraction
+                .source_files
+                .iter()
+                .any(|value| value.eq_ignore_ascii_case(&text))
+            {
                 self.data_extraction.source_files.push(text);
             }
         }
@@ -1338,25 +1675,35 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_data_extraction_browse_output(&mut self) -> Task<Message> {
-        Task::perform(async {
-            crate::sys::file_dialog()
-                .set_title(crate::t!("Save Data Extraction").as_ref())
-                .set_file_name("extraction.csv")
-                .add_filter(crate::t!("CSV").as_ref(), &["csv"])
-                .add_filter(crate::t!("Tab-separated text").as_ref(), &["txt"])
-                .add_filter(crate::t!("All Files").as_ref(), &["*"])
-                .save_file()
-                .await
-                .map(|handle| crate::sys::handle_path(&handle))
-        }, Message::DataExtractionBrowseOutputResult)
+        Task::perform(
+            async {
+                crate::sys::file_dialog()
+                    .set_title(crate::t!("Save Data Extraction").as_ref())
+                    .set_file_name("extraction.csv")
+                    .add_filter(crate::t!("CSV").as_ref(), &["csv"])
+                    .add_filter(crate::t!("Tab-separated text").as_ref(), &["txt"])
+                    .add_filter(crate::t!("All Files").as_ref(), &["*"])
+                    .save_file()
+                    .await
+                    .map(|handle| crate::sys::handle_path(&handle))
+            },
+            Message::DataExtractionBrowseOutputResult,
+        )
     }
 
-    pub(super) fn on_data_extraction_browse_output_result(&mut self, path: Option<PathBuf>) -> Task<Message> {
+    pub(super) fn on_data_extraction_browse_output_result(
+        &mut self,
+        path: Option<PathBuf>,
+    ) -> Task<Message> {
         if let Some(path) = path {
             self.data_extraction.output_path = path.to_string_lossy().into_owned();
             self.data_extraction.output_file = true;
             if self.data_extraction.page == ExtractionPage::Output {
-                self.data_extraction.page = if self.data_extraction.output_table { ExtractionPage::TableStyle } else { ExtractionPage::Finish };
+                self.data_extraction.page = if self.data_extraction.output_table {
+                    ExtractionPage::TableStyle
+                } else {
+                    ExtractionPage::Finish
+                };
             }
         }
         Task::none()
@@ -1374,8 +1721,16 @@ impl OpenCADStudio {
         let rows = self.data_extraction.preview.clone();
         if self.data_extraction.output_file {
             let path = PathBuf::from(self.data_extraction.output_path.trim());
-            let text = if path.extension().and_then(|value| value.to_str()).is_some_and(|value| value.eq_ignore_ascii_case("txt")) {
-                rows.iter().map(|row| row.join("\t")).collect::<Vec<_>>().join("\n") + "\n"
+            let text = if path
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value.eq_ignore_ascii_case("txt"))
+            {
+                rows.iter()
+                    .map(|row| row.join("\t"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    + "\n"
             } else {
                 rows_to_csv(&rows)
             };
@@ -1386,9 +1741,13 @@ impl OpenCADStudio {
         }
         let i = self.active_tab;
         if self.data_extraction.output_table {
-            let style = table_style_handle(&self.tabs[i].scene.document, &self.data_extraction.table_style);
+            let style = table_style_handle(
+                &self.tabs[i].scene.document,
+                &self.data_extraction.table_style,
+            );
             let table = build_table(&rows, style, Some(&self.data_extraction.table_title));
-            let command = crate::modules::annotate::data_link::DataLinkPlaceCommand::unlinked(table);
+            let command =
+                crate::modules::annotate::data_link::DataLinkPlaceCommand::unlinked(table);
             self.active_modal = None;
             self.reset_modal_geometry();
             self.command_line.push_info(&command.prompt());
@@ -1397,7 +1756,8 @@ impl OpenCADStudio {
             self.active_modal = None;
             self.reset_modal_geometry();
             self.ribbon.deactivate_tool();
-            self.command_line.push_output(crate::t!("DATAEXTRACTION: external file created.").as_ref());
+            self.command_line
+                .push_output(crate::t!("DATAEXTRACTION: external file created.").as_ref());
         }
         Task::none()
     }
@@ -1409,10 +1769,7 @@ mod tests {
 
     #[test]
     fn cell_ranges_are_normalized_and_missing_cells_are_blank() {
-        let rows = vec![
-            vec!["a".into(), "b".into(), "c".into()],
-            vec!["d".into()],
-        ];
+        let rows = vec![vec!["a".into(), "b".into(), "c".into()], vec!["d".into()]];
         assert_eq!(
             crop_range(rows, "C2:A1").unwrap(),
             vec![

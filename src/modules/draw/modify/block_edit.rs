@@ -65,8 +65,7 @@ pub struct BlockEditSession {
     /// Inline ATTRIB values/positions on every existing INSERT of this block.
     /// Rebasing the origin moves them with the definition; Discard restores
     /// their exact on-entry state.
-    pub reference_attributes:
-        Vec<(Handle, Vec<acadrust::entities::AttributeEntity>)>,
+    pub reference_attributes: Vec<(Handle, Vec<acadrust::entities::AttributeEntity>)>,
     /// Camera state of the space that was active when BEDIT began, restored
     /// on Save/Discard so the view returns exactly where it was (#425).
     pub return_camera: crate::scene::view::camera::Camera,
@@ -116,5 +115,9 @@ impl CadCommand for BlockEditPickCommand {
 
 // ── Autocomplete registry ─────────────────────────────────
 inventory::submit!(crate::command::CommandRegistration { names: &["BEDIT"] }); // BlockEditPickCommand
-inventory::submit!(crate::command::CommandRegistration { names: &["BEDIT_SAVE"] });
-inventory::submit!(crate::command::CommandRegistration { names: &["BEDIT_DISCARD"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["BEDIT_SAVE"]
+});
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["BEDIT_DISCARD"]
+});

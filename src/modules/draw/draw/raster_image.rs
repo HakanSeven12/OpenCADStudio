@@ -10,11 +10,11 @@
 //   3. User drags to pick width; height is computed from the image's aspect ratio.
 //   4. Entity is committed.
 
+use crate::t;
 use acadrust::entities::RasterImage;
 use acadrust::types::Vector3;
 use acadrust::EntityType;
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::io::ole_embed::{build_embedded_ole, corners_from_placement, EmbeddedImage};

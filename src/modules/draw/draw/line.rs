@@ -6,9 +6,9 @@
 //      (start→end) to the document; end becomes the new start point
 //   3. Enter / Escape → ends the command
 
+use crate::t;
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Line};
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, TangentObject};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -119,8 +119,17 @@ impl CadCommand for LineCommand {
             // hover.
             (
                 Some(_),
-                Some((Circle { center: c1, radius: r1 }, hit1)),
-                Some(Circle { center: c2, radius: r2 }),
+                Some((
+                    Circle {
+                        center: c1,
+                        radius: r1,
+                    },
+                    hit1,
+                )),
+                Some(Circle {
+                    center: c2,
+                    radius: r2,
+                }),
             ) => {
                 self.deferred_tangent = None;
                 let (t1, t2) = circle_circle_tangents(c1, r1, c2, r2)
@@ -137,7 +146,17 @@ impl CadCommand for LineCommand {
             // (C) A deferred first tangent, but this point is NOT a circle
             // tangent: the line runs from this point, tangent to the deferred
             // circle (the nearer of the two tangent points to the first hit).
-            (Some(_), Some((Circle { center: c1, radius: r1 }, hit1)), _) => {
+            (
+                Some(_),
+                Some((
+                    Circle {
+                        center: c1,
+                        radius: r1,
+                    },
+                    hit1,
+                )),
+                _,
+            ) => {
                 self.deferred_tangent = None;
                 let start = point_circle_tangents(pt, c1, r1)
                     .map(|(t0, t1)| {
@@ -191,10 +210,7 @@ impl CadCommand for LineCommand {
                 // Need at least two points to draw a closing segment back to
                 // the start; then finish the command.
                 if self.points.len() >= 2 {
-                    let close = Self::line_between(
-                        *self.points.last().unwrap(),
-                        self.points[0],
-                    );
+                    let close = Self::line_between(*self.points.last().unwrap(), self.points[0]);
                     Some(CmdResult::CommitAndExit(close))
                 } else {
                     Some(CmdResult::NeedPoint)
@@ -276,8 +292,13 @@ fn point_circle_tangents(p: DVec3, center: DVec3, radius: f64) -> Option<(DVec3,
     }
     let base = vy.atan2(vx);
     let off = (radius / d).acos();
-    let at =
-        |a: f64| DVec3::new(center.x + radius * a.cos(), center.y + radius * a.sin(), center.z);
+    let at = |a: f64| {
+        DVec3::new(
+            center.x + radius * a.cos(),
+            center.y + radius * a.sin(),
+            center.z,
+        )
+    };
     Some((at(base + off), at(base - off)))
 }
 
@@ -350,8 +371,14 @@ mod tangent_tests {
             assert!(((*t2 - c2).length() - 1.0).abs() < 1e-9, "t2 off circle 2");
             // The tangent line t1→t2 is perpendicular to each radius.
             let line = *t2 - *t1;
-            assert!(perp_dot(*t1 - c1, line).abs() < 1e-6, "not tangent at c1 end");
-            assert!(perp_dot(*t2 - c2, line).abs() < 1e-6, "not tangent at c2 end");
+            assert!(
+                perp_dot(*t1 - c1, line).abs() < 1e-6,
+                "not tangent at c1 end"
+            );
+            assert!(
+                perp_dot(*t2 - c2, line).abs() < 1e-6,
+                "not tangent at c2 end"
+            );
         }
     }
 
@@ -362,6 +389,5 @@ mod tangent_tests {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["LINE"] });  // LineCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["LINE"] }); // LineCommand

@@ -1,12 +1,11 @@
 // Circle creation commands.
 
+use crate::t;
 use acadrust::types::Vector3;
 use acadrust::{Circle, EntityType};
 use cadkernel::geom2d::{
-    fillets_between, Circle as KernelCircle, Curve as KernelCurve, Line as KernelLine,
-    Tolerance,
+    fillets_between, Circle as KernelCircle, Curve as KernelCurve, Line as KernelLine, Tolerance,
 };
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, DynField, TangentObject, WorkingPlane};
 use crate::modules::draw::defaults;
@@ -61,10 +60,14 @@ fn circle_wire(center: DVec3, radius: f64, plane: WorkingPlane) -> WireModel {
         centre: [center_local.x, center_local.y],
         radius,
     })
-        .tessellate_angle(TAU / 64.0)
-        .into_iter()
-        .map(|point| plane.to_world(DVec3::new(point[0], point[1], center_local.z)).to_array())
-        .collect();
+    .tessellate_angle(TAU / 64.0)
+    .into_iter()
+    .map(|point| {
+        plane
+            .to_world(DVec3::new(point[0], point[1], center_local.z))
+            .to_array()
+    })
+    .collect();
     let mut wire = WireModel::solid_f64("rubber_band".into(), points, WireModel::CYAN, false);
     wire.tangent_geoms.push(TangentGeom::PlanarCircle {
         center: [center.x, center.y, center.z],
@@ -84,18 +87,9 @@ fn make_circle(center: DVec3, radius: f64, plane: WorkingPlane) -> EntityType {
     }))
 }
 
-fn circumcircle(
-    a: DVec3,
-    b: DVec3,
-    c: DVec3,
-    plane: WorkingPlane,
-) -> Option<(DVec3, f64)> {
+fn circumcircle(a: DVec3, b: DVec3, c: DVec3, plane: WorkingPlane) -> Option<(DVec3, f64)> {
     let (a, b, c) = (plane.to_local(a), plane.to_local(b), plane.to_local(c));
-    let circle = cadkernel::geom2d::arc_through_points(
-        [a.x, a.y],
-        [b.x, b.y],
-        [c.x, c.y],
-    )?;
+    let circle = cadkernel::geom2d::arc_through_points([a.x, a.y], [b.x, b.y], [c.x, c.y])?;
     let center = plane.to_world(DVec3::new(circle.centre[0], circle.centre[1], a.z));
     Some((center, circle.radius))
 }
@@ -164,11 +158,9 @@ impl CadCommand for CircleCommand {
                 )
                 .into_owned()
             }
-            StepCR::Diameter(_) => crate::tf!(
-                "CIRCLE  Specify diameter  <{:.4}>:",
-                self.default_r * 2.0
-            )
-            .into_owned(),
+            StepCR::Diameter(_) => {
+                crate::tf!("CIRCLE  Specify diameter  <{:.4}>:", self.default_r * 2.0).into_owned()
+            }
         }
     }
 
@@ -181,9 +173,7 @@ impl CadCommand for CircleCommand {
                 CmdOption::new("Ttr", "TTR"),
                 CmdOption::new("Ttt", "TTT"),
             ],
-            StepCR::Radius(_) => vec![
-                CmdOption::new(t!("Diameter").as_ref(), "D"),
-            ],
+            StepCR::Radius(_) => vec![CmdOption::new(t!("Diameter").as_ref(), "D")],
             StepCR::Diameter(_) => vec![],
         }
     }
@@ -340,7 +330,9 @@ impl CadCommand for CircleCDCommand {
             StepCR::Center => t!("CIRCLE CD  Specify center point:").into_owned(),
             StepCR::Diameter(c) => crate::tf!(
                 "CIRCLE CD  Specify diameter or type value  <{:.4}>  [center ({:.3},{:.3})]:",
-                self.default_d, c.x, c.y
+                self.default_d,
+                c.x,
+                c.y
             )
             .into_owned(),
             StepCR::Radius(_) => unreachable!(),
@@ -390,7 +382,11 @@ impl CadCommand for CircleCDCommand {
             let d: f64 = text.trim().replace(',', ".").parse().ok()?;
             if d > 0.0 {
                 defaults::set_circle_diam(d);
-                return Some(CmdResult::CommitAndExit(make_circle(*c, d / 2.0, self.plane)));
+                return Some(CmdResult::CommitAndExit(make_circle(
+                    *c,
+                    d / 2.0,
+                    self.plane,
+                )));
             }
         }
         None
@@ -634,7 +630,11 @@ fn tangent_curve(object: TangentObject) -> KernelCurve {
     }
 }
 
-pub(crate) fn ttr_candidates(first: TangentObject, second: TangentObject, radius: f64) -> Vec<DVec3> {
+pub(crate) fn ttr_candidates(
+    first: TangentObject,
+    second: TangentObject,
+    radius: f64,
+) -> Vec<DVec3> {
     let first = tangent_curve(first);
     let second = tangent_curve(second);
     fillets_between(&first, &second, radius, Tolerance::default())
@@ -737,10 +737,7 @@ fn ttt_solve_sign(objs: &[TangentObject; 3], eps: &[f64; 3]) -> Vec<(DVec3, f64)
         } else {
             (e1, e0)
         };
-        if pin.lx.hypot(pin.ly) >= 1e-9
-            || pin.lr.abs() < 1e-9
-            || other.lx.hypot(other.ly) < 1e-9
-        {
+        if pin.lx.hypot(pin.ly) >= 1e-9 || pin.lr.abs() < 1e-9 || other.lx.hypot(other.ly) < 1e-9 {
             return vec![];
         }
         let r = pin.k / pin.lr;
@@ -873,11 +870,7 @@ impl CircleTTRCommand {
             return CmdResult::NeedPoint;
         };
         defaults::set_circle_radius(radius);
-        CmdResult::CommitAndExit(make_circle(
-            self.plane.to_world(center),
-            radius,
-            self.plane,
-        ))
+        CmdResult::CommitAndExit(make_circle(self.plane.to_world(center), radius, self.plane))
     }
 
     fn radius_from_point(&self, point: DVec3) -> Option<f64> {
@@ -917,7 +910,9 @@ impl CadCommand for CircleTTRCommand {
     fn prompt(&self) -> String {
         match &self.step {
             StepTTR::First => crate::t!("CIRCLE TTR  Select first tangent object:").into_owned(),
-            StepTTR::Second { .. } => crate::t!("CIRCLE TTR  Select second tangent object:").into_owned(),
+            StepTTR::Second { .. } => {
+                crate::t!("CIRCLE TTR  Select second tangent object:").into_owned()
+            }
             StepTTR::Radius { .. } => format!(
                 "{} <{:.4}>",
                 crate::t!("CIRCLE TTR  Specify radius:"),
@@ -987,11 +982,7 @@ impl CadCommand for CircleTTRCommand {
             return None;
         };
         let center = best_of(&ttr_candidates(*obj1, *obj2, radius), (*hit1 + *hit2) * 0.5)?;
-        Some(circle_wire(
-            self.plane.to_world(center),
-            radius,
-            self.plane,
-        ))
+        Some(circle_wire(self.plane.to_world(center), radius, self.plane))
     }
 
     fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
@@ -1066,11 +1057,7 @@ impl CadCommand for CircleTTTCommand {
         match best_circle_of(&candidates, hint) {
             Some((center, r)) => {
                 defaults::set_circle_radius(r);
-                CmdResult::CommitAndExit(make_circle(
-                    self.plane.to_world(center),
-                    r,
-                    self.plane,
-                ))
+                CmdResult::CommitAndExit(make_circle(self.plane.to_world(center), r, self.plane))
             }
             None => {
                 self.objs.pop();
@@ -1091,14 +1078,23 @@ impl CadCommand for CircleTTTCommand {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["CIRCLE_2P"] });
-inventory::submit!(crate::command::CommandRegistration { names: &["CIRCLE_3P"] });
-inventory::submit!(crate::command::CommandRegistration { names: &["CIRCLE_CD"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["CIRCLE_2P"]
+});
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["CIRCLE_3P"]
+});
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["CIRCLE_CD"]
+});
 inventory::submit!(crate::command::CommandRegistration { names: &["CIRCLE"] });
-inventory::submit!(crate::command::CommandRegistration { names: &["CIRCLE_TTR"] });
-inventory::submit!(crate::command::CommandRegistration { names: &["CIRCLE_TTT"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["CIRCLE_TTR"]
+});
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["CIRCLE_TTT"]
+});
 
 #[cfg(test)]
 mod tests {
@@ -1161,10 +1157,19 @@ mod tests {
     /// #318: solve a concentric ring with a line through its center.
     #[test]
     fn ttt_concentric_ring_with_line() {
-        let inner = TangentObject::Circle { center: DVec3::ZERO, radius: 3.5 };
-        let outer = TangentObject::Circle { center: DVec3::ZERO, radius: 5.0 };
+        let inner = TangentObject::Circle {
+            center: DVec3::ZERO,
+            radius: 3.5,
+        };
+        let outer = TangentObject::Circle {
+            center: DVec3::ZERO,
+            radius: 5.0,
+        };
         let dir = DVec3::new(0.35, 1.0, 0.0).normalize();
-        let line = TangentObject::Line { p1: DVec3::ZERO, p2: dir * 10.0 };
+        let line = TangentObject::Line {
+            p1: DVec3::ZERO,
+            p2: dir * 10.0,
+        };
         for order in [
             [inner, outer, line],
             [line, inner, outer],

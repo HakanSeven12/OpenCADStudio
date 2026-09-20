@@ -96,7 +96,10 @@ impl OpenCADStudio {
             .map_err(|e| failure("embed_failed", e))?;
         let at = embed_point(req)?;
         let default_width = (image.pixel_width as f64 / 100.0).max(1.0);
-        let width = req["width"].as_f64().filter(|w| *w > 0.0).unwrap_or(default_width);
+        let width = req["width"]
+            .as_f64()
+            .filter(|w| *w > 0.0)
+            .unwrap_or(default_width);
         self.push_undo_snapshot(i, "IMAGEEMBED");
         let handle = crate::io::ole_embed::add_embedded_image(
             &mut self.tabs[i].scene.document,
@@ -271,7 +274,10 @@ impl OpenCADStudio {
             "mtext_cancel" => Message::MTextCancel,
             "text_input" => Message::TextInlineInput(string(req, "value")?.into()),
             "text_commit" => Message::TextInlineOk,
-            "pointer_move" | "pointer_press" | "pointer_release" | "pointer_right_press"
+            "pointer_move"
+            | "pointer_press"
+            | "pointer_release"
+            | "pointer_right_press"
             | "pointer_right_release" => {
                 let x = req["x"]
                     .as_f64()

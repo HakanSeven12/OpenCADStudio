@@ -5,9 +5,9 @@
 //   ELLIPSE_AXIS — Axis, End     (axis endpoint 1 → endpoint 2 → minor distance)
 //   ELLIPSE_ARC  — Ellipse Arc   (shape as above, then start/end parametric angles)
 
+use crate::t;
 use acadrust::types::Vector3;
 use acadrust::{Ellipse, EntityType};
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::modules::IconKind;
@@ -164,10 +164,7 @@ impl CadCommand for EllipseCommand {
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
         match self.step {
-            CtrStep::Center => vec![
-                CmdOption::new("Arc", "ARC"),
-                CmdOption::new("Axis", "AXIS"),
-            ],
+            CtrStep::Center => vec![CmdOption::new("Arc", "ARC"), CmdOption::new("Axis", "AXIS")],
             _ => vec![],
         }
     }
@@ -441,7 +438,9 @@ impl CadCommand for EllipseArcCommand {
     fn prompt(&self) -> String {
         match &self.step {
             ArcStep::Center => t!("ELLIPSE ARC  Specify center:").into_owned(),
-            ArcStep::MajorAxis { .. } => t!("ELLIPSE ARC  Specify major axis endpoint:").into_owned(),
+            ArcStep::MajorAxis { .. } => {
+                t!("ELLIPSE ARC  Specify major axis endpoint:").into_owned()
+            }
             ArcStep::MinorRatio { major, .. } => {
                 let r = format!("{:.3}", major.length());
                 t!(
@@ -707,8 +706,13 @@ fn line_wire(from: DVec3, to: DVec3) -> WireModel {
     )
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["ELLIPSE_ARC"] });  // EllipseArcCommand
-inventory::submit!(crate::command::CommandRegistration { names: &["ELLIPSE_AXIS"] });  // EllipseAxisCommand
-inventory::submit!(crate::command::CommandRegistration { names: &["ELLIPSE"] });  // EllipseCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["ELLIPSE_ARC"]
+}); // EllipseArcCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["ELLIPSE_AXIS"]
+}); // EllipseAxisCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["ELLIPSE"]
+}); // EllipseCommand

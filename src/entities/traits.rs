@@ -2,10 +2,8 @@ use acadrust::{CadDocument, EntityType};
 
 use crate::command::EntityTransform;
 use crate::scene::convert::acad_to_render::RenderEntity;
-use crate::scene::model::object::{
-    GripApply, GripDef, GripMenuAction, GripMenuItem, PropSection,
-};
 use crate::scene::convert::tess_util::FallbackGeometry;
+use crate::scene::model::object::{GripApply, GripDef, GripMenuAction, GripMenuItem, PropSection};
 
 pub trait RenderConvertible {
     fn to_render(&self, document: &CadDocument) -> Option<RenderEntity>;
@@ -28,7 +26,10 @@ pub trait Grippable {
     /// per entity to add Add Vertex / Convert to Arc / Reverse Arrows /
     /// etc.
     fn grip_menu(&self, _grip_id: usize) -> Vec<GripMenuItem> {
-        vec![GripMenuItem { label: "Stretch", action: GripMenuAction::Stretch }]
+        vec![GripMenuItem {
+            label: "Stretch",
+            action: GripMenuAction::Stretch,
+        }]
     }
     /// React to a popup-menu commit. Default no-op — `Stretch` is the
     /// "do nothing extra" path, the normal drag still happens on click.
@@ -39,12 +40,7 @@ pub trait Grippable {
     /// follow-up (Lengthen / Radius / Arc Length / Rotate Text / …).
     /// The app prompts the user for a value on the command line and
     /// calls this with the parsed `f64`.
-    fn apply_grip_menu_value(
-        &mut self,
-        _grip_id: usize,
-        _action: GripMenuAction,
-        _value: f64,
-    ) {}
+    fn apply_grip_menu_value(&mut self, _grip_id: usize, _action: GripMenuAction, _value: f64) {}
     /// If the popup action this entity defines for `grip_id` needs a
     /// numeric prompt, return the prompt string and the action so the
     /// app can stash a pending-value state and route the next typed
@@ -112,18 +108,14 @@ pub fn entity_type_name(et: &EntityType) -> &str {
     match et {
         EntityType::Point(_) => "Point",
         EntityType::Line(line)
-            if acadrust::entities::CenterMarkAssociation::read(
-                &line.common.extended_data,
-            )
-            .is_some() =>
+            if acadrust::entities::CenterMarkAssociation::read(&line.common.extended_data)
+                .is_some() =>
         {
             "CenterMark"
         }
         EntityType::Line(line)
-            if acadrust::entities::CenterLineAssociation::read(
-                &line.common.extended_data,
-            )
-            .is_some() =>
+            if acadrust::entities::CenterLineAssociation::read(&line.common.extended_data)
+                .is_some() =>
         {
             "CenterLine"
         }
@@ -201,12 +193,7 @@ pub trait EntityTypeOps {
         action: GripMenuAction,
         point: glam::DVec3,
     ) -> Option<f64>;
-    fn apply_grip_menu_value(
-        &mut self,
-        grip_id: usize,
-        action: GripMenuAction,
-        value: f64,
-    );
+    fn apply_grip_menu_value(&mut self, grip_id: usize, action: GripMenuAction, value: f64);
     fn apply_transform(&mut self, t: &EntityTransform);
     fn mass_props(&self) -> Option<MassProps>;
     fn text_content(&self) -> Option<String>;
@@ -465,12 +452,7 @@ impl EntityTypeOps for EntityType {
         )
     }
 
-    fn apply_grip_menu_value(
-        &mut self,
-        grip_id: usize,
-        action: GripMenuAction,
-        value: f64,
-    ) {
+    fn apply_grip_menu_value(&mut self, grip_id: usize, action: GripMenuAction, value: f64) {
         dispatch!(self,
             |e| Grippable::apply_grip_menu_value(e, grip_id, action, value),
             [

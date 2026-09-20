@@ -83,13 +83,19 @@ impl<T: SnapshotData> DocumentSnapshotStore<T> {
     /// page.
     pub fn new(tab_id: u64, segment_size: usize) -> io::Result<Self> {
         let segment_size = segment_size.checked_next_multiple_of(4096).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "snapshot segment size overflow")
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "snapshot segment size overflow",
+            )
         })?;
         let total = segment_size
             .checked_mul(2)
             .and_then(|segments| CONTROL_SIZE.checked_add(segments))
             .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "snapshot mapping size overflow")
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "snapshot mapping size overflow",
+                )
             })?;
         if total > MAX_SNAPSHOT_SIZE {
             return Err(io::Error::new(
@@ -245,7 +251,10 @@ impl<T: SnapshotData> SharedDocumentReader<T> {
             ));
         }
         let file_len = usize::try_from(file_len).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidData, "snapshot file size is unsupported")
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "snapshot file size is unsupported",
+            )
         })?;
         let mmap = unsafe { MmapOptions::new().len(file_len).map(&file)? };
         let segment_size = (file_len - CONTROL_SIZE) / 2;
@@ -721,7 +730,10 @@ mod tests {
 
         let archived = reader.archived().unwrap();
         let entity = &archived.entities[0];
-        assert_eq!(entity.handle, doc.entities().next().unwrap().common().handle.value());
+        assert_eq!(
+            entity.handle,
+            doc.entities().next().unwrap().common().handle.value()
+        );
         let decoded: EntityType = bincode::deserialize(&entity.data).expect("bincode decode");
         assert!(matches!(decoded, EntityType::Point(_)));
     }

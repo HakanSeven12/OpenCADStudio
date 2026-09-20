@@ -46,7 +46,11 @@ impl ConcentricConstraintCommand {
         }
     }
 
-    fn picked_reference(entity: &EntityType, handle: Handle, point: DVec3) -> Option<ParametricRef> {
+    fn picked_reference(
+        entity: &EntityType,
+        handle: Handle,
+        point: DVec3,
+    ) -> Option<ParametricRef> {
         match entity {
             EntityType::Circle(_) | EntityType::Arc(_) | EntityType::Ellipse(_) => {
                 Some(ParametricRef::center(handle))
@@ -167,10 +171,7 @@ mod tests {
         let mut polyline = acadrust::entities::LwPolyline::new();
         polyline.vertices = vec![
             acadrust::entities::LwVertex::from_coords(0.0, 0.0),
-            acadrust::entities::LwVertex::with_bulge(
-                acadrust::types::Vector2::new(5.0, 0.0),
-                1.0,
-            ),
+            acadrust::entities::LwVertex::with_bulge(acadrust::types::Vector2::new(5.0, 0.0), 1.0),
             acadrust::entities::LwVertex::from_coords(10.0, 0.0),
         ];
 

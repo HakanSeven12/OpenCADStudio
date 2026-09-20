@@ -1,8 +1,6 @@
 use super::super::Message;
 use crate::scene::{VIEWCUBE_PX, VIEWCUBE_REGION_PX};
-use iced::widget::{
-    button, container, mouse_area, stack, Space,
-};
+use iced::widget::{button, container, mouse_area, stack, Space};
 use iced::{Background, Border, Element, Theme};
 
 // ── Render-mode picker ──────────────────────────────────────────────────────
@@ -37,9 +35,7 @@ fn vc_btn<'a>(content: Element<'a, Message>, size: f32, msg: Message) -> Element
             status,
             iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
         )
-        .then_some(Background::Color(
-            theme.palette().primary.weak.color
-        )),
+        .then_some(Background::Color(theme.palette().primary.weak.color)),
         border: Border {
             radius: 3.0.into(),
             ..Default::default()
@@ -96,12 +92,20 @@ pub(super) fn viewcube_nav_controls<'a>(
         vc_place(
             rax,
             ray,
-            vc_btn(icons::themed_undo(12.0, true), BTN, Message::ViewCubeRoll(false))
+            vc_btn(
+                icons::themed_undo(12.0, true),
+                BTN,
+                Message::ViewCubeRoll(false)
+            )
         ),
         vc_place(
             rbx,
             rby,
-            vc_btn(icons::themed_redo(12.0, true), BTN, Message::ViewCubeRoll(true))
+            vc_btn(
+                icons::themed_redo(12.0, true),
+                BTN,
+                Message::ViewCubeRoll(true)
+            )
         ),
         vc_place(
             tux,
@@ -169,16 +173,16 @@ pub(super) fn viewcube_ucs_picker<'a>(current: String, names: Vec<String>) -> El
         .style(move |theme: &Theme, _| {
             let palette = theme.palette();
             iced::widget::pick_list::Style {
-            background: Background::Color(palette.background.weak.color),
-            border: Border {
-                radius: 3.0.into(),
-                color: palette.background.neutral.color,
-                width: 1.0,
-                ..Default::default()
-            },
-            text_color: palette.background.base.text,
-            placeholder_color: palette.background.base.text.scale_alpha(0.68),
-            handle_color: palette.background.base.text,
+                background: Background::Color(palette.background.weak.color),
+                border: Border {
+                    radius: 3.0.into(),
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    ..Default::default()
+                },
+                text_color: palette.background.base.text,
+                placeholder_color: palette.background.base.text.scale_alpha(0.68),
+                handle_color: palette.background.base.text,
             }
         })
         .into()

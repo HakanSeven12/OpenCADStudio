@@ -102,7 +102,11 @@ pub fn dropdown_popup_width<'a>(
     min: f32,
 ) -> f32 {
     let max_units = labels
-        .map(|l| l.chars().map(|c| if is_wide(c) { 2.0 } else { 1.0 }).sum::<f32>())
+        .map(|l| {
+            l.chars()
+                .map(|c| if is_wide(c) { 2.0 } else { 1.0 })
+                .sum::<f32>()
+        })
         .fold(0.0f32, f32::max);
     (max_units * font_size * 0.68 + chrome).max(min)
 }

@@ -15,9 +15,9 @@ pub const MENU_ITEMS: &[(&str, &str, IconKind)] = &[
 
 // ── CadCommand implementation ─────────────────────────────────────────────
 
+use crate::t;
 use acadrust::Handle;
 use glam::{DVec3, Vec3};
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::scene::model::wire_model::WireModel;
@@ -53,10 +53,18 @@ impl PasteCommand {
         if too_heavy {
             if let Some(bbox_wire) = Self::bbox_outline(&wires) {
                 // Drop the full wires — the box is all the ghost needs now.
-                return Self { wires: Vec::new(), bbox_wire: Some(bbox_wire), base };
+                return Self {
+                    wires: Vec::new(),
+                    bbox_wire: Some(bbox_wire),
+                    base,
+                };
             }
         }
-        Self { wires, bbox_wire: None, base }
+        Self {
+            wires,
+            bbox_wire: None,
+            base,
+        }
     }
 
     /// Build a closed rectangle outline around the XY extent of `wires`, in the
@@ -130,8 +138,13 @@ impl CadCommand for PasteCommand {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["PASTE", "PASTECLIP"] });  // PasteCommand
-inventory::submit!(crate::command::CommandRegistration { names: &["PASTEORIG"] });
-inventory::submit!(crate::command::CommandRegistration { names: &["PASTEBLOCK"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["PASTE", "PASTECLIP"]
+}); // PasteCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["PASTEORIG"]
+});
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["PASTEBLOCK"]
+});

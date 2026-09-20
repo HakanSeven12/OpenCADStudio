@@ -75,21 +75,20 @@ impl CadCommand for CopyCommand {
             return crate::tr!("command-copy", "mode");
         }
         match &self.step {
-            Step::Base => crate::tr!(
-                "command-copy", "base",
-                count = (self.handles.len() as i64),
-            ),
+            Step::Base => crate::tr!("command-copy", "base", count = (self.handles.len() as i64),),
             Step::Placing(base) => {
                 if let Some(n) = self.array_count {
                     crate::tr!(
-                        "command-copy", "array-target",
+                        "command-copy",
+                        "array-target",
                         count = (n as i64),
                         x = format!("{:.3}", base.x),
                         y = format!("{:.3}", base.y),
                     )
                 } else {
                     crate::tr!(
-                        "command-copy", "target",
+                        "command-copy",
+                        "target",
                         count = (self.count as i64),
                         x = format!("{:.3}", base.x),
                         y = format!("{:.3}", base.y),
@@ -154,17 +153,13 @@ impl CadCommand for CopyCommand {
                     )
                 } else {
                     self.count += 1;
-                    CmdResult::CopySelected(
-                        self.handles.clone(),
-                        EntityTransform::Translate(delta),
-                    )
+                    CmdResult::CopySelected(self.handles.clone(), EntityTransform::Translate(delta))
                 }
             }
             // The point (typically typed as `dx,dy`) is the displacement itself.
-            Step::Displacement => CmdResult::BatchCopy(
-                self.handles.clone(),
-                vec![EntityTransform::Translate(pt)],
-            ),
+            Step::Displacement => {
+                CmdResult::BatchCopy(self.handles.clone(), vec![EntityTransform::Translate(pt)])
+            }
         }
     }
 
@@ -316,7 +311,10 @@ mod tests {
             CmdResult::CopySelected(..)
         ));
         assert_eq!(keywords(&cmd), ["A", "U", ""]);
-        assert!(matches!(cmd.on_text_input("U"), Some(CmdResult::UndoDocument)));
+        assert!(matches!(
+            cmd.on_text_input("U"),
+            Some(CmdResult::UndoDocument)
+        ));
         assert_eq!(keywords(&cmd), ["A", ""]);
         assert!(cmd.on_text_input("U").is_none(), "nothing left to undo");
     }
@@ -327,7 +325,9 @@ mod tests {
         cmd.on_text_input("D");
         match cmd.on_point(DVec3::new(1.0, 2.0, 0.0)) {
             CmdResult::BatchCopy(_, transforms) => {
-                assert!(matches!(transforms[0], EntityTransform::Translate(d) if d == DVec3::new(1.0, 2.0, 0.0)));
+                assert!(
+                    matches!(transforms[0], EntityTransform::Translate(d) if d == DVec3::new(1.0, 2.0, 0.0))
+                );
             }
             _ => panic!("expected one copy by the displacement"),
         }

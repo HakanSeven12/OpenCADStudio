@@ -18,7 +18,10 @@ fn puck() -> cadkernel::brep::Body {
     ));
     let body = presspull_model::extrusion_body(&entity, [0.0, 0.0, 10.0])
         .expect("a closed circular profile extrudes");
-    assert!(body.validate().is_empty(), "extrusion produced a valid body");
+    assert!(
+        body.validate().is_empty(),
+        "extrusion produced a valid body"
+    );
     body
 }
 
@@ -29,10 +32,10 @@ fn puck() -> cadkernel::brep::Body {
 fn opposite_faces_report_opposite_outward_normals() {
     let body = puck();
 
-    let top = solid_model::nearest_planar_face(&body, [0.0, 0.0, 10.0])
-        .expect("the top cap is planar");
-    let bottom = solid_model::nearest_planar_face(&body, [0.0, 0.0, 0.0])
-        .expect("the bottom cap is planar");
+    let top =
+        solid_model::nearest_planar_face(&body, [0.0, 0.0, 10.0]).expect("the top cap is planar");
+    let bottom =
+        solid_model::nearest_planar_face(&body, [0.0, 0.0, 0.0]).expect("the bottom cap is planar");
     assert_ne!(top, bottom, "the caps are distinct faces");
 
     let top_normal = solid_model::planar_face_normal(&body, top).expect("top cap has a normal");

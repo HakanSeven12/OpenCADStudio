@@ -7,8 +7,7 @@ pub(crate) fn web_hyperlink(value: &str) -> Option<String> {
         return None;
     }
     let url = url::Url::parse(value.trim()).ok()?;
-    (matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
-        .then(|| url.into())
+    (matches!(url.scheme(), "http" | "https") && url.host_str().is_some()).then(|| url.into())
 }
 
 #[test]
@@ -17,9 +16,15 @@ fn drawing_hyperlinks_only_open_web_pages() {
         assert!(web_hyperlink(value).is_some(), "{value}");
     }
     for value in [
-        "", "https://", "javascript:alert(1)", "data:text/html,example",
-        "file:///tmp/program.desktop", "/tmp/program.desktop", "custom:run",
-        "mailto:user@example.com", "https://example.com/\npath",
+        "",
+        "https://",
+        "javascript:alert(1)",
+        "data:text/html,example",
+        "file:///tmp/program.desktop",
+        "/tmp/program.desktop",
+        "custom:run",
+        "mailto:user@example.com",
+        "https://example.com/\npath",
     ] {
         assert!(web_hyperlink(value).is_none(), "{value}");
     }
@@ -52,14 +57,10 @@ pub fn open_url<Message: Send + 'static>(
 fn linux_activation_token(window: &dyn iced::window::Window) -> Option<String> {
     use iced::window::raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 
-    let RawWindowHandle::Wayland(window_handle) =
-        window.window_handle().ok()?.as_raw()
-    else {
+    let RawWindowHandle::Wayland(window_handle) = window.window_handle().ok()?.as_raw() else {
         return None;
     };
-    let RawDisplayHandle::Wayland(display_handle) =
-        window.display_handle().ok()?.as_raw()
-    else {
+    let RawDisplayHandle::Wayland(display_handle) = window.display_handle().ok()?.as_raw() else {
         return None;
     };
 
@@ -67,13 +68,11 @@ fn linux_activation_token(window: &dyn iced::window::Window) -> Option<String> {
     // The returned token is an owned string and is immediately handed to the
     // child process.
     unsafe {
-        iced::futures::executor::block_on(
-            ashpd::ActivationToken::from_wayland_raw(
-                None,
-                window_handle.surface.as_ptr(),
-                display_handle.display.as_ptr(),
-            ),
-        )
+        iced::futures::executor::block_on(ashpd::ActivationToken::from_wayland_raw(
+            None,
+            window_handle.surface.as_ptr(),
+            display_handle.display.as_ptr(),
+        ))
     }
     .map(String::from)
 }
@@ -101,10 +100,7 @@ fn open_url_linux(url: &str, activation_token: Option<String>) {
 }
 
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "linux")))]
-pub fn open_url<Message>(
-    url: &str,
-    _parent: Option<iced::window::Id>,
-) -> iced::Task<Message> {
+pub fn open_url<Message>(url: &str, _parent: Option<iced::window::Id>) -> iced::Task<Message> {
     let _ = open::that_detached(url);
     iced::Task::none()
 }
@@ -112,10 +108,7 @@ pub fn open_url<Message>(
 /// Web opens the tab synchronously so the browser still sees the click as a
 /// user gesture and does not block it as a pop-up.
 #[cfg(target_arch = "wasm32")]
-pub fn open_url<Message>(
-    url: &str,
-    _parent: Option<iced::window::Id>,
-) -> iced::Task<Message> {
+pub fn open_url<Message>(url: &str, _parent: Option<iced::window::Id>) -> iced::Task<Message> {
     if let Some(window) = web_sys::window() {
         let _ = window.open_with_url_and_target_and_features(url, "_blank", "noopener,noreferrer");
     }
@@ -148,12 +141,11 @@ pub fn set_unsaved_changes_warning(active: bool) {
             return;
         }
         if active {
-            let callback = wasm_bindgen::closure::Closure::new(
-                move |event: web_sys::BeforeUnloadEvent| {
+            let callback =
+                wasm_bindgen::closure::Closure::new(move |event: web_sys::BeforeUnloadEvent| {
                     event.prevent_default();
                     event.set_return_value("");
-                },
-            );
+                });
             window.set_onbeforeunload(Some(callback.as_ref().unchecked_ref()));
             *warning = Some(callback);
         } else {
@@ -254,7 +246,11 @@ pub async fn read_clipboard_text() -> Option<String> {
 #[wasm_bindgen::prelude::wasm_bindgen(module = "/web/clipboard.js")]
 extern "C" {
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = copyHistory)]
-    pub fn copy_history_text(text: &str, fallback_label: &str, close_label: &str) -> js_sys::Promise;
+    pub fn copy_history_text(
+        text: &str,
+        fallback_label: &str,
+        close_label: &str,
+    ) -> js_sys::Promise;
 }
 
 /// Web: write text to the system clipboard (fire-and-forget). Backs Ctrl+C in
@@ -286,9 +282,7 @@ pub fn synthesize_typing(text: &str) {
         init.set_bubbles(true);
         init.set_cancelable(true);
         for kind in ["keydown", "keyup"] {
-            if let Ok(ev) =
-                web_sys::KeyboardEvent::new_with_keyboard_event_init_dict(kind, &init)
-            {
+            if let Ok(ev) = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict(kind, &init) {
                 let _ = canvas.dispatch_event(&ev);
             }
         }
@@ -353,8 +347,12 @@ pub fn file_dialog() -> rfd::AsyncFileDialog {
 #[cfg(target_arch = "wasm32")]
 pub fn download_bytes(name: &str, bytes: &[u8]) {
     use wasm_bindgen::JsCast;
-    let Some(window) = web_sys::window() else { return };
-    let Some(document) = window.document() else { return };
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
+        return;
+    };
     let array = js_sys::Uint8Array::from(bytes);
     let parts = js_sys::Array::new();
     parts.push(&array.buffer());
@@ -483,7 +481,10 @@ pub mod web_diag {
                 );
                 let _ = body.append_child(&overlay);
                 for (id, label) in [
-                    ("ocs-err-title", crate::t!("OpenCADStudio renderer error — copy this into a bug report:")),
+                    (
+                        "ocs-err-title",
+                        crate::t!("OpenCADStudio renderer error — copy this into a bug report:"),
+                    ),
                     ("ocs-err-copy", crate::t!("Copy")),
                     ("ocs-err-dismiss", crate::t!("Dismiss")),
                 ] {

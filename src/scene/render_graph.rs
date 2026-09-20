@@ -96,8 +96,7 @@ impl InsertStyleSpec {
             ),
             lineweight_bylayer: matches!(
                 insert.common.line_weight,
-                acadrust::types::LineWeight::ByLayer
-                    | acadrust::types::LineWeight::Default
+                acadrust::types::LineWeight::ByLayer | acadrust::types::LineWeight::Default
             ),
             layer0: is_effective_layer_zero(&insert.common.layer),
         }
@@ -261,10 +260,7 @@ impl InstanceContext {
     pub fn draw_depth(&self, handle: Handle, depths: &FxHashMap<u64, [f32; 2]>) -> f32 {
         if self.is_instanced() {
             self.depth_base
-                + depths
-                    .get(&handle.value())
-                    .map_or(0.0, |depth| depth[0])
-                    * self.depth_scale
+                + depths.get(&handle.value()).map_or(0.0, |depth| depth[0]) * self.depth_scale
         } else {
             depths
                 .get(&handle.value())
@@ -374,8 +370,7 @@ impl<'a> RenderSceneGraph<'a> {
         root_handle: Handle,
         mut visible: V,
         mut leaf: F,
-    )
-    where
+    ) where
         V: FnMut(&EntityType, &InstanceContext) -> bool,
         F: FnMut(&EntityType, &InstanceContext),
     {
@@ -408,16 +403,9 @@ impl<'a> RenderSceneGraph<'a> {
             .map_or(0.0, |depth| depth[0]);
         let context = InstanceContext::direct(depth_base, self.viewport);
         if self.document_visible(&entity) && visible(&entity, &context) {
-            self.walk_insert_instances(
-                &root_insert,
-                scale_policy,
-                &context,
-                visible,
-                leaf,
-            );
+            self.walk_insert_instances(&root_insert, scale_policy, &context, visible, leaf);
         }
     }
-
 
     fn walk_insert_instances<V, F>(
         &self,
@@ -434,7 +422,9 @@ impl<'a> RenderSceneGraph<'a> {
         let block_style = parent
             .block_style
             .map(|style| BlockStyle::for_nested(self.document, insert, style, self.viewport))
-            .unwrap_or_else(|| BlockStyle::for_entity(self.document, &insert_entity, self.viewport));
+            .unwrap_or_else(|| {
+                BlockStyle::for_entity(self.document, &insert_entity, self.viewport)
+            });
         let root_handle = if parent.root_handle.is_null() {
             insert.common.handle
         } else {
@@ -474,14 +464,11 @@ impl<'a> RenderSceneGraph<'a> {
             context.depth_scale = depth_scale;
             context.nesting_depth += 1;
             context.scale_policy = scale_policy;
-            if let Some(filter) = crate::scene::pick::xclip::insert_spatial_filter(
-                self.document,
-                insert,
-            ) {
-                let polygon = crate::scene::pick::xclip::world_clip_polygon_for_transform(
-                    filter,
-                    &transform,
-                );
+            if let Some(filter) =
+                crate::scene::pick::xclip::insert_spatial_filter(self.document, insert)
+            {
+                let polygon =
+                    crate::scene::pick::xclip::world_clip_polygon_for_transform(filter, &transform);
                 if polygon.len() >= 3 {
                     context.clips.push(polygon);
                 }
@@ -491,13 +478,7 @@ impl<'a> RenderSceneGraph<'a> {
                 .iter()
                 .map(|insert| insert.block_name.clone())
                 .collect();
-            self.walk_block(
-                &insert.block_name,
-                &context,
-                visible,
-                leaf,
-                &mut stack,
-            );
+            self.walk_block(&insert.block_name, &context, visible, leaf, &mut stack);
         }
     }
 
@@ -605,9 +586,10 @@ impl<'a> RenderSceneGraph<'a> {
         {
             return false;
         }
-        if self.frozen_layers.is_some_and(|frozen| {
-            layer.is_some_and(|layer| frozen.contains(&layer.handle))
-        }) {
+        if self
+            .frozen_layers
+            .is_some_and(|frozen| layer.is_some_and(|layer| frozen.contains(&layer.handle)))
+        {
             return false;
         }
         !crate::scene::annotative::annotative_offscale_for(
@@ -726,11 +708,10 @@ fn block_use(
     replaces_host_wire: bool,
     suppress_root_points: bool,
 ) -> BlockUse {
-    let block =
-        block_record_by_name(document, &insert.block_name).map_or(Handle::NULL, |record| {
-            insert.block_name.clone_from(&record.name);
-            record.handle
-        });
+    let block = block_record_by_name(document, &insert.block_name).map_or(Handle::NULL, |record| {
+        insert.block_name.clone_from(&record.name);
+        record.handle
+    });
     BlockUse {
         block,
         insert,
@@ -776,9 +757,7 @@ fn push_dependency_use(
     {
         return;
     }
-    if let Some(mut block_use) =
-        block_use_from_handle(document, block, role, Vector3::ZERO)
-    {
+    if let Some(mut block_use) = block_use_from_handle(document, block, role, Vector3::ZERO) {
         block_use.active = false;
         uses.push(block_use);
     }
@@ -919,17 +898,10 @@ pub fn entity_block_uses(
                     || (style_name.is_empty() && style.name.eq_ignore_ascii_case("Standard"))
             }) {
                 let style = crate::entities::dimension::resolved_dimension_style(
-                    style,
-                    dimension,
-                    document,
+                    style, dimension, document,
                 );
                 for handle in [style.dimblk, style.dimblk1, style.dimblk2, style.dimldrblk] {
-                    push_dependency_use(
-                        &mut uses,
-                        document,
-                        handle,
-                        BlockRole::ArrowHead,
-                    );
+                    push_dependency_use(&mut uses, document, handle, BlockRole::ArrowHead);
                 }
                 for name in [style.dimblk_name, style.dimblk1_name, style.dimblk2_name] {
                     if let Some(record) = block_record_by_name(document, &name) {
@@ -955,22 +927,12 @@ pub fn entity_block_uses(
             )
             .or_else(|| style.map(|style| style.dimldrblk));
             if let Some(handle) = handle {
-                push_dependency_use(
-                    &mut uses,
-                    document,
-                    handle,
-                    BlockRole::ArrowHead,
-                );
+                push_dependency_use(&mut uses, document, handle, BlockRole::ArrowHead);
             }
         }
         EntityType::MultiLeader(multileader) => {
             if let Some(handle) = multileader.arrowhead_handle {
-                push_dependency_use(
-                    &mut uses,
-                    document,
-                    handle,
-                    BlockRole::ArrowHead,
-                );
+                push_dependency_use(&mut uses, document, handle, BlockRole::ArrowHead);
             }
             for line in multileader
                 .context
@@ -979,12 +941,7 @@ pub fn entity_block_uses(
                 .flat_map(|root| &root.lines)
             {
                 if let Some(handle) = line.arrowhead_handle {
-                    push_dependency_use(
-                        &mut uses,
-                        document,
-                        handle,
-                        BlockRole::ArrowHead,
-                    );
+                    push_dependency_use(&mut uses, document, handle, BlockRole::ArrowHead);
                 }
             }
         }
@@ -1002,12 +959,7 @@ pub fn document_block_uses(document: &CadDocument) -> Vec<BlockUse> {
         }
         for name in [&style.dimblk_name, &style.dimblk1_name, &style.dimblk2_name] {
             if let Some(record) = block_record_by_name(document, name) {
-                push_dependency_use(
-                    &mut uses,
-                    document,
-                    record.handle,
-                    BlockRole::ArrowHead,
-                );
+                push_dependency_use(&mut uses, document, record.handle, BlockRole::ArrowHead);
             }
         }
     }
@@ -1019,17 +971,11 @@ pub fn document_block_uses(document: &CadDocument) -> Vec<BlockUse> {
             push_dependency_use(&mut uses, document, handle, BlockRole::ArrowHead);
         }
         if let Some(handle) = style.block_content_handle {
-            push_dependency_use(
-                &mut uses,
-                document,
-                handle,
-                BlockRole::MultiLeaderContent,
-            );
+            push_dependency_use(&mut uses, document, handle, BlockRole::MultiLeaderContent);
         }
     }
     for line_type in document.line_types.iter() {
-        for symbol in
-            crate::scene::convert::dgn_linestyle::symbol_blocks(document, &line_type.name)
+        for symbol in crate::scene::convert::dgn_linestyle::symbol_blocks(document, &line_type.name)
         {
             push_dependency_use(
                 &mut uses,
@@ -1084,9 +1030,13 @@ pub fn insert_instance_transform(
     if offset == [0.0; 3] {
         transform
     } else {
-        let orientation = Transform::from_matrix(Matrix4::rotation_z(insert.rotation))
-            .then(&Transform::from_matrix(Matrix4::from_matrix3(Matrix3::arbitrary_axis(insert.normal))));
-        let world_offset = orientation.apply_rotation(Vector3::new(offset[0], offset[1], offset[2]));
+        let orientation = Transform::from_matrix(Matrix4::rotation_z(insert.rotation)).then(
+            &Transform::from_matrix(Matrix4::from_matrix3(Matrix3::arbitrary_axis(
+                insert.normal,
+            ))),
+        );
+        let world_offset =
+            orientation.apply_rotation(Vector3::new(offset[0], offset[1], offset[2]));
         transform.then(&Transform::from_translation(world_offset))
     }
 }
@@ -1098,22 +1048,12 @@ pub fn insert_instance_translation_delta(
     annotation_scale: f32,
     scale_policy: BlockScalePolicy,
 ) -> Vector3 {
-    let base = insert_instance_transform(
-        document,
-        insert,
-        [0.0; 3],
-        annotation_scale,
-        scale_policy,
-    )
-    .apply(Vector3::ZERO);
-    let instance = insert_instance_transform(
-        document,
-        insert,
-        offset,
-        annotation_scale,
-        scale_policy,
-    )
-    .apply(Vector3::ZERO);
+    let base =
+        insert_instance_transform(document, insert, [0.0; 3], annotation_scale, scale_policy)
+            .apply(Vector3::ZERO);
+    let instance =
+        insert_instance_transform(document, insert, offset, annotation_scale, scale_policy)
+            .apply(Vector3::ZERO);
     instance - base
 }
 
@@ -1161,20 +1101,12 @@ mod tests {
             .add_record(ExtendedDataRecord::new("AcAnnotativeData"));
         let point = Vector3::new(1.0, 0.0, 0.0);
 
-        let from_insert = insert_transform_with_policy(
-            &document,
-            &insert,
-            2.0,
-            BlockScalePolicy::FromInsert,
-        )
-        .apply(point);
-        let applied = insert_transform_with_policy(
-            &document,
-            &insert,
-            2.0,
-            BlockScalePolicy::Applied,
-        )
-        .apply(point);
+        let from_insert =
+            insert_transform_with_policy(&document, &insert, 2.0, BlockScalePolicy::FromInsert)
+                .apply(point);
+        let applied =
+            insert_transform_with_policy(&document, &insert, 2.0, BlockScalePolicy::Applied)
+                .apply(point);
 
         assert!((from_insert.x - 12.0).abs() < 1.0e-9);
         assert!((applied.x - 11.0).abs() < 1.0e-9);
@@ -1188,7 +1120,11 @@ mod tests {
         insert.row_spacing = 1.0;
         insert.column_spacing = 1.0;
         let offsets = array_offsets(&insert);
-        assert_eq!(offsets, vec![[0.0; 3]], "pathological instance count must clamp to a single instance");
+        assert_eq!(
+            offsets,
+            vec![[0.0; 3]],
+            "pathological instance count must clamp to a single instance"
+        );
     }
 
     #[test]
@@ -1224,11 +1160,18 @@ mod tests {
         // The block's own origin (local point 0,0,0) placed at this instance
         // must land 10 units from the insert point, not 20.
         let world = transform.apply(Vector3::ZERO);
-        assert!((world.x - 110.0).abs() < 1.0e-9, "expected spacing 10, got offset {}", world.x - 100.0);
+        assert!(
+            (world.x - 110.0).abs() < 1.0e-9,
+            "expected spacing 10, got offset {}",
+            world.x - 100.0
+        );
 
         // Block-local geometry must still pick up the block scale normally.
         let block_point = transform.apply(Vector3::new(1.0, 0.0, 0.0));
-        assert!((block_point.x - 112.0).abs() < 1.0e-9, "block-local geometry should still be scaled by x_scale 2");
+        assert!(
+            (block_point.x - 112.0).abs() < 1.0e-9,
+            "block-local geometry should still be scaled by x_scale 2"
+        );
     }
 
     #[test]
@@ -1250,7 +1193,15 @@ mod tests {
             BlockScalePolicy::Applied,
         );
         let world = transform.apply(Vector3::ZERO);
-        assert!(world.x.abs() < 1.0e-9, "a 90deg rotation should turn column spacing into Y, got x={}", world.x);
-        assert!((world.y - 10.0).abs() < 1.0e-9, "expected the spacing rotated onto Y, got y={}", world.y);
+        assert!(
+            world.x.abs() < 1.0e-9,
+            "a 90deg rotation should turn column spacing into Y, got x={}",
+            world.x
+        );
+        assert!(
+            (world.y - 10.0).abs() < 1.0e-9,
+            "expected the spacing rotated onto Y, got y={}",
+            world.y
+        );
     }
 }

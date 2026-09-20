@@ -275,4 +275,6 @@ impl CadCommand for TexteditmodeCommand {
 }
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["TEXTEDIT", "TEDIT", "TEXTEDITMODE"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["TEXTEDIT", "TEDIT", "TEXTEDITMODE"]
+});

@@ -10,6 +10,7 @@
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::{fmt, sync::Arc};
 
+use crate::t;
 use crate::ui::ROW_H;
 use acadrust::types::{Color as AcadColor, LineWeight};
 use acadrust::Handle;
@@ -20,7 +21,6 @@ use iced::widget::{
 use iced::{
     mouse, Background, Border, Color, Element, Length, Padding, Point, Rectangle, Size, Theme,
 };
-use crate::t;
 
 // ── Row-height-derived constants ─────────────────────────────────────────
 const FONT_SZ: f32 = ROW_H * 0.42; // ≈11 px
@@ -208,7 +208,10 @@ fn hatch_pattern_matches(
     let query = search.trim();
     query.is_empty()
         || entry.name.to_lowercase().contains(&query.to_lowercase())
-        || entry.description.to_lowercase().contains(&query.to_lowercase())
+        || entry
+            .description
+            .to_lowercase()
+            .contains(&query.to_lowercase())
 }
 
 pub(crate) fn filtered_hatch_patterns(
@@ -288,7 +291,10 @@ impl FieldKey {
 }
 
 /// Text-input widget id for one column of a named-parameter row.
-pub fn prop_param_field_id(index: usize, field: crate::ui::window::named_parameters::ParamField) -> iced::widget::Id {
+pub fn prop_param_field_id(
+    index: usize,
+    field: crate::ui::window::named_parameters::ParamField,
+) -> iced::widget::Id {
     use crate::ui::window::named_parameters::ParamField;
     let suffix = match field {
         ParamField::Name => "name",
@@ -336,16 +342,12 @@ pub fn active_key_focused(
 /// assembled lets a `PropSyncActive` event map a focused text-input id back to
 /// its field key in O(1) instead of re-scanning the sections, enabling
 /// select-all-on-focus for both text inputs and edit-choices (e.g. transparency).
-pub fn build_field_key_map(
-    sections: &[PropSection],
-) -> HashMap<iced::widget::Id, FieldKey> {
+pub fn build_field_key_map(sections: &[PropSection]) -> HashMap<iced::widget::Id, FieldKey> {
     let mut map = HashMap::default();
     for section in sections {
         for prop in &section.props {
             let key = match &prop.value {
-                PropValue::EditText(_)
-                | PropValue::PlainText(_)
-                | PropValue::EditChoice { .. } => {
+                PropValue::EditText(_) | PropValue::PlainText(_) | PropValue::EditChoice { .. } => {
                     Some(FieldKey::Geom(prop.field))
                 }
                 PropValue::AttrText { tag, .. } => Some(FieldKey::Attr(tag.clone())),
@@ -551,7 +553,9 @@ impl PropertiesPanel {
             crate::ui::icons::themed_secondary(crate::ui::icons::PIN, 12.0)
         };
         let pin = button(pin_icon)
-            .on_press(Message::Dock(DockMsg::AutoCollapseToggle(PanelId::Properties)))
+            .on_press(Message::Dock(DockMsg::AutoCollapseToggle(
+                PanelId::Properties,
+            )))
             .style(move |theme: &Theme, status| {
                 let mut style = button::subtle(theme, status);
                 if auto_collapse {
@@ -573,12 +577,7 @@ impl PropertiesPanel {
         .on_press(Message::Dock(DockMsg::Close(PanelId::Properties)))
         .style(button::subtle)
         .padding([3, 5]);
-        let close = tooltip(
-            close,
-            text(t!("Close")).size(10),
-            tooltip::Position::Bottom,
-        )
-        .gap(4);
+        let close = tooltip(close, text(t!("Close")).size(10), tooltip::Position::Bottom).gap(4);
 
         let header = mouse_area(
             container(
@@ -592,9 +591,7 @@ impl PropertiesPanel {
                 .align_y(iced::Center),
             )
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(
-                    theme.palette().background.weak.color,
-                )),
+                background: Some(Background::Color(theme.palette().background.weak.color)),
                 ..Default::default()
             })
             .width(Length::Fill)
@@ -628,13 +625,13 @@ impl PropertiesPanel {
             .style(|theme: &Theme| {
                 let palette = theme.palette();
                 container::Style {
-                background: Some(Background::Color(palette.background.weakest.color)),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
+                    background: Some(Background::Color(palette.background.weakest.color)),
+                    border: Border {
+                        color: palette.background.neutral.color,
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
                 }
             })
             .width(Length::Fill)
@@ -665,13 +662,13 @@ impl PropertiesPanel {
             .style(|theme: &Theme| {
                 let palette = theme.palette();
                 container::Style {
-                background: Some(Background::Color(palette.background.base.color)),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
+                    background: Some(Background::Color(palette.background.base.color)),
+                    border: Border {
+                        color: palette.background.neutral.color,
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
                 }
             })
             .width(Length::Fixed(width))
@@ -691,9 +688,9 @@ impl PropertiesPanel {
                 .size(FONT_SZ)
                 .style(muted_text_style),
         )
-            .style(|theme: &Theme| {
-                let palette = theme.palette();
-                container::Style {
+        .style(|theme: &Theme| {
+            let palette = theme.palette();
+            container::Style {
                 background: Some(Background::Color(palette.background.weakest.color)),
                 border: Border {
                     color: palette.background.neutral.color,
@@ -701,10 +698,10 @@ impl PropertiesPanel {
                     radius: 0.0.into(),
                 },
                 ..Default::default()
-                }
-            })
-            .width(Length::Fill)
-            .padding([4, 10]);
+            }
+        })
+        .width(Length::Fill)
+        .padding([4, 10]);
 
         let mut sections = column![].spacing(0);
         for section in &self.sections {
@@ -721,13 +718,13 @@ impl PropertiesPanel {
                 .style(|theme: &Theme| {
                     let palette = theme.palette();
                     container::Style {
-                    background: Some(Background::Color(palette.background.base.color)),
-                    border: Border {
-                        color: palette.background.neutral.color,
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    ..Default::default()
+                        background: Some(Background::Color(palette.background.base.color)),
+                        border: Border {
+                            color: palette.background.neutral.color,
+                            width: 1.0,
+                            radius: 3.0.into(),
+                        },
+                        ..Default::default()
                     }
                 })
                 .width(230)
@@ -757,23 +754,17 @@ impl PropertiesPanel {
                 .padding([3, 8]),
         )
         .on_double_click(Message::PropSectionToggle(section.title.clone()));
-        let hdr = container(
-            row![
-                title,
-                toggle,
-            ]
-            .align_y(iced::Center),
-        )
+        let hdr = container(row![title, toggle,].align_y(iced::Center))
             .style(|theme: &Theme| {
                 let palette = theme.palette();
                 container::Style {
-                background: Some(Background::Color(palette.background.weak.color)),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
+                    background: Some(Background::Color(palette.background.weak.color)),
+                    border: Border {
+                        color: palette.background.neutral.color,
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
                 }
             })
             .width(Length::Fill);
@@ -826,9 +817,7 @@ impl PropertiesPanel {
         label: &'a str,
     ) -> Element<'a, Message> {
         match &prop.value {
-            PropValue::ColorChoice(color) => {
-                self.render_color_row(label, prop.field, *color, None)
-            }
+            PropValue::ColorChoice(color) => self.render_color_row(label, prop.field, *color, None),
             PropValue::NamedColorChoice { color, name } => {
                 self.render_color_row(label, prop.field, *color, Some(name))
             }
@@ -838,9 +827,7 @@ impl PropertiesPanel {
             PropValue::FieldLwChoice { field, value } => {
                 self.render_field_lw_row(label, field, *value)
             }
-            PropValue::FieldLwVaries { field } => {
-                self.render_field_lw_varies_row(label, field)
-            }
+            PropValue::FieldLwVaries { field } => self.render_field_lw_varies_row(label, field),
             PropValue::LwVaries => self.render_lw_varies_row(label),
             PropValue::LinetypeChoice(lt) => self.render_linetype_row(label, lt),
             PropValue::Choice { selected, options } => {
@@ -862,16 +849,19 @@ impl PropertiesPanel {
             PropValue::ReadOnlyWithTooltip { value, tooltip } => {
                 render_ro_with_tooltip_row(label, value, tooltip)
             }
-            PropValue::HatchPatternChoice(current) => {
-                self.render_hatch_pattern_row(label, current)
-            }
+            PropValue::HatchPatternChoice(current) => self.render_hatch_pattern_row(label, current),
             PropValue::AttrText { tag, value } => self.render_attr_row(tag, value),
-            PropValue::EntityLink { id, handles, conflicting } => {
-                render_entity_link_row(label, *id, handles.clone(), *conflicting)
-            }
-            PropValue::ParamRow { index, name, formula, resolved } => {
-                self.render_param_row(*index, name, formula, resolved)
-            }
+            PropValue::EntityLink {
+                id,
+                handles,
+                conflicting,
+            } => render_entity_link_row(label, *id, handles.clone(), *conflicting),
+            PropValue::ParamRow {
+                index,
+                name,
+                formula,
+                resolved,
+            } => self.render_param_row(*index, name, formula, resolved),
             PropValue::ParamAddRow => render_param_add_row(),
             PropValue::ParamsVisibilityToggle(value) => render_params_visibility_toggle_row(*value),
         }
@@ -930,10 +920,7 @@ impl PropertiesPanel {
                 // "More Colors…" opens the full palette window targeting the
                 // background colour — this used to just close the picker
                 // (#415).
-                Message::OpenColorWindow(
-                    crate::app::ColorPickTarget::PropertiesBg,
-                    color,
-                ),
+                Message::OpenColorWindow(crate::app::ColorPickTarget::PropertiesBg, color),
             );
             return prop_row_widget(label, selector);
         }
@@ -1006,10 +993,7 @@ impl PropertiesPanel {
             },
             Message::PropColorChanged,
             Message::PropColorPickerToggle,
-            Message::OpenColorWindow(
-                crate::app::ColorPickTarget::Properties,
-                color,
-            ),
+            Message::OpenColorWindow(crate::app::ColorPickTarget::Properties, color),
         );
         prop_row_widget(label, selector)
     }
@@ -1024,10 +1008,7 @@ impl PropertiesPanel {
             },
             Message::PropColorChanged,
             Message::PropColorPickerToggle,
-            Message::OpenColorWindow(
-                crate::app::ColorPickTarget::Properties,
-                AcadColor::ByLayer,
-            ),
+            Message::OpenColorWindow(crate::app::ColorPickTarget::Properties, AcadColor::ByLayer),
         );
         prop_row_widget(label, selector)
     }
@@ -1416,24 +1397,46 @@ impl PropertiesPanel {
         use crate::ui::window::named_parameters::ParamField;
 
         let name_key = FieldKey::Param(index, ParamField::Name);
-        let name_display = self.edit_buf.get(&name_key).map(|s| s.as_str()).unwrap_or(name);
+        let name_display = self
+            .edit_buf
+            .get(&name_key)
+            .map(|s| s.as_str())
+            .unwrap_or(name);
         let name_active = self.active_field.as_ref() == Some(&name_key);
         let name_input = text_input("name", name_display)
             .id(name_key.widget_id())
-            .on_input(move |v| Message::PropParamInput { index, field: ParamField::Name, value: v })
-            .on_submit(Message::PropParamCommit { index, field: ParamField::Name })
+            .on_input(move |v| Message::PropParamInput {
+                index,
+                field: ParamField::Name,
+                value: v,
+            })
+            .on_submit(Message::PropParamCommit {
+                index,
+                field: ParamField::Name,
+            })
             .size(FONT_SZ)
             .style(text_input_style)
             .padding([3, 6])
             .width(Length::FillPortion(3));
 
         let formula_key = FieldKey::Param(index, ParamField::Formula);
-        let formula_display = self.edit_buf.get(&formula_key).map(|s| s.as_str()).unwrap_or(formula);
+        let formula_display = self
+            .edit_buf
+            .get(&formula_key)
+            .map(|s| s.as_str())
+            .unwrap_or(formula);
         let formula_active = self.active_field.as_ref() == Some(&formula_key);
         let formula_input = text_input("formula", formula_display)
             .id(formula_key.widget_id())
-            .on_input(move |v| Message::PropParamInput { index, field: ParamField::Formula, value: v })
-            .on_submit(Message::PropParamCommit { index, field: ParamField::Formula })
+            .on_input(move |v| Message::PropParamInput {
+                index,
+                field: ParamField::Formula,
+                value: v,
+            })
+            .on_submit(Message::PropParamCommit {
+                index,
+                field: ParamField::Formula,
+            })
             .size(FONT_SZ)
             .style(text_input_style)
             .padding([3, 6])
@@ -1443,11 +1446,11 @@ impl PropertiesPanel {
             Ok(v) => (format!("{v:.4}"), false),
             Err(_) => ("—".to_string(), true),
         };
-        let value_label = container(
-            text(value_text).size(FONT_SZ).style(move |theme: &Theme| iced::widget::text::Style {
+        let value_label = container(text(value_text).size(FONT_SZ).style(move |theme: &Theme| {
+            iced::widget::text::Style {
                 color: is_error.then_some(theme.palette().danger.base.color),
-            }),
-        )
+            }
+        }))
         .width(Length::FillPortion(2))
         .align_x(iced::Right);
 
@@ -1464,25 +1467,40 @@ impl PropertiesPanel {
                 Background::Color(theme.palette().background.base.color)
             }
         };
-        let content = container(row![name_input, formula_input, value_label, delete_btn].spacing(4).align_y(iced::Center))
-            .style(move |theme: &Theme| container::Style { background: Some(bg(theme)), ..Default::default() })
-            .padding([2, 6])
-            .width(Length::Fill);
+        let content = container(
+            row![name_input, formula_input, value_label, delete_btn]
+                .spacing(4)
+                .align_y(iced::Center),
+        )
+        .style(move |theme: &Theme| container::Style {
+            background: Some(bg(theme)),
+            ..Default::default()
+        })
+        .padding([2, 6])
+        .width(Length::Fill);
 
         if let Err(err) = resolved {
-            tooltip(content, text(err.as_str()).size(FONT_SZ), tooltip::Position::Top)
-                .gap(4.0)
-                .padding(6.0)
-                .style(|theme: &Theme| {
-                    let palette = theme.palette();
-                    container::Style {
-                        background: Some(Background::Color(palette.danger.weak.color)),
-                        text_color: Some(palette.danger.weak.text),
-                        border: Border { color: palette.danger.base.color, width: 1.0, radius: 4.0.into() },
-                        ..Default::default()
-                    }
-                })
-                .into()
+            tooltip(
+                content,
+                text(err.as_str()).size(FONT_SZ),
+                tooltip::Position::Top,
+            )
+            .gap(4.0)
+            .padding(6.0)
+            .style(|theme: &Theme| {
+                let palette = theme.palette();
+                container::Style {
+                    background: Some(Background::Color(palette.danger.weak.color)),
+                    text_color: Some(palette.danger.weak.text),
+                    border: Border {
+                        color: palette.danger.base.color,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }
+            })
+            .into()
         } else {
             content.into()
         }
@@ -1596,9 +1614,8 @@ impl PropertiesPanel {
                 })
                 .padding(5)
                 .width(PATTERN_CARD_W);
-                cards = cards.push(
-                    mouse_area(card).on_enter(Message::PropHatchPatternFocus(index)),
-                );
+                cards =
+                    cards.push(mouse_area(card).on_enter(Message::PropHatchPatternFocus(index)));
             }
             grid = grid.push(cards);
         }
@@ -1683,38 +1700,35 @@ fn render_bool_row<'a>(label: &'a str, field: &'static str, value: bool) -> Elem
     } else {
         t!("No").into_owned()
     };
-    let btn =
-        button(
-            text(btn_label)
-                .size(FONT_SZ)
-                .style(move |theme: &Theme| iced::widget::text::Style {
-                    color: value.then_some(theme.palette().warning.base.color),
-                }),
-        )
-        .on_press(Message::PropBoolToggle(field))
-        .style(move |theme: &Theme, status| {
-            let palette = theme.palette();
-            let pair = match status {
-                button::Status::Hovered | button::Status::Pressed => palette.background.weak,
-                _ => palette.background.base,
-            };
-            button::Style {
-                background: Some(Background::Color(pair.color)),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                text_color: if value {
-                    palette.warning.base.color
-                } else {
-                    pair.text
-                },
-                ..Default::default()
-            }
-        })
-        .padding([2, 6])
-        .width(Length::Fill);
+    let btn = button(text(btn_label).size(FONT_SZ).style(move |theme: &Theme| {
+        iced::widget::text::Style {
+            color: value.then_some(theme.palette().warning.base.color),
+        }
+    }))
+    .on_press(Message::PropBoolToggle(field))
+    .style(move |theme: &Theme, status| {
+        let palette = theme.palette();
+        let pair = match status {
+            button::Status::Hovered | button::Status::Pressed => palette.background.weak,
+            _ => palette.background.base,
+        };
+        button::Style {
+            background: Some(Background::Color(pair.color)),
+            border: Border {
+                color: palette.background.neutral.color,
+                width: 1.0,
+                radius: 2.0.into(),
+            },
+            text_color: if value {
+                palette.warning.base.color
+            } else {
+                pair.text
+            },
+            ..Default::default()
+        }
+    })
+    .padding([2, 6])
+    .width(Length::Fill);
 
     prop_row_widget(label, btn.into())
 }
@@ -1743,9 +1757,7 @@ fn coord_group_len(props: &[crate::scene::model::object::Property], idx: usize) 
     let groupable = |p: &crate::scene::model::object::Property| {
         matches!(
             p.value,
-            PropValue::EditText(_)
-                | PropValue::ReadOnly(_)
-                | PropValue::ReadOnlyWithTooltip { .. }
+            PropValue::EditText(_) | PropValue::ReadOnly(_) | PropValue::ReadOnlyWithTooltip { .. }
         )
     };
     let Some((base, 0)) = coord_suffix(&props[idx].label) else {
@@ -1831,9 +1843,7 @@ fn render_group_row(
     .height(Length::Fixed(ROW_H));
     let label_col = container(label_btn)
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.weakest.color,
-            )),
+            background: Some(Background::Color(theme.palette().background.weakest.color)),
             ..Default::default()
         })
         .width(Length::FillPortion(5))
@@ -1844,9 +1854,7 @@ fn render_group_row(
     let value_field = crate::ui::read_only::field(&joined, FONT_SZ, Length::Fill);
     let value_col = container(value_field)
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.base.color,
-            )),
+            background: Some(Background::Color(theme.palette().background.base.color)),
             ..Default::default()
         })
         .width(Length::FillPortion(6))
@@ -1871,10 +1879,7 @@ fn render_group_row(
         })
         .into()
 }
-fn render_annotative_scale_row<'a>(
-    label: &'a str,
-    value: &'a str,
-) -> Element<'a, Message> {
+fn render_annotative_scale_row<'a>(label: &'a str, value: &'a str) -> Element<'a, Message> {
     let field = crate::ui::read_only::field(value, FONT_SZ, Length::Fill);
 
     let manage = button(text("...").size(FONT_SZ))
@@ -1882,14 +1887,10 @@ fn render_annotative_scale_row<'a>(
         .style(button::secondary)
         .padding([2, 7]);
 
-    let controls = row![
-        field,
-        manage,
-        iced::widget::space().width(10)
-    ]
-    .spacing(2)
-    .align_y(iced::Center)
-    .width(Length::Fill);
+    let controls = row![field, manage, iced::widget::space().width(10)]
+        .spacing(2)
+        .align_y(iced::Center)
+        .width(Length::Fill);
 
     prop_row_widget(label, controls.into())
 }
@@ -1919,22 +1920,26 @@ fn render_ro_with_tooltip_row<'a>(
     tooltip_text: &'a str,
 ) -> Element<'a, Message> {
     let field = crate::ui::read_only::field(value, FONT_SZ, Length::Fill);
-    let wrapped = tooltip(field, text(tooltip_text).size(FONT_SZ), tooltip::Position::Top)
-        .gap(4.0)
-        .padding(6.0)
-        .style(|theme: &Theme| {
-            let palette = theme.palette();
-            container::Style {
-                background: Some(Background::Color(palette.background.base.color)),
-                text_color: Some(palette.background.base.text),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            }
-        });
+    let wrapped = tooltip(
+        field,
+        text(tooltip_text).size(FONT_SZ),
+        tooltip::Position::Top,
+    )
+    .gap(4.0)
+    .padding(6.0)
+    .style(|theme: &Theme| {
+        let palette = theme.palette();
+        container::Style {
+            background: Some(Background::Color(palette.background.base.color)),
+            text_color: Some(palette.background.base.text),
+            border: Border {
+                color: palette.background.neutral.color,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        }
+    });
     prop_row_widget(label, wrapped.into())
 }
 
@@ -1967,7 +1972,11 @@ fn render_entity_link_row<'a>(
             };
             button::Style {
                 background: Some(Background::Color(pair.color)),
-                border: Border { color: palette.background.neutral.color, width: 1.0, radius: 2.0.into() },
+                border: Border {
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
                 text_color: pair.text,
                 ..Default::default()
             }
@@ -1990,11 +1999,18 @@ fn render_entity_link_row<'a>(
 /// — avoids a separate "pending new row" concept, since every row always
 /// reflects a real committed table entry.
 fn render_param_add_row<'a>() -> Element<'a, Message> {
-    let btn = button(row![text("+").size(FONT_SZ), text(t!("Add parameter").into_owned()).size(FONT_SZ)].spacing(6).align_y(iced::Center))
-        .on_press(Message::PropParamAddNew)
-        .style(button::text)
-        .padding([4, 8])
-        .width(Length::Fill);
+    let btn = button(
+        row![
+            text("+").size(FONT_SZ),
+            text(t!("Add parameter").into_owned()).size(FONT_SZ)
+        ]
+        .spacing(6)
+        .align_y(iced::Center),
+    )
+    .on_press(Message::PropParamAddNew)
+    .style(button::text)
+    .padding([4, 8])
+    .width(Length::Fill);
     container(btn).width(Length::Fill).into()
 }
 
@@ -2023,16 +2039,28 @@ fn render_params_visibility_toggle_row<'a>(value: bool) -> Element<'a, Message> 
         };
         button::Style {
             background: Some(Background::Color(pair.color)),
-            border: Border { color: palette.background.neutral.color, width: 1.0, radius: 2.0.into() },
+            border: Border {
+                color: palette.background.neutral.color,
+                width: 1.0,
+                radius: 2.0.into(),
+            },
             text_color: pair.text,
             ..Default::default()
         }
     })
     .padding([4, 8])
     .width(Length::Fill);
-    container(row![text(t!("Values").into_owned()).size(FONT_SZ).width(Length::Fill), btn].align_y(iced::Center))
-        .width(Length::Fill)
-        .into()
+    container(
+        row![
+            text(t!("Values").into_owned())
+                .size(FONT_SZ)
+                .width(Length::Fill),
+            btn
+        ]
+        .align_y(iced::Center),
+    )
+    .width(Length::Fill)
+    .into()
 }
 
 /// Build a label | widget property row.
@@ -2053,23 +2081,23 @@ fn prop_row_with_active<'a>(
             .size(FONT_SZ)
             .style(muted_text_style),
     )
-        .style(move |theme: &Theme| container::Style {
-            background: Some(Background::Color(if active {
-                theme.palette().primary.weak.color
-            } else {
-                theme.palette().background.weakest.color
-            })),
-            ..Default::default()
-        })
-        .width(Length::FillPortion(5))
-        .height(Length::Fixed(ROW_H))
-        .align_y(iced::Center)
-        .padding(Padding {
-            top: 0.0,
-            bottom: 0.0,
-            left: 6.0,
-            right: 6.0,
-        });
+    .style(move |theme: &Theme| container::Style {
+        background: Some(Background::Color(if active {
+            theme.palette().primary.weak.color
+        } else {
+            theme.palette().background.weakest.color
+        })),
+        ..Default::default()
+    })
+    .width(Length::FillPortion(5))
+    .height(Length::Fixed(ROW_H))
+    .align_y(iced::Center)
+    .padding(Padding {
+        top: 0.0,
+        bottom: 0.0,
+        left: 6.0,
+        right: 6.0,
+    });
     let value_col = container(widget)
         .style(move |theme: &Theme| container::Style {
             background: Some(Background::Color(if active {
@@ -2204,7 +2232,7 @@ mod tests {
     };
 
     fn sample_sections() -> Vec<crate::scene::model::object::PropSection> {
-        use crate::scene::model::object::{Property, PropValue};
+        use crate::scene::model::object::{PropValue, Property};
         vec![
             crate::scene::model::object::PropSection {
                 title: "Geometry".into(),
@@ -2247,7 +2275,10 @@ mod tests {
         //
         // Focus on the active field's own input → row stays marked active.
         let focused = prop_geom_field_id("pos_x");
-        assert!(active_key_focused(Some(&FieldKey::Geom("pos_x")), Some(&focused)));
+        assert!(active_key_focused(
+            Some(&FieldKey::Geom("pos_x")),
+            Some(&focused)
+        ));
 
         // Focus moves to another property field → superseded (cleared here; the
         // manual focus-setter then marks the new field active).
@@ -2264,7 +2295,10 @@ mod tests {
         assert!(!active_key_focused(Some(&FieldKey::Geom("pos_x")), None));
 
         // No active field (or one whose input isn't focused) never reads active.
-        assert!(!active_key_focused(None, Some(&prop_geom_field_id("pos_x"))));
+        assert!(!active_key_focused(
+            None,
+            Some(&prop_geom_field_id("pos_x"))
+        ));
     }
 
     #[test]

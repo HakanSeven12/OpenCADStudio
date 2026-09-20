@@ -20,12 +20,12 @@ use acadrust::entities::{
 use acadrust::{EntityType, Handle};
 // Polyline offsetting, and the angle normalisation that goes with it, come
 // from the kernel; only the entity conversion stays here.
+use crate::t;
 use cadkernel::geom2d::nurbs::clamped_uniform_knots;
 use cadkernel::geom2d::{
     offset_polyline, Polyline as KernelPolyline, PolylineVertex as KernelVertex,
 };
 use glam::{DVec3, Vec3};
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::draw::defaults;
@@ -185,8 +185,7 @@ fn offset_lwpolylines(p: &LwPolyline, dist: f64, side_pt: Vec3) -> Vec<EntityTyp
                 .vertices
                 .iter()
                 .map(|vertex| {
-                    let mut output =
-                        LwVertex::from_coords(vertex.position[0], vertex.position[1]);
+                    let mut output = LwVertex::from_coords(vertex.position[0], vertex.position[1]);
                     output.bulge = vertex.bulge;
                     output
                 })
@@ -411,7 +410,6 @@ fn entity_wire_pts(e: &EntityType) -> Vec<[f32; 3]> {
         .collect::<Vec<[f32; 3]>>()
 }
 
-
 // ── Command implementation ─────────────────────────────────────────────────
 
 enum Step {
@@ -421,9 +419,13 @@ enum Step {
 
     /// First reference point has been picked; the second point defines
     /// the offset distance.
-    ReferenceSecond { first: DVec3 },
+    ReferenceSecond {
+        first: DVec3,
+    },
 
-    SelectObject { locked: Option<f64> },
+    SelectObject {
+        locked: Option<f64>,
+    },
 
     PickSide {
         targets: Vec<EntityType>,
@@ -550,9 +552,7 @@ impl OffsetCommand {
 
         let d = format!("{:.4}", distance);
 
-        CmdResult::ReportMeasurement(
-            t!("OFFSET distance = %{d}", d = d).into_owned()
-        )
+        CmdResult::ReportMeasurement(t!("OFFSET distance = %{d}", d = d).into_owned())
     }
 }
 
@@ -567,11 +567,14 @@ impl CadCommand for OffsetCommand {
     fn prompt(&self) -> String {
         match self.awaiting {
             Some(Await::Erase) => {
-                return t!("OFFSET  Erase source object after offsetting? [Yes/No] <No>:").into_owned()
+                return t!("OFFSET  Erase source object after offsetting? [Yes/No] <No>:")
+                    .into_owned()
             }
             Some(Await::Layer) => {
-                return t!("OFFSET  Enter layer option for offset objects [Current/Source] <Source>:")
-                    .into_owned()
+                return t!(
+                    "OFFSET  Enter layer option for offset objects [Current/Source] <Source>:"
+                )
+                .into_owned()
             }
             None => {}
         }
@@ -639,7 +642,10 @@ impl CadCommand for OffsetCommand {
                 return vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")]
             }
             Some(Await::Layer) => {
-                return vec![CmdOption::new("Current", "C"), CmdOption::new("Source", "S")]
+                return vec![
+                    CmdOption::new("Current", "C"),
+                    CmdOption::new("Source", "S"),
+                ]
             }
             None => {}
         }
@@ -698,11 +704,10 @@ impl CadCommand for OffsetCommand {
             return CmdResult::NeedPoint;
         }
 
-        let entity = self.picked.take().or_else(|| {
-            self.entity_index
-                .get(&self.all_entities, handle)
-                .cloned()
-        });
+        let entity = self
+            .picked
+            .take()
+            .or_else(|| self.entity_index.get(&self.all_entities, handle).cloned());
 
         // Accept every type compute_offsets can offset — including XLine (#296),
         // and Ellipse/Spline whose offset functions existed but weren't reachable.
@@ -730,15 +735,18 @@ impl CadCommand for OffsetCommand {
         match self.step {
             Step::Distance | Step::PickSide { .. } => crate::command::DynField::Scalar,
 
-            Step::ReferenceSecond { .. }
-            | Step::SelectObject { .. } => crate::command::DynField::Point,
+            Step::ReferenceSecond { .. } | Step::SelectObject { .. } => {
+                crate::command::DynField::Point
+            }
         }
     }
 
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
         match &self.step {
             Step::Distance => Some(defaults::get_offset_dist()),
-            Step::PickSide { targets, locked, .. } => Some(locked.unwrap_or_else(|| {
+            Step::PickSide {
+                targets, locked, ..
+            } => Some(locked.unwrap_or_else(|| {
                 targets
                     .first()
                     .map(|e| perp_distance(e, cursor.as_vec3()))
@@ -796,9 +804,7 @@ impl CadCommand for OffsetCommand {
                 Some(CmdResult::NeedPoint)
             }
             Step::PickSide {
-                locked,
-                multiple,
-                ..
+                locked, multiple, ..
             } => {
                 if t.eq_ignore_ascii_case("m") || t.eq_ignore_ascii_case("multiple") {
                     *multiple = true;
@@ -822,9 +828,7 @@ impl CadCommand for OffsetCommand {
         if handle.is_null() || !matches!(self.step, Step::SelectObject { .. }) {
             return vec![];
         }
-        if let Some(entity) = self
-            .entity_index.get(&self.all_entities, handle)
-        {
+        if let Some(entity) = self.entity_index.get(&self.all_entities, handle) {
             let pts = entity_wire_pts(entity);
             if !pts.is_empty() {
                 return vec![WireModel::solid(
@@ -922,16 +926,8 @@ impl CadCommand for OffsetCommand {
             return vec![WireModel::solid(
                 "offset_reference_distance".into(),
                 vec![
-                    [
-                        first.x as f32,
-                        first.y as f32,
-                        first.z as f32,
-                    ],
-                    [
-                        pt.x as f32,
-                        pt.y as f32,
-                        pt.z as f32,
-                    ],
+                    [first.x as f32, first.y as f32, first.z as f32],
+                    [pt.x as f32, pt.y as f32, pt.z as f32],
                 ],
                 WireModel::CYAN,
                 false,
@@ -939,7 +935,9 @@ impl CadCommand for OffsetCommand {
         }
 
         let (locked, targets) = match &self.step {
-            Step::PickSide { locked, targets, .. } => (*locked, targets.clone()),
+            Step::PickSide {
+                locked, targets, ..
+            } => (*locked, targets.clone()),
             _ => return vec![],
         };
         let mut wires = Vec::new();
@@ -982,9 +980,8 @@ impl CadCommand for OffsetCommand {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["OFFSET"] });  // OffsetCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["OFFSET"] }); // OffsetCommand
 
 #[cfg(test)]
 mod offset_tests {
@@ -1008,8 +1005,12 @@ mod offset_tests {
         let Some(EntityType::LwPolyline(r)) = out else {
             panic!("offset did not return an lwpolyline");
         };
-        let (mut minx, mut miny, mut maxx, mut maxy) =
-            (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        let (mut minx, mut miny, mut maxx, mut maxy) = (
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        );
         for v in &r.vertices {
             minx = minx.min(v.location.x);
             miny = miny.min(v.location.y);
@@ -1065,8 +1066,14 @@ mod option_tests {
         assert!(matches!(cmd.on_text_input("E"), Some(CmdResult::NeedPoint)));
         assert_eq!(keywords(&cmd), ["Y", "N"]);
         assert!(matches!(cmd.on_text_input("Y"), Some(CmdResult::NeedPoint)));
-        assert!(matches!(cmd.on_text_input("2"), Some(CmdResult::ReportMeasurement(_))));
-        assert!(matches!(cmd.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0)), CmdResult::NeedPoint));
+        assert!(matches!(
+            cmd.on_text_input("2"),
+            Some(CmdResult::ReportMeasurement(_))
+        ));
+        assert!(matches!(
+            cmd.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
         match cmd.on_point(DVec3::new(5.0, 5.0, 0.0)) {
             CmdResult::ReplaceManyContinue(replacements) => {
                 assert_eq!(replacements.len(), 1);
@@ -1077,7 +1084,10 @@ mod option_tests {
         }
         // Back at the object pick, with Undo now available.
         assert_eq!(keywords(&cmd), ["U", ""]);
-        assert!(matches!(cmd.on_text_input("U"), Some(CmdResult::UndoDocument)));
+        assert!(matches!(
+            cmd.on_text_input("U"),
+            Some(CmdResult::UndoDocument)
+        ));
         assert_eq!(keywords(&cmd), [""]);
     }
 
@@ -1092,6 +1102,9 @@ mod option_tests {
         assert!(matches!(cmd.step, Step::Distance));
         cmd.on_text_input("2");
         cmd.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
-        assert!(matches!(cmd.on_point(DVec3::new(5.0, 5.0, 0.0)), CmdResult::CommitEntity(_)));
+        assert!(matches!(
+            cmd.on_point(DVec3::new(5.0, 5.0, 0.0)),
+            CmdResult::CommitEntity(_)
+        ));
     }
 }

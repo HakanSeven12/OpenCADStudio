@@ -51,11 +51,8 @@ fn block_object_style(
     let entity = EntityType::Insert(insert.clone());
     let (color, pattern_length, pattern, line_weight_px, aci) =
         view::render::render_style_for_viewport(document, &entity, active_viewport);
-    let mut layer = view::render::layer_render_style_viewport(
-        document,
-        &insert.common.layer,
-        active_viewport,
-    );
+    let mut layer =
+        view::render::layer_render_style_viewport(document, &insert.common.layer, active_viewport);
     layer.color = view::render::adapt_to_bg(layer.color, bg_color);
     let layer_aci = document
         .layers
@@ -159,11 +156,8 @@ pub(crate) fn expand_block_object(
             pick::xclip::clip_wires(&mut wires, &polygon);
             for wire in &mut wires {
                 if let Some(mut instance) = wire.render_instance {
-                    instance.source_id = cache.clip_source_id(
-                        instance.source_id,
-                        &polygon,
-                        instance.translation,
-                    );
+                    instance.source_id =
+                        cache.clip_source_id(instance.source_id, &polygon, instance.translation);
                     wire.render_instance = Some(instance);
                 }
             }
@@ -657,7 +651,11 @@ fn tessellate_entity_inner(
                             // footprint doesn't drift when the camera
                             // crosses the LOD threshold. See #19.
                             let (entity_color, _, _, _, aci_idx) =
-                                view::render::render_style_for_viewport(document, e, active_viewport);
+                                view::render::render_style_for_viewport(
+                                    document,
+                                    e,
+                                    active_viewport,
+                                );
                             let entity_color = view::render::adapt_to_bg(entity_color, bg_color);
                             let entity_color = fade_if_locked(document, e, entity_color, bg_color);
                             if is_3d_entity {
@@ -776,104 +774,104 @@ fn tessellate_entity_inner(
         _ => None,
     };
     if let Some(blob) = proxy_blob {
-            let dec = convert::proxy_graphics::decode(blob.as_ref());
-            if !dec.polylines.is_empty() || !dec.texts.is_empty() {
-                use crate::scene::convert::proxy_graphics::ProxyColor;
-                use std::collections::BTreeMap;
-                let nan = [f64::NAN; 3];
-                // A specific ACI / RGB overrides the entity colour; ByLayer /
-                // ByBlock inherit it.
-                let resolve = |pc: ProxyColor| -> ([f32; 4], u8) {
-                    match pc {
-                        ProxyColor::Aci(a) => (
-                            view::render::adapt_to_bg(
-                                convert::tess_util::aci_to_rgba(&acadrust::types::Color::Index(a)),
-                                bg_color,
-                            ),
-                            a,
+        let dec = convert::proxy_graphics::decode(blob.as_ref());
+        if !dec.polylines.is_empty() || !dec.texts.is_empty() {
+            use crate::scene::convert::proxy_graphics::ProxyColor;
+            use std::collections::BTreeMap;
+            let nan = [f64::NAN; 3];
+            // A specific ACI / RGB overrides the entity colour; ByLayer /
+            // ByBlock inherit it.
+            let resolve = |pc: ProxyColor| -> ([f32; 4], u8) {
+                match pc {
+                    ProxyColor::Aci(a) => (
+                        view::render::adapt_to_bg(
+                            convert::tess_util::aci_to_rgba(&acadrust::types::Color::Index(a)),
+                            bg_color,
                         ),
-                        ProxyColor::Rgb(r, g, b) => (
-                            view::render::adapt_to_bg(
-                                [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0],
-                                bg_color,
-                            ),
-                            0,
+                        a,
+                    ),
+                    ProxyColor::Rgb(r, g, b) => (
+                        view::render::adapt_to_bg(
+                            [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0],
+                            bg_color,
                         ),
-                        ProxyColor::Inherit => (entity_color, aci),
-                    }
-                };
-                let mut wires = Vec::new();
-                // Lines / shells: group by (colour, lineweight), one wire each.
-                let mut groups: BTreeMap<(ProxyColor, i16), Vec<[f64; 3]>> = BTreeMap::new();
-                for poly in &dec.polylines {
-                    let buf = groups.entry((poly.color, poly.lineweight)).or_default();
-                    if !buf.is_empty() {
-                        buf.push(nan);
-                    }
-                    buf.extend_from_slice(&poly.points);
+                        0,
+                    ),
+                    ProxyColor::Inherit => (entity_color, aci),
                 }
-                for ((pcolor, plw), pts64) in groups {
-                    let (col, w_aci) = resolve(pcolor);
-                    let lw_px = if plw >= 0 {
-                        view::render::lineweight_to_px(&acadrust::types::LineWeight::Value(plw))
-                    } else {
-                        line_weight_px
-                    };
+            };
+            let mut wires = Vec::new();
+            // Lines / shells: group by (colour, lineweight), one wire each.
+            let mut groups: BTreeMap<(ProxyColor, i16), Vec<[f64; 3]>> = BTreeMap::new();
+            for poly in &dec.polylines {
+                let buf = groups.entry((poly.color, poly.lineweight)).or_default();
+                if !buf.is_empty() {
+                    buf.push(nan);
+                }
+                buf.extend_from_slice(&poly.points);
+            }
+            for ((pcolor, plw), pts64) in groups {
+                let (col, w_aci) = resolve(pcolor);
+                let lw_px = if plw >= 0 {
+                    view::render::lineweight_to_px(&acadrust::types::LineWeight::Value(plw))
+                } else {
+                    line_weight_px
+                };
+                let (pts, pts_low) = convert::tessellate::points_to_ds(pts64);
+                let mut w = WireModel::solid(h.value().to_string(), pts, col, sel);
+                w.points_low = pts_low;
+                w.line_weight_px = lw_px;
+                w.aci = w_aci;
+                wires.push(w);
+            }
+            // Text labels: draw the glyph strokes (simplex.shx etc. are
+            // single-stroke fonts, so the outline is the character).
+            for t in &dec.texts {
+                let font = t
+                    .font
+                    .trim()
+                    .trim_end_matches(".shx")
+                    .trim_end_matches(".SHX");
+                let font = if font.is_empty() { "standard" } else { font };
+                let (strokes, _) = crate::scene::text::lff::tessellate_text_ex(
+                    [0.0, 0.0],
+                    t.height as f32,
+                    t.rotation as f32,
+                    1.0,
+                    0.0,
+                    font,
+                    &t.text,
+                );
+                let mut pts64: Vec<[f64; 3]> = Vec::new();
+                for stroke in &strokes {
+                    if stroke.len() < 2 {
+                        continue;
+                    }
+                    if !pts64.is_empty() {
+                        pts64.push(nan);
+                    }
+                    for &[x, y] in stroke {
+                        pts64.push([
+                            t.position[0] + x as f64,
+                            t.position[1] + y as f64,
+                            t.position[2],
+                        ]);
+                    }
+                }
+                if pts64.len() >= 2 {
+                    let (col, w_aci) = resolve(t.color);
                     let (pts, pts_low) = convert::tessellate::points_to_ds(pts64);
                     let mut w = WireModel::solid(h.value().to_string(), pts, col, sel);
                     w.points_low = pts_low;
-                    w.line_weight_px = lw_px;
+                    w.line_weight_px = line_weight_px;
                     w.aci = w_aci;
                     wires.push(w);
                 }
-                // Text labels: draw the glyph strokes (simplex.shx etc. are
-                // single-stroke fonts, so the outline is the character).
-                for t in &dec.texts {
-                    let font = t
-                        .font
-                        .trim()
-                        .trim_end_matches(".shx")
-                        .trim_end_matches(".SHX");
-                    let font = if font.is_empty() { "standard" } else { font };
-                    let (strokes, _) = crate::scene::text::lff::tessellate_text_ex(
-                        [0.0, 0.0],
-                        t.height as f32,
-                        t.rotation as f32,
-                        1.0,
-                        0.0,
-                        font,
-                        &t.text,
-                    );
-                    let mut pts64: Vec<[f64; 3]> = Vec::new();
-                    for stroke in &strokes {
-                        if stroke.len() < 2 {
-                            continue;
-                        }
-                        if !pts64.is_empty() {
-                            pts64.push(nan);
-                        }
-                        for &[x, y] in stroke {
-                            pts64.push([
-                                t.position[0] + x as f64,
-                                t.position[1] + y as f64,
-                                t.position[2],
-                            ]);
-                        }
-                    }
-                    if pts64.len() >= 2 {
-                        let (col, w_aci) = resolve(t.color);
-                        let (pts, pts_low) = convert::tessellate::points_to_ds(pts64);
-                        let mut w = WireModel::solid(h.value().to_string(), pts, col, sel);
-                        w.points_low = pts_low;
-                        w.line_weight_px = line_weight_px;
-                        w.aci = w_aci;
-                        wires.push(w);
-                    }
-                }
-                if !wires.is_empty() {
-                    return wires;
-                }
             }
+            if !wires.is_empty() {
+                return wires;
+            }
+        }
     }
 
     // ── Section symbol (AcDbSectionSymbol): draw the "A-A" cut mark ──────────
@@ -961,13 +959,10 @@ fn tessellate_entity_inner(
     // Render non-annotative dimensions from their stored picture block.
     // Rebuild geometry only when no usable block exists.
     if matches!(e, EntityType::Dimension(_)) {
-        if let Some(block_use) = crate::scene::render_graph::entity_render_block_uses(
-            document,
-            e,
-            anno_scale,
-        )
-        .into_iter()
-        .find(|block_use| block_use.active)
+        if let Some(block_use) =
+            crate::scene::render_graph::entity_render_block_uses(document, e, anno_scale)
+                .into_iter()
+                .find(|block_use| block_use.active)
         {
             let mut wires = expand_block_object(
                 document,
@@ -1069,16 +1064,14 @@ fn tessellate_entity_inner(
     // When the block exists we render it directly. Same pattern as
     // Dimension's `block_name`.
     if let EntityType::Table(table) = e {
-        if let Some(block_use) = crate::scene::render_graph::entity_render_block_uses(
-            document,
-            e,
-            anno_scale,
-        )
-        .into_iter()
-        .find(|block_use| {
-            block_use.active
-                && block_use.role == crate::scene::render_graph::BlockRole::TablePicture
-        }) {
+        if let Some(block_use) =
+            crate::scene::render_graph::entity_render_block_uses(document, e, anno_scale)
+                .into_iter()
+                .find(|block_use| {
+                    block_use.active
+                        && block_use.role == crate::scene::render_graph::BlockRole::TablePicture
+                })
+        {
             let mut wires = expand_block_object(
                 document,
                 &block_use.insert,
@@ -1118,15 +1111,13 @@ fn tessellate_entity_inner(
             line_weight_px,
             table_anno,
         );
-        for block_use in crate::scene::render_graph::entity_render_block_uses(
-            document,
-            e,
-            table_anno,
-        )
-        .into_iter()
-        .filter(|block_use| {
-            block_use.role == crate::scene::render_graph::BlockRole::TableCell
-        }) {
+        for block_use in
+            crate::scene::render_graph::entity_render_block_uses(document, e, table_anno)
+                .into_iter()
+                .filter(|block_use| {
+                    block_use.role == crate::scene::render_graph::BlockRole::TableCell
+                })
+        {
             wires.extend(
                 expand_block_object(
                     document,
@@ -1266,8 +1257,8 @@ fn tessellate_entity_inner(
         bg_color,
         false,
     );
-    let frame_mode = crate::scene::frame::entity_kind(e)
-        .map(|kind| crate::scene::frame::mode(document, kind));
+    let frame_mode =
+        crate::scene::frame::entity_kind(e).map(|kind| crate::scene::frame::mode(document, kind));
     for b in &mut bases {
         b.aci = aci;
         // SDF text wires carry a glyph-bounds AABB (the true text extent) set
@@ -1730,9 +1721,9 @@ pub(crate) fn entity_bounds(e: &acadrust::EntityType) -> ([f64; 3], [f64; 3]) {
         }
     }
     if let acadrust::EntityType::Line(line) = e {
-        if let Some(association) = acadrust::entities::CenterMarkAssociation::read(
-            &line.common.extended_data,
-        ) {
+        if let Some(association) =
+            acadrust::entities::CenterMarkAssociation::read(&line.common.extended_data)
+        {
             return crate::scene::centermark::mark_bounds(&association);
         }
     }

@@ -12,8 +12,6 @@ mod command_driver;
 pub(crate) mod commands;
 pub(crate) mod dim_viewport;
 #[cfg(test)]
-mod viewport_dimension_tests;
-#[cfg(test)]
 mod dimension_preview_tests;
 mod document;
 mod drafting_settings;
@@ -23,8 +21,8 @@ pub(crate) mod helpers;
 mod history;
 mod layers;
 mod model_ops;
-mod navigation;
 mod mtext_editor;
+mod navigation;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin_host;
 mod presspull_ops;
@@ -39,6 +37,8 @@ mod text_inline;
 mod tolerance_dialog;
 mod update;
 mod view;
+#[cfg(test)]
+mod viewport_dimension_tests;
 mod visibility;
 
 pub use style_ops::StyleKind;

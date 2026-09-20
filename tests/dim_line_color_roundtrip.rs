@@ -31,7 +31,9 @@ fn leader_color(doc: &CadDocument) -> Option<Color> {
 fn dim_color(doc: &CadDocument) -> Option<Color> {
     doc.entities()
         .find_map(|e| match e {
-            EntityType::Dimension(d) => Some(dov::color(&d.base().common.extended_data, dov::DIMCLRD)),
+            EntityType::Dimension(d) => {
+                Some(dov::color(&d.base().common.extended_data, dov::DIMCLRD))
+            }
             _ => None,
         })
         .flatten()
@@ -66,8 +68,7 @@ fn dimension_scene(aci: i16) -> Scene {
     sub_e.common_mut().owner_handle = br_h;
     scene.document.add_entity(sub_e).unwrap();
 
-    let mut dim =
-        DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
+    let mut dim = DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
     dim.base.block_name = "*D0".to_string();
     let h = scene.add_entity(EntityType::Dimension(Dimension::Linear(dim)));
     dov::set(

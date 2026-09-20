@@ -184,12 +184,10 @@ fn valid_samples_are_unchanged_and_invalid_samples_stay_rejected() {
         |p| p
     )
     .is_none());
-    assert!(refine_spline_boundary(
-        &vec![[0.0; 2]; 513],
-        || panic!("size cap ignored"),
-        |p| p
-    )
-    .is_none());
+    assert!(
+        refine_spline_boundary(&vec![[0.0; 2]; 513], || panic!("size cap ignored"), |p| p)
+            .is_none()
+    );
 }
 
 #[test]

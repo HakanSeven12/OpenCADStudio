@@ -13,7 +13,6 @@ use acadrust::types::Vector3;
 use acadrust::EntityType;
 use glam::DVec3;
 
-
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
@@ -80,10 +79,22 @@ fn weights_are_rational(weights: &[f64]) -> bool {
 
 impl SplineditCommand {
     pub fn new() -> Self {
-        Self { step: Step::SelectSpline, handle: acadrust::Handle::NULL, spline: None, pending: None, history: Vec::new(), pick_context: None, join_candidates: Vec::new(), delete_source: true }
+        Self {
+            step: Step::SelectSpline,
+            handle: acadrust::Handle::NULL,
+            spline: None,
+            pending: None,
+            history: Vec::new(),
+            pick_context: None,
+            join_candidates: Vec::new(),
+            delete_source: true,
+        }
     }
 
-    pub fn with_delete_source(mut self, delete: bool) -> Self { self.delete_source = delete; self }
+    pub fn with_delete_source(mut self, delete: bool) -> Self {
+        self.delete_source = delete;
+        self
+    }
 
     fn convert_polyline(&mut self, precision: u8) -> CmdResult {
         let result = self.spline.as_ref().and_then(|source| {
@@ -91,114 +102,217 @@ impl SplineditCommand {
             let approximation = curve.to_polyline_precision(precision)?;
             let mut points = approximation.points;
             if self.closed() {
-                if points.first() != points.last() { return None; }
+                if points.first() != points.last() {
+                    return None;
+                }
                 points.pop();
             }
-            if points.len() < 2 { return None; }
-            let entity = if let Some(planar) = crate::entities::curve::entity_curve(&EntityType::Spline(source.clone())) {
+            if points.len() < 2 {
+                return None;
+            }
+            let entity = if let Some(planar) =
+                crate::entities::curve::entity_curve(&EntityType::Spline(source.clone()))
+            {
                 let normal = planar.plane.normal()?;
-                let elevation = cadkernel::space::Vec3::from(points[0]).dot(cadkernel::space::Vec3::from(normal));
+                let elevation = cadkernel::space::Vec3::from(points[0])
+                    .dot(cadkernel::space::Vec3::from(normal));
                 let normal = Vector3::new(normal[0], normal[1], normal[2]);
                 let plane = crate::entities::curve::ocs_plane(normal.clone(), elevation);
                 let mut polyline = acadrust::LwPolyline::new();
                 polyline.common = source.common.clone();
-                polyline.elevation = elevation; polyline.normal = normal; polyline.is_closed = self.closed();
-                polyline.vertices = points.iter().map(|point| {
-                    let uv = plane.project(*point)?;
-                    Some(acadrust::entities::LwVertex::new(acadrust::types::Vector2::new(uv[0], uv[1])))
-                }).collect::<Option<Vec<_>>>()?;
+                polyline.elevation = elevation;
+                polyline.normal = normal;
+                polyline.is_closed = self.closed();
+                polyline.vertices = points
+                    .iter()
+                    .map(|point| {
+                        let uv = plane.project(*point)?;
+                        Some(acadrust::entities::LwVertex::new(
+                            acadrust::types::Vector2::new(uv[0], uv[1]),
+                        ))
+                    })
+                    .collect::<Option<Vec<_>>>()?;
                 EntityType::LwPolyline(polyline)
             } else {
-                let mut polyline = acadrust::entities::Polyline3D::from_points(points.iter().map(|p| Vector3::new(p[0],p[1],p[2])).collect());
-                polyline.common = source.common.clone(); polyline.flags.closed = self.closed();
+                let mut polyline = acadrust::entities::Polyline3D::from_points(
+                    points
+                        .iter()
+                        .map(|p| Vector3::new(p[0], p[1], p[2]))
+                        .collect(),
+                );
+                polyline.common = source.common.clone();
+                polyline.flags.closed = self.closed();
                 EntityType::Polyline3D(polyline)
             };
             Some(entity)
         });
-        let Some(mut entity) = result else { return CmdResult::ReportError(crate::t!("Spline cannot be converted within the requested precision.").into_owned()); };
-        if self.delete_source { CmdResult::ReplaceMany(vec![(self.handle,vec![entity])], Vec::new()) }
-        else { entity.common_mut().handle = acadrust::Handle::NULL; CmdResult::ReplaceMany(Vec::new(), vec![entity]) }
+        let Some(mut entity) = result else {
+            return CmdResult::ReportError(
+                crate::t!("Spline cannot be converted within the requested precision.")
+                    .into_owned(),
+            );
+        };
+        if self.delete_source {
+            CmdResult::ReplaceMany(vec![(self.handle, vec![entity])], Vec::new())
+        } else {
+            entity.common_mut().handle = acadrust::Handle::NULL;
+            CmdResult::ReplaceMany(Vec::new(), vec![entity])
+        }
     }
 
-    fn picked_vertex(&self, point: DVec3) -> Option<usize> { self.picked_from_points(point, &self.spline.as_ref()?.control_points) }
-    fn picked_fit_point(&self, point: DVec3) -> Option<usize> { self.picked_from_points(point, &self.spline.as_ref()?.fit_points) }
-    fn has_fit_data(&self) -> bool { self.spline.as_ref().is_some_and(|s| s.fit_points.len() >= 2) }
+    fn picked_vertex(&self, point: DVec3) -> Option<usize> {
+        self.picked_from_points(point, &self.spline.as_ref()?.control_points)
+    }
+    fn picked_fit_point(&self, point: DVec3) -> Option<usize> {
+        self.picked_from_points(point, &self.spline.as_ref()?.fit_points)
+    }
+    fn has_fit_data(&self) -> bool {
+        self.spline
+            .as_ref()
+            .is_some_and(|s| s.fit_points.len() >= 2)
+    }
 
     fn replace_fit_points(&mut self, points: Vec<Vector3>) -> CmdResult {
-        let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
-        if points == source.fit_points { return CmdResult::NeedPoint; }
+        let Some(source) = self.spline.as_ref() else {
+            return CmdResult::NeedPoint;
+        };
+        if points == source.fit_points {
+            return CmdResult::NeedPoint;
+        }
         let mut result = source.clone();
         result.fit_points = points;
         self.rebuild_fit(result)
     }
 
     fn rebuild_fit(&mut self, mut result: acadrust::entities::Spline) -> CmdResult {
-        let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
+        let Some(source) = self.spline.as_ref() else {
+            return CmdResult::NeedPoint;
+        };
         if source.fit_tolerance != 0.0 || source.weights.windows(2).any(|w| w[0] != w[1]) {
-            return CmdResult::ReportError(crate::t!("Editing weighted or tolerance-fitted interpolation data is not supported.").into_owned());
+            return CmdResult::ReportError(
+                crate::t!(
+                    "Editing weighted or tolerance-fitted interpolation data is not supported."
+                )
+                .into_owned(),
+            );
         }
-        result.control_points.clear(); result.knots.clear(); result.weights.clear();
-        let Some(curve) = spatial_spline(&result).and_then(|curve| curve.compact_knots(source.control_tolerance.max(1e-9))) else {
-            return CmdResult::ReportError(crate::t!("Fit points do not define a valid spline.").into_owned());
+        result.control_points.clear();
+        result.knots.clear();
+        result.weights.clear();
+        let Some(curve) = spatial_spline(&result)
+            .and_then(|curve| curve.compact_knots(source.control_tolerance.max(1e-9)))
+        else {
+            return CmdResult::ReportError(
+                crate::t!("Fit points do not define a valid spline.").into_owned(),
+            );
         };
         result.degree = curve.degree() as i32;
-        result.control_points = curve.control_points().iter().map(|p| Vector3::new(p[0],p[1],p[2])).collect();
-        result.knots = curve.knots().to_vec(); result.weights = curve.weights().to_vec();
-        result.dwg_flags1 |= 1; result.dxf_flags |= 32 | 1024;
+        result.control_points = curve
+            .control_points()
+            .iter()
+            .map(|p| Vector3::new(p[0], p[1], p[2]))
+            .collect();
+        result.knots = curve.knots().to_vec();
+        result.weights = curve.weights().to_vec();
+        result.dwg_flags1 |= 1;
+        result.dxf_flags |= 32 | 1024;
         result.flags.rational = false;
         result.flags.planar = crate::entities::curve::spline_is_planar(&result);
         self.replace(result)
     }
 
     fn purge_fit(&mut self) -> CmdResult {
-        let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
+        let Some(source) = self.spline.as_ref() else {
+            return CmdResult::NeedPoint;
+        };
         let mut result = source.clone();
         if crate::entities::spline::uses_fit_method(&result) {
-            if result.fit_tolerance != 0.0 { return CmdResult::ReportError(crate::t!("Fit data cannot be purged without a stored control curve.").into_owned()); }
-            let Some(curve) = spatial_spline(source).and_then(|c| c.compact_knots(source.control_tolerance.max(1e-9))) else {
-                return CmdResult::ReportError(crate::t!("Fit data does not define a valid control curve.").into_owned());
+            if result.fit_tolerance != 0.0 {
+                return CmdResult::ReportError(
+                    crate::t!("Fit data cannot be purged without a stored control curve.")
+                        .into_owned(),
+                );
+            }
+            let Some(curve) = spatial_spline(source)
+                .and_then(|c| c.compact_knots(source.control_tolerance.max(1e-9)))
+            else {
+                return CmdResult::ReportError(
+                    crate::t!("Fit data does not define a valid control curve.").into_owned(),
+                );
             };
             result.degree = curve.degree() as i32;
-            result.control_points = curve.control_points().iter().map(|p| Vector3::new(p[0],p[1],p[2])).collect();
-            result.knots = curve.knots().to_vec(); result.weights = curve.weights().to_vec();
+            result.control_points = curve
+                .control_points()
+                .iter()
+                .map(|p| Vector3::new(p[0], p[1], p[2]))
+                .collect();
+            result.knots = curve.knots().to_vec();
+            result.weights = curve.weights().to_vec();
         }
-        result.fit_points.clear(); result.begin_tangent = Vector3::ZERO; result.end_tangent = Vector3::ZERO;
-        result.dwg_flags1 &= !1; result.dxf_flags &= !(32 | 1024);
+        result.fit_points.clear();
+        result.begin_tangent = Vector3::ZERO;
+        result.end_tangent = Vector3::ZERO;
+        result.dwg_flags1 &= !1;
+        result.dxf_flags &= !(32 | 1024);
         result.flags.rational = weights_are_rational(&result.weights);
         self.step = Step::Options;
         self.replace(result)
     }
 
     fn finish_fit_tangents(&mut self, start: DVec3, end: DVec3) -> CmdResult {
-        let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
+        let Some(source) = self.spline.as_ref() else {
+            return CmdResult::NeedPoint;
+        };
         self.step = Step::FitOptions;
-        let begin = Vector3::new(start.x,start.y,start.z);
-        let end = Vector3::new(end.x,end.y,end.z);
-        if source.begin_tangent == begin && source.end_tangent == end { return CmdResult::NeedPoint; }
-        let mut result = source.clone(); result.begin_tangent = begin; result.end_tangent = end;
+        let begin = Vector3::new(start.x, start.y, start.z);
+        let end = Vector3::new(end.x, end.y, end.z);
+        if source.begin_tangent == begin && source.end_tangent == end {
+            return CmdResult::NeedPoint;
+        }
+        let mut result = source.clone();
+        result.begin_tangent = begin;
+        result.end_tangent = end;
         self.rebuild_fit(result)
     }
     fn picked_from_points(&self, point: DVec3, points: &[Vector3]) -> Option<usize> {
         let context = self.pick_context?;
         let project = |point: DVec3| {
             let clip = context.view * (point - context.eye).as_vec3().extend(1.0);
-            if !clip.is_finite() || clip.w <= 0.0 { return None; }
+            if !clip.is_finite() || clip.w <= 0.0 {
+                return None;
+            }
             let screen = crate::scene::pick::hit_test::world_to_screen(
-                point, context.view, context.eye, context.bounds);
-            (screen.x.is_finite() && screen.y.is_finite()
-                && screen.x >= 0.0 && screen.x <= context.bounds.width
-                && screen.y >= 0.0 && screen.y <= context.bounds.height).then_some(screen)
+                point,
+                context.view,
+                context.eye,
+                context.bounds,
+            );
+            (screen.x.is_finite()
+                && screen.y.is_finite()
+                && screen.x >= 0.0
+                && screen.x <= context.bounds.width
+                && screen.y >= 0.0
+                && screen.y <= context.bounds.height)
+                .then_some(screen)
         };
         let cursor = project(point)?;
-        points.iter().enumerate().filter_map(|(index, vertex)| {
-            let screen = project(DVec3::new(vertex.x, vertex.y, vertex.z))?;
-            let distance = (screen.x - cursor.x).hypot(screen.y - cursor.y);
-            (distance.is_finite() && distance <= context.aperture_px).then_some((index, distance))
-        }).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(index, _)| index)
+        points
+            .iter()
+            .enumerate()
+            .filter_map(|(index, vertex)| {
+                let screen = project(DVec3::new(vertex.x, vertex.y, vertex.z))?;
+                let distance = (screen.x - cursor.x).hypot(screen.y - cursor.y);
+                (distance.is_finite() && distance <= context.aperture_px)
+                    .then_some((index, distance))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(index, _)| index)
     }
 
     fn closed(&self) -> bool {
-        self.spline.as_ref().is_some_and(|spline| spline.flags.closed || spline.flags.periodic)
+        self.spline
+            .as_ref()
+            .is_some_and(|spline| spline.flags.closed || spline.flags.periodic)
     }
 
     fn replace(&mut self, spline: acadrust::entities::Spline) -> CmdResult {
@@ -209,11 +323,19 @@ impl SplineditCommand {
     fn finish_join(&mut self) -> CmdResult {
         self.step = Step::Options;
         let candidates = std::mem::take(&mut self.join_candidates);
-        let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
-        let selected: Vec<_> = candidates.iter().filter(|item| item.handle != self.handle)
-            .map(|item| (item.handle, &item.entity)).collect();
-        let Some((EntityType::Spline(mut spline), consumed)) = super::join::join_to_source(
-            &EntityType::Spline(source.clone()), &selected) else { return CmdResult::NeedPoint; };
+        let Some(source) = self.spline.as_ref() else {
+            return CmdResult::NeedPoint;
+        };
+        let selected: Vec<_> = candidates
+            .iter()
+            .filter(|item| item.handle != self.handle)
+            .map(|item| (item.handle, &item.entity))
+            .collect();
+        let Some((EntityType::Spline(mut spline), consumed)) =
+            super::join::join_to_source(&EntityType::Spline(source.clone()), &selected)
+        else {
+            return CmdResult::NeedPoint;
+        };
         spline.dwg_flags1 &= !1;
         spline.dxf_flags &= !(32 | 1024);
         self.pending = Some(spline.clone());
@@ -224,18 +346,32 @@ impl SplineditCommand {
         CmdResult::ReplaceManyContinue(replacements)
     }
 
-    fn refined(&self, point: Option<DVec3>, degree: Option<usize>) -> Option<acadrust::entities::Spline> {
+    fn refined(
+        &self,
+        point: Option<DVec3>,
+        degree: Option<usize>,
+    ) -> Option<acadrust::entities::Spline> {
         let source = self.spline.as_ref()?;
         if let Some(degree) = degree {
             let current = usize::try_from(source.degree).ok()?;
-            if degree <= current || degree > 25 { return None; }
+            if degree <= current || degree > 25 {
+                return None;
+            }
             let curve = spatial_spline(source)?;
             let elevation = degree.checked_sub(curve.degree())?;
-            let curve = if elevation == 0 { curve } else { curve.elevated(elevation)? }
-                .compact_knots(source.control_tolerance.max(1e-9))?;
+            let curve = if elevation == 0 {
+                curve
+            } else {
+                curve.elevated(elevation)?
+            }
+            .compact_knots(source.control_tolerance.max(1e-9))?;
             let mut result = source.clone();
             result.degree = curve.degree() as i32;
-            result.control_points = curve.control_points().iter().map(|point| Vector3::new(point[0], point[1], point[2])).collect();
+            result.control_points = curve
+                .control_points()
+                .iter()
+                .map(|point| Vector3::new(point[0], point[1], point[2]))
+                .collect();
             result.knots = curve.knots().to_vec();
             result.weights = curve.weights().to_vec();
             clear_fit_method(&mut result);
@@ -244,20 +380,31 @@ impl SplineditCommand {
             return Some(result);
         }
         let planar = crate::entities::curve::entity_curve(&EntityType::Spline(source.clone()))?;
-        let cadkernel::geom2d::Curve::Nurbs(mut curve) = planar.curve else { return None; };
+        let cadkernel::geom2d::Curve::Nurbs(mut curve) = planar.curve else {
+            return None;
+        };
         if let Some(point) = point {
             let projected = planar.plane.project([point.x, point.y, point.z])?;
-            let nearest = cadkernel::geom2d::closest_point(&cadkernel::geom2d::Curve::Nurbs(curve.clone()), projected);
+            let nearest = cadkernel::geom2d::closest_point(
+                &cadkernel::geom2d::Curve::Nurbs(curve.clone()),
+                projected,
+            );
             let (start, end) = curve.domain();
             let parameter = start + nearest.t * (end - start);
-            if parameter <= start || parameter >= end { return None; }
+            if parameter <= start || parameter >= end {
+                return None;
+            }
             curve.insert_knot(parameter);
         }
         let mut result = crate::modules::draw::modify::spline_ops::nurbs_to_spline(&curve, source);
-        result.control_points = curve.control_points().iter().map(|point| {
-            let world = planar.plane.point_at(*point);
-            Vector3::new(world[0], world[1], world[2])
-        }).collect();
+        result.control_points = curve
+            .control_points()
+            .iter()
+            .map(|point| {
+                let world = planar.plane.point_at(*point);
+                Vector3::new(world[0], world[1], world[2])
+            })
+            .collect();
         clear_fit_method(&mut result);
         result.flags.rational = curve.is_rational();
         result.flags.planar = crate::entities::curve::spline_is_planar(&result);
@@ -266,7 +413,9 @@ impl SplineditCommand {
 }
 
 impl CadCommand for SplineditCommand {
-    fn name(&self) -> &'static str { "SPLINEDIT" }
+    fn name(&self) -> &'static str {
+        "SPLINEDIT"
+    }
     fn prompt(&self) -> String {
         match self.step {
             Step::FitOptions if self.closed() => crate::t!("SPLINEDIT  Fit data [Add/Delete/Move/Purge/eXit] <eXit>:").into_owned(),
@@ -297,41 +446,101 @@ impl CadCommand for SplineditCommand {
         use crate::command::CmdOption;
         match self.step {
             Step::FitOptions => {
-                let mut options = vec![CmdOption::new("Add", "A"), CmdOption::new("Delete", "D"), CmdOption::new("Move", "M"), CmdOption::new("Purge", "P")];
-                if !self.closed() { options.push(CmdOption::new("Tangents", "T")); }
-                options.push(CmdOption::new("Exit", "X")); options
-            },
-            Step::FitTangentStart | Step::FitTangentEnd { .. } => vec![CmdOption::new("System default", "S")],
-            Step::FitMove { .. } => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Select point", "S"), CmdOption::new("Exit", "X")],
-            Step::FitAddNew { first: true, .. } => vec![CmdOption::new("After", "A"), CmdOption::new("Before", "B")],
-            Step::Options => {
-                let mut options = vec![if self.closed() { CmdOption::new("Open", "O") } else { CmdOption::new("Close", "C") }];
-                if self.has_fit_data() { options.insert(0, CmdOption::new("Fit data", "F")); }
-                if !self.closed() { options.push(CmdOption::new("Join", "J")); }
-                options.extend([CmdOption::new("Move vertex", "M"), CmdOption::new("Refine", "R"), CmdOption::new("Reverse", "E"), CmdOption::new("Polyline (lines)", "P"), CmdOption::new("Undo", "U"), CmdOption::new("Exit", "X")]);
+                let mut options = vec![
+                    CmdOption::new("Add", "A"),
+                    CmdOption::new("Delete", "D"),
+                    CmdOption::new("Move", "M"),
+                    CmdOption::new("Purge", "P"),
+                ];
+                if !self.closed() {
+                    options.push(CmdOption::new("Tangents", "T"));
+                }
+                options.push(CmdOption::new("Exit", "X"));
                 options
-            },
-            Step::Refine => vec![CmdOption::new("Add", "A"), CmdOption::new("Delete", "D"), CmdOption::new("Elevate order", "E"), CmdOption::new("Move", "M"), CmdOption::new("Weight", "W"), CmdOption::new("Exit", "X")],
-            Step::Move { .. } | Step::Weight { .. } => vec![CmdOption::new("Next", "N"), CmdOption::new("Previous", "P"), CmdOption::new("Select point", "S"), CmdOption::new("Exit", "X")],
+            }
+            Step::FitTangentStart | Step::FitTangentEnd { .. } => {
+                vec![CmdOption::new("System default", "S")]
+            }
+            Step::FitMove { .. } => vec![
+                CmdOption::new("Next", "N"),
+                CmdOption::new("Previous", "P"),
+                CmdOption::new("Select point", "S"),
+                CmdOption::new("Exit", "X"),
+            ],
+            Step::FitAddNew { first: true, .. } => {
+                vec![CmdOption::new("After", "A"), CmdOption::new("Before", "B")]
+            }
+            Step::Options => {
+                let mut options = vec![if self.closed() {
+                    CmdOption::new("Open", "O")
+                } else {
+                    CmdOption::new("Close", "C")
+                }];
+                if self.has_fit_data() {
+                    options.insert(0, CmdOption::new("Fit data", "F"));
+                }
+                if !self.closed() {
+                    options.push(CmdOption::new("Join", "J"));
+                }
+                options.extend([
+                    CmdOption::new("Move vertex", "M"),
+                    CmdOption::new("Refine", "R"),
+                    CmdOption::new("Reverse", "E"),
+                    CmdOption::new("Polyline (lines)", "P"),
+                    CmdOption::new("Undo", "U"),
+                    CmdOption::new("Exit", "X"),
+                ]);
+                options
+            }
+            Step::Refine => vec![
+                CmdOption::new("Add", "A"),
+                CmdOption::new("Delete", "D"),
+                CmdOption::new("Elevate order", "E"),
+                CmdOption::new("Move", "M"),
+                CmdOption::new("Weight", "W"),
+                CmdOption::new("Exit", "X"),
+            ],
+            Step::Move { .. } | Step::Weight { .. } => vec![
+                CmdOption::new("Next", "N"),
+                CmdOption::new("Previous", "P"),
+                CmdOption::new("Select point", "S"),
+                CmdOption::new("Exit", "X"),
+            ],
             _ => Vec::new(),
         }
     }
-    fn is_selection_gathering(&self) -> bool { matches!(self.step, Step::Join) }
-    fn selection_entities_exclude_locked(&self) -> bool { matches!(self.step, Step::Join) }
+    fn is_selection_gathering(&self) -> bool {
+        matches!(self.step, Step::Join)
+    }
+    fn selection_entities_exclude_locked(&self) -> bool {
+        matches!(self.step, Step::Join)
+    }
     fn inject_selection_entities(&mut self, entities: Vec<crate::command::SelectionEntity>) {
-        if matches!(self.step, Step::Join) { self.join_candidates = entities; }
+        if matches!(self.step, Step::Join) {
+            self.join_candidates = entities;
+        }
     }
     fn on_selection_complete(&mut self, handles: Vec<acadrust::Handle>) -> CmdResult {
-        self.join_candidates.retain(|item| handles.contains(&item.handle) && item.handle != self.handle);
+        self.join_candidates
+            .retain(|item| handles.contains(&item.handle) && item.handle != self.handle);
         CmdResult::NeedPoint
     }
-    fn needs_entity_pick(&self) -> bool { matches!(self.step, Step::SelectSpline) }
-    fn inject_before_entity_pick(&self) -> bool { true }
+    fn needs_entity_pick(&self) -> bool {
+        matches!(self.step, Step::SelectSpline)
+    }
+    fn inject_before_entity_pick(&self) -> bool {
+        true
+    }
     fn inject_picked_entity(&mut self, entity: EntityType) {
-        self.spline = match entity { EntityType::Spline(spline) => Some(spline), _ => None };
+        self.spline = match entity {
+            EntityType::Spline(spline) => Some(spline),
+            _ => None,
+        };
     }
     fn on_entity_pick(&mut self, handle: acadrust::Handle, _pt: DVec3) -> CmdResult {
-        if handle.is_null() || self.spline.is_none() { return CmdResult::NeedPoint; }
+        if handle.is_null() || self.spline.is_none() {
+            return CmdResult::NeedPoint;
+        }
         self.handle = handle;
         self.step = Step::Options;
         CmdResult::NeedPoint
@@ -339,22 +548,51 @@ impl CadCommand for SplineditCommand {
     fn on_entity_replaced(&mut self, old: acadrust::Handle, new: &[acadrust::Handle]) {
         if old == self.handle {
             if let (Some(&handle), Some(replacement)) = (new.first(), self.pending.take()) {
-                if let Some(previous) = self.spline.replace(replacement) { self.history.push((old, previous)); }
+                if let Some(previous) = self.spline.replace(replacement) {
+                    self.history.push((old, previous));
+                }
                 self.handle = handle;
             }
         }
     }
-    fn wants_text_input(&self) -> bool { !matches!(self.step, Step::SelectSpline | Step::Join | Step::Add | Step::Delete | Step::FitTangentStart | Step::FitTangentEnd { .. } | Step::Move { .. } | Step::SelectVertex { .. } | Step::FitMove { .. } | Step::FitSelectMove | Step::FitDelete | Step::FitAddPick | Step::FitAddNew { .. }) }
+    fn wants_text_input(&self) -> bool {
+        !matches!(
+            self.step,
+            Step::SelectSpline
+                | Step::Join
+                | Step::Add
+                | Step::Delete
+                | Step::FitTangentStart
+                | Step::FitTangentEnd { .. }
+                | Step::Move { .. }
+                | Step::SelectVertex { .. }
+                | Step::FitMove { .. }
+                | Step::FitSelectMove
+                | Step::FitDelete
+                | Step::FitAddPick
+                | Step::FitAddNew { .. }
+        )
+    }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let upper = text.trim().to_uppercase();
-        if upper.is_empty() { return Some(self.on_enter()); }
+        if upper.is_empty() {
+            return Some(self.on_enter());
+        }
         match self.step {
             Step::Options => match upper.as_str() {
                 "F" | "FIT" if self.has_fit_data() => self.step = Step::FitOptions,
                 "P" | "POLYLINE" => self.step = Step::PolylinePrecision,
-                "J" | "JOIN" if !self.closed() => { self.join_candidates.clear(); self.step = Step::Join; },
+                "J" | "JOIN" if !self.closed() => {
+                    self.join_candidates.clear();
+                    self.step = Step::Join;
+                }
                 "R" | "REFINE" => self.step = Step::Refine,
-                "M" | "MOVE" => self.step = Step::Move { index: 0, refine: false },
+                "M" | "MOVE" => {
+                    self.step = Step::Move {
+                        index: 0,
+                        refine: false,
+                    }
+                }
                 "X" | "EXIT" => return Some(CmdResult::Cancel),
                 "U" | "UNDO" => {
                     if let Some((handle, spline)) = self.history.pop() {
@@ -365,13 +603,20 @@ impl CadCommand for SplineditCommand {
                 }
                 "C" | "CLOSE" | "O" | "OPEN" | "E" | "REVERSE" | "REV" => {
                     if (matches!(upper.as_str(), "C" | "CLOSE") && self.closed())
-                        || (matches!(upper.as_str(), "O" | "OPEN") && !self.closed()) {
+                        || (matches!(upper.as_str(), "O" | "OPEN") && !self.closed())
+                    {
                         return Some(CmdResult::NeedPoint);
                     }
                     let mut spline = self.spline.clone()?;
-                    let op = match upper.as_str() { "C" | "CLOSE" => "__SPLINEDIT_CLOSE__", "O" | "OPEN" => "__SPLINEDIT_OPEN__", _ => "__SPLINEDIT_REVERSE__" };
+                    let op = match upper.as_str() {
+                        "C" | "CLOSE" => "__SPLINEDIT_CLOSE__",
+                        "O" | "OPEN" => "__SPLINEDIT_OPEN__",
+                        _ => "__SPLINEDIT_REVERSE__",
+                    };
                     apply_to_spline(&mut spline, op);
-                    if self.spline.as_ref() == Some(&spline) { return Some(CmdResult::NeedPoint); }
+                    if self.spline.as_ref() == Some(&spline) {
+                        return Some(CmdResult::NeedPoint);
+                    }
                     return Some(self.replace(spline));
                 }
                 _ => {}
@@ -385,43 +630,84 @@ impl CadCommand for SplineditCommand {
                 "X" | "EXIT" => self.step = Step::Options,
                 _ => {}
             },
-            Step::FitTangentStart if matches!(upper.as_str(), "S" | "SYSTEM" | "SYSTEM DEFAULT") => self.step = Step::FitTangentEnd { start: DVec3::ZERO },
-            Step::FitTangentEnd { start } if matches!(upper.as_str(), "S" | "SYSTEM" | "SYSTEM DEFAULT") => return Some(self.finish_fit_tangents(start, DVec3::ZERO)),
+            Step::FitTangentStart
+                if matches!(upper.as_str(), "S" | "SYSTEM" | "SYSTEM DEFAULT") =>
+            {
+                self.step = Step::FitTangentEnd { start: DVec3::ZERO }
+            }
+            Step::FitTangentEnd { start }
+                if matches!(upper.as_str(), "S" | "SYSTEM" | "SYSTEM DEFAULT") =>
+            {
+                return Some(self.finish_fit_tangents(start, DVec3::ZERO))
+            }
             Step::FitMove { index } => {
                 let count = self.spline.as_ref()?.fit_points.len();
-                if count == 0 { return Some(CmdResult::NeedPoint); }
+                if count == 0 {
+                    return Some(CmdResult::NeedPoint);
+                }
                 self.step = match upper.as_str() {
-                    "N" | "NEXT" => Step::FitMove { index: (index + 1) % count },
-                    "P" | "PREVIOUS" => Step::FitMove { index: (index + count - 1) % count },
+                    "N" | "NEXT" => Step::FitMove {
+                        index: (index + 1) % count,
+                    },
+                    "P" | "PREVIOUS" => Step::FitMove {
+                        index: (index + count - 1) % count,
+                    },
                     "S" | "SELECT" | "SELECT POINT" => Step::FitSelectMove,
-                    "X" | "EXIT" => Step::FitOptions, _ => self.step,
+                    "X" | "EXIT" => Step::FitOptions,
+                    _ => self.step,
                 };
             }
             Step::FitAddNew { first: true, .. } => match upper.as_str() {
-                "A" | "AFTER" => self.step = Step::FitAddNew { index: 1, first: false },
-                "B" | "BEFORE" => self.step = Step::FitAddNew { index: 0, first: false },
+                "A" | "AFTER" => {
+                    self.step = Step::FitAddNew {
+                        index: 1,
+                        first: false,
+                    }
+                }
+                "B" | "BEFORE" => {
+                    self.step = Step::FitAddNew {
+                        index: 0,
+                        first: false,
+                    }
+                }
                 _ => {}
             },
             Step::PolylinePrecision => {
-                let Ok(precision) = upper.parse::<u8>() else { return Some(CmdResult::ReportError(crate::t!("Requires an integer between 0 and 99.").into_owned())); };
-                if precision > 99 { return Some(CmdResult::ReportError(crate::t!("Requires an integer between 0 and 99.").into_owned())); }
+                let Ok(precision) = upper.parse::<u8>() else {
+                    return Some(CmdResult::ReportError(
+                        crate::t!("Requires an integer between 0 and 99.").into_owned(),
+                    ));
+                };
+                if precision > 99 {
+                    return Some(CmdResult::ReportError(
+                        crate::t!("Requires an integer between 0 and 99.").into_owned(),
+                    ));
+                }
                 return Some(self.convert_polyline(precision));
             }
             Step::Refine => match upper.as_str() {
                 "A" | "ADD" => self.step = Step::Add,
                 "D" | "DELETE" => self.step = Step::Delete,
                 "E" | "ELEVATE" => self.step = Step::Elevate,
-                "M" | "MOVE" => self.step = Step::Move { index: 0, refine: true },
+                "M" | "MOVE" => {
+                    self.step = Step::Move {
+                        index: 0,
+                        refine: true,
+                    }
+                }
                 "W" | "WEIGHT" => self.step = Step::Weight { index: 0 },
                 "X" | "EXIT" => self.step = Step::Options,
                 _ => {}
             },
             Step::Elevate => {
                 let current_order = self.spline.as_ref()?.degree.max(1) as usize + 1;
-                let Some(order) = upper.parse::<usize>().ok()
-                    .filter(|order| *order >= current_order && *order <= 26) else {
-                        return Some(CmdResult::NeedPoint);
-                    };
+                let Some(order) = upper
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|order| *order >= current_order && *order <= 26)
+                else {
+                    return Some(CmdResult::NeedPoint);
+                };
                 if order == current_order {
                     self.step = Step::Refine;
                     return Some(CmdResult::NeedPoint);
@@ -433,19 +719,45 @@ impl CadCommand for SplineditCommand {
             }
             Step::Move { index, .. } | Step::Weight { index } => {
                 let count = self.spline.as_ref().map_or(0, |s| s.control_points.len());
-                if count == 0 { return Some(CmdResult::NeedPoint); }
-                let next = match upper.as_str() { "N" | "NEXT" => Some((index + 1) % count), "P" | "PREVIOUS" => Some((index + count - 1) % count), _ => None };
+                if count == 0 {
+                    return Some(CmdResult::NeedPoint);
+                }
+                let next = match upper.as_str() {
+                    "N" | "NEXT" => Some((index + 1) % count),
+                    "P" | "PREVIOUS" => Some((index + count - 1) % count),
+                    _ => None,
+                };
                 if let Some(next) = next {
-                    self.step = match self.step { Step::Move { refine, .. } => Step::Move { index: next, refine }, _ => Step::Weight { index: next } };
+                    self.step = match self.step {
+                        Step::Move { refine, .. } => Step::Move {
+                            index: next,
+                            refine,
+                        },
+                        _ => Step::Weight { index: next },
+                    };
                 } else if matches!(upper.as_str(), "S" | "SELECT") {
                     self.step = match self.step {
-                        Step::Move { refine, .. } => Step::SelectVertex { weight: false, refine },
-                        _ => Step::SelectVertex { weight: true, refine: true },
+                        Step::Move { refine, .. } => Step::SelectVertex {
+                            weight: false,
+                            refine,
+                        },
+                        _ => Step::SelectVertex {
+                            weight: true,
+                            refine: true,
+                        },
                     };
                 } else if matches!(upper.as_str(), "X" | "EXIT") {
-                    self.step = match self.step { Step::Move { refine: false, .. } => Step::Options, _ => Step::Refine };
+                    self.step = match self.step {
+                        Step::Move { refine: false, .. } => Step::Options,
+                        _ => Step::Refine,
+                    };
                 } else if matches!(self.step, Step::Weight { .. }) {
-                    if let Some(weight) = upper.replace(',', ".").parse::<f64>().ok().filter(|weight| weight.is_finite() && *weight > 0.0) {
+                    if let Some(weight) = upper
+                        .replace(',', ".")
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|weight| weight.is_finite() && *weight > 0.0)
+                    {
                         let mut spline = self.spline.clone()?;
                         spline.weights.resize(count, 1.0);
                         spline.weights[index] = weight;
@@ -460,66 +772,143 @@ impl CadCommand for SplineditCommand {
         Some(CmdResult::NeedPoint)
     }
     fn wants_point_pick_context(&self) -> bool {
-        matches!(self.step, Step::Delete | Step::SelectVertex { .. } | Step::FitDelete | Step::FitSelectMove | Step::FitAddPick)
+        matches!(
+            self.step,
+            Step::Delete
+                | Step::SelectVertex { .. }
+                | Step::FitDelete
+                | Step::FitSelectMove
+                | Step::FitAddPick
+        )
     }
     fn set_point_pick_context(&mut self, context: Option<crate::command::PointPickContext>) {
         self.pick_context = context;
     }
     fn on_point(&mut self, point: DVec3) -> CmdResult {
-        if !point.is_finite() { return CmdResult::NeedPoint; }
+        if !point.is_finite() {
+            return CmdResult::NeedPoint;
+        }
         match self.step {
             Step::FitSelectMove | Step::FitDelete | Step::FitAddPick => {
-                let Some(index) = self.picked_fit_point(point) else { return CmdResult::NeedPoint; };
+                let Some(index) = self.picked_fit_point(point) else {
+                    return CmdResult::NeedPoint;
+                };
                 match self.step {
-                    Step::FitSelectMove => { self.step = Step::FitMove { index }; CmdResult::NeedPoint }
-                    Step::FitAddPick => { self.step = Step::FitAddNew { index: index + 1, first: index == 0 }; CmdResult::NeedPoint }
+                    Step::FitSelectMove => {
+                        self.step = Step::FitMove { index };
+                        CmdResult::NeedPoint
+                    }
+                    Step::FitAddPick => {
+                        self.step = Step::FitAddNew {
+                            index: index + 1,
+                            first: index == 0,
+                        };
+                        CmdResult::NeedPoint
+                    }
                     _ => {
                         let mut points = self.spline.as_ref().unwrap().fit_points.clone();
-                        if points.len() <= 2 { self.step = Step::FitOptions; return CmdResult::ReportError(crate::t!("Cannot delete beyond this.").into_owned()); }
-                        points.remove(index); self.replace_fit_points(points)
+                        if points.len() <= 2 {
+                            self.step = Step::FitOptions;
+                            return CmdResult::ReportError(
+                                crate::t!("Cannot delete beyond this.").into_owned(),
+                            );
+                        }
+                        points.remove(index);
+                        self.replace_fit_points(points)
                     }
                 }
             }
             Step::FitTangentStart | Step::FitTangentEnd { .. } => {
                 let source = self.spline.as_ref().unwrap();
                 let first = matches!(self.step, Step::FitTangentStart);
-                let endpoint = if first { source.fit_points.first() } else { source.fit_points.last() }.unwrap();
-                let endpoint = DVec3::new(endpoint.x,endpoint.y,endpoint.z);
+                let endpoint = if first {
+                    source.fit_points.first()
+                } else {
+                    source.fit_points.last()
+                }
+                .unwrap();
+                let endpoint = DVec3::new(endpoint.x, endpoint.y, endpoint.z);
                 let direction = point - endpoint;
-                let Some(direction) = direction.try_normalize() else { return CmdResult::ReportError(crate::t!("Tangent point must differ from the fit endpoint.").into_owned()); };
-                if let Step::FitTangentEnd { start } = self.step { self.finish_fit_tangents(start, direction) }
-                else { self.step = Step::FitTangentEnd { start: direction }; CmdResult::NeedPoint }
-            }            Step::FitMove { index } => {
+                let Some(direction) = direction.try_normalize() else {
+                    return CmdResult::ReportError(
+                        crate::t!("Tangent point must differ from the fit endpoint.").into_owned(),
+                    );
+                };
+                if let Step::FitTangentEnd { start } = self.step {
+                    self.finish_fit_tangents(start, direction)
+                } else {
+                    self.step = Step::FitTangentEnd { start: direction };
+                    CmdResult::NeedPoint
+                }
+            }
+            Step::FitMove { index } => {
                 let mut points = self.spline.as_ref().unwrap().fit_points.clone();
-                let Some(vertex) = points.get_mut(index) else { return CmdResult::NeedPoint; };
-                *vertex = Vector3::new(point.x,point.y,point.z); self.replace_fit_points(points)
+                let Some(vertex) = points.get_mut(index) else {
+                    return CmdResult::NeedPoint;
+                };
+                *vertex = Vector3::new(point.x, point.y, point.z);
+                self.replace_fit_points(points)
             }
             Step::FitAddNew { index, .. } => {
                 let mut points = self.spline.as_ref().unwrap().fit_points.clone();
-                if index > points.len() { return CmdResult::NeedPoint; }
-                points.insert(index,Vector3::new(point.x,point.y,point.z));
+                if index > points.len() {
+                    return CmdResult::NeedPoint;
+                }
+                points.insert(index, Vector3::new(point.x, point.y, point.z));
                 let result = self.replace_fit_points(points);
-                if matches!(&result, CmdResult::ReplaceManyContinue(_)) { self.step = Step::FitAddNew { index: index + 1, first: false }; }
+                if matches!(&result, CmdResult::ReplaceManyContinue(_)) {
+                    self.step = Step::FitAddNew {
+                        index: index + 1,
+                        first: false,
+                    };
+                }
                 result
             }
             Step::SelectVertex { weight, refine } => {
                 if let Some(index) = self.picked_vertex(point) {
-                    self.step = if weight { Step::Weight { index } } else { Step::Move { index, refine } };
+                    self.step = if weight {
+                        Step::Weight { index }
+                    } else {
+                        Step::Move { index, refine }
+                    };
                 }
                 CmdResult::NeedPoint
             }
             Step::Delete => {
-                let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
-                let Some(index) = self.picked_vertex(point) else { return CmdResult::NeedPoint; };
-                let controls = source.control_points.iter().map(|point| [point.x, point.y, point.z]).collect();
-                let weights = if source.weights.is_empty() { vec![1.0; source.control_points.len()] }
-                    else { source.weights.clone() };
-                let curve = cadkernel::space::NurbsCurve3::new_strict(source.degree as usize, controls,
-                    source.knots.clone(), weights).map(|curve| curve.with_periodicity(source.flags.periodic || source.flags.closed));
-                let Some(curve) = curve.and_then(|curve| curve.without_control_vertex(index)) else { return CmdResult::NeedPoint; };
+                let Some(source) = self.spline.as_ref() else {
+                    return CmdResult::NeedPoint;
+                };
+                let Some(index) = self.picked_vertex(point) else {
+                    return CmdResult::NeedPoint;
+                };
+                let controls = source
+                    .control_points
+                    .iter()
+                    .map(|point| [point.x, point.y, point.z])
+                    .collect();
+                let weights = if source.weights.is_empty() {
+                    vec![1.0; source.control_points.len()]
+                } else {
+                    source.weights.clone()
+                };
+                let curve = cadkernel::space::NurbsCurve3::new_strict(
+                    source.degree as usize,
+                    controls,
+                    source.knots.clone(),
+                    weights,
+                )
+                .map(|curve| curve.with_periodicity(source.flags.periodic || source.flags.closed));
+                let Some(curve) = curve.and_then(|curve| curve.without_control_vertex(index))
+                else {
+                    return CmdResult::NeedPoint;
+                };
                 let mut spline = source.clone();
                 spline.degree = curve.degree() as i32;
-                spline.control_points = curve.control_points().iter().map(|point| Vector3::new(point[0], point[1], point[2])).collect();
+                spline.control_points = curve
+                    .control_points()
+                    .iter()
+                    .map(|point| Vector3::new(point[0], point[1], point[2]))
+                    .collect();
                 spline.weights = curve.weights().to_vec();
                 spline.knots = curve.knots().to_vec();
                 clear_fit_method(&mut spline);
@@ -527,10 +916,16 @@ impl CadCommand for SplineditCommand {
                 spline.flags.planar = crate::entities::curve::spline_is_planar(&spline);
                 self.replace(spline)
             }
-            Step::Add => self.refined(Some(point), None).map_or(CmdResult::NeedPoint, |spline| self.replace(spline)),
+            Step::Add => self
+                .refined(Some(point), None)
+                .map_or(CmdResult::NeedPoint, |spline| self.replace(spline)),
             Step::Move { index, .. } => {
-                let Some(mut spline) = self.spline.clone() else { return CmdResult::NeedPoint; };
-                let Some(vertex) = spline.control_points.get_mut(index) else { return CmdResult::NeedPoint; };
+                let Some(mut spline) = self.spline.clone() else {
+                    return CmdResult::NeedPoint;
+                };
+                let Some(vertex) = spline.control_points.get_mut(index) else {
+                    return CmdResult::NeedPoint;
+                };
                 *vertex = Vector3::new(point.x, point.y, point.z);
                 clear_fit_method(&mut spline);
                 spline.flags.planar = crate::entities::curve::spline_is_planar(&spline);
@@ -542,27 +937,63 @@ impl CadCommand for SplineditCommand {
     fn on_enter(&mut self) -> CmdResult {
         match self.step {
             Step::SelectSpline | Step::Options => CmdResult::Cancel,
-            Step::FitOptions => { self.step = Step::Options; CmdResult::NeedPoint }
+            Step::FitOptions => {
+                self.step = Step::Options;
+                CmdResult::NeedPoint
+            }
             Step::FitTangentStart => {
-                let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
-                self.step = Step::FitTangentEnd { start: DVec3::new(source.begin_tangent.x,source.begin_tangent.y,source.begin_tangent.z) }; CmdResult::NeedPoint
+                let Some(source) = self.spline.as_ref() else {
+                    return CmdResult::NeedPoint;
+                };
+                self.step = Step::FitTangentEnd {
+                    start: DVec3::new(
+                        source.begin_tangent.x,
+                        source.begin_tangent.y,
+                        source.begin_tangent.z,
+                    ),
+                };
+                CmdResult::NeedPoint
             }
             Step::FitTangentEnd { start } => {
-                let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
-                self.finish_fit_tangents(start,DVec3::new(source.end_tangent.x,source.end_tangent.y,source.end_tangent.z))
+                let Some(source) = self.spline.as_ref() else {
+                    return CmdResult::NeedPoint;
+                };
+                self.finish_fit_tangents(
+                    start,
+                    DVec3::new(
+                        source.end_tangent.x,
+                        source.end_tangent.y,
+                        source.end_tangent.z,
+                    ),
+                )
             }
-            Step::FitDelete | Step::FitAddPick | Step::FitSelectMove => { self.step = Step::FitOptions; CmdResult::NeedPoint }
-            Step::FitAddNew { .. } => { self.step = Step::FitAddPick; CmdResult::NeedPoint }
+            Step::FitDelete | Step::FitAddPick | Step::FitSelectMove => {
+                self.step = Step::FitOptions;
+                CmdResult::NeedPoint
+            }
+            Step::FitAddNew { .. } => {
+                self.step = Step::FitAddPick;
+                CmdResult::NeedPoint
+            }
             Step::FitMove { .. } => self.on_text_input("N").unwrap_or(CmdResult::NeedPoint),
             Step::Join => self.finish_join(),
             Step::PolylinePrecision => self.convert_polyline(10),
-            Step::Refine => { self.step = Step::Options; CmdResult::NeedPoint }
-            Step::Add | Step::Delete | Step::SelectVertex { .. } => { self.step = Step::Refine; CmdResult::NeedPoint }
+            Step::Refine => {
+                self.step = Step::Options;
+                CmdResult::NeedPoint
+            }
+            Step::Add | Step::Delete | Step::SelectVertex { .. } => {
+                self.step = Step::Refine;
+                CmdResult::NeedPoint
+            }
             Step::Elevate => {
                 let order = self.spline.as_ref().map_or(4, |s| s.degree as usize + 1);
-                self.on_text_input(&order.to_string()).unwrap_or(CmdResult::NeedPoint)
+                self.on_text_input(&order.to_string())
+                    .unwrap_or(CmdResult::NeedPoint)
             }
-            Step::Move { .. } | Step::Weight { .. } => self.on_text_input("N").unwrap_or(CmdResult::NeedPoint),
+            Step::Move { .. } | Step::Weight { .. } => {
+                self.on_text_input("N").unwrap_or(CmdResult::NeedPoint)
+            }
         }
     }
     fn on_escape(&mut self) -> CmdResult {
@@ -570,9 +1001,13 @@ impl CadCommand for SplineditCommand {
             self.join_candidates.clear();
             self.step = Step::Options;
             CmdResult::NeedPoint
-        } else { CmdResult::Cancel }
+        } else {
+            CmdResult::Cancel
+        }
     }
-    fn on_preview_wires(&mut self, _pt: DVec3) -> Vec<WireModel> { vec![] }
+    fn on_preview_wires(&mut self, _pt: DVec3) -> Vec<WireModel> {
+        vec![]
+    }
 }
 /// Apply a spline operation (CLOSE/OPEN/REVERSE) to a spline entity.
 /// Called from `cmd_result.rs` when the ReplaceEntity sentinel is detected.
@@ -590,32 +1025,69 @@ fn apply_to_spline(spline: &mut acadrust::entities::Spline, op: &str) {
         "__SPLINEDIT_REVERSE__" => Some(super::reverse::reverse_spline(spline)),
         _ => None,
     };
-    if let Some(result) = result { *spline = result; }
+    if let Some(result) = result {
+        *spline = result;
+    }
 }
 
-fn change_closure(source: &acadrust::entities::Spline, closed: bool) -> Option<acadrust::entities::Spline> {
+fn change_closure(
+    source: &acadrust::entities::Spline,
+    closed: bool,
+) -> Option<acadrust::entities::Spline> {
     use cadkernel::space::{NurbsCurve3, Parameterization};
-    if (source.flags.closed || source.flags.periodic) == closed { return None; }
-    let fit_method = !source.fit_points.is_empty() || source.dwg_flags1 & 1 != 0 || source.dxf_flags & 32 != 0;
+    if (source.flags.closed || source.flags.periodic) == closed {
+        return None;
+    }
+    let fit_method =
+        !source.fit_points.is_empty() || source.dwg_flags1 & 1 != 0 || source.dxf_flags & 32 != 0;
     let parameterization = match source.knot_parameterization {
-        1 => Parameterization::Centripetal, 2 => Parameterization::Uniform, _ => Parameterization::Chord,
+        1 => Parameterization::Centripetal,
+        2 => Parameterization::Uniform,
+        _ => Parameterization::Chord,
     };
     let xyz = |point: &Vector3| [point.x, point.y, point.z];
     let controls: Vec<_> = source.control_points.iter().map(xyz).collect();
     let degree = usize::try_from(source.degree).ok()?;
-    let weights = if source.weights.is_empty() { vec![1.0; controls.len()] } else { source.weights.clone() };
-    if fit_method && weights.windows(2).any(|pair| pair[0] != pair[1]) { return None; }
-    let stored_curve = || NurbsCurve3::new_strict(degree, controls.clone(), source.knots.clone(), weights.clone());
+    let weights = if source.weights.is_empty() {
+        vec![1.0; controls.len()]
+    } else {
+        source.weights.clone()
+    };
+    if fit_method && weights.windows(2).any(|pair| pair[0] != pair[1]) {
+        return None;
+    }
+    let stored_curve = || {
+        NurbsCurve3::new_strict(
+            degree,
+            controls.clone(),
+            source.knots.clone(),
+            weights.clone(),
+        )
+    };
     let mut fit_points = Vec::new();
     let curve = if fit_method {
         fit_points = source.fit_points.iter().map(xyz).collect();
         if fit_points.is_empty() {
             let curve = stored_curve()?;
             let (start, end) = curve.domain();
-            let mut parameters: Vec<_> = curve.knots().iter().copied()
-                .filter(|parameter| *parameter >= start && if closed { *parameter <= end } else { *parameter < end }).collect();
+            let mut parameters: Vec<_> = curve
+                .knots()
+                .iter()
+                .copied()
+                .filter(|parameter| {
+                    *parameter >= start
+                        && if closed {
+                            *parameter <= end
+                        } else {
+                            *parameter < end
+                        }
+                })
+                .collect();
             parameters.dedup();
-            fit_points = parameters.into_iter().map(|parameter| curve.point_at_knot(parameter)).collect();
+            fit_points = parameters
+                .into_iter()
+                .map(|parameter| curve.point_at_knot(parameter))
+                .collect();
         }
         let curve = if closed {
             NurbsCurve3::interpolate_periodic(&fit_points, parameterization)?
@@ -631,16 +1103,29 @@ fn change_closure(source: &acadrust::entities::Spline, closed: bool) -> Option<a
     };
     let mut result = source.clone();
     result.degree = curve.degree() as i32;
-    result.control_points = curve.control_points().iter().map(|point| Vector3::new(point[0], point[1], point[2])).collect();
+    result.control_points = curve
+        .control_points()
+        .iter()
+        .map(|point| Vector3::new(point[0], point[1], point[2]))
+        .collect();
     result.knots = curve.knots().to_vec();
     result.weights = curve.weights().to_vec();
     result.flags.closed = closed;
     result.flags.periodic = closed;
-    if closed { result.dxf_flags |= 2048; } else { result.dxf_flags &= !2048; }
+    if closed {
+        result.dxf_flags |= 2048;
+    } else {
+        result.dxf_flags &= !2048;
+    }
     result.flags.rational = !fit_method && curve.is_rational();
     result.fit_points = if !closed && fit_method {
-        fit_points.iter().map(|point| Vector3::new(point[0], point[1], point[2])).collect()
-    } else { Vec::new() };
+        fit_points
+            .iter()
+            .map(|point| Vector3::new(point[0], point[1], point[2]))
+            .collect()
+    } else {
+        Vec::new()
+    };
     if fit_method {
         result.dwg_flags1 |= 1;
         result.dxf_flags |= 32 | 1024;
@@ -776,7 +1261,10 @@ mod tests {
         let mut command = selected_command(spline);
         command.on_text_input("REFINE");
         command.on_text_input("ELEVATE");
-        assert!(matches!(command.on_text_input("invalid"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(
+            command.on_text_input("invalid"),
+            Some(CmdResult::NeedPoint)
+        ));
         assert!(matches!(command.step, Step::Elevate));
         let elevated = replacement(command.on_text_input("5").unwrap());
         assert_eq!(elevated.degree, 4);
@@ -836,14 +1324,7 @@ mod tests {
     #[test]
     fn planar_polyline_conversion_honors_source_deletion_policy() {
         let handle = Handle::new(41);
-        let mut spline = control_spline(
-            &[
-                [0.0, 0.0, 2.0],
-                [1.0, 2.0, 2.0],
-                [3.0, 0.0, 2.0],
-            ],
-            2,
-        );
+        let mut spline = control_spline(&[[0.0, 0.0, 2.0], [1.0, 2.0, 2.0], [3.0, 0.0, 2.0]], 2);
         spline.common.handle = handle;
         spline.flags.planar = true;
         let mut command = SplineditCommand::new().with_delete_source(false);
@@ -906,7 +1387,10 @@ mod tests {
         spline.flags.periodic = true;
         let mut command = selected_command(spline);
         command.on_text_input("POLYLINE");
-        assert!(matches!(command.on_text_input("100"), Some(CmdResult::ReportError(_))));
+        assert!(matches!(
+            command.on_text_input("100"),
+            Some(CmdResult::ReportError(_))
+        ));
         assert!(matches!(command.step, Step::PolylinePrecision));
         let CmdResult::ReplaceMany(replacements, _) = command.on_enter() else {
             panic!("expected the default conversion");
@@ -919,22 +1403,25 @@ mod tests {
         };
         assert!(polyline.is_closed);
         assert!(polyline.vertices.len() >= 4);
-        assert_ne!(polyline.vertices.first().unwrap().location, polyline.vertices.last().unwrap().location);
+        assert_ne!(
+            polyline.vertices.first().unwrap().location,
+            polyline.vertices.last().unwrap().location
+        );
     }
 
     #[test]
     fn two_point_fit_data_accepts_forward_endpoint_tangents() {
         let mut spline = Spline::new();
         spline.degree = 3;
-        spline.fit_points = vec![
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(4.0, 0.0, 0.0),
-        ];
+        spline.fit_points = vec![Vector3::new(0.0, 0.0, 0.0), Vector3::new(4.0, 0.0, 0.0)];
         let mut command = selected_command(spline);
         assert!(command.has_fit_data());
         command.on_text_input("FIT");
         command.on_text_input("TANGENTS");
-        assert!(matches!(command.on_point(DVec3::new(1.0, 0.0, 0.0)), CmdResult::NeedPoint));
+        assert!(matches!(
+            command.on_point(DVec3::new(1.0, 0.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
         let edited = replacement(command.on_point(DVec3::new(5.0, 0.0, 0.0)));
         assert_eq!(edited.begin_tangent, Vector3::new(1.0, 0.0, 0.0));
         assert_eq!(edited.end_tangent, Vector3::new(1.0, 0.0, 0.0));
@@ -962,17 +1449,30 @@ mod tests {
 }
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["SPLINEDIT"] });  // SplineditCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["SPLINEDIT"]
+}); // SplineditCommand
 
 fn spatial_spline(source: &acadrust::entities::Spline) -> Option<cadkernel::space::NurbsCurve3> {
     let curve = if crate::entities::spline::uses_fit_method(source) {
         crate::entities::spline::fit_nurbs3(source)?
     } else {
         let current = usize::try_from(source.degree).ok()?;
-        let weights = if source.weights.is_empty() { vec![1.0; source.control_points.len()] } else { source.weights.clone() };
-        cadkernel::space::NurbsCurve3::new_strict(current,
-            source.control_points.iter().map(|point| [point.x, point.y, point.z]).collect(),
-            source.knots.clone(), weights)?
+        let weights = if source.weights.is_empty() {
+            vec![1.0; source.control_points.len()]
+        } else {
+            source.weights.clone()
+        };
+        cadkernel::space::NurbsCurve3::new_strict(
+            current,
+            source
+                .control_points
+                .iter()
+                .map(|point| [point.x, point.y, point.z])
+                .collect(),
+            source.knots.clone(),
+            weights,
+        )?
     };
     Some(curve.with_periodicity(source.flags.closed || source.flags.periodic))
 }

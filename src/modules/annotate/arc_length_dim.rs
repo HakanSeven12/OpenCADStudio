@@ -10,13 +10,12 @@ use crate::command::{
 };
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::dimension_assoc::{
-    polyline_arc_point_marker, RadialSourceGeometry,
-    ARC_DIMENSION_POINT_MARKER, POLYLINE_ARC_CENTER_MARKER,
+    polyline_arc_point_marker, RadialSourceGeometry, ARC_DIMENSION_POINT_MARKER,
+    POLYLINE_ARC_CENTER_MARKER,
 };
 use crate::scene::model::wire_model::WireModel;
 
-pub const ICON: IconKind =
-    IconKind::Svg(include_bytes!("../../../assets/icons/dim_angular.svg"));
+pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_angular.svg"));
 
 pub fn tool() -> ToolDef {
     ToolDef {
@@ -118,9 +117,8 @@ impl ArcSelection {
 
     fn association_sources(self, handle: Handle) -> Vec<Option<DimensionAssociationSource>> {
         let source_sweep = positive_sweep(self.source.start_angle, self.source.end_angle);
-        let parameter = |angle: f64| {
-            ((angle - self.source.start_angle) / source_sweep).clamp(0.0, 1.0)
-        };
+        let parameter =
+            |angle: f64| ((angle - self.source.start_angle) / source_sweep).clamp(0.0, 1.0);
         match self.binding {
             SourceBinding::Arc => vec![
                 Some(DimensionAssociationSource::explicit(handle, -3, 0.0)),
@@ -231,7 +229,8 @@ impl ArcLengthDimensionCommand {
         dimension.base.definition_point = dimension.definition_point;
         dimension.base.text_middle_point = dimension.definition_point;
         dimension.base.insertion_point = dimension.definition_point;
-        dimension.has_leader = self.leader_enabled && selection.sweep() > std::f64::consts::FRAC_PI_2;
+        dimension.has_leader =
+            self.leader_enabled && selection.sweep() > std::f64::consts::FRAC_PI_2;
         if dimension.has_leader {
             let middle = selection.start_angle + selection.sweep() * 0.5;
             let anchor = DVec3::new(
@@ -256,11 +255,7 @@ impl ArcLengthDimensionCommand {
 
         let association = self.source_handle.map_or_else(
             || DimensionAssociationInput::Explicit(Vec::new()),
-            |handle| {
-                DimensionAssociationInput::Explicit(
-                    selection.association_sources(handle),
-                )
-            },
+            |handle| DimensionAssociationInput::Explicit(selection.association_sources(handle)),
         );
         CmdResult::CommitDimension {
             entity: plane.place_entity(EntityType::Dimension(Dimension::Arc(dimension))),
@@ -280,7 +275,8 @@ impl CadCommand for ArcLengthDimensionCommand {
 
     fn prompt(&self) -> String {
         if self.awaiting_text {
-            return crate::t!("DIMARC  Enter dimension text (blank = measured value):").into_owned();
+            return crate::t!("DIMARC  Enter dimension text (blank = measured value):")
+                .into_owned();
         }
         if self.awaiting_angle {
             return crate::t!("DIMARC  Specify text angle (degrees):").into_owned();
@@ -291,7 +287,11 @@ impl CadCommand for ArcLengthDimensionCommand {
             }
             Step::DimLine(selection) => {
                 let leader_option = if selection.sweep() > std::f64::consts::FRAC_PI_2 {
-                    if self.leader_enabled { "/No Leader" } else { "/Leader" }
+                    if self.leader_enabled {
+                        "/No Leader"
+                    } else {
+                        "/Leader"
+                    }
                 } else {
                     ""
                 };
@@ -501,11 +501,9 @@ impl CadCommand for ArcLengthDimensionCommand {
     fn on_mouse_move(&mut self, point: DVec3) -> Option<WireModel> {
         match self.step {
             Step::SelectObject | Step::PartialFirst(_) => None,
-            Step::DimLine(selection) => Some(dimension_preview(
-                selection,
-                point,
-                self.leader_enabled,
-            )),
+            Step::DimLine(selection) => {
+                Some(dimension_preview(selection, point, self.leader_enabled))
+            }
             Step::PartialSecond {
                 selection,
                 first_angle,
@@ -539,11 +537,7 @@ fn positive_sweep(start: f64, end: f64) -> f64 {
     sweep
 }
 
-fn dimension_preview(
-    selection: ArcSelection,
-    point: DVec3,
-    leader: bool,
-) -> WireModel {
+fn dimension_preview(selection: ArcSelection, point: DVec3, leader: bool) -> WireModel {
     let plane = selection.plane();
     let center = plane.to_local(selection.center());
     let first = plane.to_local(selection.point_at(selection.start_angle));
@@ -594,7 +588,13 @@ fn dimension_preview(
     preview_wire(
         points
             .into_iter()
-            .map(|value| if value.is_nan() { value } else { plane.to_world(value) })
+            .map(|value| {
+                if value.is_nan() {
+                    value
+                } else {
+                    plane.to_world(value)
+                }
+            })
             .collect(),
         "dimarc_preview",
     )

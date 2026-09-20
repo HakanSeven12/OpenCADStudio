@@ -49,7 +49,11 @@ impl SliceCommand {
         preview_center: DVec3,
         preview_radius: f64,
     ) -> Self {
-        let step = if targets.is_empty() { Step::Targets } else { Step::FirstPoint };
+        let step = if targets.is_empty() {
+            Step::Targets
+        } else {
+            Step::FirstPoint
+        };
         Self {
             step,
             targets,
@@ -98,8 +102,7 @@ impl SliceCommand {
         ) {
             return None;
         }
-        crate::scene::model::presspull_model::profile_geometry(entity)
-            .map(|(plane, _, _)| plane)
+        crate::scene::model::presspull_model::profile_geometry(entity).map(|(plane, _, _)| plane)
     }
 
     fn finish_surface(&mut self, keep_point: Option<DVec3>) -> CmdResult {
@@ -314,7 +317,10 @@ impl CadCommand for SliceCommand {
     }
 
     fn point_step_accepts_keywords(&self) -> bool {
-        matches!(self.step, Step::FirstPoint | Step::Side(_) | Step::SurfaceSide)
+        matches!(
+            self.step,
+            Step::FirstPoint | Step::Side(_) | Step::SurfaceSide
+        )
     }
 
     fn is_selection_gathering(&self) -> bool {
@@ -438,11 +444,7 @@ impl CadCommand for SliceCommand {
             _ => None,
         };
         if let Some(plane) = plane {
-            wires.extend(plane_grid(
-                plane,
-                self.preview_center,
-                self.preview_radius,
-            ));
+            wires.extend(plane_grid(plane, self.preview_center, self.preview_radius));
         }
         wires
     }
@@ -470,11 +472,7 @@ fn planar_body_plane(body: &cadkernel::brep::Body) -> Option<Plane> {
 
 fn plane_grid(plane: Plane, centre: DVec3, radius: f64) -> Vec<WireModel> {
     let normal = DVec3::from_array(plane.normal().unwrap_or([0.0, 0.0, 1.0]));
-    let projected = centre
-        - normal
-            * plane
-                .distance_to(centre.to_array())
-                .unwrap_or_default();
+    let projected = centre - normal * plane.distance_to(centre.to_array()).unwrap_or_default();
     let x = DVec3::from_array(plane.x_axis);
     let y = DVec3::from_array(plane.y_axis);
     let color = [0.2, 0.55, 1.0, 1.0];

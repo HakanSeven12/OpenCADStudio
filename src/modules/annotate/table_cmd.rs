@@ -67,8 +67,13 @@ fn saved_defaults() -> &'static Mutex<TableDefaults> {
 #[derive(Clone, Copy)]
 enum Step {
     Columns,
-    DataRows { columns: usize },
-    ColumnWidth { columns: usize, data_rows: usize },
+    DataRows {
+        columns: usize,
+    },
+    ColumnWidth {
+        columns: usize,
+        data_rows: usize,
+    },
     RowHeight {
         columns: usize,
         data_rows: usize,
@@ -86,7 +91,10 @@ enum Step {
         column_width: f64,
         row_height: f64,
     },
-    WindowFirst { columns: usize, data_rows: usize },
+    WindowFirst {
+        columns: usize,
+        data_rows: usize,
+    },
     WindowSecond {
         columns: usize,
         data_rows: usize,
@@ -129,10 +137,7 @@ fn cell_style_from_row(style: &acadrust::objects::RowCellStyle) -> CellStyle {
     result
 }
 
-fn selected_row_style(
-    table_style: &acadrust::objects::TableStyle,
-    name: &str,
-) -> CellStyle {
+fn selected_row_style(table_style: &acadrust::objects::TableStyle, name: &str) -> CellStyle {
     let style = if name.eq_ignore_ascii_case("Title") {
         &table_style.title_row_style
     } else if name.eq_ignore_ascii_case("Header") {
@@ -237,7 +242,10 @@ impl TableCommand {
     }
 
     fn defaults(&self) -> TableDefaults {
-        let mut defaults = saved_defaults().lock().map(|value| *value).unwrap_or_default();
+        let mut defaults = saved_defaults()
+            .lock()
+            .map(|value| *value)
+            .unwrap_or_default();
         if (defaults.column_width - DEFAULT_COL_WIDTH).abs() < 1.0e-9 {
             defaults.column_width = self.suggested_column_width;
         }
@@ -289,7 +297,12 @@ impl TableCommand {
         let mut points = Vec::with_capacity((rows + columns + 2) * 2);
         for column in 0..=columns {
             let x = column as f64 * column_width * scale;
-            points.push(self.plane.to_world(point + DVec3::X * x).as_vec3().to_array());
+            points.push(
+                self.plane
+                    .to_world(point + DVec3::X * x)
+                    .as_vec3()
+                    .to_array(),
+            );
             points.push(
                 self.plane
                     .to_world(point + DVec3::new(x, -height, 0.0))
@@ -299,7 +312,12 @@ impl TableCommand {
         }
         for row in 0..=rows {
             let y = -(row as f64 * row_height * scale);
-            points.push(self.plane.to_world(point + DVec3::Y * y).as_vec3().to_array());
+            points.push(
+                self.plane
+                    .to_world(point + DVec3::Y * y)
+                    .as_vec3()
+                    .to_array(),
+            );
             points.push(
                 self.plane
                     .to_world(point + DVec3::new(width, y, 0.0))
@@ -385,15 +403,15 @@ impl CadCommand for TableCommand {
                 }
             )
             .into_owned(),
-            Step::Insertion { columns, data_rows, .. } => t!(
+            Step::Insertion {
+                columns, data_rows, ..
+            } => t!(
                 "TABLE  Specify insertion point  [%{cols}×%{rows}]:",
                 cols = columns,
                 rows = self.total_rows(*data_rows)
             )
             .into_owned(),
-            Step::WindowFirst { .. } => {
-                t!("%{n}  Specify first corner:", n = "TABLE").into_owned()
-            }
+            Step::WindowFirst { .. } => t!("%{n}  Specify first corner:", n = "TABLE").into_owned(),
             Step::WindowSecond { .. } => {
                 t!("%{n}  Specify opposite corner:", n = "TABLE").into_owned()
             }
@@ -447,7 +465,11 @@ impl CadCommand for TableCommand {
                     column_width,
                 };
             }
-            Step::RowHeight { columns, data_rows, column_width } => {
+            Step::RowHeight {
+                columns,
+                data_rows,
+                column_width,
+            } => {
                 let row_height = if input.is_empty() {
                     defaults.row_height
                 } else {
@@ -460,7 +482,12 @@ impl CadCommand for TableCommand {
                     row_height,
                 };
             }
-            Step::InsertionMode { columns, data_rows, column_width, row_height } => {
+            Step::InsertionMode {
+                columns,
+                data_rows,
+                column_width,
+                row_height,
+            } => {
                 let mode = if input.is_empty() {
                     defaults.insertion_mode
                 } else if "POINT".starts_with(&input.to_ascii_uppercase()) {
@@ -523,7 +550,11 @@ impl CadCommand for TableCommand {
                 };
                 CmdResult::NeedPoint
             }
-            Step::WindowSecond { columns, data_rows, first } => {
+            Step::WindowSecond {
+                columns,
+                data_rows,
+                first,
+            } => {
                 let first = self.plane.to_local(first);
                 let second = self.plane.to_local(point);
                 let rows = self.total_rows(data_rows);
@@ -560,7 +591,11 @@ impl CadCommand for TableCommand {
                 row_height,
                 self.preview_scale,
             )),
-            Step::WindowSecond { columns, data_rows, first } => {
+            Step::WindowSecond {
+                columns,
+                data_rows,
+                first,
+            } => {
                 let first = self.plane.to_local(first);
                 let second = self.plane.to_local(point);
                 let rows = self.total_rows(data_rows);
@@ -815,8 +850,8 @@ mod tabledit_tests {
     //! default orientation (horizontal +X, flow down).
     use super::{table_cell_at, TableCellEditCommand, TableCellHit, TableditCommand};
     use crate::command::{CadCommand, CmdResult};
-    use acadrust::entities::Table;
     use acadrust::entities::table::CellStateFlags;
+    use acadrust::entities::Table;
     use acadrust::types::Vector3;
     use glam::DVec3;
 
@@ -863,8 +898,14 @@ mod tabledit_tests {
             table_cell_at(&table, None, DVec3::new(-0.1, -0.1, 0.0)),
             None
         );
-        assert_eq!(table_cell_at(&table, None, DVec3::new(6.0, -0.1, 0.0)), None);
-        assert_eq!(table_cell_at(&table, None, DVec3::new(1.0, -9.0, 0.0)), None);
+        assert_eq!(
+            table_cell_at(&table, None, DVec3::new(6.0, -0.1, 0.0)),
+            None
+        );
+        assert_eq!(
+            table_cell_at(&table, None, DVec3::new(1.0, -9.0, 0.0)),
+            None
+        );
         assert_eq!(table_cell_at(&table, None, DVec3::new(1.0, 1.0, 0.0)), None);
     }
 
@@ -878,9 +919,11 @@ mod tabledit_tests {
             .expect("locked cell still resolves");
         assert!(hit.locked);
         // Its neighbour stays editable through the same pick path.
-        assert!(!table_cell_at(&table, None, DVec3::new(1.25, -0.125, 0.0))
-            .expect("neighbour resolves")
-            .locked);
+        assert!(
+            !table_cell_at(&table, None, DVec3::new(1.25, -0.125, 0.0))
+                .expect("neighbour resolves")
+                .locked
+        );
     }
 
     #[test]
@@ -888,10 +931,7 @@ mod tabledit_tests {
         let mut cmd = TableditCommand::new();
         assert!(!cmd.needs_entity_pick());
         match cmd.on_point(DVec3::new(1.0, 2.0, 0.0)) {
-            CmdResult::EditTableCell {
-                handle,
-                point,
-            } => {
+            CmdResult::EditTableCell { handle, point } => {
                 assert_eq!(handle, acadrust::Handle::NULL);
                 assert_eq!(point, DVec3::new(1.0, 2.0, 0.0));
             }

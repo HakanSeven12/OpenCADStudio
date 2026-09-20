@@ -251,9 +251,7 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
             continue;
         }
         if let Some(header) = line.strip_prefix('[') {
-            section = header
-                .find(']')
-                .map(|end| header[..end].trim());
+            section = header.find(']').map(|end| header[..end].trim());
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
@@ -523,7 +521,10 @@ xdata_apps = ["MYPLUGIN_RECORD"]
         assert_eq!(p.api_version, 2);
         assert_eq!(p.repository.as_deref(), Some("example/opencad-my-plugin"));
         assert!(p.command_prefixes.contains(&"MP_".to_string()));
-        assert!(p.api_compatible(), "V2 plugins must be accepted by the V4 host");
+        assert!(
+            p.api_compatible(),
+            "V2 plugins must be accepted by the V4 host"
+        );
     }
 
     #[test]
@@ -569,7 +570,10 @@ rustc_version = ""
         let p = parse_plugin_toml(toml).expect("parsed");
         assert!(p.rustc_declared);
         assert!(p.rustc_version.is_none());
-        assert!(!p.rustc_compatible(), "declared but empty rustc is incompatible");
+        assert!(
+            !p.rustc_compatible(),
+            "declared but empty rustc is incompatible"
+        );
         assert!(!p.loadable());
     }
 
@@ -604,7 +608,10 @@ rustc_version = "{other}"
         );
         let p = parse_plugin_toml(&toml).expect("parsed");
         assert!(p.rustc_declared);
-        assert!(!p.rustc_compatible(), "mismatched rustc should be incompatible");
+        assert!(
+            !p.rustc_compatible(),
+            "mismatched rustc should be incompatible"
+        );
         assert!(!p.loadable());
     }
 
@@ -681,7 +688,10 @@ acadrust_source = ""
         let p = parse_plugin_toml(toml).expect("parsed");
         assert!(p.acadrust_declared);
         assert!(p.acadrust_source.is_none());
-        assert!(!p.acadrust_compatible(), "declared but empty source is incompatible");
+        assert!(
+            !p.acadrust_compatible(),
+            "declared but empty source is incompatible"
+        );
         assert!(!p.loadable());
     }
 
@@ -720,7 +730,10 @@ acadrust_source = "{other}"
         );
         let p = parse_plugin_toml(&toml).expect("parsed");
         assert!(p.acadrust_declared);
-        assert!(!p.acadrust_compatible(), "mismatched acadrust fingerprint should be incompatible");
+        assert!(
+            !p.acadrust_compatible(),
+            "mismatched acadrust fingerprint should be incompatible"
+        );
         assert!(!p.loadable());
     }
 
@@ -741,7 +754,10 @@ acadrust_source = "{host}"
         );
         let p = parse_plugin_toml(&toml).expect("parsed");
         assert!(p.acadrust_declared);
-        assert!(p.acadrust_compatible(), "matching acadrust fingerprint should be compatible");
+        assert!(
+            p.acadrust_compatible(),
+            "matching acadrust fingerprint should be compatible"
+        );
     }
 
     #[test]
@@ -793,11 +809,11 @@ acadrust_source = "git+https://github.com/HakanSeven12/cadcodec.git?rev=0908da7#
         let mut app = crate::app::OpenCADStudio::new_for_test();
         let mut host = crate::app::plugin_host::HostSession::new(&mut app, 0);
         let process = ocs_plugin_api::process::PluginProcess::spawn(
-                &path,
-                &mut host,
-                v4_support::notification_handler(),
-            )
-            .expect("spawn test plugin");
+            &path,
+            &mut host,
+            v4_support::notification_handler(),
+        )
+        .expect("spawn test plugin");
         assert_eq!(process.id(), "opencad.my_plugin");
         let mut started = false;
         let handled = process

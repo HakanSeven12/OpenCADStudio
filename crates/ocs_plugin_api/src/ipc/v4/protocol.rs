@@ -53,7 +53,10 @@ pub enum PluginToHostV4 {
         tab_id: Option<u64>,
         payload: PluginRequest,
     },
-    Response { id: u64, payload: HostResponse },
+    Response {
+        id: u64,
+        payload: HostResponse,
+    },
     Notification(NotificationEnvelope<PluginNotification>),
 }
 

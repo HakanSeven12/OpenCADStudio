@@ -1,8 +1,8 @@
+use crate::t;
 use acadrust::entities::{AttributeDefinition, AttributeEntity, Entity, Insert};
 use acadrust::types::Vector3;
 use acadrust::EntityType;
 use glam::{DVec3, Vec3};
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, InputKind, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -64,7 +64,8 @@ impl InsertBlockCommand {
         usage_rank: rustc_hash::FxHashMap<String, (u32, usize)>,
         cliprompt_lines: u8,
     ) -> Self {
-        let limit = (cliprompt_lines as usize).clamp(0, crate::modules::insert::picker::MAX_SUGGESTIONS);
+        let limit =
+            (cliprompt_lines as usize).clamp(0, crate::modules::insert::picker::MAX_SUGGESTIONS);
         let picker = crate::modules::insert::picker::BlockPicker::new(available, usage_rank, limit);
         Self {
             picker,
@@ -102,7 +103,6 @@ impl InsertBlockCommand {
             plane: WorkingPlane::default(),
         }
     }
-
 }
 
 impl CadCommand for InsertBlockCommand {
@@ -190,10 +190,7 @@ impl CadCommand for InsertBlockCommand {
             Step::Name => CmdResult::NeedPoint,
             Step::Point { name } => {
                 let point = self.plane.to_local(pt);
-                let mut ins = Insert::new(
-                    name.clone(),
-                    Vector3::new(point.x, point.y, point.z),
-                );
+                let mut ins = Insert::new(name.clone(), Vector3::new(point.x, point.y, point.z));
                 ins.set_x_scale(self.x_scale);
                 ins.set_y_scale(self.y_scale);
                 ins.rotation = self.rotation_rad;
@@ -328,7 +325,8 @@ impl CadCommand for InsertBlockCommand {
         }
     }
 
-    fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> { let pt = pt.as_vec3();
+    fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
+        let pt = pt.as_vec3();
         match (&self.step, &self.preview) {
             (Step::Point { .. }, Some((wires, base))) => {
                 let delta = pt - *base;
@@ -395,7 +393,12 @@ impl InsertBlockCommand {
         loop {
             let next = match &self.step {
                 Step::FillAttr { attdefs, idx, .. } => attdefs.get(*idx).map(|ad| {
-                    (*idx, ad.flags.constant, ad.flags.preset, ad.default_value.clone())
+                    (
+                        *idx,
+                        ad.flags.constant,
+                        ad.flags.preset,
+                        ad.default_value.clone(),
+                    )
                 }),
                 _ => return None,
             };
@@ -435,6 +438,5 @@ impl InsertBlockCommand {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["INSERT"] });  // InsertBlockCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["INSERT"] }); // InsertBlockCommand

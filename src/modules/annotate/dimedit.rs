@@ -3,9 +3,7 @@
 use acadrust::Handle;
 use glam::DVec3;
 
-use crate::command::{
-    CadCommand, CmdOption, CmdResult, DimensionEditOperation, InputKind,
-};
+use crate::command::{CadCommand, CmdOption, CmdResult, DimensionEditOperation, InputKind};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::t;
 
@@ -121,9 +119,13 @@ impl CadCommand for DimEditCommand {
                 }
                 _ => None,
             },
-            Step::NewText => Some(self.select(DimensionEditOperation::NewText(
-                if value == "<>" { String::new() } else { text.to_string() },
-            ))),
+            Step::NewText => Some(
+                self.select(DimensionEditOperation::NewText(if value == "<>" {
+                    String::new()
+                } else {
+                    text.to_string()
+                })),
+            ),
             Step::Rotate => value
                 .parse::<f64>()
                 .ok()
@@ -151,4 +153,6 @@ impl CadCommand for DimEditCommand {
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["DIMEDIT"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["DIMEDIT"]
+});

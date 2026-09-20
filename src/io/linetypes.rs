@@ -120,10 +120,9 @@ pub fn document_lt_segments(document: &CadDocument, name: &str) -> Option<Comple
                         .find(|s| s.handle == c.style_handle)
                         .map(|s| s.name.as_str())
                         .unwrap_or("");
-                    let font = crate::entities::text_support::resolve_text_style(
-                        style_name, document,
-                    )
-                    .font_name;
+                    let font =
+                        crate::entities::text_support::resolve_text_style(style_name, document)
+                            .font_name;
                     let scale = c.scale as f32;
                     segments.push(LtSegment::Text {
                         text: text.clone(),
@@ -281,7 +280,6 @@ pub fn populate_document_from_source(doc: &mut CadDocument, source: &str) -> usi
     }
     added
 }
-
 
 // ── Parser ────────────────────────────────────────────────────────────────
 

@@ -220,13 +220,9 @@ impl Scene {
                         };
                         let follows_selected_point = set.constraints.iter().any(|link| {
                             link.enabled
-                                && link.kind
-                                    == parametric_constraints::ConstraintKind::Coincident
+                                && link.kind == parametric_constraints::ConstraintKind::Coincident
                                 && link.refs.contains(&anchor)
-                                && link
-                                    .refs
-                                    .iter()
-                                    .any(|item| handles.contains(&item.entity))
+                                && link.refs.iter().any(|item| handles.contains(&item.entity))
                         });
                         if !follows_selected_point && !driven_refs.contains(&anchor) {
                             driven_refs.push(anchor);

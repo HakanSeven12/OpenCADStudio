@@ -36,15 +36,13 @@ pub use dimension_assoc::{ReferenceStatus, ResolvedReference};
 pub use page_setup::{apply_default_page_setup, rotated_margins};
 mod dwg_native_constraints;
 mod entity;
+mod group_layer;
 #[cfg(test)]
 mod hatch_boundary;
-mod group_layer;
 mod layout;
 mod limits;
 mod modify;
 mod mspace;
-pub mod viewport_ref;
-pub mod viewport_dimension_pick;
 pub mod named_parameters;
 mod page_setup;
 mod paper;
@@ -52,6 +50,8 @@ mod preview;
 mod project;
 mod scene_markers;
 mod selection;
+pub mod viewport_dimension_pick;
+pub mod viewport_ref;
 pub(crate) use selection::{pe_url_description_of, pe_url_of};
 pub mod parametric_constraints;
 mod parametric_solve;
@@ -201,9 +201,7 @@ impl Scene {
         {
             let (edges, lows) = set.geometry_edges();
             let mut seen = HashSet::default();
-            for (a, b) in
-                crate::scene::model::mesh_model::solid_edge_segments(edges, lows)
-            {
+            for (a, b) in crate::scene::model::mesh_model::solid_edge_segments(edges, lows) {
                 for (point, hint) in [(a, SnapHint::Vertex), (b, SnapHint::Vertex)] {
                     let key = [point.x.to_bits(), point.y.to_bits(), point.z.to_bits()];
                     if seen.insert(key) {
@@ -302,8 +300,8 @@ impl Scene {
         want_nearest: bool,
     ) -> Option<crate::snap::SnapResult> {
         use crate::snap::{
-            closest_point_on_tri_2d, foot_on_triangle, snap_better, snap_priority,
-            snap_tier, SnapType,
+            closest_point_on_tri_2d, foot_on_triangle, snap_better, snap_priority, snap_tier,
+            SnapType,
         };
         if !want_perp && !want_nearest {
             return None;
@@ -347,8 +345,7 @@ impl Scene {
                         || (tier == *bt
                             && (d2 - *bd2).abs() <= 1e-4
                             && sub == *bs
-                            && (depth2 < *bdepth2
-                                || (depth2 == *bdepth2 && handle.value() < *bh)))
+                            && (depth2 < *bdepth2 || (depth2 == *bdepth2 && handle.value() < *bh)))
                 }
             };
             if better {
@@ -368,9 +365,7 @@ impl Scene {
                         extension_origin: None,
                         extension_dir: None,
                         viewport: None,
-                        source: Some(
-                            crate::command::DimensionAssociationSource::inferred(handle),
-                        ),
+                        source: Some(crate::command::DimensionAssociationSource::inferred(handle)),
                         secondary_source: None,
                         model_point: None,
                     },
@@ -423,7 +418,10 @@ impl Scene {
                 for (slot, index) in v.iter_mut().zip(tri.iter()) {
                     let (Some(high), low) = (
                         lod.verts.get(*index as usize),
-                        lod.verts_low.get(*index as usize).copied().unwrap_or([0.0; 3]),
+                        lod.verts_low
+                            .get(*index as usize)
+                            .copied()
+                            .unwrap_or([0.0; 3]),
                     ) else {
                         ok = false;
                         break;
@@ -447,14 +445,8 @@ impl Scene {
                     continue;
                 }
                 // Per-triangle screen reject before any 3D work.
-                let (tx0, ty0) = (
-                    sa[0].min(sb[0]).min(sc[0]),
-                    sa[1].min(sb[1]).min(sc[1]),
-                );
-                let (tx1, ty1) = (
-                    sa[0].max(sb[0]).max(sc[0]),
-                    sa[1].max(sb[1]).max(sc[1]),
-                );
+                let (tx0, ty0) = (sa[0].min(sb[0]).min(sc[0]), sa[1].min(sb[1]).min(sc[1]));
+                let (tx1, ty1) = (sa[0].max(sb[0]).max(sc[0]), sa[1].max(sb[1]).max(sc[1]));
                 if cursor[0] < tx0 - aperture_px
                     || cursor[0] > tx1 + aperture_px
                     || cursor[1] < ty0 - aperture_px
@@ -2204,8 +2196,7 @@ pub struct Scene {
         RefCell<HashMap<(String, String), Option<Arc<crate::io::plot_style::PlotStyleTable>>>>,
     styled_wire_cache: RefCell<HashMap<(u64, String), (u64, Arc<Vec<WireModel>>)>>,
     styled_hatch_cache: RefCell<HashMap<(u64, usize, usize, String, u32), Arc<Vec<HatchModel>>>>,
-    styled_wire_fill_cache:
-        RefCell<HashMap<(u64, String, u32, u64), Arc<Vec<HatchModel>>>>,
+    styled_wire_fill_cache: RefCell<HashMap<(u64, String, u32, u64), Arc<Vec<HatchModel>>>>,
     /// Per-viewport projected wire cache for paper-space content viewports.
     /// Stores projected + clipped wires in paper-space coordinates.
     /// Maps vp_handle → (geometry_epoch, Vec<WireModel>).
@@ -3224,7 +3215,10 @@ impl Scene {
     }
 
     /// Refresh display and associations after a solved grip or exact history restore.
-    pub(crate) fn bump_entities_after_parametric_solve(&mut self, changes: &[(Handle, ChangeKind)]) {
+    pub(crate) fn bump_entities_after_parametric_solve(
+        &mut self,
+        changes: &[(Handle, ChangeKind)],
+    ) {
         self.bump_entities_with_solve_policy(changes, &[], false, &[], &[], false);
     }
 
@@ -3237,14 +3231,7 @@ impl Scene {
         fixed_refs: &[parametric_constraints::ParametricRef],
         retain_size: bool,
     ) {
-        self.bump_entities_with_solve_policy(
-            changes,
-            &[],
-            retain_size,
-            &[],
-            fixed_refs,
-            true,
-        );
+        self.bump_entities_with_solve_policy(changes, &[], retain_size, &[], fixed_refs, true);
     }
 
     pub fn bump_entities_with_parametric_transform_policy(
@@ -7222,8 +7209,15 @@ impl Scene {
         all_visible: bool,
         viewport: Option<Handle>,
     ) -> Vec<ImageModel> {
-        self.collect_images(target_block, frozen, annotation_scale_handle, all_visible,
-            viewport, false, |image, _| image)
+        self.collect_images(
+            target_block,
+            frozen,
+            annotation_scale_handle,
+            all_visible,
+            viewport,
+            false,
+            |image, _| image,
+        )
     }
 
     pub fn paper_plot_images(&self) -> Vec<crate::io::pdf_export::PlotImage> {
@@ -7232,8 +7226,14 @@ impl Scene {
         } else {
             self.paper_annotation_scale_handle()
         };
-        self.placed_images(self.current_layout_block_handle(), None,
-            scale, self.annotation_all_visible(), None, true)
+        self.placed_images(
+            self.current_layout_block_handle(),
+            None,
+            scale,
+            self.annotation_all_visible(),
+            None,
+            true,
+        )
     }
 
     fn placed_images(
@@ -7245,11 +7245,18 @@ impl Scene {
         viewport: Option<Handle>,
         plotting: bool,
     ) -> Vec<crate::io::pdf_export::PlotImage> {
-        self.collect_images(target_block, frozen, annotation_scale_handle, all_visible,
-            viewport, plotting, |image, context| crate::io::pdf_export::PlotImage {
+        self.collect_images(
+            target_block,
+            frozen,
+            annotation_scale_handle,
+            all_visible,
+            viewport,
+            plotting,
+            |image, context| crate::io::pdf_export::PlotImage {
                 image,
                 clips: context.clips.clone(),
-            })
+            },
+        )
     }
 
     fn collect_images<T>(
@@ -7290,8 +7297,12 @@ impl Scene {
         graph.walk_root(
             root,
             |entity, context| {
-                (!plotting || self.document.layers.get(&entity.common().layer)
-                    .is_none_or(|layer| layer.is_plottable))
+                (!plotting
+                    || self
+                        .document
+                        .layers
+                        .get(&entity.common().layer)
+                        .is_none_or(|layer| layer.is_plottable))
                     && (context.is_instanced()
                         || !self.entity_temporarily_hidden(entity.common().handle))
             },
@@ -10353,8 +10364,7 @@ impl Scene {
                 for (h, a) in miss_pairs {
                     // Uniquely owned (just built above): enrich solid shells
                     // with B-rep vertex snaps before the memo/assembly split.
-                    let mut wires =
-                        Arc::try_unwrap(a).unwrap_or_else(|a| a.as_ref().clone());
+                    let mut wires = Arc::try_unwrap(a).unwrap_or_else(|a| a.as_ref().clone());
                     self.attach_solid_snaps(h, &mut wires);
                     let a = Arc::new(wires);
                     out.extend(a.iter().cloned());
@@ -12186,8 +12196,19 @@ mod journal_tests {
         hatch.common.layer = "Shadows".to_string();
         let handle = scene.add_entity(EntityType::Hatch(hatch));
         let model = scene.model_space_block_handle();
-        assert_eq!(scene.document.get_entity(handle).unwrap().common().owner_handle, model);
-        scene.document.objects.retain(|_, object| !matches!(object, ObjectType::Layout(_)));
+        assert_eq!(
+            scene
+                .document
+                .get_entity(handle)
+                .unwrap()
+                .common()
+                .owner_handle,
+            model
+        );
+        scene
+            .document
+            .objects
+            .retain(|_, object| !matches!(object, ObjectType::Layout(_)));
         scene.invalidate_dependency_index();
 
         let targets = scene.dependency_targets(DependencyKind::Layer, &["Shadows".to_string()]);
@@ -12198,7 +12219,10 @@ mod journal_tests {
         scene.document.layers.get_mut("Shadows").unwrap().flags.off = true;
         let epoch = scene.geometry_epoch;
         scene.invalidate_layer_dependencies(&["Shadows".to_string()]);
-        assert_ne!(scene.geometry_epoch, epoch, "the cached hatch needs an entity delta");
+        assert_ne!(
+            scene.geometry_epoch, epoch,
+            "the cached hatch needs an entity delta"
+        );
     }
 
     /// The loader's handed-over draw depths must equal a local rebuild.

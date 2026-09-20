@@ -6,9 +6,7 @@ use acadrust::{EntityType, Handle};
 use glam::{DVec2, DVec3};
 
 use crate::command::{CadCommand, CmdOption, CmdResult, WorkingPlane};
-use crate::modules::draw::draw::polyline::{
-    arc_sample_points, compute_bulge, seg_exit_tangent,
-};
+use crate::modules::draw::draw::polyline::{arc_sample_points, compute_bulge, seg_exit_tangent};
 use crate::scene::model::solid_model;
 use crate::scene::model::sweep_model::{self, PolysolidJustification};
 use crate::scene::model::wire_model::WireModel;
@@ -139,12 +137,9 @@ impl PolysolidCommand {
     }
 
     fn commit(&self, path: EntityType, erase_source: Option<Handle>) -> CmdResult {
-        let Some((solid, history)) = sweep_model::polysolid(
-            &path,
-            self.width,
-            self.height,
-            self.justification,
-        ) else {
+        let Some((solid, history)) =
+            sweep_model::polysolid(&path, self.width, self.height, self.justification)
+        else {
             return CmdResult::NeedPoint;
         };
         let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&solid) else {
@@ -176,7 +171,8 @@ impl PolysolidCommand {
             let first = self.vertices[0];
             let bulge = compute_bulge(
                 self.plane.to_local(last).truncate(),
-                self.pending_direction.unwrap_or_else(|| self.last_tangent()),
+                self.pending_direction
+                    .unwrap_or_else(|| self.last_tangent()),
                 self.plane.to_local(first).truncate(),
             );
             if let Some(value) = self.bulges.last_mut() {
@@ -197,8 +193,10 @@ impl PolysolidCommand {
         self.pending_second = None;
         if self.vertices.is_empty() {
             self.step = Step::Start;
-        } else if matches!(self.step, Step::Arc | Step::ArcDirection | Step::ArcSecond | Step::ArcEnd)
-        {
+        } else if matches!(
+            self.step,
+            Step::Arc | Step::ArcDirection | Step::ArcSecond | Step::ArcEnd
+        ) {
             self.step = Step::Arc;
         } else {
             self.step = Step::Line;
@@ -236,8 +234,7 @@ impl PolysolidCommand {
         let a = DVec2::new(a3.x, a3.y);
         let m = DVec2::new(m3.x, m3.y);
         let b = DVec2::new(b3.x, b3.y);
-        let determinant = 2.0
-            * (a.x * (m.y - b.y) + m.x * (b.y - a.y) + b.x * (a.y - m.y));
+        let determinant = 2.0 * (a.x * (m.y - b.y) + m.x * (b.y - a.y) + b.x * (a.y - m.y));
         if determinant.abs() <= 1e-12 {
             return 0.0;
         }
@@ -245,17 +242,14 @@ impl PolysolidCommand {
         let mm = m.length_squared();
         let bb = b.length_squared();
         let center = DVec2::new(
-            (aa * (m.y - b.y) + mm * (b.y - a.y) + bb * (a.y - m.y))
-                / determinant,
-            (aa * (b.x - m.x) + mm * (a.x - b.x) + bb * (m.x - a.x))
-                / determinant,
+            (aa * (m.y - b.y) + mm * (b.y - a.y) + bb * (a.y - m.y)) / determinant,
+            (aa * (b.x - m.x) + mm * (a.x - b.x) + bb * (m.x - a.x)) / determinant,
         );
         let start_angle = (a - center).y.atan2((a - center).x);
         let middle_angle = (m - center).y.atan2((m - center).x);
         let end_angle = (b - center).y.atan2((b - center).x);
         let ccw = (end_angle - start_angle).rem_euclid(std::f64::consts::TAU);
-        let middle_ccw =
-            (middle_angle - start_angle).rem_euclid(std::f64::consts::TAU);
+        let middle_ccw = (middle_angle - start_angle).rem_euclid(std::f64::consts::TAU);
         let sweep = if middle_ccw <= ccw + 1e-12 {
             ccw
         } else {
@@ -281,16 +275,21 @@ impl PolysolidCommand {
             Step::Arc => {
                 let bulge = compute_bulge(
                     start_local.truncate(),
-                    self.pending_direction.unwrap_or_else(|| self.last_tangent()),
+                    self.pending_direction
+                        .unwrap_or_else(|| self.last_tangent()),
                     cursor_local.truncate(),
                 );
                 arc_sample_points(start_local.as_vec3(), bulge, cursor_local.as_vec3(), 24)
                     .into_iter()
-                    .map(|point| self.plane.to_world(DVec3::new(
-                        point[0] as f64,
-                        point[1] as f64,
-                        point[2] as f64,
-                    )).to_array())
+                    .map(|point| {
+                        self.plane
+                            .to_world(DVec3::new(
+                                point[0] as f64,
+                                point[1] as f64,
+                                point[2] as f64,
+                            ))
+                            .to_array()
+                    })
                     .collect()
             }
             Step::ArcEnd => {
@@ -298,11 +297,15 @@ impl PolysolidCommand {
                 let bulge = self.three_point_bulge(start, middle, cursor);
                 arc_sample_points(start_local.as_vec3(), bulge, cursor_local.as_vec3(), 24)
                     .into_iter()
-                    .map(|point| self.plane.to_world(DVec3::new(
-                        point[0] as f64,
-                        point[1] as f64,
-                        point[2] as f64,
-                    )).to_array())
+                    .map(|point| {
+                        self.plane
+                            .to_world(DVec3::new(
+                                point[0] as f64,
+                                point[1] as f64,
+                                point[2] as f64,
+                            ))
+                            .to_array()
+                    })
                     .collect()
             }
             Step::ArcDirection => vec![start.to_array(), cursor.to_array()],
@@ -330,12 +333,11 @@ impl PolysolidCommand {
         let segment_bulge = match self.step {
             Step::Arc => compute_bulge(
                 self.plane.to_local(start).truncate(),
-                self.pending_direction.unwrap_or_else(|| self.last_tangent()),
+                self.pending_direction
+                    .unwrap_or_else(|| self.last_tangent()),
                 self.plane.to_local(cursor).truncate(),
             ),
-            Step::ArcEnd => {
-                self.three_point_bulge(start, self.pending_second?, cursor)
-            }
+            Step::ArcEnd => self.three_point_bulge(start, self.pending_second?, cursor),
             _ => 0.0,
         };
         if let Some(last) = bulges.last_mut() {
@@ -345,12 +347,8 @@ impl PolysolidCommand {
         bulges.push(0.0);
 
         let path = self.path_entity_from(&vertices, &bulges, false)?;
-        let (solid, _) = sweep_model::polysolid(
-            &path,
-            self.width,
-            self.height,
-            self.justification,
-        )?;
+        let (solid, _) =
+            sweep_model::polysolid(&path, self.width, self.height, self.justification)?;
         let previews = solid_model::edge_wires(&solid)
             .into_iter()
             .enumerate()
@@ -393,7 +391,8 @@ impl CadCommand for PolysolidCommand {
                     PolysolidJustification::Right => crate::t!("Right"),
                 },
                 t!("Specify start point or [Object/Height/Width/Justify] <Object>:")
-            ).into_owned(),
+            )
+            .into_owned(),
             Step::Height => crate::tf!("Specify height <{:.4}>:", self.height).into_owned(),
             Step::Width => crate::tf!("Specify width <{:.4}>:", self.width).into_owned(),
             Step::Justify => crate::tf!(
@@ -403,7 +402,8 @@ impl CadCommand for PolysolidCommand {
                     PolysolidJustification::Center => crate::t!("Center"),
                     PolysolidJustification::Right => crate::t!("Right"),
                 }
-            ).into_owned(),
+            )
+            .into_owned(),
             Step::Object => t!("Select object:").into_owned(),
             Step::Line if self.vertices.len() >= 3 => {
                 t!("Specify next point or [Arc/Close/Undo]:").into_owned()
@@ -470,7 +470,9 @@ impl CadCommand for PolysolidCommand {
                 let start = *self.vertices.last().unwrap_or(&point);
                 let a = self.plane.to_local(start).truncate();
                 let b = self.plane.to_local(point).truncate();
-                let tangent = self.pending_direction.unwrap_or_else(|| self.last_tangent());
+                let tangent = self
+                    .pending_direction
+                    .unwrap_or_else(|| self.last_tangent());
                 let bulge = compute_bulge(a, tangent, b);
                 self.add_segment(point, bulge)
             }
@@ -519,7 +521,10 @@ impl CadCommand for PolysolidCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        !matches!(self.step, Step::Object | Step::ArcDirection | Step::ArcSecond | Step::ArcEnd)
+        !matches!(
+            self.step,
+            Step::Object | Step::ArcDirection | Step::ArcSecond | Step::ArcEnd
+        )
     }
 
     fn point_step_accepts_keywords(&self) -> bool {

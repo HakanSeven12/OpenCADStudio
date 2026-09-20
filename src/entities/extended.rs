@@ -1,16 +1,16 @@
+use crate::t;
 use acadrust::entities::{
-    ArcAlignedTextData, ExtendedEntity, ExtendedEntityData, GeoPositionMarkerData,
-    PointCloudData, PointCloudExData, RemoteTextData, SectionObjectData,
+    ArcAlignedTextData, ExtendedEntity, ExtendedEntityData, GeoPositionMarkerData, PointCloudData,
+    PointCloudExData, RemoteTextData, SectionObjectData,
 };
 use acadrust::types::{Handle, Transform, Vector3};
 use acadrust::xdata::{ExtendedDataRecord, XDataValue};
-use crate::t;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
     center_grip, edit_angle_prop, edit_prop, parse_f64, ro_prop, square_grip,
 };
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{
     GripApply, GripDef, GripMenuAction, GripMenuItem, PropSection, PropValue, Property,
@@ -61,11 +61,7 @@ pub(crate) fn section_slice_depth(entity: &ExtendedEntity) -> Option<f64> {
         .map(f64::abs)
 }
 
-pub(crate) fn set_section_slice_metadata(
-    entity: &mut ExtendedEntity,
-    enabled: bool,
-    depth: f64,
-) {
+pub(crate) fn set_section_slice_metadata(entity: &mut ExtendedEntity, enabled: bool, depth: f64) {
     if !enabled {
         entity.common.extended_data.remove_record(SECTION_SLICE_APP);
         entity
@@ -116,12 +112,7 @@ fn bool_prop(label: &str, field: &'static str, value: bool) -> Property {
     }
 }
 
-fn choice_prop(
-    label: &str,
-    field: &'static str,
-    selected: &str,
-    options: &[&str],
-) -> Property {
+fn choice_prop(label: &str, field: &'static str, selected: &str, options: &[&str]) -> Property {
     Property {
         label: label.into(),
         field,
@@ -191,8 +182,7 @@ fn normalized(value: Vector3, fallback: Vector3) -> Vector3 {
 
 fn plane_axes(normal: Vector3) -> (Vector3, Vector3, Vector3) {
     let normal = normalized(normal, Vector3::UNIT_Z);
-    let (x, y) =
-        crate::scene::view::transform::ocs_axes((normal.x, normal.y, normal.z));
+    let (x, y) = crate::scene::view::transform::ocs_axes((normal.x, normal.y, normal.z));
     (
         Vector3::new(x.0, x.1, x.2),
         Vector3::new(y.0, y.1, y.2),
@@ -231,7 +221,11 @@ fn append_planar_text(
         0.0,
         width_factor as f32,
         0.0,
-        if font.trim().is_empty() { "standard" } else { font },
+        if font.trim().is_empty() {
+            "standard"
+        } else {
+            font
+        },
         text,
     );
     for stroke in strokes {
@@ -280,15 +274,19 @@ fn append_arc_aligned_text(points: &mut Vec<[f64; 3]>, data: &ArcAlignedTextData
             0.0,
             data.x_scale.abs().max(0.01) as f32,
             0.0,
-            if font.trim().is_empty() { "standard" } else { font },
+            if font.trim().is_empty() {
+                "standard"
+            } else {
+                font
+            },
             &character.to_string(),
         );
         for stroke in strokes {
             push_chain(
                 points,
-                stroke.into_iter().map(|[x, y]| {
-                    add_scaled(origin, tangent, x as f64, radial, y as f64)
-                }),
+                stroke
+                    .into_iter()
+                    .map(|[x, y]| add_scaled(origin, tangent, x as f64, radial, y as f64)),
             );
         }
         angle += delta;
@@ -305,17 +303,18 @@ fn section_lines(data: &SectionObjectData) -> Vec<[f64; 3]> {
             point.z + vertical.z * distance,
         ]
     };
+    push_chain(&mut points, data.vertices.iter().map(|p| [p.x, p.y, p.z]));
     push_chain(
         &mut points,
-        data.vertices.iter().map(|p| [p.x, p.y, p.z]),
+        data.vertices
+            .iter()
+            .map(|point| offset(point, data.top_height)),
     );
     push_chain(
         &mut points,
-        data.vertices.iter().map(|point| offset(point, data.top_height)),
-    );
-    push_chain(
-        &mut points,
-        data.vertices.iter().map(|point| offset(point, -data.bottom_height)),
+        data.vertices
+            .iter()
+            .map(|point| offset(point, -data.bottom_height)),
     );
     for point in &data.vertices {
         push_segment(
@@ -355,7 +354,11 @@ fn section_lines(data: &SectionObjectData) -> Vec<[f64; 3]> {
                 .zip(data.back_line_vertices.last()),
         ) {
             for (a, b) in [(front.0, back.0), (front.1, back.1)] {
-                push_segment(&mut points, offset(a, data.top_height), offset(b, data.top_height));
+                push_segment(
+                    &mut points,
+                    offset(a, data.top_height),
+                    offset(b, data.top_height),
+                );
                 push_segment(
                     &mut points,
                     offset(a, -data.bottom_height),
@@ -422,11 +425,7 @@ fn geo_marker_lines(data: &GeoPositionMarkerData) -> Vec<[f64; 3]> {
         );
         push_segment(
             &mut points,
-            [
-                data.position.x + radius,
-                data.position.y,
-                data.position.z,
-            ],
+            [data.position.x + radius, data.position.y, data.position.z],
             [origin.x, origin.y, origin.z],
         );
         append_planar_text(
@@ -483,8 +482,7 @@ fn point_cloud_ex_clip_lines(data: &PointCloudExData) -> Vec<[f64; 3]> {
             if crop.points.len() < 2 {
                 continue;
             }
-            let mut chain: Vec<[f64; 3]> =
-                crop.points.iter().map(|p| [p.x, p.y, p.z]).collect();
+            let mut chain: Vec<[f64; 3]> = crop.points.iter().map(|p| [p.x, p.y, p.z]).collect();
             if crop.points.len() > 2 {
                 chain.push(chain[0]);
             }
@@ -503,7 +501,11 @@ pub(crate) fn point_cloud_frame_lines(entity: &ExtendedEntity) -> Option<Vec<[f6
 }
 
 fn camera_lines(document: &acadrust::CadDocument, view_handle: Handle) -> Vec<[f64; 3]> {
-    let Some(view) = document.views.iter().find(|view| view.handle == view_handle) else {
+    let Some(view) = document
+        .views
+        .iter()
+        .find(|view| view.handle == view_handle)
+    else {
         return Vec::new();
     };
     let direction = normalized(view.direction, Vector3::UNIT_Z);
@@ -537,84 +539,76 @@ fn camera_lines(document: &acadrust::CadDocument, view_handle: Handle) -> Vec<[f
 }
 
 fn to_render(entity: &ExtendedEntity, document: &acadrust::CadDocument) -> Option<RenderEntity> {
-    let (points, snaps, keys): (
-        Vec<[f64; 3]>,
-        Vec<(glam::DVec3, SnapHint)>,
-        Vec<[f64; 3]>,
-    ) = match &entity.data {
-        ExtendedEntityData::Camera { view_handle } => {
-            let points = camera_lines(document, *view_handle);
-            (points, Vec::new(), Vec::new())
-        }
-        ExtendedEntityData::SectionObject(data) => {
-            let snaps = data
-                .vertices
-                .iter()
-                .chain(data.back_line_vertices.iter())
-                .map(|point| {
-                    (
-                        glam::DVec3::new(point.x, point.y, point.z),
-                        SnapHint::Node,
-                    )
-                })
-                .collect();
-            let keys = data
-                .vertices
-                .iter()
-                .chain(data.back_line_vertices.iter())
-                .map(|point| [point.x, point.y, point.z])
-                .collect();
-            (section_lines(data), snaps, keys)
-        }
-        ExtendedEntityData::ArcAlignedText(data) => {
-            let mut points = Vec::new();
-            append_arc_aligned_text(&mut points, data);
-            (
-                points,
+    let (points, snaps, keys): (Vec<[f64; 3]>, Vec<(glam::DVec3, SnapHint)>, Vec<[f64; 3]>) =
+        match &entity.data {
+            ExtendedEntityData::Camera { view_handle } => {
+                let points = camera_lines(document, *view_handle);
+                (points, Vec::new(), Vec::new())
+            }
+            ExtendedEntityData::SectionObject(data) => {
+                let snaps = data
+                    .vertices
+                    .iter()
+                    .chain(data.back_line_vertices.iter())
+                    .map(|point| (glam::DVec3::new(point.x, point.y, point.z), SnapHint::Node))
+                    .collect();
+                let keys = data
+                    .vertices
+                    .iter()
+                    .chain(data.back_line_vertices.iter())
+                    .map(|point| [point.x, point.y, point.z])
+                    .collect();
+                (section_lines(data), snaps, keys)
+            }
+            ExtendedEntityData::ArcAlignedText(data) => {
+                let mut points = Vec::new();
+                append_arc_aligned_text(&mut points, data);
+                (
+                    points,
+                    vec![(
+                        glam::DVec3::new(data.center.x, data.center.y, data.center.z),
+                        SnapHint::Center,
+                    )],
+                    vec![[data.center.x, data.center.y, data.center.z]],
+                )
+            }
+            ExtendedEntityData::RemoteText(data) => (
+                remote_text_lines(data),
                 vec![(
-                    glam::DVec3::new(data.center.x, data.center.y, data.center.z),
-                    SnapHint::Center,
+                    glam::DVec3::new(data.position.x, data.position.y, data.position.z),
+                    SnapHint::Insertion,
                 )],
-                vec![[data.center.x, data.center.y, data.center.z]],
-            )
-        }
-        ExtendedEntityData::RemoteText(data) => (
-            remote_text_lines(data),
-            vec![(
-                glam::DVec3::new(data.position.x, data.position.y, data.position.z),
-                SnapHint::Insertion,
-            )],
-            vec![[data.position.x, data.position.y, data.position.z]],
-        ),
-        ExtendedEntityData::GeoPositionMarker(data) => (
-            geo_marker_lines(data),
-            vec![(
-                glam::DVec3::new(data.position.x, data.position.y, data.position.z),
-                SnapHint::Node,
-            )],
-            vec![[data.position.x, data.position.y, data.position.z]],
-        ),
-        ExtendedEntityData::PointCloud(data) => (
-            point_cloud_lines(data),
-            vec![(
-                glam::DVec3::new(data.origin.x, data.origin.y, data.origin.z),
-                SnapHint::Insertion,
-            )],
-            vec![
-                [data.extents_min.x, data.extents_min.y, data.extents_min.z],
-                [data.extents_max.x, data.extents_max.y, data.extents_max.z],
-            ],
-        ),
-        ExtendedEntityData::PointCloudEx(data) => (
-            point_cloud_ex_lines(data),
-            Vec::new(),
-            vec![
-                [data.extents_min.x, data.extents_min.y, data.extents_min.z],
-                [data.extents_max.x, data.extents_max.y, data.extents_max.z],
-            ],
-        ),
-        _ => return None,
-    };
+                vec![[data.position.x, data.position.y, data.position.z]],
+            ),
+            ExtendedEntityData::GeoPositionMarker(data) => (
+                geo_marker_lines(data),
+                vec![(
+                    glam::DVec3::new(data.position.x, data.position.y, data.position.z),
+                    SnapHint::Node,
+                )],
+                vec![[data.position.x, data.position.y, data.position.z]],
+            ),
+            ExtendedEntityData::PointCloud(data) => (
+                point_cloud_lines(data),
+                vec![(
+                    glam::DVec3::new(data.origin.x, data.origin.y, data.origin.z),
+                    SnapHint::Insertion,
+                )],
+                vec![
+                    [data.extents_min.x, data.extents_min.y, data.extents_min.z],
+                    [data.extents_max.x, data.extents_max.y, data.extents_max.z],
+                ],
+            ),
+            ExtendedEntityData::PointCloudEx(data) => (
+                point_cloud_ex_lines(data),
+                Vec::new(),
+                vec![
+                    [data.extents_min.x, data.extents_min.y, data.extents_min.z],
+                    [data.extents_max.x, data.extents_max.y, data.extents_max.z],
+                ],
+            ),
+            _ => return None,
+        };
     if points.len() < 2 {
         return None;
     }
@@ -659,7 +653,11 @@ fn section_properties(entity: &ExtendedEntity, data: &SectionObjectData) -> Vec<
                 "ext_section_vertical",
                 &vector_text(data.vertical_direction),
             ),
-            ro_prop(t!("Normal").as_ref(), "ext_section_normal", vector_text(viewing)),
+            ro_prop(
+                t!("Normal").as_ref(),
+                "ext_section_normal",
+                vector_text(viewing),
+            ),
             bool_prop(
                 t!("Live Section Enabled").as_ref(),
                 "ext_section_live",
@@ -676,8 +674,16 @@ fn section_properties(entity: &ExtendedEntity, data: &SectionObjectData) -> Vec<
                 value: PropValue::ColorChoice(data.indicator_color),
             },
             edit_prop(t!("Elevation").as_ref(), "ext_section_elevation", offset),
-            edit_prop(t!("Top Height").as_ref(), "ext_section_top", data.top_height),
-            edit_prop(t!("Bottom Height").as_ref(), "ext_section_bottom", data.bottom_height),
+            edit_prop(
+                t!("Top Height").as_ref(),
+                "ext_section_top",
+                data.top_height,
+            ),
+            edit_prop(
+                t!("Bottom Height").as_ref(),
+                "ext_section_bottom",
+                data.bottom_height,
+            ),
             ro_prop(
                 t!("Number of Vertices").as_ref(),
                 "ext_section_vertex_count",
@@ -716,7 +722,11 @@ fn section_viewing_direction(data: &SectionObjectData) -> Vector3 {
     let tangent = section_tangent(data);
     let vertical = normalized(data.vertical_direction, Vector3::UNIT_Z);
     let base = normalized(vertical.cross(&tangent), Vector3::new(0.0, 0.0, -1.0));
-    if data.flags & 4 != 0 { base } else { -base }
+    if data.flags & 4 != 0 {
+        base
+    } else {
+        -base
+    }
 }
 
 fn section_depth(data: &SectionObjectData) -> f64 {
@@ -768,9 +778,9 @@ fn parse_vertices(value: &str) -> Option<Vec<Vector3>> {
         return None;
     }
     let vertices = values
-            .chunks_exact(3)
-            .map(|point| Vector3::new(point[0], point[1], point[2]))
-            .collect::<Vec<_>>();
+        .chunks_exact(3)
+        .map(|point| Vector3::new(point[0], point[1], point[2]))
+        .collect::<Vec<_>>();
     let valid = vertices
         .first()
         .zip(vertices.last())
@@ -821,7 +831,11 @@ fn set_section_kind(data: &mut SectionObjectData, value: &str) {
 fn move_section_to_offset(data: &mut SectionObjectData, desired: f64) {
     let current = section_plane_offset(data);
     let delta = section_viewing_direction(data) * (current - desired);
-    for point in data.vertices.iter_mut().chain(data.back_line_vertices.iter_mut()) {
+    for point in data
+        .vertices
+        .iter_mut()
+        .chain(data.back_line_vertices.iter_mut())
+    {
         *point = *point + delta;
     }
 }
@@ -850,53 +864,100 @@ fn arc_text_properties(data: &ArcAlignedTextData) -> Vec<PropSection> {
         props: vec![
             text_prop(t!("Text").as_ref(), "ext_arc_text", &data.text),
             text_prop(t!("Font").as_ref(), "ext_arc_font", &data.font_name),
-            text_prop(t!("Big Font").as_ref(), "ext_arc_big_font", &data.big_font_name),
+            text_prop(
+                t!("Big Font").as_ref(),
+                "ext_arc_big_font",
+                &data.big_font_name,
+            ),
             text_prop(t!("Style").as_ref(), "ext_arc_style", &data.style_name),
-            ro_prop(t!("Center").as_ref(), "ext_arc_center", vector_text(data.center)),
+            ro_prop(
+                t!("Center").as_ref(),
+                "ext_arc_center",
+                vector_text(data.center),
+            ),
             edit_prop(t!("Radius").as_ref(), "ext_arc_radius", data.radius),
             edit_prop(t!("X Scale").as_ref(), "ext_arc_xscale", data.x_scale),
             edit_prop(t!("Text Size").as_ref(), "ext_arc_size", data.text_size),
-            edit_prop(t!("Character Spacing").as_ref(),
+            edit_prop(
+                t!("Character Spacing").as_ref(),
                 "ext_arc_spacing",
                 data.character_spacing,
             ),
-            edit_prop(t!("Offset From Arc").as_ref(),
+            edit_prop(
+                t!("Offset From Arc").as_ref(),
                 "ext_arc_offset",
                 data.offset_from_arc,
             ),
-            edit_prop(t!("Right Offset").as_ref(), "ext_arc_right", data.right_offset),
+            edit_prop(
+                t!("Right Offset").as_ref(),
+                "ext_arc_right",
+                data.right_offset,
+            ),
             edit_prop(t!("Left Offset").as_ref(), "ext_arc_left", data.left_offset),
-            edit_angle_prop(t!("Start Angle").as_ref(),
+            edit_angle_prop(
+                t!("Start Angle").as_ref(),
                 "ext_arc_start",
                 data.start_angle.to_degrees(),
             ),
-            edit_angle_prop(t!("End Angle").as_ref(), "ext_arc_end", data.end_angle.to_degrees()),
+            edit_angle_prop(
+                t!("End Angle").as_ref(),
+                "ext_arc_end",
+                data.end_angle.to_degrees(),
+            ),
             bool_prop(t!("Reverse").as_ref(), "ext_arc_reverse", data.reverse),
-            ro_prop(t!("Text Direction").as_ref(),
+            ro_prop(
+                t!("Text Direction").as_ref(),
                 "ext_arc_direction",
                 data.text_direction.to_string(),
             ),
-            ro_prop(t!("Alignment").as_ref(), "ext_arc_alignment", data.alignment.to_string()),
-            ro_prop(t!("Text Position").as_ref(),
+            ro_prop(
+                t!("Alignment").as_ref(),
+                "ext_arc_alignment",
+                data.alignment.to_string(),
+            ),
+            ro_prop(
+                t!("Text Position").as_ref(),
                 "ext_arc_position",
                 data.text_position.to_string(),
             ),
             bool_prop(t!("Bold").as_ref(), "ext_arc_bold", data.bold),
             bool_prop(t!("Italic").as_ref(), "ext_arc_italic", data.italic),
-            bool_prop(t!("Underlined").as_ref(), "ext_arc_underlined", data.underlined),
-            ro_prop(t!("Character Set").as_ref(),
+            bool_prop(
+                t!("Underlined").as_ref(),
+                "ext_arc_underlined",
+                data.underlined,
+            ),
+            ro_prop(
+                t!("Character Set").as_ref(),
                 "ext_arc_charset",
                 data.character_set.to_string(),
             ),
-            ro_prop(t!("Pitch And Family").as_ref(),
+            ro_prop(
+                t!("Pitch And Family").as_ref(),
                 "ext_arc_pitch",
                 data.pitch_and_family.to_string(),
             ),
             bool_prop(t!("SHX").as_ref(), "ext_arc_shx", data.is_shx),
-            ro_prop(t!("Text Color").as_ref(), "ext_arc_color", data.text_color.to_string()),
-            ro_prop(t!("Normal").as_ref(), "ext_arc_normal", vector_text(data.normal)),
-            bool_prop(t!("Wizard Flag").as_ref(), "ext_arc_wizard", data.wizard_flag),
-            ro_prop(t!("Arc").as_ref(), "ext_arc_handle", handle_text(data.arc_handle)),
+            ro_prop(
+                t!("Text Color").as_ref(),
+                "ext_arc_color",
+                data.text_color.to_string(),
+            ),
+            ro_prop(
+                t!("Normal").as_ref(),
+                "ext_arc_normal",
+                vector_text(data.normal),
+            ),
+            bool_prop(
+                t!("Wizard Flag").as_ref(),
+                "ext_arc_wizard",
+                data.wizard_flag,
+            ),
+            ro_prop(
+                t!("Arc").as_ref(),
+                "ext_arc_handle",
+                handle_text(data.arc_handle),
+            ),
         ],
     }]
 }
@@ -906,19 +967,37 @@ fn remote_text_properties(data: &RemoteTextData) -> Vec<PropSection> {
         title: t!("Remote Text").into_owned(),
         props: vec![
             text_prop(t!("Text").as_ref(), "ext_rtext_text", &data.text),
-            ro_prop(t!("Position").as_ref(), "ext_rtext_position", vector_text(data.position)),
-            ro_prop(t!("Normal").as_ref(), "ext_rtext_normal", vector_text(data.normal)),
-            edit_angle_prop(t!("Rotation").as_ref(),
+            ro_prop(
+                t!("Position").as_ref(),
+                "ext_rtext_position",
+                vector_text(data.position),
+            ),
+            ro_prop(
+                t!("Normal").as_ref(),
+                "ext_rtext_normal",
+                vector_text(data.normal),
+            ),
+            edit_angle_prop(
+                t!("Rotation").as_ref(),
                 "ext_rtext_rotation",
                 data.rotation.to_degrees(),
             ),
             edit_prop(t!("Height").as_ref(), "ext_rtext_height", data.height),
-            text_prop(t!("Style Name").as_ref(), "ext_rtext_style", &data.style_name),
-            ro_prop(t!("Style Handle").as_ref(),
+            text_prop(
+                t!("Style Name").as_ref(),
+                "ext_rtext_style",
+                &data.style_name,
+            ),
+            ro_prop(
+                t!("Style Handle").as_ref(),
                 "ext_rtext_style_handle",
                 handle_text(data.style_handle),
             ),
-            ro_prop(t!("Flags").as_ref(), "ext_rtext_flags", data.flags.to_string()),
+            ro_prop(
+                t!("Flags").as_ref(),
+                "ext_rtext_flags",
+                data.flags.to_string(),
+            ),
         ],
     }]
 }
@@ -927,21 +1006,36 @@ fn geo_marker_properties(data: &GeoPositionMarkerData) -> Vec<PropSection> {
     vec![PropSection {
         title: t!("Geographic Position Marker").into_owned(),
         props: vec![
-            ro_prop(t!("Class Version").as_ref(),
+            ro_prop(
+                t!("Class Version").as_ref(),
                 "ext_geo_version",
                 data.class_version.to_string(),
             ),
-            ro_prop(t!("Position").as_ref(), "ext_geo_position", vector_text(data.position)),
+            ro_prop(
+                t!("Position").as_ref(),
+                "ext_geo_position",
+                vector_text(data.position),
+            ),
             edit_prop(t!("Radius").as_ref(), "ext_geo_radius", data.radius),
             text_prop(t!("Notes").as_ref(), "ext_geo_notes", &data.notes),
             edit_prop(t!("Landing Gap").as_ref(), "ext_geo_gap", data.landing_gap),
-            bool_prop(t!("Text Visible").as_ref(), "ext_geo_visible", data.mtext_visible),
-            ro_prop(t!("Text Alignment").as_ref(),
+            bool_prop(
+                t!("Text Visible").as_ref(),
+                "ext_geo_visible",
+                data.mtext_visible,
+            ),
+            ro_prop(
+                t!("Text Alignment").as_ref(),
                 "ext_geo_alignment",
                 data.text_alignment.to_string(),
             ),
-            bool_prop(t!("Frame Text").as_ref(), "ext_geo_frame", data.enable_frame_text),
-            ro_prop(t!("Embedded MText").as_ref(),
+            bool_prop(
+                t!("Frame Text").as_ref(),
+                "ext_geo_frame",
+                data.enable_frame_text,
+            ),
+            ro_prop(
+                t!("Embedded MText").as_ref(),
                 "ext_geo_mtext",
                 data.embedded_mtext
                     .as_ref()
@@ -974,44 +1068,69 @@ fn point_cloud_properties(data: &PointCloudData) -> Vec<PropSection> {
         PropSection {
             title: t!("Point Cloud").into_owned(),
             props: vec![
-                ro_prop(t!("Class Version").as_ref(),
+                ro_prop(
+                    t!("Class Version").as_ref(),
                     "ext_pc_version",
                     data.class_version.to_string(),
                 ),
-                ro_prop(t!("Origin").as_ref(), "ext_pc_origin", vector_text(data.origin)),
-                text_prop(t!("Saved File").as_ref(), "ext_pc_file", &data.saved_filename),
-                ro_prop(t!("Source Files").as_ref(),
+                ro_prop(
+                    t!("Origin").as_ref(),
+                    "ext_pc_origin",
+                    vector_text(data.origin),
+                ),
+                text_prop(
+                    t!("Saved File").as_ref(),
+                    "ext_pc_file",
+                    &data.saved_filename,
+                ),
+                ro_prop(
+                    t!("Source Files").as_ref(),
                     "ext_pc_sources",
                     data.source_files.join("\n"),
                 ),
-                ro_prop(t!("Extents Min").as_ref(), "ext_pc_min", vector_text(data.extents_min)),
-                ro_prop(t!("Extents Max").as_ref(), "ext_pc_max", vector_text(data.extents_max)),
-                ro_prop(t!("Point Count").as_ref(),
+                ro_prop(
+                    t!("Extents Min").as_ref(),
+                    "ext_pc_min",
+                    vector_text(data.extents_min),
+                ),
+                ro_prop(
+                    t!("Extents Max").as_ref(),
+                    "ext_pc_max",
+                    vector_text(data.extents_max),
+                ),
+                ro_prop(
+                    t!("Point Count").as_ref(),
                     "ext_pc_count",
                     data.point_count.to_string(),
                 ),
                 text_prop(t!("UCS Name").as_ref(), "ext_pc_ucs", &data.ucs_name),
-                ro_prop(t!("UCS Origin").as_ref(),
+                ro_prop(
+                    t!("UCS Origin").as_ref(),
                     "ext_pc_ucs_origin",
                     vector_text(data.ucs_origin),
                 ),
-                ro_prop(t!("UCS X").as_ref(),
+                ro_prop(
+                    t!("UCS X").as_ref(),
                     "ext_pc_ucs_x",
                     vector_text(data.ucs_x_direction),
                 ),
-                ro_prop(t!("UCS Y").as_ref(),
+                ro_prop(
+                    t!("UCS Y").as_ref(),
                     "ext_pc_ucs_y",
                     vector_text(data.ucs_y_direction),
                 ),
-                ro_prop(t!("UCS Z").as_ref(),
+                ro_prop(
+                    t!("UCS Z").as_ref(),
                     "ext_pc_ucs_z",
                     vector_text(data.ucs_z_direction),
                 ),
-                ro_prop(t!("Definition").as_ref(),
+                ro_prop(
+                    t!("Definition").as_ref(),
                     "ext_pc_definition",
                     handle_text(data.definition_handle),
                 ),
-                ro_prop(t!("Reactor").as_ref(),
+                ro_prop(
+                    t!("Reactor").as_ref(),
                     "ext_pc_reactor",
                     handle_text(data.reactor_handle),
                 ),
@@ -1020,28 +1139,41 @@ fn point_cloud_properties(data: &PointCloudData) -> Vec<PropSection> {
         PropSection {
             title: t!("Point Cloud Display").into_owned(),
             props: vec![
-                bool_prop(t!("Show Intensity").as_ref(), "ext_pc_show_intensity", data.show_intensity),
-                ro_prop(t!("Intensity Scheme").as_ref(),
+                bool_prop(
+                    t!("Show Intensity").as_ref(),
+                    "ext_pc_show_intensity",
+                    data.show_intensity,
+                ),
+                ro_prop(
+                    t!("Intensity Scheme").as_ref(),
                     "ext_pc_intensity_scheme",
                     data.intensity_scheme.to_string(),
                 ),
-                edit_prop(t!("Minimum Intensity").as_ref(),
+                edit_prop(
+                    t!("Minimum Intensity").as_ref(),
                     "ext_pc_intensity_min",
                     data.minimum_intensity,
                 ),
-                edit_prop(t!("Maximum Intensity").as_ref(),
+                edit_prop(
+                    t!("Maximum Intensity").as_ref(),
                     "ext_pc_intensity_max",
                     data.maximum_intensity,
                 ),
-                edit_prop(t!("Low Threshold").as_ref(),
+                edit_prop(
+                    t!("Low Threshold").as_ref(),
                     "ext_pc_low_threshold",
                     data.low_intensity_threshold,
                 ),
-                edit_prop(t!("High Threshold").as_ref(),
+                edit_prop(
+                    t!("High Threshold").as_ref(),
                     "ext_pc_high_threshold",
                     data.high_intensity_threshold,
                 ),
-                bool_prop(t!("Show Clipping").as_ref(), "ext_pc_show_clipping", data.show_clipping),
+                bool_prop(
+                    t!("Show Clipping").as_ref(),
+                    "ext_pc_show_clipping",
+                    data.show_clipping,
+                ),
                 ro_prop(t!("Clippings").as_ref(), "ext_pc_clippings", clips),
             ],
         },
@@ -1070,35 +1202,50 @@ fn point_cloud_ex_properties(data: &PointCloudExData) -> Vec<PropSection> {
         PropSection {
             title: t!("Point Cloud Ex").into_owned(),
             props: vec![
-                ro_prop(t!("Class Version").as_ref(),
+                ro_prop(
+                    t!("Class Version").as_ref(),
                     "ext_pcx_version",
                     data.class_version.to_string(),
                 ),
                 text_prop(t!("Name").as_ref(), "ext_pcx_name", &data.name),
-                ro_prop(t!("Extents Min").as_ref(), "ext_pcx_min", vector_text(data.extents_min)),
-                ro_prop(t!("Extents Max").as_ref(), "ext_pcx_max", vector_text(data.extents_max)),
-                ro_prop(t!("UCS Origin").as_ref(),
+                ro_prop(
+                    t!("Extents Min").as_ref(),
+                    "ext_pcx_min",
+                    vector_text(data.extents_min),
+                ),
+                ro_prop(
+                    t!("Extents Max").as_ref(),
+                    "ext_pcx_max",
+                    vector_text(data.extents_max),
+                ),
+                ro_prop(
+                    t!("UCS Origin").as_ref(),
                     "ext_pcx_ucs_origin",
                     vector_text(data.ucs_origin),
                 ),
-                ro_prop(t!("UCS X").as_ref(),
+                ro_prop(
+                    t!("UCS X").as_ref(),
                     "ext_pcx_ucs_x",
                     vector_text(data.ucs_x_direction),
                 ),
-                ro_prop(t!("UCS Y").as_ref(),
+                ro_prop(
+                    t!("UCS Y").as_ref(),
                     "ext_pcx_ucs_y",
                     vector_text(data.ucs_y_direction),
                 ),
-                ro_prop(t!("UCS Z").as_ref(),
+                ro_prop(
+                    t!("UCS Z").as_ref(),
                     "ext_pcx_ucs_z",
                     vector_text(data.ucs_z_direction),
                 ),
                 bool_prop(t!("Locked").as_ref(), "ext_pcx_locked", data.locked),
-                ro_prop(t!("Definition").as_ref(),
+                ro_prop(
+                    t!("Definition").as_ref(),
                     "ext_pcx_definition",
                     handle_text(data.definition_handle),
                 ),
-                ro_prop(t!("Reactor").as_ref(),
+                ro_prop(
+                    t!("Reactor").as_ref(),
                     "ext_pcx_reactor",
                     handle_text(data.reactor_handle),
                 ),
@@ -1107,54 +1254,76 @@ fn point_cloud_ex_properties(data: &PointCloudExData) -> Vec<PropSection> {
         PropSection {
             title: t!("Point Cloud Ex Display").into_owned(),
             props: vec![
-                bool_prop(t!("Show Intensity").as_ref(),
+                bool_prop(
+                    t!("Show Intensity").as_ref(),
                     "ext_pcx_show_intensity",
                     data.show_intensity,
                 ),
-                bool_prop(t!("Show Cropping").as_ref(), "ext_pcx_show_cropping", data.show_cropping),
-                ro_prop(t!("Unknown Flags").as_ref(),
+                bool_prop(
+                    t!("Show Cropping").as_ref(),
+                    "ext_pcx_show_cropping",
+                    data.show_cropping,
+                ),
+                ro_prop(
+                    t!("Unknown Flags").as_ref(),
                     "ext_pcx_unknown",
                     format!("{}, {}", data.unknown_bl0, data.unknown_bl1),
                 ),
-                ro_prop(t!("Stylization Type").as_ref(),
+                ro_prop(
+                    t!("Stylization Type").as_ref(),
                     "ext_pcx_stylization",
                     data.stylization_type.to_string(),
                 ),
-                text_prop(t!("Intensity Color Scheme").as_ref(),
+                text_prop(
+                    t!("Intensity Color Scheme").as_ref(),
                     "ext_pcx_intensity_scheme",
                     &data.intensity_color_scheme,
                 ),
-                text_prop(t!("Current Color Scheme").as_ref(),
+                text_prop(
+                    t!("Current Color Scheme").as_ref(),
                     "ext_pcx_current_scheme",
                     &data.current_color_scheme,
                 ),
-                text_prop(t!("Classification Scheme").as_ref(),
+                text_prop(
+                    t!("Classification Scheme").as_ref(),
                     "ext_pcx_class_scheme",
                     &data.classification_color_scheme,
                 ),
-                edit_prop(t!("Elevation Min").as_ref(), "ext_pcx_elevation_min", data.elevation_min),
-                edit_prop(t!("Elevation Max").as_ref(), "ext_pcx_elevation_max", data.elevation_max),
-                ro_prop(t!("Intensity Range").as_ref(),
+                edit_prop(
+                    t!("Elevation Min").as_ref(),
+                    "ext_pcx_elevation_min",
+                    data.elevation_min,
+                ),
+                edit_prop(
+                    t!("Elevation Max").as_ref(),
+                    "ext_pcx_elevation_max",
+                    data.elevation_max,
+                ),
+                ro_prop(
+                    t!("Intensity Range").as_ref(),
                     "ext_pcx_intensity_range",
                     format!("{}..{}", data.intensity_min, data.intensity_max),
                 ),
-                ro_prop(t!("Out Of Range Behavior").as_ref(),
+                ro_prop(
+                    t!("Out Of Range Behavior").as_ref(),
                     "ext_pcx_out_of_range",
                     format!(
                         "intensity {}; elevation {}",
-                        data.intensity_out_of_range_behavior,
-                        data.elevation_out_of_range_behavior
+                        data.intensity_out_of_range_behavior, data.elevation_out_of_range_behavior
                     ),
                 ),
-                bool_prop(t!("Fixed Elevation Range").as_ref(),
+                bool_prop(
+                    t!("Fixed Elevation Range").as_ref(),
                     "ext_pcx_fixed_range",
                     data.elevation_apply_to_fixed_range,
                 ),
-                bool_prop(t!("Intensity Gradient").as_ref(),
+                bool_prop(
+                    t!("Intensity Gradient").as_ref(),
                     "ext_pcx_intensity_gradient",
                     data.intensity_as_gradient,
                 ),
-                bool_prop(t!("Elevation Gradient").as_ref(),
+                bool_prop(
+                    t!("Elevation Gradient").as_ref(),
                     "ext_pcx_elevation_gradient",
                     data.elevation_as_gradient,
                 ),
@@ -1164,9 +1333,7 @@ fn point_cloud_ex_properties(data: &PointCloudExData) -> Vec<PropSection> {
     ]
 }
 
-fn semantic_properties(
-    properties: &[acadrust::objects::SemanticProperty],
-) -> String {
+fn semantic_properties(properties: &[acadrust::objects::SemanticProperty]) -> String {
     properties
         .iter()
         .map(|property| {
@@ -1179,18 +1346,10 @@ fn semantic_properties(
         .join("\n")
 }
 
-fn reference_properties(
-    references: &[acadrust::objects::ProxyObjectReference],
-) -> String {
+fn reference_properties(references: &[acadrust::objects::ProxyObjectReference]) -> String {
     references
         .iter()
-        .map(|reference| {
-            format!(
-                "{:X}: {:?}",
-                reference.handle.value(),
-                reference.kind
-            )
-        })
+        .map(|reference| format!("{:X}: {:?}", reference.handle.value(), reference.kind))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -1199,7 +1358,11 @@ fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
     match &entity.data {
         ExtendedEntityData::Camera { view_handle } => vec![PropSection {
             title: t!("Camera").into_owned(),
-            props: vec![ro_prop(t!("View").as_ref(), "ext_camera_view", handle_text(*view_handle))],
+            props: vec![ro_prop(
+                t!("View").as_ref(),
+                "ext_camera_view",
+                handle_text(*view_handle),
+            )],
         }],
         ExtendedEntityData::SectionObject(data) => section_properties(entity, data),
         ExtendedEntityData::ArcAlignedText(data) => arc_text_properties(data),
@@ -1208,21 +1371,28 @@ fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
         ExtendedEntityData::CoordinationModel(data) => vec![PropSection {
             title: t!("Coordination Model").into_owned(),
             props: vec![
-                ro_prop(t!("Flags").as_ref(), "ext_coord_flags", data.flags.to_string()),
-                ro_prop(t!("Definition").as_ref(),
+                ro_prop(
+                    t!("Flags").as_ref(),
+                    "ext_coord_flags",
+                    data.flags.to_string(),
+                ),
+                ro_prop(
+                    t!("Definition").as_ref(),
                     "ext_coord_definition",
                     handle_text(data.definition_handle),
                 ),
-                edit_prop(t!("Unit Factor").as_ref(), "ext_coord_unit", data.unit_factor),
-                ro_prop(t!("Transform").as_ref(),
+                edit_prop(
+                    t!("Unit Factor").as_ref(),
+                    "ext_coord_unit",
+                    data.unit_factor,
+                ),
+                ro_prop(
+                    t!("Transform").as_ref(),
                     "ext_coord_transform",
                     data.transform
                         .chunks_exact(4)
                         .map(|row| {
-                            format!(
-                                "{:.6}, {:.6}, {:.6}, {:.6}",
-                                row[0], row[1], row[2], row[3]
-                            )
+                            format!("{:.6}, {:.6}, {:.6}, {:.6}", row[0], row[1], row[2], row[3])
                         })
                         .collect::<Vec<_>>()
                         .join("\n"),
@@ -1234,28 +1404,53 @@ fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
         ExtendedEntityData::Proxy(data) => vec![PropSection {
             title: t!("Proxy Entity").into_owned(),
             props: vec![
-                ro_prop(t!("Proxy ID").as_ref(), "ext_proxy_id", data.proxy_id.to_string()),
-                ro_prop(t!("Class ID").as_ref(), "ext_proxy_class", data.class_id.to_string()),
-                ro_prop(t!("DXF Subclass").as_ref(), "ext_proxy_subclass", data.dxf_subclass.clone()),
-                ro_prop(t!("Version").as_ref(), "ext_proxy_version", data.version.to_string()),
-                ro_prop(t!("DWG Version").as_ref(),
+                ro_prop(
+                    t!("Proxy ID").as_ref(),
+                    "ext_proxy_id",
+                    data.proxy_id.to_string(),
+                ),
+                ro_prop(
+                    t!("Class ID").as_ref(),
+                    "ext_proxy_class",
+                    data.class_id.to_string(),
+                ),
+                ro_prop(
+                    t!("DXF Subclass").as_ref(),
+                    "ext_proxy_subclass",
+                    data.dxf_subclass.clone(),
+                ),
+                ro_prop(
+                    t!("Version").as_ref(),
+                    "ext_proxy_version",
+                    data.version.to_string(),
+                ),
+                ro_prop(
+                    t!("DWG Version").as_ref(),
                     "ext_proxy_dwg_version",
                     format!("{}.{}", data.dwg_version, data.maintenance_version),
                 ),
-                ro_prop(t!("From DXF").as_ref(), "ext_proxy_from_dxf", data.from_dxf.to_string()),
-                ro_prop(t!("Graphics").as_ref(),
+                ro_prop(
+                    t!("From DXF").as_ref(),
+                    "ext_proxy_from_dxf",
+                    data.from_dxf.to_string(),
+                ),
+                ro_prop(
+                    t!("Graphics").as_ref(),
                     "ext_proxy_graphics",
                     format!("{} bits", data.graphics.bit_count),
                 ),
-                ro_prop(t!("Payload").as_ref(),
+                ro_prop(
+                    t!("Payload").as_ref(),
                     "ext_proxy_payload",
                     format!("{} bits", data.payload.bit_count),
                 ),
-                ro_prop(t!("Text Payload").as_ref(),
+                ro_prop(
+                    t!("Text Payload").as_ref(),
                     "ext_proxy_text_payload",
                     format!("{} bits", data.text_payload.bit_count),
                 ),
-                ro_prop(t!("Object References").as_ref(),
+                ro_prop(
+                    t!("Object References").as_ref(),
                     "ext_proxy_references",
                     reference_properties(&data.object_ids),
                 ),
@@ -1266,7 +1461,8 @@ fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
             props: vec![
                 ro_prop(t!("Flag").as_ref(), "ext_ole_flag", data.flag.to_string()),
                 ro_prop(t!("Mode").as_ref(), "ext_ole_mode", data.mode.to_string()),
-                ro_prop(t!("Storage Size").as_ref(),
+                ro_prop(
+                    t!("Storage Size").as_ref(),
                     "ext_ole_size",
                     format!("{} bytes", data.storage.encoded_len()),
                 ),
@@ -1275,7 +1471,8 @@ fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
         ExtendedEntityData::LayoutPrintConfig(data) => vec![PropSection {
             title: t!("Layout Print Configuration").into_owned(),
             props: vec![
-                ro_prop(t!("Class Version").as_ref(),
+                ro_prop(
+                    t!("Class Version").as_ref(),
                     "ext_print_version",
                     data.class_version.to_string(),
                 ),
@@ -1285,7 +1482,8 @@ fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
         ExtendedEntityData::Format(data) => vec![PropSection {
             title: t!("Format").into_owned(),
             props: vec![
-                ro_prop(t!("DWG Payload").as_ref(),
+                ro_prop(
+                    t!("DWG Payload").as_ref(),
                     "ext_format_dwg",
                     format!(
                         "{} bytes / {} handle bits",
@@ -1293,11 +1491,13 @@ fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
                         data.raw_dwg_handle_bits
                     ),
                 ),
-                ro_prop(t!("DWG Version").as_ref(),
+                ro_prop(
+                    t!("DWG Version").as_ref(),
                     "ext_format_version",
                     format!("{:?}", data.raw_dwg_version),
                 ),
-                ro_prop(t!("DXF Codes").as_ref(),
+                ro_prop(
+                    t!("DXF Codes").as_ref(),
                     "ext_format_dxf",
                     data.raw_dxf_codes.as_ref().map_or(0, Vec::len).to_string(),
                 ),
@@ -1305,35 +1505,52 @@ fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
         }],
         ExtendedEntityData::Legacy(data) => vec![PropSection {
             title: t!("Legacy Entity").into_owned(),
-            props: vec![ro_prop(t!("Data").as_ref(), "ext_legacy_data", format!("{data:#?}"))],
+            props: vec![ro_prop(
+                t!("Data").as_ref(),
+                "ext_legacy_data",
+                format!("{data:#?}"),
+            )],
         }],
         ExtendedEntityData::DynamicBlock(data) => vec![PropSection {
             title: t!("Dynamic Block Entity").into_owned(),
             props: vec![
-                ro_prop(t!("Class").as_ref(),
+                ro_prop(
+                    t!("Class").as_ref(),
                     "ext_dynamic_class",
                     data.entity_dxf_name().unwrap_or("Helper"),
                 ),
-                ro_prop(t!("Decoded Data").as_ref(), "ext_dynamic_data", format!("{data:#?}")),
+                ro_prop(
+                    t!("Decoded Data").as_ref(),
+                    "ext_dynamic_data",
+                    format!("{data:#?}"),
+                ),
             ],
         }],
         ExtendedEntityData::RegisteredClass(data) => vec![PropSection {
             title: t!("Registered Class Entity").into_owned(),
             props: vec![
-                ro_prop(t!("DXF Name").as_ref(), "ext_registered_dxf", data.dxf_name.clone()),
-                ro_prop(t!("C++ Class").as_ref(),
+                ro_prop(
+                    t!("DXF Name").as_ref(),
+                    "ext_registered_dxf",
+                    data.dxf_name.clone(),
+                ),
+                ro_prop(
+                    t!("C++ Class").as_ref(),
                     "ext_registered_cpp",
                     data.cpp_class_name.clone(),
                 ),
-                ro_prop(t!("Properties").as_ref(),
+                ro_prop(
+                    t!("Properties").as_ref(),
                     "ext_registered_properties",
                     semantic_properties(&data.properties),
                 ),
-                ro_prop(t!("Payload").as_ref(),
+                ro_prop(
+                    t!("Payload").as_ref(),
                     "ext_registered_payload",
                     format!("{} bits", data.payload.bit_count),
                 ),
-                ro_prop(t!("Object References").as_ref(),
+                ro_prop(
+                    t!("Object References").as_ref(),
                     "ext_registered_references",
                     reference_properties(&data.object_ids),
                 ),
@@ -1542,12 +1759,7 @@ fn apply_point(point: &mut Vector3, apply: GripApply) {
     }
 }
 
-fn move_extents(
-    min: &mut Vector3,
-    max: &mut Vector3,
-    grip_id: usize,
-    apply: GripApply,
-) {
+fn move_extents(min: &mut Vector3, max: &mut Vector3, grip_id: usize, apply: GripApply) {
     match grip_id {
         0 => apply_point(min, apply),
         1 => apply_point(max, apply),
@@ -1609,8 +1821,7 @@ fn grips(entity: &ExtendedEntity) -> Vec<GripDef> {
                 let normal_world = glam::DVec3::new(normal.x, normal.y, normal.z);
                 grips.push(GripDef {
                     id: SECTION_GRIP_NORMAL,
-                    world: glam::DVec3::new(center.x, center.y, center.z)
-                        - normal_world * offset,
+                    world: glam::DVec3::new(center.x, center.y, center.z) - normal_world * offset,
                     is_midpoint: false,
                     shape: crate::scene::model::object::GripShape::Triangle,
                     dir: Some(-normal_world),
@@ -1634,19 +1845,11 @@ fn grips(entity: &ExtendedEntity) -> Vec<GripDef> {
         ExtendedEntityData::PointCloud(data) => vec![
             square_grip(
                 0,
-                glam::DVec3::new(
-                    data.extents_min.x,
-                    data.extents_min.y,
-                    data.extents_min.z,
-                ),
+                glam::DVec3::new(data.extents_min.x, data.extents_min.y, data.extents_min.z),
             ),
             square_grip(
                 1,
-                glam::DVec3::new(
-                    data.extents_max.x,
-                    data.extents_max.y,
-                    data.extents_max.z,
-                ),
+                glam::DVec3::new(data.extents_max.x, data.extents_max.y, data.extents_max.z),
             ),
             center_grip(
                 2,
@@ -1660,19 +1863,11 @@ fn grips(entity: &ExtendedEntity) -> Vec<GripDef> {
         ExtendedEntityData::PointCloudEx(data) => vec![
             square_grip(
                 0,
-                glam::DVec3::new(
-                    data.extents_min.x,
-                    data.extents_min.y,
-                    data.extents_min.z,
-                ),
+                glam::DVec3::new(data.extents_min.x, data.extents_min.y, data.extents_min.z),
             ),
             square_grip(
                 1,
-                glam::DVec3::new(
-                    data.extents_max.x,
-                    data.extents_max.y,
-                    data.extents_max.z,
-                ),
+                glam::DVec3::new(data.extents_max.x, data.extents_max.y, data.extents_max.z),
             ),
             center_grip(
                 2,
@@ -1692,10 +1887,7 @@ fn apply_grip(entity: &mut ExtendedEntity, grip_id: usize, apply: GripApply) {
         ExtendedEntityData::SectionObject(data) => {
             if matches!(
                 grip_id,
-                SECTION_GRIP_LEFT
-                    | SECTION_GRIP_RIGHT
-                    | SECTION_GRIP_TOP
-                    | SECTION_GRIP_BOTTOM
+                SECTION_GRIP_LEFT | SECTION_GRIP_RIGHT | SECTION_GRIP_TOP | SECTION_GRIP_BOTTOM
             ) {
                 apply_section_plane_edge_grip(data, grip_id, apply);
             } else if grip_id == SECTION_GRIP_NORMAL {
@@ -1743,18 +1935,12 @@ fn apply_grip(entity: &mut ExtendedEntity, grip_id: usize, apply: GripApply) {
             let before = data.position;
             apply_point(&mut data.position, apply);
             if let Some(text) = data.embedded_mtext.as_mut() {
-                text.insertion_point =
-                    text.insertion_point + (data.position - before);
+                text.insertion_point = text.insertion_point + (data.position - before);
             }
         }
         ExtendedEntityData::PointCloud(data) => {
             let before = (data.extents_min + data.extents_max) * 0.5;
-            move_extents(
-                &mut data.extents_min,
-                &mut data.extents_max,
-                grip_id,
-                apply,
-            );
+            move_extents(&mut data.extents_min, &mut data.extents_max, grip_id, apply);
             if grip_id == 2 {
                 let after = (data.extents_min + data.extents_max) * 0.5;
                 let delta = after - before;
@@ -1764,12 +1950,7 @@ fn apply_grip(entity: &mut ExtendedEntity, grip_id: usize, apply: GripApply) {
         }
         ExtendedEntityData::PointCloudEx(data) => {
             let before = (data.extents_min + data.extents_max) * 0.5;
-            move_extents(
-                &mut data.extents_min,
-                &mut data.extents_max,
-                grip_id,
-                apply,
-            );
+            move_extents(&mut data.extents_min, &mut data.extents_max, grip_id, apply);
             if grip_id == 2 {
                 let after = (data.extents_min + data.extents_max) * 0.5;
                 let delta = after - before;
@@ -1837,11 +2018,7 @@ fn section_plane_edge_grips(data: &SectionObjectData) -> Vec<GripDef> {
         .collect()
 }
 
-fn apply_section_plane_edge_grip(
-    data: &mut SectionObjectData,
-    grip_id: usize,
-    apply: GripApply,
-) {
+fn apply_section_plane_edge_grip(data: &mut SectionObjectData, grip_id: usize, apply: GripApply) {
     let Some((first, last)) = data.vertices.first().zip(data.vertices.last()) else {
         return;
     };
@@ -1858,31 +2035,21 @@ fn apply_section_plane_edge_grip(
     };
     let delta = match apply {
         GripApply::Translate(delta) => Vector3::new(delta.x, delta.y, delta.z),
-        GripApply::Absolute(position) => {
-            Vector3::new(position.x, position.y, position.z) - current
-        }
+        GripApply::Absolute(position) => Vector3::new(position.x, position.y, position.z) - current,
     };
     let span = (*last - *first).length();
     let minimum_span = 1.0e-6;
-    let in_plane_vertical = normalized(
-        vertical - tangent * vertical.dot(&tangent),
-        vertical,
-    );
+    let in_plane_vertical = normalized(vertical - tangent * vertical.dot(&tangent), vertical);
     let vertical_change = in_plane_vertical * delta.dot(&in_plane_vertical);
     match grip_id {
         SECTION_GRIP_LEFT => {
-            let tangent_change = delta
-                .dot(&tangent)
-                .min((span - minimum_span).max(0.0));
+            let tangent_change = delta.dot(&tangent).min((span - minimum_span).max(0.0));
             data.vertices[0] = data.vertices[0] + tangent * tangent_change + vertical_change;
         }
         SECTION_GRIP_RIGHT => {
             let last = data.vertices.len() - 1;
-            let tangent_change = delta
-                .dot(&tangent)
-                .max((-span + minimum_span).min(0.0));
-            data.vertices[last] =
-                data.vertices[last] + tangent * tangent_change + vertical_change;
+            let tangent_change = delta.dot(&tangent).max((-span + minimum_span).min(0.0));
+            data.vertices[last] = data.vertices[last] + tangent * tangent_change + vertical_change;
         }
         SECTION_GRIP_TOP => {
             data.top_height = (data.top_height + delta.dot(&vertical)).max(0.0);
@@ -1899,26 +2066,28 @@ fn entity_transform(transform: &EntityTransform) -> Transform {
         EntityTransform::Translate(delta) => {
             Transform::from_translation(Vector3::new(delta.x, delta.y, delta.z))
         }
-        EntityTransform::Rotate { center, axis, angle_rad } => {
-            Transform::from_translation(Vector3::new(-center.x, -center.y, -center.z))
-                .then(&Transform::from_rotation(
-                    Vector3::new(axis.x, axis.y, axis.z),
-                    *angle_rad,
-                ))
-                .then(&Transform::from_translation(Vector3::new(
-                    center.x, center.y, center.z,
-                )))
-        }
+        EntityTransform::Rotate {
+            center,
+            axis,
+            angle_rad,
+        } => Transform::from_translation(Vector3::new(-center.x, -center.y, -center.z))
+            .then(&Transform::from_rotation(
+                Vector3::new(axis.x, axis.y, axis.z),
+                *angle_rad,
+            ))
+            .then(&Transform::from_translation(Vector3::new(
+                center.x, center.y, center.z,
+            ))),
         EntityTransform::Scale { center, factor } => Transform::from_scaling_with_origin(
             Vector3::new(*factor, *factor, *factor),
             Vector3::new(center.x, center.y, center.z),
         ),
-        EntityTransform::Mirror { p1, p2, working_normal } => {
-            crate::scene::view::transform::reflection_about_working_line(
-                *p1,
-                *p2,
-                *working_normal,
-            )
+        EntityTransform::Mirror {
+            p1,
+            p2,
+            working_normal,
+        } => {
+            crate::scene::view::transform::reflection_about_working_line(*p1, *p2, *working_normal)
         }
         EntityTransform::Affine(transform) => *transform,
     }
@@ -1955,11 +2124,7 @@ fn transform_extents(min: Vector3, max: Vector3, transform: &Transform) -> (Vect
     (out_min, out_max)
 }
 
-fn transformed_planar_angle(
-    normal: Vector3,
-    angle: f64,
-    transform: &Transform,
-) -> (Vector3, f64) {
+fn transformed_planar_angle(normal: Vector3, angle: f64, transform: &Transform) -> (Vector3, f64) {
     let (axis_x, axis_y, _) = plane_axes(normal);
     let direction = axis_x * angle.cos() + axis_y * angle.sin();
     let new_normal = normalized(transform.apply_rotation(normal), Vector3::UNIT_Z);
@@ -1974,8 +2139,8 @@ fn transformed_planar_angle(
 fn apply_transform(entity: &mut ExtendedEntity, requested: &EntityTransform) {
     let transform = entity_transform(requested);
     let scale = scalar_scale(requested);
-    let slice_depth = section_is_slice(entity)
-        .then(|| section_slice_depth(entity).unwrap_or(0.0) * scale);
+    let slice_depth =
+        section_is_slice(entity).then(|| section_slice_depth(entity).unwrap_or(0.0) * scale);
     match &mut entity.data {
         ExtendedEntityData::SectionObject(data) => {
             for point in data
@@ -1985,17 +2150,17 @@ fn apply_transform(entity: &mut ExtendedEntity, requested: &EntityTransform) {
             {
                 *point = transform.apply(*point);
             }
-            data.vertical_direction =
-                normalized(transform.apply_rotation(data.vertical_direction), Vector3::UNIT_Z);
+            data.vertical_direction = normalized(
+                transform.apply_rotation(data.vertical_direction),
+                Vector3::UNIT_Z,
+            );
             data.top_height *= scale;
             data.bottom_height *= scale;
         }
         ExtendedEntityData::ArcAlignedText(data) => {
             let old_normal = data.normal;
-            let (_, start) =
-                transformed_planar_angle(old_normal, data.start_angle, &transform);
-            let (normal, end) =
-                transformed_planar_angle(old_normal, data.end_angle, &transform);
+            let (_, start) = transformed_planar_angle(old_normal, data.start_angle, &transform);
+            let (normal, end) = transformed_planar_angle(old_normal, data.end_angle, &transform);
             data.center = transform.apply(data.center);
             data.normal = normal;
             data.start_angle = start;
@@ -2056,8 +2221,7 @@ fn apply_transform(entity: &mut ExtendedEntity, requested: &EntityTransform) {
                 transform_extents(data.extents_min, data.extents_max, &transform);
             for clip in &mut data.clippings {
                 let mut min = Vector3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
-                let mut max =
-                    Vector3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+                let mut max = Vector3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
                 for point in &clip.vertices {
                     for z in [clip.z_min, clip.z_max] {
                         let point = transform.apply(Vector3::new(point.x, point.y, z));
@@ -2097,16 +2261,11 @@ fn apply_transform(entity: &mut ExtendedEntity, requested: &EntityTransform) {
             (data.extents_min, data.extents_max) =
                 transform_extents(data.extents_min, data.extents_max, &transform);
             for crop in &mut data.croppings {
-                crop.plane =
-                    normalized(transform.apply_rotation(crop.plane), Vector3::UNIT_Z);
-                crop.x_direction = normalized(
-                    transform.apply_rotation(crop.x_direction),
-                    Vector3::UNIT_X,
-                );
-                crop.y_direction = normalized(
-                    transform.apply_rotation(crop.y_direction),
-                    Vector3::UNIT_Y,
-                );
+                crop.plane = normalized(transform.apply_rotation(crop.plane), Vector3::UNIT_Z);
+                crop.x_direction =
+                    normalized(transform.apply_rotation(crop.x_direction), Vector3::UNIT_X);
+                crop.y_direction =
+                    normalized(transform.apply_rotation(crop.y_direction), Vector3::UNIT_Y);
                 for point in &mut crop.points {
                     *point = transform.apply(*point);
                 }
@@ -2144,11 +2303,19 @@ impl Grippable for ExtendedEntity {
         let current = section_kind(self, data);
         vec![
             GripMenuItem {
-                label: if current == "Plane" { "✓ Plane" } else { "Plane" },
+                label: if current == "Plane" {
+                    "✓ Plane"
+                } else {
+                    "Plane"
+                },
                 action: GripMenuAction::SectionPlane,
             },
             GripMenuItem {
-                label: if current == "Slice" { "✓ Slice" } else { "Slice" },
+                label: if current == "Slice" {
+                    "✓ Slice"
+                } else {
+                    "Slice"
+                },
                 action: GripMenuAction::SectionSlice,
             },
             GripMenuItem {
@@ -2160,7 +2327,11 @@ impl Grippable for ExtendedEntity {
                 action: GripMenuAction::SectionBoundary,
             },
             GripMenuItem {
-                label: if current == "Volume" { "✓ Volume" } else { "Volume" },
+                label: if current == "Volume" {
+                    "✓ Volume"
+                } else {
+                    "Volume"
+                },
                 action: GripMenuAction::SectionVolume,
             },
         ]

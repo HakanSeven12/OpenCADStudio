@@ -83,7 +83,8 @@ impl AlignedDimensionCommand {
         if let Some(angle) = self.text_angle {
             dim.base.text_rotation = angle;
         }
-        self.plane.place_entity(EntityType::Dimension(Dimension::Aligned(dim)))
+        self.plane
+            .place_entity(EntityType::Dimension(Dimension::Aligned(dim)))
     }
 }
 
@@ -116,9 +117,7 @@ impl CadCommand for AlignedDimensionCommand {
                 "DIMALIGNED  Specify first extension line origin or press Enter to select object:"
             )
             .into_owned(),
-            Step::Second(_) => {
-                t!("DIMALIGNED  Specify second extension line origin:").into_owned()
-            }
+            Step::Second(_) => t!("DIMALIGNED  Specify second extension line origin:").into_owned(),
             Step::DimLine { .. } => {
                 t!("DIMALIGNED  Specify dimension line location  [Mtext/Text/Angle]:").into_owned()
             }
@@ -138,14 +137,12 @@ impl CadCommand for AlignedDimensionCommand {
                 self.step = Step::DimLine { p1, p2: pt };
                 CmdResult::NeedPoint
             }
-            Step::DimLine { p1, p2 } => {
-                CmdResult::CommitDimension {
-                    entity: self.build_dimension(p1, p2, pt),
-                    association: DimensionAssociationInput::Infer(self.source_handle),
-                    preserve_base_style: false,
-                    continue_command: false,
-                }
-            }
+            Step::DimLine { p1, p2 } => CmdResult::CommitDimension {
+                entity: self.build_dimension(p1, p2, pt),
+                association: DimensionAssociationInput::Infer(self.source_handle),
+                preserve_base_style: false,
+                continue_command: false,
+            },
         }
     }
 
@@ -472,6 +469,7 @@ fn preview_aligned(p1: DVec3, p2: DVec3, dim_pt: DVec3) -> WireModel {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["DIMALIGNED"] });  // AlignedDimensionCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["DIMALIGNED"]
+}); // AlignedDimensionCommand

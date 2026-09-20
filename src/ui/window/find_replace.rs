@@ -51,8 +51,10 @@ pub fn view_window<'a>(
         ]
         .spacing(8)
         .align_y(iced::Center),
-        text(t!("Searches Text, MText, Attribute Definitions, and block attribute values."))
-            .size(11),
+        text(t!(
+            "Searches Text, MText, Attribute Definitions, and block attribute values."
+        ))
+        .size(11),
         text(status).size(11),
         row![
             Space::new().width(field_width),

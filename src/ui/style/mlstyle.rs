@@ -2,9 +2,9 @@
 
 use crate::app::Message;
 use crate::t;
+use crate::ui::style::common::muted_style;
 use iced::widget::{button, canvas, checkbox, column, container, row, text, text_input};
 use iced::{mouse, Color, Element, Length, Point, Rectangle, Theme};
-use crate::ui::style::common::muted_style;
 use std::borrow::Cow;
 
 pub struct MlStyleView<'a> {
@@ -100,7 +100,10 @@ fn draw_arc(frame: &mut canvas::Frame, center: Point, radius: f32, start_side: b
             } else {
                 -std::f32::consts::FRAC_PI_2 + t * std::f32::consts::PI
             };
-            let point = Point::new(center.x + radius * angle.cos(), center.y + radius * angle.sin());
+            let point = Point::new(
+                center.x + radius * angle.cos(),
+                center.y + radius * angle.sin(),
+            );
             if step == 0 {
                 builder.move_to(point);
             } else {
@@ -108,7 +111,10 @@ fn draw_arc(frame: &mut canvas::Frame, center: Point, radius: f32, start_side: b
             }
         }
     });
-    frame.stroke(&path, canvas::Stroke::default().with_color(color).with_width(1.1));
+    frame.stroke(
+        &path,
+        canvas::Stroke::default().with_color(color).with_width(1.1),
+    );
 }
 
 impl canvas::Program<Message> for MLinePreviewCanvas {
@@ -149,7 +155,10 @@ impl canvas::Program<Message> for MLinePreviewCanvas {
                     builder.line_to(lower[0]);
                     builder.close();
                 });
-                frame.fill(&fill, aci_color(&self.fill_color, theme.palette().background.weak.color));
+                frame.fill(
+                    &fill,
+                    aci_color(&self.fill_color, theme.palette().background.weak.color),
+                );
             }
         }
         for (offset, color, linetype) in &parsed {
@@ -161,7 +170,10 @@ impl canvas::Program<Message> for MLinePreviewCanvas {
                 style: canvas::Style::Solid(aci_color(color, ink)),
                 width: 1.4,
                 line_dash: if dashed {
-                    canvas::LineDash { segments: &[6.0, 4.0], offset: 0 }
+                    canvas::LineDash {
+                        segments: &[6.0, 4.0],
+                        offset: 0,
+                    }
                 } else {
                     canvas::LineDash::default()
                 },
@@ -183,24 +195,49 @@ impl canvas::Program<Message> for MLinePreviewCanvas {
             let start_bottom = bottom_points[0];
             let end_top = top_points[2];
             let end_bottom = bottom_points[2];
-            let start_angle = self.start_angle.trim().parse::<f32>().unwrap_or(90.0).to_radians();
-            let end_angle = self.end_angle.trim().parse::<f32>().unwrap_or(90.0).to_radians();
+            let start_angle = self
+                .start_angle
+                .trim()
+                .parse::<f32>()
+                .unwrap_or(90.0)
+                .to_radians();
+            let end_angle = self
+                .end_angle
+                .trim()
+                .parse::<f32>()
+                .unwrap_or(90.0)
+                .to_radians();
             let cap = |a: Point, b: Point, angle: f32| {
                 let middle = Point::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
                 let half = ((a.y - b.y).abs() * 0.5).max(2.0);
                 let direction = Point::new(angle.cos() * half, angle.sin() * half);
-                (Point::new(middle.x - direction.x, middle.y - direction.y), Point::new(middle.x + direction.x, middle.y + direction.y))
+                (
+                    Point::new(middle.x - direction.x, middle.y - direction.y),
+                    Point::new(middle.x + direction.x, middle.y + direction.y),
+                )
             };
             if self.start_square {
                 let (a, b) = cap(start_top, start_bottom, start_angle);
-                frame.stroke(&canvas::Path::line(a, b), canvas::Stroke::default().with_color(ink));
+                frame.stroke(
+                    &canvas::Path::line(a, b),
+                    canvas::Stroke::default().with_color(ink),
+                );
             }
             if self.end_square {
                 let (a, b) = cap(end_top, end_bottom, end_angle);
-                frame.stroke(&canvas::Path::line(a, b), canvas::Stroke::default().with_color(ink));
+                frame.stroke(
+                    &canvas::Path::line(a, b),
+                    canvas::Stroke::default().with_color(ink),
+                );
             }
-            let start_center = Point::new((start_top.x + start_bottom.x) * 0.5, (start_top.y + start_bottom.y) * 0.5);
-            let end_center = Point::new((end_top.x + end_bottom.x) * 0.5, (end_top.y + end_bottom.y) * 0.5);
+            let start_center = Point::new(
+                (start_top.x + start_bottom.x) * 0.5,
+                (start_top.y + start_bottom.y) * 0.5,
+            );
+            let end_center = Point::new(
+                (end_top.x + end_bottom.x) * 0.5,
+                (end_top.y + end_bottom.y) * 0.5,
+            );
             let outer_radius = ((start_top.y - start_bottom.y).abs() * 0.5).max(3.0);
             if self.start_round {
                 draw_arc(&mut frame, start_center, outer_radius, true, ink);
@@ -217,11 +254,19 @@ impl canvas::Program<Message> for MLinePreviewCanvas {
             if self.joints {
                 let joint_top = top_points[1];
                 let joint_bottom = bottom_points[1];
-                frame.stroke(&canvas::Path::line(joint_top, joint_bottom), canvas::Stroke::default().with_color(ink).with_width(1.0));
+                frame.stroke(
+                    &canvas::Path::line(joint_top, joint_bottom),
+                    canvas::Stroke::default().with_color(ink).with_width(1.0),
+                );
             }
         }
         frame.fill_text(canvas::Text {
-            content: format!("{} · {} {}", self.description, t!("Elements"), self.elements.len()),
+            content: format!(
+                "{} · {} {}",
+                self.description,
+                t!("Elements"),
+                self.elements.len()
+            ),
             position: Point::new(10.0, bounds.height - 9.0),
             color: ink.scale_alpha(0.62),
             size: iced::Pixels(10.0),
@@ -240,29 +285,44 @@ pub fn view_window<'a>(
     let content: Element<'a, Message> = match (v.tab, style) {
         (_, None) => text(t!("Select a style to view details.")).size(11).into(),
         (0, Some(_)) => {
-            let mut items = column![
-                row![
-                    text(t!("Offset")).size(10).style(muted_style).width(110),
-                    text(t!("Color")).size(10).style(muted_style).width(100),
-                    text(t!("Line type")).size(10).style(muted_style).width(170),
-                    button(text(t!("Add")).size(10)).on_press(Message::MlStyleElementAdd).padding([4, 12]),
-                ]
-                .spacing(6)
-                .align_y(iced::Center),
+            let mut items = column![row![
+                text(t!("Offset")).size(10).style(muted_style).width(110),
+                text(t!("Color")).size(10).style(muted_style).width(100),
+                text(t!("Line type")).size(10).style(muted_style).width(170),
+                button(text(t!("Add")).size(10))
+                    .on_press(Message::MlStyleElementAdd)
+                    .padding([4, 12]),
             ]
+            .spacing(6)
+            .align_y(iced::Center),]
             .spacing(6);
             for (index, element) in v.elements.iter().enumerate() {
                 items = items.push(
                     row![
                         text_input("0.0", &element[0])
-                            .on_input(move |value| Message::MlStyleElementEdit { index, field: "offset", value })
-                            .size(11).width(110),
+                            .on_input(move |value| Message::MlStyleElementEdit {
+                                index,
+                                field: "offset",
+                                value
+                            })
+                            .size(11)
+                            .width(110),
                         text_input("256", &element[1])
-                            .on_input(move |value| Message::MlStyleElementEdit { index, field: "color", value })
-                            .size(11).width(100),
+                            .on_input(move |value| Message::MlStyleElementEdit {
+                                index,
+                                field: "color",
+                                value
+                            })
+                            .size(11)
+                            .width(100),
                         text_input("ByLayer", &element[2])
-                            .on_input(move |value| Message::MlStyleElementEdit { index, field: "linetype", value })
-                            .size(11).width(170),
+                            .on_input(move |value| Message::MlStyleElementEdit {
+                                index,
+                                field: "linetype",
+                                value
+                            })
+                            .size(11)
+                            .width(170),
                         button(text(t!("Delete")).size(10))
                             .on_press(Message::MlStyleElementDelete(index))
                             .padding([4, 10]),
@@ -279,23 +339,36 @@ pub fn view_window<'a>(
             row![
                 toggle(t!("Fill enabled"), style.flags.fill_on, "fill"),
                 toggle(t!("Display joints"), style.flags.display_joints, "joints"),
-            ].spacing(18),
+            ]
+            .spacing(18),
             input_row(t!("Fill color"), "256", v.fill_color, "fill_color"),
             text(t!("Start caps")).size(11).style(primary_style),
             row![
                 toggle(t!("Line"), style.flags.start_square_cap, "start_square"),
-                toggle(t!("Inner arcs"), style.flags.start_inner_arcs_cap, "start_inner"),
+                toggle(
+                    t!("Inner arcs"),
+                    style.flags.start_inner_arcs_cap,
+                    "start_inner"
+                ),
                 toggle(t!("Outer arc"), style.flags.start_round_cap, "start_round"),
-            ].spacing(18),
+            ]
+            .spacing(18),
             input_row(t!("Start angle"), "90", v.start_angle, "start_angle"),
             text(t!("End caps")).size(11).style(primary_style),
             row![
                 toggle(t!("Line"), style.flags.end_square_cap, "end_square"),
-                toggle(t!("Inner arcs"), style.flags.end_inner_arcs_cap, "end_inner"),
+                toggle(
+                    t!("Inner arcs"),
+                    style.flags.end_inner_arcs_cap,
+                    "end_inner"
+                ),
                 toggle(t!("Outer arc"), style.flags.end_round_cap, "end_round"),
-            ].spacing(18),
+            ]
+            .spacing(18),
             input_row(t!("End angle"), "90", v.end_angle, "end_angle"),
-        ].spacing(9).into(),
+        ]
+        .spacing(9)
+        .into(),
     };
     let preview: Element<'a, Message> = if let Some(style) = style {
         canvas(MLinePreviewCanvas {

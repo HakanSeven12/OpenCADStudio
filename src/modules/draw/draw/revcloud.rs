@@ -200,7 +200,10 @@ impl RevCloudCommand {
             }
         }
         if replacement.is_none()
-            && matches!(self.creation, CreationMode::Rectangular | CreationMode::Polygonal)
+            && matches!(
+                self.creation,
+                CreationMode::Rectangular | CreationMode::Polygonal
+            )
         {
             self.message = None;
             return CmdResult::CommitAndExit(entity);
@@ -213,13 +216,8 @@ impl RevCloudCommand {
         CmdResult::NeedPoint
     }
 
-    fn prepare_planar_cloud(
-        &mut self,
-        curve: &PlanarCurve,
-        replacement: Handle,
-    ) -> CmdResult {
-        let Some(mut entity) =
-            cloud_entity_on_plane(curve, self.arc_length, self.style, false)
+    fn prepare_planar_cloud(&mut self, curve: &PlanarCurve, replacement: Handle) -> CmdResult {
+        let Some(mut entity) = cloud_entity_on_plane(curve, self.arc_length, self.style, false)
         else {
             self.message = Some("The selected path cannot form a revision cloud.");
             return CmdResult::NeedPoint;
@@ -289,9 +287,8 @@ impl RevCloudCommand {
     fn preview(entity: &EntityType, name: &str) -> Option<WireModel> {
         let curve = entity_curve(entity)?;
         let points = curve_points(&curve);
-        (points.len() >= 2).then(|| {
-            WireModel::solid_f64(name.to_string(), points, WireModel::CYAN, false)
-        })
+        (points.len() >= 2)
+            .then(|| WireModel::solid_f64(name.to_string(), points, WireModel::CYAN, false))
     }
 
     fn preview_world_points(&self, points: &[DVec3], name: &str) -> Option<WireModel> {
@@ -325,10 +322,7 @@ impl RevCloudCommand {
             .vertices
             .iter()
             .map(|vertex| {
-                DVec3::from_array(curve.plane.point_at([
-                    vertex.location.x,
-                    vertex.location.y,
-                ]))
+                DVec3::from_array(curve.plane.point_at([vertex.location.x, vertex.location.y]))
             })
             .collect();
         let start = vertices
@@ -405,11 +399,7 @@ impl RevCloudCommand {
             guide.extend(state.replacement.iter().rev().skip(1).copied());
         }
         let style = style_from_entity(&state.source).unwrap_or(self.style);
-        let curve = guide_curve_on_plane(
-            &state.plane,
-            &guide,
-            self.arc_length * 1.0e-6,
-        )?;
+        let curve = guide_curve_on_plane(&state.plane, &guide, self.arc_length * 1.0e-6)?;
         let mut entity = cloud_entity_on_plane(
             &PlanarCurve::new(state.plane, curve),
             self.arc_length,
@@ -545,13 +535,13 @@ impl CadCommand for RevCloudCommand {
                 CmdOption::new("Calligraphy", "C"),
             ],
             Stage::Object | Stage::ModifySelect => vec![CmdOption::new("Back", "B")],
-            Stage::Reverse(_) => vec![
-                CmdOption::new("Yes", "Y"),
-                CmdOption::new("No", "N"),
-            ],
+            Stage::Reverse(_) => vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")],
             Stage::ModifyDraw(state) => {
                 if state.replacement.len() > 1 {
-                    vec![CmdOption::new("Undo", "U"), CmdOption::new("First point", "F")]
+                    vec![
+                        CmdOption::new("Undo", "U"),
+                        CmdOption::new("First point", "F"),
+                    ]
                 } else {
                     Vec::new()
                 }
@@ -737,19 +727,19 @@ impl CadCommand for RevCloudCommand {
             }
             Stage::Create => match keyword.as_str() {
                 "C" | "CLOSE" if self.creation == CreationMode::Polygonal => {
-                    return Some(if self.points.len() >= 3 { self.on_enter() } else { CmdResult::NeedPoint });
+                    return Some(if self.points.len() >= 3 {
+                        self.on_enter()
+                    } else {
+                        CmdResult::NeedPoint
+                    });
                 }
                 "A" | "ARC" | "ARCLENGTH" => self.stage = Stage::ArcLength,
                 "O" | "OBJECT" => {
                     self.stage = Stage::Object;
                     self.points.clear();
                 }
-                "R" | "RECTANGULAR" | "RECTANGLE" => {
-                    self.set_creation(CreationMode::Rectangular)
-                }
-                "P" | "POLYGONAL" | "POLYGON" => {
-                    self.set_creation(CreationMode::Polygonal)
-                }
+                "R" | "RECTANGULAR" | "RECTANGLE" => self.set_creation(CreationMode::Rectangular),
+                "P" | "POLYGONAL" | "POLYGON" => self.set_creation(CreationMode::Polygonal),
                 "F" | "FREEHAND" => self.set_creation(CreationMode::Freehand),
                 "S" | "STYLE" => self.stage = Stage::Style,
                 "M" | "MODIFY" => {
@@ -794,11 +784,7 @@ impl CadCommand for RevCloudCommand {
         if !matches!(self.stage, Stage::Object) {
             return Vec::new();
         }
-        let Some(curve) = self
-            .sources
-            .get(&handle)
-            .and_then(Self::object_curve)
-        else {
+        let Some(curve) = self.sources.get(&handle).and_then(Self::object_curve) else {
             return Vec::new();
         };
         cloud_entity_on_plane(&curve, self.arc_length, self.style, false)
@@ -829,7 +815,11 @@ impl CadCommand for RevCloudCommand {
         match &mut self.stage {
             Stage::Create if self.creation == CreationMode::Freehand && self.tracing => {
                 let spacing = (self.arc_length * 0.25).max(1.0e-6);
-                if self.points.last().is_none_or(|last| last.distance(point) >= spacing) {
+                if self
+                    .points
+                    .last()
+                    .is_none_or(|last| last.distance(point) >= spacing)
+                {
                     self.points.push(point);
                 }
                 let points = self.points.clone();
@@ -840,7 +830,9 @@ impl CadCommand for RevCloudCommand {
                 let points = self.rectangle_points(first, point)?;
                 self.preview_world_points(&points, "revcloud_rectangular_preview")
             }
-            Stage::Create if self.creation == CreationMode::Polygonal && !self.points.is_empty() => {
+            Stage::Create
+                if self.creation == CreationMode::Polygonal && !self.points.is_empty() =>
+            {
                 let mut points = self.points.clone();
                 points.push(point);
                 self.preview_world_points(&points, "revcloud_polygonal_preview")
@@ -849,11 +841,7 @@ impl CadCommand for RevCloudCommand {
             Stage::ModifyDraw(state) => {
                 let mut points = state.replacement.clone();
                 points.push(point);
-                let curve = guide_curve_on_plane(
-                    &state.plane,
-                    &points,
-                    self.arc_length * 1.0e-6,
-                )?;
+                let curve = guide_curve_on_plane(&state.plane, &points, self.arc_length * 1.0e-6)?;
                 let entity = cloud_entity_on_plane(
                     &PlanarCurve::new(state.plane, curve),
                     self.arc_length,
@@ -901,29 +889,19 @@ fn cloud_entity_on_plane(
     Some(EntityType::LwPolyline(cloud))
 }
 
-fn guide_curve_on_plane(
-    plane: &Plane,
-    points: &[DVec3],
-    tolerance: f64,
-) -> Option<Curve> {
+fn guide_curve_on_plane(plane: &Plane, points: &[DVec3], tolerance: f64) -> Option<Curve> {
     let mut points: Vec<[f64; 2]> = points
         .iter()
         .map(|point| plane.project(point.to_array()))
         .collect::<Option<_>>()?;
-    points.dedup_by(|right, left| {
-        Vec2::from(*left).distance(Vec2::from(*right)) <= tolerance
-    });
-    if points.len() >= 2
-        && Vec2::from(points[0]).distance(Vec2::from(*points.last()?)) <= tolerance
+    points.dedup_by(|right, left| Vec2::from(*left).distance(Vec2::from(*right)) <= tolerance);
+    if points.len() >= 2 && Vec2::from(points[0]).distance(Vec2::from(*points.last()?)) <= tolerance
     {
         points.pop();
     }
     (points.len() >= 3).then(|| {
         Curve::Polyline(Polyline {
-            vertices: points
-                .into_iter()
-                .map(PolylineVertex::straight)
-                .collect(),
+            vertices: points.into_iter().map(PolylineVertex::straight).collect(),
             closed: true,
         })
     })
@@ -942,19 +920,26 @@ fn style_from_entity(entity: &EntityType) -> Option<CloudStyle> {
     let EntityType::LwPolyline(polyline) = entity else {
         return None;
     };
-    Some(if polyline
-        .vertices
-        .iter()
-        .any(|vertex| vertex.start_width > 0.0 || vertex.end_width > 0.0)
-    {
-        CloudStyle::Calligraphy
-    } else {
-        CloudStyle::Normal
-    })
+    Some(
+        if polyline
+            .vertices
+            .iter()
+            .any(|vertex| vertex.start_width > 0.0 || vertex.end_width > 0.0)
+        {
+            CloudStyle::Calligraphy
+        } else {
+            CloudStyle::Normal
+        },
+    )
 }
 
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["REVCLOUD", "REVCLOUD_RECTANGULAR", "REVCLOUD_POLYGONAL", "REVCLOUD_FREEHAND"]
+    names: &[
+        "REVCLOUD",
+        "REVCLOUD_RECTANGULAR",
+        "REVCLOUD_POLYGONAL",
+        "REVCLOUD_FREEHAND"
+    ]
 });
 
 #[cfg(test)]
@@ -970,7 +955,10 @@ mod tests {
     #[test]
     fn rectangular_creation_commits_after_the_opposite_corner() {
         let mut command = command(CreationMode::Rectangular);
-        assert!(matches!(command.on_point(DVec3::ZERO), CmdResult::NeedPoint));
+        assert!(matches!(
+            command.on_point(DVec3::ZERO),
+            CmdResult::NeedPoint
+        ));
         assert!(matches!(
             command.on_point(DVec3::new(10.0, 5.0, 0.0)),
             CmdResult::CommitAndExit(_)

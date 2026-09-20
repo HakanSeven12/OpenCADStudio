@@ -9,8 +9,8 @@
 //! stay in one place. (#169)
 
 use crate::command::{CadCommand, CmdResult};
-use glam::DVec3;
 use crate::t;
+use glam::DVec3;
 
 #[derive(Default)]
 pub struct UcsCommand {
@@ -54,10 +54,10 @@ impl CadCommand for UcsCommand {
 
     fn prompt(&self) -> String {
         match self.option.as_deref() {
-            None => t!(
-                "UCS  option [Face/OBject/World/View/3Point/Z/X/Y/Origin/Save/Delete] or name:"
-            )
-            .into_owned(),
+            None => {
+                t!("UCS  option [Face/OBject/World/View/3Point/Z/X/Y/Origin/Save/Delete] or name:")
+                    .into_owned()
+            }
             Some("Z") => t!("UCS  rotation angle about Z (degrees):").into_owned(),
             Some("X") => t!("UCS  rotation angle about X (degrees):").into_owned(),
             Some("Y") => t!("UCS  rotation angle about Y (degrees):").into_owned(),

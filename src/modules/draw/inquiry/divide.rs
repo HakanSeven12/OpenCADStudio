@@ -63,7 +63,11 @@ impl<const MEASURE: bool> CurveMarkerCommand<MEASURE> {
 
 impl<const MEASURE: bool> CadCommand for CurveMarkerCommand<MEASURE> {
     fn name(&self) -> &'static str {
-        if MEASURE { "MEASURE" } else { "DIVIDE" }
+        if MEASURE {
+            "MEASURE"
+        } else {
+            "DIVIDE"
+        }
     }
 
     fn prompt(&self) -> String {
@@ -198,8 +202,8 @@ impl<const MEASURE: bool> CadCommand for CurveMarkerCommand<MEASURE> {
             return None;
         }
         let origin = self.value_origin?;
-        let distance = cadkernel::space::Vec3::from(cursor.to_array())
-            .distance(origin.to_array().into());
+        let distance =
+            cadkernel::space::Vec3::from(cursor.to_array()).distance(origin.to_array().into());
         (distance.is_finite() && distance > 0.0).then_some(distance)
     }
 
@@ -354,7 +358,9 @@ fn measurable(entity: &EntityType) -> Option<(MeasuredCurve, f64)> {
 }
 
 inventory::submit!(crate::command::CommandRegistration { names: &["DIVIDE"] });
-inventory::submit!(crate::command::CommandRegistration { names: &["MEASURE"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["MEASURE"]
+});
 
 #[cfg(test)]
 mod tests {
@@ -362,7 +368,9 @@ mod tests {
     use acadrust::entities::{Circle, Line};
 
     fn point(entity: &EntityType) -> DVec3 {
-        let EntityType::Point(point) = entity else { panic!("expected point") };
+        let EntityType::Point(point) = entity else {
+            panic!("expected point")
+        };
         DVec3::new(point.location.x, point.location.y, point.location.z)
     }
 
@@ -401,7 +409,12 @@ mod tests {
     fn measure_rejects_an_unbounded_marker_count() {
         let mut line = Line::default();
         line.end = Vector3::new(1.0, 0.0, 0.0);
-        assert!(measure_entity(&EntityType::Line(line), f64::MIN_POSITIVE,
-            DVec3::ZERO, None).is_empty());
+        assert!(measure_entity(
+            &EntityType::Line(line),
+            f64::MIN_POSITIVE,
+            DVec3::ZERO,
+            None
+        )
+        .is_empty());
     }
 }

@@ -69,14 +69,12 @@ impl CadCommand for DimBreakCommand {
                 handles.len()
             )
             .into_owned(),
-            Step::PickCrossing(_) => t!(
-                "DIMBREAK  Select object to break dimension or [Auto/Manual/Remove] <Auto>:"
-            )
-            .into_owned(),
-            Step::ManualFirst(_) => t!("DIMBREAK  Specify first break point:").into_owned(),
-            Step::ManualSecond(_, _) => {
-                t!("DIMBREAK  Specify second break point:").into_owned()
+            Step::PickCrossing(_) => {
+                t!("DIMBREAK  Select object to break dimension or [Auto/Manual/Remove] <Auto>:")
+                    .into_owned()
             }
+            Step::ManualFirst(_) => t!("DIMBREAK  Specify first break point:").into_owned(),
+            Step::ManualSecond(_, _) => t!("DIMBREAK  Specify second break point:").into_owned(),
         }
     }
 
@@ -195,7 +193,9 @@ impl CadCommand for DimBreakCommand {
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["DIMBREAK"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["DIMBREAK"]
+});
 
 #[cfg(test)]
 mod tests {

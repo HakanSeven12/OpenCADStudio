@@ -28,7 +28,9 @@ use std::time::{Duration, Instant};
 use interprocess::local_socket::traits::Listener;
 use interprocess::local_socket::{GenericNamespaced, ListenerOptions, Stream, ToNsName};
 
-use crate::host::{CommandSource, CommandStep, ExecutionResult, HostApi, HostNotification, PluginNotification};
+use crate::host::{
+    CommandSource, CommandStep, ExecutionResult, HostApi, HostNotification, PluginNotification,
+};
 use crate::ipc::protocol::{
     CadDocument, EntityType, Handle, HostRequest, HostResponse, HostToPlugin, InteractiveEvent,
     PluginToHost, RunnerHandshake, PLUGIN_TOKEN_ENV,
@@ -100,7 +102,11 @@ impl HostApi for NullHost {
     ) -> Option<&crate::ipc::protocol::ExtendedDataRecord> {
         None
     }
-    fn write_record(&mut self, _handle: Handle, _record: crate::ipc::protocol::ExtendedDataRecord) -> bool {
+    fn write_record(
+        &mut self,
+        _handle: Handle,
+        _record: crate::ipc::protocol::ExtendedDataRecord,
+    ) -> bool {
         false
     }
     fn remove_record(&mut self, _handle: Handle, _app_name: &str) -> bool {
@@ -112,10 +118,7 @@ impl HostApi for NullHost {
     fn push_output(&mut self, _msg: &str) {}
     fn push_error(&mut self, _msg: &str) {}
     fn start_interactive(&mut self, _command: Box<dyn crate::host::InteractiveCommand>) {}
-    fn plugin_state_any(
-        &self,
-        _plugin_id: &str,
-    ) -> Option<&(dyn std::any::Any + Send + Sync)> {
+    fn plugin_state_any(&self, _plugin_id: &str) -> Option<&(dyn std::any::Any + Send + Sync)> {
         None
     }
     fn plugin_state_any_mut(
@@ -416,7 +419,11 @@ impl PluginProcess {
             // the V4 reader thread. The notification handler receives an empty
             // plugin id until we read the manifest below; that brief window is
             // fine because the plugin has not yet been asked to do work.
-            let stream = stream.lock().unwrap_or_else(|e| e.into_inner()).take().expect("V4 stream");
+            let stream = stream
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take()
+                .expect("V4 stream");
             let plugin_id_placeholder = Arc::new(std::sync::Mutex::new(String::new()));
             let handler_for_v4: Arc<dyn Fn(Option<u64>, PluginNotification) + Send + Sync> = {
                 let plugin_id = Arc::clone(&plugin_id_placeholder);
@@ -431,7 +438,9 @@ impl PluginProcess {
                 HostResponse::Manifest(m) => m,
                 other => return Err(PluginError::UnexpectedResponse(Box::new(other))),
             };
-            *plugin_id_placeholder.lock().unwrap_or_else(|e| e.into_inner()) = manifest.id.clone();
+            *plugin_id_placeholder
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = manifest.id.clone();
             ribbon = match v4_conn.call(host, HostRequest::GetRibbon, no_op)? {
                 HostResponse::Ribbon(r) => r,
                 other => return Err(PluginError::UnexpectedResponse(Box::new(other))),
@@ -845,10 +854,7 @@ fn format_exit_status(status: Option<std::process::ExitStatus>) -> String {
 
 /// Describe why a runner failed before/during connection, including any stderr
 /// it produced.
-fn spawn_failure_status(
-    child: &Mutex<Option<Child>>,
-    last_stderr: &Mutex<String>,
-) -> String {
+fn spawn_failure_status(child: &Mutex<Option<Child>>, last_stderr: &Mutex<String>) -> String {
     let mut parts = vec![format_exit_status(child_status(child))];
     if let Ok(line) = last_stderr.lock() {
         if !line.is_empty() {
@@ -1202,7 +1208,10 @@ mod timeout_tests {
         fn push_undo(&mut self, _label: &str) {}
         fn set_dirty(&mut self) {}
         fn push_info(&mut self, msg: &str) {
-            self.push_info_messages.lock().unwrap().push(msg.to_string());
+            self.push_info_messages
+                .lock()
+                .unwrap()
+                .push(msg.to_string());
         }
         fn push_output(&mut self, _msg: &str) {}
         fn push_error(&mut self, _msg: &str) {}
@@ -1376,7 +1385,9 @@ mod timeout_tests {
             )
             .expect("send nested request");
             let resp = recv::<HostToPlugin>(&mut peer).expect("read nested response");
-            assert!(matches!(resp, HostToPlugin::Response(ref r) if matches!(**r, PluginResponse::Ok)));
+            assert!(
+                matches!(resp, HostToPlugin::Response(ref r) if matches!(**r, PluginResponse::Ok))
+            );
             send(&mut peer, &PluginToHost::Response(HostResponse::Bool(true)))
                 .expect("send final response");
         });
@@ -1386,7 +1397,11 @@ mod timeout_tests {
         assert!(result.expect("dispatch succeeds"));
         assert!(process.is_alive(), "process should still be alive");
         let infos = host.take_push_info();
-        assert_eq!(infos, vec!["hello".to_string()], "push_info should be delivered to host");
+        assert_eq!(
+            infos,
+            vec!["hello".to_string()],
+            "push_info should be delivered to host"
+        );
 
         // Clean up the helper child so it does not outlive the test.
         if let Some(mut child) = process
@@ -1425,7 +1440,10 @@ mod timeout_tests {
             RunnerHandshake::Token("correct-token".to_string()),
             "correct-token",
         );
-        assert!(result.is_ok(), "expected authentication success, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected authentication success, got {result:?}"
+        );
         assert!(!result.unwrap(), "V3 token should select V3 path");
     }
 
@@ -1440,7 +1458,10 @@ mod timeout_tests {
             },
             "correct-token",
         );
-        assert!(result.is_ok(), "expected authentication success, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected authentication success, got {result:?}"
+        );
         assert!(result.unwrap(), "TokenV4 should select V4 path");
     }
 

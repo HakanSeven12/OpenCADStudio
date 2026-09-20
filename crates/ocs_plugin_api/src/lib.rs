@@ -70,8 +70,8 @@ pub use manifest::{
 };
 pub use ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, StyleKey, ToolDef};
 pub use type_registry::{
-    get_embedded_type_registry_json, EnumVariantInfo, FieldInfo, MethodInfo, ParameterInfo,
-    TypeId, TypeInfo, TypeKind, TypeRegistry,
+    get_embedded_type_registry_json, EnumVariantInfo, FieldInfo, MethodInfo, ParameterInfo, TypeId,
+    TypeInfo, TypeKind, TypeRegistry,
 };
 pub use version_info::get_embedded_version_info_json;
 

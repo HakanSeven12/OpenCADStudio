@@ -48,7 +48,8 @@ impl OpenCADStudio {
         };
         match &self.gpu_status {
             GpuStatus::Software(adapter) => {
-                self.command_line.push_warning(&software_rasterizer_warning(adapter));
+                self.command_line
+                    .push_warning(&software_rasterizer_warning(adapter));
             }
             GpuStatus::NoRenderer => {
                 crate::scene::pipeline::report_gpu_line(
@@ -127,9 +128,15 @@ mod tests {
         // The name carries parentheses and commas of its own; the localized
         // template must still place it whole. The loader follows the system
         // locale here, so the assertions stay language-neutral.
-        assert!(warning.contains("(llvmpipe (LLVM 20.1.8, 256 bits))"), "{warning}");
+        assert!(
+            warning.contains("(llvmpipe (LLVM 20.1.8, 256 bits))"),
+            "{warning}"
+        );
         assert!(warning.contains("GPU"), "{warning}");
-        assert!(!warning.contains("{adapter}") && !warning.contains("__ocs_"), "{warning}");
+        assert!(
+            !warning.contains("{adapter}") && !warning.contains("__ocs_"),
+            "{warning}"
+        );
         // Every platform has a hint, and it is a sentence, not a missing key.
         let hint = gpu_platform_hint();
         assert!(hint.len() > 20 && !hint.contains("hint-"), "{hint}");

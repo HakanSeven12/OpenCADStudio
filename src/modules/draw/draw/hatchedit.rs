@@ -8,9 +8,9 @@
 //        A <degrees>  — change angle
 //      Press Enter to apply changes.
 
+use crate::t;
 use acadrust::Handle;
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, HatchEditOperation};
 
@@ -31,18 +31,25 @@ pub struct HatcheditCommand {
     store_origin: bool,
     current_origin: [f64; 2],
     origin_plane: cadkernel::space::Plane,
-    origin_bounds: Option<([f64;2],[f64;2])>,
+    origin_bounds: Option<([f64; 2], [f64; 2])>,
     origin_bounds_unavailable: bool,
     style: Option<acadrust::entities::HatchStyleType>,
     annotative: Option<bool>,
     annotative_current: bool,
     style_current: acadrust::entities::HatchStyleType,
     input: Option<&'static str>,
-    source_appearance: Option<(acadrust::types::Color,String,acadrust::types::Transparency)>,
+    source_appearance: Option<(
+        acadrust::types::Color,
+        String,
+        acadrust::types::Transparency,
+    )>,
     current_color: acadrust::types::Color,
     current_transparency: acadrust::types::Transparency,
     boundary_region: bool,
-    association_sources: Option<(crate::command::WorkingPlane,rustc_hash::FxHashMap<Handle,crate::scene::BoundarySource>)>,
+    association_sources: Option<(
+        crate::command::WorkingPlane,
+        rustc_hash::FxHashMap<Handle, crate::scene::BoundarySource>,
+    )>,
     association_paths: Vec<acadrust::entities::BoundaryPath>,
     association_missed: bool,
 }
@@ -57,7 +64,11 @@ impl HatcheditCommand {
             origin_bounds: None,
             origin_bounds_unavailable: false,
             current_origin: [0.0, 0.0],
-            origin_plane: cadkernel::space::Plane::from_axes([0.0;3],[1.0,0.0,0.0],[0.0,1.0,0.0]),
+            origin_plane: cadkernel::space::Plane::from_axes(
+                [0.0; 3],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ),
             style: None,
             annotative: None,
             annotative_current: false,
@@ -93,7 +104,11 @@ impl HatcheditCommand {
             origin_bounds: None,
             origin_bounds_unavailable: false,
             current_origin: [0.0, 0.0],
-            origin_plane: cadkernel::space::Plane::from_axes([0.0;3],[1.0,0.0,0.0],[0.0,1.0,0.0]),
+            origin_plane: cadkernel::space::Plane::from_axes(
+                [0.0; 3],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ),
             style: None,
             annotative: None,
             annotative_current: annotative,
@@ -128,24 +143,55 @@ impl HatcheditCommand {
         })
     }
 
-    pub fn for_association(handle:Handle,name:String,scale:f32,angle:f32,plane:crate::command::WorkingPlane,sources:rustc_hash::FxHashMap<Handle,crate::scene::BoundarySource>)->Self {
-        let mut command=Self::with_handle(handle,name,scale,angle,false);
-        command.input=Some("associate-point");command.association_sources=Some((plane,sources));command
+    pub fn for_association(
+        handle: Handle,
+        name: String,
+        scale: f32,
+        angle: f32,
+        plane: crate::command::WorkingPlane,
+        sources: rustc_hash::FxHashMap<Handle, crate::scene::BoundarySource>,
+    ) -> Self {
+        let mut command = Self::with_handle(handle, name, scale, angle, false);
+        command.input = Some("associate-point");
+        command.association_sources = Some((plane, sources));
+        command
     }
-    fn add_association_rings(&mut self,rings:Vec<Vec<[f64;2]>>,sources:&rustc_hash::FxHashMap<Handle,crate::scene::BoundarySource>) {
-        let exterior=cadkernel::geom2d::ring_nesting_depths(&rings).into_iter().map(|depth|depth==0).collect::<Vec<_>>();
-        let paths=crate::scene::exact_hatch_paths(&rings,&exterior,sources,1e-6);
-        self.association_missed=paths.is_empty()||paths.len()!=rings.len()||paths.iter().any(|path|path.boundary_handles.is_empty());
+    fn add_association_rings(
+        &mut self,
+        rings: Vec<Vec<[f64; 2]>>,
+        sources: &rustc_hash::FxHashMap<Handle, crate::scene::BoundarySource>,
+    ) {
+        let exterior = cadkernel::geom2d::ring_nesting_depths(&rings)
+            .into_iter()
+            .map(|depth| depth == 0)
+            .collect::<Vec<_>>();
+        let paths = crate::scene::exact_hatch_paths(&rings, &exterior, sources, 1e-6);
+        self.association_missed = paths.is_empty()
+            || paths.len() != rings.len()
+            || paths.iter().any(|path| path.boundary_handles.is_empty());
         if !self.association_missed {
-            for path in paths {if !self.association_paths.contains(&path){self.association_paths.push(path);}}
+            for path in paths {
+                if !self.association_paths.contains(&path) {
+                    self.association_paths.push(path);
+                }
+            }
         }
     }
-    pub fn with_appearance(mut self,entity:Option<&acadrust::EntityType>,current_color:acadrust::types::Color,current_transparency:acadrust::types::Transparency)->Self {
+    pub fn with_appearance(
+        mut self,
+        entity: Option<&acadrust::EntityType>,
+        current_color: acadrust::types::Color,
+        current_transparency: acadrust::types::Transparency,
+    ) -> Self {
         if let Some(acadrust::EntityType::Hatch(hatch)) = entity {
             self.style_current = hatch.style;
             self.origin_plane = crate::entities::curve::ocs_plane(hatch.normal, hatch.elevation);
-            self.origin_bounds = hatch.paths.iter().flat_map(|path| &path.edges)
-                .map(crate::entities::hatch::edge_curve).collect::<Option<Vec<_>>>()
+            self.origin_bounds = hatch
+                .paths
+                .iter()
+                .flat_map(|path| &path.edges)
+                .map(crate::entities::hatch::edge_curve)
+                .collect::<Option<Vec<_>>>()
                 .and_then(|curves| {
                     // Full ellipses use the four axis endpoints as origin anchors,
                     // not their geometric extrema. Keep the general bounds contract
@@ -154,12 +200,18 @@ impl HatcheditCommand {
                     for curve in curves {
                         match curve {
                             cadkernel::geom2d::Curve::Ellipse(arc) => {
-                                if (arc.end_parameter - arc.start_parameter).abs() < std::f64::consts::TAU { return None; }
+                                if (arc.end_parameter - arc.start_parameter).abs()
+                                    < std::f64::consts::TAU
+                                {
+                                    return None;
+                                }
                                 for angle in [0.0, std::f64::consts::FRAC_PI_2] {
-                                    anchors.push(cadkernel::geom2d::Curve::Line(cadkernel::geom2d::Line {
-                                        start: arc.ellipse.point_at(angle),
-                                        end: arc.ellipse.point_at(angle + std::f64::consts::PI),
-                                    }));
+                                    anchors.push(cadkernel::geom2d::Curve::Line(
+                                        cadkernel::geom2d::Line {
+                                            start: arc.ellipse.point_at(angle),
+                                            end: arc.ellipse.point_at(angle + std::f64::consts::PI),
+                                        },
+                                    ));
                                 }
                             }
                             cadkernel::geom2d::Curve::Nurbs(_) => return None,
@@ -169,11 +221,19 @@ impl HatcheditCommand {
                     cadkernel::geom2d::analytic_curve_bounds(&anchors)
                 });
         }
-        self.source_appearance=entity.map(|e|{let c=e.common();(c.color,c.layer.clone(),c.transparency)});
-        self.current_color=current_color;self.current_transparency=current_transparency;self
+        self.source_appearance = entity.map(|e| {
+            let c = e.common();
+            (c.color, c.layer.clone(), c.transparency)
+        });
+        self.current_color = current_color;
+        self.current_transparency = current_transparency;
+        self
     }
 
-    pub fn with_origin(mut self, origin: [f64; 2]) -> Self { self.current_origin = origin; self }
+    pub fn with_origin(mut self, origin: [f64; 2]) -> Self {
+        self.current_origin = origin;
+        self
+    }
 
     fn update_operation(&self) -> HatchEditOperation {
         HatchEditOperation::Update {
@@ -192,7 +252,7 @@ impl CadCommand for HatcheditCommand {
     }
 
     fn prompt(&self) -> String {
-        if let Some(input)=self.input {
+        if let Some(input) = self.input {
             if input == "style" {
                 let current = match self.style_current {
                     acadrust::entities::HatchStyleType::Normal => "Normal",
@@ -201,24 +261,34 @@ impl CadCommand for HatcheditCommand {
                 };
                 return format!("Enter hatching style [Ignore/Outer/Normal] <{current}>:");
             }
-            if let Some((color,layer,transparency))=&self.source_appearance {
+            if let Some((color, layer, transparency)) = &self.source_appearance {
                 match input {
-                    "color"=>return format!("New color [Truecolor/. (for use current)] <{color:?}>:"),
-                    "layer"=>return format!("Specify layer or [. (for use current)] <{layer}>:"),
-                    "transparency"=>return format!("Specify transparency (0-90) or ByLayer/ByBlock <{}>:",match transparency {
-                        acadrust::types::Transparency::ByLayer=>"ByLayer".into(),
-                        acadrust::types::Transparency::ByBlock=>"ByBlock".into(),
-                        value=>format!("{:.0}",value.as_percent()*100.0),
-                    }),
-                    _=>{},
+                    "color" => {
+                        return format!("New color [Truecolor/. (for use current)] <{color:?}>:")
+                    }
+                    "layer" => return format!("Specify layer or [. (for use current)] <{layer}>:"),
+                    "transparency" => {
+                        return format!(
+                            "Specify transparency (0-90) or ByLayer/ByBlock <{}>:",
+                            match transparency {
+                                acadrust::types::Transparency::ByLayer => "ByLayer".into(),
+                                acadrust::types::Transparency::ByBlock => "ByBlock".into(),
+                                value => format!("{:.0}", value.as_percent() * 100.0),
+                            }
+                        )
+                    }
+                    _ => {}
                 }
             }
-            if let HatcheditStep::EditOptions{name,scale,angle,..}=&self.step {
+            if let HatcheditStep::EditOptions {
+                name, scale, angle, ..
+            } = &self.step
+            {
                 match input {
-                    "pattern"=>return format!("Enter a pattern name or [Solid] <{name}>:"),
-                    "scale"=>return format!("Specify a scale for the pattern <{scale:.4}>:"),
-                    "angle"=>return format!("Specify an angle for the pattern <{angle:.4}>:"),
-                    _=>{},
+                    "pattern" => return format!("Enter a pattern name or [Solid] <{name}>:"),
+                    "scale" => return format!("Specify a scale for the pattern <{scale:.4}>:"),
+                    "angle" => return format!("Specify an angle for the pattern <{angle:.4}>:"),
+                    _ => {}
                 }
             }
             return match input {
@@ -265,14 +335,21 @@ impl CadCommand for HatcheditCommand {
     fn needs_entity_pick(&self) -> bool {
         matches!(self.step, HatcheditStep::PickHatch)
     }
-    fn is_selection_gathering(&self)->bool {self.input==Some("associate-select")}
-    fn on_selection_complete(&mut self,handles:Vec<Handle>)->CmdResult {
-        if let Some((_,sources))=&self.association_sources {
-            let sources=sources.iter().filter(|(handle,_)|handles.contains(handle)).map(|(handle,source)|(*handle,source.clone())).collect();
-            let rings=crate::scene::boundary_faces(&sources,1e-6);
-            self.add_association_rings(rings,&sources);
+    fn is_selection_gathering(&self) -> bool {
+        self.input == Some("associate-select")
+    }
+    fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
+        if let Some((_, sources)) = &self.association_sources {
+            let sources = sources
+                .iter()
+                .filter(|(handle, _)| handles.contains(handle))
+                .map(|(handle, source)| (*handle, source.clone()))
+                .collect();
+            let rings = crate::scene::boundary_faces(&sources, 1e-6);
+            self.add_association_rings(rings, &sources);
         }
-        self.input=Some("associate-point");CmdResult::NeedPoint
+        self.input = Some("associate-point");
+        CmdResult::NeedPoint
     }
 
     fn on_entity_pick(&mut self, handle: Handle, _pt: DVec3) -> CmdResult {
@@ -291,21 +368,48 @@ impl CadCommand for HatcheditCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        matches!(self.step, HatcheditStep::EditOptions { .. })&&!self.is_selection_gathering()
+        matches!(self.step, HatcheditStep::EditOptions { .. }) && !self.is_selection_gathering()
     }
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
-        if self.input==Some("associate-point") {return vec![crate::command::CmdOption::new("Select objects","S")];}
+        if self.input == Some("associate-point") {
+            return vec![crate::command::CmdOption::new("Select objects", "S")];
+        }
         if let Some(input) = self.input {
             use crate::command::CmdOption;
             return match input {
-                "origin" => vec![CmdOption::new("Use current origin", "U"), CmdOption::new("Set new origin", "S"), CmdOption::new("Default to boundary extents", "D")],
-                "origin-extents" => vec![CmdOption::new("Bottom left", "L"), CmdOption::new("Bottom right", "R"), CmdOption::new("Top right", "I"), CmdOption::new("Top left", "E"), CmdOption::new("Center", "C")],
+                "origin" => vec![
+                    CmdOption::new("Use current origin", "U"),
+                    CmdOption::new("Set new origin", "S"),
+                    CmdOption::new("Default to boundary extents", "D"),
+                ],
+                "origin-extents" => vec![
+                    CmdOption::new("Bottom left", "L"),
+                    CmdOption::new("Bottom right", "R"),
+                    CmdOption::new("Top right", "I"),
+                    CmdOption::new("Top left", "E"),
+                    CmdOption::new("Center", "C"),
+                ],
                 "origin-store" => vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")],
-                "style" => vec![CmdOption::new("Ignore", "I"), CmdOption::new("Outer", "O"), CmdOption::new("Normal", "N")],
-                "draworder" => vec![CmdOption::new("Do not change", "N"), CmdOption::new("Send to back", "B"), CmdOption::new("Bring to front", "F"), CmdOption::new("Behind boundary", "H"), CmdOption::new("In front of boundary", "D")],
-                "annotative" | "boundary-associate" => vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")],
-                "boundary-type" => vec![CmdOption::new("Region", "R"), CmdOption::new("Polyline", "P")],
+                "style" => vec![
+                    CmdOption::new("Ignore", "I"),
+                    CmdOption::new("Outer", "O"),
+                    CmdOption::new("Normal", "N"),
+                ],
+                "draworder" => vec![
+                    CmdOption::new("Do not change", "N"),
+                    CmdOption::new("Send to back", "B"),
+                    CmdOption::new("Bring to front", "F"),
+                    CmdOption::new("Behind boundary", "H"),
+                    CmdOption::new("In front of boundary", "D"),
+                ],
+                "annotative" | "boundary-associate" => {
+                    vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")]
+                }
+                "boundary-type" => vec![
+                    CmdOption::new("Region", "R"),
+                    CmdOption::new("Polyline", "P"),
+                ],
                 "color" => vec![CmdOption::new("Truecolor", "T")],
                 "pattern" => vec![CmdOption::new("Solid", "SOLID")],
                 _ => Vec::new(),
@@ -332,42 +436,66 @@ impl CadCommand for HatcheditCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let keyword=text.trim().to_ascii_uppercase();
-        if let Some(input)=self.input {
-            use acadrust::types::{Color,Transparency};
-            let appearance=|color,layer,transparency|HatchEditOperation::Appearance{color,layer,transparency};
+        let keyword = text.trim().to_ascii_uppercase();
+        if let Some(input) = self.input {
+            use acadrust::types::{Color, Transparency};
+            let appearance = |color, layer, transparency| HatchEditOperation::Appearance {
+                color,
+                layer,
+                transparency,
+            };
             match input {
                 "origin" => match keyword.as_str() {
-                    "U" | "USE" => { self.origin = Some((self.current_origin[0], self.current_origin[1])); return self.apply_result(self.update_operation()); }
-                    "S" | "SET" => { self.input = Some("origin-point"); }
+                    "U" | "USE" => {
+                        self.origin = Some((self.current_origin[0], self.current_origin[1]));
+                        return self.apply_result(self.update_operation());
+                    }
+                    "S" | "SET" => {
+                        self.input = Some("origin-point");
+                    }
                     "D" | "DEFAULT" => {
                         self.origin_bounds_unavailable = self.origin_bounds.is_none();
-                        if !self.origin_bounds_unavailable { self.input = Some("origin-extents"); }
+                        if !self.origin_bounds_unavailable {
+                            self.input = Some("origin-extents");
+                        }
                     }
-                    _ => {},
+                    _ => {}
                 },
                 "origin-extents" => {
-                    if let Some((min,max)) = self.origin_bounds {
+                    if let Some((min, max)) = self.origin_bounds {
                         let origin = match keyword.as_str() {
                             "L" | "LEFT" => min,
-                            "R" | "RIGHT" => [max[0],min[1]],
+                            "R" | "RIGHT" => [max[0], min[1]],
                             "I" | "TOP RIGHT" => max,
-                            "E" | "TOP LEFT" => [min[0],max[1]],
-                            "C" | "CENTER" => [min[0]*0.5+max[0]*0.5,min[1]*0.5+max[1]*0.5],
+                            "E" | "TOP LEFT" => [min[0], max[1]],
+                            "C" | "CENTER" => {
+                                [min[0] * 0.5 + max[0] * 0.5, min[1] * 0.5 + max[1] * 0.5]
+                            }
                             _ => return Some(CmdResult::NeedPoint),
                         };
-                        self.origin = Some((origin[0],origin[1]));
+                        self.origin = Some((origin[0], origin[1]));
                         self.input = Some("origin-store");
                     }
                 }
                 "origin-point" => {
-                    let values: Option<Vec<f64>> = text.split(',').map(|s| s.trim().parse().ok()).collect();
-                    if let Some(values) = values.filter(|v| (2..=3).contains(&v.len()) && v.iter().all(|n| n.is_finite())) {
-                        return Some(self.on_point(DVec3::new(values[0], values[1], values.get(2).copied().unwrap_or(0.0))));
+                    let values: Option<Vec<f64>> =
+                        text.split(',').map(|s| s.trim().parse().ok()).collect();
+                    if let Some(values) = values
+                        .filter(|v| (2..=3).contains(&v.len()) && v.iter().all(|n| n.is_finite()))
+                    {
+                        return Some(self.on_point(DVec3::new(
+                            values[0],
+                            values[1],
+                            values.get(2).copied().unwrap_or(0.0),
+                        )));
                     }
                 }
                 "origin-store" => {
-                    self.store_origin = match keyword.as_str() { "Y" | "YES" => true, "N" | "NO" => false, _ => return Some(CmdResult::NeedPoint) };
+                    self.store_origin = match keyword.as_str() {
+                        "Y" | "YES" => true,
+                        "N" | "NO" => false,
+                        _ => return Some(CmdResult::NeedPoint),
+                    };
                     return self.apply_result(self.update_operation());
                 }
                 "style" => {
@@ -380,69 +508,179 @@ impl CadCommand for HatcheditCommand {
                     return self.apply_result(self.update_operation());
                 }
                 "annotative" => {
-                    let value = match keyword.as_str() { "Y" | "YES" => true, "N" | "NO" => false, _ => return Some(CmdResult::NeedPoint) };
+                    let value = match keyword.as_str() {
+                        "Y" | "YES" => true,
+                        "N" | "NO" => false,
+                        _ => return Some(CmdResult::NeedPoint),
+                    };
                     self.annotative = Some(value);
                     return self.apply_result(self.update_operation());
                 }
-                "associate-point"=>{
-                    if matches!(keyword.as_str(),"S"|"SELECT"|"SELECT OBJECTS") {self.input=Some("associate-select");}
+                "associate-point" => {
+                    if matches!(keyword.as_str(), "S" | "SELECT" | "SELECT OBJECTS") {
+                        self.input = Some("associate-select");
+                    }
                     return Some(CmdResult::NeedPoint);
-                },
-                "color"=>{
-                    if matches!(keyword.as_str(),"T"|"TRUECOLOR") {self.input=Some("truecolor");return Some(CmdResult::NeedPoint);}
-                    let color=match keyword.as_str(){"."=>Some(self.current_color),"BYLAYER"=>Some(Color::ByLayer),"BYBLOCK"=>Some(Color::ByBlock),
-                        "RED"=>Some(Color::Index(1)),"YELLOW"=>Some(Color::Index(2)),"GREEN"=>Some(Color::Index(3)),
-                        "CYAN"=>Some(Color::Index(4)),"BLUE"=>Some(Color::Index(5)),"MAGENTA"=>Some(Color::Index(6)),"WHITE"=>Some(Color::Index(7)),
-                        n=>n.parse::<i16>().ok().filter(|v|(0..=256).contains(v)).map(Color::from_index)};
-                    return Some(color.and_then(|v|self.apply_result(appearance(Some(v),None,None))).unwrap_or(CmdResult::NeedPoint));
                 }
-                "truecolor"=>{
-                    let rgb:Option<Vec<u8>>=keyword.split(',').map(|s|s.trim().parse().ok()).collect();
-                    if let Some(rgb)=rgb.filter(|rgb|rgb.len()==3) {return self.apply_result(appearance(Some(Color::from_rgb(rgb[0],rgb[1],rgb[2])),None,None));}
+                "color" => {
+                    if matches!(keyword.as_str(), "T" | "TRUECOLOR") {
+                        self.input = Some("truecolor");
+                        return Some(CmdResult::NeedPoint);
+                    }
+                    let color = match keyword.as_str() {
+                        "." => Some(self.current_color),
+                        "BYLAYER" => Some(Color::ByLayer),
+                        "BYBLOCK" => Some(Color::ByBlock),
+                        "RED" => Some(Color::Index(1)),
+                        "YELLOW" => Some(Color::Index(2)),
+                        "GREEN" => Some(Color::Index(3)),
+                        "CYAN" => Some(Color::Index(4)),
+                        "BLUE" => Some(Color::Index(5)),
+                        "MAGENTA" => Some(Color::Index(6)),
+                        "WHITE" => Some(Color::Index(7)),
+                        n => n
+                            .parse::<i16>()
+                            .ok()
+                            .filter(|v| (0..=256).contains(v))
+                            .map(Color::from_index),
+                    };
+                    return Some(
+                        color
+                            .and_then(|v| self.apply_result(appearance(Some(v), None, None)))
+                            .unwrap_or(CmdResult::NeedPoint),
+                    );
                 }
-                "layer"=>if !text.trim().is_empty(){return self.apply_result(appearance(None,Some(text.trim().to_owned()),None));},
-                "transparency"=>{
-                    let value=match keyword.as_str(){"."=>Some(self.current_transparency),"BYLAYER"=>Some(Transparency::BY_LAYER),"BYBLOCK"=>Some(Transparency::BY_BLOCK),
-                        n=>n.parse::<u8>().ok().filter(|v|*v<=90).map(|v|Transparency::from_percent(v as f64 / 100.0))};
-                    if let Some(value)=value{return self.apply_result(appearance(None,None,Some(value)));}
-                }
-                "draworder"=>return match keyword.as_str(){"F"|"FRONT"=>self.apply_result(HatchEditOperation::DrawOrderFront),
-                    "H"|"BEHIND"=>self.apply_result(HatchEditOperation::DrawOrderBoundary{above:false}),
-                    "D"=>self.apply_result(HatchEditOperation::DrawOrderBoundary{above:true}),
-                    "B"|"BACK"=>self.apply_result(HatchEditOperation::DrawOrderBack),"N"|"NOT"=>Some(CmdResult::Cancel),_=>Some(CmdResult::NeedPoint)},
-                "boundary-type"=>match keyword.as_str(){
-                    "P"|"POLYLINE"=>{self.boundary_region=false;self.input=Some("boundary-associate");},
-                    "R"|"REGION"=>{self.boundary_region=true;self.input=Some("boundary-associate");},
-                    _=>{},
-                },
-                "boundary-associate"=>return match keyword.as_str(){
-                    "Y"|"YES"=>self.apply_result(HatchEditOperation::RecreateBoundary{associate:true,region:self.boundary_region}),
-                    "N"|"NO"=>self.apply_result(HatchEditOperation::RecreateBoundary{associate:false,region:self.boundary_region}),
-                    _=>Some(CmdResult::NeedPoint),
-                },
-                "pattern"=>{
-                    if crate::scene::model::hatch_patterns::find(&keyword).is_some() {
-                        if let HatcheditStep::EditOptions{name,..}=&mut self.step{*name=keyword.clone();}
-                        if keyword=="SOLID" {return self.apply_result(self.update_operation());}
-                        self.input=Some("scale");
+                "truecolor" => {
+                    let rgb: Option<Vec<u8>> =
+                        keyword.split(',').map(|s| s.trim().parse().ok()).collect();
+                    if let Some(rgb) = rgb.filter(|rgb| rgb.len() == 3) {
+                        return self.apply_result(appearance(
+                            Some(Color::from_rgb(rgb[0], rgb[1], rgb[2])),
+                            None,
+                            None,
+                        ));
                     }
                 }
-                "scale"|"angle"=>if let Ok(value)=keyword.parse::<f32>() {if value.is_finite()&&(input=="angle"||value>0.0){
-                    if let HatcheditStep::EditOptions{scale,angle,..}=&mut self.step{if input=="scale"{*scale=value;}else{*angle=value;}}
-                    if input=="scale"{self.input=Some("angle");}else{return self.apply_result(self.update_operation());}
-                }},
-                _=>{},
+                "layer" => {
+                    if !text.trim().is_empty() {
+                        return self.apply_result(appearance(
+                            None,
+                            Some(text.trim().to_owned()),
+                            None,
+                        ));
+                    }
+                }
+                "transparency" => {
+                    let value = match keyword.as_str() {
+                        "." => Some(self.current_transparency),
+                        "BYLAYER" => Some(Transparency::BY_LAYER),
+                        "BYBLOCK" => Some(Transparency::BY_BLOCK),
+                        n => n
+                            .parse::<u8>()
+                            .ok()
+                            .filter(|v| *v <= 90)
+                            .map(|v| Transparency::from_percent(v as f64 / 100.0)),
+                    };
+                    if let Some(value) = value {
+                        return self.apply_result(appearance(None, None, Some(value)));
+                    }
+                }
+                "draworder" => {
+                    return match keyword.as_str() {
+                        "F" | "FRONT" => self.apply_result(HatchEditOperation::DrawOrderFront),
+                        "H" | "BEHIND" => self
+                            .apply_result(HatchEditOperation::DrawOrderBoundary { above: false }),
+                        "D" => {
+                            self.apply_result(HatchEditOperation::DrawOrderBoundary { above: true })
+                        }
+                        "B" | "BACK" => self.apply_result(HatchEditOperation::DrawOrderBack),
+                        "N" | "NOT" => Some(CmdResult::Cancel),
+                        _ => Some(CmdResult::NeedPoint),
+                    }
+                }
+                "boundary-type" => match keyword.as_str() {
+                    "P" | "POLYLINE" => {
+                        self.boundary_region = false;
+                        self.input = Some("boundary-associate");
+                    }
+                    "R" | "REGION" => {
+                        self.boundary_region = true;
+                        self.input = Some("boundary-associate");
+                    }
+                    _ => {}
+                },
+                "boundary-associate" => {
+                    return match keyword.as_str() {
+                        "Y" | "YES" => self.apply_result(HatchEditOperation::RecreateBoundary {
+                            associate: true,
+                            region: self.boundary_region,
+                        }),
+                        "N" | "NO" => self.apply_result(HatchEditOperation::RecreateBoundary {
+                            associate: false,
+                            region: self.boundary_region,
+                        }),
+                        _ => Some(CmdResult::NeedPoint),
+                    }
+                }
+                "pattern" => {
+                    if crate::scene::model::hatch_patterns::find(&keyword).is_some() {
+                        if let HatcheditStep::EditOptions { name, .. } = &mut self.step {
+                            *name = keyword.clone();
+                        }
+                        if keyword == "SOLID" {
+                            return self.apply_result(self.update_operation());
+                        }
+                        self.input = Some("scale");
+                    }
+                }
+                "scale" | "angle" => {
+                    if let Ok(value) = keyword.parse::<f32>() {
+                        if value.is_finite() && (input == "angle" || value > 0.0) {
+                            if let HatcheditStep::EditOptions { scale, angle, .. } = &mut self.step
+                            {
+                                if input == "scale" {
+                                    *scale = value;
+                                } else {
+                                    *angle = value;
+                                }
+                            }
+                            if input == "scale" {
+                                self.input = Some("angle");
+                            } else {
+                                return self.apply_result(self.update_operation());
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
             return Some(CmdResult::NeedPoint);
         }
-        let next=match keyword.as_str(){"O"|"ORIGIN"=>Some("origin"),"S"|"STYLE"=>Some("style"),"P"|"PROPERTIES"=>Some("pattern"),"CO"|"COLOR"=>Some("color"),"LA"|"LAYER"=>Some("layer"),
-            "AN"|"ANNOTATIVE"=>Some("annotative"),"T"|"TRANSPARENCY"=>Some("transparency"),"DR"|"DRAW"|"DRAW ORDER"=>Some("draworder"),
-            "B"|"BOUNDARY"|"R"|"RECREATE"=>Some("boundary-type"),_=>None};
-        if let Some(input)=next {self.input=Some(input);return Some(CmdResult::NeedPoint);}
-        if matches!(keyword.as_str(),"H"|"HATCHES"|"SEPARATE") {return self.apply_result(HatchEditOperation::Separate);}
-        if matches!(keyword.as_str(),"AS"|"ASSOCIATE"){return self.apply_result(HatchEditOperation::BeginAssociate);}
-        if matches!(keyword.as_str(),"DI"|"DISASSOCIATE"){
-            self.disassociate=true;return self.apply_result(self.update_operation());
+        let next = match keyword.as_str() {
+            "O" | "ORIGIN" => Some("origin"),
+            "S" | "STYLE" => Some("style"),
+            "P" | "PROPERTIES" => Some("pattern"),
+            "CO" | "COLOR" => Some("color"),
+            "LA" | "LAYER" => Some("layer"),
+            "AN" | "ANNOTATIVE" => Some("annotative"),
+            "T" | "TRANSPARENCY" => Some("transparency"),
+            "DR" | "DRAW" | "DRAW ORDER" => Some("draworder"),
+            "B" | "BOUNDARY" | "R" | "RECREATE" => Some("boundary-type"),
+            _ => None,
+        };
+        if let Some(input) = next {
+            self.input = Some(input);
+            return Some(CmdResult::NeedPoint);
+        }
+        if matches!(keyword.as_str(), "H" | "HATCHES" | "SEPARATE") {
+            return self.apply_result(HatchEditOperation::Separate);
+        }
+        if matches!(keyword.as_str(), "AS" | "ASSOCIATE") {
+            return self.apply_result(HatchEditOperation::BeginAssociate);
+        }
+        if matches!(keyword.as_str(), "DI" | "DISASSOCIATE") {
+            self.disassociate = true;
+            return self.apply_result(self.update_operation());
         }
         let (_handle, name, scale, angle) = match &mut self.step {
             HatcheditStep::EditOptions {
@@ -521,7 +759,8 @@ impl CadCommand for HatcheditCommand {
             return Some(CmdResult::NeedPoint);
         }
         if text == "R" || text == "RECREATE" {
-            self.input=Some("boundary-type");return Some(CmdResult::NeedPoint);
+            self.input = Some("boundary-type");
+            return Some(CmdResult::NeedPoint);
         }
         if text == "E" || text == "SEPARATE" {
             return self.apply_result(HatchEditOperation::Separate);
@@ -564,45 +803,97 @@ impl CadCommand for HatcheditCommand {
             }
             return CmdResult::NeedPoint;
         }
-        if self.input==Some("associate-point") {
-            if let Some((plane,sources))=&self.association_sources {
-                let point=plane.to_local(pt);
-                let sources=sources.clone();
-                if let Some(rings)=crate::scene::model::presspull_model::selected_rings(&sources,[point.x,point.y]) {
-                    self.add_association_rings(rings,&sources);
-                }else{self.association_missed=true;}
+        if self.input == Some("associate-point") {
+            if let Some((plane, sources)) = &self.association_sources {
+                let point = plane.to_local(pt);
+                let sources = sources.clone();
+                if let Some(rings) = crate::scene::model::presspull_model::selected_rings(
+                    &sources,
+                    [point.x, point.y],
+                ) {
+                    self.add_association_rings(rings, &sources);
+                } else {
+                    self.association_missed = true;
+                }
             }
         }
         CmdResult::NeedPoint
     }
     fn on_enter(&mut self) -> CmdResult {
         match self.input {
-            None if matches!(self.step,HatcheditStep::EditOptions{..})=>{
-                self.input=Some("pattern");CmdResult::NeedPoint
-            }
-            Some("origin")=>{self.origin=Some((self.current_origin[0],self.current_origin[1]));self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel)},
-            Some("origin-extents")=>{
-                if let Some((min,_)) = self.origin_bounds { self.origin=Some((min[0],min[1])); self.input=Some("origin-store"); }
+            None if matches!(self.step, HatcheditStep::EditOptions { .. }) => {
+                self.input = Some("pattern");
                 CmdResult::NeedPoint
-            },
-            Some("origin-point")=>CmdResult::NeedPoint,
-            Some("origin-store")=>self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel),
-            Some("style")=>{self.style=Some(self.style_current);self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel)},
-            Some("annotative")=>{self.annotative=Some(self.annotative_current);self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel)},
-            Some("pattern")=>{
-                if matches!(&self.step,HatcheditStep::EditOptions{name,..} if name.eq_ignore_ascii_case("SOLID")) {
-                    self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel)
-                }else{self.input=Some("scale");CmdResult::NeedPoint}
             }
-            Some("scale")=>{self.input=Some("angle");CmdResult::NeedPoint}
-            Some("angle")=>self.apply_result(self.update_operation()).unwrap_or(CmdResult::Cancel),
-            Some("boundary-type")=>{self.boundary_region=false;self.input=Some("boundary-associate");CmdResult::NeedPoint},
-            Some("boundary-associate")=>self.apply_result(HatchEditOperation::RecreateBoundary{associate:false,region:self.boundary_region}).unwrap_or(CmdResult::Cancel),
-            Some("associate-select")=>{self.input=Some("associate-point");CmdResult::NeedPoint},
-            Some("associate-point")=>if self.association_paths.is_empty(){CmdResult::Cancel}else{
-                self.apply_result(HatchEditOperation::AssociatePaths(self.association_paths.clone())).unwrap_or(CmdResult::Cancel)
-            },
-            _=>CmdResult::Cancel,
+            Some("origin") => {
+                self.origin = Some((self.current_origin[0], self.current_origin[1]));
+                self.apply_result(self.update_operation())
+                    .unwrap_or(CmdResult::Cancel)
+            }
+            Some("origin-extents") => {
+                if let Some((min, _)) = self.origin_bounds {
+                    self.origin = Some((min[0], min[1]));
+                    self.input = Some("origin-store");
+                }
+                CmdResult::NeedPoint
+            }
+            Some("origin-point") => CmdResult::NeedPoint,
+            Some("origin-store") => self
+                .apply_result(self.update_operation())
+                .unwrap_or(CmdResult::Cancel),
+            Some("style") => {
+                self.style = Some(self.style_current);
+                self.apply_result(self.update_operation())
+                    .unwrap_or(CmdResult::Cancel)
+            }
+            Some("annotative") => {
+                self.annotative = Some(self.annotative_current);
+                self.apply_result(self.update_operation())
+                    .unwrap_or(CmdResult::Cancel)
+            }
+            Some("pattern") => {
+                if matches!(&self.step,HatcheditStep::EditOptions{name,..} if name.eq_ignore_ascii_case("SOLID"))
+                {
+                    self.apply_result(self.update_operation())
+                        .unwrap_or(CmdResult::Cancel)
+                } else {
+                    self.input = Some("scale");
+                    CmdResult::NeedPoint
+                }
+            }
+            Some("scale") => {
+                self.input = Some("angle");
+                CmdResult::NeedPoint
+            }
+            Some("angle") => self
+                .apply_result(self.update_operation())
+                .unwrap_or(CmdResult::Cancel),
+            Some("boundary-type") => {
+                self.boundary_region = false;
+                self.input = Some("boundary-associate");
+                CmdResult::NeedPoint
+            }
+            Some("boundary-associate") => self
+                .apply_result(HatchEditOperation::RecreateBoundary {
+                    associate: false,
+                    region: self.boundary_region,
+                })
+                .unwrap_or(CmdResult::Cancel),
+            Some("associate-select") => {
+                self.input = Some("associate-point");
+                CmdResult::NeedPoint
+            }
+            Some("associate-point") => {
+                if self.association_paths.is_empty() {
+                    CmdResult::Cancel
+                } else {
+                    self.apply_result(HatchEditOperation::AssociatePaths(
+                        self.association_paths.clone(),
+                    ))
+                    .unwrap_or(CmdResult::Cancel)
+                }
+            }
+            _ => CmdResult::Cancel,
         }
     }
     fn on_escape(&mut self) -> CmdResult {
@@ -613,9 +904,7 @@ impl CadCommand for HatcheditCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::hatch::{
-        BoundaryEdge, BoundaryPath, EllipticArcEdge, LineEdge,
-    };
+    use acadrust::entities::hatch::{BoundaryEdge, BoundaryPath, EllipticArcEdge, LineEdge};
     use acadrust::entities::{Hatch, HatchStyleType};
     use acadrust::types::{Color, Transparency, Vector2};
     use acadrust::EntityType;
@@ -812,14 +1101,9 @@ mod tests {
         }));
         hatch.paths.push(path);
         let entity = EntityType::Hatch(hatch);
-        let mut command = HatcheditCommand::with_handle(
-            Handle::new(7),
-            "ANSI31".into(),
-            1.0,
-            0.0,
-            false,
-        )
-        .with_appearance(Some(&entity), Color::ByLayer, Transparency::ByLayer);
+        let mut command =
+            HatcheditCommand::with_handle(Handle::new(7), "ANSI31".into(), 1.0, 0.0, false)
+                .with_appearance(Some(&entity), Color::ByLayer, Transparency::ByLayer);
 
         assert!(matches!(
             command.on_text_input("O"),
@@ -843,6 +1127,7 @@ mod tests {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["HATCHEDIT"] });  // HatcheditCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["HATCHEDIT"]
+}); // HatcheditCommand

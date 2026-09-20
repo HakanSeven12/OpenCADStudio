@@ -62,10 +62,7 @@ impl CadCommand for GeomConstraintCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let keyword = text
-            .trim()
-            .trim_start_matches('_')
-            .to_ascii_uppercase();
+        let keyword = text.trim().trim_start_matches('_').to_ascii_uppercase();
         Self::dispatch(&keyword).map(|command| CmdResult::Dispatch(command.to_string()))
     }
 

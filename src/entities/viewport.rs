@@ -24,7 +24,6 @@ const STANDARD_SCALES: &[(&str, f64)] = &[
     ("10:1", 10.0),
 ];
 
-
 fn scale_label(scale: f64) -> String {
     for (label, val) in STANDARD_SCALES {
         if (scale - val).abs() < val * 0.01 {
@@ -119,7 +118,11 @@ fn properties(vp: &Viewport) -> Vec<PropSection> {
                 ro(
                     "Clipped",
                     "vp_clipped",
-                    if vp.clip_boundary_handle.is_null() { "No" } else { "Yes" },
+                    if vp.clip_boundary_handle.is_null() {
+                        "No"
+                    } else {
+                        "Yes"
+                    },
                 ),
                 Property {
                     label: "Display locked".into(),
@@ -429,9 +432,7 @@ fn apply_transform(vp: &mut Viewport, t: &EntityTransform) {
 crate::impl_entity_basics!(Viewport);
 
 impl crate::entities::traits::FallbackTess for Viewport {
-    fn fallback_geometry(
-        &self,
-    ) -> crate::scene::convert::tess_util::FallbackGeometry {
+    fn fallback_geometry(&self) -> crate::scene::convert::tess_util::FallbackGeometry {
         // A clipped viewport uses its linked boundary entity as its visible
         // frame. Drawing the viewport's rectangular extents as well leaves an
         // incorrect box around polygonal/Object MVIEW results.

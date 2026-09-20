@@ -4,8 +4,8 @@
 //   block name  → copies the named block definition to a new document
 //   *           → copies currently selected model-space entities
 
-use acadrust::{CadDocument, EntityType};
 use crate::t;
+use acadrust::{CadDocument, EntityType};
 
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 
@@ -31,11 +31,7 @@ pub fn extract_block_to_doc(src: &CadDocument, block_name: &str) -> Result<CadDo
 
     let handles = br.entity_handles.clone();
     if handles.is_empty() {
-        return Err(t!(
-            "Block \"%{name}\" has no entities.",
-            name = block_name
-        )
-        .into_owned());
+        return Err(t!("Block \"%{name}\" has no entities.", name = block_name).into_owned());
     }
 
     let mut out = CadDocument::new();

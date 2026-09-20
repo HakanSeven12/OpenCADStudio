@@ -134,9 +134,9 @@ impl MTextCommand {
             | AttachmentPoint::BottomRight => 1.0,
         };
         let vertical_anchor = match self.attachment {
-            AttachmentPoint::TopLeft
-            | AttachmentPoint::TopCenter
-            | AttachmentPoint::TopRight => 1.0,
+            AttachmentPoint::TopLeft | AttachmentPoint::TopCenter | AttachmentPoint::TopRight => {
+                1.0
+            }
             AttachmentPoint::MiddleLeft
             | AttachmentPoint::MiddleCenter
             | AttachmentPoint::MiddleRight => 0.5,
@@ -210,16 +210,39 @@ impl CadCommand for MTextCommand {
         match self.step {
             Step::FirstCorner => t!("MTEXT  Specify first corner:").into_owned(),
             Step::OppositeCorner => t!("MTEXT  Specify opposite corner:").into_owned(),
-            Step::Height => crate::tf!("MTEXT  Specify text height <{}>:", self.height).into_owned(),
-            Step::Justify => t!("MTEXT  Enter justification [TL / TC / TR / ML / MC / MR / BL / BC / BR] <TL>:").into_owned(),
-            Step::LineSpacing => crate::tf!("MTEXT  Enter line spacing factor (0.25-4.00) <{}>:", self.line_spacing).into_owned(),
-            Step::Rotation => crate::tf!("MTEXT  Specify rotation angle <{}>:", self.rotation.to_degrees()).into_owned(),
+            Step::Height => {
+                crate::tf!("MTEXT  Specify text height <{}>:", self.height).into_owned()
+            }
+            Step::Justify => {
+                t!("MTEXT  Enter justification [TL / TC / TR / ML / MC / MR / BL / BC / BR] <TL>:")
+                    .into_owned()
+            }
+            Step::LineSpacing => crate::tf!(
+                "MTEXT  Enter line spacing factor (0.25-4.00) <{}>:",
+                self.line_spacing
+            )
+            .into_owned(),
+            Step::Rotation => crate::tf!(
+                "MTEXT  Specify rotation angle <{}>:",
+                self.rotation.to_degrees()
+            )
+            .into_owned(),
             Step::Style => crate::tf!("MTEXT  Enter text style <{}>:", self.style).into_owned(),
-            Step::Width => crate::tf!("MTEXT  Specify boundary width <{}>:", self.width.unwrap_or(0.0)).into_owned(),
+            Step::Width => crate::tf!(
+                "MTEXT  Specify boundary width <{}>:",
+                self.width.unwrap_or(0.0)
+            )
+            .into_owned(),
             Step::ColumnMode => t!("MTEXT  Columns [None / Static / Dynamic] <None>:").into_owned(),
-            Step::ColumnCount => crate::tf!("MTEXT  Enter column count <{}>:", self.column_count).into_owned(),
-            Step::ColumnWidth => crate::tf!("MTEXT  Enter column width <{}>:", self.column_width).into_owned(),
-            Step::ColumnGutter => crate::tf!("MTEXT  Enter column gutter <{}>:", self.column_gutter).into_owned(),
+            Step::ColumnCount => {
+                crate::tf!("MTEXT  Enter column count <{}>:", self.column_count).into_owned()
+            }
+            Step::ColumnWidth => {
+                crate::tf!("MTEXT  Enter column width <{}>:", self.column_width).into_owned()
+            }
+            Step::ColumnGutter => {
+                crate::tf!("MTEXT  Enter column gutter <{}>:", self.column_gutter).into_owned()
+            }
         }
     }
 

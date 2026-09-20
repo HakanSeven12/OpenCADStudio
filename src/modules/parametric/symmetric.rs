@@ -193,15 +193,11 @@ impl CadCommand for SymmetricConstraintCommand {
 
     fn prompt(&self) -> String {
         match self.step {
-            Step::ObjectOrTwoPoints => {
-                "Select first object or [2Points] <2Points>:".to_string()
-            }
+            Step::ObjectOrTwoPoints => "Select first object or [2Points] <2Points>:".to_string(),
             Step::SecondObject(_) => "Select second object:".to_string(),
             Step::FirstPoint => "Select first point:".to_string(),
             Step::SecondPoint(_) => "Select second point:".to_string(),
-            Step::ObjectAxis(_, _) | Step::PointAxis(_, _) => {
-                "Select symmetry line:".to_string()
-            }
+            Step::ObjectAxis(_, _) | Step::PointAxis(_, _) => "Select symmetry line:".to_string(),
         }
     }
 

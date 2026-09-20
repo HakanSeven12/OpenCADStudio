@@ -202,8 +202,7 @@ impl SketchCommand {
             .collect();
         let elevation = local.first()?.z;
         let points: Vec<[f64; 2]> = local.iter().map(|point| [point.x, point.y]).collect();
-        NurbsCurve::fit_polyline(&points, self.fit_distance())
-            .map(|curve| (curve, elevation))
+        NurbsCurve::fit_polyline(&points, self.fit_distance()).map(|curve| (curve, elevation))
     }
 
     fn fit_distance(&self) -> f64 {
@@ -236,9 +235,7 @@ impl SketchCommand {
                     .iter()
                     .map(|point| LwVertex::new(Vector2::new(point.x, point.y)))
                     .collect();
-                vec![self
-                    .plane
-                    .place_entity(EntityType::LwPolyline(polyline))]
+                vec![self.plane.place_entity(EntityType::LwPolyline(polyline))]
             }
             SketchType::Spline => {
                 let Some((curve, elevation)) = self.fit_curve(points) else {
@@ -324,7 +321,12 @@ impl SketchCommand {
             combined.extend(display.into_iter().map(|point| [point.x, point.y, point.z]));
         }
         (combined.len() >= 2).then(|| {
-            WireModel::solid_f64("sketch_preview".to_string(), combined, WireModel::CYAN, false)
+            WireModel::solid_f64(
+                "sketch_preview".to_string(),
+                combined,
+                WireModel::CYAN,
+                false,
+            )
         })
     }
 
@@ -347,7 +349,14 @@ impl SketchCommand {
         }
         options.extend([
             CmdOption::new("Record", "RECORD"),
-            CmdOption::new(if self.erasing { "Stop erasing" } else { "Erase" }, "ERASE"),
+            CmdOption::new(
+                if self.erasing {
+                    "Stop erasing"
+                } else {
+                    "Erase"
+                },
+                "ERASE",
+            ),
             CmdOption::new("Connect", "CONNECT"),
             CmdOption::new("Exit", "EXIT"),
             CmdOption::new("Quit", "QUIT"),

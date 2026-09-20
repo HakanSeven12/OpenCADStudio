@@ -232,7 +232,11 @@ fn apply_geom_prop(ins: &mut Insert, field: &str, value: &str) {
 fn apply_grip(ins: &mut Insert, grip_id: usize, apply: GripApply) {
     // An attribute grip moves that attribute alone; the block stays put.
     if let Some(index) = grip_id.checked_sub(ATTRIBUTE_GRIP_BASE) {
-        if let Some(att) = ins.attributes.get_mut(index).filter(|a| attribute_is_movable(a)) {
+        if let Some(att) = ins
+            .attributes
+            .get_mut(index)
+            .filter(|a| attribute_is_movable(a))
+        {
             Grippable::apply_grip(att, 0, apply);
         }
         return;
@@ -289,9 +293,7 @@ fn apply_transform(ins: &mut Insert, t: &EntityTransform) {
 crate::impl_entity_basics!(Insert);
 
 impl crate::entities::traits::FallbackTess for Insert {
-    fn fallback_geometry(
-        &self,
-    ) -> crate::scene::convert::tess_util::FallbackGeometry {
+    fn fallback_geometry(&self) -> crate::scene::convert::tess_util::FallbackGeometry {
         let (ipx, ipy, ipz) = (
             self.insert_point.x,
             self.insert_point.y,
@@ -458,7 +460,10 @@ mod tests {
     /// handle to pick an attribute up by and nowhere to drop it.
     #[test]
     fn each_attribute_offers_its_own_grip() {
-        let ins = block_with(vec![attribute("TAG_A", 3.0, 4.0), attribute("TAG_B", 6.0, 8.0)]);
+        let ins = block_with(vec![
+            attribute("TAG_A", 3.0, 4.0),
+            attribute("TAG_B", 6.0, 8.0),
+        ]);
 
         let g = grips(&ins);
         assert_eq!(g.len(), 3, "insertion point plus one grip per attribute");
@@ -471,15 +476,31 @@ mod tests {
     /// block and its other attributes stay where they were.
     #[test]
     fn attribute_grip_moves_only_that_attribute() {
-        let mut ins = block_with(vec![attribute("TAG_A", 3.0, 4.0), attribute("TAG_B", 6.0, 8.0)]);
+        let mut ins = block_with(vec![
+            attribute("TAG_A", 3.0, 4.0),
+            attribute("TAG_B", 6.0, 8.0),
+        ]);
 
         let moved = grips(&ins)[1].id;
-        apply_grip(&mut ins, moved, GripApply::Absolute(glam::DVec3::new(30.0, 40.0, 0.0)));
+        apply_grip(
+            &mut ins,
+            moved,
+            GripApply::Absolute(glam::DVec3::new(30.0, 40.0, 0.0)),
+        );
 
         assert_eq!(ins.insert_point, Vector3::new(0.0, 0.0, 0.0));
-        assert_eq!(ins.attributes[0].insertion_point, Vector3::new(30.0, 40.0, 0.0));
-        assert_eq!(ins.attributes[0].alignment_point, Vector3::new(30.0, 40.0, 0.0));
-        assert_eq!(ins.attributes[1].insertion_point, Vector3::new(6.0, 8.0, 0.0));
+        assert_eq!(
+            ins.attributes[0].insertion_point,
+            Vector3::new(30.0, 40.0, 0.0)
+        );
+        assert_eq!(
+            ins.attributes[0].alignment_point,
+            Vector3::new(30.0, 40.0, 0.0)
+        );
+        assert_eq!(
+            ins.attributes[1].insertion_point,
+            Vector3::new(6.0, 8.0, 0.0)
+        );
     }
 
     /// The insertion grip keeps carrying the attributes along with the block,
@@ -489,10 +510,17 @@ mod tests {
     fn insertion_grip_still_carries_the_attributes() {
         let mut ins = block_with(vec![attribute("TAG_A", 3.0, 4.0)]);
 
-        apply_grip(&mut ins, 0, GripApply::Translate(glam::DVec3::new(10.0, 0.0, 0.0)));
+        apply_grip(
+            &mut ins,
+            0,
+            GripApply::Translate(glam::DVec3::new(10.0, 0.0, 0.0)),
+        );
 
         assert_eq!(ins.insert_point, Vector3::new(10.0, 0.0, 0.0));
-        assert_eq!(ins.attributes[0].insertion_point, Vector3::new(13.0, 4.0, 0.0));
+        assert_eq!(
+            ins.attributes[0].insertion_point,
+            Vector3::new(13.0, 4.0, 0.0)
+        );
     }
 
     /// A constant attribute belongs to the block definition and an invisible
@@ -506,15 +534,30 @@ mod tests {
         invisible.flags.invisible = true;
         let mut locked = attribute("TAG_LOCKED", 4.0, 4.0);
         locked.lock_position = true;
-        let mut ins = block_with(vec![constant, invisible, locked, attribute("TAG_OK", 5.0, 5.0)]);
+        let mut ins = block_with(vec![
+            constant,
+            invisible,
+            locked,
+            attribute("TAG_OK", 5.0, 5.0),
+        ]);
 
         let g = grips(&ins);
         assert_eq!(g.len(), 2, "only the movable attribute is gripped: {g:?}");
         assert_eq!(g[1].world, glam::DVec3::new(5.0, 5.0, 0.0));
 
-        apply_grip(&mut ins, g[1].id, GripApply::Absolute(glam::DVec3::new(50.0, 50.0, 0.0)));
-        assert_eq!(ins.attributes[3].insertion_point, Vector3::new(50.0, 50.0, 0.0));
-        assert_eq!(ins.attributes[0].insertion_point, Vector3::new(1.0, 1.0, 0.0));
+        apply_grip(
+            &mut ins,
+            g[1].id,
+            GripApply::Absolute(glam::DVec3::new(50.0, 50.0, 0.0)),
+        );
+        assert_eq!(
+            ins.attributes[3].insertion_point,
+            Vector3::new(50.0, 50.0, 0.0)
+        );
+        assert_eq!(
+            ins.attributes[0].insertion_point,
+            Vector3::new(1.0, 1.0, 0.0)
+        );
     }
 
     #[test]

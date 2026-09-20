@@ -10,9 +10,9 @@
 //
 // Layer names are case-insensitive. Multiple space-separated names are accepted.
 
+use crate::t;
 use acadrust::Handle;
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::scene::model::wire_model::WireModel;
@@ -108,6 +108,7 @@ impl CadCommand for VplayerCommand {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["VPLAYER"] });  // VplayerCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["VPLAYER"]
+}); // VplayerCommand

@@ -149,9 +149,7 @@ pub fn view_window<'a>(
             .on_press_maybe(can_map.then_some(Message::LayerTranslatorMap))
             .padding([4, 10]),
         button(text(t!("Map same")).size(12))
-            .on_press_maybe(
-                (!state.targets.is_empty()).then_some(Message::LayerTranslatorMapSame)
-            )
+            .on_press_maybe((!state.targets.is_empty()).then_some(Message::LayerTranslatorMapSame))
             .padding([4, 10]),
         Space::new().width(Fill),
         loaded,

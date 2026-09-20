@@ -24,7 +24,10 @@ use std::sync::{Mutex, OnceLock};
 /// Every LibreCAD LFF font, keyed by its file stem (lower-case). Registered
 /// under the upper-cased stem and the font's `# Name:` header.
 const FONTS_SRC: &[(&str, &str)] = &[
-    ("cyrillic_ii", include_str!("../../../assets/fonts/cyrillic_ii.lff")),
+    (
+        "cyrillic_ii",
+        include_str!("../../../assets/fonts/cyrillic_ii.lff"),
+    ),
     ("gothgbt", include_str!("../../../assets/fonts/gothgbt.lff")),
     ("gothgrt", include_str!("../../../assets/fonts/gothgrt.lff")),
     ("gothitt", include_str!("../../../assets/fonts/gothitt.lff")),
@@ -34,7 +37,10 @@ const FONTS_SRC: &[(&str, &str)] = &[
     ("iso", include_str!("../../../assets/fonts/iso.lff")),
     ("italicc", include_str!("../../../assets/fonts/italicc.lff")),
     ("italict", include_str!("../../../assets/fonts/italict.lff")),
-    ("ltypeshp", include_str!("../../../assets/fonts/ltypeshp.lff")),
+    (
+        "ltypeshp",
+        include_str!("../../../assets/fonts/ltypeshp.lff"),
+    ),
     ("romanc", include_str!("../../../assets/fonts/romanc.lff")),
     ("romand", include_str!("../../../assets/fonts/romand.lff")),
     ("romans", include_str!("../../../assets/fonts/romans.lff")),
@@ -42,7 +48,10 @@ const FONTS_SRC: &[(&str, &str)] = &[
     ("scriptc", include_str!("../../../assets/fonts/scriptc.lff")),
     ("scripts", include_str!("../../../assets/fonts/scripts.lff")),
     ("simplex", include_str!("../../../assets/fonts/simplex.lff")),
-    ("standard", include_str!("../../../assets/fonts/standard.lff")),
+    (
+        "standard",
+        include_str!("../../../assets/fonts/standard.lff"),
+    ),
     ("syastro", include_str!("../../../assets/fonts/syastro.lff")),
     ("symap", include_str!("../../../assets/fonts/symap.lff")),
     ("symath", include_str!("../../../assets/fonts/symath.lff")),
@@ -155,7 +164,8 @@ fn fonts_map() -> &'static HashMap<String, Font> {
         for (stem, src) in FONTS_SRC {
             let f = parse_lff(src);
             map.insert(stem.to_ascii_uppercase(), f.clone());
-            map.entry(f.name.to_ascii_uppercase()).or_insert_with(|| f.clone());
+            map.entry(f.name.to_ascii_uppercase())
+                .or_insert_with(|| f.clone());
         }
         // AutoCAD/DXF SHX names → the matching LFF stem.
         for (alias, stem) in ALIASES {
@@ -319,7 +329,11 @@ pub(crate) fn tokenize_run(text: &str) -> Vec<Tok> {
             continue;
         }
 
-        toks.push(if ch == ' ' { Tok::Space } else { Tok::Glyph(ch) });
+        toks.push(if ch == ' ' {
+            Tok::Space
+        } else {
+            Tok::Glyph(ch)
+        });
     }
     toks
 }
@@ -420,7 +434,10 @@ pub fn tessellate_text_run(
     // Flush a buffered TTF segment: shape it, emit the positioned glyph
     // contours, and advance the pen by the shaped run width. Falls back to
     // per-glyph outlines if shaping is unavailable.
-    let flush_ttf = |seg: &mut String, cursor_x: &mut f32, out: &mut Vec<Vec<[f32; 2]>>, fill_tris: &mut Vec<[f32; 2]>| {
+    let flush_ttf = |seg: &mut String,
+                     cursor_x: &mut f32,
+                     out: &mut Vec<Vec<[f32; 2]>>,
+                     fill_tris: &mut Vec<[f32; 2]>| {
         if seg.is_empty() {
             return;
         }
@@ -517,13 +534,22 @@ pub fn tessellate_text_run(
     }
 
     if let Some(start) = underline {
-        out.push(vec![xform(start, UNDER_Y, 0.0), xform(cursor_x, UNDER_Y, 0.0)]);
+        out.push(vec![
+            xform(start, UNDER_Y, 0.0),
+            xform(cursor_x, UNDER_Y, 0.0),
+        ]);
     }
     if let Some(start) = overline {
-        out.push(vec![xform(start, OVER_Y, 0.0), xform(cursor_x, OVER_Y, 0.0)]);
+        out.push(vec![
+            xform(start, OVER_Y, 0.0),
+            xform(cursor_x, OVER_Y, 0.0),
+        ]);
     }
     if let Some(start) = strikethrough {
-        out.push(vec![xform(start, STRIKE_Y, 0.0), xform(cursor_x, STRIKE_Y, 0.0)]);
+        out.push(vec![
+            xform(start, STRIKE_Y, 0.0),
+            xform(cursor_x, STRIKE_Y, 0.0),
+        ]);
     }
 
     (out, fill_tris)
@@ -667,11 +693,25 @@ fn parse_lff(src: &str) -> Font {
     };
     for (c, g) in raw {
         let advance = advance_of(&g.strokes);
-        font.glyphs.insert(c, Glyph { strokes: g.strokes, advance, fill_tris: Vec::new() });
+        font.glyphs.insert(
+            c,
+            Glyph {
+                strokes: g.strokes,
+                advance,
+                fill_tris: Vec::new(),
+            },
+        );
     }
     for (n, g) in raw_shapes {
         let advance = advance_of(&g.strokes);
-        font.shapes.insert(n, Glyph { strokes: g.strokes, advance, fill_tris: Vec::new() });
+        font.shapes.insert(
+            n,
+            Glyph {
+                strokes: g.strokes,
+                advance,
+                fill_tris: Vec::new(),
+            },
+        );
     }
     font
 }
@@ -763,11 +803,7 @@ mod tests {
         for &(t, segs, verts, sum_ref) in cases {
             let (st, _) = tessellate_text_ex([0.0, 0.0], 10.0, 0.0, 1.0, 0.0, "txt", t);
             let nv: usize = st.iter().map(|s| s.len()).sum();
-            let sum: f64 = st
-                .iter()
-                .flatten()
-                .map(|p| p[0] as f64 + p[1] as f64)
-                .sum();
+            let sum: f64 = st.iter().flatten().map(|p| p[0] as f64 + p[1] as f64).sum();
             assert_eq!(st.len(), segs, "segment count drift for {t:?}");
             assert_eq!(nv, verts, "vertex count drift for {t:?}");
             assert!(
@@ -806,15 +842,15 @@ mod tests {
         assert!(!is_builtin("amiri-regular"));
         assert!(get_font("kochigothic").glyph('A').is_some());
         // Unicode fallback covers a non-ASCII letter via the renderer path.
-        let (strokes, _) = tessellate_text_run([0.0, 0.0], 2.5, 0.0, 1.0, 0.0, 1.0, "Standard", "Aб");
+        let (strokes, _) =
+            tessellate_text_run([0.0, 0.0], 2.5, 0.0, 1.0, 0.0, 1.0, "Standard", "Aб");
         assert!(!strokes.is_empty());
         // The bulge belongs to the segment ENDING at the vertex (LibreCAD
         // convention): the standard/iso/unicode 'O' must come out as an
         // upright oval (taller than wide), not a sideways capsule.
         for name in ["standard", "iso", "unicode", "txt"] {
             let o = get_font(name).glyph('O').expect("O glyph");
-            let (mut minx, mut miny, mut maxx, mut maxy) =
-                (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+            let (mut minx, mut miny, mut maxx, mut maxy) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
             for s in &o.strokes {
                 for &[x, y] in s {
                     minx = minx.min(x);

@@ -8,12 +8,12 @@
 
 use crate::app::Message;
 use crate::plugin::external::{ExternalPlugin, RegistryEntry, ReleaseInfo};
+use crate::t;
 use crate::ui::style::common::muted_style;
 use iced::widget::{
     button, column, container, markdown, row, rule, scrollable, text, text_input, Space,
 };
 use iced::{Background, Border, Element, Fill, Length, Theme};
-use crate::t;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 
@@ -61,13 +61,13 @@ fn badge<'a>(label: String) -> Element<'a, Message> {
         .style(|theme: &Theme| {
             let pair = theme.palette().primary.weak;
             container::Style {
-            background: Some(Background::Color(pair.color)),
-            text_color: Some(pair.text),
-            border: Border {
-                radius: 4.0.into(),
+                background: Some(Background::Color(pair.color)),
+                text_color: Some(pair.text),
+                border: Border {
+                    radius: 4.0.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
-            },
-            ..Default::default()
             }
         })
         .into()
@@ -85,7 +85,11 @@ fn toggle_button<'a>(id: &str, disabled: bool) -> Element<'a, Message> {
     button(text(label).size(12))
         .padding([3, 12])
         .on_press(Message::SetPluginEnabled(id_owned, want_enabled))
-        .style(if disabled { button::success } else { button::danger })
+        .style(if disabled {
+            button::success
+        } else {
+            button::danger
+        })
         .into()
 }
 
@@ -110,13 +114,13 @@ fn status_badge<'a>(label: Cow<'static, str>, kind: StatusKind) -> Element<'a, M
                 StatusKind::Warning => palette.warning.weak,
             };
             container::Style {
-            background: Some(Background::Color(pair.color)),
-            text_color: Some(pair.text),
-            border: Border {
-                radius: 4.0.into(),
+                background: Some(Background::Color(pair.color)),
+                text_color: Some(pair.text),
+                border: Border {
+                    radius: 4.0.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
-            },
-            ..Default::default()
             }
         })
         .into()
@@ -140,10 +144,7 @@ fn card_style(theme: &Theme, selected: bool) -> container::Style {
     }
 }
 
-fn repository_for_external(
-    plugin: &ExternalPlugin,
-    registry: &[RegistryEntry],
-) -> Option<String> {
+fn repository_for_external(plugin: &ExternalPlugin, registry: &[RegistryEntry]) -> Option<String> {
     plugin.repository.clone().or_else(|| {
         registry
             .iter()
@@ -182,8 +183,7 @@ fn repository_is_installed(
 ) -> bool {
     externals.iter().any(|plugin| {
         plugin.repository.as_deref() == Some(repository)
-            || registry_name
-                .is_some_and(|name| plugin.name.eq_ignore_ascii_case(name))
+            || registry_name.is_some_and(|name| plugin.name.eq_ignore_ascii_case(name))
     })
 }
 
@@ -221,8 +221,8 @@ fn external_card<'a>(
 ) -> Element<'a, Message> {
     let failed_old_api = load_error.is_some() && !p.api_compatible();
     let acadrust_mismatch = p.acadrust_declared && !p.acadrust_compatible();
-    let rustc_mismatch = ocs_plugin_api::version_info::uses_acadrust_gate(p.api_version)
-        && !p.rustc_compatible();
+    let rustc_mismatch =
+        ocs_plugin_api::version_info::uses_acadrust_gate(p.api_version) && !p.rustc_compatible();
     let (status, kind) = if loaded && disabled {
         (t!("Disabled"), StatusKind::Muted)
     } else if loaded {
@@ -274,14 +274,11 @@ fn external_card<'a>(
         } else {
             t!("Load failed:  %{error}", error = error)
         };
-        info_body = info_body.push(
-            text(detail)
-                .size(11)
-                .width(Fill)
-                .style(|theme: &Theme| iced::widget::text::Style {
-                    color: Some(theme.palette().danger.base.color),
-                }),
-        );
+        info_body = info_body.push(text(detail).size(11).width(Fill).style(|theme: &Theme| {
+            iced::widget::text::Style {
+                color: Some(theme.palette().danger.base.color),
+            }
+        }));
     }
 
     let info: Element<'a, Message> = if let Some(repo) = repository.clone() {
@@ -358,17 +355,17 @@ fn install_controls<'a>(
         .iter()
         .map(|release| release.tag.clone())
         .collect::<Vec<_>>();
-    let selected_release = selected.as_ref().and_then(|selected| {
-        releases.iter().find(|release| release.tag == *selected)
-    });
+    let selected_release = selected
+        .as_ref()
+        .and_then(|selected| releases.iter().find(|release| release.tag == *selected));
     let picker: Element<'_, Message> = if tags.is_empty() {
         text(t!("no releases")).size(11).style(muted_style).into()
     } else {
         let r = repo_s.clone();
         iced::widget::pick_list(selected, tags, |value| value.to_string())
-        .on_select(move |tag| Message::PluginReleaseSelect(r.clone(), tag))
-        .text_size(12)
-        .into()
+            .on_select(move |tag| Message::PluginReleaseSelect(r.clone(), tag))
+            .text_size(12)
+            .into()
     };
     let action = match selected_release {
         Some(release)
@@ -496,11 +493,7 @@ fn registry_notice<'a>(m: &MarketView) -> Option<Element<'a, Message>> {
     if let Some(error) = m.registry_error {
         let (title, message) = registry_error_message(error);
         let actions = row![
-            pill_button(
-                t!("Retry"),
-                Message::PluginRegistryRetry,
-                button::primary,
-            ),
+            pill_button(t!("Retry"), Message::PluginRegistryRetry, button::primary,),
             Space::new().width(6),
             pill_button(
                 if m.registry_error_details_open {
@@ -557,9 +550,11 @@ fn registry_notice<'a>(m: &MarketView) -> Option<Element<'a, Message>> {
         container(
             column![
                 text(t!("Loading plugin catalog…")).size(13),
-                text(t!("Connecting securely using your system certificate settings."))
-                    .size(11)
-                    .style(muted_style),
+                text(t!(
+                    "Connecting securely using your system certificate settings."
+                ))
+                .size(11)
+                .style(muted_style),
             ]
             .spacing(5)
             .padding([10, 12]),
@@ -570,10 +565,7 @@ fn registry_notice<'a>(m: &MarketView) -> Option<Element<'a, Message>> {
     })
 }
 
-fn marketplace_section<'a>(
-    m: &MarketView,
-    externals: &[ExternalPlugin],
-) -> Element<'a, Message> {
+fn marketplace_section<'a>(m: &MarketView, externals: &[ExternalPlugin]) -> Element<'a, Message> {
     let mut col = column![text(t!("Available plugins")).size(13).style(primary_style)].spacing(6);
     let mut visible = 0usize;
     if let Some(notice) = registry_notice(m) {
@@ -648,9 +640,7 @@ fn marketplace_section<'a>(
         ));
     }
 
-    if visible == 0
-        && m.registry_error.is_none()
-        && !(m.registry_loading && m.registry.is_empty())
+    if visible == 0 && m.registry_error.is_none() && !(m.registry_loading && m.registry.is_empty())
     {
         let message = if m.search.trim().is_empty() {
             t!("No additional plugins are available.")
@@ -669,10 +659,7 @@ fn marketplace_section<'a>(
 }
 
 fn resolve_readme_link(repo: &str, uri: &str) -> String {
-    if uri.starts_with("https://")
-        || uri.starts_with("http://")
-        || uri.starts_with("mailto:")
-    {
+    if uri.starts_with("https://") || uri.starts_with("http://") || uri.starts_with("mailto:") {
         uri.to_string()
     } else if uri.starts_with('/') {
         format!("https://github.com{uri}")
@@ -753,9 +740,7 @@ fn readme_panel<'a>(
                     readme.items(),
                     markdown::Settings::with_text_size(13, theme),
                 )
-                .map(move |uri| {
-                    Message::OpenUrl(resolve_readme_link(&source_repo, &uri))
-                })
+                .map(move |uri| Message::OpenUrl(resolve_readme_link(&source_repo, &uri)))
             }
             Some(Err(error)) => container(
                 column![
@@ -823,15 +808,20 @@ pub fn view_window<'a>(
     let width = sizing.width;
     let height = sizing.height;
     let title = text(t!("Plugins")).size(20);
-    let subtitle =
-        text(t!("Browse, install, and manage add-ons. Select one to view its README."))
-            .size(12)
-            .style(muted_style);
+    let subtitle = text(t!(
+        "Browse, install, and manage add-ons. Select one to view its README."
+    ))
+    .size(12)
+    .style(muted_style);
 
     let mut list = column![].spacing(10);
     // Installed external packages (from the plugins folder).
     if externals.is_empty() {
-        list = list.push(text(t!("No plugins installed yet.")).size(13).style(muted_style));
+        list = list.push(
+            text(t!("No plugins installed yet."))
+                .size(13)
+                .style(muted_style),
+        );
     } else {
         let mut visible_installed = 0usize;
         for p in externals {
@@ -906,9 +896,7 @@ pub fn view_window<'a>(
             .height(height),
     )
     .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(
-            theme.palette().background.base.color,
-        )),
+        background: Some(Background::Color(theme.palette().background.base.color)),
         ..Default::default()
     })
     .width(width)
@@ -934,9 +922,7 @@ pub fn view_web_notice<'a>() -> Element<'a, Message> {
     ))
     .center(Length::Fixed(44.0))
     .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(
-            theme.palette().primary.weak.color,
-        )),
+        background: Some(Background::Color(theme.palette().primary.weak.color)),
         border: Border {
             radius: 12.0.into(),
             ..Default::default()
@@ -968,11 +954,11 @@ pub fn view_web_notice<'a>() -> Element<'a, Message> {
     .width(Length::Fit.max(380.0));
 
     container(notice)
-    .center_x(Length::Fit)
-    .padding([16, 20])
-    .width(Length::Fit)
-    .height(Length::Fit)
-    .into()
+        .center_x(Length::Fit)
+        .padding([16, 20])
+        .width(Length::Fit)
+        .height(Length::Fit)
+        .into()
 }
 
 #[cfg(test)]

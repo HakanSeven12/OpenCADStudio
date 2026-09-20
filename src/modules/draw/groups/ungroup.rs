@@ -13,9 +13,9 @@ pub fn tool() -> ToolDef {
 
 // ── CadCommand implementation ─────────────────────────────────────────────
 
+use crate::t;
 use acadrust::Handle;
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::scene::model::wire_model::WireModel;
@@ -61,6 +61,7 @@ impl CadCommand for UngroupCommand {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["UNGROUP"] });  // UngroupCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["UNGROUP"]
+}); // UngroupCommand

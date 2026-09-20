@@ -1,13 +1,13 @@
 //! Dimension Style Manager window — fills the entire OS window.
 
 use crate::app::{ColorPickTarget, DsField, Message};
+use crate::t;
+use crate::ui::style::common::muted_style;
+use crate::ui::style::form::hdivider;
 use iced::widget::{
     button, canvas, checkbox, column, container, row, scrollable, text, text_input, Space,
 };
 use iced::{mouse, Background, Border, Element, Length, Point, Rectangle, Theme};
-use crate::ui::style::common::muted_style;
-use crate::ui::style::form::hdivider;
-use crate::t;
 use std::borrow::Cow;
 use std::fmt;
 
@@ -120,20 +120,18 @@ fn tab_btn_style(active: bool) -> impl Fn(&Theme, button::Status) -> button::Sty
         let palette = theme.palette();
         let pair = match (active, st) {
             (true, _) => palette.primary.strong,
-            (false, button::Status::Hovered | button::Status::Pressed) => {
-                palette.background.strong
-            }
+            (false, button::Status::Hovered | button::Status::Pressed) => palette.background.strong,
             _ => palette.background.weak,
         };
         button::Style {
-        background: Some(Background::Color(pair.color)),
-        text_color: pair.text,
-        border: Border {
-            color: palette.background.neutral.color,
-            width: 1.0,
-            radius: 3.0.into(),
-        },
-        ..Default::default()
+            background: Some(Background::Color(pair.color)),
+            text_color: pair.text,
+            border: Border {
+                color: palette.background.neutral.color,
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
         }
     }
 }
@@ -199,22 +197,45 @@ impl canvas::Program<Message> for DimensionPreview {
 
         let line = |a: Point, b: Point| canvas::Path::line(a, b);
         frame.stroke(
-            &line(Point::new(x1 - 18.0, object_y), Point::new(x2 + 18.0, object_y)),
-            canvas::Stroke::default().with_color(ink.scale_alpha(0.38)).with_width(1.0),
+            &line(
+                Point::new(x1 - 18.0, object_y),
+                Point::new(x2 + 18.0, object_y),
+            ),
+            canvas::Stroke::default()
+                .with_color(ink.scale_alpha(0.38))
+                .with_width(1.0),
         );
         if self.ext1 {
-            frame.stroke(&line(Point::new(x1, object_y), Point::new(x1, 22.0)), stroke.clone());
+            frame.stroke(
+                &line(Point::new(x1, object_y), Point::new(x1, 22.0)),
+                stroke.clone(),
+            );
         }
         if self.ext2 {
-            frame.stroke(&line(Point::new(x2, object_y), Point::new(x2, 22.0)), stroke.clone());
+            frame.stroke(
+                &line(Point::new(x2, object_y), Point::new(x2, 22.0)),
+                stroke.clone(),
+            );
         }
 
         let text_half = (self.text.chars().count() as f32 * 3.4 + 8.0).min((x2 - x1) * 0.34);
         if self.dim1 {
-            frame.stroke(&line(Point::new(x1, y), Point::new((bounds.width * 0.5 - text_half).max(x1), y)), stroke.clone());
+            frame.stroke(
+                &line(
+                    Point::new(x1, y),
+                    Point::new((bounds.width * 0.5 - text_half).max(x1), y),
+                ),
+                stroke.clone(),
+            );
         }
         if self.dim2 {
-            frame.stroke(&line(Point::new((bounds.width * 0.5 + text_half).min(x2), y), Point::new(x2, y)), stroke.clone());
+            frame.stroke(
+                &line(
+                    Point::new((bounds.width * 0.5 + text_half).min(x2), y),
+                    Point::new(x2, y),
+                ),
+                stroke.clone(),
+            );
         }
 
         let size = self.arrow_size.clamp(5.0, 14.0);
@@ -240,8 +261,7 @@ impl canvas::Program<Message> for DimensionPreview {
 
         let text_y = if self.text_above { y - 16.0 } else { y };
         if self.basic {
-            let frame_width = (self.text.chars().count() as f32 * 7.0 + 12.0)
-                .min((x2 - x1) * 0.8);
+            let frame_width = (self.text.chars().count() as f32 * 7.0 + 12.0).min((x2 - x1) * 0.8);
             frame.stroke(
                 &canvas::Path::rectangle(
                     Point::new(bounds.width * 0.5 - frame_width * 0.5, text_y - 9.0),
@@ -340,7 +360,8 @@ pub fn view_window<'a>(
         if vals.read_only {
             item.into()
         } else {
-            item.on_toggle(move |_| Message::DsToggle(fld.clone())).into()
+            item.on_toggle(move |_| Message::DsToggle(fld.clone()))
+                .into()
         }
     };
 
@@ -370,17 +391,15 @@ pub fn view_window<'a>(
             crate::ui::read_only::field(cur.to_string().as_str(), 11.0, Length::Fixed(150.0))
         } else {
             iced::widget::pick_list(Some(cur), options, |value| value.to_string())
-                .on_select(move |chosen: DimEnumChoice| {
-                    Message::DsEdit(fld.clone(), chosen.code)
-                })
+                .on_select(move |chosen: DimEnumChoice| Message::DsEdit(fld.clone(), chosen.code))
                 .text_size(11)
                 .width(150)
                 .into()
         };
         row![lbl(label), choice]
-        .spacing(8)
-        .align_y(iced::Center)
-        .into()
+            .spacing(8)
+            .align_y(iced::Center)
+            .into()
     };
 
     // Linear unit formats shared by DIMLUNIT / DIMALTU.
@@ -434,26 +453,47 @@ pub fn view_window<'a>(
      -> Element<'a, Message> {
         let raw = value.trim().parse::<i16>().unwrap_or(0);
         let feet_modes = vec![
-            DimEnumChoice { code: "0".into(), label: t!("Suppress zero feet and zero inches").into_owned() },
-            DimEnumChoice { code: "1".into(), label: t!("Show zero feet and zero inches").into_owned() },
-            DimEnumChoice { code: "2".into(), label: t!("Show zero feet; suppress zero inches").into_owned() },
-            DimEnumChoice { code: "3".into(), label: t!("Suppress zero feet; show zero inches").into_owned() },
+            DimEnumChoice {
+                code: "0".into(),
+                label: t!("Suppress zero feet and zero inches").into_owned(),
+            },
+            DimEnumChoice {
+                code: "1".into(),
+                label: t!("Show zero feet and zero inches").into_owned(),
+            },
+            DimEnumChoice {
+                code: "2".into(),
+                label: t!("Show zero feet; suppress zero inches").into_owned(),
+            },
+            DimEnumChoice {
+                code: "3".into(),
+                label: t!("Suppress zero feet; show zero inches").into_owned(),
+            },
         ];
         let feet_current = feet_modes[(raw & 3) as usize].clone();
         let feet: Element<'a, Message> = if show_feet_inches {
-            let list = iced::widget::pick_list(Some(feet_current.clone()), feet_modes, |choice| choice.to_string())
-                .text_size(11)
-                .width(210);
+            let list = iced::widget::pick_list(Some(feet_current.clone()), feet_modes, |choice| {
+                choice.to_string()
+            })
+            .text_size(11)
+            .width(210);
             let list: Element<'a, Message> = if enabled && !vals.read_only {
                 let target = field.clone();
                 list.on_select(move |choice| {
                     Message::DsZeroBase(target.clone(), choice.code.parse().unwrap_or(0))
-                }).into()
+                })
+                .into()
             } else {
-                crate::ui::read_only::field(feet_current.to_string().as_str(), 11.0, Length::Fixed(210.0))
+                crate::ui::read_only::field(
+                    feet_current.to_string().as_str(),
+                    11.0,
+                    Length::Fixed(210.0),
+                )
             };
             row![lbl(t!("Feet and inches")), list]
-                .spacing(8).align_y(iced::Center).into()
+                .spacing(8)
+                .align_y(iced::Center)
+                .into()
         } else {
             Space::new().height(0).into()
         };
@@ -467,12 +507,16 @@ pub fn view_window<'a>(
             .text_size(11);
         let leading: Element<'a, Message> = if enabled && !vals.read_only {
             let target = field.clone();
-            leading.on_toggle(move |_| Message::DsZeroFlag(target.clone(), 4)).into()
+            leading
+                .on_toggle(move |_| Message::DsZeroFlag(target.clone(), 4))
+                .into()
         } else {
             leading.into()
         };
         let trailing: Element<'a, Message> = if enabled && !vals.read_only {
-            trailing.on_toggle(move |_| Message::DsZeroFlag(field.clone(), 8)).into()
+            trailing
+                .on_toggle(move |_| Message::DsZeroFlag(field.clone(), 8))
+                .into()
         } else {
             trailing.into()
         };
@@ -482,39 +526,42 @@ pub fn view_window<'a>(
     // Shared colour selector (main dropdown + "more" palette), reusing the
     // existing DsEdit path (the chosen colour is sent as an ACI string).
     let color_open = vals.color_open.clone();
-    let color_row = move |label: Cow<'static, str>, fld: DsField, _val: &'a str| -> Element<'a, Message> {
-        if vals.read_only {
-            return row![
-                lbl(label),
-                crate::ui::read_only::field(_val, 11.0, Length::Fixed(150.0)),
-            ]
-            .spacing(8)
-            .align_y(iced::Center)
-            .into();
-        }
-        let cur = crate::ui::color_select::aci_string_to_color(_val);
-        let open = color_open.as_ref() == Some(&fld);
-        let f_sel = fld.clone();
-        let selector = crate::ui::color_select::color_selector(
-            cur,
-            open,
-            crate::ui::color_select::ColorExtras {
-                by_layer: true,
-                by_block: true,
-                ..Default::default()
-            },
-            move |c| Message::DsEdit(f_sel.clone(), crate::ui::color_select::color_to_aci_string(c)),
-            Message::DsColorMore(fld.clone()),
-            Message::OpenColorWindow(
-                ColorPickTarget::DimStyle(fld.clone()),
+    let color_row =
+        move |label: Cow<'static, str>, fld: DsField, _val: &'a str| -> Element<'a, Message> {
+            if vals.read_only {
+                return row![
+                    lbl(label),
+                    crate::ui::read_only::field(_val, 11.0, Length::Fixed(150.0)),
+                ]
+                .spacing(8)
+                .align_y(iced::Center)
+                .into();
+            }
+            let cur = crate::ui::color_select::aci_string_to_color(_val);
+            let open = color_open.as_ref() == Some(&fld);
+            let f_sel = fld.clone();
+            let selector = crate::ui::color_select::color_selector(
                 cur,
-            ),
-        );
-        row![lbl(label), container(selector).width(150)]
-            .spacing(8)
-            .align_y(iced::Center)
-            .into()
-    };
+                open,
+                crate::ui::color_select::ColorExtras {
+                    by_layer: true,
+                    by_block: true,
+                    ..Default::default()
+                },
+                move |c| {
+                    Message::DsEdit(
+                        f_sel.clone(),
+                        crate::ui::color_select::color_to_aci_string(c),
+                    )
+                },
+                Message::DsColorMore(fld.clone()),
+                Message::OpenColorWindow(ColorPickTarget::DimStyle(fld.clone()), cur),
+            );
+            row![lbl(label), container(selector).width(150)]
+                .spacing(8)
+                .align_y(iced::Center)
+                .into()
+        };
 
     // Block / linetype Handle dropdown: pick a block-record (arrowheads) or a
     // linetype by name from the available records.
@@ -533,22 +580,24 @@ pub fn view_window<'a>(
                 .into()
         };
         row![lbl(label), list]
-        .spacing(8)
-        .align_y(iced::Center)
-        .into()
+            .spacing(8)
+            .align_y(iced::Center)
+            .into()
     };
 
     let hrow_enabled = move |label: Cow<'static, str>,
-                              options: Vec<String>,
-                              selected: String,
-                              field: &'static str,
-                              enabled: bool|
+                             options: Vec<String>,
+                             selected: String,
+                             field: &'static str,
+                             enabled: bool|
           -> Element<'a, Message> {
-        let list = iced::widget::pick_list(Some(selected.clone()), options, |value| value.to_string())
-            .text_size(11)
-            .width(150);
+        let list =
+            iced::widget::pick_list(Some(selected.clone()), options, |value| value.to_string())
+                .text_size(11)
+                .width(150);
         let list: Element<'a, Message> = if enabled && !vals.read_only {
-            list.on_select(move |value| Message::DsSetHandle { field, value }).into()
+            list.on_select(move |value| Message::DsSetHandle { field, value })
+                .into()
         } else {
             crate::ui::read_only::field(&selected, 11.0, Length::Fixed(150.0))
         };
@@ -571,20 +620,33 @@ pub fn view_window<'a>(
         .width(150)
         .into()
     };
-    let text_height_note: Element<'a, Message> = if let Some(height) = vals.text_style_fixed_height {
-        text(t!("The selected text style fixes the height at %{height}.", height = height))
-            .size(10)
-            .style(muted_style)
-            .into()
+    let text_height_note: Element<'a, Message> = if let Some(height) = vals.text_style_fixed_height
+    {
+        text(t!(
+            "The selected text style fixes the height at %{height}.",
+            height = height
+        ))
+        .size(10)
+        .style(muted_style)
+        .into()
     } else {
         Space::new().height(0).into()
     };
     let center_mode = vals.dimcen.trim().parse::<f64>().unwrap_or(0.0);
     let tick_on = vals.dimtsz.trim().parse::<f64>().unwrap_or(0.0) > 0.0;
     let center_choices = vec![
-        DimEnumChoice { code: "none".into(), label: t!("None").into_owned() },
-        DimEnumChoice { code: "mark".into(), label: t!("Center mark").into_owned() },
-        DimEnumChoice { code: "lines".into(), label: t!("Centerlines").into_owned() },
+        DimEnumChoice {
+            code: "none".into(),
+            label: t!("None").into_owned(),
+        },
+        DimEnumChoice {
+            code: "mark".into(),
+            label: t!("Center mark").into_owned(),
+        },
+        DimEnumChoice {
+            code: "lines".into(),
+            label: t!("Centerlines").into_owned(),
+        },
     ];
     let center_current = if center_mode < 0.0 {
         center_choices[2].clone()
@@ -594,20 +656,41 @@ pub fn view_window<'a>(
         center_choices[0].clone()
     };
     let center_method_field: Element<'a, Message> = if vals.read_only {
-        crate::ui::read_only::field(center_current.to_string().as_str(), 11.0, Length::Fixed(150.0))
+        crate::ui::read_only::field(
+            center_current.to_string().as_str(),
+            11.0,
+            Length::Fixed(150.0),
+        )
     } else {
-        iced::widget::pick_list(Some(center_current), center_choices, |choice| choice.to_string())
-            .on_select(|choice| Message::DsCenterMarkMode(choice.code))
-            .text_size(11)
-            .width(150)
-            .into()
+        iced::widget::pick_list(Some(center_current), center_choices, |choice| {
+            choice.to_string()
+        })
+        .on_select(|choice| Message::DsCenterMarkMode(choice.code))
+        .text_size(11)
+        .width(150)
+        .into()
     };
     let tolerance_choices = vec![
-        DimEnumChoice { code: "none".into(), label: t!("None").into_owned() },
-        DimEnumChoice { code: "symmetrical".into(), label: t!("Symmetrical").into_owned() },
-        DimEnumChoice { code: "deviation".into(), label: t!("Deviation").into_owned() },
-        DimEnumChoice { code: "limits".into(), label: t!("Limits").into_owned() },
-        DimEnumChoice { code: "basic".into(), label: t!("Basic").into_owned() },
+        DimEnumChoice {
+            code: "none".into(),
+            label: t!("None").into_owned(),
+        },
+        DimEnumChoice {
+            code: "symmetrical".into(),
+            label: t!("Symmetrical").into_owned(),
+        },
+        DimEnumChoice {
+            code: "deviation".into(),
+            label: t!("Deviation").into_owned(),
+        },
+        DimEnumChoice {
+            code: "limits".into(),
+            label: t!("Limits").into_owned(),
+        },
+        DimEnumChoice {
+            code: "basic".into(),
+            label: t!("Basic").into_owned(),
+        },
     ];
     let tolerance_current = if vals.dimgap.trim().starts_with('-') {
         tolerance_choices[4].clone()
@@ -621,13 +704,15 @@ pub fn view_window<'a>(
         tolerance_choices[0].clone()
     };
     let tolerance_method_field: Element<'a, Message> = if vals.read_only {
-        crate::ui::read_only::field(tolerance_current.to_string().as_str(), 11.0, Length::Fixed(150.0))
-    } else {
-        iced::widget::pick_list(
-            Some(tolerance_current),
-            tolerance_choices,
-            |choice| choice.to_string(),
+        crate::ui::read_only::field(
+            tolerance_current.to_string().as_str(),
+            11.0,
+            Length::Fixed(150.0),
         )
+    } else {
+        iced::widget::pick_list(Some(tolerance_current), tolerance_choices, |choice| {
+            choice.to_string()
+        })
         .on_select(|choice| Message::DsToleranceMode(choice.code))
         .text_size(11)
         .width(150)
@@ -1109,11 +1194,7 @@ pub fn view_window<'a>(
         preview_text.push_str(&format!("  [{alternate_text}]"));
     }
     if vals.dimlim {
-        preview_text = format!(
-            "{} / {}",
-            preview_text,
-            vals.dimtm.trim()
-        );
+        preview_text = format!("{} / {}", preview_text, vals.dimtm.trim());
     } else if vals.dimtol {
         if vals.dimtp.trim() == vals.dimtm.trim() {
             preview_text.push_str(&format!(" ±{}", vals.dimtp.trim()));
@@ -1160,7 +1241,11 @@ pub fn view_window<'a>(
         let summary = if vals.comparison_sections.is_empty() {
             t!("No differences").into_owned()
         } else {
-            format!("{}: {}", t!("Different sections"), vals.comparison_sections.join(", "))
+            format!(
+                "{}: {}",
+                t!("Different sections"),
+                vals.comparison_sections.join(", ")
+            )
         };
         row![
             text(t!("Compare with")).size(10).style(muted_style),

@@ -1080,9 +1080,8 @@ impl OpenCADStudio {
                         false,
                         true,
                     );
-                    self.command_line.push_output(
-                        format!("{} constraint bar(s) reset.", count).as_str(),
-                    );
+                    self.command_line
+                        .push_output(format!("{} constraint bar(s) reset.", count).as_str());
                 }
             }
 
@@ -1174,20 +1173,15 @@ impl OpenCADStudio {
                     self.tabs[i].active_cmd = Some(Box::new(sel));
                 } else {
                     let scope = self.tabs[i].current_parametric_scope();
-                    let inferred = self.tabs[i]
-                        .scene
-                        .inferred_parametric_constraints(
-                            scope,
-                            &handles,
-                            &self.auto_constrain_settings,
-                        );
+                    let inferred = self.tabs[i].scene.inferred_parametric_constraints(
+                        scope,
+                        &handles,
+                        &self.auto_constrain_settings,
+                    );
                     if inferred.is_empty() {
                         self.command_line.push_output(
-                            format!(
-                                "0 constraint(s) applied to {} object(s).",
-                                handles.len()
-                            )
-                            .as_str(),
+                            format!("0 constraint(s) applied to {} object(s).", handles.len())
+                                .as_str(),
                         );
                         self.tabs[i].scene.deselect_all();
                         self.refresh_selected_grips();
@@ -1388,7 +1382,11 @@ impl OpenCADStudio {
                 let (kind, axis, label) = if vertical {
                     (ConstraintKind::Vertical, "Vertical", "Vertical constraint")
                 } else {
-                    (ConstraintKind::Horizontal, "Horizontal", "Horizontal constraint")
+                    (
+                        ConstraintKind::Horizontal,
+                        "Horizontal",
+                        "Horizontal constraint",
+                    )
                 };
                 let new_command = || {
                     if vertical {
@@ -1407,13 +1405,14 @@ impl OpenCADStudio {
                         .push_error(&format!("{axis}: select exactly one compatible object."));
                 } else {
                     let handle = handles[0];
-                    let reference = self.tabs[i]
-                        .scene
-                        .document
-                        .get_entity(handle)
-                        .and_then(|entity| {
-                            HorizontalConstraintCommand::preselected_reference(entity, handle)
-                        });
+                    let reference =
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .get_entity(handle)
+                            .and_then(|entity| {
+                                HorizontalConstraintCommand::preselected_reference(entity, handle)
+                            });
                     if let Some(reference) = reference {
                         let plane = self.tabs[i].ucs_xform().working_plane();
                         let direction = if vertical { plane.y } else { plane.x };
@@ -1448,13 +1447,14 @@ impl OpenCADStudio {
                 // the reference's own point-or-object prompt.
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if let [handle] = handles.as_slice() {
-                    let reference = self.tabs[i]
-                        .scene
-                        .document
-                        .get_entity(*handle)
-                        .and_then(|entity| {
-                            FixConstraintCommand::preselected_reference(entity, *handle)
-                        });
+                    let reference =
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .get_entity(*handle)
+                            .and_then(|entity| {
+                                FixConstraintCommand::preselected_reference(entity, *handle)
+                            });
                     if let Some(reference) = reference {
                         return Some(self.apply_cmd_result(CmdResult::AddParametricConstraint {
                             kind: ConstraintKind::Fixed,
@@ -1514,13 +1514,15 @@ impl OpenCADStudio {
                         })
                         .collect::<Vec<_>>();
                     if picks.len() == 2 && picks[0].reference != picks[1].reference {
-                        return Some(self.apply_cmd_result(CmdResult::AddPerpendicularConstraint {
-                            first: picks[0].reference,
-                            second: picks[1].reference,
-                            first_fixed: picks[0].fixed_reference,
-                            second_start: picks[1].start_reference,
-                            label: "Perpendicular constraint",
-                        }));
+                        return Some(self.apply_cmd_result(
+                            CmdResult::AddPerpendicularConstraint {
+                                first: picks[0].reference,
+                                second: picks[1].reference,
+                                first_fixed: picks[0].fixed_reference,
+                                second_start: picks[1].start_reference,
+                                label: "Perpendicular constraint",
+                            },
+                        ));
                     }
                     self.tabs[i].scene.deselect_all();
                     self.command_line.push_error(
@@ -1569,8 +1571,7 @@ impl OpenCADStudio {
                 }
             }
 
-            "PCONSTRAINT" | "ECONSTRAINT" | "LCONSTRAINT"
-            | "NRCONSTRAINT" => {
+            "PCONSTRAINT" | "ECONSTRAINT" | "LCONSTRAINT" | "NRCONSTRAINT" => {
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
                     use crate::modules::draw::select::SelectObjectsCommand;
@@ -1648,21 +1649,21 @@ impl OpenCADStudio {
                     self.command_line.push_info(&command.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(command));
                 } else {
-                    use crate::command::{
-                        CmdResult, SymmetricConstraintSelection,
-                    };
+                    use crate::command::{CmdResult, SymmetricConstraintSelection};
                     use crate::modules::parametric::SymmetricConstraintCommand;
 
-                    let refs = (handles.len() == 3).then(|| {
-                        let first = self.tabs[i].scene.document.get_entity(handles[0])?;
-                        let second = self.tabs[i].scene.document.get_entity(handles[1])?;
-                        let axis = self.tabs[i].scene.document.get_entity(handles[2])?;
-                        SymmetricConstraintCommand::preselected_refs(
-                            (first, handles[0]),
-                            (second, handles[1]),
-                            (axis, handles[2]),
-                        )
-                    }).flatten();
+                    let refs = (handles.len() == 3)
+                        .then(|| {
+                            let first = self.tabs[i].scene.document.get_entity(handles[0])?;
+                            let second = self.tabs[i].scene.document.get_entity(handles[1])?;
+                            let axis = self.tabs[i].scene.document.get_entity(handles[2])?;
+                            SymmetricConstraintCommand::preselected_refs(
+                                (first, handles[0]),
+                                (second, handles[1]),
+                                (axis, handles[2]),
+                            )
+                        })
+                        .flatten();
                     if let Some([first, second, axis]) = refs {
                         return Some(self.apply_cmd_result(CmdResult::AddSymmetricConstraint {
                             selection: SymmetricConstraintSelection::Objects(first, second),

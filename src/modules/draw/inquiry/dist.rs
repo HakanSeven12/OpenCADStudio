@@ -1,7 +1,7 @@
 // DIST command — measure distance and angle between two picked points.
 
-use glam::DVec3;
 use crate::t;
+use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::modules::IconKind;
@@ -13,8 +13,7 @@ pub struct DistCommand {
     first: Option<DVec3>,
     plane: WorkingPlane,
 }
-pub const ICON: IconKind =
-    IconKind::Svg(include_bytes!("../../../../assets/icons/measure.svg"));
+pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../../assets/icons/measure.svg"));
 impl DistCommand {
     pub fn new() -> Self {
         Self {
@@ -125,6 +124,5 @@ impl CadCommand for DistCommand {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["DIST"] });  // DistCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["DIST"] }); // DistCommand

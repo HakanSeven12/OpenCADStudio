@@ -22,12 +22,36 @@ fn quad_verts(corners: &[[f32; 3]; 4], corners_low: &[[f32; 3]; 4]) -> Vec<Image
     let [p0, p1, p2, p3] = *corners;
     let [l0, l1, l2, l3] = *corners_low;
     vec![
-        ImageQuadVertex { pos: p0, uv: [0.0, 1.0], pos_low: l0 },
-        ImageQuadVertex { pos: p1, uv: [1.0, 1.0], pos_low: l1 },
-        ImageQuadVertex { pos: p2, uv: [1.0, 0.0], pos_low: l2 },
-        ImageQuadVertex { pos: p0, uv: [0.0, 1.0], pos_low: l0 },
-        ImageQuadVertex { pos: p2, uv: [1.0, 0.0], pos_low: l2 },
-        ImageQuadVertex { pos: p3, uv: [0.0, 0.0], pos_low: l3 },
+        ImageQuadVertex {
+            pos: p0,
+            uv: [0.0, 1.0],
+            pos_low: l0,
+        },
+        ImageQuadVertex {
+            pos: p1,
+            uv: [1.0, 1.0],
+            pos_low: l1,
+        },
+        ImageQuadVertex {
+            pos: p2,
+            uv: [1.0, 0.0],
+            pos_low: l2,
+        },
+        ImageQuadVertex {
+            pos: p0,
+            uv: [0.0, 1.0],
+            pos_low: l0,
+        },
+        ImageQuadVertex {
+            pos: p2,
+            uv: [1.0, 0.0],
+            pos_low: l2,
+        },
+        ImageQuadVertex {
+            pos: p3,
+            uv: [0.0, 0.0],
+            pos_low: l3,
+        },
     ]
 }
 
@@ -39,12 +63,7 @@ fn clip_triangles_px(img: &acadrust::entities::RasterImage) -> Vec<[f64; 2]> {
     use acadrust::entities::{ClipMode, ClipType};
     let w = img.size.x;
     let h = img.size.y;
-    let quad = || {
-        vec![
-            [0.0, 0.0], [w, 0.0], [w, h],
-            [0.0, 0.0], [w, h], [0.0, h],
-        ]
-    };
+    let quad = || vec![[0.0, 0.0], [w, 0.0], [w, h], [0.0, 0.0], [w, h], [0.0, h]];
     if !img.clipping_enabled {
         return quad();
     }
@@ -114,9 +133,7 @@ pub struct ImageModel {
 impl ImageModel {
     /// Build an ImageModel from a DXF RasterImage entity.
     /// Returns `None` if the image file cannot be opened or decoded.
-    pub fn from_raster_image(
-        img: &acadrust::entities::RasterImage,
-    ) -> Option<Self> {
+    pub fn from_raster_image(img: &acadrust::entities::RasterImage) -> Option<Self> {
         let w = img.size.x;
         let h = img.size.y;
         // Model-space geometry is drawn in (WCS - world_offset) so large UTM-
@@ -160,7 +177,11 @@ impl ImageModel {
                 let fu = (px / w) as f32;
                 let fv = (py / h) as f32;
                 ImageQuadVertex {
-                    pos: [ox + ux * fu + vx * fv, oy + uy * fu + vy * fv, oz + uz * fu + vz * fv],
+                    pos: [
+                        ox + ux * fu + vx * fv,
+                        oy + uy * fu + vy * fv,
+                        oz + uz * fu + vz * fv,
+                    ],
                     uv: [fu, 1.0 - fv],
                     pos_low: [oxl, oyl, ozl],
                 }

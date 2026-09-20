@@ -58,8 +58,16 @@ impl DimJogLineCommand {
                 DVec3::new(value.rotation.cos(), value.rotation.sin(), 0.0),
             ),
             Dimension::Aligned(value) => {
-                let first = DVec3::new(value.first_point.x, value.first_point.y, value.first_point.z);
-                let second = DVec3::new(value.second_point.x, value.second_point.y, value.second_point.z);
+                let first = DVec3::new(
+                    value.first_point.x,
+                    value.first_point.y,
+                    value.first_point.z,
+                );
+                let second = DVec3::new(
+                    value.second_point.x,
+                    value.second_point.y,
+                    value.second_point.z,
+                );
                 (
                     value.first_point,
                     value.second_point,
@@ -192,15 +200,31 @@ impl CadCommand for DimJogLineCommand {
                 let axis = DVec3::new(value.rotation.cos(), value.rotation.sin(), 0.0);
                 (
                     [(point - axis).to_array(), (point + axis).to_array()],
-                    [value.base.normal.x, value.base.normal.y, value.base.normal.z],
+                    [
+                        value.base.normal.x,
+                        value.base.normal.y,
+                        value.base.normal.z,
+                    ],
                 )
             }
             Dimension::Aligned(value) => (
                 [
-                    [value.first_point.x, value.first_point.y, value.first_point.z],
-                    [value.second_point.x, value.second_point.y, value.second_point.z],
+                    [
+                        value.first_point.x,
+                        value.first_point.y,
+                        value.first_point.z,
+                    ],
+                    [
+                        value.second_point.x,
+                        value.second_point.y,
+                        value.second_point.z,
+                    ],
                 ],
-                [value.base.normal.x, value.base.normal.y, value.base.normal.z],
+                [
+                    value.base.normal.x,
+                    value.base.normal.y,
+                    value.base.normal.z,
+                ],
             ),
             _ => return None,
         };
@@ -223,7 +247,9 @@ impl CadCommand for DimJogLineCommand {
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["DIMJOGLINE"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["DIMJOGLINE"]
+});
 
 #[cfg(test)]
 mod tests {

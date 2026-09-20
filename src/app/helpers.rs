@@ -81,11 +81,26 @@ mod coordinate_parsing_tests {
     #[test]
     fn parses_all_coordinate_forms() {
         let close = |a: glam::DVec3, b: glam::DVec3| (a - b).length() < 1e-9;
-        assert!(close(parse_coord("1,2").unwrap().0, glam::dvec3(1.0, 2.0, 0.0)));
-        assert!(close(parse_coord("1,2,3").unwrap().0, glam::dvec3(1.0, 2.0, 3.0)));
-        assert!(close(parse_coord("10<90").unwrap().0, glam::dvec3(0.0, 10.0, 0.0)));
-        assert!(close(parse_coord("10<90,4").unwrap().0, glam::dvec3(0.0, 10.0, 4.0)));
-        assert!(close(parse_coord("10<0<30").unwrap().0, glam::dvec3(5.0 * 3.0_f64.sqrt(), 0.0, 5.0)));
+        assert!(close(
+            parse_coord("1,2").unwrap().0,
+            glam::dvec3(1.0, 2.0, 0.0)
+        ));
+        assert!(close(
+            parse_coord("1,2,3").unwrap().0,
+            glam::dvec3(1.0, 2.0, 3.0)
+        ));
+        assert!(close(
+            parse_coord("10<90").unwrap().0,
+            glam::dvec3(0.0, 10.0, 0.0)
+        ));
+        assert!(close(
+            parse_coord("10<90,4").unwrap().0,
+            glam::dvec3(0.0, 10.0, 4.0)
+        ));
+        assert!(close(
+            parse_coord("10<0<30").unwrap().0,
+            glam::dvec3(5.0 * 3.0_f64.sqrt(), 0.0, 5.0)
+        ));
         assert_eq!(parse_coord("@10<0").unwrap().1, CoordKind::Relative);
         assert_eq!(parse_coord("#1,2").unwrap().1, CoordKind::Absolute);
     }
@@ -132,7 +147,12 @@ impl UcsXform {
         };
         let z = x.cross(raw_y).normalize_or(x.cross(fallback_z).normalize());
         let y = z.cross(x).normalize();
-        Self { origin: v(ucs.origin), x, y, z }
+        Self {
+            origin: v(ucs.origin),
+            x,
+            y,
+            z,
+        }
     }
 
     pub(super) fn from_active(ucs: Option<&Ucs>) -> Self {
@@ -191,10 +211,7 @@ impl UcsXform {
 
     /// Full UCS-local → WCS transform, using `origin` as local zero while
     /// retaining this UCS's orthonormal axes.
-    pub(super) fn to_wcs_transform_at(
-        &self,
-        origin: glam::DVec3,
-    ) -> acadrust::types::Transform {
+    pub(super) fn to_wcs_transform_at(&self, origin: glam::DVec3) -> acadrust::types::Transform {
         use acadrust::types::{Matrix4, Transform};
         Transform::from_matrix(Matrix4 {
             m: [
@@ -207,10 +224,7 @@ impl UcsXform {
     }
 
     /// Full WCS → UCS-local transform, using `origin` as the local zero.
-    pub(super) fn to_ucs_transform_at(
-        &self,
-        origin: glam::DVec3,
-    ) -> acadrust::types::Transform {
+    pub(super) fn to_ucs_transform_at(&self, origin: glam::DVec3) -> acadrust::types::Transform {
         use acadrust::types::{Matrix4, Transform};
         Transform::from_matrix(Matrix4 {
             m: [
@@ -326,7 +340,11 @@ pub(super) fn drafting_constrain(
         let radians = degrees.to_radians();
         glam::DVec2::new(radians.cos(), radians.sin())
     });
-    let direction = if delta.dot(a).abs() >= delta.dot(c).abs() { a } else { c };
+    let direction = if delta.dot(a).abs() >= delta.dot(c).abs() {
+        a
+    } else {
+        c
+    };
     let projected = direction * delta.dot(direction);
     let c = glam::DVec3::new(b.x + projected.x, b.y + projected.y, p.z);
     xf.to_wcs(c)
@@ -393,8 +411,7 @@ pub(super) fn polar_constrain_near(
     tol_px: f32,
     xf: &UcsXform,
 ) -> glam::DVec3 {
-    polar_constrain_if_near(pt, base, step_deg, view_rot, eye, bounds, tol_px, xf)
-        .unwrap_or(pt)
+    polar_constrain_if_near(pt, base, step_deg, view_rot, eye, bounds, tol_px, xf).unwrap_or(pt)
 }
 
 /// Hard axis lock (#312): the locked ray's direction — the nearest polar
@@ -427,8 +444,16 @@ pub(super) fn axis_lock_capture(
             let radians = degrees.to_radians();
             glam::DVec2::new(radians.cos(), radians.sin())
         });
-        let direction = if delta.dot(a).abs() >= delta.dot(b).abs() { a } else { b };
-        let direction = if delta.dot(direction) < 0.0 { -direction } else { direction };
+        let direction = if delta.dot(a).abs() >= delta.dot(b).abs() {
+            a
+        } else {
+            b
+        };
+        let direction = if delta.dot(direction) < 0.0 {
+            -direction
+        } else {
+            direction
+        };
         direction.y.atan2(direction.x)
     };
     let dir_ucs = glam::DVec3::new(ang.cos(), ang.sin(), 0.0);
@@ -439,11 +464,7 @@ pub(super) fn axis_lock_capture(
 /// Project `pt` onto the locked ray through `base` — the hard lock applies to
 /// EVERYTHING, including an osnap hit, so a snap far off-axis contributes only
 /// its along-axis component (#312).
-pub(super) fn axis_lock_apply(
-    pt: glam::DVec3,
-    base: glam::DVec3,
-    dir: glam::DVec3,
-) -> glam::DVec3 {
+pub(super) fn axis_lock_apply(pt: glam::DVec3, base: glam::DVec3, dir: glam::DVec3) -> glam::DVec3 {
     base + dir * (pt - base).dot(dir)
 }
 
@@ -481,8 +502,7 @@ pub(super) fn entities_lower_left_by_bbox(
 
 /// Generate the next available auto group name ("*A1", "*A2", …).
 pub(super) fn next_group_auto_name(scene: &crate::scene::Scene) -> String {
-    let existing: rustc_hash::FxHashSet<String> =
-        scene.groups().map(|g| g.name.clone()).collect();
+    let existing: rustc_hash::FxHashSet<String> = scene.groups().map(|g| g.name.clone()).collect();
     for n in 1..=9999 {
         let name = format!("*A{n}");
         if !existing.contains(&name) {

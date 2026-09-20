@@ -57,8 +57,7 @@ impl CadCommand for DimSpaceCommand {
             )
             .into_owned(),
             Step::EnterSpacing { .. } => {
-                t!("DIMSPACE  Specify distance between dimensions or [Auto] <Auto>:")
-                    .into_owned()
+                t!("DIMSPACE  Specify distance between dimensions or [Auto] <Auto>:").into_owned()
             }
         }
     }
@@ -193,14 +192,14 @@ impl CadCommand for DimSpaceCommand {
 
     fn on_enter(&mut self) -> CmdResult {
         if matches!(self.step, Step::EnterSpacing { .. }) {
-            return self
-                .on_text_input("AUTO")
-                .unwrap_or(CmdResult::Cancel);
+            return self.on_text_input("AUTO").unwrap_or(CmdResult::Cancel);
         }
         CmdResult::Cancel
     }
 }
-inventory::submit!(crate::command::CommandRegistration { names: &["DIMSPACE", "DSPACE"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["DIMSPACE", "DSPACE"]
+});
 
 #[cfg(test)]
 mod tests {

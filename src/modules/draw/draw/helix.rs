@@ -71,7 +71,11 @@ impl HelixCommand {
     }
 
     fn parse_turns(text: &str) -> Option<f64> {
-        text.trim().replace(',', ".").parse().ok().filter(|value: &f64| value.is_finite())
+        text.trim()
+            .replace(',', ".")
+            .parse()
+            .ok()
+            .filter(|value: &f64| value.is_finite())
     }
 
     fn axis_start_direction(&self, axis: Vec3) -> Option<Vec3> {
@@ -136,7 +140,11 @@ impl HelixCommand {
         helix.axis_vector = Vector3::new(axis.x, axis.y, axis.z);
         helix.radius = curve.top_radius;
         helix.turns = curve.turns;
-        helix.turn_height = if curve.turns == 0.0 { 0.0 } else { height / curve.turns };
+        helix.turn_height = if curve.turns == 0.0 {
+            0.0
+        } else {
+            height / curve.turns
+        };
         helix.handedness = self.counter_clockwise;
         helix.constraint = self.constraint;
         Some(EntityType::Helix(helix))
@@ -212,7 +220,9 @@ impl CadCommand for HelixCommand {
             )
             .into_owned(),
             Step::AxisEndpoint => t!("HELIX  Specify axis endpoint:").into_owned(),
-            Step::Turns => crate::tf!("HELIX  Enter number of turns <{:.4}>:", self.turns).into_owned(),
+            Step::Turns => {
+                crate::tf!("HELIX  Enter number of turns <{:.4}>:", self.turns).into_owned()
+            }
             Step::TurnHeight => crate::tf!(
                 "HELIX  Specify distance between turns <{:.4}>:",
                 self.height.abs() / self.turns.max(EPSILON)
@@ -228,7 +238,9 @@ impl CadCommand for HelixCommand {
 
     fn options(&self) -> Vec<CmdOption> {
         match self.step {
-            Step::BaseRadius | Step::TopRadius => vec![CmdOption::new(t!("Diameter").as_ref(), "D")],
+            Step::BaseRadius | Step::TopRadius => {
+                vec![CmdOption::new(t!("Diameter").as_ref(), "D")]
+            }
             Step::Final => vec![
                 CmdOption::new(t!("Axis endpoint").as_ref(), "A"),
                 CmdOption::new(t!("Turns").as_ref(), "T"),
@@ -244,7 +256,10 @@ impl CadCommand for HelixCommand {
     }
 
     fn point_step_accepts_keywords(&self) -> bool {
-        matches!(self.step, Step::BaseRadius | Step::TopRadius | Step::Final | Step::Twist)
+        matches!(
+            self.step,
+            Step::BaseRadius | Step::TopRadius | Step::Final | Step::Twist
+        )
     }
 
     fn on_point(&mut self, point: DVec3) -> CmdResult {
@@ -348,7 +363,12 @@ impl CadCommand for HelixCommand {
     fn dyn_field(&self) -> DynField {
         match self.step {
             Step::Center | Step::AxisEndpoint => DynField::Point,
-            Step::BaseRadius | Step::BaseDiameter | Step::TopRadius | Step::TopDiameter | Step::Final | Step::TurnHeight => DynField::Distance,
+            Step::BaseRadius
+            | Step::BaseDiameter
+            | Step::TopRadius
+            | Step::TopDiameter
+            | Step::Final
+            | Step::TurnHeight => DynField::Distance,
             Step::Turns | Step::Twist => DynField::Scalar,
         }
     }
@@ -491,7 +511,9 @@ impl CadCommand for HelixCommand {
             Step::AxisEndpoint => {
                 let vector = point - self.center;
                 let height = vector.length();
-                (height > EPSILON).then(|| self.preview(height, vector / height)).flatten()
+                (height > EPSILON)
+                    .then(|| self.preview(height, vector / height))
+                    .flatten()
             }
             Step::Turns | Step::TurnHeight | Step::Twist => self.preview(self.height, self.plane.z),
         }
@@ -519,7 +541,10 @@ mod tests {
         assert!(helix.turn_height.is_finite());
         assert!(helix.spline.flags.planar);
         assert_eq!(helix.spline.control_points.len(), 2);
-        assert_eq!(helix.spline.control_points[0], helix.spline.control_points[1]);
+        assert_eq!(
+            helix.spline.control_points[0],
+            helix.spline.control_points[1]
+        );
     }
 
     #[test]

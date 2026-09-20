@@ -1,10 +1,10 @@
 // Legacy centre cross and associative centre mark commands.
 
-use acadrust::types::Vector3;
+use crate::t;
 use acadrust::entities::{CenterMarkAssociation, CenterMarkSource};
+use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle, Line};
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -139,7 +139,10 @@ pub struct CenterMarkCommand {
 
 impl CenterMarkCommand {
     pub(crate) fn new(settings: CenterLineSettings) -> Self {
-        Self { picked: None, settings }
+        Self {
+            picked: None,
+            settings,
+        }
     }
 
     fn build_mark(
@@ -178,14 +181,20 @@ impl CenterMarkCommand {
 }
 
 impl CadCommand for CenterMarkCommand {
-    fn name(&self) -> &'static str { "CENTERMARK" }
+    fn name(&self) -> &'static str {
+        "CENTERMARK"
+    }
 
     fn prompt(&self) -> String {
         t!("CENTERMARK  Select arc or circle <finish>:").into_owned()
     }
 
-    fn needs_entity_pick(&self) -> bool { true }
-    fn inject_before_entity_pick(&self) -> bool { true }
+    fn needs_entity_pick(&self) -> bool {
+        true
+    }
+    fn inject_before_entity_pick(&self) -> bool {
+        true
+    }
 
     fn inject_picked_entity(&mut self, entity: EntityType) {
         self.picked = Some(entity);
@@ -205,9 +214,15 @@ impl CadCommand for CenterMarkCommand {
         CmdResult::CommitEntity(self.build_mark(source, center, radius, x, y))
     }
 
-    fn on_point(&mut self, _point: DVec3) -> CmdResult { CmdResult::NeedPoint }
-    fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
-    fn on_escape(&mut self) -> CmdResult { CmdResult::Cancel }
+    fn on_point(&mut self, _point: DVec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
 }
 
 pub struct CenterMarkReassociateCommand {
@@ -217,30 +232,53 @@ pub struct CenterMarkReassociateCommand {
 
 impl CenterMarkReassociateCommand {
     pub fn new(target: Handle) -> Self {
-        Self { target, picked: None }
+        Self {
+            target,
+            picked: None,
+        }
     }
 }
 
 impl CadCommand for CenterMarkReassociateCommand {
-    fn name(&self) -> &'static str { "CENTERREASSOCIATE" }
+    fn name(&self) -> &'static str {
+        "CENTERREASSOCIATE"
+    }
     fn prompt(&self) -> String {
         t!("CENTERREASSOCIATE  Select new arc or circle:").into_owned()
     }
-    fn needs_entity_pick(&self) -> bool { true }
-    fn inject_before_entity_pick(&self) -> bool { true }
-    fn inject_picked_entity(&mut self, entity: EntityType) { self.picked = Some(entity); }
+    fn needs_entity_pick(&self) -> bool {
+        true
+    }
+    fn inject_before_entity_pick(&self) -> bool {
+        true
+    }
+    fn inject_picked_entity(&mut self, entity: EntityType) {
+        self.picked = Some(entity);
+    }
     fn on_entity_pick(&mut self, source: Handle, point: DVec3) -> CmdResult {
-        let valid = self.picked.as_ref().and_then(|entity| {
-            crate::scene::centermark::picked_mark_source(entity, source, point)
-        }).is_some();
+        let valid = self
+            .picked
+            .as_ref()
+            .and_then(|entity| crate::scene::centermark::picked_mark_source(entity, source, point))
+            .is_some();
         if !valid {
             return CmdResult::NeedPoint;
         }
-        CmdResult::ReassociateCenterMark { target: self.target, source, point }
+        CmdResult::ReassociateCenterMark {
+            target: self.target,
+            source,
+            point,
+        }
     }
-    fn on_point(&mut self, _point: DVec3) -> CmdResult { CmdResult::NeedPoint }
-    fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
-    fn on_escape(&mut self) -> CmdResult { CmdResult::Cancel }
+    fn on_point(&mut self, _point: DVec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
 }
 
 // ── Autocomplete registry ─────────────────────────────────

@@ -53,10 +53,7 @@ impl CadCommand for PdfAttachCommand {
         underlay.definition_handle = self.definition_handle;
         underlay.insertion_point = Vector3::new(point.x, point.y, point.z);
 
-        CmdResult::CommitAndExit(
-            self.plane
-                .place_entity(EntityType::Underlay(underlay)),
-        )
+        CmdResult::CommitAndExit(self.plane.place_entity(EntityType::Underlay(underlay)))
     }
 
     fn on_enter(&mut self) -> CmdResult {

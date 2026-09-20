@@ -11,10 +11,7 @@ const TOL: f64 = 1e-9;
 fn tessellation(body: &Body) -> brep::mesh::BodyMesh {
     brep::mesh::tessellate(
         body,
-        brep::mesh::TessellationTolerance::new(
-            cadkernel::tessellation::DEFAULT_ANGLE,
-            TOL,
-        ),
+        brep::mesh::TessellationTolerance::new(cadkernel::tessellation::DEFAULT_ANGLE, TOL),
     )
 }
 
@@ -74,13 +71,7 @@ pub fn cone_frustum_solid(
     top_radius: f64,
     height: f64,
 ) -> Option<Body> {
-    brep::make::frustum(
-        center,
-        base_x_radius,
-        base_y_radius,
-        top_radius,
-        height,
-    )
+    brep::make::frustum(center, base_x_radius, base_y_radius, top_radius, height)
 }
 
 /// Circular or elliptical cylinder standing on the local z = base plane.
@@ -283,12 +274,9 @@ pub fn grip_preview_wires(
 ) -> Vec<WireModel> {
     let tessellation = brep::mesh::tessellate(
         body,
-        brep::mesh::TessellationTolerance::new(
-            cadkernel::tessellation::DEFAULT_ANGLE,
-            TOL,
-        )
-        .with_uv_isolines(isolines[0], isolines[1])
-        .with_planar_isolines(planar_isolines),
+        brep::mesh::TessellationTolerance::new(cadkernel::tessellation::DEFAULT_ANGLE, TOL)
+            .with_uv_isolines(isolines[0], isolines[1])
+            .with_planar_isolines(planar_isolines),
     );
     tessellation
         .edges
@@ -507,7 +495,8 @@ fn mesh_from_tessellation(
         }
     }
     set.complete = tessellation.missing_faces.is_empty();
-    set.curved_gens.push(super::mesh_model::CurvedGen { source: silhouette });
+    set.curved_gens
+        .push(super::mesh_model::CurvedGen { source: silhouette });
     Some(set)
 }
 
@@ -614,13 +603,28 @@ mod tests {
     #[test]
     fn all_primitives_triangulate() {
         let c = [0.0, 0.0, 0.0];
-        assert!(tri_count(&box_solid(c, 10.0, 10.0, 10.0).unwrap()) >= 12, "box");
-        assert!(tri_count(&wedge_solid(c, 10.0, 10.0, 10.0).unwrap()) >= 6, "wedge");
-        assert!(tri_count(&cylinder_solid(c, 5.0, 12.0).unwrap()) > 20, "cylinder");
-        assert!(tri_count(&cone_frustum_solid(c, 5.0, 5.0, 0.0, 12.0).unwrap()) > 10, "cone");
+        assert!(
+            tri_count(&box_solid(c, 10.0, 10.0, 10.0).unwrap()) >= 12,
+            "box"
+        );
+        assert!(
+            tri_count(&wedge_solid(c, 10.0, 10.0, 10.0).unwrap()) >= 6,
+            "wedge"
+        );
+        assert!(
+            tri_count(&cylinder_solid(c, 5.0, 12.0).unwrap()) > 20,
+            "cylinder"
+        );
+        assert!(
+            tri_count(&cone_frustum_solid(c, 5.0, 5.0, 0.0, 12.0).unwrap()) > 10,
+            "cone"
+        );
         assert!(tri_count(&sphere_solid(c, 5.0).unwrap()) > 50, "sphere");
         assert!(tri_count(&torus_solid(c, 8.0, 2.0).unwrap()) > 50, "torus");
-        assert!(tri_count(&pyramid_solid(c, 5.0, 9.0, 6).unwrap()) >= 8, "pyramid");
+        assert!(
+            tri_count(&pyramid_solid(c, 5.0, 9.0, 6).unwrap()) >= 8,
+            "pyramid"
+        );
     }
 
     #[test]

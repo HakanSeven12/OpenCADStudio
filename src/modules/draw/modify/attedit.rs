@@ -7,8 +7,8 @@
 // suitable block is already selected, the ATTEDIT dispatch opens the dialog
 // directly and never starts this command (see `app::commands::inquiry`).
 
-use glam::DVec3;
 use crate::t;
+use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::scene::model::wire_model::WireModel;
@@ -63,4 +63,6 @@ impl CadCommand for AtteditCommand {
 }
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["ATTEDIT"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["ATTEDIT"]
+});

@@ -133,7 +133,10 @@ fn ctab_is_created_against_a_repaired_root() {
         panic!("variable dictionary must resolve");
     };
     assert!(
-        variable_dictionary.entries.iter().any(|(key, _)| key == "CTAB"),
+        variable_dictionary
+            .entries
+            .iter()
+            .any(|(key, _)| key == "CTAB"),
         "CTAB must be registered in the variable dictionary"
     );
 }

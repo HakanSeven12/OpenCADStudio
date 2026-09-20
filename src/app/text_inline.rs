@@ -169,9 +169,7 @@ impl super::OpenCADStudio {
             EntityType::AttributeEntity(a) => (vec3(a.insertion_point), a.height),
             EntityType::Dimension(d) => (vec3(d.base().insertion_point), 0.25),
             EntityType::Tolerance(t) => (vec3(t.insertion_point), t.text_height),
-            EntityType::MultiLeader(ml) => {
-                (vec3(ml.context.text_location), ml.context.text_height)
-            }
+            EntityType::MultiLeader(ml) => (vec3(ml.context.text_location), ml.context.text_height),
             _ => (DVec3::ZERO, 0.25),
         };
 
@@ -207,7 +205,12 @@ impl super::OpenCADStudio {
             creation,
             screen_anchor: iced::Point::new(60.0, 90.0),
         };
-        if let Some(p) = self.tabs[self.active_tab].scene.selection.borrow().last_move_pos {
+        if let Some(p) = self.tabs[self.active_tab]
+            .scene
+            .selection
+            .borrow()
+            .last_move_pos
+        {
             state.screen_anchor = p;
         }
         self.text_inline = Some(state);
@@ -217,7 +220,9 @@ impl super::OpenCADStudio {
     /// Empty content drops a new entity and leaves an edited one untouched.
     pub(super) fn text_inline_commit(&mut self) -> bool {
         let i = self.active_tab;
-        let Some(ed) = self.text_inline.take() else { return false };
+        let Some(ed) = self.text_inline.take() else {
+            return false;
+        };
         if ed.value.trim().is_empty() && ed.editing.is_none() {
             self.refresh_properties();
             return false;
@@ -247,11 +252,8 @@ impl super::OpenCADStudio {
                 prepared
             } else {
                 let position = plane.to_local(ed.pos);
-                Text::with_value(
-                    &ed.value,
-                    Vector3::new(position.x, position.y, position.z),
-                )
-                .with_height(ed.height)
+                Text::with_value(&ed.value, Vector3::new(position.x, position.y, position.z))
+                    .with_height(ed.height)
             };
             // New text inherits the document's current text style (STYLE), not
             // the entity default. See #92.

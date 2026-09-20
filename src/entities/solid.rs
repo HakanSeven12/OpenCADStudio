@@ -1,11 +1,11 @@
 // SOLID geometry comes from the kernel; entity coordinates stay in WCS here.
 
-use acadrust::entities::Solid;
 use crate::t;
+use acadrust::entities::Solid;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, square_grip};
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::scene::model::wire_model::SnapHint;
@@ -44,10 +44,7 @@ pub(crate) fn wcs_corners(solid: &Solid) -> [[f64; 3]; 4] {
 
 fn set_wcs_corner(solid: &mut Solid, index: usize, point: glam::DVec3) {
     let n = normal_tuple(solid);
-    let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs(
-        (point.x, point.y, point.z),
-        n,
-    );
+    let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs((point.x, point.y, point.z), n);
     let corner = match index {
         0 => &mut solid.first_corner,
         1 => &mut solid.second_corner,
@@ -107,15 +104,8 @@ fn extrusion_body(
         .skip(1)
         .map(|point| glam::DVec3::from_array(*point) - origin)
         .find(|axis| axis.length() > tolerance)?;
-    let plane = cadkernel::space::Plane::orthonormal(
-        base[0],
-        axis.to_array(),
-        normal.to_array(),
-    )?;
-    if base
-        .iter()
-        .any(|point| !plane.contains(*point, tolerance))
-    {
+    let plane = cadkernel::space::Plane::orthonormal(base[0], axis.to_array(), normal.to_array())?;
+    if base.iter().any(|point| !plane.contains(*point, tolerance)) {
         return None;
     }
     let projected = base
@@ -130,20 +120,14 @@ fn extrusion_body(
             })
         })
         .collect::<Vec<_>>();
-    cadkernel::brep::extrude(
-        plane,
-        &profile,
-        (normal * solid.thickness).to_array(),
-    )
+    cadkernel::brep::extrude(plane, &profile, (normal * solid.thickness).to_array())
 }
 
 fn solid_geometry(solid: &Solid) -> Option<SolidGeometry> {
     let base = boundary(solid);
     let tolerance = kernel_tolerance(&base);
-    let fill_tris = cadkernel::space::polygon::triangulate(
-        &base,
-        cadkernel::geom2d::Tolerance::new(tolerance),
-    );
+    let fill_tris =
+        cadkernel::space::polygon::triangulate(&base, cadkernel::geom2d::Tolerance::new(tolerance));
     if solid.thickness.abs() <= 1.0e-10 {
         return Some(SolidGeometry {
             edges: boundary_edges(&base),
@@ -221,9 +205,12 @@ impl RenderConvertible for Solid {
             snap.push((dvec3(point), SnapHint::Node));
             snap.push((dvec3(point), SnapHint::Endpoint));
         }
-        snap.extend(geometry.edges.iter().map(|(start, end)| {
-            ((dvec3(*start) + dvec3(*end)) * 0.5, SnapHint::Midpoint)
-        }));
+        snap.extend(
+            geometry
+                .edges
+                .iter()
+                .map(|(start, end)| ((dvec3(*start) + dvec3(*end)) * 0.5, SnapHint::Midpoint)),
+        );
         let pick_tris = geometry
             .extruded
             .then(|| geometry.fill_tris.clone())

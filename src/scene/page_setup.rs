@@ -71,7 +71,10 @@ impl Scene {
     /// drawing genuinely has no named page setups.
     fn plotsettings_dict_handle(&self) -> Option<Handle> {
         let dh = self.document.header.acad_plotsettings_dict_handle;
-        if matches!(self.document.objects.get(&dh), Some(ObjectType::Dictionary(_))) {
+        if matches!(
+            self.document.objects.get(&dh),
+            Some(ObjectType::Dictionary(_))
+        ) {
             return Some(dh);
         }
         let owner = self.document.objects.values().find_map(|o| match o {
@@ -87,7 +90,10 @@ impl Scene {
 
     /// Names of the document's named page setups, in dictionary order.
     pub fn page_setup_names(&self) -> Vec<String> {
-        match self.plotsettings_dict_handle().and_then(|h| self.document.objects.get(&h)) {
+        match self
+            .plotsettings_dict_handle()
+            .and_then(|h| self.document.objects.get(&h))
+        {
             Some(ObjectType::Dictionary(d)) => d.entries.iter().map(|(k, _)| k.clone()).collect(),
             _ => Vec::new(),
         }
@@ -128,7 +134,8 @@ impl Scene {
         self.document.header.acad_plotsettings_dict_handle = new_handle;
         if let Some(ObjectType::Dictionary(rd)) = self.document.objects.get_mut(&root) {
             rd.entries.retain(|(k, _)| k != "ACAD_PLOTSETTINGS");
-            rd.entries.push(("ACAD_PLOTSETTINGS".to_string(), new_handle));
+            rd.entries
+                .push(("ACAD_PLOTSETTINGS".to_string(), new_handle));
         }
         new_handle
     }
@@ -151,11 +158,15 @@ impl Scene {
         ps.owner = dict_handle;
         if let Some(h) = self.page_setup_handle(name) {
             ps.handle = h;
-            self.document.objects.insert(h, ObjectType::PlotSettings(ps));
+            self.document
+                .objects
+                .insert(h, ObjectType::PlotSettings(ps));
         } else {
             ps.handle = self.document.allocate_handle();
             let h = ps.handle;
-            self.document.objects.insert(h, ObjectType::PlotSettings(ps));
+            self.document
+                .objects
+                .insert(h, ObjectType::PlotSettings(ps));
             if let Some(ObjectType::Dictionary(d)) = self.document.objects.get_mut(&dict_handle) {
                 d.entries.push((name.to_string(), h));
             }
@@ -167,15 +178,14 @@ impl Scene {
         let Some(dict_handle) = self.plotsettings_dict_handle() else {
             return;
         };
-        let handle = if let Some(ObjectType::Dictionary(d)) =
-            self.document.objects.get_mut(&dict_handle)
-        {
-            let h = d.entries.iter().find(|(k, _)| k == name).map(|(_, h)| *h);
-            d.entries.retain(|(k, _)| k != name);
-            h
-        } else {
-            None
-        };
+        let handle =
+            if let Some(ObjectType::Dictionary(d)) = self.document.objects.get_mut(&dict_handle) {
+                let h = d.entries.iter().find(|(k, _)| k == name).map(|(_, h)| *h);
+                d.entries.retain(|(k, _)| k != name);
+                h
+            } else {
+                None
+            };
         if let Some(h) = handle {
             self.document.objects.remove(&h);
         }

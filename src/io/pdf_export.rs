@@ -12,8 +12,8 @@ use crate::io::plot_style::PlotStyleTable;
 use crate::scene::model::hatch_model::HatchModel;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::scene::model::hatch_model::HatchPattern;
-use crate::scene::WireModel;
 use crate::scene::model::image_model::ImageModel;
+use crate::scene::WireModel;
 #[cfg(not(target_arch = "wasm32"))]
 use printpdf::{
     BlendMode, BuiltinFont, Color, ExtendedGraphicsState, ExtendedGraphicsStateId, Line,
@@ -386,8 +386,7 @@ pub fn pick_pdf_path_owned(
         .set_file_name(&format!("{stem}.pdf"))
         .add_filter(crate::t!("PDF Files").as_ref(), &["pdf"])
         .add_filter(crate::t!("All Files").as_ref(), &["*"])
-        .save_file()
-        ?;
+        .save_file()?;
     crate::config::remember_dialog_dir(&path);
     Some(path)
 }
@@ -414,7 +413,10 @@ pub async fn pick_pdf_path_async(stem: String) -> Option<std::path::PathBuf> {
 // ── PDF builder ───────────────────────────────────────────────────────────
 
 #[cfg(not(target_arch = "wasm32"))]
-fn build_pdf_pages(pages: &[PdfPageInput], plot_style: Option<&PlotStyleTable>) -> Result<Vec<u8>, String> {
+fn build_pdf_pages(
+    pages: &[PdfPageInput],
+    plot_style: Option<&PlotStyleTable>,
+) -> Result<Vec<u8>, String> {
     let mut doc = PdfDocument::new("Open CAD Studio Export");
     // Borrowing all pages keeps their pixel Arcs alive until this cache is dropped.
     // Allocation addresses cannot be reused by another source during this export.
@@ -434,7 +436,13 @@ fn append_pdf_page(
     page: &PdfPageInput,
     fallback_plot_style: Option<&PlotStyleTable>,
 ) -> Result<(), String> {
-    let PlotContent { wires, hatches, wipeouts, images, group_splits } = &page.content;
+    let PlotContent {
+        wires,
+        hatches,
+        wipeouts,
+        images,
+        group_splits,
+    } = &page.content;
     let (paper_w, paper_h) = (page.paper_w as f32, page.paper_h as f32);
     let (ox, oy) = (page.offset_x, page.offset_y);
     let (rotation_deg, scale, clip) = (page.rotation_deg, page.scale, page.clip);
@@ -515,11 +523,17 @@ fn append_pdf_page(
                     rings: vec![PolygonRing {
                         points: vec![
                             LinePoint {
-                                p: Point { x: Pt(cx * MM_TO_PT), y: Pt(cy * MM_TO_PT) },
+                                p: Point {
+                                    x: Pt(cx * MM_TO_PT),
+                                    y: Pt(cy * MM_TO_PT),
+                                },
                                 bezier: false,
                             },
                             LinePoint {
-                                p: Point { x: Pt((cx + cw) * MM_TO_PT), y: Pt(cy * MM_TO_PT) },
+                                p: Point {
+                                    x: Pt((cx + cw) * MM_TO_PT),
+                                    y: Pt(cy * MM_TO_PT),
+                                },
                                 bezier: false,
                             },
                             LinePoint {
@@ -530,7 +544,10 @@ fn append_pdf_page(
                                 bezier: false,
                             },
                             LinePoint {
-                                p: Point { x: Pt(cx * MM_TO_PT), y: Pt((cy + ch) * MM_TO_PT) },
+                                p: Point {
+                                    x: Pt(cx * MM_TO_PT),
+                                    y: Pt((cy + ch) * MM_TO_PT),
+                                },
                                 bezier: false,
                             },
                         ],
@@ -542,317 +559,318 @@ fn append_pdf_page(
         }
     }
 
-
-    let (first_wires, second_wires) =
-        wires.split_at(group_splits.wires.min(wires.len()));
-    let (first_hatches, second_hatches) =
-        hatches.split_at(group_splits.hatches.min(hatches.len()));
+    let (first_wires, second_wires) = wires.split_at(group_splits.wires.min(wires.len()));
+    let (first_hatches, second_hatches) = hatches.split_at(group_splits.hatches.min(hatches.len()));
     let (first_wipeouts, second_wipeouts) =
         wipeouts.split_at(group_splits.wipeouts.min(wipeouts.len()));
-    let (first_images, second_images) =
-        images.split_at(group_splits.images.min(images.len()));
+    let (first_images, second_images) = images.split_at(group_splits.images.min(images.len()));
     for (wires, hatches, wipeouts, images) in [
         (first_wires, first_hatches, first_wipeouts, first_images),
         (second_wires, second_hatches, second_wipeouts, second_images),
     ] {
-    enum DrawItem<'a> {
-        WireFill(&'a PlotWire),
-        Hatch(&'a HatchModel),
-        Image(&'a PlotImage),
-        Wire(&'a PlotWire),
-        Text(&'a PlotWire),
-    }
+        enum DrawItem<'a> {
+            WireFill(&'a PlotWire),
+            Hatch(&'a HatchModel),
+            Image(&'a PlotImage),
+            Wire(&'a PlotWire),
+            Text(&'a PlotWire),
+        }
 
-    let mut draw_items = Vec::with_capacity(wires.len() * 2 + hatches.len() + wipeouts.len() + images.len());
-    let mut sequence = 0usize;
-    for wire in wires {
-        if !wire.fill_tris.is_empty() {
-            draw_items.push((wire.draw_depth, 0u8, sequence, DrawItem::WireFill(wire)));
+        let mut draw_items =
+            Vec::with_capacity(wires.len() * 2 + hatches.len() + wipeouts.len() + images.len());
+        let mut sequence = 0usize;
+        for wire in wires {
+            if !wire.fill_tris.is_empty() {
+                draw_items.push((wire.draw_depth, 0u8, sequence, DrawItem::WireFill(wire)));
+                sequence += 1;
+            }
+            draw_items.push((wire.draw_depth, 2u8, sequence, DrawItem::Wire(wire)));
+            sequence += 1;
+            if !wire.text_verts.is_empty() {
+                draw_items.push((wire.draw_depth, 3u8, sequence, DrawItem::Text(wire)));
+                sequence += 1;
+            }
+        }
+        for hatch in wipeouts.iter().chain(hatches.iter()) {
+            draw_items.push((hatch.draw_depth, 1u8, sequence, DrawItem::Hatch(hatch)));
             sequence += 1;
         }
-        draw_items.push((wire.draw_depth, 2u8, sequence, DrawItem::Wire(wire)));
-        sequence += 1;
-        if !wire.text_verts.is_empty() {
-            draw_items.push((wire.draw_depth, 3u8, sequence, DrawItem::Text(wire)));
+        for image in images {
+            draw_items.push((
+                image.image.draw_depth,
+                1u8,
+                sequence,
+                DrawItem::Image(image),
+            ));
             sequence += 1;
         }
-    }
-    for hatch in wipeouts.iter().chain(hatches.iter()) {
-        draw_items.push((hatch.draw_depth, 1u8, sequence, DrawItem::Hatch(hatch)));
-        sequence += 1;
-    }
-    for image in images {
-        draw_items.push((image.image.draw_depth, 1u8, sequence, DrawItem::Image(image)));
-        sequence += 1;
-    }
-    draw_items.sort_by(|a, b| {
-        a.0.total_cmp(&b.0)
-            .then_with(|| a.1.cmp(&b.1))
-            .then_with(|| a.2.cmp(&b.2))
-    });
+        draw_items.sort_by(|a, b| {
+            a.0.total_cmp(&b.0)
+                .then_with(|| a.1.cmp(&b.1))
+                .then_with(|| a.2.cmp(&b.2))
+        });
 
-    let mut last_color: Option<[f32; 3]> = None;
-    let mut last_lw: Option<f32> = None;
-    let mut last_cap = Some(LineCapStyle::Round);
-    let mut last_join = Some(LineJoinStyle::Round);
-    // Current PDF dash array (empty = solid). Tracked so the dash op is only
-    // re-emitted when it actually changes between wires.
-    let mut last_dash: Option<Vec<i64>> = None;
+        let mut last_color: Option<[f32; 3]> = None;
+        let mut last_lw: Option<f32> = None;
+        let mut last_cap = Some(LineCapStyle::Round);
+        let mut last_join = Some(LineJoinStyle::Round);
+        // Current PDF dash array (empty = solid). Tracked so the dash op is only
+        // re-emitted when it actually changes between wires.
+        let mut last_dash: Option<Vec<i64>> = None;
 
-    for (_, _, _, item) in draw_items {
-        let wire = match item {
-            DrawItem::WireFill(wire) => {
-                emit_wire_fills(
-                    &mut ops,
-                    std::slice::from_ref(&wire.wire),
-                    wire.draw_depth,
-                    ox,
-                    oy,
-                    plot_style,
-                    scale,
-                    options,
-                    normal_blend.as_ref(),
-                );
-                last_color = None;
-                last_lw = None;
-                last_dash = None;
-                continue;
-            }
-            DrawItem::Hatch(hatch) => {
-                emit_hatch(
-                    &mut ops,
-                    hatch,
-                    ox,
-                    oy,
-                    plot_style,
-                    scale,
-                    options,
-                    normal_blend.as_ref(),
-                );
-                last_color = None;
-                last_lw = None;
-                last_dash = None;
-                continue;
-            }
-            DrawItem::Text(wire) => {
-                emit_text(
-                    &mut ops,
-                    std::slice::from_ref(&wire.wire),
-                    ox,
-                    oy,
-                    scale,
-                    plot_style,
-                    options,
-                );
-                last_color = None;
-                last_lw = None;
-                last_dash = None;
-                continue;
-            }
-            DrawItem::Image(image) => {
-                emit_image(doc, image_resources, &mut ops, image, ox, oy, options)?;
-                continue;
-            }
-            DrawItem::Wire(wire) => wire,
-        };
-        let [mut r, mut g, mut b, a] = wire.color;
-        if a < 0.01 {
-            continue;
-        }
-        // Skip screen-only paper helpers. The PDF page supplies its own white
-        // boundary, and the printable-area rectangle is a UI guide, not ink.
-        if matches!(wire.name.as_str(), "__paper_boundary__" | "paper_printable_area") {
-            continue;
-        }
-        // Apply CTB plot style table overrides (color + lineweight).
-        let mut lw_override: Option<f32> = None;
-        let mut screening = 1.0;
-        let mut color_overridden = false;
-        let mut cap = None;
-        let mut join = None;
-        if let Some(ctb) = plot_style {
-            if wire.aci > 0 {
-                if let Some([cr, cg, cb]) = ctb.resolve_color(wire.aci) {
-                    r = cr;
-                    g = cg;
-                    b = cb;
-                    color_overridden = true;
-                }
-                lw_override = ctb
-                    .resolve_lineweight(wire.aci)
-                    .map(|mm| (mm * MM_TO_PT).max(0.1));
-                screening = ctb.resolve_screening(wire.aci);
-                if let Some(entry) = ctb.aci_entries.get(wire.aci as usize) {
-                    cap = match entry.end_style {
-                        0 => Some(LineCapStyle::Butt),
-                        1 | 3 => Some(LineCapStyle::ProjectingSquare),
-                        2 => Some(LineCapStyle::Round),
-                        _ => None,
-                    };
-                    join = match entry.join_style {
-                        0 => Some(LineJoinStyle::Miter),
-                        1 | 3 => Some(LineJoinStyle::Bevel),
-                        2 => Some(LineJoinStyle::Round),
-                        _ => None,
-                    };
-                }
-            }
-        }
-        // Near-white and near-yellow (viewport active border) → dark grey for print
-        // (only when no CTB override was applied).
-        if !color_overridden {
-            let is_light = r > 0.80 && g > 0.80 && b > 0.80;
-            let is_yellow = r > 0.80 && g > 0.70 && b < 0.30;
-            let is_cyan = r < 0.30 && g > 0.70 && b > 0.70;
-            if is_light || is_yellow {
-                r = 0.0;
-                g = 0.0;
-                b = 0.0;
-            } else if is_cyan {
-                // Viewport border: print as dark blue.
-                r = 0.0;
-                g = 0.15;
-                b = 0.50;
-            }
-        }
-        [r, g, b] = plotted_color([r, g, b], a, screening, options);
-
-        let cap = cap.unwrap_or(LineCapStyle::Round);
-        if last_cap != Some(cap) {
-            ops.push(Op::SetLineCapStyle { cap });
-            last_cap = Some(cap);
-        }
-        let join = join.unwrap_or(LineJoinStyle::Round);
-        if last_join != Some(join) {
-            ops.push(Op::SetLineJoinStyle { join });
-            last_join = Some(join);
-        }
-
-        if last_color
-            .map(|c| (c[0] - r).abs() > 0.01 || (c[1] - g).abs() > 0.01 || (c[2] - b).abs() > 0.01)
-            .unwrap_or(true)
-        {
-            let color = Color::Rgb(Rgb {
-                r,
-                g,
-                b,
-                icc_profile: None,
-            });
-            ops.push(Op::SetOutlineColor {
-                col: color.clone(),
-            });
-            ops.push(Op::SetFillColor { col: color });
-            last_color = Some([r, g, b]);
-        }
-
-        // Line weight: style override or object weight. Normal output divides
-        // by the page transform so physical pen widths stay constant; the
-        // scale-lineweights option deliberately keeps the transformed width.
-        //
-        // A wide polyline is the exception: its band is a geometric width in
-        // drawing units, so it must SCALE with the plot (no `/ scale`). Stroke
-        // the centre-line at `world_width`, converted mm → pt exactly like the
-        // geometry coordinates so the CTM scale renders the band at its true
-        // size; the linetype dash pattern below then strokes it dashed. This
-        // replaces the model-space hatch band that the shader-band change
-        // dropped, and overrides any CTB pen weight (the width is geometry, not
-        // a lineweight).
-        let pen_divisor = if options.scale_lineweights {
-            1.0
-        } else {
-            scale.max(1e-6)
-        };
-        let lw_pt = if wire.world_width > 0.0 {
-            wire.world_width * MM_TO_PT
-        } else {
-            let physical = if options.object_lineweights {
-                lw_override.unwrap_or_else(|| (wire.line_weight_px * LW_PX_TO_PT).max(0.1))
-            } else {
-                0.1
-            };
-            physical / pen_divisor
-        };
-        if last_lw.map(|l| (l - lw_pt).abs() > 0.01).unwrap_or(true) {
-            ops.push(Op::SetOutlineThickness { pt: Pt(lw_pt) });
-            last_lw = Some(lw_pt);
-        }
-
-        // Linetype dash pattern. Without this every wire exported as a solid
-        // line regardless of its linetype (dashed / centre / dash-dot). (#155)
-        let dash_arr = dash_array_from_pattern(wire.pattern_length, &wire.pattern, MM_TO_PT);
-        let stationed =
-            !dash_arr.is_empty() && wire.pattern_stations.len() > wire.points.len();
-        if stationed {
-            if last_dash.as_ref().is_none_or(|dash| !dash.is_empty()) {
-                ops.push(Op::SetLineDashPattern {
-                    dash: LineDashPattern::default(),
-                });
-                last_dash = Some(Vec::new());
-            }
-            for index in 0..wire.points.len().saturating_sub(1) {
-                if !wire.points[index][0].is_finite()
-                    || !wire.points[index + 1][0].is_finite()
-                {
+        for (_, _, _, item) in draw_items {
+            let wire = match item {
+                DrawItem::WireFill(wire) => {
+                    emit_wire_fills(
+                        &mut ops,
+                        std::slice::from_ref(&wire.wire),
+                        wire.draw_depth,
+                        ox,
+                        oy,
+                        plot_style,
+                        scale,
+                        options,
+                        normal_blend.as_ref(),
+                    );
+                    last_color = None;
+                    last_lw = None;
+                    last_dash = None;
                     continue;
                 }
-                let start = wire.point_world(index, paper_h as f64 / scale.max(1e-6) as f64);
-                let end = wire.point_world(index + 1, paper_h as f64 / scale.max(1e-6) as f64);
-                for [from, to] in visible_station_ranges(
-                    wire.pattern_stations[index],
-                    wire.pattern_stations[index + 1],
-                    wire.pattern_length,
-                    &wire.pattern,
-                ) {
-                    let point = |t: f32| {
-                        LinePoint {
+                DrawItem::Hatch(hatch) => {
+                    emit_hatch(
+                        &mut ops,
+                        hatch,
+                        ox,
+                        oy,
+                        plot_style,
+                        scale,
+                        options,
+                        normal_blend.as_ref(),
+                    );
+                    last_color = None;
+                    last_lw = None;
+                    last_dash = None;
+                    continue;
+                }
+                DrawItem::Text(wire) => {
+                    emit_text(
+                        &mut ops,
+                        std::slice::from_ref(&wire.wire),
+                        ox,
+                        oy,
+                        scale,
+                        plot_style,
+                        options,
+                    );
+                    last_color = None;
+                    last_lw = None;
+                    last_dash = None;
+                    continue;
+                }
+                DrawItem::Image(image) => {
+                    emit_image(doc, image_resources, &mut ops, image, ox, oy, options)?;
+                    continue;
+                }
+                DrawItem::Wire(wire) => wire,
+            };
+            let [mut r, mut g, mut b, a] = wire.color;
+            if a < 0.01 {
+                continue;
+            }
+            // Skip screen-only paper helpers. The PDF page supplies its own white
+            // boundary, and the printable-area rectangle is a UI guide, not ink.
+            if matches!(
+                wire.name.as_str(),
+                "__paper_boundary__" | "paper_printable_area"
+            ) {
+                continue;
+            }
+            // Apply CTB plot style table overrides (color + lineweight).
+            let mut lw_override: Option<f32> = None;
+            let mut screening = 1.0;
+            let mut color_overridden = false;
+            let mut cap = None;
+            let mut join = None;
+            if let Some(ctb) = plot_style {
+                if wire.aci > 0 {
+                    if let Some([cr, cg, cb]) = ctb.resolve_color(wire.aci) {
+                        r = cr;
+                        g = cg;
+                        b = cb;
+                        color_overridden = true;
+                    }
+                    lw_override = ctb
+                        .resolve_lineweight(wire.aci)
+                        .map(|mm| (mm * MM_TO_PT).max(0.1));
+                    screening = ctb.resolve_screening(wire.aci);
+                    if let Some(entry) = ctb.aci_entries.get(wire.aci as usize) {
+                        cap = match entry.end_style {
+                            0 => Some(LineCapStyle::Butt),
+                            1 | 3 => Some(LineCapStyle::ProjectingSquare),
+                            2 => Some(LineCapStyle::Round),
+                            _ => None,
+                        };
+                        join = match entry.join_style {
+                            0 => Some(LineJoinStyle::Miter),
+                            1 | 3 => Some(LineJoinStyle::Bevel),
+                            2 => Some(LineJoinStyle::Round),
+                            _ => None,
+                        };
+                    }
+                }
+            }
+            // Near-white and near-yellow (viewport active border) → dark grey for print
+            // (only when no CTB override was applied).
+            if !color_overridden {
+                let is_light = r > 0.80 && g > 0.80 && b > 0.80;
+                let is_yellow = r > 0.80 && g > 0.70 && b < 0.30;
+                let is_cyan = r < 0.30 && g > 0.70 && b > 0.70;
+                if is_light || is_yellow {
+                    r = 0.0;
+                    g = 0.0;
+                    b = 0.0;
+                } else if is_cyan {
+                    // Viewport border: print as dark blue.
+                    r = 0.0;
+                    g = 0.15;
+                    b = 0.50;
+                }
+            }
+            [r, g, b] = plotted_color([r, g, b], a, screening, options);
+
+            let cap = cap.unwrap_or(LineCapStyle::Round);
+            if last_cap != Some(cap) {
+                ops.push(Op::SetLineCapStyle { cap });
+                last_cap = Some(cap);
+            }
+            let join = join.unwrap_or(LineJoinStyle::Round);
+            if last_join != Some(join) {
+                ops.push(Op::SetLineJoinStyle { join });
+                last_join = Some(join);
+            }
+
+            if last_color
+                .map(|c| {
+                    (c[0] - r).abs() > 0.01 || (c[1] - g).abs() > 0.01 || (c[2] - b).abs() > 0.01
+                })
+                .unwrap_or(true)
+            {
+                let color = Color::Rgb(Rgb {
+                    r,
+                    g,
+                    b,
+                    icc_profile: None,
+                });
+                ops.push(Op::SetOutlineColor { col: color.clone() });
+                ops.push(Op::SetFillColor { col: color });
+                last_color = Some([r, g, b]);
+            }
+
+            // Line weight: style override or object weight. Normal output divides
+            // by the page transform so physical pen widths stay constant; the
+            // scale-lineweights option deliberately keeps the transformed width.
+            //
+            // A wide polyline is the exception: its band is a geometric width in
+            // drawing units, so it must SCALE with the plot (no `/ scale`). Stroke
+            // the centre-line at `world_width`, converted mm → pt exactly like the
+            // geometry coordinates so the CTM scale renders the band at its true
+            // size; the linetype dash pattern below then strokes it dashed. This
+            // replaces the model-space hatch band that the shader-band change
+            // dropped, and overrides any CTB pen weight (the width is geometry, not
+            // a lineweight).
+            let pen_divisor = if options.scale_lineweights {
+                1.0
+            } else {
+                scale.max(1e-6)
+            };
+            let lw_pt = if wire.world_width > 0.0 {
+                wire.world_width * MM_TO_PT
+            } else {
+                let physical = if options.object_lineweights {
+                    lw_override.unwrap_or_else(|| (wire.line_weight_px * LW_PX_TO_PT).max(0.1))
+                } else {
+                    0.1
+                };
+                physical / pen_divisor
+            };
+            if last_lw.map(|l| (l - lw_pt).abs() > 0.01).unwrap_or(true) {
+                ops.push(Op::SetOutlineThickness { pt: Pt(lw_pt) });
+                last_lw = Some(lw_pt);
+            }
+
+            // Linetype dash pattern. Without this every wire exported as a solid
+            // line regardless of its linetype (dashed / centre / dash-dot). (#155)
+            let dash_arr = dash_array_from_pattern(wire.pattern_length, &wire.pattern, MM_TO_PT);
+            let stationed = !dash_arr.is_empty() && wire.pattern_stations.len() > wire.points.len();
+            if stationed {
+                if last_dash.as_ref().is_none_or(|dash| !dash.is_empty()) {
+                    ops.push(Op::SetLineDashPattern {
+                        dash: LineDashPattern::default(),
+                    });
+                    last_dash = Some(Vec::new());
+                }
+                for index in 0..wire.points.len().saturating_sub(1) {
+                    if !wire.points[index][0].is_finite() || !wire.points[index + 1][0].is_finite()
+                    {
+                        continue;
+                    }
+                    let start = wire.point_world(index, paper_h as f64 / scale.max(1e-6) as f64);
+                    let end = wire.point_world(index + 1, paper_h as f64 / scale.max(1e-6) as f64);
+                    for [from, to] in visible_station_ranges(
+                        wire.pattern_stations[index],
+                        wire.pattern_stations[index + 1],
+                        wire.pattern_length,
+                        &wire.pattern,
+                    ) {
+                        let point = |t: f32| LinePoint {
                             p: Point::new(
                                 Mm((start.x + (end.x - start.x) * t as f64 + ox) as f32),
                                 Mm((start.y + (end.y - start.y) * t as f64 + oy) as f32),
                             ),
                             bezier: false,
-                        }
-                    };
-                    flush_line(&mut ops, &[point(from), point(to)], None);
+                        };
+                        flush_line(&mut ops, &[point(from), point(to)], None);
+                    }
+                }
+                continue;
+            }
+            if last_dash.as_deref() != Some(dash_arr.as_slice()) {
+                let dash = if dash_arr.is_empty() {
+                    LineDashPattern::default()
+                } else {
+                    LineDashPattern::from_array(&dash_arr, 0)
+                };
+                ops.push(Op::SetLineDashPattern { dash });
+                last_dash = Some(dash_arr.clone());
+            }
+
+            // Emit segments (NaN = pen-up). Points are the "high" half of a
+            // double-single pair; fold in the `points_low` residual and cancel the
+            // offset in f64 before narrowing. Dropping the residual (or narrowing
+            // first) snaps a UTM drawing onto the f32 grid — ~3 cm across, ~50 cm
+            // along northing — which is exactly the distortion the plot showed while
+            // low-coordinate drawings came out clean. The result is a sheet-mm value
+            // in single digits, so f32 is lossless from here.
+            let mut segment: Vec<LinePoint> = Vec::new();
+            let dot_radius = (wire.name == "viewport_hatch_pattern")
+                .then_some(Pt(SCREEN_DOT_MM * MM_TO_PT / (2.0 * scale.max(1e-6))));
+            for (pi, &[x, y, _z]) in wire.points.iter().enumerate() {
+                if x.is_nan() || y.is_nan() {
+                    flush_line(&mut ops, &segment, dot_radius);
+                    segment.clear();
+                } else {
+                    let point = wire.point_world(pi, paper_h as f64 / scale.max(1e-6) as f64);
+                    let wx = (point.x + ox) as f32;
+                    let wy = (point.y + oy) as f32;
+                    segment.push(LinePoint {
+                        p: Point::new(Mm(wx), Mm(wy)),
+                        bezier: false,
+                    });
                 }
             }
-            continue;
+            flush_line(&mut ops, &segment, dot_radius);
         }
-        if last_dash.as_deref() != Some(dash_arr.as_slice()) {
-            let dash = if dash_arr.is_empty() {
-                LineDashPattern::default()
-            } else {
-                LineDashPattern::from_array(&dash_arr, 0)
-            };
-            ops.push(Op::SetLineDashPattern { dash });
-            last_dash = Some(dash_arr.clone());
-        }
-
-        // Emit segments (NaN = pen-up). Points are the "high" half of a
-        // double-single pair; fold in the `points_low` residual and cancel the
-        // offset in f64 before narrowing. Dropping the residual (or narrowing
-        // first) snaps a UTM drawing onto the f32 grid — ~3 cm across, ~50 cm
-        // along northing — which is exactly the distortion the plot showed while
-        // low-coordinate drawings came out clean. The result is a sheet-mm value
-        // in single digits, so f32 is lossless from here.
-        let mut segment: Vec<LinePoint> = Vec::new();
-        let dot_radius = (wire.name == "viewport_hatch_pattern")
-            .then_some(Pt(SCREEN_DOT_MM * MM_TO_PT / (2.0 * scale.max(1e-6))));
-        for (pi, &[x, y, _z]) in wire.points.iter().enumerate() {
-            if x.is_nan() || y.is_nan() {
-                flush_line(&mut ops, &segment, dot_radius);
-                segment.clear();
-            } else {
-                let point = wire.point_world(pi, paper_h as f64 / scale.max(1e-6) as f64);
-                let wx = (point.x + ox) as f32;
-                let wy = (point.y + oy) as f32;
-                segment.push(LinePoint {
-                    p: Point::new(Mm(wx), Mm(wy)),
-                    bezier: false,
-                });
-            }
-        }
-        flush_line(&mut ops, &segment, dot_radius);
-    }
     }
 
     if needs_state {
@@ -902,7 +920,10 @@ fn visible_station_ranges(
     pattern_length: f32,
     pattern: &[f32; 8],
 ) -> Vec<[f32; 2]> {
-    let count = pattern.iter().rposition(|value| *value != 0.0).map_or(0, |i| i + 1);
+    let count = pattern
+        .iter()
+        .rposition(|value| *value != 0.0)
+        .map_or(0, |i| i + 1);
     if count == 0 || pattern_length <= 1e-6 {
         return vec![[0.0, 1.0]];
     }
@@ -948,7 +969,11 @@ fn visible_station_ranges(
         }
     };
     if delta.abs() <= 1e-6 {
-        return state(start, true).0.then_some([0.0, 1.0]).into_iter().collect();
+        return state(start, true)
+            .0
+            .then_some([0.0, 1.0])
+            .into_iter()
+            .collect();
     }
 
     let mut ranges = Vec::new();
@@ -973,8 +998,7 @@ fn flush_line(ops: &mut Vec<Op>, pts: &[LinePoint], dot_radius: Option<Pt>) {
     if let Some(radius) = dot_radius {
         let first = pts[0].p;
         let coincident = pts.iter().skip(1).all(|point| {
-            (point.p.x.0 - first.x.0).abs() <= 1e-6
-                && (point.p.y.0 - first.y.0).abs() <= 1e-6
+            (point.p.x.0 - first.x.0).abs() <= 1e-6 && (point.p.y.0 - first.y.0).abs() <= 1e-6
         });
         if coincident {
             emit_round_dot(ops, first, radius);
@@ -1014,12 +1038,7 @@ fn emit_round_dot(ops: &mut Vec<Op>, center: Point, radius: Pt) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn plotted_color(
-    rgb: [f32; 3],
-    alpha: f32,
-    screening: f32,
-    options: PdfPlotOptions,
-) -> [f32; 3] {
+fn plotted_color(rgb: [f32; 3], alpha: f32, screening: f32, options: PdfPlotOptions) -> [f32; 3] {
     let amount = screening.clamp(0.0, 1.0)
         * if options.transparency {
             alpha.clamp(0.0, 1.0)
@@ -1220,15 +1239,9 @@ fn emit_hatch(
     let mut styled_hatch = None;
     if let Some(table) = plot_style {
         if hatch.aci > 0 && matches!(hatch.pattern, HatchPattern::Solid) {
-            if let Some(pattern) = table
-                .aci_entries
-                .get(hatch.aci as usize)
-                .and_then(|entry| {
-                    crate::scene::model::hatch_model::plot_style_fill_pattern(
-                        entry.fill_style,
-                    )
-                })
-            {
+            if let Some(pattern) = table.aci_entries.get(hatch.aci as usize).and_then(|entry| {
+                crate::scene::model::hatch_model::plot_style_fill_pattern(entry.fill_style)
+            }) {
                 let mut model = hatch.clone();
                 model.pattern = pattern;
                 model.scale = 1.0 / scale.max(1.0e-6);
@@ -1272,8 +1285,7 @@ fn emit_hatch(
         r = 1.0;
         g = 1.0;
         b = 1.0;
-    } else if !color_overridden
-        && !(hatch.aci == 7 && matches!(hatch.pattern, HatchPattern::Solid))
+    } else if !color_overridden && !(hatch.aci == 7 && matches!(hatch.pattern, HatchPattern::Solid))
     {
         let is_light = r > 0.80 && g > 0.80 && b > 0.80;
         let is_yellow = r > 0.80 && g > 0.70 && b < 0.30;
@@ -1301,7 +1313,9 @@ fn emit_hatch(
     for &[bx, by] in hatch.boundary.iter() {
         if bx.is_nan() || by.is_nan() {
             if current.len() >= 3 {
-                rings.push(PolygonRing { points: std::mem::take(&mut current) });
+                rings.push(PolygonRing {
+                    points: std::mem::take(&mut current),
+                });
             } else {
                 current.clear();
             }
@@ -1375,9 +1389,7 @@ fn emit_hatch(
             b,
             icc_profile: None,
         });
-        ops.push(Op::SetOutlineColor {
-            col: color.clone(),
-        });
+        ops.push(Op::SetOutlineColor { col: color.clone() });
         ops.push(Op::SetFillColor { col: color });
         ops.push(Op::SetOutlineThickness {
             pt: Pt(physical / divisor),
@@ -1519,16 +1531,19 @@ fn emit_text(
         if let Some(ctb) = plot_style {
             if wire.aci > 0 {
                 ctb_color = ctb.resolve_color(wire.aci);
-                lw_override = options.object_lineweights.then(|| {
-                    ctb.resolve_lineweight(wire.aci).map(|mm| {
-                        let divisor = if options.scale_lineweights {
-                            1.0
-                        } else {
-                            scale.max(1e-6)
-                        };
-                        (mm * MM_TO_PT).max(0.1) / divisor
+                lw_override = options
+                    .object_lineweights
+                    .then(|| {
+                        ctb.resolve_lineweight(wire.aci).map(|mm| {
+                            let divisor = if options.scale_lineweights {
+                                1.0
+                            } else {
+                                scale.max(1e-6)
+                            };
+                            (mm * MM_TO_PT).max(0.1) / divisor
+                        })
                     })
-                }).flatten();
+                    .flatten();
                 screening = ctb.resolve_screening(wire.aci);
             }
         }
@@ -1581,7 +1596,12 @@ fn emit_text(
                 if !ge.fill_tris.is_empty() {
                     // Filled TrueType glyph: one filled triangle per triple.
                     ops.push(Op::SetFillColor {
-                        col: Color::Rgb(Rgb { r, g, b, icc_profile: None }),
+                        col: Color::Rgb(Rgb {
+                            r,
+                            g,
+                            b,
+                            icc_profile: None,
+                        }),
                     });
                     for tri in ge.fill_tris.chunks_exact(3) {
                         ops.push(Op::DrawPolygon {
@@ -1589,7 +1609,10 @@ fn emit_text(
                                 rings: vec![PolygonRing {
                                     points: tri
                                         .iter()
-                                        .map(|&p| LinePoint { p: map(p), bezier: false })
+                                        .map(|&p| LinePoint {
+                                            p: map(p),
+                                            bezier: false,
+                                        })
                                         .collect(),
                                 }],
                                 mode: PaintMode::Fill,
@@ -1634,7 +1657,10 @@ fn emit_text(
                             line: Line {
                                 points: stroke
                                     .iter()
-                                    .map(|&p| LinePoint { p: map(p), bezier: false })
+                                    .map(|&p| LinePoint {
+                                        p: map(p),
+                                        bezier: false,
+                                    })
                                     .collect(),
                                 is_closed: false,
                             },
@@ -1645,14 +1671,22 @@ fn emit_text(
                 // Decoration bar (underline / overline / strike): the quad is a
                 // solid-texel rectangle — fill it directly from its corners.
                 ops.push(Op::SetFillColor {
-                    col: Color::Rgb(Rgb { r, g, b, icc_profile: None }),
+                    col: Color::Rgb(Rgb {
+                        r,
+                        g,
+                        b,
+                        icc_profile: None,
+                    }),
                 });
                 ops.push(Op::DrawPolygon {
                     polygon: Polygon {
                         rings: vec![PolygonRing {
                             points: [bl, br, tr, tl]
                                 .iter()
-                                .map(|&c| LinePoint { p: point(c[0], c[1]), bezier: false })
+                                .map(|&c| LinePoint {
+                                    p: point(c[0], c[1]),
+                                    bezier: false,
+                                })
                                 .collect(),
                         }],
                         mode: PaintMode::Fill,
@@ -1670,7 +1704,10 @@ mod tests {
 
     fn test_page(wires: Vec<PlotWire>) -> PdfPageInput {
         PdfPageInput {
-            content: PlotContent { wires: std::sync::Arc::new(wires), ..Default::default() },
+            content: PlotContent {
+                wires: std::sync::Arc::new(wires),
+                ..Default::default()
+            },
             paper_w: 210.0,
             paper_h: 297.0,
             offset_x: 0.0,

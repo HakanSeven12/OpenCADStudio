@@ -6,11 +6,11 @@
 //   3. Text: Enter default value    (optional — press Enter for blank)
 //   4. Point: Click insertion point
 
+use crate::t;
 use acadrust::entities::AttributeDefinition;
 use acadrust::types::Vector3;
 use acadrust::EntityType;
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, InputKind, WorkingPlane};
 use crate::scene::model::wire_model::WireModel;
@@ -80,11 +80,9 @@ impl CadCommand for AttdefCommand {
                 tag = tag
             )
             .into_owned(),
-            Step::Insertion { tag, .. } => t!(
-                "ATTDEF  Specify insertion point for '%{tag}':",
-                tag = tag
-            )
-            .into_owned(),
+            Step::Insertion { tag, .. } => {
+                t!("ATTDEF  Specify insertion point for '%{tag}':", tag = tag).into_owned()
+            }
         }
     }
 
@@ -238,6 +236,5 @@ impl CadCommand for AttdefCommand {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["ATTDEF"] });  // AttdefCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["ATTDEF"] }); // AttdefCommand

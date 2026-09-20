@@ -1,7 +1,5 @@
 use super::*;
-use acadrust::entities::{
-    CenterMarkAssociation, CenterMarkSource, CenterMarkSourceKind,
-};
+use acadrust::entities::{CenterMarkAssociation, CenterMarkSource, CenterMarkSourceKind};
 use acadrust::types::Vector3;
 use cadkernel::geom2d::{closest_point, Arc as KernelArc, BulgeArc, Curve};
 use glam::DVec3;
@@ -15,19 +13,14 @@ pub(crate) fn dvec(point: Vector3) -> DVec3 {
 }
 
 fn ocs_point(point: (f64, f64, f64), normal: Vector3) -> DVec3 {
-    let point = crate::scene::view::transform::ocs_point_to_wcs(
-        point,
-        (normal.x, normal.y, normal.z),
-    );
+    let point =
+        crate::scene::view::transform::ocs_point_to_wcs(point, (normal.x, normal.y, normal.z));
     DVec3::new(point.0, point.1, point.2)
 }
 
 fn axes(normal: Vector3) -> (DVec3, DVec3) {
     let (x, y) = crate::scene::view::transform::ocs_axes((normal.x, normal.y, normal.z));
-    (
-        DVec3::new(x.0, x.1, x.2),
-        DVec3::new(y.0, y.1, y.2),
-    )
+    (DVec3::new(x.0, x.1, x.2), DVec3::new(y.0, y.1, y.2))
 }
 
 fn arc_distance(arc: &BulgeArc, pick: [f64; 2]) -> f64 {
@@ -114,8 +107,13 @@ pub(crate) fn picked_mark_source(
                     BulgeArc::from_bulge([a.x, a.y], [b.x, b.y], polyline.vertices[index].bulge)
                         .map(|arc| (index, arc))
                 })
-                .min_by(|(_, a), (_, b)| arc_distance(a, local_pick).total_cmp(&arc_distance(b, local_pick)))?;
-            let center = ocs_point((arc.center[0], arc.center[1], polyline.elevation), polyline.normal);
+                .min_by(|(_, a), (_, b)| {
+                    arc_distance(a, local_pick).total_cmp(&arc_distance(b, local_pick))
+                })?;
+            let center = ocs_point(
+                (arc.center[0], arc.center[1], polyline.elevation),
+                polyline.normal,
+            );
             let (x, y) = axes(polyline.normal);
             Some((
                 CenterMarkSource {
@@ -146,8 +144,13 @@ pub(crate) fn picked_mark_source(
                     BulgeArc::from_bulge([a.x, a.y], [b.x, b.y], polyline.vertices[index].bulge)
                         .map(|arc| (index, arc))
                 })
-                .min_by(|(_, a), (_, b)| arc_distance(a, local_pick).total_cmp(&arc_distance(b, local_pick)))?;
-            let center = ocs_point((arc.center[0], arc.center[1], polyline.elevation), polyline.normal);
+                .min_by(|(_, a), (_, b)| {
+                    arc_distance(a, local_pick).total_cmp(&arc_distance(b, local_pick))
+                })?;
+            let center = ocs_point(
+                (arc.center[0], arc.center[1], polyline.elevation),
+                polyline.normal,
+            );
             let (x, y) = axes(polyline.normal);
             Some((
                 CenterMarkSource {
@@ -173,7 +176,10 @@ fn resolve_source(
     let entity = document.get_entity(source.handle)?;
     match (source.kind, entity) {
         (CenterMarkSourceKind::Circle, EntityType::Circle(circle)) if circle.radius > 1.0e-10 => {
-            let center = ocs_point((circle.center.x, circle.center.y, circle.center.z), circle.normal);
+            let center = ocs_point(
+                (circle.center.x, circle.center.y, circle.center.z),
+                circle.normal,
+            );
             let (x, y) = axes(circle.normal);
             Some((center, circle.radius, x, y))
         }
@@ -185,24 +191,34 @@ fn resolve_source(
         (CenterMarkSourceKind::LwPolylineArcSegment, EntityType::LwPolyline(polyline)) => {
             let index = usize::try_from(source.segment_index).ok()?;
             let count = segment_count(polyline.vertices.len(), polyline.is_closed);
-            if index >= count { return None; }
+            if index >= count {
+                return None;
+            }
             let next = (index + 1) % polyline.vertices.len();
             let a = polyline.vertices[index].location;
             let b = polyline.vertices[next].location;
             let arc = BulgeArc::from_bulge([a.x, a.y], [b.x, b.y], polyline.vertices[index].bulge)?;
-            let center = ocs_point((arc.center[0], arc.center[1], polyline.elevation), polyline.normal);
+            let center = ocs_point(
+                (arc.center[0], arc.center[1], polyline.elevation),
+                polyline.normal,
+            );
             let (x, y) = axes(polyline.normal);
             Some((center, arc.radius, x, y))
         }
         (CenterMarkSourceKind::Polyline2DArcSegment, EntityType::Polyline2D(polyline)) => {
             let index = usize::try_from(source.segment_index).ok()?;
             let count = segment_count(polyline.vertices.len(), polyline.is_closed());
-            if index >= count { return None; }
+            if index >= count {
+                return None;
+            }
             let next = (index + 1) % polyline.vertices.len();
             let a = polyline.vertices[index].location;
             let b = polyline.vertices[next].location;
             let arc = BulgeArc::from_bulge([a.x, a.y], [b.x, b.y], polyline.vertices[index].bulge)?;
-            let center = ocs_point((arc.center[0], arc.center[1], polyline.elevation), polyline.normal);
+            let center = ocs_point(
+                (arc.center[0], arc.center[1], polyline.elevation),
+                polyline.normal,
+            );
             let (x, y) = axes(polyline.normal);
             Some((center, arc.radius, x, y))
         }
@@ -315,10 +331,10 @@ fn apply_source_geometry(
 
 pub(crate) fn update_carrier(line: &mut acadrust::Line, association: &CenterMarkAssociation) {
     let segments = mark_segments(association);
-    let horizontal = segments.first().copied().unwrap_or([
-        dvec(association.center),
-        dvec(association.center),
-    ]);
+    let horizontal = segments
+        .first()
+        .copied()
+        .unwrap_or([dvec(association.center), dvec(association.center)]);
     line.start = vector(horizontal[0]);
     line.end = vector(horizontal[1]);
     association.write(&mut line.common.extended_data);
@@ -331,12 +347,21 @@ impl Scene {
         source_handle: Handle,
         pick: DVec3,
     ) -> bool {
-        let Some(source_entity) = self.document.get_entity(source_handle) else { return false; };
+        let Some(source_entity) = self.document.get_entity(source_handle) else {
+            return false;
+        };
         let Some((source, center, radius, x, y)) =
             picked_mark_source(source_entity, source_handle, pick)
-        else { return false; };
-        let Some(EntityType::Line(target_line)) = self.document.get_entity(target) else { return false; };
-        let Some(mut association) = CenterMarkAssociation::read(&target_line.common.extended_data) else { return false; };
+        else {
+            return false;
+        };
+        let Some(EntityType::Line(target_line)) = self.document.get_entity(target) else {
+            return false;
+        };
+        let Some(mut association) = CenterMarkAssociation::read(&target_line.common.extended_data)
+        else {
+            return false;
+        };
         association.source = source;
         apply_source_geometry(&mut association, center, radius, x, y);
         association.associated = true;
@@ -344,7 +369,9 @@ impl Scene {
             let before = self.document.get_entity_arc(target);
             self.record_undo_before(target, before);
         }
-        let Some(EntityType::Line(line)) = self.document.get_entity_mut(target) else { return false; };
+        let Some(EntityType::Line(line)) = self.document.get_entity_mut(target) else {
+            return false;
+        };
         update_carrier(line, &association);
         self.bump_entities(&[(target, ChangeKind::Modified)]);
         true
@@ -354,8 +381,7 @@ impl Scene {
         &mut self,
         changes: &[(Handle, ChangeKind)],
     ) -> Vec<(Handle, ChangeKind)> {
-        let changed: rustc_hash::FxHashSet<_> =
-            changes.iter().map(|(handle, _)| *handle).collect();
+        let changed: rustc_hash::FxHashSet<_> = changes.iter().map(|(handle, _)| *handle).collect();
         if changed.is_empty() {
             return Vec::new();
         }
@@ -363,7 +389,9 @@ impl Scene {
             .document
             .entities()
             .filter_map(|entity| {
-                let EntityType::Line(line) = entity else { return None; };
+                let EntityType::Line(line) = entity else {
+                    return None;
+                };
                 let association = CenterMarkAssociation::read(&line.common.extended_data)?;
                 (association.associated && changed.contains(&association.source.handle))
                     .then_some((line.common.handle, association))
@@ -375,7 +403,9 @@ impl Scene {
                 let before = self.document.get_entity_arc(handle);
                 self.record_undo_before(handle, before);
             }
-            if let Some((center, radius, x, y)) = resolve_source(&self.document, &association.source) {
+            if let Some((center, radius, x, y)) =
+                resolve_source(&self.document, &association.source)
+            {
                 apply_source_geometry(&mut association, center, radius, x, y);
             } else {
                 association.associated = false;
@@ -393,19 +423,15 @@ impl Scene {
         let candidates: Vec<_> = handles
             .iter()
             .filter_map(|handle| {
-                let EntityType::Line(line) = self.document.get_entity(*handle)? else { return None; };
+                let EntityType::Line(line) = self.document.get_entity(*handle)? else {
+                    return None;
+                };
                 let mut association = CenterMarkAssociation::read(&line.common.extended_data)?;
                 let diameter = association.radius * 2.0;
-                association.cross_size = super::centerline::resolve_center_measure(
-                    &settings.cross_size,
-                    diameter,
-                    0.1,
-                );
-                association.cross_gap = super::centerline::resolve_center_measure(
-                    &settings.cross_gap,
-                    diameter,
-                    0.05,
-                );
+                association.cross_size =
+                    super::centerline::resolve_center_measure(&settings.cross_size, diameter, 0.1);
+                association.cross_gap =
+                    super::centerline::resolve_center_measure(&settings.cross_gap, diameter, 0.05);
                 association.cross_size_relative =
                     super::centerline::center_measure_is_relative(&settings.cross_size);
                 association.cross_gap_relative =
@@ -444,10 +470,13 @@ impl Scene {
         let candidates: Vec<_> = handles
             .iter()
             .filter_map(|handle| {
-                let EntityType::Line(line) = self.document.get_entity(*handle)? else { return None; };
+                let EntityType::Line(line) = self.document.get_entity(*handle)? else {
+                    return None;
+                };
                 let mut association = CenterMarkAssociation::read(&line.common.extended_data)?;
                 if associated {
-                    let (center, radius, x, y) = resolve_source(&self.document, &association.source)?;
+                    let (center, radius, x, y) =
+                        resolve_source(&self.document, &association.source)?;
                     apply_source_geometry(&mut association, center, radius, x, y);
                 }
                 association.associated = associated;

@@ -1,10 +1,10 @@
 // MVIEW — interactive paper-space viewport creation.
 
+use crate::t;
 use acadrust::entities::{LwPolyline, LwVertex, Viewport};
 use acadrust::tables::View;
 use acadrust::types::{Vector2, Vector3};
 use acadrust::{EntityType, Handle};
-use crate::t;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
 use crate::modules::draw::draw::polyline::{
@@ -85,11 +85,7 @@ impl MviewCommand {
             return None;
         }
         let mut viewport = Viewport::new();
-        viewport.center = Vector3::new(
-            (a.x + b.x) / 2.0,
-            (a.y + b.y) / 2.0,
-            a.z,
-        );
+        viewport.center = Vector3::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0, a.z);
         viewport.width = width;
         viewport.height = height;
         viewport.id = 2;
@@ -98,10 +94,7 @@ impl MviewCommand {
 
     fn fit_viewport(&self) -> Option<Viewport> {
         let ((x0, y0), (x1, y1)) = self.paper_bounds;
-        Self::viewport_from_corners(
-            DVec3::new(x0, y0, 0.0),
-            DVec3::new(x1, y1, 0.0),
-        )
+        Self::viewport_from_corners(DVec3::new(x0, y0, 0.0), DVec3::new(x1, y1, 0.0))
     }
 
     fn placed_viewport(&self, center: DVec3) -> Option<Viewport> {
@@ -254,7 +247,10 @@ impl MviewCommand {
         }
         Some(WireModel::solid_f64(
             "mview_preview".to_string(),
-            points.iter().map(|point| [point.x, point.y, point.z]).collect(),
+            points
+                .iter()
+                .map(|point| [point.x, point.y, point.z])
+                .collect(),
             WireModel::CYAN,
             false,
         ))
@@ -268,10 +264,10 @@ impl CadCommand for MviewCommand {
 
     fn prompt(&self) -> String {
         match self.step {
-            Step::RectangleFirst => t!(
-                "MVIEW  Specify corner of viewport or [Polygonal/Object/Fit/Insert view]:"
-            )
-            .into_owned(),
+            Step::RectangleFirst => {
+                t!("MVIEW  Specify corner of viewport or [Polygonal/Object/Fit/Insert view]:")
+                    .into_owned()
+            }
             Step::RectangleSecond => t!("MVIEW  Specify opposite corner:").into_owned(),
             Step::Polygon if self.polygon.is_empty() => {
                 t!("MVIEW Polygonal  Specify start point:").into_owned()
@@ -357,8 +353,7 @@ impl CadCommand for MviewCommand {
                         PolygonMode::Line => {
                             let direction = DVec2::new(pt.x - last.x, pt.y - last.y);
                             if direction.length_squared() > 1e-10 {
-                                self.polygon_last_tangent =
-                                    Some(direction.normalize().as_vec2());
+                                self.polygon_last_tangent = Some(direction.normalize().as_vec2());
                             }
                             0.0
                         }
@@ -372,10 +367,7 @@ impl CadCommand for MviewCommand {
                                 tangent,
                                 DVec2::new(pt.x, pt.y),
                             );
-                            update_tangent_after_arc(
-                                &mut self.polygon_last_tangent,
-                                bulge,
-                            );
+                            update_tangent_after_arc(&mut self.polygon_last_tangent, bulge);
                             bulge
                         }
                     };
@@ -383,8 +375,7 @@ impl CadCommand for MviewCommand {
                 }
 
                 if let Some(first) = self.polygon.first() {
-                    let distance_squared =
-                        (pt.x - first.x).powi(2) + (pt.y - first.y).powi(2);
+                    let distance_squared = (pt.x - first.x).powi(2) + (pt.y - first.y).powi(2);
                     if self.polygon.len() >= 3 && distance_squared < 1e-12 {
                         return self.finish_polygon();
                     }
@@ -522,9 +513,7 @@ impl CadCommand for MviewCommand {
                     Some(CmdResult::NeedPoint)
                 }
                 "C" | "CLOSE" if self.polygon.len() >= 3 => Some(self.finish_polygon()),
-                "U" | "UNDO" if !self.polygon.is_empty() => {
-                    Some(self.undo_polygon())
-                }
+                "U" | "UNDO" if !self.polygon.is_empty() => Some(self.undo_polygon()),
                 _ => None,
             },
             Step::ChooseView => {
@@ -578,6 +567,5 @@ impl CadCommand for MviewCommand {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["MVIEW"] });  // MviewCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["MVIEW"] }); // MviewCommand

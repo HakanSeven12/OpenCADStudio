@@ -13,9 +13,9 @@
 // with an error message — full matrix inversion for those cases would
 // require per-entity matrix transforms not yet in EntityTransform.
 
+use crate::t;
 use acadrust::{EntityType, Handle};
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -161,7 +161,10 @@ pub fn apply_insert_inverse_transform(entity: &mut EntityType, session: &RefEdit
     entity.as_entity_mut().apply_transform(&session.inverse);
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["REFCLOSE"] });  // RefCloseCommand
-inventory::submit!(crate::command::CommandRegistration { names: &["REFEDIT"] });  // RefEditPickCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["REFCLOSE"]
+}); // RefCloseCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["REFEDIT"]
+}); // RefEditPickCommand

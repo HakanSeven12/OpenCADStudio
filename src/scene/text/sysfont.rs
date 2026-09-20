@@ -61,24 +61,32 @@ pub fn canonical_family_name(family: &str) -> Option<String> {
 
 fn canonical_family_name_uncached(family: &str) -> Option<String> {
     let db = &fonts().db;
-    
+
     // 1. Try exact match first
     let query = fontdb::Query {
         families: &[fontdb::Family::Name(family)],
         ..Default::default()
     };
     if db.query(&query).is_some() {
-        if let Some(canonical) = fonts().families.iter().find(|&f| f.eq_ignore_ascii_case(family)) {
+        if let Some(canonical) = fonts()
+            .families
+            .iter()
+            .find(|&f| f.eq_ignore_ascii_case(family))
+        {
             return Some(canonical.clone());
         }
         return Some(family.to_string());
     }
-    
+
     // 2. Try case-insensitive match on the families we have
-    if let Some(matched) = fonts().families.iter().find(|&f| f.eq_ignore_ascii_case(family)) {
+    if let Some(matched) = fonts()
+        .families
+        .iter()
+        .find(|&f| f.eq_ignore_ascii_case(family))
+    {
         return Some(matched.clone());
     }
-    
+
     // 3. Match common prefixes / variations
     let family_lower = family.to_lowercase();
     let alias = match family_lower.as_str() {
@@ -88,13 +96,17 @@ fn canonical_family_name_uncached(family: &str) -> Option<String> {
         "cour" => Some("Courier New"),
         _ => None,
     };
-    
+
     if let Some(alias_name) = alias {
-        if let Some(matched) = fonts().families.iter().find(|&f| f.eq_ignore_ascii_case(alias_name)) {
+        if let Some(matched) = fonts()
+            .families
+            .iter()
+            .find(|&f| f.eq_ignore_ascii_case(alias_name))
+        {
             return Some(matched.clone());
         }
     }
-    
+
     // 4. Try matching prefix/subset case-insensitively. Require at least 3
     //    chars so a 1–2 letter request can't grab an arbitrary family by the
     //    first iteration order. Iterating sorted keeps the pick deterministic.
@@ -141,4 +153,3 @@ pub fn with_face_data<T>(family: &str, f: impl FnOnce(&[u8], u32) -> T) -> Optio
 pub fn has_family(family: &str) -> bool {
     face_id(family).is_some()
 }
-

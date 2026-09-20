@@ -4,12 +4,12 @@
 //! behaves the same everywhere.
 
 use crate::app::Message;
+use crate::t;
 use crate::ui::properties::acad_color_display;
 use crate::ui::ROW_H;
 use acadrust::types::Color as AcadColor;
 use iced::widget::{button, column, container, row, text};
 use iced::{Background, Border, Color, Element, Length, Theme};
-use crate::t;
 
 /// Which "logical" entries the colour list offers besides the standard ACI
 /// colours.
@@ -126,15 +126,7 @@ pub fn color_selector<'a>(
     on_toggle: Message,
     on_more: Message,
 ) -> Element<'a, Message> {
-    color_selector_with_name(
-        current,
-        None,
-        open,
-        extras,
-        on_select,
-        on_toggle,
-        on_more,
-    )
+    color_selector_with_name(current, None, open, extras, on_select, on_toggle, on_more)
 }
 
 pub fn color_selector_with_name<'a>(
@@ -373,10 +365,7 @@ pub fn index_color_page<'a>(
         )
         .on_press(Message::ColorPickerColorChanged(color))
         .style(move |theme: &Theme, status| {
-            let hovered = matches!(
-                status,
-                button::Status::Hovered | button::Status::Pressed
-            );
+            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
 
             button::Style {
                 background: Some(Background::Color(bg)),
@@ -431,22 +420,14 @@ pub fn index_color_page<'a>(
     let mut grayscale = row![].spacing(4);
 
     for idx in 250u8..=255 {
-        grayscale =
-            grayscale.push(swatch_button(AcadColor::Index(idx), 22.0));
+        grayscale = grayscale.push(swatch_button(AcadColor::Index(idx), 22.0));
     }
 
     let recent: Element<'a, Message> = if recent_colors.is_empty() {
         text(crate::t!("No recent colors yet"))
             .size(10)
             .style(|theme: &Theme| iced::widget::text::Style {
-                color: Some(
-                    theme
-                        .palette()
-                        .background
-                        .base
-                        .text
-                        .scale_alpha(0.55),
-                ),
+                color: Some(theme.palette().background.base.text.scale_alpha(0.55)),
             })
             .into()
     } else {
@@ -461,13 +442,10 @@ pub fn index_color_page<'a>(
 
     let selected_text = match current {
         AcadColor::Index(i) => {
-            let (r, g, b) =
-                acadrust::types::aci_table::aci_to_rgb(i).unwrap_or((128, 128, 128));
+            let (r, g, b) = acadrust::types::aci_table::aci_to_rgb(i).unwrap_or((128, 128, 128));
             format!("ACI {i}    RGB {r}, {g}, {b}")
         }
-        AcadColor::Rgb { r, g, b } => {
-            crate::tf!("True Color    RGB {r}, {g}, {b}").into_owned()
-        }
+        AcadColor::Rgb { r, g, b } => crate::tf!("True Color    RGB {r}, {g}, {b}").into_owned(),
         AcadColor::ByLayer => t!("ByLayer").into_owned(),
         AcadColor::ByBlock => t!("ByBlock").into_owned(),
         AcadColor::None => t!("None").into_owned(),
@@ -508,19 +486,15 @@ pub fn index_color_page<'a>(
             text(crate::t!("Standard colors")).size(11),
             standard,
             text(crate::t!("CAD Color Index (ACI) 10–249")).size(11),
-
             text(crate::t!("Color family  →    ·    Shade / intensity  ↓"))
                 .size(9)
                 .style(|theme: &Theme| iced::widget::text::Style {
                     color: Some(theme.palette().background.base.text.scale_alpha(0.65)),
                 }),
-
             container(palette_rows)
                 .padding(6)
                 .style(|theme: &Theme| container::Style {
-                    background: Some(Background::Color(
-                        theme.palette().background.weakest.color
-                    )),
+                    background: Some(Background::Color(theme.palette().background.weakest.color)),
                     border: Border {
                         color: theme.palette().background.neutral.color,
                         width: 1.0,
@@ -528,17 +502,11 @@ pub fn index_color_page<'a>(
                     },
                     ..Default::default()
                 }),
-
             text(crate::t!("Grayscale 250–255")).size(11),
-
             grayscale,
-
             text(crate::t!("Recently used")).size(11),
-
             recent,
-
             text(selected_text).size(11),
-
             actions,
         ]
         .spacing(9),

@@ -433,10 +433,8 @@ fn build_shaped(_family: &str, text: &str) -> Option<ShapedRun> {
         database.load_font_data((*bytes).clone());
     }
     database.set_sans_serif_family(crate::scene::text::web_font::primary_script().family());
-    let mut font_system = FontSystem::new_with_locale_and_db(
-        crate::i18n::active_language_tag(),
-        database,
-    );
+    let mut font_system =
+        FontSystem::new_with_locale_and_db(crate::i18n::active_language_tag(), database);
     let attrs = Attrs::new().family(Family::SansSerif);
     let mut buffer = Buffer::new(&mut font_system, Metrics::new(SHAPE_FS, SHAPE_FS));
     buffer.set_size(&mut font_system, None, None);
@@ -464,10 +462,7 @@ fn build_shaped(_family: &str, text: &str) -> Option<ShapedRun> {
             let pen_y = -(SHAPE_FS * glyph.y_offset) * px_to_9;
             let mut flattener = OutlineFlattener::new(scale);
             flattener.offset = [pen_x, pen_y];
-            face.outline_glyph(
-                ttf_parser::GlyphId(glyph.glyph_id),
-                &mut flattener,
-            );
+            face.outline_glyph(ttf_parser::GlyphId(glyph.glyph_id), &mut flattener);
             flattener.flush();
             if flattener.contours.is_empty() {
                 continue;
@@ -589,7 +584,6 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
 mod tests {
     use super::*;
 
-
     #[test]
     fn shape_run_falls_back_for_missing_script() {
         let fams = sysfont::families();
@@ -612,18 +606,36 @@ mod tests {
     #[test]
     fn shape_run_positions_glyphs() {
         let fams = sysfont::families();
-        if fams.is_empty() { eprintln!("no fonts; skip"); return; }
-        let fam = fams.iter().find(|f| glyph(f, 'A').is_some()).expect("family");
+        if fams.is_empty() {
+            eprintln!("no fonts; skip");
+            return;
+        }
+        let fam = fams
+            .iter()
+            .find(|f| glyph(f, 'A').is_some())
+            .expect("family");
         let run = shape_run(fam, "AVA").expect("shaped");
         eprintln!("glyphs={} advance={:.3}", run.glyphs.len(), run.advance);
         assert_eq!(run.glyphs.len(), 3);
         assert!(run.advance > 0.0);
         // glyphs must be laid out left-to-right: each glyph's strokes sit at a
         // greater x than the previous glyph's start.
-        let xs: Vec<f32> = run.glyphs.iter()
-            .filter_map(|g| g.strokes.iter().flatten().map(|p| p[0]).fold(None, |m,x| Some(m.map_or(x, |mm:f32| mm.min(x)))))
+        let xs: Vec<f32> = run
+            .glyphs
+            .iter()
+            .filter_map(|g| {
+                g.strokes
+                    .iter()
+                    .flatten()
+                    .map(|p| p[0])
+                    .fold(None, |m, x| Some(m.map_or(x, |mm: f32| mm.min(x))))
+            })
             .collect();
-        assert!(xs.windows(2).all(|w| w[1] >= w[0] - 1.0), "glyphs not L->R: {:?}", xs);
+        assert!(
+            xs.windows(2).all(|w| w[1] >= w[0] - 1.0),
+            "glyphs not L->R: {:?}",
+            xs
+        );
     }
 
     #[test]

@@ -12,9 +12,9 @@
 //   measured between two points; the new length may be typed or measured
 //   from the scale base.
 
+use crate::t;
 use acadrust::Handle;
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, DynField, EntityTransform};
 use crate::modules::draw::defaults;
@@ -34,14 +34,24 @@ pub fn tool() -> ToolDef {
 enum Step {
     Base,
     /// Default flow: factor is the cursor distance from `base`.
-    Factor { base: DVec3 },
+    Factor {
+        base: DVec3,
+    },
     /// Reference flow: waiting for the first of two independent points, or a
     /// typed reference length.
-    RefFirst { base: DVec3 },
+    RefFirst {
+        base: DVec3,
+    },
     /// Reference flow: measuring the reference length from `first`.
-    RefSecond { base: DVec3, first: DVec3 },
+    RefSecond {
+        base: DVec3,
+        first: DVec3,
+    },
     /// Reference flow: factor is `cursor_dist / ref_dist` from `base`.
-    RefNew { base: DVec3, ref_dist: f64 },
+    RefNew {
+        base: DVec3,
+        ref_dist: f64,
+    },
 }
 
 pub struct ScaleCommand {
@@ -93,9 +103,7 @@ impl CadCommand for ScaleCommand {
             Step::RefFirst { .. } => {
                 t!("SCALE  Specify first reference point or type reference length:").into_owned()
             }
-            Step::RefSecond { .. } => {
-                t!("SCALE  Specify second reference point:").into_owned()
-            }
+            Step::RefSecond { .. } => t!("SCALE  Specify second reference point:").into_owned(),
             Step::RefNew { ref_dist, .. } => {
                 let d = format!("{:.3}", ref_dist);
                 t!(
@@ -206,9 +214,7 @@ impl CadCommand for ScaleCommand {
             // Default flow: scale live by cursor distance from the base.
             Step::Factor { base } => (*base, base.distance(pt).max(1e-6) as f32),
             // Reference flow, new-length step: factor = cursor_dist / ref_dist.
-            Step::RefNew { base, ref_dist } => {
-                (*base, (base.distance(pt) / ref_dist) as f32)
-            }
+            Step::RefNew { base, ref_dist } => (*base, (base.distance(pt) / ref_dist) as f32),
             // The reference length is measured between two points independent
             // of the scale base.
             Step::RefSecond { first, .. } => {

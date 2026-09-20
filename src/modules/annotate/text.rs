@@ -1,6 +1,4 @@
-use acadrust::entities::{
-    Text, TextHorizontalAlignment as HA, TextVerticalAlignment as VA,
-};
+use acadrust::entities::{Text, TextHorizontalAlignment as HA, TextVerticalAlignment as VA};
 use acadrust::tables::TextStyle;
 use acadrust::types::Vector3;
 use glam::DVec3;
@@ -103,10 +101,9 @@ impl TextCommand {
             self.height = style.last_height;
         }
         self.width_factor = style.width_factor.max(0.01);
-        self.oblique_angle = style.oblique_angle.clamp(
-            -85.0_f64.to_radians(),
-            85.0_f64.to_radians(),
-        );
+        self.oblique_angle = style
+            .oblique_angle
+            .clamp(-85.0_f64.to_radians(), 85.0_f64.to_radians());
         self.annotative = style.annotative;
         true
     }
@@ -197,8 +194,7 @@ impl TextCommand {
         };
         let angle = if matches!(entity.horizontal_alignment, HA::Aligned | HA::Fit) {
             entity.alignment_point.map_or(entity.rotation, |point| {
-                (point.y - entity.insertion_point.y)
-                    .atan2(point.x - entity.insertion_point.x)
+                (point.y - entity.insertion_point.y).atan2(point.x - entity.insertion_point.x)
             })
         } else {
             entity.rotation
@@ -278,11 +274,21 @@ impl CadCommand for TextCommand {
                 CmdOption::new(t!("Style").as_ref(), "ST"),
             ],
             Step::Justification => [
-                ("Left", "L"), ("Center", "C"), ("Right", "R"),
-                ("Aligned", "A"), ("Middle", "M"), ("Fit", "F"),
-                ("TL", "TL"), ("TC", "TC"), ("TR", "TR"),
-                ("ML", "ML"), ("MC", "MC"), ("MR", "MR"),
-                ("BL", "BL"), ("BC", "BC"), ("BR", "BR"),
+                ("Left", "L"),
+                ("Center", "C"),
+                ("Right", "R"),
+                ("Aligned", "A"),
+                ("Middle", "M"),
+                ("Fit", "F"),
+                ("TL", "TL"),
+                ("TC", "TC"),
+                ("TR", "TR"),
+                ("ML", "ML"),
+                ("MC", "MC"),
+                ("MR", "MR"),
+                ("BL", "BL"),
+                ("BC", "BC"),
+                ("BR", "BR"),
             ]
             .into_iter()
             .map(|(label, keyword)| CmdOption::new(label, keyword))

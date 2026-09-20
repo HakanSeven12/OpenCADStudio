@@ -38,13 +38,21 @@ fn root_entry(document: &CadDocument, name: &str) -> Option<Handle> {
 }
 
 fn raster_variables_handle(document: &CadDocument) -> Option<Handle> {
-    root_entry(document, "ACAD_IMAGE_VARS")
-        .filter(|handle| matches!(document.objects.get(handle), Some(ObjectType::RasterVariables(_))))
+    root_entry(document, "ACAD_IMAGE_VARS").filter(|handle| {
+        matches!(
+            document.objects.get(handle),
+            Some(ObjectType::RasterVariables(_))
+        )
+    })
 }
 
 fn wipeout_variables_handle(document: &CadDocument) -> Option<Handle> {
-    root_entry(document, "ACAD_WIPEOUT_VARS")
-        .filter(|handle| matches!(document.objects.get(handle), Some(ObjectType::WipeoutVariables(_))))
+    root_entry(document, "ACAD_WIPEOUT_VARS").filter(|handle| {
+        matches!(
+            document.objects.get(handle),
+            Some(ObjectType::WipeoutVariables(_))
+        )
+    })
 }
 
 fn drawing_mode(document: &CadDocument, name: &str, default: i16) -> i16 {
@@ -147,11 +155,9 @@ pub(crate) fn set_mode(document: &mut CadDocument, kind: FrameKind, value: i16) 
         FrameKind::Pdf => crate::io::set_drawing_variable(document, "PDFFRAME", &value.to_string()),
         FrameKind::Wipeout => set_wipeout_mode(document, value),
         FrameKind::Xclip => document.header.xclip_frame = value,
-        FrameKind::PointCloudClip => crate::io::set_drawing_variable(
-            document,
-            "POINTCLOUDCLIPFRAME",
-            &value.to_string(),
-        ),
+        FrameKind::PointCloudClip => {
+            crate::io::set_drawing_variable(document, "POINTCLOUDCLIPFRAME", &value.to_string())
+        }
     }
 }
 
@@ -179,7 +185,10 @@ pub(crate) fn entity_kind(entity: &EntityType) -> Option<FrameKind> {
     match entity {
         EntityType::RasterImage(_) => Some(FrameKind::Image),
         EntityType::Underlay(underlay)
-            if matches!(underlay.underlay_type, acadrust::entities::UnderlayType::Pdf) =>
+            if matches!(
+                underlay.underlay_type,
+                acadrust::entities::UnderlayType::Pdf
+            ) =>
         {
             Some(FrameKind::Pdf)
         }

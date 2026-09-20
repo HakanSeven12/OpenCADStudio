@@ -44,17 +44,16 @@ pub fn item<'a>(
         // Fixed-width ✓ column keeps every name left-aligned whether or not the
         // row is current.
         let check = crate::ui::icons::themed_check_cell(is_current);
-        let label = row![check, text(name.to_string()).size(11)]
-            .align_y(iced::Center);
+        let label = row![check, text(name.to_string()).size(11)].align_y(iced::Center);
         let cell = container(label)
             .padding([4, 8])
             .width(Fill)
             .style(move |theme: &Theme| {
                 let pair = theme.palette().primary.strong;
                 container::Style {
-                background: is_selected.then_some(Background::Color(pair.color)),
-                text_color: is_selected.then_some(pair.text),
-                ..Default::default()
+                    background: is_selected.then_some(Background::Color(pair.color)),
+                    text_color: is_selected.then_some(pair.text),
+                    ..Default::default()
                 }
             });
         let area = mouse_area(cell).on_press(on_select);

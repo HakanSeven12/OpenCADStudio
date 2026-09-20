@@ -3,13 +3,13 @@ use acadrust::EntityType;
 use cadkernel::geom2d::{Circle, Curve, Line};
 use cadkernel::space::{curve::bezier_points, PlanarCurve, Plane, Vec3};
 
-use crate::t;
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, parse_f64, square_grip};
 use crate::entities::traits::RenderConvertible;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::scene::model::wire_model::{PointMarker, SnapHint};
+use crate::t;
 
 /// Resolve a positive (absolute) PDSIZE to a world size. Relative/zero PDSIZE
 /// is handled by [`relative_render`].
@@ -137,8 +137,8 @@ fn point_plane(pt: &Point) -> Plane {
     } else {
         Vec3::Z.cross(normal)
     };
-    let base = Plane::orthonormal(origin, x_seed.to_array(), normal.to_array())
-        .unwrap_or(Plane::XY);
+    let base =
+        Plane::orthonormal(origin, x_seed.to_array(), normal.to_array()).unwrap_or(Plane::XY);
     let (sin, cos) = pt.x_axis_angle.sin_cos();
     Plane::from_axes(
         origin,
@@ -202,15 +202,16 @@ fn point_glyph(pt: &Point, pdmode: i16, s_half: f64) -> Vec<[f64; 3]> {
     let nan = [f64::NAN; 3];
     let mut paths: Vec<Vec<[f64; 3]>> = curves
         .iter()
-        .map(|curve| PlanarCurve::new(plane, curve.clone()).tessellate(64.0 / std::f64::consts::TAU))
+        .map(|curve| {
+            PlanarCurve::new(plane, curve.clone()).tessellate(64.0 / std::f64::consts::TAU)
+        })
         .collect();
     if pt.thickness.abs() > 1.0e-10 && !curves.is_empty() {
         let normal = Vec3::from(plane.normal().unwrap_or([0.0, 0.0, 1.0]));
         let top_origin = (Vec3::from(plane.origin) + normal * pt.thickness).to_array();
         let top_plane = Plane::from_axes(top_origin, plane.x_axis, plane.y_axis);
         paths.extend(curves.iter().map(|curve| {
-            PlanarCurve::new(top_plane, curve.clone())
-                .tessellate(64.0 / std::f64::consts::TAU)
+            PlanarCurve::new(top_plane, curve.clone()).tessellate(64.0 / std::f64::consts::TAU)
         }));
         paths.push(bezier_points(&[plane.origin, top_origin], 1));
     }
@@ -345,7 +346,10 @@ mod tests {
         doc.header.point_display_size = -5.0;
 
         let drawn = relative_render(&EntityType::Point(point_on("0")), &doc, Some(0.01));
-        assert!(drawn.is_some(), "a user point still takes the viewport-aware path");
+        assert!(
+            drawn.is_some(),
+            "a user point still takes the viewport-aware path"
+        );
 
         let defpoint = relative_render(
             &EntityType::Point(point_on("xref|Defpoints")),

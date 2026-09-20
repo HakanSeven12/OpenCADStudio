@@ -12,10 +12,7 @@ fn mgr() -> std::sync::MutexGuard<'static, HostV4SnapshotManager> {
 }
 
 /// Open (or refresh) the V4 shared document view for `tab_id`.
-pub fn open_document_view_v4(
-    tab_id: u64,
-    doc: &acadrust::CadDocument,
-) -> Option<DocumentViewInfo> {
+pub fn open_document_view_v4(tab_id: u64, doc: &acadrust::CadDocument) -> Option<DocumentViewInfo> {
     mgr().open(tab_id, doc)
 }
 

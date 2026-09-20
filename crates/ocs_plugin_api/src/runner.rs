@@ -76,10 +76,8 @@ fn invoke_on_load(
     interactive: &InteractiveRegistry,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut proxy = client.plugin_host_api(0, interactive.clone());
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        plugin.on_load(&mut proxy)
-    }))
-    .map_err(|_| std::io::Error::other("plugin on_load() panicked"))?;
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| plugin.on_load(&mut proxy)))
+        .map_err(|_| std::io::Error::other("plugin on_load() panicked"))?;
     Ok(())
 }
 
@@ -121,7 +119,9 @@ fn run_v4(
 
         match client.recv_runner_frame_timeout(std::time::Duration::from_millis(50)) {
             Ok(RunnerFrame::Request { id, payload }) => {
-                if let Some(resp) = handle_host_request_v4(&mut *plugin, interactive, &client, id, payload) {
+                if let Some(resp) =
+                    handle_host_request_v4(&mut *plugin, interactive, &client, id, payload)
+                {
                     client.send_response(id, resp)?;
                 }
             }
@@ -243,7 +243,9 @@ fn handle_host_request_v4(
         HostRequest::GetManifest => {
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| plugin.manifest())) {
                 Ok(m) => Some(HostResponse::Manifest(m.into())),
-                Err(_) => Some(HostResponse::Error("plugin manifest() panicked".to_string())),
+                Err(_) => Some(HostResponse::Error(
+                    "plugin manifest() panicked".to_string(),
+                )),
             }
         }
         HostRequest::GetRibbon => {
@@ -287,7 +289,9 @@ fn handle_host_request_v4(
             };
             match step {
                 Ok(s) => Some(HostResponse::CommandStep(Box::new(s))),
-                Err(_) => Some(HostResponse::Error("interactive command panicked".to_string())),
+                Err(_) => Some(HostResponse::Error(
+                    "interactive command panicked".to_string(),
+                )),
             }
         }
         HostRequest::GetPrompt { command_id } => {
@@ -300,7 +304,9 @@ fn handle_host_request_v4(
             match result {
                 Some(Ok(s)) => Some(HostResponse::Text(s)),
                 Some(Err(_)) => Some(HostResponse::Error("prompt() panicked".to_string())),
-                None => Some(HostResponse::Error(format!("unknown interactive command {command_id}"))),
+                None => Some(HostResponse::Error(format!(
+                    "unknown interactive command {command_id}"
+                ))),
             }
         }
         HostRequest::NeedsEntityPick { command_id } => {
@@ -314,8 +320,12 @@ fn handle_host_request_v4(
             };
             match result {
                 Some(Ok(b)) => Some(HostResponse::Bool(b)),
-                Some(Err(_)) => Some(HostResponse::Error("needs_object_pick() panicked".to_string())),
-                None => Some(HostResponse::Error(format!("unknown interactive command {command_id}"))),
+                Some(Err(_)) => Some(HostResponse::Error(
+                    "needs_object_pick() panicked".to_string(),
+                )),
+                None => Some(HostResponse::Error(format!(
+                    "unknown interactive command {command_id}"
+                ))),
             }
         }
         HostRequest::ExecuteCode {
@@ -327,13 +337,7 @@ fn handle_host_request_v4(
             let mut proxy = client.plugin_host_api(tab_index, interactive.clone());
             let respond = client.execute_code_responder(id);
             let started = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                plugin.start_execute_code(
-                    &mut proxy,
-                    command_id,
-                    &code,
-                    source,
-                    respond,
-                )
+                plugin.start_execute_code(&mut proxy, command_id, &code, source, respond)
             }));
             match started {
                 Ok(true) => None,
@@ -355,7 +359,9 @@ fn handle_host_request_v4(
     }
 }
 
-unsafe fn load_plugin(path: &Path) -> Result<(u32, Box<dyn BuiltinPlugin>), Box<dyn std::error::Error>> {
+unsafe fn load_plugin(
+    path: &Path,
+) -> Result<(u32, Box<dyn BuiltinPlugin>), Box<dyn std::error::Error>> {
     let lib = libloading::Library::new(path)?;
 
     let version: libloading::Symbol<extern "C" fn() -> u32> = lib

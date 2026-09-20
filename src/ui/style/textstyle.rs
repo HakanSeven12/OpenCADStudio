@@ -2,9 +2,11 @@
 
 use crate::app::{Message, StyleKind};
 use crate::t;
-use iced::widget::{button, canvas, checkbox, column, container, row, scrollable, text, text_input};
-use iced::{mouse, Background, Border, Element, Length, Point, Rectangle, Theme};
 use crate::ui::style::common::muted_style;
+use iced::widget::{
+    button, canvas, checkbox, column, container, row, scrollable, text, text_input,
+};
+use iced::{mouse, Background, Border, Element, Length, Point, Rectangle, Theme};
 use std::borrow::Cow;
 
 pub struct TextStyleView<'a> {
@@ -32,9 +34,9 @@ pub struct TextStyleView<'a> {
 }
 
 const BUILTIN_FONTS: &[&str] = &[
-    "Standard", "ISO", "Simplex", "RomanS", "RomanD", "RomanC", "RomanT", "ItalicC",
-    "ItalicT", "ScriptS", "ScriptC", "GothGBT", "GothGRT", "GothITT", "GreekC",
-    "Symbol", "ISO3098", "Unicode",
+    "Standard", "ISO", "Simplex", "RomanS", "RomanD", "RomanC", "RomanT", "ItalicC", "ItalicT",
+    "ScriptS", "ScriptC", "GothGBT", "GothGRT", "GothITT", "GreekC", "Symbol", "ISO3098",
+    "Unicode",
 ];
 
 fn primary_style(theme: &Theme) -> iced::widget::text::Style {
@@ -275,10 +277,16 @@ fn font_list<'a>(
             }
         })
         .collect();
-    container(column![text(title).size(10).style(muted_style), scrollable(column(items).spacing(1)).height(250)].spacing(5))
-        .width(Length::FillPortion(1))
-        .padding(4)
-        .into()
+    container(
+        column![
+            text(title).size(10).style(muted_style),
+            scrollable(column(items).spacing(1)).height(250)
+        ]
+        .spacing(5),
+    )
+    .width(Length::FillPortion(1))
+    .padding(4)
+    .into()
 }
 
 pub fn view_window<'a>(
@@ -301,7 +309,12 @@ pub fn view_window<'a>(
         font: effective_font.to_string(),
         big_font: v.bigfont_buf.to_string(),
         width_factor: if v.backward { -width } else { width },
-        oblique: v.oblique_buf.trim().parse::<f32>().unwrap_or(0.0).to_radians(),
+        oblique: v
+            .oblique_buf
+            .trim()
+            .parse::<f32>()
+            .unwrap_or(0.0)
+            .to_radians(),
         height: v.height_buf.trim().parse::<f32>().unwrap_or(0.0).max(0.0),
         upside_down: v.upside_down,
         vertical: v.vertical,
@@ -312,7 +325,10 @@ pub fn view_window<'a>(
 
     let content: Element<'a, Message> = match v.tab {
         0 => {
-            let built_in = BUILTIN_FONTS.iter().map(|value| (*value).to_string()).collect();
+            let built_in = BUILTIN_FONTS
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect();
             let system = crate::scene::text::sysfont::families().to_vec();
             column![
                 row![
@@ -320,9 +336,27 @@ pub fn view_window<'a>(
                     font_list(t!("System fonts"), system, v.ttf_buf, true, v.read_only),
                 ]
                 .spacing(10),
-                input_row(t!("Font file"), t!("font file…"), v.font_buf, "font", v.read_only),
-                input_row(t!("Big font"), t!("big-font file…"), v.bigfont_buf, "bigfont", v.read_only),
-                input_row(t!("System font"), t!("font family…"), v.ttf_buf, "ttf", v.read_only),
+                input_row(
+                    t!("Font file"),
+                    t!("font file…"),
+                    v.font_buf,
+                    "font",
+                    v.read_only
+                ),
+                input_row(
+                    t!("Big font"),
+                    t!("big-font file…"),
+                    v.bigfont_buf,
+                    "bigfont",
+                    v.read_only
+                ),
+                input_row(
+                    t!("System font"),
+                    t!("font family…"),
+                    v.ttf_buf,
+                    "ttf",
+                    v.read_only
+                ),
             ]
             .spacing(8)
             .into()
@@ -330,15 +364,31 @@ pub fn view_window<'a>(
         _ => column![
             text(t!("Size")).size(11).style(primary_style),
             input_row(
-                if v.annotative { t!("Paper text height") } else { t!("Fixed height") },
+                if v.annotative {
+                    t!("Paper text height")
+                } else {
+                    t!("Fixed height")
+                },
                 t!("0 = variable"),
                 v.height_buf,
                 "height",
                 v.read_only,
             ),
             text(t!("Effects")).size(11).style(primary_style),
-            input_row(t!("Width factor"), "1.0".into(), v.width_buf, "width", v.read_only),
-            input_row(t!("Oblique angle"), "0.0".into(), v.oblique_buf, "oblique", v.read_only),
+            input_row(
+                t!("Width factor"),
+                "1.0".into(),
+                v.width_buf,
+                "width",
+                v.read_only
+            ),
+            input_row(
+                t!("Oblique angle"),
+                "0.0".into(),
+                v.oblique_buf,
+                "oblique",
+                v.read_only
+            ),
             row![
                 toggle(t!("Backward"), v.backward, "backward", v.read_only),
                 toggle(t!("Upside down"), v.upside_down, "upside_down", v.read_only),

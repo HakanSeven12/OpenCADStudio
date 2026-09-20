@@ -71,9 +71,7 @@ fn spline_to_nurbs_with(
     let control_points: Vec<[f64; 2]> = spl.control_points.iter().map(&point).collect();
     let weights = (!spl.weights.is_empty()).then(|| spl.weights.clone());
 
-    if let Some(curve) =
-        NurbsCurve::new(degree, control_points, spl.knots.clone(), weights)
-    {
+    if let Some(curve) = NurbsCurve::new(degree, control_points, spl.knots.clone(), weights) {
         return Some(curve);
     }
 
@@ -106,12 +104,7 @@ fn spline_to_nurbs_with(
     };
     let start_tangent = tangent(&spl.begin_tangent);
     let end_tangent = tangent(&spl.end_tangent);
-    NurbsCurve::interpolate(
-        &fit,
-        start_tangent,
-        end_tangent,
-        parameterization,
-    )
+    NurbsCurve::interpolate(&fit, start_tangent, end_tangent, parameterization)
 }
 
 /// Rebuild an acadrust `Spline` from a kernel curve.
@@ -163,10 +156,7 @@ pub fn spline_cut(spl: &Spline, t: f64) -> Option<(Spline, Spline)> {
     }
     let normalised = (t - start) / (end - start);
     let (left, right) = curve.split_at(normalised)?;
-    Some((
-        nurbs_to_spline(&left, spl),
-        nurbs_to_spline(&right, spl),
-    ))
+    Some((nurbs_to_spline(&left, spl), nurbs_to_spline(&right, spl)))
 }
 
 // ── Sampling ───────────────────────────────────────────────────────────────

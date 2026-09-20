@@ -26,9 +26,18 @@ pub fn cycle_popup_overlay(
 ) -> Element<'static, Message> {
     // The type column and the layer column get one shared width each (the
     // widest entry of their kind, clamped) so the separators line up.
-    let type_w = clamp_col_width(items.iter().map(|c| c.type_name.chars().count()), 11.0, 40.0, 96.0);
-    let layer_w =
-        clamp_col_width(items.iter().map(|c| c.layer.chars().count()), 10.0, 28.0, 84.0);
+    let type_w = clamp_col_width(
+        items.iter().map(|c| c.type_name.chars().count()),
+        11.0,
+        40.0,
+        96.0,
+    );
+    let layer_w = clamp_col_width(
+        items.iter().map(|c| c.layer.chars().count()),
+        10.0,
+        28.0,
+        84.0,
+    );
 
     let rows: Vec<Element<'static, Message>> = items
         .into_iter()

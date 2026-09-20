@@ -54,11 +54,10 @@ fn bodies(document: &CadDocument) -> Vec<(Handle, String)> {
         .filter(|entity| matches!(entity, EntityType::Solid3D(_)))
         .map(|entity| {
             let handle = entity.common().handle;
-            let label = crate::scene::model::solid_history::primitive_property_operation(
-                document, handle,
-            )
-            .as_ref()
-            .map_or("Solid", operation_label);
+            let label =
+                crate::scene::model::solid_history::primitive_property_operation(document, handle)
+                    .as_ref()
+                    .map_or("Solid", operation_label);
             (handle, format!("{label} {:X}", handle.value()))
         })
         .collect()
@@ -87,10 +86,14 @@ fn entry_row(label: String, command: String) -> Element<'static, Message> {
 
 /// A row that states something rather than doing something.
 fn note_row(label: String) -> Element<'static, Message> {
-    container(text(label).size(11).style(crate::ui::style::common::muted_style))
-        .width(Fill)
-        .padding([3, 10])
-        .into()
+    container(
+        text(label)
+            .size(11)
+            .style(crate::ui::style::common::muted_style),
+    )
+    .width(Fill)
+    .padding([3, 10])
+    .into()
 }
 
 pub fn view<'a>(
@@ -119,13 +122,26 @@ pub fn view<'a>(
             style
         })
         .padding([3, 5]);
-    let pin = tooltip(pin, text(crate::t!("Auto")).size(10), tooltip::Position::Bottom).gap(4);
+    let pin = tooltip(
+        pin,
+        text(crate::t!("Auto")).size(10),
+        tooltip::Position::Bottom,
+    )
+    .gap(4);
 
-    let close = button(crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 12.0))
-        .on_press(Message::Dock(DockMsg::Close(PanelId::Browser)))
-        .style(button::subtle)
-        .padding([3, 5]);
-    let close = tooltip(close, text(crate::t!("Close")).size(10), tooltip::Position::Bottom).gap(4);
+    let close = button(crate::ui::icons::themed_secondary(
+        crate::ui::icons::CLOSE,
+        12.0,
+    ))
+    .on_press(Message::Dock(DockMsg::Close(PanelId::Browser)))
+    .style(button::subtle)
+    .padding([3, 5]);
+    let close = tooltip(
+        close,
+        text(crate::t!("Close")).size(10),
+        tooltip::Position::Bottom,
+    )
+    .gap(4);
 
     let title_bar = mouse_area(
         container(
@@ -169,7 +185,9 @@ pub fn view<'a>(
     }
 
     let bodies = bodies(document);
-    tree = tree.push(section_header(crate::tf!("Bodies ({})", bodies.len()).into_owned()));
+    tree = tree.push(section_header(
+        crate::tf!("Bodies ({})", bodies.len()).into_owned(),
+    ));
     if bodies.is_empty() {
         tree = tree.push(note_row(crate::t!("No solids yet").into_owned()));
     } else {

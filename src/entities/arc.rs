@@ -1,5 +1,5 @@
-use acadrust::entities::Arc;
 use crate::t;
+use acadrust::entities::Arc;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
@@ -105,11 +105,7 @@ fn control_points(arc: &Arc) -> [glam::DVec3; 3] {
     ]
 }
 
-pub(crate) fn refit_grips(
-    arc: &mut Arc,
-    original: &Arc,
-    edits: &[(usize, glam::DVec3)],
-) -> bool {
+pub(crate) fn refit_grips(arc: &mut Arc, original: &Arc, edits: &[(usize, glam::DVec3)]) -> bool {
     let mut points = control_points(original);
     let mut changed = false;
     for &(grip_id, point) in edits {
@@ -209,8 +205,16 @@ fn properties(arc: &Arc) -> Vec<PropSection> {
             edit(t!("Radius").as_ref(), "radius", arc.radius),
             edit_angle(t!("Start angle").as_ref(), "start_angle", sa.to_degrees()),
             edit_angle(t!("End angle").as_ref(), "end_angle", ea.to_degrees()),
-            ro(t!("Total angle").as_ref(), "total_angle", format_angle(total_angle.to_radians())),
-            ro(t!("Arc length").as_ref(), "arc_length", format_length(arc_length)),
+            ro(
+                t!("Total angle").as_ref(),
+                "total_angle",
+                format_angle(total_angle.to_radians()),
+            ),
+            ro(
+                t!("Arc length").as_ref(),
+                "arc_length",
+                format_length(arc_length),
+            ),
             ro(t!("Area").as_ref(), "area", format_area(area)),
             edit(t!("Normal X").as_ref(), "normal_x", arc.normal.x),
             edit(t!("Normal Y").as_ref(), "normal_y", arc.normal.y),
@@ -357,7 +361,11 @@ impl crate::entities::traits::Grippable for Arc {
             ],
         }
     }
-    fn apply_grip_menu(&mut self, _grip_id: usize, _action: crate::scene::model::object::GripMenuAction) {
+    fn apply_grip_menu(
+        &mut self,
+        _grip_id: usize,
+        _action: crate::scene::model::object::GripMenuAction,
+    ) {
         // Radius / Arc Length / Lengthen all need a follow-up prompt;
         // the actual edit happens in `apply_grip_menu_value`.
     }
@@ -382,8 +390,8 @@ impl crate::entities::traits::Grippable for Arc {
         action: crate::scene::model::object::GripMenuAction,
         point: glam::DVec3,
     ) -> Option<f64> {
-        use cadkernel::geom2d::{Circle as KernelCircle, Curve as KernelCurve, Vec2};
         use crate::scene::model::object::GripMenuAction as A;
+        use cadkernel::geom2d::{Circle as KernelCircle, Curve as KernelCurve, Vec2};
         if self.radius <= 1.0e-9 {
             return None;
         }
@@ -532,17 +540,11 @@ mod tests {
         let tangent = glam::DVec3::from_array(curve.tangent_at(0.5)).normalize();
         let wanted_length = curve.length() + 1.25;
         let arc_length = arc
-            .grip_menu_point_value(
-                3,
-                GripMenuAction::ArcLength,
-                middle + tangent * 1.25,
-            )
+            .grip_menu_point_value(3, GripMenuAction::ArcLength, middle + tangent * 1.25)
             .expect("arc length value");
         assert!((arc_length - wanted_length).abs() < 1.0e-9);
 
         arc.apply_grip_menu_value(3, GripMenuAction::ArcLength, arc_length);
-        assert!(
-            (crate::entities::curve::arc_curve(&arc).length() - wanted_length).abs() < 1.0e-9
-        );
+        assert!((crate::entities::curve::arc_curve(&arc).length() - wanted_length).abs() < 1.0e-9);
     }
 }

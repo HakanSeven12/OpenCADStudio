@@ -4,13 +4,12 @@
 use super::util::*;
 use super::{format_size, VIEWCUBE_HIT_SIZE};
 use crate::app::helpers::{
-    parse_coord, polar_constrain_near, ucs_rotate_vec, ucs_to_wcs, ucs_z_axis,
-    CoordKind,
+    parse_coord, polar_constrain_near, ucs_rotate_vec, ucs_to_wcs, ucs_z_axis, CoordKind,
 };
 use crate::app::{Message, OpenCADStudio, POLY_START_DELAY_MS};
 use crate::modules::ModuleEvent;
-use crate::scene::pick::grip::{find_hit_grip, find_hit_grip_paper, find_hit_grip_rte, GripEdit};
 use crate::scene::model::object::GripApply;
+use crate::scene::pick::grip::{find_hit_grip, find_hit_grip_paper, find_hit_grip_rte, GripEdit};
 use crate::scene::{
     self, hover_id, CubeRegion, Scene, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX,
 };
@@ -19,7 +18,6 @@ use acadrust::types::Color as AcadColor;
 use acadrust::{EntityType as AcadEntityType, Handle};
 use iced::time::Instant;
 use iced::{mouse, Point, Task};
-
 
 impl OpenCADStudio {
     pub(in crate::app) fn mlstyle_mut(
@@ -60,7 +58,7 @@ impl OpenCADStudio {
                             [
                                 format!("{}", element.offset),
                                 element.color.index().unwrap_or(256).to_string(),
-                            element.linetype.clone(),
+                                element.linetype.clone(),
                             ]
                         })
                         .collect::<Vec<_>>(),
@@ -107,7 +105,10 @@ impl OpenCADStudio {
         }
     }
 
-    pub(in crate::app) fn tablestyle_mut(&mut self, tab: usize) -> Option<&mut acadrust::objects::TableStyle> {
+    pub(in crate::app) fn tablestyle_mut(
+        &mut self,
+        tab: usize,
+    ) -> Option<&mut acadrust::objects::TableStyle> {
         use acadrust::objects::ObjectType;
         let name = self.tablestyle_selected.clone();
         self.tabs[tab]
@@ -211,7 +212,10 @@ impl OpenCADStudio {
 
     /// Mutable access to the currently selected multileader style.
 
-    pub(in crate::app) fn mleaderstyle_mut(&mut self, tab: usize) -> Option<&mut acadrust::objects::MultiLeaderStyle> {
+    pub(in crate::app) fn mleaderstyle_mut(
+        &mut self,
+        tab: usize,
+    ) -> Option<&mut acadrust::objects::MultiLeaderStyle> {
         use acadrust::objects::ObjectType;
         let name = self.mleaderstyle_selected.clone();
         self.tabs[tab]
@@ -602,615 +606,612 @@ impl OpenCADStudio {
         }
     }
 
-pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
-                let i = self.active_tab;
-                let cur = self.tabs[i]
-                    .scene
-                    .document
-                    .header
-                    .current_text_style_name
-                    .clone();
-                let exists = self.tabs[i].scene.document.text_styles.get(&cur).is_some();
-                self.textstyle_selected = if exists {
-                    cur
-                } else {
-                    self.tabs[i]
-                        .scene
-                        .document
-                        .text_styles
-                        .iter()
-                        .next()
-                        .map(|s| s.name.clone())
-                        .unwrap_or_else(|| "Standard".to_string())
-                };
-                self.load_textstyle_bufs(i);
-                self.active_modal = Some(crate::app::ModalKind::TextStyle);
-                self.style_stage_begin();
-                Task::none()
+    pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
+        let i = self.active_tab;
+        let cur = self.tabs[i]
+            .scene
+            .document
+            .header
+            .current_text_style_name
+            .clone();
+        let exists = self.tabs[i].scene.document.text_styles.get(&cur).is_some();
+        self.textstyle_selected = if exists {
+            cur
+        } else {
+            self.tabs[i]
+                .scene
+                .document
+                .text_styles
+                .iter()
+                .next()
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| "Standard".to_string())
+        };
+        self.load_textstyle_bufs(i);
+        self.active_modal = Some(crate::app::ModalKind::TextStyle);
+        self.style_stage_begin();
+        Task::none()
     }
 
     /// Write the editor buffers into the selected text style (staged, no
     /// commit), so edits survive switching to another style as well as Apply.
     pub(super) fn stage_textstyle_bufs(&mut self) {
-                let i = self.active_tab;
-                let name = self.textstyle_selected.clone();
-                let font = self.textstyle_font.clone();
-                let width_str = self.textstyle_width.clone();
-                let oblique_str = self.textstyle_oblique.clone();
-                let height_str = self.textstyle_height.clone();
-                let bigfont = self.textstyle_bigfont.clone();
-                let ttf = self.textstyle_ttf.clone();
-                if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&name) {
-                    if s.xref_dependent {
-                        return;
-                    }
-                    s.font_file = font;
-                    s.big_font_file = bigfont;
-                    s.true_type_font = ttf;
-                    if let Ok(w) = width_str.trim().parse::<f64>() {
-                        s.width_factor = w;
-                    }
-                    if let Ok(a) = oblique_str.trim().parse::<f64>() {
-                        s.oblique_angle = a.to_radians();
-                    }
-                    if let Ok(h) = height_str.trim().parse::<f64>() {
-                        s.height = h.max(0.0);
-                    }
-                }
+        let i = self.active_tab;
+        let name = self.textstyle_selected.clone();
+        let font = self.textstyle_font.clone();
+        let width_str = self.textstyle_width.clone();
+        let oblique_str = self.textstyle_oblique.clone();
+        let height_str = self.textstyle_height.clone();
+        let bigfont = self.textstyle_bigfont.clone();
+        let ttf = self.textstyle_ttf.clone();
+        if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&name) {
+            if s.xref_dependent {
+                return;
+            }
+            s.font_file = font;
+            s.big_font_file = bigfont;
+            s.true_type_font = ttf;
+            if let Ok(w) = width_str.trim().parse::<f64>() {
+                s.width_factor = w;
+            }
+            if let Ok(a) = oblique_str.trim().parse::<f64>() {
+                s.oblique_angle = a.to_radians();
+            }
+            if let Ok(h) = height_str.trim().parse::<f64>() {
+                s.height = h.max(0.0);
+            }
+        }
     }
 
     pub(super) fn on_text_style_apply(&mut self) -> Task<Message> {
-                self.stage_textstyle_bufs();
-                self.style_stage_commit();
-                Task::none()
+        self.stage_textstyle_bufs();
+        self.style_stage_commit();
+        Task::none()
     }
 
     pub(super) fn on_table_style_cell_apply(&mut self, row: u8) -> Task<Message> {
-                let i = self.active_tab;
-                let r = row as usize;
-                if r >= 3 {
-                    return Task::none();
-                }
-                let ts = self.ts_cell_textstyle[r].trim().to_string();
-                let height: Option<f64> = self.ts_cell_height[r].trim().parse().ok();
-                let tc: Option<i16> = self.ts_cell_textcolor[r].trim().parse().ok();
-                let fc: Option<i16> = self.ts_cell_fillcolor[r].trim().parse().ok();
-                let dtype: Option<i32> = self.ts_cell_datatype[r].trim().parse().ok();
-                let utype: Option<i32> = self.ts_cell_unittype[r].trim().parse().ok();
-                let fmt = self.ts_cell_format[r].clone();
-                // Per-border numeric edits for this cell.
-                let border_vals: [(Option<i16>, Option<i16>, Option<f64>); 6] =
-                    std::array::from_fn(|b| {
-                        (
-                            self.ts_border_lw[r][b].trim().parse().ok(),
-                            self.ts_border_color[r][b].trim().parse().ok(),
-                            self.ts_border_spacing[r][b].trim().parse().ok(),
-                        )
-                    });
-                if let Some(c) = self
-                    .tablestyle_mut(i)
-                    .and_then(|s| Self::ts_cell_of(s, row))
-                {
-                    if !ts.is_empty() {
-                        c.text_style_name = ts;
+        let i = self.active_tab;
+        let r = row as usize;
+        if r >= 3 {
+            return Task::none();
+        }
+        let ts = self.ts_cell_textstyle[r].trim().to_string();
+        let height: Option<f64> = self.ts_cell_height[r].trim().parse().ok();
+        let tc: Option<i16> = self.ts_cell_textcolor[r].trim().parse().ok();
+        let fc: Option<i16> = self.ts_cell_fillcolor[r].trim().parse().ok();
+        let dtype: Option<i32> = self.ts_cell_datatype[r].trim().parse().ok();
+        let utype: Option<i32> = self.ts_cell_unittype[r].trim().parse().ok();
+        let fmt = self.ts_cell_format[r].clone();
+        // Per-border numeric edits for this cell.
+        let border_vals: [(Option<i16>, Option<i16>, Option<f64>); 6] = std::array::from_fn(|b| {
+            (
+                self.ts_border_lw[r][b].trim().parse().ok(),
+                self.ts_border_color[r][b].trim().parse().ok(),
+                self.ts_border_spacing[r][b].trim().parse().ok(),
+            )
+        });
+        if let Some(c) = self
+            .tablestyle_mut(i)
+            .and_then(|s| Self::ts_cell_of(s, row))
+        {
+            if !ts.is_empty() {
+                c.text_style_name = ts;
+            }
+            if let Some(h) = height {
+                c.text_height = h;
+            }
+            if let Some(v) = tc {
+                c.text_color = acadrust::types::Color::from_index(v);
+            }
+            if let Some(v) = fc {
+                c.fill_color = acadrust::types::Color::from_index(v);
+            }
+            if let Some(v) = dtype {
+                c.data_type = v;
+            }
+            if let Some(v) = utype {
+                c.unit_type = v;
+            }
+            c.format_string = fmt;
+            for (b, (lw, color, spacing)) in border_vals.into_iter().enumerate() {
+                if let Some(bd) = Self::ts_border_of(c, b as u8) {
+                    if let Some(v) = lw {
+                        bd.line_weight = acadrust::types::LineWeight::from_value(v);
                     }
-                    if let Some(h) = height {
-                        c.text_height = h;
+                    if let Some(v) = color {
+                        bd.color = acadrust::types::Color::from_index(v);
                     }
-                    if let Some(v) = tc {
-                        c.text_color = acadrust::types::Color::from_index(v);
-                    }
-                    if let Some(v) = fc {
-                        c.fill_color = acadrust::types::Color::from_index(v);
-                    }
-                    if let Some(v) = dtype {
-                        c.data_type = v;
-                    }
-                    if let Some(v) = utype {
-                        c.unit_type = v;
-                    }
-                    c.format_string = fmt;
-                    for (b, (lw, color, spacing)) in border_vals.into_iter().enumerate() {
-                        if let Some(bd) = Self::ts_border_of(c, b as u8) {
-                            if let Some(v) = lw {
-                                bd.line_weight = acadrust::types::LineWeight::from_value(v);
-                            }
-                            if let Some(v) = color {
-                                bd.color = acadrust::types::Color::from_index(v);
-                            }
-                            if let Some(v) = spacing {
-                                bd.double_line_spacing = v;
-                            }
-                        }
+                    if let Some(v) = spacing {
+                        bd.double_line_spacing = v;
                     }
                 }
-                Task::none()
+            }
+        }
+        Task::none()
     }
 
     pub(super) fn on_ml_style_dialog_open(&mut self) -> Task<Message> {
-                use acadrust::objects::ObjectType;
-                let i = self.active_tab;
-                let cur = self.tabs[i].scene.document.header.multiline_style.clone();
-                let exists = self.tabs[i]
-                    .scene
-                    .document
-                    .objects
-                    .values()
-                    .any(|o| matches!(o, ObjectType::MLineStyle(s) if s.name == cur));
-                self.mlstyle_selected = if exists {
-                    cur
-                } else {
-                    self.tabs[i]
-                        .scene
-                        .document
-                        .objects
-                        .values()
-                        .find_map(|o| {
-                            if let ObjectType::MLineStyle(s) = o {
-                                Some(s.name.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or_else(|| "Standard".to_string())
-                };
-                self.active_modal = Some(crate::app::ModalKind::MlStyle);
-                self.load_mlstyle_bufs(i);
-                self.style_stage_begin();
-                Task::none()
+        use acadrust::objects::ObjectType;
+        let i = self.active_tab;
+        let cur = self.tabs[i].scene.document.header.multiline_style.clone();
+        let exists = self.tabs[i]
+            .scene
+            .document
+            .objects
+            .values()
+            .any(|o| matches!(o, ObjectType::MLineStyle(s) if s.name == cur));
+        self.mlstyle_selected = if exists {
+            cur
+        } else {
+            self.tabs[i]
+                .scene
+                .document
+                .objects
+                .values()
+                .find_map(|o| {
+                    if let ObjectType::MLineStyle(s) = o {
+                        Some(s.name.clone())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| "Standard".to_string())
+        };
+        self.active_modal = Some(crate::app::ModalKind::MlStyle);
+        self.load_mlstyle_bufs(i);
+        self.style_stage_begin();
+        Task::none()
     }
 
     pub(super) fn on_mleader_style_dialog_open(&mut self) -> Task<Message> {
-                use acadrust::objects::ObjectType;
-                let i = self.active_tab;
-                let cur = self.tabs[i].active_mleader_style.clone();
-                let exists = self.tabs[i]
-                    .scene
-                    .document
-                    .objects
-                    .values()
-                    .any(|o| matches!(o, ObjectType::MultiLeaderStyle(s) if s.name == cur));
-                self.mleaderstyle_selected = if exists {
-                    cur
-                } else {
-                    self.tabs[i]
-                        .scene
-                        .document
-                        .objects
-                        .values()
-                        .find_map(|o| {
-                            if let ObjectType::MultiLeaderStyle(s) = o {
-                                Some(s.name.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or_else(|| "Standard".to_string())
-                };
-                self.load_mleaderstyle_bufs(i);
-                self.active_modal = Some(crate::app::ModalKind::MLeaderStyle);
-                self.style_stage_begin();
-                Task::none()
+        use acadrust::objects::ObjectType;
+        let i = self.active_tab;
+        let cur = self.tabs[i].active_mleader_style.clone();
+        let exists = self.tabs[i]
+            .scene
+            .document
+            .objects
+            .values()
+            .any(|o| matches!(o, ObjectType::MultiLeaderStyle(s) if s.name == cur));
+        self.mleaderstyle_selected = if exists {
+            cur
+        } else {
+            self.tabs[i]
+                .scene
+                .document
+                .objects
+                .values()
+                .find_map(|o| {
+                    if let ObjectType::MultiLeaderStyle(s) = o {
+                        Some(s.name.clone())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| "Standard".to_string())
+        };
+        self.load_mleaderstyle_bufs(i);
+        self.active_modal = Some(crate::app::ModalKind::MLeaderStyle);
+        self.style_stage_begin();
+        Task::none()
     }
 
     pub(super) fn on_mleader_style_dialog_set_current(&mut self) -> Task<Message> {
-                use acadrust::objects::ObjectType;
-                let i = self.active_tab;
-                let name = self.mleaderstyle_selected.clone();
-                let exists = self.tabs[i]
-                    .scene
-                    .document
-                    .objects
-                    .values()
-                    .any(|o| matches!(o, ObjectType::MultiLeaderStyle(s) if s.name == name));
-                if exists {
-                    // Staged: header field is the round-trip source of truth
-                    // ($CMLEADERSTYLE); the ribbon/tab mirror it.
-                    self.tabs[i]
-                        .scene
-                        .document
-                        .header
-                        .current_mleader_style_name = name.clone();
-                    self.tabs[i].active_mleader_style = name.clone();
-                    self.ribbon.active_mleader_style = name.clone();
-                    self.command_line
-                        .push_output(crate::tf!("Current multileader style: {}", name).as_ref());
-                }
-                Task::none()
+        use acadrust::objects::ObjectType;
+        let i = self.active_tab;
+        let name = self.mleaderstyle_selected.clone();
+        let exists = self.tabs[i]
+            .scene
+            .document
+            .objects
+            .values()
+            .any(|o| matches!(o, ObjectType::MultiLeaderStyle(s) if s.name == name));
+        if exists {
+            // Staged: header field is the round-trip source of truth
+            // ($CMLEADERSTYLE); the ribbon/tab mirror it.
+            self.tabs[i]
+                .scene
+                .document
+                .header
+                .current_mleader_style_name = name.clone();
+            self.tabs[i].active_mleader_style = name.clone();
+            self.ribbon.active_mleader_style = name.clone();
+            self.command_line
+                .push_output(crate::tf!("Current multileader style: {}", name).as_ref());
+        }
+        Task::none()
     }
 
-    pub(super) fn on_mleader_style_edit(&mut self, field: &'static str, value: String) -> Task<Message> {
-                self.mls_color_open = None;
+    pub(super) fn on_mleader_style_edit(
+        &mut self,
+        field: &'static str,
+        value: String,
+    ) -> Task<Message> {
+        self.mls_color_open = None;
+        match field {
+            "landing_distance" => self.mls_landing_distance = value,
+            "landing_gap" => self.mls_landing_gap = value,
+            "arrowhead_size" => self.mls_arrowhead_size = value,
+            "text_height" => self.mls_text_height = value,
+            "scale_factor" => self.mls_scale_factor = value,
+            "break_gap" => self.mls_break_gap = value,
+            "first_seg_angle" => self.mls_first_seg_angle = value,
+            "second_seg_angle" => self.mls_second_seg_angle = value,
+            "max_points" => self.mls_max_points = value,
+            "default_text" => self.mls_default_text = value,
+            "line_color" => self.mls_line_color = value,
+            "text_color" => self.mls_text_color = value,
+            "description" => self.mls_description = value,
+            "align_space" => self.mls_align_space = value,
+            "block_color" => self.mls_block_color = value,
+            "block_rotation" => self.mls_block_rotation = value,
+            "block_scale_x" => self.mls_block_scale_x = value,
+            "block_scale_y" => self.mls_block_scale_y = value,
+            "block_scale_z" => self.mls_block_scale_z = value,
+            _ => {}
+        }
+        Task::none()
+    }
+
+    pub(super) fn on_mleader_style_set_enum(
+        &mut self,
+        field: &'static str,
+        value: String,
+    ) -> Task<Message> {
+        use acadrust::objects::{
+            BlockContentConnectionType, LeaderContentType, LeaderDrawOrderType,
+            MultiLeaderDrawOrderType, MultiLeaderPathType, TextAlignmentType, TextAngleType,
+            TextAttachmentDirectionType, TextAttachmentType,
+        };
+        // Parse a TextAttachmentType from its debug name.
+        fn parse_att(v: &str) -> TextAttachmentType {
+            match v {
+                "TopOfTopLine" => TextAttachmentType::TopOfTopLine,
+                "MiddleOfText" => TextAttachmentType::MiddleOfText,
+                "MiddleOfBottomLine" => TextAttachmentType::MiddleOfBottomLine,
+                "BottomOfBottomLine" => TextAttachmentType::BottomOfBottomLine,
+                "BottomLine" => TextAttachmentType::BottomLine,
+                "BottomOfTopLineUnderlineBottomLine" => {
+                    TextAttachmentType::BottomOfTopLineUnderlineBottomLine
+                }
+                "BottomOfTopLineUnderlineTopLine" => {
+                    TextAttachmentType::BottomOfTopLineUnderlineTopLine
+                }
+                "BottomOfTopLineUnderlineAll" => TextAttachmentType::BottomOfTopLineUnderlineAll,
+                "CenterOfText" => TextAttachmentType::CenterOfText,
+                "CenterOfTextOverline" => TextAttachmentType::CenterOfTextOverline,
+                _ => TextAttachmentType::MiddleOfTopLine,
+            }
+        }
+        let i = self.active_tab;
+        if let Some(s) = self.mleaderstyle_mut(i) {
+            match field {
+                "path_type" => {
+                    s.path_type = match value.as_str() {
+                        "Invisible" => MultiLeaderPathType::Invisible,
+                        "Spline" => MultiLeaderPathType::Spline,
+                        _ => MultiLeaderPathType::StraightLineSegments,
+                    };
+                }
+                "content_type" => {
+                    s.content_type = match value.as_str() {
+                        "None" => LeaderContentType::None,
+                        "Block" => LeaderContentType::Block,
+                        "Tolerance" => LeaderContentType::Tolerance,
+                        _ => LeaderContentType::MText,
+                    };
+                }
+                "text_angle_type" => {
+                    s.text_angle_type = match value.as_str() {
+                        "ParallelToLastLeaderLine" => TextAngleType::ParallelToLastLeaderLine,
+                        "Optimized" => TextAngleType::Optimized,
+                        _ => TextAngleType::Horizontal,
+                    };
+                }
+                "text_alignment" => {
+                    s.text_alignment = match value.as_str() {
+                        "Center" => TextAlignmentType::Center,
+                        "Right" => TextAlignmentType::Right,
+                        _ => TextAlignmentType::Left,
+                    };
+                }
+                "text_left_attachment" => s.text_left_attachment = parse_att(&value),
+                "text_right_attachment" => s.text_right_attachment = parse_att(&value),
+                "text_top_attachment" => s.text_top_attachment = parse_att(&value),
+                "text_bottom_attachment" => s.text_bottom_attachment = parse_att(&value),
+                "text_attachment_direction" => {
+                    s.text_attachment_direction = match value.as_str() {
+                        "Vertical" => TextAttachmentDirectionType::Vertical,
+                        _ => TextAttachmentDirectionType::Horizontal,
+                    };
+                }
+                "block_content_connection" => {
+                    s.block_content_connection = match value.as_str() {
+                        "BasePoint" => BlockContentConnectionType::BasePoint,
+                        _ => BlockContentConnectionType::BlockExtents,
+                    };
+                }
+                "leader_draw_order" => {
+                    s.leader_draw_order = match value.as_str() {
+                        "LeaderTailFirst" => LeaderDrawOrderType::LeaderTailFirst,
+                        _ => LeaderDrawOrderType::LeaderHeadFirst,
+                    };
+                }
+                "multileader_draw_order" => {
+                    s.multileader_draw_order = match value.as_str() {
+                        "LeaderFirst" => MultiLeaderDrawOrderType::LeaderFirst,
+                        _ => MultiLeaderDrawOrderType::ContentFirst,
+                    };
+                }
+                _ => {}
+            }
+        }
+        Task::none()
+    }
+
+    pub(super) fn on_mleader_style_set_handle(
+        &mut self,
+        field: &'static str,
+        value: String,
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        let doc = &self.tabs[i].scene.document;
+        let handle: Option<acadrust::types::Handle> =
+            if value == "None" || value == "ByBlock" || value == "Closed filled" {
+                None
+            } else {
                 match field {
-                    "landing_distance" => self.mls_landing_distance = value,
-                    "landing_gap" => self.mls_landing_gap = value,
-                    "arrowhead_size" => self.mls_arrowhead_size = value,
-                    "text_height" => self.mls_text_height = value,
-                    "scale_factor" => self.mls_scale_factor = value,
-                    "break_gap" => self.mls_break_gap = value,
-                    "first_seg_angle" => self.mls_first_seg_angle = value,
-                    "second_seg_angle" => self.mls_second_seg_angle = value,
-                    "max_points" => self.mls_max_points = value,
-                    "default_text" => self.mls_default_text = value,
-                    "line_color" => self.mls_line_color = value,
-                    "text_color" => self.mls_text_color = value,
-                    "description" => self.mls_description = value,
-                    "align_space" => self.mls_align_space = value,
-                    "block_color" => self.mls_block_color = value,
-                    "block_rotation" => self.mls_block_rotation = value,
-                    "block_scale_x" => self.mls_block_scale_x = value,
-                    "block_scale_y" => self.mls_block_scale_y = value,
-                    "block_scale_z" => self.mls_block_scale_z = value,
-                    _ => {}
+                    "line_type_handle" => doc
+                        .line_types
+                        .iter()
+                        .find(|lt| lt.name == value)
+                        .map(|lt| lt.handle),
+                    "text_style_handle" => doc
+                        .text_styles
+                        .iter()
+                        .find(|t| t.name == value)
+                        .map(|t| t.handle),
+                    "arrowhead_handle" | "block_content_handle" => doc
+                        .block_records
+                        .iter()
+                        .find(|b| b.name == value)
+                        .map(|b| b.handle),
+                    _ => None,
                 }
-                Task::none()
-    }
-
-    pub(super) fn on_mleader_style_set_enum(&mut self, field: &'static str, value: String) -> Task<Message> {
-                use acadrust::objects::{
-                    BlockContentConnectionType, LeaderContentType, LeaderDrawOrderType,
-                    MultiLeaderDrawOrderType, MultiLeaderPathType, TextAlignmentType,
-                    TextAngleType, TextAttachmentDirectionType, TextAttachmentType,
-                };
-                // Parse a TextAttachmentType from its debug name.
-                fn parse_att(v: &str) -> TextAttachmentType {
-                    match v {
-                        "TopOfTopLine" => TextAttachmentType::TopOfTopLine,
-                        "MiddleOfText" => TextAttachmentType::MiddleOfText,
-                        "MiddleOfBottomLine" => TextAttachmentType::MiddleOfBottomLine,
-                        "BottomOfBottomLine" => TextAttachmentType::BottomOfBottomLine,
-                        "BottomLine" => TextAttachmentType::BottomLine,
-                        "BottomOfTopLineUnderlineBottomLine" => {
-                            TextAttachmentType::BottomOfTopLineUnderlineBottomLine
-                        }
-                        "BottomOfTopLineUnderlineTopLine" => {
-                            TextAttachmentType::BottomOfTopLineUnderlineTopLine
-                        }
-                        "BottomOfTopLineUnderlineAll" => {
-                            TextAttachmentType::BottomOfTopLineUnderlineAll
-                        }
-                        "CenterOfText" => TextAttachmentType::CenterOfText,
-                        "CenterOfTextOverline" => TextAttachmentType::CenterOfTextOverline,
-                        _ => TextAttachmentType::MiddleOfTopLine,
-                    }
-                }
-                let i = self.active_tab;
-                if let Some(s) = self.mleaderstyle_mut(i) {
-                    match field {
-                        "path_type" => {
-                            s.path_type = match value.as_str() {
-                                "Invisible" => MultiLeaderPathType::Invisible,
-                                "Spline" => MultiLeaderPathType::Spline,
-                                _ => MultiLeaderPathType::StraightLineSegments,
-                            };
-                        }
-                        "content_type" => {
-                            s.content_type = match value.as_str() {
-                                "None" => LeaderContentType::None,
-                                "Block" => LeaderContentType::Block,
-                                "Tolerance" => LeaderContentType::Tolerance,
-                                _ => LeaderContentType::MText,
-                            };
-                        }
-                        "text_angle_type" => {
-                            s.text_angle_type = match value.as_str() {
-                                "ParallelToLastLeaderLine" => {
-                                    TextAngleType::ParallelToLastLeaderLine
-                                }
-                                "Optimized" => TextAngleType::Optimized,
-                                _ => TextAngleType::Horizontal,
-                            };
-                        }
-                        "text_alignment" => {
-                            s.text_alignment = match value.as_str() {
-                                "Center" => TextAlignmentType::Center,
-                                "Right" => TextAlignmentType::Right,
-                                _ => TextAlignmentType::Left,
-                            };
-                        }
-                        "text_left_attachment" => s.text_left_attachment = parse_att(&value),
-                        "text_right_attachment" => s.text_right_attachment = parse_att(&value),
-                        "text_top_attachment" => s.text_top_attachment = parse_att(&value),
-                        "text_bottom_attachment" => s.text_bottom_attachment = parse_att(&value),
-                        "text_attachment_direction" => {
-                            s.text_attachment_direction = match value.as_str() {
-                                "Vertical" => TextAttachmentDirectionType::Vertical,
-                                _ => TextAttachmentDirectionType::Horizontal,
-                            };
-                        }
-                        "block_content_connection" => {
-                            s.block_content_connection = match value.as_str() {
-                                "BasePoint" => BlockContentConnectionType::BasePoint,
-                                _ => BlockContentConnectionType::BlockExtents,
-                            };
-                        }
-                        "leader_draw_order" => {
-                            s.leader_draw_order = match value.as_str() {
-                                "LeaderTailFirst" => LeaderDrawOrderType::LeaderTailFirst,
-                                _ => LeaderDrawOrderType::LeaderHeadFirst,
-                            };
-                        }
-                        "multileader_draw_order" => {
-                            s.multileader_draw_order = match value.as_str() {
-                                "LeaderFirst" => MultiLeaderDrawOrderType::LeaderFirst,
-                                _ => MultiLeaderDrawOrderType::ContentFirst,
-                            };
-                        }
-                        _ => {}
-                    }
-                }
-                Task::none()
-    }
-
-    pub(super) fn on_mleader_style_set_handle(&mut self, field: &'static str, value: String) -> Task<Message> {
-                let i = self.active_tab;
-                let doc = &self.tabs[i].scene.document;
-                let handle: Option<acadrust::types::Handle> = if value == "None"
-                    || value == "ByBlock"
-                    || value == "Closed filled"
-                {
-                    None
-                } else {
-                    match field {
-                        "line_type_handle" => doc
-                            .line_types
-                            .iter()
-                            .find(|lt| lt.name == value)
-                            .map(|lt| lt.handle),
-                        "text_style_handle" => doc
-                            .text_styles
-                            .iter()
-                            .find(|t| t.name == value)
-                            .map(|t| t.handle),
-                        "arrowhead_handle" | "block_content_handle" => doc
-                            .block_records
-                            .iter()
-                            .find(|b| b.name == value)
-                            .map(|b| b.handle),
-                        _ => None,
-                    }
-                };
-                if let Some(s) = self.mleaderstyle_mut(i) {
-                    match field {
-                        "line_type_handle" => s.line_type_handle = handle,
-                        "text_style_handle" => s.text_style_handle = handle,
-                        "arrowhead_handle" => s.arrowhead_handle = handle,
-                        "block_content_handle" => s.block_content_handle = handle,
-                        _ => {}
-                    }
-                }
-                Task::none()
+            };
+        if let Some(s) = self.mleaderstyle_mut(i) {
+            match field {
+                "line_type_handle" => s.line_type_handle = handle,
+                "text_style_handle" => s.text_style_handle = handle,
+                "arrowhead_handle" => s.arrowhead_handle = handle,
+                "block_content_handle" => s.block_content_handle = handle,
+                _ => {}
+            }
+        }
+        Task::none()
     }
 
     /// Write the editor buffers into the selected multileader style (staged, no
     /// commit), so edits survive switching to another style as well as Apply.
     pub(super) fn stage_mleaderstyle_bufs(&mut self) {
-                let i = self.active_tab;
-                let (ld, lg, asz, th, sf, bg, fsa, ssa, mp, dt, lc, tc) = (
-                    self.mls_landing_distance.parse::<f64>().ok(),
-                    self.mls_landing_gap.parse::<f64>().ok(),
-                    self.mls_arrowhead_size.parse::<f64>().ok(),
-                    self.mls_text_height.parse::<f64>().ok(),
-                    self.mls_scale_factor.parse::<f64>().ok(),
-                    self.mls_break_gap.parse::<f64>().ok(),
-                    self.mls_first_seg_angle.parse::<f64>().ok(),
-                    self.mls_second_seg_angle.parse::<f64>().ok(),
-                    self.mls_max_points.parse::<i32>().ok(),
-                    self.mls_default_text.clone(),
-                    self.mls_line_color.parse::<i16>().ok(),
-                    self.mls_text_color.parse::<i16>().ok(),
-                );
-                let desc = self.mls_description.clone();
-                let align = self.mls_align_space.parse::<f64>().ok();
-                let bclr = self.mls_block_color.parse::<i16>().ok();
-                let brot = self.mls_block_rotation.parse::<f64>().ok();
-                let bsx = self.mls_block_scale_x.parse::<f64>().ok();
-                let bsy = self.mls_block_scale_y.parse::<f64>().ok();
-                let bsz = self.mls_block_scale_z.parse::<f64>().ok();
-                if let Some(s) = self.mleaderstyle_mut(i) {
-                    if let Some(v) = ld {
-                        s.landing_distance = v;
-                    }
-                    if let Some(v) = lg {
-                        s.landing_gap = v;
-                    }
-                    if let Some(v) = asz {
-                        s.arrowhead_size = v;
-                    }
-                    if let Some(v) = th {
-                        s.text_height = v;
-                    }
-                    if let Some(v) = sf {
-                        s.scale_factor = v;
-                    }
-                    if let Some(v) = bg {
-                        s.break_gap_size = v;
-                    }
-                    if let Some(v) = fsa {
-                        s.first_segment_angle = v.to_radians();
-                    }
-                    if let Some(v) = ssa {
-                        s.second_segment_angle = v.to_radians();
-                    }
-                    if let Some(v) = mp {
-                        s.max_leader_points = v;
-                    }
-                    s.default_text = dt;
-                    if let Some(v) = lc {
-                        s.line_color = acadrust::types::Color::from_index(v);
-                    }
-                    if let Some(v) = tc {
-                        s.text_color = acadrust::types::Color::from_index(v);
-                    }
-                    s.description = desc;
-                    if let Some(v) = align {
-                        s.align_space = v;
-                    }
-                    if let Some(v) = bclr {
-                        s.block_content_color = acadrust::types::Color::from_index(v);
-                    }
-                    if let Some(v) = brot {
-                        s.block_content_rotation = v.to_radians();
-                    }
-                    if let Some(v) = bsx {
-                        s.block_content_scale_x = v;
-                    }
-                    if let Some(v) = bsy {
-                        s.block_content_scale_y = v;
-                    }
-                    if let Some(v) = bsz {
-                        s.block_content_scale_z = v;
-                    }
-                }
+        let i = self.active_tab;
+        let (ld, lg, asz, th, sf, bg, fsa, ssa, mp, dt, lc, tc) = (
+            self.mls_landing_distance.parse::<f64>().ok(),
+            self.mls_landing_gap.parse::<f64>().ok(),
+            self.mls_arrowhead_size.parse::<f64>().ok(),
+            self.mls_text_height.parse::<f64>().ok(),
+            self.mls_scale_factor.parse::<f64>().ok(),
+            self.mls_break_gap.parse::<f64>().ok(),
+            self.mls_first_seg_angle.parse::<f64>().ok(),
+            self.mls_second_seg_angle.parse::<f64>().ok(),
+            self.mls_max_points.parse::<i32>().ok(),
+            self.mls_default_text.clone(),
+            self.mls_line_color.parse::<i16>().ok(),
+            self.mls_text_color.parse::<i16>().ok(),
+        );
+        let desc = self.mls_description.clone();
+        let align = self.mls_align_space.parse::<f64>().ok();
+        let bclr = self.mls_block_color.parse::<i16>().ok();
+        let brot = self.mls_block_rotation.parse::<f64>().ok();
+        let bsx = self.mls_block_scale_x.parse::<f64>().ok();
+        let bsy = self.mls_block_scale_y.parse::<f64>().ok();
+        let bsz = self.mls_block_scale_z.parse::<f64>().ok();
+        if let Some(s) = self.mleaderstyle_mut(i) {
+            if let Some(v) = ld {
+                s.landing_distance = v;
+            }
+            if let Some(v) = lg {
+                s.landing_gap = v;
+            }
+            if let Some(v) = asz {
+                s.arrowhead_size = v;
+            }
+            if let Some(v) = th {
+                s.text_height = v;
+            }
+            if let Some(v) = sf {
+                s.scale_factor = v;
+            }
+            if let Some(v) = bg {
+                s.break_gap_size = v;
+            }
+            if let Some(v) = fsa {
+                s.first_segment_angle = v.to_radians();
+            }
+            if let Some(v) = ssa {
+                s.second_segment_angle = v.to_radians();
+            }
+            if let Some(v) = mp {
+                s.max_leader_points = v;
+            }
+            s.default_text = dt;
+            if let Some(v) = lc {
+                s.line_color = acadrust::types::Color::from_index(v);
+            }
+            if let Some(v) = tc {
+                s.text_color = acadrust::types::Color::from_index(v);
+            }
+            s.description = desc;
+            if let Some(v) = align {
+                s.align_space = v;
+            }
+            if let Some(v) = bclr {
+                s.block_content_color = acadrust::types::Color::from_index(v);
+            }
+            if let Some(v) = brot {
+                s.block_content_rotation = v.to_radians();
+            }
+            if let Some(v) = bsx {
+                s.block_content_scale_x = v;
+            }
+            if let Some(v) = bsy {
+                s.block_content_scale_y = v;
+            }
+            if let Some(v) = bsz {
+                s.block_content_scale_z = v;
+            }
+        }
     }
 
     pub(super) fn on_mleader_style_apply(&mut self) -> Task<Message> {
-                self.stage_mleaderstyle_bufs();
-                self.style_stage_commit();
-                Task::none()
+        self.stage_mleaderstyle_bufs();
+        self.style_stage_commit();
+        Task::none()
     }
 
     pub(super) fn on_dim_style_dialog_open(&mut self) -> Task<Message> {
-                let i = self.active_tab;
-                // Pick the document's current dim style or "Standard".
-                let cur = self.tabs[i]
-                    .scene
-                    .document
-                    .header
-                    .current_dimstyle_name
-                    .clone();
-                let selected = if self.tabs[i].scene.document.dim_styles.get(&cur).is_some() {
-                    cur
-                } else {
-                    self.tabs[i]
-                        .scene
-                        .document
-                        .dim_styles
-                        .iter()
-                        .next()
-                        .map(|s| s.name.clone())
-                        .unwrap_or_else(|| "Standard".to_string())
-                };
-                self.dimstyle_selected = selected.clone();
-                self.dimstyle_compare = self.tabs[i]
-                    .scene
-                    .document
-                    .dim_styles
-                    .iter()
-                    .map(|style| style.name.clone())
-                    .find(|name| !name.eq_ignore_ascii_case(&selected))
-                    .unwrap_or_default();
-                self.load_dimstyle_bufs(i);
-                self.active_modal = Some(crate::app::ModalKind::DimStyle);
-                self.style_stage_begin();
-                Task::none()
+        let i = self.active_tab;
+        // Pick the document's current dim style or "Standard".
+        let cur = self.tabs[i]
+            .scene
+            .document
+            .header
+            .current_dimstyle_name
+            .clone();
+        let selected = if self.tabs[i].scene.document.dim_styles.get(&cur).is_some() {
+            cur
+        } else {
+            self.tabs[i]
+                .scene
+                .document
+                .dim_styles
+                .iter()
+                .next()
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| "Standard".to_string())
+        };
+        self.dimstyle_selected = selected.clone();
+        self.dimstyle_compare = self.tabs[i]
+            .scene
+            .document
+            .dim_styles
+            .iter()
+            .map(|style| style.name.clone())
+            .find(|name| !name.eq_ignore_ascii_case(&selected))
+            .unwrap_or_default();
+        self.load_dimstyle_bufs(i);
+        self.active_modal = Some(crate::app::ModalKind::DimStyle);
+        self.style_stage_begin();
+        Task::none()
     }
 
     pub(super) fn on_color_window_pick(&mut self, color: acadrust::types::Color) -> Task<Message> {
-                if matches!(
-                    self.color_pick_target.as_ref().map(|(target, _)| target),
-                    Some(crate::app::ColorPickTarget::PlotStyle)
-                ) {
-                    self.color_pick_target = None;
+        if matches!(
+            self.color_pick_target.as_ref().map(|(target, _)| target),
+            Some(crate::app::ColorPickTarget::PlotStyle)
+        ) {
+            self.color_pick_target = None;
 
-                    let rgb = match color {
-                        acadrust::types::Color::Rgb { r, g, b } => Some((r, g, b)),
-                        acadrust::types::Color::Index(index) => {
-                            acadrust::types::aci_table::aci_to_rgb(index)
-                        }
-                        _ => None,
-                    };
-
-                    if let Some((r, g, b)) = rgb {
-                        self.ps_color_buf = format!("#{r:02X}{g:02X}{b:02X}");
-                    }
-
-                    return self.on_plot_style_panel_apply();
+            let rgb = match color {
+                acadrust::types::Color::Rgb { r, g, b } => Some((r, g, b)),
+                acadrust::types::Color::Index(index) => {
+                    acadrust::types::aci_table::aci_to_rgb(index)
                 }
-                let s = crate::ui::color_select::color_to_aci_string(color);
-                let edit = match self.color_pick_target.take().map(|(target, _)| target) {
-                    Some(crate::app::ColorPickTarget::DimStyle(f)) => Some(Message::DsEdit(f, s)),
-                    Some(crate::app::ColorPickTarget::MLeader(f)) => {
-                        Some(Message::MLeaderStyleEdit { field: f, value: s })
-                    }
-                    Some(crate::app::ColorPickTarget::Table(r, f)) => {
-                        Some(Message::TableStyleCellEdit {
-                            row: r,
-                            field: f,
-                            value: s,
-                        })
-                    }
-                    Some(crate::app::ColorPickTarget::Properties) => {
-                        Some(Message::PropColorChanged(color))
-                    }
-                    Some(crate::app::ColorPickTarget::PropertiesBg) => {
-                        Some(Message::PropBgColorChanged(color))
-                    }
-                    Some(crate::app::ColorPickTarget::PropertiesField(field)) => {
-                        Some(Message::PropColorFieldChanged { field, color })
-                    }
-                    Some(crate::app::ColorPickTarget::MText) => {
-                        Some(Message::MTextColorChanged(color))
-                    }
-                    Some(crate::app::ColorPickTarget::Ribbon) => {
-                        Some(Message::RibbonColorChanged(color))
-                    }
-                    Some(crate::app::ColorPickTarget::Layer(idx)) => {
-                        self.tabs[self.active_tab].layers.selected = Some(idx);
-                        Some(Message::LayerColorSet(color))
-                    }
-                    Some(crate::app::ColorPickTarget::LayerState(idx)) => {
-                        Some(Message::LayerStateEditorLayerColor(idx, color))
-                    }
-                    Some(crate::app::ColorPickTarget::PlotStyle) => None,
-                    None => None,
-                };
-                if let Some(m) = edit {
-                    self.update(m)
-                } else {
-                    Task::none()
-                }
+                _ => None,
+            };
+
+            if let Some((r, g, b)) = rgb {
+                self.ps_color_buf = format!("#{r:02X}{g:02X}{b:02X}");
+            }
+
+            return self.on_plot_style_panel_apply();
+        }
+        let s = crate::ui::color_select::color_to_aci_string(color);
+        let edit = match self.color_pick_target.take().map(|(target, _)| target) {
+            Some(crate::app::ColorPickTarget::DimStyle(f)) => Some(Message::DsEdit(f, s)),
+            Some(crate::app::ColorPickTarget::MLeader(f)) => {
+                Some(Message::MLeaderStyleEdit { field: f, value: s })
+            }
+            Some(crate::app::ColorPickTarget::Table(r, f)) => Some(Message::TableStyleCellEdit {
+                row: r,
+                field: f,
+                value: s,
+            }),
+            Some(crate::app::ColorPickTarget::Properties) => Some(Message::PropColorChanged(color)),
+            Some(crate::app::ColorPickTarget::PropertiesBg) => {
+                Some(Message::PropBgColorChanged(color))
+            }
+            Some(crate::app::ColorPickTarget::PropertiesField(field)) => {
+                Some(Message::PropColorFieldChanged { field, color })
+            }
+            Some(crate::app::ColorPickTarget::MText) => Some(Message::MTextColorChanged(color)),
+            Some(crate::app::ColorPickTarget::Ribbon) => Some(Message::RibbonColorChanged(color)),
+            Some(crate::app::ColorPickTarget::Layer(idx)) => {
+                self.tabs[self.active_tab].layers.selected = Some(idx);
+                Some(Message::LayerColorSet(color))
+            }
+            Some(crate::app::ColorPickTarget::LayerState(idx)) => {
+                Some(Message::LayerStateEditorLayerColor(idx, color))
+            }
+            Some(crate::app::ColorPickTarget::PlotStyle) => None,
+            None => None,
+        };
+        if let Some(m) = edit {
+            self.update(m)
+        } else {
+            Task::none()
+        }
     }
 
     pub(super) fn on_ds_set_handle(&mut self, field: &'static str, value: String) -> Task<Message> {
-                let i = self.active_tab;
-                let name = self.dimstyle_selected.clone();
-                let is_lt = matches!(
-                    field,
-                    "dimltex_handle" | "dimltex1_handle" | "dimltex2_handle"
-                );
-                let doc = &self.tabs[i].scene.document;
-                let handle = if value == "Default" || value == "ByBlock" {
-                    acadrust::types::Handle::NULL
-                } else if is_lt {
-                    doc.line_types
-                        .iter()
-                        .find(|lt| lt.name == value)
-                        .map(|lt| lt.handle)
-                        .unwrap_or(acadrust::types::Handle::NULL)
-                } else {
-                    doc.block_records
-                        .iter()
-                        .find(|b| b.name == value)
-                        .map(|b| b.handle)
-                        .unwrap_or(acadrust::types::Handle::NULL)
-                };
-                // Staged: persists on Apply.
-                if let Some(ds) = self.tabs[i].scene.document.dim_styles.get_mut(&name) {
-                    match field {
-                        "dimblk" => ds.dimblk = handle,
-                        "dimblk1" => {
-                            ds.dimblk1 = handle;
-                            ds.dimblk2 = handle;
-                        }
-                        "dimblk2" => ds.dimblk2 = handle,
-                        "dimldrblk" => ds.dimldrblk = handle,
-                        "dimltex_handle" => ds.dimltex_handle = handle,
-                        "dimltex1_handle" => ds.dimltex1_handle = handle,
-                        "dimltex2_handle" => ds.dimltex2_handle = handle,
-                        _ => {}
-                    }
+        let i = self.active_tab;
+        let name = self.dimstyle_selected.clone();
+        let is_lt = matches!(
+            field,
+            "dimltex_handle" | "dimltex1_handle" | "dimltex2_handle"
+        );
+        let doc = &self.tabs[i].scene.document;
+        let handle = if value == "Default" || value == "ByBlock" {
+            acadrust::types::Handle::NULL
+        } else if is_lt {
+            doc.line_types
+                .iter()
+                .find(|lt| lt.name == value)
+                .map(|lt| lt.handle)
+                .unwrap_or(acadrust::types::Handle::NULL)
+        } else {
+            doc.block_records
+                .iter()
+                .find(|b| b.name == value)
+                .map(|b| b.handle)
+                .unwrap_or(acadrust::types::Handle::NULL)
+        };
+        // Staged: persists on Apply.
+        if let Some(ds) = self.tabs[i].scene.document.dim_styles.get_mut(&name) {
+            match field {
+                "dimblk" => ds.dimblk = handle,
+                "dimblk1" => {
+                    ds.dimblk1 = handle;
+                    ds.dimblk2 = handle;
                 }
-                Task::none()
+                "dimblk2" => ds.dimblk2 = handle,
+                "dimldrblk" => ds.dimldrblk = handle,
+                "dimltex_handle" => ds.dimltex_handle = handle,
+                "dimltex1_handle" => ds.dimltex1_handle = handle,
+                "dimltex2_handle" => ds.dimltex2_handle = handle,
+                _ => {}
+            }
+        }
+        Task::none()
     }
 }

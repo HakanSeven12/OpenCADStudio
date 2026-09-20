@@ -107,11 +107,7 @@ impl Camera {
     /// geometry closer to the eye can grow dramatically. Match the maximum
     /// projected extent of the model box instead, leaving target, rotation and
     /// field of view untouched.
-    pub fn set_projection_preserving_frame(
-        &mut self,
-        projection: Projection,
-        aspect: f32,
-    ) {
+    pub fn set_projection_preserving_frame(&mut self, projection: Projection, aspect: f32) {
         if self.projection == projection {
             return;
         }
@@ -275,9 +271,12 @@ impl Camera {
         view.w_axis = glam::vec4(0.0, 0.0, 0.0, 1.0);
 
         let proj = match self.projection {
-            Projection::Perspective => {
-                perspective(self.fov_y, aspect, self.distance * 0.001, self.distance * 1000.0)
-            }
+            Projection::Perspective => perspective(
+                self.fov_y,
+                aspect,
+                self.distance * 0.001,
+                self.distance * 1000.0,
+            ),
             Projection::Orthographic => {
                 let h = self.ortho_size();
                 let w = h * aspect;
@@ -381,7 +380,6 @@ impl Camera {
         self.unproject_on_plane(screen, bounds, forward, self.target)
     }
 
-
     // ── ViewCube rotation matrix ───────────────────────────────────────────
 
     /// Returns the rotation matrix for the ViewCube.
@@ -397,19 +395,27 @@ impl Camera {
     /// when a transient UCS is baked into block-local geometry: the contents
     /// retain their on-screen framing while their canonical coordinates change.
     pub fn apply_rigid_transform(&mut self, transform: &acadrust::types::Transform) {
-        let point = acadrust::types::Vector3::new(
-            self.target.x,
-            self.target.y,
-            self.target.z,
-        );
+        let point = acadrust::types::Vector3::new(self.target.x, self.target.y, self.target.z);
         let point = transform.apply(point);
         self.target = DVec3::new(point.x, point.y, point.z);
 
         let matrix = &transform.matrix.m;
         let rotation = glam::Mat3::from_cols(
-            Vec3::new(matrix[0][0] as f32, matrix[1][0] as f32, matrix[2][0] as f32),
-            Vec3::new(matrix[0][1] as f32, matrix[1][1] as f32, matrix[2][1] as f32),
-            Vec3::new(matrix[0][2] as f32, matrix[1][2] as f32, matrix[2][2] as f32),
+            Vec3::new(
+                matrix[0][0] as f32,
+                matrix[1][0] as f32,
+                matrix[2][0] as f32,
+            ),
+            Vec3::new(
+                matrix[0][1] as f32,
+                matrix[1][1] as f32,
+                matrix[2][1] as f32,
+            ),
+            Vec3::new(
+                matrix[0][2] as f32,
+                matrix[1][2] as f32,
+                matrix[2][2] as f32,
+            ),
         );
         self.rotation = (Quat::from_mat3(&rotation) * self.rotation).normalize();
         self.sync_yaw_pitch();
@@ -428,11 +434,8 @@ impl Camera {
             let mut new_min = DVec3::splat(f64::INFINITY);
             let mut new_max = DVec3::splat(f64::NEG_INFINITY);
             for corner in corners {
-                let transformed = transform.apply(acadrust::types::Vector3::new(
-                    corner.x,
-                    corner.y,
-                    corner.z,
-                ));
+                let transformed =
+                    transform.apply(acadrust::types::Vector3::new(corner.x, corner.y, corner.z));
                 let transformed = DVec3::new(transformed.x, transformed.y, transformed.z);
                 new_min = new_min.min(transformed);
                 new_max = new_max.max(transformed);
@@ -666,7 +669,11 @@ impl Camera {
         // (upside-down) view inverted.
         let cur_up = self.rotation * Vec3::Y;
         let raw_ref = if new_eye.dot(uz).abs() > 0.9 { uy } else { uz };
-        let up_ref = if cur_up.dot(raw_ref) < 0.0 { -raw_ref } else { raw_ref };
+        let up_ref = if cur_up.dot(raw_ref) < 0.0 {
+            -raw_ref
+        } else {
+            raw_ref
+        };
         let projected = up_ref - new_eye * up_ref.dot(new_eye);
         let new_up = projected.normalize_or(if new_eye.dot(uz).abs() < 0.99 {
             (uz - new_eye * uz.dot(new_eye)).normalize()
@@ -792,7 +799,10 @@ mod tests {
                 let clip = matrix * glam::vec4(0., 0., -distance, 1.);
                 clip.z / clip.w
             };
-            assert!(depth(near).abs() < 1e-5, "{projection:?}: near must map to 0");
+            assert!(
+                depth(near).abs() < 1e-5,
+                "{projection:?}: near must map to 0"
+            );
             assert!(
                 (depth(far) - 1.).abs() < 1e-5,
                 "{projection:?}: far must map to 1"
@@ -916,7 +926,10 @@ mod rte_tests {
         let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 600.0));
         for projection in [Projection::Orthographic, Projection::Perspective] {
             for distance in [0.01, 60.36, 71.08106, 100_000.0] {
-                for origin in [DVec3::ZERO, DVec3::new(639_792.184_2, 4_517_057.531_7, 12.5)] {
+                for origin in [
+                    DVec3::ZERO,
+                    DVec3::new(639_792.184_2, 4_517_057.531_7, 12.5),
+                ] {
                     let camera = Camera {
                         target: origin,
                         distance,
@@ -925,11 +938,17 @@ mod rte_tests {
                     };
                     for cursor in [Point::new(400.0, 300.0), Point::new(530.0, 215.0)] {
                         let point = camera.pick_on_target_plane(cursor, bounds);
-                        assert_eq!(point.z, origin.z, "{projection:?}, distance={distance}, {point:?}");
+                        assert_eq!(
+                            point.z, origin.z,
+                            "{projection:?}, distance={distance}, {point:?}"
+                        );
                         let normal = Vec3::new(0.2, -0.3, 1.0).normalize();
                         let point = camera.pick_on_plane(cursor, bounds, normal, origin);
                         let residual = (point - origin).dot(normal.as_dvec3());
-                        assert!(residual.abs() < 1e-9, "plane residual={residual}, {projection:?}, distance={distance}");
+                        assert!(
+                            residual.abs() < 1e-9,
+                            "plane residual={residual}, {projection:?}, distance={distance}"
+                        );
                     }
                 }
             }
@@ -948,10 +967,16 @@ mod rte_tests {
                 ..Camera::default()
             };
             let offset = DVec3::new(639_792.184_2, 4_517_057.531_7, 12.5);
-            let translated = Camera { target: offset, ..camera.clone() };
+            let translated = Camera {
+                target: offset,
+                ..camera.clone()
+            };
             let here = camera.pick_on_target_plane(cursor, bounds);
             let there = translated.pick_on_target_plane(cursor, bounds) - offset;
-            assert!(here.distance(there) < 1e-9, "{projection:?}: {here:?} vs {there:?}");
+            assert!(
+                here.distance(there) < 1e-9,
+                "{projection:?}: {here:?} vs {there:?}"
+            );
         }
     }
 
@@ -978,7 +1003,11 @@ mod rte_tests {
 
         let here = at_origin.view_proj_rte(bounds);
         let there = at_utm.view_proj_rte(bounds);
-        for (a, b) in here.to_cols_array().iter().zip(there.to_cols_array().iter()) {
+        for (a, b) in here
+            .to_cols_array()
+            .iter()
+            .zip(there.to_cols_array().iter())
+        {
             assert_eq!(a, b, "the camera's position reached the view matrix");
         }
     }
@@ -992,19 +1021,13 @@ mod rte_tests {
         for (yaw, pitch) in [(0.0, 1.2), (0.7, 0.3), (-2.1, -0.9)] {
             let mut camera = Camera::default();
             camera.target = glam::DVec3::ZERO;
-            camera.rotation =
-                Quat::from_rotation_z(yaw) * Quat::from_rotation_x(pitch);
+            camera.rotation = Quat::from_rotation_z(yaw) * Quat::from_rotation_x(pitch);
             let up_dir = camera.rotation * Vec3::Y;
 
-            let mut old = look_at_mat4(
-                camera.eye().as_vec3(),
-                camera.target.as_vec3(),
-                up_dir,
-            );
+            let mut old = look_at_mat4(camera.eye().as_vec3(), camera.target.as_vec3(), up_dir);
             old.w_axis = glam::vec4(0.0, 0.0, 0.0, 1.0);
             let new = {
-                let mut view =
-                    look_at_mat4(Vec3::ZERO, -(camera.rotation * Vec3::Z), up_dir);
+                let mut view = look_at_mat4(Vec3::ZERO, -(camera.rotation * Vec3::Z), up_dir);
                 view.w_axis = glam::vec4(0.0, 0.0, 0.0, 1.0);
                 view
             };

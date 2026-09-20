@@ -100,7 +100,8 @@ fn apply(m: &Xform, p: [f64; 3]) -> [f64; 3] {
 }
 
 fn u32_at(b: &[u8], o: usize) -> Option<u32> {
-    b.get(o..o + 4).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+    b.get(o..o + 4)
+        .map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
 }
 
 fn f64_at(b: &[u8], o: usize) -> Option<f64> {
@@ -110,7 +111,9 @@ fn f64_at(b: &[u8], o: usize) -> Option<f64> {
 
 fn pt3_at(b: &[u8], o: usize) -> Option<[f64; 3]> {
     let p = [f64_at(b, o)?, f64_at(b, o + 8)?, f64_at(b, o + 16)?];
-    p.iter().all(|v| v.is_finite() && v.abs() < 1e12).then_some(p)
+    p.iter()
+        .all(|v| v.is_finite() && v.abs() < 1e12)
+        .then_some(p)
 }
 
 fn color_from_aci(v: i32) -> ProxyColor {
@@ -154,9 +157,13 @@ pub fn decode(blob: &[u8]) -> Decoded {
     let mut xform = IDENTITY;
 
     for _ in 0..count {
-        let Some(rsize) = u32_at(blob, pos) else { break };
+        let Some(rsize) = u32_at(blob, pos) else {
+            break;
+        };
         let rsize = rsize as usize;
-        let Some(rtype) = u32_at(blob, pos + 4) else { break };
+        let Some(rtype) = u32_at(blob, pos + 4) else {
+            break;
+        };
         if rsize < 8 || pos + rsize > total {
             break;
         }
@@ -179,9 +186,7 @@ pub fn decode(blob: &[u8]) -> Decoded {
             REC_TRANSFORM => {
                 // 4×4 row-major; keep the top 3 rows (local→world).
                 let mut m = IDENTITY;
-                if (0..12).all(|k| {
-                    f64_at(blob, pos + 8 + 8 * k).map(|v| m[k] = v).is_some()
-                }) {
+                if (0..12).all(|k| f64_at(blob, pos + 8 + 8 * k).map(|v| m[k] = v).is_some()) {
                     xform = m;
                 }
             }
@@ -216,7 +221,13 @@ pub fn decode(blob: &[u8]) -> Decoded {
 }
 
 /// Transform a run of local points to world and push it as one poly-line.
-fn push_line(out: &mut Decoded, local: Vec<[f64; 3]>, color: ProxyColor, lineweight: i16, xform: &Xform) {
+fn push_line(
+    out: &mut Decoded,
+    local: Vec<[f64; 3]>,
+    color: ProxyColor,
+    lineweight: i16,
+    xform: &Xform,
+) {
     if local.len() >= 2 {
         out.polylines.push(ProxyPolyline {
             points: local.iter().map(|&p| apply(xform, p)).collect(),

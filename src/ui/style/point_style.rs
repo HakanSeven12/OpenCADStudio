@@ -6,10 +6,10 @@
 //! does the same without the dialog.
 
 use crate::app::Message;
+use crate::t;
+use crate::ui::style::common::muted_style;
 use iced::widget::{button, canvas, column, container, radio, row, text, text_input, Space};
 use iced::{mouse, Background, Border, Element, Length, Point, Rectangle, Size, Theme};
-use crate::ui::style::common::muted_style;
-use crate::t;
 use std::borrow::Cow;
 
 const CELL_PX: f32 = 44.0;
@@ -51,8 +51,14 @@ impl canvas::Program<Message> for GlyphCanvas {
             0 => frame.fill(&canvas::Path::circle(Point::new(cx, cy), 2.4), glyph),
             1 => {}
             2 => {
-                frame.stroke(&line(Point::new(cx - r, cy), Point::new(cx + r, cy)), stroke.clone());
-                frame.stroke(&line(Point::new(cx, cy - r), Point::new(cx, cy + r)), stroke.clone());
+                frame.stroke(
+                    &line(Point::new(cx - r, cy), Point::new(cx + r, cy)),
+                    stroke.clone(),
+                );
+                frame.stroke(
+                    &line(Point::new(cx, cy - r), Point::new(cx, cy + r)),
+                    stroke.clone(),
+                );
             }
             3 => {
                 frame.stroke(
@@ -64,14 +70,18 @@ impl canvas::Program<Message> for GlyphCanvas {
                     stroke.clone(),
                 );
             }
-            4 => frame.stroke(&line(Point::new(cx, cy), Point::new(cx, cy - r)), stroke.clone()),
+            4 => frame.stroke(
+                &line(Point::new(cx, cy), Point::new(cx, cy - r)),
+                stroke.clone(),
+            ),
             _ => {}
         }
         if self.mode & 32 != 0 {
             frame.stroke(&canvas::Path::circle(Point::new(cx, cy), r), stroke.clone());
         }
         if self.mode & 64 != 0 {
-            let sq = canvas::Path::rectangle(Point::new(cx - r, cy - r), Size::new(2.0 * r, 2.0 * r));
+            let sq =
+                canvas::Path::rectangle(Point::new(cx - r, cy - r), Size::new(2.0 * r, 2.0 * r));
             frame.stroke(&sq, stroke.clone());
         }
         vec![frame.into_geometry()]
@@ -157,7 +167,13 @@ pub fn view_window<'a>(
             .size(13)
             .width(110),
         Space::new().width(6),
-        text(if relative { Cow::Borrowed("%") } else { t!("units") }).size(12).style(muted_style),
+        text(if relative {
+            Cow::Borrowed("%")
+        } else {
+            t!("units")
+        })
+        .size(12)
+        .style(muted_style),
     ]
     .align_y(iced::Center);
 
@@ -204,9 +220,7 @@ pub fn view_window<'a>(
         .height(height),
     )
     .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(
-            theme.palette().background.base.color
-        )),
+        background: Some(Background::Color(theme.palette().background.base.color)),
         ..Default::default()
     })
     .width(width)

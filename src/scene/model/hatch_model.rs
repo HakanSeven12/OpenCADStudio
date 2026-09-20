@@ -350,10 +350,7 @@ impl HatchModel {
         self.pattern_segments_with_dot_length(Some(0.0))
     }
 
-    fn pattern_segments_with_dot_length(
-        &self,
-        plot_dot_length: Option<f64>,
-    ) -> Vec<[[f64; 2]; 2]> {
+    fn pattern_segments_with_dot_length(&self, plot_dot_length: Option<f64>) -> Vec<[[f64; 2]; 2]> {
         let HatchPattern::Pattern(families) = &self.pattern else {
             return Vec::new();
         };
@@ -538,8 +535,7 @@ impl HatchModel {
                         // dashes, negative are gaps, and a zero-length entry is
                         // a round-capped point.
                         let n = family.dashes.len();
-                        let dot_len = plot_dot_length
-                            .unwrap_or_else(|| (period * 0.06).max(1e-3));
+                        let dot_len = plot_dot_length.unwrap_or_else(|| (period * 0.06).max(1e-3));
                         let phase = t0.rem_euclid(period);
                         // Start at the period boundary at or before t0; the
                         // span clip below drops anything before t0.

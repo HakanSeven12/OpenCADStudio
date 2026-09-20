@@ -1,5 +1,5 @@
-use acadrust::{EntityType, Handle, Transparency};
 use crate::t;
+use acadrust::{EntityType, Handle, Transparency};
 
 use crate::scene::model::object::{PropSection, PropValue, Property};
 

@@ -6,12 +6,17 @@ use acadrust::types::Vector3;
 use acadrust::EntityType;
 use cadkernel::brep::Body;
 
-use crate::command::{ExtrudeMode, SweepOptions};
 use super::sweep_model::{embedded_path, embedded_revolve_profile};
+use crate::command::{ExtrudeMode, SweepOptions};
 
-fn embedded_sweep_profile(entity: &EntityType) -> Option<(acadrust::entities::EmbeddedEntity, [f64; 16])> {
+fn embedded_sweep_profile(
+    entity: &EntityType,
+) -> Option<(acadrust::entities::EmbeddedEntity, [f64; 16])> {
     if let EntityType::Region(region) = entity {
-        Some((acadrust::entities::EmbeddedEntity::Region(region.clone()), glam::DMat4::IDENTITY.to_cols_array()))
+        Some((
+            acadrust::entities::EmbeddedEntity::Region(region.clone()),
+            glam::DMat4::IDENTITY.to_cols_array(),
+        ))
     } else {
         embedded_revolve_profile(entity)
     }
@@ -26,8 +31,9 @@ pub fn is_sweep_profile(entity: &EntityType) -> bool {
 pub fn is_sweep_path(entity: &EntityType) -> bool {
     match embedded_path(entity) {
         Some(acadrust::entities::EmbeddedEntity::Spline(value)) => {
-            value.degree > 0 && (value.control_points.len() > value.degree as usize
-                || value.fit_points.len() >= 2)
+            value.degree > 0
+                && (value.control_points.len() > value.degree as usize
+                    || value.fit_points.len() >= 2)
         }
         Some(_) => crate::entities::curve::entity_curve(entity)
             .is_some_and(|curve| curve.curve.length().is_finite() && curve.curve.length() > 1e-9),
@@ -36,24 +42,36 @@ pub fn is_sweep_path(entity: &EntityType) -> bool {
 }
 
 /// All selected profiles use one base point, preserving their relative offsets.
-pub fn sweep_selection_options(profiles: &[EntityType], mut options: SweepOptions) -> Option<SweepOptions> {
+pub fn sweep_selection_options(
+    profiles: &[EntityType],
+    mut options: SweepOptions,
+) -> Option<SweepOptions> {
     if options.base_point.is_some() {
         return Some(options);
     }
-    let geometry = profiles.iter().map(|profile| {
-        let (entity, transform) = embedded_sweep_profile(profile)?;
-        let (plane, wires, _) = cadkernel::acis::sweep_profile_geometry(&entity, transform).ok()?;
-        Some((plane, wires))
-    }).collect::<Option<Vec<_>>>()?;
+    let geometry = profiles
+        .iter()
+        .map(|profile| {
+            let (entity, transform) = embedded_sweep_profile(profile)?;
+            let (plane, wires, _) =
+                cadkernel::acis::sweep_profile_geometry(&entity, transform).ok()?;
+            Some((plane, wires))
+        })
+        .collect::<Option<Vec<_>>>()?;
     options.base_point = Some(glam::DVec3::from_array(
         cadkernel::brep::sweep_profile_group_base(&geometry)?,
     ));
     Some(options)
 }
 
-pub fn sweep_record(profile: &EntityType, path: &EntityType, options: SweepOptions) -> Option<SolidHistorySweep> {
+pub fn sweep_record(
+    profile: &EntityType,
+    path: &EntityType,
+    options: SweepOptions,
+) -> Option<SolidHistorySweep> {
     let (sweep_entity, sweep_entity_transform) = embedded_sweep_profile(profile)?;
-    let (plane, wires, _) = cadkernel::acis::sweep_profile_geometry(&sweep_entity, sweep_entity_transform).ok()?;
+    let (plane, wires, _) =
+        cadkernel::acis::sweep_profile_geometry(&sweep_entity, sweep_entity_transform).ok()?;
     let base_point = match options.base_point {
         Some(point) => point.to_array(),
         None => cadkernel::brep::sweep_profile_base(plane, &wires)?,
@@ -77,7 +95,12 @@ pub fn sweep_record(profile: &EntityType, path: &EntityType, options: SweepOptio
     })
 }
 
-pub fn swept_with_options(profile: &EntityType, path: &EntityType, mode: ExtrudeMode, options: SweepOptions) -> Option<Body> {
+pub fn swept_with_options(
+    profile: &EntityType,
+    path: &EntityType,
+    mode: ExtrudeMode,
+    options: SweepOptions,
+) -> Option<Body> {
     let record = sweep_record(profile, path, options)?;
     cadkernel::acis::rebuild_sweep_with_mode(&record, mode == ExtrudeMode::Surface).ok()
 }

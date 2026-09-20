@@ -125,8 +125,8 @@ fn apply_text_defaults(doc: &CadDocument, entity: &mut EntityType) {
     if style_name.trim().is_empty() {
         style_name.clone_from(&active.style_name);
     }
-    let resolved = named_text_style(doc, style_name)
-        .unwrap_or_else(|| TextStyle::new(style_name.clone()));
+    let resolved =
+        named_text_style(doc, style_name).unwrap_or_else(|| TextStyle::new(style_name.clone()));
     match entity {
         EntityType::Text(text) => {
             if resolved.height > 1.0e-9 {
@@ -155,9 +155,8 @@ fn apply_text_defaults(doc: &CadDocument, entity: &mut EntityType) {
                 attribute.oblique_angle = resolved.oblique_angle;
             }
             if attribute.text_generation_flags == 0 {
-                attribute.text_generation_flags =
-                    (if resolved.flags.backward { 2 } else { 0 })
-                        | (if resolved.flags.upside_down { 4 } else { 0 });
+                attribute.text_generation_flags = (if resolved.flags.backward { 2 } else { 0 })
+                    | (if resolved.flags.upside_down { 4 } else { 0 });
             }
         }
         EntityType::AttributeDefinition(attribute) => {
@@ -171,9 +170,8 @@ fn apply_text_defaults(doc: &CadDocument, entity: &mut EntityType) {
                 attribute.oblique_angle = resolved.oblique_angle;
             }
             if attribute.text_generation_flags == 0 {
-                attribute.text_generation_flags =
-                    (if resolved.flags.backward { 2 } else { 0 })
-                        | (if resolved.flags.upside_down { 4 } else { 0 });
+                attribute.text_generation_flags = (if resolved.flags.backward { 2 } else { 0 })
+                    | (if resolved.flags.upside_down { 4 } else { 0 });
             }
         }
         _ => {}
@@ -185,7 +183,10 @@ fn apply_dimension_defaults(doc: &CadDocument, entity: &mut EntityType) {
     match entity {
         EntityType::Dimension(dimension) => {
             if entity_uses_default_style(&dimension.base().style_name) {
-                dimension.base_mut().style_name.clone_from(&active.style_name);
+                dimension
+                    .base_mut()
+                    .style_name
+                    .clone_from(&active.style_name);
             }
         }
         EntityType::Leader(leader) => {
@@ -198,9 +199,11 @@ fn apply_dimension_defaults(doc: &CadDocument, entity: &mut EntityType) {
         }
         EntityType::Tolerance(tolerance) => {
             if entity_uses_default_style(&tolerance.dimension_style_name) {
-                tolerance.dimension_style_name.clone_from(&active.style_name);
-                tolerance.dimension_style_handle = (!active.style_handle.is_null())
-                    .then_some(active.style_handle);
+                tolerance
+                    .dimension_style_name
+                    .clone_from(&active.style_name);
+                tolerance.dimension_style_handle =
+                    (!active.style_handle.is_null()).then_some(active.style_handle);
                 tolerance.text_height = active.text_height;
                 tolerance.dimension_gap = active.gap;
             }
@@ -213,35 +216,46 @@ fn apply_object_defaults(doc: &CadDocument, entity: &mut EntityType) {
     match entity {
         EntityType::MultiLeader(leader) if leader.style_handle.is_none() => {
             let name = doc.header.current_mleader_style_name.trim();
-            if let Some(style) = doc.objects.iter().find_map(|(handle, object)| match object {
-                ObjectType::MultiLeaderStyle(style) if style.name.eq_ignore_ascii_case(name) => {
-                    let mut style = style.clone();
-                    style.handle = *handle;
-                    Some(style)
-                }
-                _ => None,
-            }) {
+            if let Some(style) = doc
+                .objects
+                .iter()
+                .find_map(|(handle, object)| match object {
+                    ObjectType::MultiLeaderStyle(style)
+                        if style.name.eq_ignore_ascii_case(name) =>
+                    {
+                        let mut style = style.clone();
+                        style.handle = *handle;
+                        Some(style)
+                    }
+                    _ => None,
+                })
+            {
                 crate::scene::annotative::apply_mleader_style(leader, &style);
             }
         }
         EntityType::Table(table) if table.table_style_handle.is_none() => {
             let name = doc.header.current_table_style_name.trim();
-            table.table_style_handle = doc.objects.iter().find_map(|(handle, object)| match object {
-                ObjectType::TableStyle(style) if style.name.eq_ignore_ascii_case(name) => {
-                    Some(*handle)
-                }
-                _ => None,
-            });
+            table.table_style_handle =
+                doc.objects
+                    .iter()
+                    .find_map(|(handle, object)| match object {
+                        ObjectType::TableStyle(style) if style.name.eq_ignore_ascii_case(name) => {
+                            Some(*handle)
+                        }
+                        _ => None,
+                    });
         }
         EntityType::MLine(mline) if mline.style_handle.is_none() => {
             let name = doc.header.multiline_style.trim();
             if let Some((handle, style_name)) =
-                doc.objects.iter().find_map(|(handle, object)| match object {
-                    ObjectType::MLineStyle(style) if style.name.eq_ignore_ascii_case(name) => {
-                        Some((*handle, style.name.clone()))
-                    }
-                    _ => None,
-                })
+                doc.objects
+                    .iter()
+                    .find_map(|(handle, object)| match object {
+                        ObjectType::MLineStyle(style) if style.name.eq_ignore_ascii_case(name) => {
+                            Some((*handle, style.name.clone()))
+                        }
+                        _ => None,
+                    })
             {
                 mline.style_handle = Some(handle);
                 mline.style_name = style_name;
@@ -263,7 +277,10 @@ pub(crate) fn parse_current_transparency(value: &str) -> Option<acadrust::types:
     match value.trim().to_ascii_uppercase().as_str() {
         "BYLAYER" | "-1" => Some(Transparency::ByLayer),
         "BYBLOCK" | "-2" => Some(Transparency::ByBlock),
-        value => value.parse::<u8>().ok().filter(|value| *value <= 90)
+        value => value
+            .parse::<u8>()
+            .ok()
+            .filter(|value| *value <= 90)
             .map(|value| Transparency::from_percent(value as f64 / 100.0)),
     }
 }
@@ -284,11 +301,26 @@ mod transparency_tests {
 
     #[test]
     fn parses_supported_current_transparency_values() {
-        assert_eq!(parse_current_transparency("ByLayer"), Some(Transparency::ByLayer));
-        assert_eq!(parse_current_transparency("-1"), Some(Transparency::ByLayer));
-        assert_eq!(parse_current_transparency("ByBlock"), Some(Transparency::ByBlock));
-        assert_eq!(parse_current_transparency("-2"), Some(Transparency::ByBlock));
-        assert_eq!(parse_current_transparency("25"), Some(Transparency::Explicit(64)));
+        assert_eq!(
+            parse_current_transparency("ByLayer"),
+            Some(Transparency::ByLayer)
+        );
+        assert_eq!(
+            parse_current_transparency("-1"),
+            Some(Transparency::ByLayer)
+        );
+        assert_eq!(
+            parse_current_transparency("ByBlock"),
+            Some(Transparency::ByBlock)
+        );
+        assert_eq!(
+            parse_current_transparency("-2"),
+            Some(Transparency::ByBlock)
+        );
+        assert_eq!(
+            parse_current_transparency("25"),
+            Some(Transparency::Explicit(64))
+        );
         assert!(parse_current_transparency("91").is_none());
         assert!(parse_current_transparency("25.5").is_none());
         assert!(parse_current_transparency("invalid").is_none());

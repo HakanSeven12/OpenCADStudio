@@ -15,9 +15,9 @@
 //     Insert      : move the whole entity if its insertion point is inside.
 //     All others  : move the whole entity if any point is inside.
 
+use crate::t;
 use acadrust::Handle;
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -44,9 +44,7 @@ enum Step {
     /// Selection is complete; waiting for the displacement base point.
     Base,
     /// Waiting for the displacement target.
-    Target {
-        base: DVec3,
-    },
+    Target { base: DVec3 },
 }
 
 pub struct StretchCommand {
@@ -135,12 +133,8 @@ impl CadCommand for StretchCommand {
                     .into_owned()
                 }
             }
-            Step::WindowCorner2(_) => {
-                t!("STRETCH  Specify opposite corner:").into_owned()
-            }
-            Step::Base => {
-                t!("STRETCH  Specify base point:").into_owned()
-            }
+            Step::WindowCorner2(_) => t!("STRETCH  Specify opposite corner:").into_owned(),
+            Step::Base => t!("STRETCH  Specify base point:").into_owned(),
             Step::Target { base } => {
                 let bx = format!("{:.3}", base.x);
                 let bz = format!("{:.3}", base.z);
@@ -244,17 +238,13 @@ impl CadCommand for StretchCommand {
                 let windows: Vec<_> = self
                     .windows
                     .iter()
-                    .map(|(win_min, win_max)| {
-                        (win_min.as_vec3(), win_max.as_vec3())
-                    })
+                    .map(|(win_min, win_max)| (win_min.as_vec3(), win_max.as_vec3()))
                     .collect();
 
                 let mut out: Vec<WireModel> = self
                     .wire_models
                     .iter()
-                    .map(|wire| {
-                        wire.stretched_windows(&windows, delta.as_vec3())
-                    })
+                    .map(|wire| wire.stretched_windows(&windows, delta.as_vec3()))
                     .collect();
 
                 out.push(WireModel::solid(

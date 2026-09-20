@@ -1,7 +1,7 @@
 //! Bottom status bar — Model/Layout tabs + OSNAP toggle + status info
 
-pub mod status_menu;
 pub(crate) mod spacemouse;
+pub mod status_menu;
 pub mod statusbar_config;
 pub mod statusbar_menu;
 

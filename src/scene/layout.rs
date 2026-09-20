@@ -16,9 +16,7 @@ impl Scene {
         }
     }
 
-    pub(crate) fn model_pane_min_reporter(
-        &self,
-    ) -> std::sync::Arc<std::sync::atomic::AtomicU32> {
+    pub(crate) fn model_pane_min_reporter(&self) -> std::sync::Arc<std::sync::atomic::AtomicU32> {
         self.model_pane_min_px.clone()
     }
 
@@ -173,7 +171,10 @@ impl Scene {
         let cam = self.camera.borrow().clone();
         let (mode, grid_on, snap_on) = {
             let tiles = self.model_tiles.borrow();
-            let active = self.active_model_tile.get().min(tiles.len().saturating_sub(1));
+            let active = self
+                .active_model_tile
+                .get()
+                .min(tiles.len().saturating_sub(1));
             tiles
                 .get(active)
                 .map(|t| (t.render_mode, t.grid_on, t.snap_on))
@@ -282,8 +283,16 @@ impl Scene {
         if a == b {
             return;
         }
-        let pa = self.model_panes.iter().find(|(_, &v)| v == a).map(|(p, _)| *p);
-        let pb = self.model_panes.iter().find(|(_, &v)| v == b).map(|(p, _)| *p);
+        let pa = self
+            .model_panes
+            .iter()
+            .find(|(_, &v)| v == a)
+            .map(|(p, _)| *p);
+        let pb = self
+            .model_panes
+            .iter()
+            .find(|(_, &v)| v == b)
+            .map(|(p, _)| *p);
         if let (Some(pa), Some(pb)) = (pa, pb) {
             self.model_panes.swap(pa, pb);
         }
@@ -297,26 +306,27 @@ impl Scene {
         let old = self.model_tiles.borrow().clone();
         let order: Vec<iced::widget::pane_grid::Pane> =
             self.model_panes.iter().map(|(p, _)| *p).collect();
-        let fallback = old
-            .first()
-            .cloned()
-            .unwrap_or_else(|| ModelTile {
-                rect: iced::Rectangle {
-                    x: 0.0,
-                    y: 0.0,
-                    width: 1.0,
-                    height: 1.0,
-                },
-                camera: self.camera.borrow().clone(),
-                render_mode: acadrust::entities::ViewportRenderMode::Wireframe2D,
-                grid_on: false,
-                snap_on: false,
-            });
+        let fallback = old.first().cloned().unwrap_or_else(|| ModelTile {
+            rect: iced::Rectangle {
+                x: 0.0,
+                y: 0.0,
+                width: 1.0,
+                height: 1.0,
+            },
+            camera: self.camera.borrow().clone(),
+            render_mode: acadrust::entities::ViewportRenderMode::Wireframe2D,
+            grid_on: false,
+            snap_on: false,
+        });
         let mut new_tiles = Vec::with_capacity(order.len());
         let mut new_active = 0usize;
         for (new_idx, pane) in order.iter().enumerate() {
             let old_idx = *self.model_panes.get(*pane).unwrap_or(&0);
-            new_tiles.push(old.get(old_idx).cloned().unwrap_or_else(|| fallback.clone()));
+            new_tiles.push(
+                old.get(old_idx)
+                    .cloned()
+                    .unwrap_or_else(|| fallback.clone()),
+            );
             if let Some(v) = self.model_panes.get_mut(*pane) {
                 *v = new_idx;
             }
@@ -446,7 +456,6 @@ impl Scene {
         }
     }
 
-
     /// Screen-pixel rectangle of the active Model tile within a canvas of
     /// `(vw, vh)`. Full canvas outside the Model layout or for a single
     /// tile. Used to map cursor coordinates into the active tile so pick /
@@ -464,10 +473,18 @@ impl Scene {
 
     pub fn active_model_tile_bounds(&self, vw: f32, vh: f32) -> iced::Rectangle {
         if self.current_layout != "Model" {
-            return iced::Rectangle { x: 0.0, y: 0.0, width: vw, height: vh };
+            return iced::Rectangle {
+                x: 0.0,
+                y: 0.0,
+                width: vw,
+                height: vh,
+            };
         }
         let tiles = self.model_tiles.borrow();
-        let active = self.active_model_tile.get().min(tiles.len().saturating_sub(1));
+        let active = self
+            .active_model_tile
+            .get()
+            .min(tiles.len().saturating_sub(1));
         match tiles.get(active) {
             Some(t) => iced::Rectangle {
                 x: t.rect.x * vw,
@@ -475,11 +492,15 @@ impl Scene {
                 width: (t.rect.width * vw).max(1.0),
                 height: (t.rect.height * vh).max(1.0),
             },
-            None => iced::Rectangle { x: 0.0, y: 0.0, width: vw, height: vh },
+            None => iced::Rectangle {
+                x: 0.0,
+                y: 0.0,
+                width: vw,
+                height: vh,
+            },
         }
     }
 }
-
 
 /// Reconstruct a `pane_grid` configuration from a set of (tile-index, rect)
 /// items covering `region`, by recursively finding a full vertical or

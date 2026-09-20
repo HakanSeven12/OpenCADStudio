@@ -130,10 +130,16 @@ impl OpenCADStudio {
     ) {
         let touched: Vec<_> = grip.targets.iter().map(|target| target.handle).collect();
         let connected = self.tabs[i].scene.parametric_connected_handles(
-            self.tabs[i].current_parametric_scope(), &touched, true,
+            self.tabs[i].current_parametric_scope(),
+            &touched,
+            true,
         );
         for handle in connected {
-            if !self.grip_originals.iter().any(|(original, _)| *original == handle) {
+            if !self
+                .grip_originals
+                .iter()
+                .any(|(original, _)| *original == handle)
+            {
                 if let Some(entity) = self.tabs[i].scene.document.get_entity(handle).cloned() {
                     self.grip_originals.push((handle, entity));
                 }
@@ -145,15 +151,29 @@ impl OpenCADStudio {
                 }
             }
         }
-        let driven_refs: Vec<_> = grip.targets.iter().flat_map(|target| {
-            self.tabs[i].scene.document.get_entity(target.handle)
-                .map(|entity| crate::scene::parametric_constraints::grip_solve_anchor_refs(
-                    entity, target.handle, target.grip_id,
-                )).unwrap_or_default()
-        }).collect();
+        let driven_refs: Vec<_> = grip
+            .targets
+            .iter()
+            .flat_map(|target| {
+                self.tabs[i]
+                    .scene
+                    .document
+                    .get_entity(target.handle)
+                    .map(|entity| {
+                        crate::scene::parametric_constraints::grip_solve_anchor_refs(
+                            entity,
+                            target.handle,
+                            target.grip_id,
+                        )
+                    })
+                    .unwrap_or_default()
+            })
+            .collect();
         let retain_size = self.constraint_solve_mode
             && !driven_refs.is_empty()
-            && driven_refs.iter().all(|reference| reference.marker.is_some());
+            && driven_refs
+                .iter()
+                .all(|reference| reference.marker.is_some());
         let solved = self.tabs[i].scene.solve_parametric_constraints_preview(
             &touched,
             &driven_refs,
@@ -270,7 +290,9 @@ impl OpenCADStudio {
             .into_iter()
             .map(|handle| (handle, crate::scene::ChangeKind::Modified))
             .collect();
-        self.tabs[i].scene.bump_entities_after_parametric_solve(&changes);
+        self.tabs[i]
+            .scene
+            .bump_entities_after_parametric_solve(&changes);
         if let Some(dirty_before) = self.grip_dirty_before.take() {
             self.tabs[i].dirty = dirty_before;
         }
@@ -1725,22 +1747,19 @@ impl OpenCADStudio {
     }
 
     fn apply_continuous_constraints(&mut self, i: usize, new_handles: &[acadrust::Handle]) {
-        let supported_creation = self.tabs[i]
-            .active_cmd
-            .as_ref()
-            .is_some_and(|command| {
-                matches!(
-                    command.name(),
-                    "LINE"
-                        | "PLINE"
-                        | "POLYLINE"
-                        | "RECTANG"
-                        | "RECTANGLE"
-                        | "POLYGON"
-                        | "CIRCLE"
-                        | "ARC"
-                )
-            });
+        let supported_creation = self.tabs[i].active_cmd.as_ref().is_some_and(|command| {
+            matches!(
+                command.name(),
+                "LINE"
+                    | "PLINE"
+                    | "POLYLINE"
+                    | "RECTANG"
+                    | "RECTANGLE"
+                    | "POLYGON"
+                    | "CIRCLE"
+                    | "ARC"
+            )
+        });
         if supported_creation {
             self.apply_inferred_constraints(i, new_handles);
         }
@@ -2407,7 +2426,10 @@ impl OpenCADStudio {
                             &path,
                             host_base.as_deref(),
                         ) {
-                            self.command_line.push_error(crate::t!("XATTACH: cannot attach the host drawing into itself.").as_ref());
+                            self.command_line.push_error(
+                                crate::t!("XATTACH: cannot attach the host drawing into itself.")
+                                    .as_ref(),
+                            );
                             self.tabs[i].scene.clear_preview_wire();
                             self.tabs[i].active_cmd = None;
                             self.tabs[i].snap_result = None;
@@ -3200,8 +3222,10 @@ impl OpenCADStudio {
                     self.tabs[i].snap_result = None;
                     self.command_line.push_error(message);
                     if keep_command {
-                        if let Some(prompt) =
-                            self.tabs[i].active_cmd.as_ref().map(|command| command.prompt())
+                        if let Some(prompt) = self.tabs[i]
+                            .active_cmd
+                            .as_ref()
+                            .map(|command| command.prompt())
                         {
                             self.command_line.push_info(&prompt);
                         }
@@ -3252,11 +3276,9 @@ impl OpenCADStudio {
                     .into_iter()
                     .map(|h| (h, crate::scene::ChangeKind::Modified))
                     .collect();
-                self.tabs[i].scene.bump_entities_with_parametric_policy(
-                    &changes,
-                    &[],
-                    retain_size,
-                );
+                self.tabs[i]
+                    .scene
+                    .bump_entities_with_parametric_policy(&changes, &[], retain_size);
                 self.tabs[i].dirty = true;
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
@@ -3275,8 +3297,7 @@ impl OpenCADStudio {
 
                 let scope = self.tabs[i].current_parametric_scope();
                 let document = &self.tabs[i].scene.document;
-                let world =
-                    acadrust::types::Vector3::new(pick.point.x, pick.point.y, pick.point.z);
+                let world = acadrust::types::Vector3::new(pick.point.x, pick.point.y, pick.point.z);
                 let resolved = match (pick.whole_curve, pick.handle) {
                     (true, Some(handle)) => {
                         parametric_curve_ref_for_pick(document, scope, handle, world)
@@ -3360,9 +3381,8 @@ impl OpenCADStudio {
                 let vertical = kind == ConstraintKind::Vertical;
                 let axis = if vertical { "Vertical" } else { "Horizontal" };
                 let scope = self.tabs[i].current_parametric_scope();
-                let to_world = |point: glam::DVec3| {
-                    acadrust::types::Vector3::new(point.x, point.y, point.z)
-                };
+                let to_world =
+                    |point: glam::DVec3| acadrust::types::Vector3::new(point.x, point.y, point.z);
                 let (refs, initial_fixed) = match selection {
                     HorizontalConstraintSelection::Reference(reference) => {
                         // The reference turns the object about its first
@@ -3444,14 +3464,14 @@ impl OpenCADStudio {
                     direction.y / axis_length,
                     0.0,
                 );
-                if let Err(message) =
-                    self.tabs[i].scene.validate_parametric_constraint(kind, &refs, None)
+                if let Err(message) = self.tabs[i]
+                    .scene
+                    .validate_parametric_constraint(kind, &refs, None)
                 {
                     self.command_line.push_error(message);
                     return Task::none();
                 }
-                if self
-                    .tabs[i]
+                if self.tabs[i]
                     .scene
                     .parametric_constraint_set(scope)
                     .is_some_and(|set| set.contains_axis_constraint(kind, &refs, direction))
@@ -3549,9 +3569,8 @@ impl OpenCADStudio {
                 use crate::scene::parametric_constraints::ConstraintKind;
 
                 let scope = self.tabs[i].current_parametric_scope();
-                let to_world = |point: glam::DVec3| {
-                    acadrust::types::Vector3::new(point.x, point.y, point.z)
-                };
+                let to_world =
+                    |point: glam::DVec3| acadrust::types::Vector3::new(point.x, point.y, point.z);
                 let resolve_point = |pick: crate::command::CoincidentPick| {
                     if let Some(handle) = pick.handle {
                         crate::scene::parametric_constraints::nearest_parametric_point_on_entity(
@@ -3583,12 +3602,10 @@ impl OpenCADStudio {
                         (first, second)
                     }
                 };
-                if first == second
-                    || axis.entity == first.entity
-                    || axis.entity == second.entity
-                {
-                    self.command_line
-                        .push_error("Symmetric: select two different references and a separate line axis.");
+                if first == second || axis.entity == first.entity || axis.entity == second.entity {
+                    self.command_line.push_error(
+                        "Symmetric: select two different references and a separate line axis.",
+                    );
                     return Task::none();
                 }
                 let refs = vec![first, second, axis];
@@ -3651,11 +3668,9 @@ impl OpenCADStudio {
                     .into_iter()
                     .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                     .collect::<Vec<_>>();
-                self.tabs[i].scene.bump_entities_with_initial_parametric_policy(
-                    &changes,
-                    &[first, axis],
-                    false,
-                );
+                self.tabs[i]
+                    .scene
+                    .bump_entities_with_initial_parametric_policy(&changes, &[first, axis], false);
                 self.tabs[i].dirty = true;
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
@@ -3717,11 +3732,13 @@ impl OpenCADStudio {
                     .into_iter()
                     .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                     .collect::<Vec<_>>();
-                self.tabs[i].scene.bump_entities_with_initial_parametric_policy(
-                    &changes,
-                    &[first_fixed, second_start],
-                    true,
-                );
+                self.tabs[i]
+                    .scene
+                    .bump_entities_with_initial_parametric_policy(
+                        &changes,
+                        &[first_fixed, second_start],
+                        true,
+                    );
                 self.tabs[i].dirty = true;
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
@@ -3780,11 +3797,9 @@ impl OpenCADStudio {
                     .into_iter()
                     .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                     .collect::<Vec<_>>();
-                self.tabs[i].scene.bump_entities_with_initial_parametric_policy(
-                    &changes,
-                    &[first],
-                    true,
-                );
+                self.tabs[i]
+                    .scene
+                    .bump_entities_with_initial_parametric_policy(&changes, &[first], true);
                 self.tabs[i].dirty = true;
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
@@ -3862,11 +3877,9 @@ impl OpenCADStudio {
                     .into_iter()
                     .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                     .collect::<Vec<_>>();
-                self.tabs[i].scene.bump_entities_with_initial_parametric_policy(
-                    &changes,
-                    &[first],
-                    true,
-                );
+                self.tabs[i]
+                    .scene
+                    .bump_entities_with_initial_parametric_policy(&changes, &[first], true);
                 self.tabs[i].dirty = true;
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
@@ -3884,8 +3897,7 @@ impl OpenCADStudio {
             } => {
                 let scope = self.tabs[i].current_parametric_scope();
                 let to_world = |p: glam::DVec3| acadrust::types::Vector3::new(p.x, p.y, p.z);
-                let resolve = |pick: crate::command::CoincidentPick,
-                               exclude: Option<Handle>| {
+                let resolve = |pick: crate::command::CoincidentPick, exclude: Option<Handle>| {
                     if pick.whole_curve {
                         pick.handle.and_then(|handle| {
                             crate::scene::parametric_constraints::parametric_curve_ref_for_pick(
@@ -3912,8 +3924,8 @@ impl OpenCADStudio {
                     }
                 };
                 let resolved_first = resolve(first, None);
-                let resolved_second = resolved_first
-                    .and_then(|reference| resolve(second, Some(reference.entity)));
+                let resolved_second =
+                    resolved_first.and_then(|reference| resolve(second, Some(reference.entity)));
                 let (Some(first_ref), Some(second_ref)) = (resolved_first, resolved_second) else {
                     self.command_line.push_error(
                         "Coincident: select a supported endpoint, center, midpoint, vertex, or curve.",
@@ -3934,8 +3946,9 @@ impl OpenCADStudio {
                         vec![first_ref, second_ref],
                     ),
                     _ => {
-                        self.command_line
-                            .push_error("Coincident: select one point and one curve, or two points.");
+                        self.command_line.push_error(
+                            "Coincident: select one point and one curve, or two points.",
+                        );
                         return Task::none();
                     }
                 };
@@ -3982,7 +3995,8 @@ impl OpenCADStudio {
                 if !multiple {
                     self.tabs[i].active_cmd = None;
                 }
-                self.command_line.push_output("Coincident constraint applied.");
+                self.command_line
+                    .push_output("Coincident constraint applied.");
                 if multiple {
                     if let Some(prompt) = self.tabs[i].active_cmd.as_ref().map(|cmd| cmd.prompt()) {
                         self.command_line.push_info(&prompt);
@@ -4017,15 +4031,17 @@ impl OpenCADStudio {
                                 scope,
                             )
                         });
-                    let pending = self.begin_undo(i, "Coincident auto constrain", handles.len(), true);
+                    let pending =
+                        self.begin_undo(i, "Coincident auto constrain", handles.len(), true);
                     self.tabs[i]
                         .scene
                         .record_undo_parametric_constraints_before(scope, constraints_before);
                     for refs in inferred {
-                        let id = self.tabs[i]
-                            .scene
-                            .parametric_constraint_set_mut(scope)
-                            .add(ConstraintKind::Coincident, refs, None);
+                        let id = self.tabs[i].scene.parametric_constraint_set_mut(scope).add(
+                            ConstraintKind::Coincident,
+                            refs,
+                            None,
+                        );
                         self.tabs[i].scene.note_parametric_constraint_applied(
                             scope,
                             id,
@@ -5592,10 +5608,8 @@ impl OpenCADStudio {
                                 {
                                     for (index, vertex) in world.vertices.iter().enumerate() {
                                         if in_win(vertex.location.x, vertex.location.y) {
-                                            driven_refs.push(ParametricRef::point(
-                                                *handle,
-                                                index as i32,
-                                            ));
+                                            driven_refs
+                                                .push(ParametricRef::point(*handle, index as i32));
                                         }
                                     }
                                 }
@@ -5603,10 +5617,8 @@ impl OpenCADStudio {
                             acadrust::EntityType::Polyline2D(polyline) => {
                                 for (index, vertex) in polyline.vertices.iter().enumerate() {
                                     if in_win(vertex.location.x, vertex.location.y) {
-                                        driven_refs.push(ParametricRef::point(
-                                            *handle,
-                                            index as i32,
-                                        ));
+                                        driven_refs
+                                            .push(ParametricRef::point(*handle, index as i32));
                                     }
                                 }
                             }
@@ -9008,14 +9020,11 @@ mod parametric_constraint_undo_tests {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let handle = add_line(&mut app, 0.0, 0.0, 5.0, 2.0);
-        let (original_start, original_end, original_length) = match app.tabs[app.active_tab]
-            .scene
-            .document
-            .get_entity(handle)
-        {
-            Some(acadrust::EntityType::Line(line)) => (line.start, line.end, line.length()),
-            other => panic!("expected a Line, got {other:?}"),
-        };
+        let (original_start, original_end, original_length) =
+            match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+                Some(acadrust::EntityType::Line(line)) => (line.start, line.end, line.length()),
+                other => panic!("expected a Line, got {other:?}"),
+            };
         let direction = acadrust::types::Vector3::new(3.0, 4.0, 0.0).normalize();
 
         let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
@@ -9061,7 +9070,13 @@ mod parametric_constraint_undo_tests {
             Some(acadrust::EntityType::Line(line)) => line,
             other => panic!("expected a Line after redo, got {other:?}"),
         };
-        assert!((line.end - line.start).normalize().cross(&direction).length() < 1.0e-7);
+        assert!(
+            (line.end - line.start)
+                .normalize()
+                .cross(&direction)
+                .length()
+                < 1.0e-7
+        );
     }
 
     #[test]
@@ -9629,9 +9644,7 @@ mod parametric_constraint_undo_tests {
         else {
             panic!("expected second line");
         };
-        assert!(
-            (first.end - acadrust::types::Vector3::new(5.0, 0.0, 0.0)).length() < 1.0e-7
-        );
+        assert!((first.end - acadrust::types::Vector3::new(5.0, 0.0, 0.0)).length() < 1.0e-7);
         assert!((second.start - first.end).length() < 1.0e-7);
         assert!((second.length() - 5.0).abs() < 1.0e-7);
     }

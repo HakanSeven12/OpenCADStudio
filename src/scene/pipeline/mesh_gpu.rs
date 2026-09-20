@@ -234,9 +234,7 @@ impl MeshInstanceGpu {
             translation[2] as f32,
         ];
         let linear = glam::DMat3::from_cols_array(&[
-            m[0][0], m[1][0], m[2][0],
-            m[0][1], m[1][1], m[2][1],
-            m[0][2], m[1][2], m[2][2],
+            m[0][0], m[1][0], m[2][0], m[0][1], m[1][1], m[2][1], m[0][2], m[1][2], m[2][2],
         ]);
         let normal = if linear.determinant().abs() > 1e-18 {
             linear.inverse().transpose()
@@ -483,10 +481,8 @@ fn make_chunk(
     };
     let mut wire_vertices = Vec::with_capacity(wire_indices.len());
     for line in wire_indices.chunks_exact(2) {
-        let (Some(start), Some(end)) = (
-            verts.get(line[0] as usize),
-            verts.get(line[1] as usize),
-        ) else {
+        let (Some(start), Some(end)) = (verts.get(line[0] as usize), verts.get(line[1] as usize))
+        else {
             continue;
         };
         for vertex in [start, end] {
@@ -569,11 +565,20 @@ struct MeshSurfaceParams {
 }
 
 fn valid_rgba_size(width: u32, height: u32, pixels: &[u8]) -> bool {
-    width > 0 && height > 0
-        && (width as usize).checked_mul(height as usize).and_then(|size| size.checked_mul(4)) == Some(pixels.len())
+    width > 0
+        && height > 0
+        && (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|size| size.checked_mul(4))
+            == Some(pixels.len())
 }
 
-fn downscale_rgba_to_limit(width: u32, height: u32, rgba: &[u8], limit: u32) -> Option<(u32, u32, Vec<u8>)> {
+fn downscale_rgba_to_limit(
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    limit: u32,
+) -> Option<(u32, u32, Vec<u8>)> {
     if limit == 0 || !valid_rgba_size(width, height, rgba) {
         return None;
     }
@@ -581,7 +586,12 @@ fn downscale_rgba_to_limit(width: u32, height: u32, rgba: &[u8], limit: u32) -> 
     let scale = (limit as f64 / width.max(height) as f64).min(1.0);
     let new_width = ((width as f64 * scale).round() as u32).clamp(1, limit);
     let new_height = ((height as f64 * scale).round() as u32).clamp(1, limit);
-    let resized = image::imageops::resize(&buffer, new_width, new_height, image::imageops::FilterType::Triangle);
+    let resized = image::imageops::resize(
+        &buffer,
+        new_width,
+        new_height,
+        image::imageops::FilterType::Triangle,
+    );
     Some((new_width, new_height, resized.into_raw()))
 }
 
@@ -674,18 +684,54 @@ pub fn create_material_resources(
     let bump = material.and_then(|material| material.bump_map.image.as_deref());
     let refraction = material.and_then(|material| material.refraction_map.image.as_deref());
     let normal = material.and_then(|material| material.normal_map.image.as_deref());
-    let diffuse_view =
-        upload_rgba_texture(device, queue, "mesh.material.diffuse", diffuse, [255; 4], true);
-    let specular_view =
-        upload_rgba_texture(device, queue, "mesh.material.specular", specular, [255; 4], true);
-    let reflection_view =
-        upload_rgba_texture(device, queue, "mesh.material.reflection", reflection, [0, 0, 0, 255], true);
-    let opacity_view =
-        upload_rgba_texture(device, queue, "mesh.material.opacity", opacity, [255; 4], false);
-    let bump_view =
-        upload_rgba_texture(device, queue, "mesh.material.bump", bump, [128, 128, 128, 255], false);
-    let refraction_view =
-        upload_rgba_texture(device, queue, "mesh.material.refraction", refraction, [255; 4], true);
+    let diffuse_view = upload_rgba_texture(
+        device,
+        queue,
+        "mesh.material.diffuse",
+        diffuse,
+        [255; 4],
+        true,
+    );
+    let specular_view = upload_rgba_texture(
+        device,
+        queue,
+        "mesh.material.specular",
+        specular,
+        [255; 4],
+        true,
+    );
+    let reflection_view = upload_rgba_texture(
+        device,
+        queue,
+        "mesh.material.reflection",
+        reflection,
+        [0, 0, 0, 255],
+        true,
+    );
+    let opacity_view = upload_rgba_texture(
+        device,
+        queue,
+        "mesh.material.opacity",
+        opacity,
+        [255; 4],
+        false,
+    );
+    let bump_view = upload_rgba_texture(
+        device,
+        queue,
+        "mesh.material.bump",
+        bump,
+        [128, 128, 128, 255],
+        false,
+    );
+    let refraction_view = upload_rgba_texture(
+        device,
+        queue,
+        "mesh.material.refraction",
+        refraction,
+        [255; 4],
+        true,
+    );
     let normal_view = upload_rgba_texture(
         device,
         queue,
@@ -850,8 +896,7 @@ pub fn create_material_bind_group_from_resources(
     material: Option<&crate::scene::model::material_model::MeshMaterial>,
     face_color: [f32; 4],
 ) -> wgpu::BindGroup {
-    let (material_params, specular, ambient, advanced, flags) =
-        material_vertex_params(material);
+    let (material_params, specular, ambient, advanced, flags) = material_vertex_params(material);
     let surface = MeshSurfaceParams {
         face_color,
         material: material_params,
@@ -947,14 +992,7 @@ pub fn create_material_bind_group(
 ) -> wgpu::BindGroup {
     let resources = create_material_resources(device, queue, material);
     let color = material.map_or([0.8, 0.8, 0.8, 1.0], |material| material.diffuse);
-    create_material_bind_group_from_resources(
-        device,
-        queue,
-        layout,
-        &resources,
-        material,
-        color,
-    )
+    create_material_bind_group_from_resources(device, queue, layout, &resources, material, color)
 }
 
 pub fn upload_chunk_material_bind_groups(
@@ -967,8 +1005,7 @@ pub fn upload_chunk_material_bind_groups(
     let mut materials = rustc_hash::FxHashMap::default();
     for chunk in chunks {
         let resources = match chunk.material.as_ref() {
-            None => fallback
-                .get_or_insert_with(|| create_material_resources(device, queue, None)),
+            None => fallback.get_or_insert_with(|| create_material_resources(device, queue, None)),
             Some(material) => {
                 let Some(handle) = material.handle else {
                     let resources = create_material_resources(device, queue, Some(material));
@@ -982,9 +1019,9 @@ pub fn upload_chunk_material_bind_groups(
                     ));
                     continue;
                 };
-                materials.entry(handle.value()).or_insert_with(|| {
-                    create_material_resources(device, queue, Some(material))
-                })
+                materials
+                    .entry(handle.value())
+                    .or_insert_with(|| create_material_resources(device, queue, Some(material)))
             }
         };
         chunk.material_bind_group = Some(create_material_bind_group_from_resources(
@@ -1044,9 +1081,7 @@ fn material_key(
     MaterialBatchKey(key)
 }
 
-fn material_mapper_key(
-    material: &crate::scene::model::material_model::MeshMaterial,
-) -> u64 {
+fn material_mapper_key(material: &crate::scene::model::material_model::MeshMaterial) -> u64 {
     use std::hash::{Hash, Hasher};
     let Some(mapper) = material.mapper else {
         return 0;
@@ -1260,8 +1295,7 @@ fn triangle_mapping_normal(mesh: &MeshModel, triangle: &[u32]) -> [f32; 3] {
         ab[2] * ac[0] - ab[0] * ac[2],
         ab[0] * ac[1] - ab[1] * ac[0],
     ];
-    let length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2])
-        .sqrt();
+    let length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
     if length > f32::EPSILON {
         [normal[0] / length, normal[1] / length, normal[2] / length]
     } else {
@@ -1292,7 +1326,9 @@ fn build_instanced_chunks(
         material.map_or(0, |material| {
             let handle = material
                 .handle
-                .map_or(material as *const _ as usize as u64, |handle| handle.value());
+                .map_or(material as *const _ as usize as u64, |handle| {
+                    handle.value()
+                });
             handle ^ material_mapper_key(material).rotate_left(17)
         })
     } else {
@@ -1307,10 +1343,10 @@ fn build_instanced_chunks(
     let needs_wire_vertices = first.include_edges && source.edge_verts.is_empty();
     let split_geometry = (first.include_faces && material_has_box_projection(material))
         || mesh
-        .verts
-        .len()
-        .saturating_mul(std::mem::size_of::<MeshVertex>())
-        > budget
+            .verts
+            .len()
+            .saturating_mul(std::mem::size_of::<MeshVertex>())
+            > budget
         || first
             .indices
             .len()
@@ -1369,7 +1405,9 @@ fn build_instanced_chunks(
     };
     let verts: Vec<_> =
         if !split_geometry && (shared_vertex_buffer.is_none() || needs_wire_vertices) {
-            (0..mesh.verts.len()).map(|index| vertex(index, None)).collect()
+            (0..mesh.verts.len())
+                .map(|index| vertex(index, None))
+                .collect()
         } else {
             Vec::new()
         };
@@ -1744,10 +1782,7 @@ fn material_map_uv(
         position[0] * m[8] + position[1] * m[9] + position[2] * m[10] + m[11],
     ];
     match map.projection {
-        3 => [
-            p[1].atan2(p[0]) / std::f32::consts::TAU + 0.5,
-            p[2],
-        ],
+        3 => [p[1].atan2(p[0]) / std::f32::consts::TAU + 0.5, p[2]],
         4 => {
             let radius = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
             if radius <= f32::EPSILON {
@@ -1892,8 +1927,7 @@ pub fn build_mesh_batch_filtered(
     let max_verts = super::gpu_budget::max_elements::<MeshVertex>(device).max(3);
     // A triangle contributes three line segments (six standalone edge
     // vertices). Bound chunks by the largest buffer produced for wire meshes.
-    let max_tris =
-        (budget / (6 * std::mem::size_of::<MeshEdgeVertex>())).max(1);
+    let max_tris = (budget / (6 * std::mem::size_of::<MeshEdgeVertex>())).max(1);
     let stubs = MeshBatchStubs::new(device, queue);
 
     let mut chunks = Vec::new();
@@ -1907,10 +1941,8 @@ pub fn build_mesh_batch_filtered(
         rustc_hash::FxHashSet::default();
     let mut total_tris = 0u64;
     let mut ordered: Vec<MeshBatchPart<'_>> = Vec::new();
-    let mut source_indices: rustc_hash::FxHashMap<
-        (bool, u64),
-        (std::sync::Arc<[u32]>, u64),
-    > = rustc_hash::FxHashMap::default();
+    let mut source_indices: rustc_hash::FxHashMap<(bool, u64), (std::sync::Arc<[u32]>, u64)> =
+        rustc_hash::FxHashMap::default();
     let mut face_partitions: rustc_hash::FxHashMap<FacePartitionKey, Vec<CachedFacePart<'_>>> =
         rustc_hash::FxHashMap::default();
     for set in sets {
@@ -1922,9 +1954,9 @@ pub fn build_mesh_batch_filtered(
             continue;
         };
         let display_handle = set.entity_handle();
-        if handles.is_some_and(|wanted| {
-            display_handle.is_none_or(|handle| !wanted.contains(&handle))
-        }) {
+        if handles
+            .is_some_and(|wanted| display_handle.is_none_or(|handle| !wanted.contains(&handle)))
+        {
             continue;
         }
         let display_color = set.display_color().unwrap_or(mesh.color);
@@ -1933,8 +1965,7 @@ pub fn build_mesh_batch_filtered(
             |source| (true, source.handle.value()),
         );
         let triangle_count = mesh.indices.len() / 3;
-        let has_face_materials =
-            mesh.triangle_material_handles.len() == triangle_count
+        let has_face_materials = mesh.triangle_material_handles.len() == triangle_count
             && !set.face_materials.is_empty();
         let has_face_colors = mesh.triangle_colors.len() == triangle_count
             && mesh.triangle_colors.iter().any(Option::is_some);
@@ -1947,8 +1978,10 @@ pub fn build_mesh_batch_filtered(
             .as_ref()
             .map_or(true, |style| style.edges_visible());
         if !has_face_materials && !has_face_colors {
-            let base_color =
-                set.material.as_ref().map_or(display_color, |material| material.diffuse);
+            let base_color = set
+                .material
+                .as_ref()
+                .map_or(display_color, |material| material.diffuse);
             let color = set
                 .visual_style
                 .as_ref()
@@ -2017,8 +2050,7 @@ pub fn build_mesh_batch_filtered(
                 } else {
                     set.material.as_ref()
                 };
-                let base_color =
-                    material.map_or(display_color, |material| material.diffuse);
+                let base_color = material.map_or(display_color, |material| material.diffuse);
                 let base_color = if has_face_colors {
                     mesh.triangle_colors[triangle].unwrap_or(base_color)
                 } else {
@@ -2093,10 +2125,8 @@ pub fn build_mesh_batch_filtered(
             mesh_spatial_key(part.set, spatial_bounds),
         )
     });
-    let mut instance_groups: std::collections::BTreeMap<
-        InstanceGroupKey,
-        Vec<MeshBatchPart<'_>>,
-    > = std::collections::BTreeMap::new();
+    let mut instance_groups: std::collections::BTreeMap<InstanceGroupKey, Vec<MeshBatchPart<'_>>> =
+        std::collections::BTreeMap::new();
     let mut direct_parts = Vec::with_capacity(ordered.len());
     for part in ordered {
         let eligible = part.set.instance_transform.is_some()
@@ -2189,7 +2219,9 @@ pub fn build_mesh_batch_filtered(
         let edge_color = set
             .visual_style
             .as_ref()
-            .map_or(part.display_color, |style| style.edge_color(part.display_color));
+            .map_or(part.display_color, |style| {
+                style.edge_color(part.display_color)
+            });
         let vtx = |vi: usize,
                    local_mapping_normal: Option<[f32; 3]>,
                    model_mapping_normal: Option<[f32; 3]>| {
@@ -2198,21 +2230,13 @@ pub fn build_mesh_batch_filtered(
             } else {
                 [0.0, 1.0, 0.0]
             };
-            let local_position = uv_mesh
-                .verts
-                .get(vi)
-                .copied()
-                .unwrap_or(mesh.verts[vi]);
+            let local_position = uv_mesh.verts.get(vi).copied().unwrap_or(mesh.verts[vi]);
             let local_position_low = uv_mesh
                 .verts_low
                 .get(vi)
                 .copied()
                 .unwrap_or_else(|| mesh.verts_low.get(vi).copied().unwrap_or([0.0; 3]));
-            let local_normal = uv_mesh
-                .normals
-                .get(vi)
-                .copied()
-                .unwrap_or(normal);
+            let local_normal = uv_mesh.normals.get(vi).copied().unwrap_or(normal);
             let uv = material_uvs(
                 material,
                 local_position,
@@ -2260,9 +2284,7 @@ pub fn build_mesh_batch_filtered(
                 let available = max_verts.saturating_sub(edge_verts.len());
                 // LineList consumes pairs. Never split a segment between
                 // chunks even when the vertex budget is odd.
-                let take = available
-                    .min(edge_end - edge_start)
-                    & !1usize;
+                let take = available.min(edge_end - edge_start) & !1usize;
                 if take == 0 {
                     chunks.push(make_chunk(
                         device,
@@ -2422,8 +2444,7 @@ pub fn build_mesh_batch_filtered(
                     Vec::new()
                 };
                 if is_transp {
-                    let sub_handles: rustc_hash::FxHashSet<_> =
-                        entity_handle.into_iter().collect();
+                    let sub_handles: rustc_hash::FxHashSet<_> = entity_handle.into_iter().collect();
                     chunks.push(make_chunk(
                         device,
                         queue,
@@ -2443,8 +2464,7 @@ pub fn build_mesh_batch_filtered(
                         None,
                     ));
                 } else {
-                    let sub_handles: rustc_hash::FxHashSet<_> =
-                        entity_handle.into_iter().collect();
+                    let sub_handles: rustc_hash::FxHashSet<_> = entity_handle.into_iter().collect();
                     chunks.push(make_chunk(
                         device,
                         queue,
@@ -2510,7 +2530,11 @@ pub fn build_mesh_batch_filtered(
             verts.push(vtx(i, None, None));
         }
         if part.include_faces {
-            let fill = if is_transp { &mut transp_indices } else { &mut indices };
+            let fill = if is_transp {
+                &mut transp_indices
+            } else {
+                &mut indices
+            };
             let index_start = fill.len() as u32;
             for &idx in part.indices.iter() {
                 fill.push(base + idx);
@@ -2677,19 +2701,31 @@ mod texture_limit_tests {
         // both dimensions must come out <= limit and aspect ratio preserved.
         let (w, h) = (500u32, 10u32);
         let rgba = vec![0u8; (w * h * 4) as usize];
-        let (new_w, new_h, buf) = downscale_rgba_to_limit(w, h, &rgba, 200).expect("well-formed input must resize");
-        assert!(new_w <= 200 && new_h <= 200, "both dimensions must respect the limit, got {new_w}x{new_h}");
-        assert_eq!(buf.len(), (new_w * new_h * 4) as usize, "the returned buffer must match its reported dimensions");
+        let (new_w, new_h, buf) =
+            downscale_rgba_to_limit(w, h, &rgba, 200).expect("well-formed input must resize");
+        assert!(
+            new_w <= 200 && new_h <= 200,
+            "both dimensions must respect the limit, got {new_w}x{new_h}"
+        );
+        assert_eq!(
+            buf.len(),
+            (new_w * new_h * 4) as usize,
+            "the returned buffer must match its reported dimensions"
+        );
         // Aspect ratio 50:1 should be preserved within rounding.
         let ratio = new_w as f64 / new_h as f64;
-        assert!((ratio - 50.0).abs() < 1.0, "expected aspect ratio near 50:1, got {ratio}");
+        assert!(
+            (ratio - 50.0).abs() < 1.0,
+            "expected aspect ratio near 50:1, got {ratio}"
+        );
     }
 
     #[test]
     fn downscale_handles_a_square_image_over_the_limit() {
         let (w, h) = (300u32, 300u32);
         let rgba = vec![255u8; (w * h * 4) as usize];
-        let (new_w, new_h, buf) = downscale_rgba_to_limit(w, h, &rgba, 128).expect("well-formed input must resize");
+        let (new_w, new_h, buf) =
+            downscale_rgba_to_limit(w, h, &rgba, 128).expect("well-formed input must resize");
         assert_eq!(new_w, 128);
         assert_eq!(new_h, 128);
         assert_eq!(buf.len(), (128 * 128 * 4) as usize);
@@ -2704,11 +2740,15 @@ mod texture_limit_tests {
     }
     #[test]
     fn malformed_material_images_are_rejected_even_below_the_texture_limit() {
-        for (width, height, pixels) in [(0, 1, vec![]), (1, 0, vec![]), (1, 1, vec![0; 3]), (1, 1, vec![0; 5])] {
+        for (width, height, pixels) in [
+            (0, 1, vec![]),
+            (1, 0, vec![]),
+            (1, 1, vec![0; 3]),
+            (1, 1, vec![0; 5]),
+        ] {
             assert!(!super::valid_rgba_size(width, height, &pixels));
             assert!(downscale_rgba_to_limit(width, height, &pixels, 16).is_none());
         }
         assert!(downscale_rgba_to_limit(1, 1, &[0; 4], 0).is_none());
     }
-
 }

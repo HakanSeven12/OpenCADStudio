@@ -104,8 +104,8 @@ pub fn available_ctb_names() -> Vec<String> {
 /// Lineweight table: index value → mm, matching the stored LWEIGHT codes.
 /// Index 0 = 0.00 mm (hairline), others follow the DXF lineweight enum.
 pub const LW_TABLE: &[f32] = &[
-    0.00, 0.05, 0.09, 0.10, 0.13, 0.15, 0.18, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50,
-    0.53, 0.60, 0.65, 0.70, 0.80, 0.90, 1.00, 1.06, 1.20, 1.40, 1.58, 2.00, 2.11,
+    0.00, 0.05, 0.09, 0.10, 0.13, 0.15, 0.18, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.53, 0.60,
+    0.65, 0.70, 0.80, 0.90, 1.00, 1.06, 1.20, 1.40, 1.58, 2.00, 2.11,
 ];
 
 // ── Per-color entry ───────────────────────────────────────────────────────────
@@ -228,8 +228,7 @@ impl PlotStyleTable {
                         let gray = if aci == 7 {
                             0
                         } else {
-                            (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32)
-                                .round() as u8
+                            (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32).round() as u8
                         };
                         table.aci_entries[aci as usize].color = Some([gray, gray, gray]);
                     }
@@ -314,9 +313,8 @@ impl PlotStyleTable {
                 if aci == 7 {
                     Some([0.0; 3])
                 } else {
-                    acadrust::types::aci_to_rgb(aci).map(|(r, g, b)| {
-                        [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
-                    })
+                    acadrust::types::aci_to_rgb(aci)
+                        .map(|(r, g, b)| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0])
                 }
             })?;
             let gray = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
@@ -332,13 +330,16 @@ impl PlotStyleTable {
         if matches!(entry.lineweight, 0 | 255) {
             None
         } else {
-            self.lineweights.get(entry.lineweight as usize).copied().map(|weight| {
-                if self.apply_factor {
-                    weight * self.scale_factor.max(0.0)
-                } else {
-                    weight
-                }
-            })
+            self.lineweights
+                .get(entry.lineweight as usize)
+                .copied()
+                .map(|weight| {
+                    if self.apply_factor {
+                        weight * self.scale_factor.max(0.0)
+                    } else {
+                        weight
+                    }
+                })
         }
     }
 
@@ -405,7 +406,11 @@ impl PlotStyleTable {
                 "  linepattern_size={}\n  linetype={}\n  adaptive_linetype={}\n",
                 entry.linepattern_size,
                 entry.linetype,
-                if entry.adaptive_linetype { "TRUE" } else { "FALSE" }
+                if entry.adaptive_linetype {
+                    "TRUE"
+                } else {
+                    "FALSE"
+                }
             ));
             s.push_str(&format!("  lineweight={}\n", entry.lineweight));
             s.push_str(&format!(
@@ -632,12 +637,8 @@ fn parse_plot_style_text(text: &str, name: String, is_stb: bool) -> Result<PlotS
                 "physical_pen_number" => {
                     style.entry.physical_pen_number = value.parse().unwrap_or(0)
                 }
-                "virtual_pen_number" => {
-                    style.entry.virtual_pen_number = value.parse().unwrap_or(0)
-                }
-                "linepattern_size" => {
-                    style.entry.linepattern_size = value.parse().unwrap_or(0.5)
-                }
+                "virtual_pen_number" => style.entry.virtual_pen_number = value.parse().unwrap_or(0),
+                "linepattern_size" => style.entry.linepattern_size = value.parse().unwrap_or(0.5),
                 "linetype" => style.entry.linetype = value.parse().unwrap_or(31),
                 "adaptive_linetype" => {
                     style.entry.adaptive_linetype = value.eq_ignore_ascii_case("TRUE")

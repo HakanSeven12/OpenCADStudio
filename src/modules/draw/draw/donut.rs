@@ -2,9 +2,7 @@
 
 use acadrust::entities::{LwPolyline, LwVertex};
 use acadrust::EntityType;
-use cadkernel::geom2d::{
-    Circle as KernelCircle, Curve as KernelCurve, Vec2 as KernelVec2,
-};
+use cadkernel::geom2d::{Circle as KernelCircle, Curve as KernelCurve, Vec2 as KernelVec2};
 use glam::DVec3;
 
 use crate::t;
@@ -210,23 +208,13 @@ impl CadCommand for DonutCommand {
                     false,
                 ))
             }
-            DonutState::PlaceCenter => Some(donut_wire(
-                pt,
-                self.inner_r,
-                self.outer_r,
-                self.plane,
-            )),
+            DonutState::PlaceCenter => Some(donut_wire(pt, self.inner_r, self.outer_r, self.plane)),
             _ => None,
         }
     }
 }
 
-fn donut_wire(
-    center: DVec3,
-    inner_r: f64,
-    outer_r: f64,
-    plane: WorkingPlane,
-) -> WireModel {
+fn donut_wire(center: DVec3, inner_r: f64, outer_r: f64, plane: WorkingPlane) -> WireModel {
     let local_center = plane.to_local(center);
     let mut points = Vec::new();
     for radius in [outer_r, inner_r] {
@@ -253,7 +241,13 @@ fn donut_wire(
     WireModel::solid_f64("rubber_band".into(), points, WireModel::CYAN, false)
 }
 
-pub(crate) fn make_donut(cx: f64, cy: f64, elevation: f64, inner_r: f64, outer_r: f64) -> EntityType {
+pub(crate) fn make_donut(
+    cx: f64,
+    cy: f64,
+    elevation: f64,
+    inner_r: f64,
+    outer_r: f64,
+) -> EntityType {
     use acadrust::types::Vector2;
     let r_avg = (inner_r + outer_r) / 2.0;
     let width = outer_r - inner_r;
@@ -274,6 +268,5 @@ pub(crate) fn make_donut(cx: f64, cy: f64, elevation: f64, inner_r: f64, outer_r
     EntityType::LwPolyline(p)
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["DONUT"] });  // DonutCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["DONUT"] }); // DonutCommand

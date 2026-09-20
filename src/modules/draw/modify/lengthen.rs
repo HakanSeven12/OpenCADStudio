@@ -8,17 +8,14 @@
 // The entity is modified at whichever end is closest to the pick point.
 
 use crate::modules::draw::modify::spline_ops::{spline_cut, spline_to_nurbs};
-use acadrust::entities::{
-    Spline as SplineEnt,
-};
-use cadkernel::geom2d::Curve;
+use crate::t;
+use acadrust::entities::Spline as SplineEnt;
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
+use cadkernel::geom2d::Curve;
 use glam::{DVec3, Vec3};
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
-
 
 pub struct LengthenCommand {
     state: LenState,
@@ -28,39 +25,83 @@ pub struct LengthenCommand {
 }
 
 #[derive(Clone, Copy)]
-enum ValueMode { Delta, Total, Percent, DeltaAngle, TotalAngle, Dynamic }
+enum ValueMode {
+    Delta,
+    Total,
+    Percent,
+    DeltaAngle,
+    TotalAngle,
+    Dynamic,
+}
 
-struct LengthenDefaults { mode: ValueMode, delta: f64, total: f64, percent: f64, delta_angle: f64, total_angle: f64 }
-static LENGTHEN_DEFAULTS: std::sync::Mutex<LengthenDefaults> = std::sync::Mutex::new(
-    LengthenDefaults { mode: ValueMode::Total, delta: 0.0, total: 1.0, percent: 100.0, delta_angle: 0.0, total_angle: 180.0 }
-);
+struct LengthenDefaults {
+    mode: ValueMode,
+    delta: f64,
+    total: f64,
+    percent: f64,
+    delta_angle: f64,
+    total_angle: f64,
+}
+static LENGTHEN_DEFAULTS: std::sync::Mutex<LengthenDefaults> =
+    std::sync::Mutex::new(LengthenDefaults {
+        mode: ValueMode::Total,
+        delta: 0.0,
+        total: 1.0,
+        percent: 100.0,
+        delta_angle: 0.0,
+        total_angle: 180.0,
+    });
 
 enum LenState {
     ChooseMode,
     Value(ValueMode),
     Apply(LenMode),
     DynamicPick,
-    DynamicPoint { handle: Handle, entity: EntityType, pick: DVec3 },
+    DynamicPoint {
+        handle: Handle,
+        entity: EntityType,
+        pick: DVec3,
+    },
 }
 
 impl LengthenCommand {
     pub fn new() -> Self {
-        Self { state: LenState::ChooseMode, picked: None, measurement: None, edits: 0 }
+        Self {
+            state: LenState::ChooseMode,
+            picked: None,
+            measurement: None,
+            edits: 0,
+        }
     }
 }
 
 impl CadCommand for LengthenCommand {
-    fn name(&self) -> &'static str { "LENGTHEN" }
+    fn name(&self) -> &'static str {
+        "LENGTHEN"
+    }
 
     fn prompt(&self) -> String {
         match &self.state {
             LenState::ChooseMode => {
-                let prompt = t!("LENGTHEN  Select an object to measure or [Delta/Percent/Total/Dynamic]:");
-                self.measurement.map_or_else(|| prompt.to_string(), |length| format!("Length: {length:.4}  {prompt}"))
+                let prompt =
+                    t!("LENGTHEN  Select an object to measure or [Delta/Percent/Total/Dynamic]:");
+                self.measurement.map_or_else(
+                    || prompt.to_string(),
+                    |length| format!("Length: {length:.4}  {prompt}"),
+                )
             }
-            LenState::Value(ValueMode::Delta) => format!("LENGTHEN  Enter delta length <{}>:", LENGTHEN_DEFAULTS.lock().unwrap().delta),
-            LenState::Value(ValueMode::Total) => format!("LENGTHEN  Enter total length <{}>:", LENGTHEN_DEFAULTS.lock().unwrap().total),
-            LenState::Value(ValueMode::Percent) => format!("LENGTHEN  Enter percentage length <{}>:", LENGTHEN_DEFAULTS.lock().unwrap().percent),
+            LenState::Value(ValueMode::Delta) => format!(
+                "LENGTHEN  Enter delta length <{}>:",
+                LENGTHEN_DEFAULTS.lock().unwrap().delta
+            ),
+            LenState::Value(ValueMode::Total) => format!(
+                "LENGTHEN  Enter total length <{}>:",
+                LENGTHEN_DEFAULTS.lock().unwrap().total
+            ),
+            LenState::Value(ValueMode::Percent) => format!(
+                "LENGTHEN  Enter percentage length <{}>:",
+                LENGTHEN_DEFAULTS.lock().unwrap().percent
+            ),
             LenState::Value(ValueMode::DeltaAngle) => format!(
                 "LENGTHEN  Enter delta angle <{}>:",
                 crate::entities::common::format_angle(
@@ -74,64 +115,121 @@ impl CadCommand for LengthenCommand {
                 )
             ),
             LenState::DynamicPoint { .. } => "LENGTHEN  Specify new end point:".into(),
-            LenState::Apply(_) | LenState::DynamicPick | LenState::Value(ValueMode::Dynamic) => t!("LENGTHEN  Select an object to change or [Undo]:").into_owned(),
+            LenState::Apply(_) | LenState::DynamicPick | LenState::Value(ValueMode::Dynamic) => {
+                t!("LENGTHEN  Select an object to change or [Undo]:").into_owned()
+            }
         }
     }
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
         match self.state {
-            LenState::ChooseMode => vec![CmdOption::new("Delta", "DE"), CmdOption::new("Percent", "P"), CmdOption::new("Total", "TO"), CmdOption::new("Dynamic", "DY")],
-            LenState::Value(ValueMode::Delta | ValueMode::Total) => vec![CmdOption::new("Angle", "A")],
+            LenState::ChooseMode => vec![
+                CmdOption::new("Delta", "DE"),
+                CmdOption::new("Percent", "P"),
+                CmdOption::new("Total", "TO"),
+                CmdOption::new("Dynamic", "DY"),
+            ],
+            LenState::Value(ValueMode::Delta | ValueMode::Total) => {
+                vec![CmdOption::new("Angle", "A")]
+            }
             LenState::Apply(_) | LenState::DynamicPick => vec![CmdOption::new("Undo", "U")],
             _ => Vec::new(),
         }
     }
 
-    fn needs_entity_pick(&self) -> bool { matches!(self.state, LenState::ChooseMode | LenState::Apply(_) | LenState::DynamicPick) }
-    fn inject_before_entity_pick(&self) -> bool { true }
-    fn inject_picked_entity(&mut self, entity: EntityType) { self.picked = Some(entity); }
+    fn needs_entity_pick(&self) -> bool {
+        matches!(
+            self.state,
+            LenState::ChooseMode | LenState::Apply(_) | LenState::DynamicPick
+        )
+    }
+    fn inject_before_entity_pick(&self) -> bool {
+        true
+    }
+    fn inject_picked_entity(&mut self, entity: EntityType) {
+        self.picked = Some(entity);
+    }
 
     fn on_entity_pick(&mut self, handle: Handle, pt: DVec3) -> CmdResult {
-        if handle.is_null() { return CmdResult::NeedPoint; }
-        let Some(entity) = self.picked.take() else { return CmdResult::NeedPoint; };
+        if handle.is_null() {
+            return CmdResult::NeedPoint;
+        }
+        let Some(entity) = self.picked.take() else {
+            return CmdResult::NeedPoint;
+        };
         match &self.state {
             LenState::ChooseMode => {
                 self.measurement = crate::entities::curve::entity_curve(&entity)
-                    .map(|curve| curve.curve.length()).filter(|length| length.is_finite());
+                    .map(|curve| curve.curve.length())
+                    .filter(|length| length.is_finite());
                 CmdResult::NeedPoint
             }
             LenState::Apply(mode) => match lengthen_entity_precise(&entity, pt, mode) {
-                Some(replacement) => CmdResult::ReplaceManyContinue(vec![(handle, vec![replacement])]),
+                Some(replacement) => {
+                    CmdResult::ReplaceManyContinue(vec![(handle, vec![replacement])])
+                }
                 None => CmdResult::NeedPoint,
             },
-            LenState::DynamicPick if matches!(entity, EntityType::Line(_) | EntityType::Arc(_) | EntityType::Ellipse(_)) => {
-                self.state = LenState::DynamicPoint { handle, entity, pick: pt };
+            LenState::DynamicPick
+                if matches!(
+                    entity,
+                    EntityType::Line(_) | EntityType::Arc(_) | EntityType::Ellipse(_)
+                ) =>
+            {
+                self.state = LenState::DynamicPoint {
+                    handle,
+                    entity,
+                    pick: pt,
+                };
                 CmdResult::NeedPoint
             }
             _ => CmdResult::NeedPoint,
         }
     }
 
-    fn on_entity_replaced(&mut self, _old: Handle, _new_handles: &[Handle]) { self.edits += 1; }
-    fn wants_text_input(&self) -> bool { true }
-    fn dyn_commit_as_text(&self) -> bool { matches!(self.state, LenState::Value(_)) }
-    fn dyn_auto_sign_angle(&self) -> bool { false }
+    fn on_entity_replaced(&mut self, _old: Handle, _new_handles: &[Handle]) {
+        self.edits += 1;
+    }
+    fn wants_text_input(&self) -> bool {
+        true
+    }
+    fn dyn_commit_as_text(&self) -> bool {
+        matches!(self.state, LenState::Value(_))
+    }
+    fn dyn_auto_sign_angle(&self) -> bool {
+        false
+    }
     fn dyn_field(&self) -> crate::command::DynField {
-        if matches!(self.state, LenState::Value(ValueMode::DeltaAngle | ValueMode::TotalAngle)) { crate::command::DynField::Angle }
-        else if matches!(self.state, LenState::Value(_)) { crate::command::DynField::Scalar }
-        else { crate::command::DynField::Point }
+        if matches!(
+            self.state,
+            LenState::Value(ValueMode::DeltaAngle | ValueMode::TotalAngle)
+        ) {
+            crate::command::DynField::Angle
+        } else if matches!(self.state, LenState::Value(_)) {
+            crate::command::DynField::Scalar
+        } else {
+            crate::command::DynField::Point
+        }
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        if matches!(self.state, LenState::DynamicPoint { .. }) { return None; }
+        if matches!(self.state, LenState::DynamicPoint { .. }) {
+            return None;
+        }
         let upper = text.trim().to_uppercase();
-        if upper.is_empty() { return Some(self.on_enter()); }
+        if upper.is_empty() {
+            return Some(self.on_enter());
+        }
         if matches!(self.state, LenState::Apply(_) | LenState::DynamicPick) {
-            return Some(if matches!(upper.as_str(), "U" | "UNDO") && self.edits > 0 {
-                self.edits -= 1;
-                CmdResult::UndoDocument
-            } else { CmdResult::NeedPoint });
+            return Some(
+                if matches!(upper.as_str(), "U" | "UNDO") && self.edits > 0 {
+                    self.edits -= 1;
+                    CmdResult::UndoDocument
+                } else {
+                    CmdResult::NeedPoint
+                },
+            );
         }
         if matches!(self.state, LenState::ChooseMode) {
             let mut parts = upper.split_whitespace();
@@ -143,11 +241,19 @@ impl CadCommand for LengthenCommand {
                 _ => return Some(CmdResult::NeedPoint),
             };
             LENGTHEN_DEFAULTS.lock().unwrap().mode = mode;
-            self.state = if matches!(mode, ValueMode::Dynamic) { LenState::DynamicPick } else { LenState::Value(mode) };
-            if let Some(value) = parts.next() { return self.on_text_input(value); }
+            self.state = if matches!(mode, ValueMode::Dynamic) {
+                LenState::DynamicPick
+            } else {
+                LenState::Value(mode)
+            };
+            if let Some(value) = parts.next() {
+                return self.on_text_input(value);
+            }
             return Some(CmdResult::NeedPoint);
         }
-        let LenState::Value(mode) = self.state else { return Some(CmdResult::NeedPoint); };
+        let LenState::Value(mode) = self.state else {
+            return Some(CmdResult::NeedPoint);
+        };
         if matches!(upper.as_str(), "A" | "ANGLE") {
             self.state = match mode {
                 ValueMode::Delta => LenState::Value(ValueMode::DeltaAngle),
@@ -165,12 +271,22 @@ impl CadCommand for LengthenCommand {
         let Some(value) = parsed.filter(|v| v.is_finite()) else {
             return Some(CmdResult::NeedPoint);
         };
-        if !matches!(mode, ValueMode::Delta | ValueMode::DeltaAngle) && value <= 0.0 { return Some(CmdResult::NeedPoint); }
-        if matches!(mode, ValueMode::TotalAngle) && value >= 360.0 { return Some(CmdResult::NeedPoint); }
+        if !matches!(mode, ValueMode::Delta | ValueMode::DeltaAngle) && value <= 0.0 {
+            return Some(CmdResult::NeedPoint);
+        }
+        if matches!(mode, ValueMode::TotalAngle) && value >= 360.0 {
+            return Some(CmdResult::NeedPoint);
+        }
         {
             let mut defaults = LENGTHEN_DEFAULTS.lock().unwrap();
-            match mode { ValueMode::Delta => defaults.delta = value, ValueMode::Total => defaults.total = value, ValueMode::Percent => defaults.percent = value,
-                ValueMode::DeltaAngle => defaults.delta_angle = value, ValueMode::TotalAngle => defaults.total_angle = value, ValueMode::Dynamic => {} }
+            match mode {
+                ValueMode::Delta => defaults.delta = value,
+                ValueMode::Total => defaults.total = value,
+                ValueMode::Percent => defaults.percent = value,
+                ValueMode::DeltaAngle => defaults.delta_angle = value,
+                ValueMode::TotalAngle => defaults.total_angle = value,
+                ValueMode::Dynamic => {}
+            }
         }
         self.state = LenState::Apply(match mode {
             ValueMode::Delta => LenMode::Delta(value),
@@ -184,8 +300,14 @@ impl CadCommand for LengthenCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
-        if let LenState::DynamicPoint { handle, entity, pick } = &self.state {
-            if let Some(replacement) = lengthen_entity_precise(entity, *pick, &LenMode::Dynamic(pt)) {
+        if let LenState::DynamicPoint {
+            handle,
+            entity,
+            pick,
+        } = &self.state
+        {
+            if let Some(replacement) = lengthen_entity_precise(entity, *pick, &LenMode::Dynamic(pt))
+            {
                 let handle = *handle;
                 self.state = LenState::DynamicPick;
                 return CmdResult::ReplaceManyContinue(vec![(handle, vec![replacement])]);
@@ -194,28 +316,44 @@ impl CadCommand for LengthenCommand {
         CmdResult::NeedPoint
     }
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<crate::scene::model::wire_model::WireModel> {
-        let LenState::DynamicPoint { entity, pick, .. } = &self.state else { return None; };
+        let LenState::DynamicPoint { entity, pick, .. } = &self.state else {
+            return None;
+        };
         let replacement = lengthen_entity_precise(entity, *pick, &LenMode::Dynamic(pt))?;
         let curve = crate::entities::curve::entity_curve(&replacement)?;
-        let points = crate::entities::curve::curve_points(&curve).into_iter()
-            .map(|p| [p[0] as f32, p[1] as f32, p[2] as f32]).collect();
+        let points = crate::entities::curve::curve_points(&curve)
+            .into_iter()
+            .map(|p| [p[0] as f32, p[1] as f32, p[2] as f32])
+            .collect();
         Some(crate::scene::model::wire_model::WireModel::solid(
-            "lengthen_dynamic_preview".into(), points,
-            crate::scene::model::wire_model::WireModel::CYAN, false,
+            "lengthen_dynamic_preview".into(),
+            points,
+            crate::scene::model::wire_model::WireModel::CYAN,
+            false,
         ))
     }
     fn on_enter(&mut self) -> CmdResult {
         match self.state {
             LenState::ChooseMode => {
                 let mode = LENGTHEN_DEFAULTS.lock().unwrap().mode;
-                self.state = if matches!(mode, ValueMode::Dynamic) { LenState::DynamicPick } else { LenState::Value(mode) };
+                self.state = if matches!(mode, ValueMode::Dynamic) {
+                    LenState::DynamicPick
+                } else {
+                    LenState::Value(mode)
+                };
                 CmdResult::NeedPoint
             }
             LenState::Value(mode) => {
                 let value = {
                     let defaults = LENGTHEN_DEFAULTS.lock().unwrap();
-                    match mode { ValueMode::Delta => defaults.delta, ValueMode::Total => defaults.total, ValueMode::Percent => defaults.percent,
-                        ValueMode::DeltaAngle => defaults.delta_angle, ValueMode::TotalAngle => defaults.total_angle, ValueMode::Dynamic => 0.0 }
+                    match mode {
+                        ValueMode::Delta => defaults.delta,
+                        ValueMode::Total => defaults.total,
+                        ValueMode::Percent => defaults.percent,
+                        ValueMode::DeltaAngle => defaults.delta_angle,
+                        ValueMode::TotalAngle => defaults.total_angle,
+                        ValueMode::Dynamic => 0.0,
+                    }
                 };
                 let text = if matches!(mode, ValueMode::DeltaAngle | ValueMode::TotalAngle) {
                     format!("{value}d")
@@ -249,7 +387,7 @@ pub fn lengthen_entity(entity: &EntityType, pick_pt: Vec3, mode: &LenMode) -> Op
 }
 
 fn lengthen_entity_precise(entity: &EntityType, pick: DVec3, mode: &LenMode) -> Option<EntityType> {
-    use cadkernel::space::lengthen::{LengthChange, lengthen_line, lengthen_arc};
+    use cadkernel::space::lengthen::{lengthen_arc, lengthen_line, LengthChange};
     let change = match mode {
         LenMode::Delta(value) => LengthChange::Delta(*value),
         LenMode::Total(value) => LengthChange::Total(*value),
@@ -262,7 +400,10 @@ fn lengthen_entity_precise(entity: &EntityType, pick: DVec3, mode: &LenMode) -> 
         EntityType::Line(line) => {
             let [start, end] = lengthen_line(
                 [line.start.x, line.start.y, line.start.z],
-                [line.end.x, line.end.y, line.end.z], pick.to_array(), change)?;
+                [line.end.x, line.end.y, line.end.z],
+                pick.to_array(),
+                change,
+            )?;
             let mut result = line.clone();
             result.common.handle = Handle::NULL;
             result.start = Vector3::new(start[0], start[1], start[2]);
@@ -270,7 +411,11 @@ fn lengthen_entity_precise(entity: &EntityType, pick: DVec3, mode: &LenMode) -> 
             Some(EntityType::Line(result))
         }
         EntityType::Arc(arc) => {
-            let (start, end) = lengthen_arc(&crate::entities::curve::arc_curve(arc), pick.to_array(), change)?;
+            let (start, end) = lengthen_arc(
+                &crate::entities::curve::arc_curve(arc),
+                pick.to_array(),
+                change,
+            )?;
             let mut result = arc.clone();
             result.common.handle = Handle::NULL;
             result.start_angle = start;
@@ -279,7 +424,8 @@ fn lengthen_entity_precise(entity: &EntityType, pick: DVec3, mode: &LenMode) -> 
         }
         EntityType::Ellipse(ellipse) => {
             let curve = crate::entities::curve::ellipse_curve(ellipse)?;
-            let (start, end) = cadkernel::space::lengthen::lengthen_ellipse(&curve, pick.to_array(), change)?;
+            let (start, end) =
+                cadkernel::space::lengthen::lengthen_ellipse(&curve, pick.to_array(), change)?;
             let mut result = ellipse.clone();
             result.start_parameter = start;
             result.end_parameter = end;
@@ -288,20 +434,30 @@ fn lengthen_entity_precise(entity: &EntityType, pick: DVec3, mode: &LenMode) -> 
         EntityType::Spline(s) => lengthen_spline(s, pick.as_vec3(), mode),
         EntityType::LwPolyline(polyline) => {
             let curve = crate::entities::curve::lwpolyline_curve(polyline)?;
-            let vertices = cadkernel::space::lengthen::lengthen_polyline(&curve, pick.to_array(), change)?;
+            let vertices =
+                cadkernel::space::lengthen::lengthen_polyline(&curve, pick.to_array(), change)?;
             let mut result = polyline.clone();
-            result.vertices = vertices.into_iter().map(|vertex| {
-                let mut value = polyline.vertices[vertex.source].clone();
-                value.location.x = vertex.position[0];
-                value.location.y = vertex.position[1];
-                value.bulge = vertex.bulge;
-                let width_delta = value.end_width - value.start_width;
-                value.end_width = value.start_width + width_delta * vertex.end_fraction;
-                value.start_width += width_delta * vertex.start_fraction;
-                value
-            }).collect();
-            if result.vertices.iter().any(|v| !v.start_width.is_finite() || !v.end_width.is_finite()
-                || v.start_width < 0.0 || v.end_width < 0.0) { return None; }
+            result.vertices = vertices
+                .into_iter()
+                .map(|vertex| {
+                    let mut value = polyline.vertices[vertex.source].clone();
+                    value.location.x = vertex.position[0];
+                    value.location.y = vertex.position[1];
+                    value.bulge = vertex.bulge;
+                    let width_delta = value.end_width - value.start_width;
+                    value.end_width = value.start_width + width_delta * vertex.end_fraction;
+                    value.start_width += width_delta * vertex.start_fraction;
+                    value
+                })
+                .collect();
+            if result.vertices.iter().any(|v| {
+                !v.start_width.is_finite()
+                    || !v.end_width.is_finite()
+                    || v.start_width < 0.0
+                    || v.end_width < 0.0
+            }) {
+                return None;
+            }
             Some(EntityType::LwPolyline(result))
         }
         _ => None,
@@ -340,8 +496,8 @@ fn lengthen_spline(spl: &SplineEnt, pick_pt: Vec3, mode: &LenMode) -> Option<Ent
     let p_start = nurbs.point_at_knot(t0);
     let p_end = nurbs.point_at_knot(t1);
     let (px, py) = (pick_pt.x as f64, pick_pt.y as f64);
-    let extend_end = (p_end[0] - px).hypot(p_end[1] - py)
-        <= (p_start[0] - px).hypot(p_start[1] - py);
+    let extend_end =
+        (p_end[0] - px).hypot(p_end[1] - py) <= (p_start[0] - px).hypot(p_start[1] - py);
 
     // Where to cut, by distance along the curve rather than by a bisection
     // over repeated chord sums. Keeping the head means cutting `new_len` from
@@ -358,7 +514,9 @@ fn lengthen_spline(spl: &SplineEnt, pick_pt: Vec3, mode: &LenMode) -> Option<Ent
 }
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["LENGTHEN"] });  // LengthenCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["LENGTHEN"]
+}); // LengthenCommand
 
 #[cfg(test)]
 mod tests {
@@ -375,7 +533,10 @@ mod tests {
     fn repeated_delta_edits_offer_one_undo_per_replacement() {
         let handle = Handle::new(11);
         let mut command = LengthenCommand::new();
-        assert!(matches!(command.on_text_input("DE 2"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(
+            command.on_text_input("DE 2"),
+            Some(CmdResult::NeedPoint)
+        ));
 
         for _ in 0..2 {
             command.inject_picked_entity(spatial_line());
@@ -391,16 +552,28 @@ mod tests {
             command.on_entity_replaced(handle, &[]);
         }
 
-        assert!(matches!(command.on_text_input("U"), Some(CmdResult::UndoDocument)));
-        assert!(matches!(command.on_text_input("U"), Some(CmdResult::UndoDocument)));
-        assert!(matches!(command.on_text_input("U"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(
+            command.on_text_input("U"),
+            Some(CmdResult::UndoDocument)
+        ));
+        assert!(matches!(
+            command.on_text_input("U"),
+            Some(CmdResult::UndoDocument)
+        ));
+        assert!(matches!(
+            command.on_text_input("U"),
+            Some(CmdResult::NeedPoint)
+        ));
     }
 
     #[test]
     fn dynamic_line_endpoint_is_projected_onto_its_spatial_support() {
         let handle = Handle::new(12);
         let mut command = LengthenCommand::new();
-        assert!(matches!(command.on_text_input("DY"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(
+            command.on_text_input("DY"),
+            Some(CmdResult::NeedPoint)
+        ));
         command.inject_picked_entity(spatial_line());
         assert!(matches!(
             command.on_entity_pick(handle, DVec3::new(0.0, 0.0, 4.0)),
@@ -433,8 +606,7 @@ mod tests {
             DVec3::new(0.0, 2.0, 0.0),
             &LenMode::TotalAngle(std::f64::consts::PI),
         )
-        .expect("valid angular total")
-        else {
+        .expect("valid angular total") else {
             panic!("replacement must stay an arc");
         };
         assert!((result.end_angle - result.start_angle - std::f64::consts::PI).abs() < 1.0e-12);
@@ -455,14 +627,17 @@ mod tests {
         start.end_width = 4.0;
         polyline.vertices = vec![start, acadrust::entities::LwVertex::from_coords(10.0, 0.0)];
         let entity = EntityType::LwPolyline(polyline.clone());
-        let pick = DVec3::from_array(crate::entities::curve::lwpolyline_curve(&polyline)
-            .unwrap().point_at(1.0));
+        let pick = DVec3::from_array(
+            crate::entities::curve::lwpolyline_curve(&polyline)
+                .unwrap()
+                .point_at(1.0),
+        );
 
-        let EntityType::LwPolyline(result) = lengthen_entity_precise(
-            &entity,
-            pick,
-            &LenMode::Total(15.0),
-        ).unwrap() else { panic!("expected polyline") };
+        let EntityType::LwPolyline(result) =
+            lengthen_entity_precise(&entity, pick, &LenMode::Total(15.0)).unwrap()
+        else {
+            panic!("expected polyline")
+        };
         assert_eq!(result.normal, polyline.normal);
         assert_eq!(result.elevation, polyline.elevation);
         assert!((result.vertices.last().unwrap().location.x - 15.0).abs() < 1e-12);

@@ -14,8 +14,8 @@ use std::f64::consts::TAU;
 // its call shapes to the loose scalars and f32 render vertices used here.
 use super::geom;
 use super::geom::{
-    arc_parameter as arc_t, arc_points as arc_pts, ellipse_points as ellipse_pts,
-    lerp as lerp2, normalize_angle as norm,
+    arc_parameter as arc_t, arc_points as arc_pts, ellipse_points as ellipse_pts, lerp as lerp2,
+    normalize_angle as norm,
 };
 
 use crate::modules::draw::fence::{crossing_box_preview, FencePick};
@@ -26,14 +26,14 @@ use acadrust::entities::{
 };
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
-use glam::DVec3;
 use cadkernel::geom2d::nurbs::clamped_uniform_knots;
 use cadkernel::geom2d::{
-    intersect as kernel_intersect, trim_spans as kernel_trim_spans, Arc as KernelArc,
-    BulgeArc, Circle as KernelCircle, Curve, Extent as KernelExtent,
-    Ellipse as KernelEllipse, EllipseArc as KernelEllipseArc, Line as KernelLine,
-    NurbsCurve, Ray as KernelRay, Tolerance as KernelTolerance, XLine as KernelXLine,
+    intersect as kernel_intersect, trim_spans as kernel_trim_spans, Arc as KernelArc, BulgeArc,
+    Circle as KernelCircle, Curve, Ellipse as KernelEllipse, EllipseArc as KernelEllipseArc,
+    Extent as KernelExtent, Line as KernelLine, NurbsCurve, Ray as KernelRay,
+    Tolerance as KernelTolerance, XLine as KernelXLine,
 };
+use glam::DVec3;
 
 use crate::entities::curve::{entity_curve_xy, entity_with_lwpolyline_world_xy};
 
@@ -297,7 +297,9 @@ fn geo_to_curve(geo: &Geo) -> Option<Curve> {
             start: *p1,
             end: *p2,
         }),
-        Geo::Arc { cx, cy, r, a0, a1, .. } => Curve::Arc(KernelArc {
+        Geo::Arc {
+            cx, cy, r, a0, a1, ..
+        } => Curve::Arc(KernelArc {
             centre: [*cx, *cy],
             radius: *r,
             start_angle: *a0,
@@ -316,7 +318,15 @@ fn geo_to_curve(geo: &Geo) -> Option<Curve> {
             direction: [*dx, *dy],
         }),
         Geo::Ellipse {
-            cx, cy, a, b, nx, ny, t0, t1, ..
+            cx,
+            cy,
+            a,
+            b,
+            nx,
+            ny,
+            t0,
+            t1,
+            ..
         } => Curve::Ellipse(KernelEllipseArc {
             ellipse: KernelEllipse {
                 centre: [*cx, *cy],
@@ -351,7 +361,13 @@ fn cut_params(target: &Curve, handle: Handle, geos: &[Geo]) -> Vec<f64> {
         .flat_map(|boundary| {
             kernel_intersect(target, &boundary, tolerance)
                 .into_iter()
-                .map(|hit| if bounded { hit.t_a.clamp(0.0, 1.0) } else { hit.t_a })
+                .map(|hit| {
+                    if bounded {
+                        hit.t_a.clamp(0.0, 1.0)
+                    } else {
+                        hit.t_a
+                    }
+                })
                 .collect::<Vec<_>>()
         })
         .collect();
@@ -710,15 +726,10 @@ fn extend_spline(spl: &SplineEnt, t_click: f64, geos: &[Geo]) -> Option<EntityTy
 // ── Trim helpers ──────────────────────────────────────────────────────────
 
 fn trim_intervals(curve: &Curve, ts: &[f64], t_click: f64) -> Vec<(f64, f64)> {
-    kernel_trim_spans(
-        curve,
-        ts,
-        t_click,
-        KernelTolerance::new(CUT_TOLERANCE),
-    )
-    .into_iter()
-    .map(|span| (span[0], span[1]))
-    .collect()
+    kernel_trim_spans(curve, ts, t_click, KernelTolerance::new(CUT_TOLERANCE))
+        .into_iter()
+        .map(|span| (span[0], span[1]))
+        .collect()
 }
 
 /// Trim a Line entity. Returns the surviving line segments.
@@ -853,8 +864,7 @@ fn trim_circle(orig: &CircleEnt, ts: &[f64], t_click: f64) -> Vec<EntityType> {
     for i in 0..n {
         let ta = ts[i];
         let tb = if i + 1 < n { ts[i + 1] } else { ts[0] + 1.0 };
-        if (tc >= ta - 1e-9 && tc <= tb + 1e-9)
-            || (tc + 1.0 >= ta - 1e-9 && tc + 1.0 <= tb + 1e-9)
+        if (tc >= ta - 1e-9 && tc <= tb + 1e-9) || (tc + 1.0 >= ta - 1e-9 && tc + 1.0 <= tb + 1e-9)
         {
             removed = Some((ta, tb));
             break;
@@ -899,9 +909,7 @@ fn extract_sub_polyline(poly: &LwPolyline, s0: f64, s1: f64) -> Option<LwPolylin
         let v = &poly.vertices[i % n];
         [v.location.x, v.location.y]
     };
-    let seg_bulge = |i: usize| -> f64 {
-        poly.vertices[i % n].bulge
-    };
+    let seg_bulge = |i: usize| -> f64 { poly.vertices[i % n].bulge };
 
     let mut raw_verts: Vec<(f64, f64, f64)> = Vec::new();
     let mut curr = s0;
@@ -926,10 +934,7 @@ fn extract_sub_polyline(poly: &LwPolyline, s0: f64, s1: f64) -> Option<LwPolylin
                 };
                 (sp, sub_b)
             } else {
-                let sp = [
-                    p0[0] + u_a * (p1[0] - p0[0]),
-                    p0[1] + u_a * (p1[1] - p0[1]),
-                ];
+                let sp = [p0[0] + u_a * (p1[0] - p0[0]), p0[1] + u_a * (p1[1] - p0[1])];
                 (sp, 0.0)
             };
             raw_verts.push((start_pt[0], start_pt[1], sub_bulge));
@@ -1008,9 +1013,7 @@ fn trim_lwpolyline(poly: &LwPolyline, cx: f64, cy: f64, geos: &[Geo]) -> Option<
         let v = &poly.vertices[i % n];
         [v.location.x, v.location.y]
     };
-    let seg_bulge = |i: usize| -> f64 {
-        poly.vertices[i % n].bulge
-    };
+    let seg_bulge = |i: usize| -> f64 { poly.vertices[i % n].bulge };
 
     // Boundary cuts as global params (segment index + local u).
     let mut cuts: Vec<f64> = Vec::new();
@@ -1020,7 +1023,11 @@ fn trim_lwpolyline(poly: &LwPolyline, cx: f64, cy: f64, geos: &[Geo]) -> Option<
         let b = seg_bulge(i);
         for u in polyline_seg_ts(p0, p1, b, handle, geos) {
             let param = i as f64 + u.clamp(0.0, 1.0);
-            cuts.push(if closed { param.rem_euclid(total) } else { param });
+            cuts.push(if closed {
+                param.rem_euclid(total)
+            } else {
+                param
+            });
         }
     }
     cuts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -1418,7 +1425,6 @@ fn entity_pts(e: &EntityType) -> Vec<[f32; 3]> {
 // TrimCommand
 // ══════════════════════════════════════════════════════════════════════════
 
-
 // ── TRIM / EXTEND option machinery (#336) ─────────────────────────────────
 
 /// Sub-mode of the TRIM / EXTEND commands (#336). `Pick` is the quick mode;
@@ -1446,19 +1452,13 @@ struct CrossingWindow {
     pick: [f64; 2],
 }
 
-fn segment_window_range(
-    p1: [f64; 2],
-    p2: [f64; 2],
-    window: CrossingWindow,
-) -> Option<(f64, f64)> {
+fn segment_window_range(p1: [f64; 2], p2: [f64; 2], window: CrossingWindow) -> Option<(f64, f64)> {
     let mut lo: f64 = 0.0;
     let mut hi: f64 = 1.0;
     for axis in 0..2 {
         let d = p2[axis] - p1[axis];
         if d.abs() < 1e-12 {
-            if p1[axis] < window.min[axis] - 1e-9
-                || p1[axis] > window.max[axis] + 1e-9
-            {
+            if p1[axis] < window.min[axis] - 1e-9 || p1[axis] > window.max[axis] + 1e-9 {
                 return None;
             }
             continue;
@@ -1497,9 +1497,7 @@ fn crossing_trim_lwpolyline(
         let v = &poly.vertices[i % n];
         [v.location.x, v.location.y]
     };
-    let seg_bulge = |i: usize| -> f64 {
-        poly.vertices[i % n].bulge
-    };
+    let seg_bulge = |i: usize| -> f64 { poly.vertices[i % n].bulge };
 
     let mut removed = Vec::<(f64, f64)>::new();
     for i in 0..seg_count {
@@ -1513,8 +1511,10 @@ fn crossing_trim_lwpolyline(
             for s in 0..=steps {
                 let t = s as f64 / steps as f64;
                 let pt = ba.sample(t);
-                if pt[0] >= window.min[0] - 1e-9 && pt[0] <= window.max[0] + 1e-9
-                    && pt[1] >= window.min[1] - 1e-9 && pt[1] <= window.max[1] + 1e-9
+                if pt[0] >= window.min[0] - 1e-9
+                    && pt[0] <= window.max[0] + 1e-9
+                    && pt[1] >= window.min[1] - 1e-9
+                    && pt[1] <= window.max[1] + 1e-9
                 {
                     min_t = Some(min_t.map_or(t, |m: f64| m.min(t)));
                     max_t = Some(max_t.map_or(t, |m: f64| m.max(t)));
@@ -1612,7 +1612,9 @@ fn crossing_trim_lwpolyline(
 
     Some(
         kept.into_iter()
-            .filter_map(|(start, end)| extract_sub_polyline(poly, start, end).map(EntityType::LwPolyline))
+            .filter_map(|(start, end)| {
+                extract_sub_polyline(poly, start, end).map(EntityType::LwPolyline)
+            })
             .collect(),
     )
 }
@@ -1628,114 +1630,112 @@ fn pick_trim_at(
 ) -> Option<Vec<EntityType>> {
     let entity = all.iter().find(|e| e.common().handle == handle);
     let result: Option<Vec<EntityType>> = match entity {
-            Some(EntityType::Line(l)) => {
-                let ax = l.start.x;
-                let ay = l.start.y;
-                let bx = l.end.x;
-                let by = l.end.y;
-                let ts = line_seg_ts(ax, ay, bx, by, handle, geos);
-                if ts.is_empty() {
-                    return None;
-                }
-                let dx = bx - ax;
-                let dy = by - ay;
-                let len2 = dx * dx + dy * dy;
-                let t_click = if len2 > 1e-12 {
-                    ((px - ax) * dx + (py - ay) * dy) / len2
-                } else {
-                    0.5
-                };
-                Some(trim_line(l, &ts, t_click))
+        Some(EntityType::Line(l)) => {
+            let ax = l.start.x;
+            let ay = l.start.y;
+            let bx = l.end.x;
+            let by = l.end.y;
+            let ts = line_seg_ts(ax, ay, bx, by, handle, geos);
+            if ts.is_empty() {
+                return None;
             }
-            Some(EntityType::Arc(a)) => {
-                let cx = a.center.x;
-                let cy = a.center.y;
-                let a0 = a.start_angle;
-                let a1 = a.end_angle;
-                let ts = arc_seg_ts(cx, cy, a.radius, a0, a1, handle, geos);
-                if ts.is_empty() {
-                    return None;
-                }
-                let click_angle = (py - cy).atan2(px - cx);
-                let t_click = arc_t(click_angle, a0, a1);
-                Some(trim_arc(a, &ts, t_click))
+            let dx = bx - ax;
+            let dy = by - ay;
+            let len2 = dx * dx + dy * dy;
+            let t_click = if len2 > 1e-12 {
+                ((px - ax) * dx + (py - ay) * dy) / len2
+            } else {
+                0.5
+            };
+            Some(trim_line(l, &ts, t_click))
+        }
+        Some(EntityType::Arc(a)) => {
+            let cx = a.center.x;
+            let cy = a.center.y;
+            let a0 = a.start_angle;
+            let a1 = a.end_angle;
+            let ts = arc_seg_ts(cx, cy, a.radius, a0, a1, handle, geos);
+            if ts.is_empty() {
+                return None;
             }
-            Some(EntityType::Circle(c)) => {
-                let cx = c.center.x;
-                let cy = c.center.y;
-                let ts = arc_seg_ts(cx, cy, c.radius, 0.0, TAU, handle, geos);
-                if ts.len() < 2 {
-                    return None;
-                }
-                let click_angle = (py - cy).atan2(px - cx);
-                let t_click = arc_t(click_angle, 0.0, TAU);
-                let survivors = trim_circle(c, &ts, t_click);
-                if survivors.is_empty() {
-                    return None;
-                }
-                Some(survivors)
+            let click_angle = (py - cy).atan2(px - cx);
+            let t_click = arc_t(click_angle, a0, a1);
+            Some(trim_arc(a, &ts, t_click))
+        }
+        Some(EntityType::Circle(c)) => {
+            let cx = c.center.x;
+            let cy = c.center.y;
+            let ts = arc_seg_ts(cx, cy, c.radius, 0.0, TAU, handle, geos);
+            if ts.len() < 2 {
+                return None;
             }
-            Some(EntityType::Ray(r)) => {
-                let curve = ray_curve(r);
-                let ts = cut_params(&curve, handle, geos);
-                if ts.is_empty() {
-                    return None;
-                }
-                let t_click = curve.parameter_at([px, py]);
-                Some(trim_ray(r, &ts, t_click))
+            let click_angle = (py - cy).atan2(px - cx);
+            let t_click = arc_t(click_angle, 0.0, TAU);
+            let survivors = trim_circle(c, &ts, t_click);
+            if survivors.is_empty() {
+                return None;
             }
-            Some(EntityType::XLine(x)) => {
-                let curve = xline_curve(x);
-                let ts = cut_params(&curve, handle, geos);
-                if ts.is_empty() {
-                    return None;
-                }
-                let t_click = curve.parameter_at([px, py]);
-                Some(trim_xline(x, &ts, t_click))
+            Some(survivors)
+        }
+        Some(EntityType::Ray(r)) => {
+            let curve = ray_curve(r);
+            let ts = cut_params(&curve, handle, geos);
+            if ts.is_empty() {
+                return None;
             }
-            Some(EntityType::Ellipse(e)) => {
-                let a = (e.major_axis.x.powi(2) + e.major_axis.y.powi(2)).sqrt();
-                if a < 1e-9 {
-                    return None;
-                }
-                let b = a * e.minor_axis_ratio;
-                let (nx, ny) = (e.major_axis.x / a, e.major_axis.y / a);
-                let t0 = e.start_parameter;
-                let mut t1 = e.end_parameter;
-                if t1 <= t0 {
-                    t1 += TAU;
-                }
-                let ts = ellipse_seg_ts(
-                    e.center.x, e.center.y, a, b, nx, ny, t0, t1, handle, geos,
-                );
-                if ts.is_empty() {
-                    return None;
-                }
-                // t_click: project mouse onto ellipse local param
-                let rx = px - e.center.x;
-                let ry = py - e.center.y;
-                let xl = rx * nx + ry * ny;
-                let yl = -rx * ny + ry * nx;
-                let t_ell = yl.atan2(xl);
-                let t_click = arc_t(t_ell, t0, t1);
-                Some(trim_ellipse(e, &ts, t_click))
+            let t_click = curve.parameter_at([px, py]);
+            Some(trim_ray(r, &ts, t_click))
+        }
+        Some(EntityType::XLine(x)) => {
+            let curve = xline_curve(x);
+            let ts = cut_params(&curve, handle, geos);
+            if ts.is_empty() {
+                return None;
             }
-            Some(EntityType::Spline(s)) => {
-                let ts = spline_seg_ts(s, handle, geos);
-                if ts.is_empty() {
-                    return None;
-                }
-                let t_click = spline_nearest_t(s, px, py)
-                    .and_then(|t_actual| {
-                        let (t0, t1) = spline_range(s)?;
-                        Some(t_to_rel(t_actual, t0, t1))
-                    })
-                    .unwrap_or(0.5);
-                Some(trim_spline(s, &ts, t_click))
+            let t_click = curve.parameter_at([px, py]);
+            Some(trim_xline(x, &ts, t_click))
+        }
+        Some(EntityType::Ellipse(e)) => {
+            let a = (e.major_axis.x.powi(2) + e.major_axis.y.powi(2)).sqrt();
+            if a < 1e-9 {
+                return None;
             }
-            Some(EntityType::LwPolyline(p)) => trim_lwpolyline(p, px, py, geos),
-            _ => None,
-        };
+            let b = a * e.minor_axis_ratio;
+            let (nx, ny) = (e.major_axis.x / a, e.major_axis.y / a);
+            let t0 = e.start_parameter;
+            let mut t1 = e.end_parameter;
+            if t1 <= t0 {
+                t1 += TAU;
+            }
+            let ts = ellipse_seg_ts(e.center.x, e.center.y, a, b, nx, ny, t0, t1, handle, geos);
+            if ts.is_empty() {
+                return None;
+            }
+            // t_click: project mouse onto ellipse local param
+            let rx = px - e.center.x;
+            let ry = py - e.center.y;
+            let xl = rx * nx + ry * ny;
+            let yl = -rx * ny + ry * nx;
+            let t_ell = yl.atan2(xl);
+            let t_click = arc_t(t_ell, t0, t1);
+            Some(trim_ellipse(e, &ts, t_click))
+        }
+        Some(EntityType::Spline(s)) => {
+            let ts = spline_seg_ts(s, handle, geos);
+            if ts.is_empty() {
+                return None;
+            }
+            let t_click = spline_nearest_t(s, px, py)
+                .and_then(|t_actual| {
+                    let (t0, t1) = spline_range(s)?;
+                    Some(t_to_rel(t_actual, t0, t1))
+                })
+                .unwrap_or(0.5);
+            Some(trim_spline(s, &ts, t_click))
+        }
+        Some(EntityType::LwPolyline(p)) => trim_lwpolyline(p, px, py, geos),
+        _ => None,
+    };
     result
 }
 
@@ -1750,60 +1750,58 @@ fn pick_extend_at(
 ) -> Option<EntityType> {
     let entity = all.iter().find(|e| e.common().handle == handle);
     let result: Option<EntityType> = match entity {
-            Some(EntityType::Line(l)) => {
-                let ax = l.start.x;
-                let ay = l.start.y;
-                let bx = l.end.x;
-                let by = l.end.y;
-                let dx = bx - ax;
-                let dy = by - ay;
-                let len2 = dx * dx + dy * dy;
-                let t_click = if len2 > 1e-12 {
-                    ((px - ax) * dx + (py - ay) * dy) / len2
-                } else {
-                    0.5
-                };
-                extend_line(l, t_click, geos)
+        Some(EntityType::Line(l)) => {
+            let ax = l.start.x;
+            let ay = l.start.y;
+            let bx = l.end.x;
+            let by = l.end.y;
+            let dx = bx - ax;
+            let dy = by - ay;
+            let len2 = dx * dx + dy * dy;
+            let t_click = if len2 > 1e-12 {
+                ((px - ax) * dx + (py - ay) * dy) / len2
+            } else {
+                0.5
+            };
+            extend_line(l, t_click, geos)
+        }
+        Some(EntityType::Arc(a)) => {
+            let ang = (py - a.center.y).atan2(px - a.center.x);
+            let t_click = arc_t(ang, a.start_angle, a.end_angle);
+            extend_arc(a, t_click, geos)
+        }
+        Some(EntityType::Ellipse(e)) => {
+            let t0 = e.start_parameter;
+            let mut t1 = e.end_parameter;
+            if t1 <= t0 {
+                t1 += TAU;
             }
-            Some(EntityType::Arc(a)) => {
-                let ang = (py - a.center.y).atan2(px - a.center.x);
-                let t_click = arc_t(ang, a.start_angle, a.end_angle);
-                extend_arc(a, t_click, geos)
+            let span = t1 - t0;
+            let a = (e.major_axis.x.powi(2) + e.major_axis.y.powi(2)).sqrt();
+            if a < 1e-9 {
+                return None;
             }
-            Some(EntityType::Ellipse(e)) => {
-                let t0 = e.start_parameter;
-                let mut t1 = e.end_parameter;
-                if t1 <= t0 {
-                    t1 += TAU;
-                }
-                let span = t1 - t0;
-                let a = (e.major_axis.x.powi(2) + e.major_axis.y.powi(2)).sqrt();
-                if a < 1e-9 {
-                    return None;
-                }
-                let (nx, ny) = (e.major_axis.x / a, e.major_axis.y / a);
-                let rx = px - e.center.x;
-                let ry = py - e.center.y;
-                let xl = rx * nx + ry * ny;
-                let yl = -rx * ny + ry * nx;
-                let t_click = arc_t(yl.atan2(xl), t0, t1);
-                let _ = span;
-                extend_ellipse(e, t_click, geos)
-            }
-            Some(EntityType::LwPolyline(p)) => {
-                extend_lwpoly(p, px, py, geos)
-            }
-            Some(EntityType::Spline(s)) => {
-                let t_click = spline_nearest_t(s, px, py)
-                    .and_then(|t_actual| {
-                        let (t0, t1) = spline_range(s)?;
-                        Some(t_to_rel(t_actual, t0, t1))
-                    })
-                    .unwrap_or(0.5);
-                extend_spline(s, t_click, geos)
-            }
-            _ => None,
-        };
+            let (nx, ny) = (e.major_axis.x / a, e.major_axis.y / a);
+            let rx = px - e.center.x;
+            let ry = py - e.center.y;
+            let xl = rx * nx + ry * ny;
+            let yl = -rx * ny + ry * nx;
+            let t_click = arc_t(yl.atan2(xl), t0, t1);
+            let _ = span;
+            extend_ellipse(e, t_click, geos)
+        }
+        Some(EntityType::LwPolyline(p)) => extend_lwpoly(p, px, py, geos),
+        Some(EntityType::Spline(s)) => {
+            let t_click = spline_nearest_t(s, px, py)
+                .and_then(|t_actual| {
+                    let (t0, t1) = spline_range(s)?;
+                    Some(t_to_rel(t_actual, t0, t1))
+                })
+                .unwrap_or(0.5);
+            extend_spline(s, t_click, geos)
+        }
+        _ => None,
+    };
     result
 }
 
@@ -1875,7 +1873,14 @@ fn fence_cross_points(e: &EntityType, fence_geos: &[Geo]) -> Vec<[f64; 2]> {
     for w in pts.windows(2) {
         // NOTE: the exclusion handle must differ from the fence geos' own —
         // passing NULL against NULL-handle geos excluded the whole fence.
-        let mut ts = line_seg_ts(w[0][0], w[0][1], w[1][0], w[1][1], Handle::new(FENCE_PROBE), fence_geos);
+        let mut ts = line_seg_ts(
+            w[0][0],
+            w[0][1],
+            w[1][0],
+            w[1][1],
+            Handle::new(FENCE_PROBE),
+            fence_geos,
+        );
         ts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         for t in ts {
             out.push(lerp2(w[0], w[1], t));
@@ -1930,8 +1935,7 @@ fn fence_pieces(
             }
             for cp in cps {
                 let res = if extend {
-                    pick_extend_at(&tmp_all, geos, target, cp[0], cp[1])
-                        .map(|x| vec![x])
+                    pick_extend_at(&tmp_all, geos, target, cp[0], cp[1]).map(|x| vec![x])
                 } else {
                     pick_trim_at(&tmp_all, geos, target, cp[0], cp[1])
                 };
@@ -1955,7 +1959,11 @@ fn fence_pieces(
             break;
         }
     }
-    if changed { Some(pieces) } else { None }
+    if changed {
+        Some(pieces)
+    } else {
+        None
+    }
 }
 
 /// Fence / Crossing pass (#336): every object crossing the fence polyline is
@@ -2152,11 +2160,7 @@ fn piece_cut_points(orig: &EntityType, pieces: &[EntityType]) -> Vec<[f64; 2]> {
 /// boundary's drawn body, draw a dashed guide along the boundary's implied
 /// extension — from its drawn end to the cut — so the user sees WHICH edge
 /// causes the cut there. Lines get a straight guide, arcs follow the circle.
-fn implied_cut_guides(
-    all: &[EntityType],
-    target: Handle,
-    cuts: &[[f64; 2]],
-) -> Vec<WireModel> {
+fn implied_cut_guides(all: &[EntityType], target: Handle, cuts: &[[f64; 2]]) -> Vec<WireModel> {
     let mut out = Vec::new();
     'cuts: for (ci, cp) in cuts.iter().enumerate() {
         let tol = 1e-6 * (1.0 + cp[0].abs() + cp[1].abs());
@@ -2232,12 +2236,8 @@ fn implied_cut_guides(
                                 ]
                             })
                             .collect();
-                        let mut w = WireModel::solid(
-                            format!("edge_guide_{ci}"),
-                            pts,
-                            OPT_YELLOW,
-                            false,
-                        );
+                        let mut w =
+                            WireModel::solid(format!("edge_guide_{ci}"), pts, OPT_YELLOW, false);
                         w.pattern_length = 0.8;
                         w.pattern = [0.5, -0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
                         out.push(w);
@@ -2296,10 +2296,7 @@ impl TrimCommand {
         Self::with_cutting_edges(all_entities, Vec::new())
     }
 
-    pub fn with_cutting_edges(
-        all_entities: Vec<EntityType>,
-        initial_edges: Vec<Handle>,
-    ) -> Self {
+    pub fn with_cutting_edges(all_entities: Vec<EntityType>, initial_edges: Vec<Handle>) -> Self {
         let all_entities: Vec<EntityType> = all_entities
             .iter()
             .map(entity_with_lwpolyline_world_xy)
@@ -2359,11 +2356,7 @@ impl TrimCommand {
             .collect()
     }
 
-    fn fence_run(
-        &mut self,
-        fence: &[[f64; 2]],
-        window: Option<CrossingWindow>,
-    ) -> CmdResult {
+    fn fence_run(&mut self, fence: &[[f64; 2]], window: Option<CrossingWindow>) -> CmdResult {
         let repl = fence_pass(&self.all_entities, &self.geos, fence, window, self.shift);
         if repl.is_empty() {
             return CmdResult::NeedPoint;
@@ -2433,7 +2426,11 @@ impl CadCommand for TrimCommand {
                 CmdOption::new("Fence", "F"),
                 CmdOption::new("Crossing", "C"),
                 CmdOption::new(
-                    if self.implied_edges { "Edge: Extend" } else { "Edge: No extend" },
+                    if self.implied_edges {
+                        "Edge: Extend"
+                    } else {
+                        "Edge: No extend"
+                    },
                     "E",
                 ),
                 CmdOption::new("Erase", "R"),
@@ -2519,8 +2516,7 @@ impl CadCommand for TrimCommand {
                 let (px, py) = (pt.x, pt.y);
                 let new_entities = if self.shift {
                     // Shift+click swaps to Extend for this pick (#336).
-                    pick_extend_at(&self.all_entities, &self.geos, handle, px, py)
-                        .map(|e| vec![e])
+                    pick_extend_at(&self.all_entities, &self.geos, handle, px, py).map(|e| vec![e])
                 } else {
                     let geos = self.nearby_geos(handle);
                     pick_trim_at(&self.all_entities, &geos, handle, px, py)
@@ -2579,13 +2575,7 @@ impl CadCommand for TrimCommand {
             max,
             pick: fence[0],
         });
-        let replacements = fence_pass(
-            &self.all_entities,
-            &self.geos,
-            fence,
-            window,
-            self.shift,
-        );
+        let replacements = fence_pass(&self.all_entities, &self.geos, fence, window, self.shift);
         if replacements.is_empty() {
             return Some(CmdResult::NeedPoint);
         }
@@ -2605,12 +2595,8 @@ impl CadCommand for TrimCommand {
                 let mut out: Vec<WireModel> = self
                     .edge_set
                     .iter()
-                    .filter_map(|h| {
-                        self.all_entities.iter().find(|e| e.common().handle == *h)
-                    })
-                    .map(|e| {
-                        WireModel::solid("edge_sel".into(), entity_pts(e), OPT_YELLOW, false)
-                    })
+                    .filter_map(|h| self.all_entities.iter().find(|e| e.common().handle == *h))
+                    .map(|e| WireModel::solid("edge_sel".into(), entity_pts(e), OPT_YELLOW, false))
                     .collect();
                 if !handle.is_null() && !self.edge_set.contains(&handle) {
                     if let Some(e) = self
@@ -2651,9 +2637,7 @@ impl CadCommand for TrimCommand {
         }
         if self.shift {
             // Shift held: preview the extend result instead.
-            if let Some(ext) =
-                pick_extend_at(&self.all_entities, &self.geos, handle, pt.x, pt.y)
-            {
+            if let Some(ext) = pick_extend_at(&self.all_entities, &self.geos, handle, pt.x, pt.y) {
                 if let Some(orig) = self
                     .all_entities
                     .iter()
@@ -2682,8 +2666,7 @@ impl CadCommand for TrimCommand {
 
         let nearby_geos = self.nearby_geos(handle);
         let geos = nearby_geos.as_slice();
-        let entity = self
-            .entity_index.get(&self.all_entities, handle);
+        let entity = self.entity_index.get(&self.all_entities, handle);
 
         let mut hover_wires = match entity {
             Some(EntityType::Line(l)) => {
@@ -2847,9 +2830,7 @@ impl CadCommand for TrimCommand {
                 if t1 <= t0 {
                     t1 += TAU;
                 }
-                let ts = ellipse_seg_ts(
-                    e.center.x, e.center.y, a, b, nx, ny, t0, t1, handle, geos,
-                );
+                let ts = ellipse_seg_ts(e.center.x, e.center.y, a, b, nx, ny, t0, t1, handle, geos);
                 if ts.is_empty() {
                     return vec![];
                 }
@@ -2901,11 +2882,15 @@ impl CadCommand for TrimCommand {
                 out
             }
             Some(EntityType::LwPolyline(p)) => {
-                let Some(survivors) = trim_lwpolyline(p, pt.x as f64, pt.y as f64, geos)
-                else {
+                let Some(survivors) = trim_lwpolyline(p, pt.x as f64, pt.y as f64, geos) else {
                     return vec![];
                 };
-                let orig = WireModel::solid("trim_rm".into(), entity_pts(entity.unwrap()), DIM_RED, false);
+                let orig = WireModel::solid(
+                    "trim_rm".into(),
+                    entity_pts(entity.unwrap()),
+                    DIM_RED,
+                    false,
+                );
                 let mut out = vec![orig];
                 for (i, ent) in survivors.iter().enumerate() {
                     out.push(WireModel::solid(
@@ -3080,11 +3065,7 @@ impl ExtendCommand {
         }
     }
 
-    fn fence_run(
-        &mut self,
-        fence: &[[f64; 2]],
-        window: Option<CrossingWindow>,
-    ) -> CmdResult {
+    fn fence_run(&mut self, fence: &[[f64; 2]], window: Option<CrossingWindow>) -> CmdResult {
         // EXTEND's fence extends; Shift held at Enter swaps it to trim.
         let repl = fence_pass(&self.all_entities, &self.geos, fence, window, !self.shift);
         if repl.is_empty() {
@@ -3106,10 +3087,10 @@ impl CadCommand for ExtendCommand {
             std::borrow::Cow::Borrowed("")
         };
         match &self.mode {
-            TrimMode::Pick => crate::tf!(
-                "EXTEND{edge}  Click near end of object to extend (Shift+click trims):"
-            )
-            .into_owned(),
+            TrimMode::Pick => {
+                crate::tf!("EXTEND{edge}  Click near end of object to extend (Shift+click trims):")
+                    .into_owned()
+            }
             TrimMode::SelectEdges => crate::tf!(
                 "EXTEND  Select boundary edges [{} picked, Enter = done]:",
                 self.edge_set.len()
@@ -3138,7 +3119,11 @@ impl CadCommand for ExtendCommand {
                 CmdOption::new("Fence", "F"),
                 CmdOption::new("Crossing", "C"),
                 CmdOption::new(
-                    if self.implied_edges { "Edge: Extend" } else { "Edge: No extend" },
+                    if self.implied_edges {
+                        "Edge: Extend"
+                    } else {
+                        "Edge: No extend"
+                    },
                     "E",
                 ),
                 CmdOption::enter("Done"),
@@ -3202,8 +3187,7 @@ impl CadCommand for ExtendCommand {
                     // Shift+click swaps to Trim for this pick (#336).
                     pick_trim_at(&self.all_entities, &self.geos, handle, px, py)
                 } else {
-                    pick_extend_at(&self.all_entities, &self.geos, handle, px, py)
-                        .map(|e| vec![e])
+                    pick_extend_at(&self.all_entities, &self.geos, handle, px, py).map(|e| vec![e])
                 };
                 if let Some(new_entities) = new_entities {
                     // Same snapshot bookkeeping as TRIM: drop the old entry,
@@ -3256,14 +3240,10 @@ impl CadCommand for ExtendCommand {
                     .edge_set
                     .iter()
                     .filter_map(|h| self.entity_index.get(&self.all_entities, *h))
-                    .map(|e| {
-                        WireModel::solid("edge_sel".into(), entity_pts(e), OPT_YELLOW, false)
-                    })
+                    .map(|e| WireModel::solid("edge_sel".into(), entity_pts(e), OPT_YELLOW, false))
                     .collect();
                 if !handle.is_null() && !self.edge_set.contains(&handle) {
-                    if let Some(e) = self
-                        .entity_index.get(&self.all_entities, handle)
-                    {
+                    if let Some(e) = self.entity_index.get(&self.all_entities, handle) {
                         let mut c = OPT_YELLOW;
                         c[3] = 0.45;
                         out.push(WireModel::solid(
@@ -3281,9 +3261,7 @@ impl CadCommand for ExtendCommand {
         }
         if self.shift {
             // Shift held: preview the trim result instead.
-            if let Some(pieces) =
-                pick_trim_at(&self.all_entities, &self.geos, handle, pt.x, pt.y)
-            {
+            if let Some(pieces) = pick_trim_at(&self.all_entities, &self.geos, handle, pt.x, pt.y) {
                 let mut out = Vec::new();
                 for (i, e) in pieces.iter().enumerate() {
                     out.push(WireModel::solid(
@@ -3301,8 +3279,7 @@ impl CadCommand for ExtendCommand {
             return vec![];
         }
 
-        let entity = self
-            .entity_index.get(&self.all_entities, handle);
+        let entity = self.entity_index.get(&self.all_entities, handle);
         match entity {
             Some(EntityType::Line(l)) => {
                 let ax = l.start.x;
@@ -3356,12 +3333,12 @@ impl CadCommand for ExtendCommand {
                     let t_click = arc_t(yl.atan2(xl), t0, t1);
                     if let Some(ext) = extend_ellipse(e, t_click, &self.geos) {
                         return extend_hover_wires(
-                        &EntityType::Ellipse(e.clone()),
-                        &ext,
-                        &self.all_entities,
-                        handle,
-                        self.implied_edges,
-                    );
+                            &EntityType::Ellipse(e.clone()),
+                            &ext,
+                            &self.all_entities,
+                            handle,
+                            self.implied_edges,
+                        );
                     }
                 }
             }
@@ -3487,10 +3464,9 @@ impl CadCommand for ExtendCommand {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["EXTEND"] });  // ExtendCommand
-inventory::submit!(crate::command::CommandRegistration { names: &["TRIM"] });  // TrimCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["EXTEND"] }); // ExtendCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["TRIM"] }); // TrimCommand
 
 #[cfg(test)]
 mod tests {
@@ -3520,8 +3496,12 @@ mod tests {
         imply_edge_geos(&mut implied);
         match pick_extend_at(&all, &implied, Handle::new(1), 1.9, 0.0) {
             Some(EntityType::Line(l)) => {
-                assert!((l.end.x - 5.0).abs() < 1e-6 && l.end.y.abs() < 1e-6,
-                    "extends to the implied boundary, got ({}, {})", l.end.x, l.end.y);
+                assert!(
+                    (l.end.x - 5.0).abs() < 1e-6 && l.end.y.abs() < 1e-6,
+                    "extends to the implied boundary, got ({}, {})",
+                    l.end.x,
+                    l.end.y
+                );
             }
             other => panic!("expected an extended Line, got {other:?}"),
         }
@@ -3538,13 +3518,21 @@ mod tests {
         let geos = build_geos(&all);
         let fence = [[8.0, 10.0], [10.0, 8.0]];
         let repl = fence_pass(&all, &geos, &fence, None, false);
-        assert_eq!(repl.len(), 1, "exactly the crossed line is trimmed: {repl:?}");
+        assert_eq!(
+            repl.len(),
+            1,
+            "exactly the crossed line is trimmed: {repl:?}"
+        );
         assert_eq!(repl[0].0, Handle::new(1));
         assert_eq!(repl[0].1.len(), 1);
         match &repl[0].1[0] {
             EntityType::Line(l) => {
-                assert!((l.end.x - 5.0).abs() < 1e-6 && (l.end.y - 5.0).abs() < 1e-6,
-                    "arm cut back to the intersection, got end ({}, {})", l.end.x, l.end.y);
+                assert!(
+                    (l.end.x - 5.0).abs() < 1e-6 && (l.end.y - 5.0).abs() < 1e-6,
+                    "arm cut back to the intersection, got end ({}, {})",
+                    l.end.x,
+                    l.end.y
+                );
             }
             other => panic!("expected a Line, got {other:?}"),
         }
@@ -3619,17 +3607,34 @@ mod tests {
         let geos = build_geos(&all);
 
         // Click first half near (0.5, -0.8) -> first half removed, second half kept from (1.0, -1.0) to (2.0, 0.0)
-        let res = pick_trim_at(&all, &geos, Handle::new(10), 0.5, -0.8).expect("should trim polyline arc");
+        let res = pick_trim_at(&all, &geos, Handle::new(10), 0.5, -0.8)
+            .expect("should trim polyline arc");
         assert_eq!(res.len(), 1);
         match &res[0] {
             EntityType::LwPolyline(p) => {
                 assert_eq!(p.vertices.len(), 2);
                 let p0 = &p.vertices[0];
                 let p1 = &p.vertices[1];
-                assert!((p0.location.x - 1.0).abs() < 1e-5, "expected x=1.0, got {}", p0.location.x);
-                assert!((p0.location.y + 1.0).abs() < 1e-5, "expected y=-1.0, got {}", p0.location.y);
-                assert!((p1.location.x - 2.0).abs() < 1e-5, "expected x=2.0, got {}", p1.location.x);
-                assert!(p1.location.y.abs() < 1e-5, "expected y=0.0, got {}", p1.location.y);
+                assert!(
+                    (p0.location.x - 1.0).abs() < 1e-5,
+                    "expected x=1.0, got {}",
+                    p0.location.x
+                );
+                assert!(
+                    (p0.location.y + 1.0).abs() < 1e-5,
+                    "expected y=-1.0, got {}",
+                    p0.location.y
+                );
+                assert!(
+                    (p1.location.x - 2.0).abs() < 1e-5,
+                    "expected x=2.0, got {}",
+                    p1.location.x
+                );
+                assert!(
+                    p1.location.y.abs() < 1e-5,
+                    "expected y=0.0, got {}",
+                    p1.location.y
+                );
                 // The surviving quarter circle should have bulge = tan(pi / 8)
                 let expected_bulge = FRAC_PI_8.tan();
                 assert!(
@@ -3644,17 +3649,34 @@ mod tests {
         }
 
         // Click second half near (1.5, -0.8) -> second half removed, first half kept from (0.0, 0.0) to (1.0, -1.0)
-        let res2 = pick_trim_at(&all, &geos, Handle::new(10), 1.5, -0.8).expect("should trim polyline arc");
+        let res2 = pick_trim_at(&all, &geos, Handle::new(10), 1.5, -0.8)
+            .expect("should trim polyline arc");
         assert_eq!(res2.len(), 1);
         match &res2[0] {
             EntityType::LwPolyline(p) => {
                 assert_eq!(p.vertices.len(), 2);
                 let p0 = &p.vertices[0];
                 let p1 = &p.vertices[1];
-                assert!(p0.location.x.abs() < 1e-5, "expected x=0.0, got {}", p0.location.x);
-                assert!(p0.location.y.abs() < 1e-5, "expected y=0.0, got {}", p0.location.y);
-                assert!((p1.location.x - 1.0).abs() < 1e-5, "expected x=1.0, got {}", p1.location.x);
-                assert!((p1.location.y + 1.0).abs() < 1e-5, "expected y=-1.0, got {}", p1.location.y);
+                assert!(
+                    p0.location.x.abs() < 1e-5,
+                    "expected x=0.0, got {}",
+                    p0.location.x
+                );
+                assert!(
+                    p0.location.y.abs() < 1e-5,
+                    "expected y=0.0, got {}",
+                    p0.location.y
+                );
+                assert!(
+                    (p1.location.x - 1.0).abs() < 1e-5,
+                    "expected x=1.0, got {}",
+                    p1.location.x
+                );
+                assert!(
+                    (p1.location.y + 1.0).abs() < 1e-5,
+                    "expected y=-1.0, got {}",
+                    p1.location.y
+                );
                 let expected_bulge = FRAC_PI_8.tan();
                 assert!(
                     (p0.bulge - expected_bulge).abs() < 1e-4,
@@ -3795,7 +3817,8 @@ mod tests {
         // Click first half of arc near (0.5, -0.8):
         // Nearest cuts are at (1.0, -1.0) on seg 0 and at (0.0, 1.0) on seg 3.
         // Trim removes that corner/arc portion and leaves an open polyline
-        let res = pick_trim_at(&all, &geos, Handle::new(70), 0.5, -0.8).expect("should trim closed polyline");
+        let res = pick_trim_at(&all, &geos, Handle::new(70), 0.5, -0.8)
+            .expect("should trim closed polyline");
         assert_eq!(res.len(), 1);
         match &res[0] {
             EntityType::LwPolyline(p) => {
@@ -4082,7 +4105,10 @@ fn preview_sample_xy(e: &EntityType) -> Vec<[f64; 2]> {
             (0..=steps)
                 .map(|i| {
                     let a = TAU * (i as f64 / steps as f64);
-                    [c.center.x + c.radius * a.cos(), c.center.y + c.radius * a.sin()]
+                    [
+                        c.center.x + c.radius * a.cos(),
+                        c.center.y + c.radius * a.sin(),
+                    ]
                 })
                 .collect()
         }
@@ -4272,7 +4298,11 @@ impl ExtrimCommand {
             .into_iter()
             .map(|(handle, entity)| (handle, entity_with_lwpolyline_world_xy(&entity)))
             .collect();
-        Self { all, boundary: None, geos: Vec::new() }
+        Self {
+            all,
+            boundary: None,
+            geos: Vec::new(),
+        }
     }
 }
 
@@ -4353,8 +4383,10 @@ impl CadCommand for ExtrimCommand {
                     );
                     if ts.is_empty() {
                         let am = norm(a.start_angle);
-                        let mid =
-                            [a.center.x + a.radius * am.cos(), a.center.y + a.radius * am.sin()];
+                        let mid = [
+                            a.center.x + a.radius * am.cos(),
+                            a.center.y + a.radius * am.sin(),
+                        ];
                         if side(mid) {
                             repl.push((*h, vec![]));
                         }
@@ -4449,6 +4481,4 @@ impl CadCommand for ExtrimCommand {
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration {
-    names: &["EXTRIM"]
-}); // ExtrimCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["EXTRIM"] }); // ExtrimCommand

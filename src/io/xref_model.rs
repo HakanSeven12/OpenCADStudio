@@ -17,25 +17,23 @@ fn normalize_core(raw: &str, fold_case: bool) -> String {
 
     // 2. Prefix split: drive (`C:`), UNC (`//`), or none.
     let bytes = slashed.as_bytes();
-    let (prefix, mut rest, unc) = if bytes.len() >= 2
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b':'
-    {
-        let drive = &slashed[..2];
-        (
-            if fold_case {
-                drive.to_ascii_lowercase()
-            } else {
-                drive.to_string()
-            },
-            slashed[2..].to_string(),
-            false,
-        )
-    } else if let Some(stripped) = slashed.strip_prefix("//") {
-        ("//".to_string(), stripped.to_string(), true)
-    } else {
-        (String::new(), slashed, false)
-    };
+    let (prefix, mut rest, unc) =
+        if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+            let drive = &slashed[..2];
+            (
+                if fold_case {
+                    drive.to_ascii_lowercase()
+                } else {
+                    drive.to_string()
+                },
+                slashed[2..].to_string(),
+                false,
+            )
+        } else if let Some(stripped) = slashed.strip_prefix("//") {
+            ("//".to_string(), stripped.to_string(), true)
+        } else {
+            (String::new(), slashed, false)
+        };
     if unc {
         // Collapse `///share` → `//share` so the rejoin can't triple-slash.
         rest = rest.trim_start_matches('/').to_string();
@@ -147,9 +145,15 @@ fn comps_after_root(path_norm: &str) -> Vec<&str> {
     let is_drive = b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':';
     let is_unc = path_norm.starts_with("//");
     if is_drive {
-        path_norm[2..].split('/').filter(|s| !s.is_empty()).collect()
+        path_norm[2..]
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .collect()
     } else if is_unc {
-        let all: Vec<&str> = path_norm[2..].split('/').filter(|s| !s.is_empty()).collect();
+        let all: Vec<&str> = path_norm[2..]
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
         if all.len() >= 2 {
             all[2..].to_vec()
         } else {
@@ -191,7 +195,10 @@ pub fn to_pathtype_result(
             if is_relative_path(&normalize_lexical(path)) && !normalize_lexical(path).is_empty() {
                 if let Some(dir) = host.parent() {
                     if !dir.as_os_str().is_empty() {
-                        let joined = dir.join(normalize_display(path)).to_string_lossy().into_owned();
+                        let joined = dir
+                            .join(normalize_display(path))
+                            .to_string_lossy()
+                            .into_owned();
                         return Ok(normalize_display(&joined));
                     }
                 }
@@ -460,7 +467,10 @@ pub fn decide_status(
     }
     if resolved == RefStatus::Loaded {
         if let (Some(l), Some(c)) = (live, cached) {
-            let delta = l.duration_since(c).ok().or_else(|| c.duration_since(l).ok());
+            let delta = l
+                .duration_since(c)
+                .ok()
+                .or_else(|| c.duration_since(l).ok());
             if delta.is_some_and(|d| d > std::time::Duration::from_secs(1)) {
                 return RefStatus::Stale;
             }
@@ -553,9 +563,12 @@ impl RefStatCache {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_display, normalize_lexical, to_pathtype, to_pathtype_result, wildcard_match, Pathtype, PathtypeError};
     use super::{bind_symbol, bind_symbol_taken, RefKind, ReferenceEntry};
     use super::{child_key, decide_status, RefStatCache, RefStatus, UnloadSet};
+    use super::{
+        normalize_display, normalize_lexical, to_pathtype, to_pathtype_result, wildcard_match,
+        Pathtype, PathtypeError,
+    };
 
     #[test]
     fn child_key_differs_from_colliding_host_key() {
@@ -770,8 +783,7 @@ mod tests {
 
         // Cell 2: raster image definition with an absolute file path.
         let img_handle = doc.allocate_handle();
-        let mut img_def =
-            ImageDefinition::with_dimensions(r"C:\Probe\IMG.png", 64u32, 64u32);
+        let mut img_def = ImageDefinition::with_dimensions(r"C:\Probe\IMG.png", 64u32, 64u32);
         img_def.handle = img_handle;
         img_def.is_loaded = true;
         doc.objects
@@ -787,8 +799,7 @@ mod tests {
         // Cell 4: the retain flag itself ($VISRETAIN).
         doc.header.retain_xref_visibility = true;
 
-        let bytes = crate::io::save_to_bytes(&doc, ext, doc.version)
-            .expect("probe save");
+        let bytes = crate::io::save_to_bytes(&doc, ext, doc.version).expect("probe save");
         std::fs::write(dir.join(format!("probe.{ext}")), &bytes).expect("probe write");
 
         let back = crate::io::load_bytes(&format!("probe.{ext}"), bytes).expect("probe reload");
@@ -872,7 +883,13 @@ mod tests {
     }
     #[test]
     fn bind_chain_naming_transitive() {
-        assert_eq!(bind_symbol("PLAN", "DETAIL", "WALLS"), "PLAN$0$DETAIL$0$WALLS");
-        assert_eq!(bind_symbol_taken("PLAN", "WALLS", &["PLAN$0$WALLS"]), "PLAN$1$WALLS");
+        assert_eq!(
+            bind_symbol("PLAN", "DETAIL", "WALLS"),
+            "PLAN$0$DETAIL$0$WALLS"
+        );
+        assert_eq!(
+            bind_symbol_taken("PLAN", "WALLS", &["PLAN$0$WALLS"]),
+            "PLAN$1$WALLS"
+        );
     }
 }

@@ -1,7 +1,7 @@
 use acadrust::tables::{Table, TableEntry};
 use iced::Task;
-use serde::{Serialize, de::DeserializeOwned};
-use serde_json::{Map, Value, json};
+use serde::{de::DeserializeOwned, Serialize};
+use serde_json::{json, Map, Value};
 use std::collections::VecDeque;
 use std::sync::OnceLock;
 
@@ -1613,7 +1613,7 @@ mod tests {
     use acadrust::entities::{AttributeEntity, EntityType, Insert};
     use acadrust::objects::{Dictionary, ObjectType};
     use acadrust::types::{Handle, Vector3};
-    use serde_json::{Value, json};
+    use serde_json::{json, Value};
 
     use super::OpenCADStudio;
 

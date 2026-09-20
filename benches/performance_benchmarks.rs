@@ -1188,10 +1188,26 @@ fn bench_ui_grid_geometry(runner: &mut BenchmarkRunner) {
     if runner.should_run("ui_grid_geometry_uncached") {
         for _ in 0..10 {
             let _ = black_box(grid_segments(
-                view_rot1, eye1, bounds1, step1, step1, major_every, origin1, axes1, limits1,
+                view_rot1,
+                eye1,
+                bounds1,
+                step1,
+                step1,
+                major_every,
+                origin1,
+                axes1,
+                limits1,
             ));
             let _ = black_box(grid_segments(
-                view_rot2, eye2, bounds2, step2, step2, major_every, origin2, axes2, limits2,
+                view_rot2,
+                eye2,
+                bounds2,
+                step2,
+                step2,
+                major_every,
+                origin2,
+                axes2,
+                limits2,
             ));
         }
 
@@ -1202,8 +1218,28 @@ fn bench_ui_grid_geometry(runner: &mut BenchmarkRunner) {
         for _ in 0..runs {
             let t0 = Instant::now();
             for _ in 0..n {
-                let g1 = grid_segments(view_rot1, eye1, bounds1, step1, step1, major_every, origin1, axes1, limits1);
-                let g2 = grid_segments(view_rot2, eye2, bounds2, step2, step2, major_every, origin2, axes2, limits2);
+                let g1 = grid_segments(
+                    view_rot1,
+                    eye1,
+                    bounds1,
+                    step1,
+                    step1,
+                    major_every,
+                    origin1,
+                    axes1,
+                    limits1,
+                );
+                let g2 = grid_segments(
+                    view_rot2,
+                    eye2,
+                    bounds2,
+                    step2,
+                    step2,
+                    major_every,
+                    origin2,
+                    axes2,
+                    limits2,
+                );
                 black_box(g1);
                 black_box(g2);
             }

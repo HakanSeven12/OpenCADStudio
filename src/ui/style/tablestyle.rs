@@ -2,9 +2,9 @@
 
 use crate::app::Message;
 use crate::t;
+use crate::ui::style::common::muted_style;
 use iced::widget::{canvas, checkbox, column, row, text, text_input, Column};
 use iced::{mouse, Color, Element, Length, Point, Rectangle, Size, Theme};
-use crate::ui::style::common::muted_style;
 use std::borrow::Cow;
 use std::fmt;
 
@@ -197,16 +197,52 @@ impl canvas::Program<Message> for TablePreviewCanvas {
                 );
             }
             let borders = &row.borders;
-            draw_line(&mut frame, Point::new(left, y0), Point::new(left, y1), &borders[0], ink);
-            draw_line(&mut frame, Point::new(right, y0), Point::new(right, y1), &borders[1], ink);
-            draw_line(&mut frame, Point::new(left, y0), Point::new(right, y0), &borders[2], ink);
-            draw_line(&mut frame, Point::new(left, y1), Point::new(right, y1), &borders[3], ink);
+            draw_line(
+                &mut frame,
+                Point::new(left, y0),
+                Point::new(left, y1),
+                &borders[0],
+                ink,
+            );
+            draw_line(
+                &mut frame,
+                Point::new(right, y0),
+                Point::new(right, y1),
+                &borders[1],
+                ink,
+            );
+            draw_line(
+                &mut frame,
+                Point::new(left, y0),
+                Point::new(right, y0),
+                &borders[2],
+                ink,
+            );
+            draw_line(
+                &mut frame,
+                Point::new(left, y1),
+                Point::new(right, y1),
+                &borders[3],
+                ink,
+            );
             for column in 1..3 {
                 let x = left + column as f32 * col_width;
-                draw_line(&mut frame, Point::new(x, y0), Point::new(x, y1), &borders[5], ink);
+                draw_line(
+                    &mut frame,
+                    Point::new(x, y0),
+                    Point::new(x, y1),
+                    &borders[5],
+                    ink,
+                );
             }
             if display_row + 1 < order.len() {
-                draw_line(&mut frame, Point::new(left, y1), Point::new(right, y1), &borders[4], ink);
+                draw_line(
+                    &mut frame,
+                    Point::new(left, y1),
+                    Point::new(right, y1),
+                    &borders[4],
+                    ink,
+                );
             }
             for column in 0..3 {
                 let label = if row.format.trim().is_empty() {
@@ -223,8 +259,12 @@ impl canvas::Program<Message> for TablePreviewCanvas {
                 };
                 let x = match horizontal {
                     iced::advanced::text::Alignment::Left => left + column as f32 * col_width + 5.0,
-                    iced::advanced::text::Alignment::Right => left + (column + 1) as f32 * col_width - 5.0,
-                    iced::advanced::text::Alignment::Center => left + (column as f32 + 0.5) * col_width,
+                    iced::advanced::text::Alignment::Right => {
+                        left + (column + 1) as f32 * col_width - 5.0
+                    }
+                    iced::advanced::text::Alignment::Center => {
+                        left + (column as f32 + 0.5) * col_width
+                    }
                     _ => left + (column as f32 + 0.5) * col_width,
                 };
                 let y = if row.alignment.starts_with("Top") {
@@ -256,10 +296,20 @@ impl canvas::Program<Message> for TablePreviewCanvas {
             content: format!(
                 "{} · {} · {} {} / {} {}{}{}",
                 active.text_style,
-                if self.annotative { t!("Annotative") } else { t!("Drawing units") },
-                t!("Type"), active.data_type,
-                t!("Unit"), active.unit_type,
-                if self.description.trim().is_empty() { "" } else { " · " },
+                if self.annotative {
+                    t!("Annotative")
+                } else {
+                    t!("Drawing units")
+                },
+                t!("Type"),
+                active.data_type,
+                t!("Unit"),
+                active.unit_type,
+                if self.description.trim().is_empty() {
+                    ""
+                } else {
+                    " · "
+                },
                 self.description,
             ),
             position: Point::new(10.0, bounds.height - 9.0),
@@ -301,10 +351,12 @@ fn cell_editor<'a>(v: &TableStyleView<'a>, row_index: u8) -> Element<'a, Message
     };
     let index = row_index as usize;
     let cell_input = |label, placeholder, value: &'a str, field| {
-        input_row(label, placeholder, value, move |value| Message::TableStyleCellEdit {
-            row: row_index,
-            field,
-            value,
+        input_row(label, placeholder, value, move |value| {
+            Message::TableStyleCellEdit {
+                row: row_index,
+                field,
+                value,
+            }
         })
     };
     let cell_color = |label: Cow<'static, str>, value: &'a str, field: &'static str| {
@@ -323,7 +375,10 @@ fn cell_editor<'a>(v: &TableStyleView<'a>, row_index: u8) -> Element<'a, Message
                 value: crate::ui::color_select::color_to_aci_string(color),
             },
             Message::TableColorMore(row_index, field),
-            Message::OpenColorWindow(crate::app::ColorPickTarget::Table(row_index, field), current),
+            Message::OpenColorWindow(
+                crate::app::ColorPickTarget::Table(row_index, field),
+                current,
+            ),
         );
         row![text(label).size(11).style(muted_style).width(155), selector]
             .spacing(8)
@@ -332,23 +387,53 @@ fn cell_editor<'a>(v: &TableStyleView<'a>, row_index: u8) -> Element<'a, Message
     let selected_alignment = format!("{:?}", row_style.alignment);
     let mut content = Column::new()
         .spacing(7)
-        .push(cell_input(t!("Text style"), "Standard", &v.cell_textstyle[index], "textstyle"))
-        .push(cell_input(t!("Text height"), "0.18", &v.cell_height[index], "height"))
-        .push(cell_color(t!("Text color"), &v.cell_textcolor[index], "textcolor"))
-        .push(cell_color(t!("Fill color"), &v.cell_fillcolor[index], "fillcolor"))
+        .push(cell_input(
+            t!("Text style"),
+            "Standard",
+            &v.cell_textstyle[index],
+            "textstyle",
+        ))
+        .push(cell_input(
+            t!("Text height"),
+            "0.18",
+            &v.cell_height[index],
+            "height",
+        ))
+        .push(cell_color(
+            t!("Text color"),
+            &v.cell_textcolor[index],
+            "textcolor",
+        ))
+        .push(cell_color(
+            t!("Fill color"),
+            &v.cell_fillcolor[index],
+            "fillcolor",
+        ))
         .push(
             row![
                 text(t!("Alignment")).size(11).style(muted_style).width(155),
                 iced::widget::pick_list(
-                    Some(EnumChoice { code: selected_alignment.clone(), label: crate::i18n::translate(&selected_alignment) }),
+                    Some(EnumChoice {
+                        code: selected_alignment.clone(),
+                        label: crate::i18n::translate(&selected_alignment)
+                    }),
                     choices(&[
-                        ("TopLeft", "Top left"), ("TopCenter", "Top center"), ("TopRight", "Top right"),
-                        ("MiddleLeft", "Middle left"), ("MiddleCenter", "Middle center"), ("MiddleRight", "Middle right"),
-                        ("BottomLeft", "Bottom left"), ("BottomCenter", "Bottom center"), ("BottomRight", "Bottom right"),
+                        ("TopLeft", "Top left"),
+                        ("TopCenter", "Top center"),
+                        ("TopRight", "Top right"),
+                        ("MiddleLeft", "Middle left"),
+                        ("MiddleCenter", "Middle center"),
+                        ("MiddleRight", "Middle right"),
+                        ("BottomLeft", "Bottom left"),
+                        ("BottomCenter", "Bottom center"),
+                        ("BottomRight", "Bottom right"),
                     ]),
                     |value| value.to_string(),
                 )
-                .on_select(move |choice| Message::TableStyleCellSetAlign { row: row_index, value: choice.code })
+                .on_select(move |choice| Message::TableStyleCellSetAlign {
+                    row: row_index,
+                    value: choice.code
+                })
                 .text_size(11)
                 .width(170),
             ]
@@ -362,9 +447,24 @@ fn cell_editor<'a>(v: &TableStyleView<'a>, row_index: u8) -> Element<'a, Message
                 .size(14)
                 .text_size(11),
         )
-        .push(cell_input(t!("Data type"), "0", &v.cell_datatype[index], "datatype"))
-        .push(cell_input(t!("Unit type"), "0", &v.cell_unittype[index], "unittype"))
-        .push(cell_input(t!("Format string"), "", &v.cell_format[index], "format"))
+        .push(cell_input(
+            t!("Data type"),
+            "0",
+            &v.cell_datatype[index],
+            "datatype",
+        ))
+        .push(cell_input(
+            t!("Unit type"),
+            "0",
+            &v.cell_unittype[index],
+            "unittype",
+        ))
+        .push(cell_input(
+            t!("Format string"),
+            "",
+            &v.cell_format[index],
+            "format",
+        ))
         .push(text(t!("Borders")).size(11).style(primary_style));
     let borders = [
         (t!("Left"), &row_style.left_border),
@@ -381,26 +481,64 @@ fn cell_editor<'a>(v: &TableStyleView<'a>, row_index: u8) -> Element<'a, Message
             row![
                 text(label).size(10).style(muted_style).width(96),
                 iced::widget::pick_list(
-                    Some(EnumChoice { code: border_type.clone(), label: crate::i18n::translate(&border_type) }),
+                    Some(EnumChoice {
+                        code: border_type.clone(),
+                        label: crate::i18n::translate(&border_type)
+                    }),
                     choices(&[("Single", "Single"), ("Double", "Double")]),
                     |value| value.to_string(),
                 )
-                .on_select(move |choice| Message::TableStyleBorderSetType { cell: row_index, border: border_index, value: choice.code })
+                .on_select(move |choice| Message::TableStyleBorderSetType {
+                    cell: row_index,
+                    border: border_index,
+                    value: choice.code
+                })
                 .text_size(10)
                 .width(82),
-                text_input(t!("Weight").as_ref(), &v.border_lw[index][border_index as usize])
-                    .on_input(move |value| Message::TableStyleBorderEdit { cell: row_index, border: border_index, field: "lw", value })
-                    .size(10).width(68),
-                text_input(t!("Color").as_ref(), &v.border_color[index][border_index as usize])
-                    .on_input(move |value| Message::TableStyleBorderEdit { cell: row_index, border: border_index, field: "color", value })
-                    .size(10).width(62),
-                text_input(t!("Spacing").as_ref(), &v.border_spacing[index][border_index as usize])
-                    .on_input(move |value| Message::TableStyleBorderEdit { cell: row_index, border: border_index, field: "spacing", value })
-                    .size(10).width(68),
+                text_input(
+                    t!("Weight").as_ref(),
+                    &v.border_lw[index][border_index as usize]
+                )
+                .on_input(move |value| Message::TableStyleBorderEdit {
+                    cell: row_index,
+                    border: border_index,
+                    field: "lw",
+                    value
+                })
+                .size(10)
+                .width(68),
+                text_input(
+                    t!("Color").as_ref(),
+                    &v.border_color[index][border_index as usize]
+                )
+                .on_input(move |value| Message::TableStyleBorderEdit {
+                    cell: row_index,
+                    border: border_index,
+                    field: "color",
+                    value
+                })
+                .size(10)
+                .width(62),
+                text_input(
+                    t!("Spacing").as_ref(),
+                    &v.border_spacing[index][border_index as usize]
+                )
+                .on_input(move |value| Message::TableStyleBorderEdit {
+                    cell: row_index,
+                    border: border_index,
+                    field: "spacing",
+                    value
+                })
+                .size(10)
+                .width(68),
                 checkbox(border.is_invisible)
                     .label(t!("Hidden"))
-                    .on_toggle(move |_| Message::TableStyleBorderToggleInvisible { cell: row_index, border: border_index })
-                    .size(13).text_size(10),
+                    .on_toggle(move |_| Message::TableStyleBorderToggleInvisible {
+                        cell: row_index,
+                        border: border_index
+                    })
+                    .size(13)
+                    .text_size(10),
             ]
             .spacing(5)
             .align_y(iced::Center),
@@ -411,7 +549,11 @@ fn cell_editor<'a>(v: &TableStyleView<'a>, row_index: u8) -> Element<'a, Message
 
 fn preview_rows(v: &TableStyleView<'_>) -> Option<[PreviewRow; 3]> {
     let style = v.style?;
-    let source = [&style.data_row_style, &style.header_row_style, &style.title_row_style];
+    let source = [
+        &style.data_row_style,
+        &style.header_row_style,
+        &style.title_row_style,
+    ];
     Some(std::array::from_fn(|row| {
         let borders = [
             &source[row].left_border,
@@ -451,23 +593,58 @@ pub fn view_window<'a>(
     let content: Element<'a, Message> = match (v.tab, style) {
         (_, None) => text(t!("Select a style to view details.")).size(11).into(),
         (0, Some(style)) => column![
-            input_row(t!("Description"), "", v.description, |value| Message::TableStyleEdit { field: "description", value }),
+            input_row(t!("Description"), "", v.description, |value| {
+                Message::TableStyleEdit {
+                    field: "description",
+                    value,
+                }
+            }),
             row![
-                text(t!("Flow direction")).size(11).style(muted_style).width(155),
+                text(t!("Flow direction"))
+                    .size(11)
+                    .style(muted_style)
+                    .width(155),
                 iced::widget::pick_list(
-                    Some(EnumChoice { code: format!("{:?}", style.flow_direction), label: crate::i18n::translate(&format!("{:?}", style.flow_direction)) }),
+                    Some(EnumChoice {
+                        code: format!("{:?}", style.flow_direction),
+                        label: crate::i18n::translate(&format!("{:?}", style.flow_direction))
+                    }),
                     choices(&[("Down", "Top to bottom"), ("Up", "Bottom to top")]),
                     |value| value.to_string(),
                 )
                 .on_select(|choice| Message::TableStyleSetFlow(choice.code))
-                .text_size(11).width(170),
+                .text_size(11)
+                .width(170),
             ]
-            .spacing(8).align_y(iced::Center),
-            input_row(t!("Horizontal margin"), "1.5", v.hmargin, |value| Message::TableStyleEdit { field: "hmargin", value }),
-            input_row(t!("Vertical margin"), "1.5", v.vmargin, |value| Message::TableStyleEdit { field: "vmargin", value }),
-            checkbox(style.title_suppressed).label(t!("Suppress title row")).on_toggle(|_| Message::TableStyleToggle("title_sup")).size(14).text_size(11),
-            checkbox(style.header_suppressed).label(t!("Suppress header row")).on_toggle(|_| Message::TableStyleToggle("header_sup")).size(14).text_size(11),
-            checkbox(style.annotative).label(t!("Annotative")).on_toggle(|_| Message::TableStyleToggleAnnotative).size(14).text_size(11),
+            .spacing(8)
+            .align_y(iced::Center),
+            input_row(t!("Horizontal margin"), "1.5", v.hmargin, |value| {
+                Message::TableStyleEdit {
+                    field: "hmargin",
+                    value,
+                }
+            }),
+            input_row(t!("Vertical margin"), "1.5", v.vmargin, |value| {
+                Message::TableStyleEdit {
+                    field: "vmargin",
+                    value,
+                }
+            }),
+            checkbox(style.title_suppressed)
+                .label(t!("Suppress title row"))
+                .on_toggle(|_| Message::TableStyleToggle("title_sup"))
+                .size(14)
+                .text_size(11),
+            checkbox(style.header_suppressed)
+                .label(t!("Suppress header row"))
+                .on_toggle(|_| Message::TableStyleToggle("header_sup"))
+                .size(14)
+                .text_size(11),
+            checkbox(style.annotative)
+                .label(t!("Annotative"))
+                .on_toggle(|_| Message::TableStyleToggleAnnotative)
+                .size(14)
+                .text_size(11),
         ]
         .spacing(9)
         .into(),
@@ -486,7 +663,11 @@ pub fn view_window<'a>(
             unit_type: String::new(),
             format: String::new(),
             borders: std::array::from_fn(|_| PreviewBorder {
-                color: String::new(), weight: String::new(), spacing: String::new(), double: false, hidden: false,
+                color: String::new(),
+                weight: String::new(),
+                spacing: String::new(),
+                double: false,
+                hidden: false,
             }),
         })
     });
@@ -527,15 +708,20 @@ pub fn view_window<'a>(
                 summary,
                 on_select: Message::TableStyleDialogCompare,
             }),
-            tabs: [t!("General"), t!("Data Row"), t!("Header Row"), t!("Title Row")]
-                .into_iter()
-                .enumerate()
-                .map(|(tab, label)| crate::ui::style::style_manager::EditorTab {
-                    label,
-                    active: v.tab == tab as u8,
-                    on_press: Message::TableStyleDialogTab(tab as u8),
-                })
-                .collect(),
+            tabs: [
+                t!("General"),
+                t!("Data Row"),
+                t!("Header Row"),
+                t!("Title Row"),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(tab, label)| crate::ui::style::style_manager::EditorTab {
+                label,
+                active: v.tab == tab as u8,
+                on_press: Message::TableStyleDialogTab(tab as u8),
+            })
+            .collect(),
             content,
         },
     );

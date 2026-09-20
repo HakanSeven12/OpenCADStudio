@@ -89,17 +89,20 @@ impl Widget<Message, Theme, Renderer> for Intrinsic<'_> {
             self.max.height.min(limits.max().height),
         );
         let measure_limits = layout::Limits::new(Size::ZERO, measure_max);
-        let measured = self.children[0]
-            .as_widget_mut()
-            .layout(&mut tree.children[0], renderer, &measure_limits);
+        let measured = self.children[0].as_widget_mut().layout(
+            &mut tree.children[0],
+            renderer,
+            &measure_limits,
+        );
         let size = Size::new(
             (measured.size().width + self.extra.x).min(limits.max().width),
             (measured.size().height + self.extra.y).min(limits.max().height),
         );
         let final_limits = layout::Limits::new(size, size);
-        let content = self.children[1]
-            .as_widget_mut()
-            .layout(&mut tree.children[1], renderer, &final_limits);
+        let content =
+            self.children[1]
+                .as_widget_mut()
+                .layout(&mut tree.children[1], renderer, &final_limits);
 
         layout::Node::with_children(size, vec![measured, content])
     }
@@ -111,9 +114,12 @@ impl Widget<Message, Theme, Renderer> for Intrinsic<'_> {
         renderer: &Renderer,
         operation: &mut dyn widget::Operation,
     ) {
-        self.children[1]
-            .as_widget_mut()
-            .operate(&mut tree.children[1], layout.child(1), renderer, operation);
+        self.children[1].as_widget_mut().operate(
+            &mut tree.children[1],
+            layout.child(1),
+            renderer,
+            operation,
+        );
     }
 
     fn update(
@@ -145,15 +151,13 @@ impl Widget<Message, Theme, Renderer> for Intrinsic<'_> {
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
-        self.children[1]
-            .as_widget()
-            .mouse_interaction(
-                &tree.children[1],
-                layout.child(1),
-                cursor,
-                viewport,
-                renderer,
-            )
+        self.children[1].as_widget().mouse_interaction(
+            &tree.children[1],
+            layout.child(1),
+            cursor,
+            viewport,
+            renderer,
+        )
     }
 
     fn draw(
@@ -166,17 +170,15 @@ impl Widget<Message, Theme, Renderer> for Intrinsic<'_> {
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        self.children[1]
-            .as_widget()
-            .draw(
-                &tree.children[1],
-                renderer,
-                theme,
-                style,
-                layout.child(1),
-                cursor,
-                viewport,
-            );
+        self.children[1].as_widget().draw(
+            &tree.children[1],
+            renderer,
+            theme,
+            style,
+            layout.child(1),
+            cursor,
+            viewport,
+        );
     }
 
     fn overlay<'b>(
@@ -187,15 +189,13 @@ impl Widget<Message, Theme, Renderer> for Intrinsic<'_> {
         viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
-        self.children[1]
-            .as_widget_mut()
-            .overlay(
-                &mut tree.children[1],
-                layout.child(1),
-                renderer,
-                viewport,
-                translation,
-            )
+        self.children[1].as_widget_mut().overlay(
+            &mut tree.children[1],
+            layout.child(1),
+            renderer,
+            viewport,
+            translation,
+        )
     }
 }
 
@@ -228,12 +228,7 @@ pub fn backdrop<'a>(
             .height(Length::Fill)
             .style(|theme: &Theme| container::Style {
                 background: Some(Background::Color(
-                    theme
-                        .palette()
-                        .background
-                        .strongest
-                        .color
-                        .scale_alpha(0.55),
+                    theme.palette().background.strongest.color.scale_alpha(0.55),
                 )),
                 ..Default::default()
             }),
@@ -308,9 +303,7 @@ pub fn modal<'a>(
     .height(Length::Fixed(24.0));
 
     let panel_style = |theme: &Theme| container::Style {
-        background: Some(Background::Color(
-            theme.palette().background.base.color,
-        )),
+        background: Some(Background::Color(theme.palette().background.base.color)),
         border: Border {
             color: theme.palette().background.neutral.color,
             width: 1.0,
@@ -323,16 +316,15 @@ pub fn modal<'a>(
     // room for the title, while the actual title bar and resize grip overlay it
     // without influencing the modal dimensions.
     let measured_content = sensor(content).on_resize(Message::ModalContentResized);
-    let body_base = column![
-        Space::new().height(Length::Fixed(24.0)),
-        measured_content,
-    ]
-    .spacing(6);
+    let body_base = column![Space::new().height(Length::Fixed(24.0)), measured_content,].spacing(6);
     let mut body = stack![body_base, title_bar];
     if options.resizable {
         let resize = mouse_area(
-            container(crate::ui::icons::themed_primary(crate::ui::icons::RESIZE, 15.0))
-                .padding([0, 2]),
+            container(crate::ui::icons::themed_primary(
+                crate::ui::icons::RESIZE,
+                15.0,
+            ))
+            .padding([0, 2]),
         )
         .on_press(Message::ModalResizeGrab)
         .interaction(iced::mouse::Interaction::Grab);
@@ -344,8 +336,7 @@ pub fn modal<'a>(
                 .align_y(iced::alignment::Vertical::Bottom),
         );
     }
-    let framed: Element<'a, Message> =
-        container(body).padding(10).style(panel_style).into();
+    let framed: Element<'a, Message> = container(body).padding(10).style(panel_style).into();
 
     // Position via asymmetric padding (padding is non-negative): shifting a
     // centred box by `d` on an axis needs (near − far) padding = 2·d there.
@@ -365,12 +356,7 @@ pub fn modal<'a>(
             .padding(pad)
             .style(|theme: &Theme| container::Style {
                 background: Some(Background::Color(
-                    theme
-                        .palette()
-                        .background
-                        .strongest
-                        .color
-                        .scale_alpha(0.55),
+                    theme.palette().background.strongest.color.scale_alpha(0.55),
                 )),
                 ..Default::default()
             }),

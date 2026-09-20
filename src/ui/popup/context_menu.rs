@@ -215,7 +215,9 @@ impl ContextMenu {
                     header: None,
                 }),
                 MenuRow::Separator => {}
-                MenuRow::Submenu { id, items, open, .. } => {
+                MenuRow::Submenu {
+                    id, items, open, ..
+                } => {
                     out.push(Selectable {
                         action: MenuAction::ToggleSubmenu(*id),
                         mnemonic: None,
@@ -403,7 +405,10 @@ pub fn build_context_menu(ctx: &MenuContext, open_submenu: Option<SubmenuId>) ->
         ),
         MenuContext::Grip(grip) => grip_rows(grip),
     };
-    let mut menu = ContextMenu { rows, width: MENU_WIDTH };
+    let mut menu = ContextMenu {
+        rows,
+        width: MENU_WIDTH,
+    };
     if menu.has_hints() {
         menu.width = MENU_WIDTH_WITH_HINTS;
     }
@@ -439,7 +444,9 @@ fn command_rows(
         _ => "⏎".to_string(),
     };
     rows.push(MenuRow::Item(
-        MenuItem::new(t!("Enter").into_owned(), MenuAction::Enter).hint(enter_hint).default(),
+        MenuItem::new(t!("Enter").into_owned(), MenuAction::Enter)
+            .hint(enter_hint)
+            .default(),
     ));
     rows.push(MenuRow::Item(
         MenuItem::new(t!("Cancel").into_owned(), MenuAction::Cancel).hint("Esc"),
@@ -527,8 +534,11 @@ fn navigation_rows(transparent: bool) -> Vec<MenuRow> {
     let prefix = if transparent { "'" } else { "" };
     vec![
         MenuRow::Item(
-            MenuItem::new(t!("Pan").into_owned(), MenuAction::Command(format!("{prefix}PAN")))
-                .icon(MenuIcon::Pan),
+            MenuItem::new(
+                t!("Pan").into_owned(),
+                MenuAction::Command(format!("{prefix}PAN")),
+            )
+            .icon(MenuIcon::Pan),
         ),
         MenuRow::Item(
             MenuItem::new(
@@ -552,7 +562,8 @@ fn idle_rows(
     props_open: bool,
     open_submenu: Option<SubmenuId>,
 ) -> Vec<MenuRow> {
-    let cmd = |label: String, name: &str| MenuItem::new(label, MenuAction::Command(name.to_string()));
+    let cmd =
+        |label: String, name: &str| MenuItem::new(label, MenuAction::Command(name.to_string()));
     let mut rows = Vec::new();
 
     // ── Repeat / Recent Input ──────────────────────────────────────────
@@ -585,8 +596,11 @@ fn idle_rows(
             cmd(t!("Copy with Base Point").into_owned(), "COPYBASE").enabled(has_selection),
             cmd(t!("Paste").into_owned(), "PASTECLIP").enabled(clipboard_nonempty),
             cmd(t!("Paste as Block").into_owned(), "PASTEBLOCK").enabled(clipboard_nonempty),
-            cmd(t!("Paste to Original Coordinates").into_owned(), "PASTEORIG")
-                .enabled(clipboard_nonempty),
+            cmd(
+                t!("Paste to Original Coordinates").into_owned(),
+                "PASTEORIG",
+            )
+            .enabled(clipboard_nonempty),
         ],
         open: open_submenu == Some(SubmenuId::Clipboard),
     });
@@ -602,10 +616,14 @@ fn idle_rows(
         None => t!("Redo").into_owned(),
     };
     rows.push(MenuRow::Item(
-        MenuItem::new(undo, MenuAction::Undo).hint("Ctrl+Z").enabled(undo_label.is_some()),
+        MenuItem::new(undo, MenuAction::Undo)
+            .hint("Ctrl+Z")
+            .enabled(undo_label.is_some()),
     ));
     rows.push(MenuRow::Item(
-        MenuItem::new(redo, MenuAction::Redo).hint("Ctrl+Y").enabled(redo_label.is_some()),
+        MenuItem::new(redo, MenuAction::Redo)
+            .hint("Ctrl+Y")
+            .enabled(redo_label.is_some()),
     ));
     rows.push(MenuRow::Separator);
 
@@ -616,7 +634,10 @@ fn idle_rows(
             MenuAction::DeleteSelected,
         )));
         rows.push(MenuRow::Item(cmd(t!("Move").into_owned(), "MOVE")));
-        rows.push(MenuRow::Item(cmd(t!("Copy Selection").into_owned(), "COPY")));
+        rows.push(MenuRow::Item(cmd(
+            t!("Copy Selection").into_owned(),
+            "COPY",
+        )));
         rows.push(MenuRow::Item(cmd(t!("Scale").into_owned(), "SCALE")));
         rows.push(MenuRow::Item(cmd(t!("Rotate").into_owned(), "ROTATE")));
         rows.push(MenuRow::Item(cmd(t!("Mirror").into_owned(), "MIRROR")));
@@ -667,7 +688,10 @@ fn idle_rows(
     // The edit menu is long already; Zoom Extents stays on the idle menu
     // (and on the middle button's double-click), as in commercial solutions.
     if !has_selection {
-        rows.push(MenuRow::Item(cmd(t!("Zoom Extents").into_owned(), "ZOOM EXTENTS")));
+        rows.push(MenuRow::Item(cmd(
+            t!("Zoom Extents").into_owned(),
+            "ZOOM EXTENTS",
+        )));
     }
     rows.push(MenuRow::Separator);
 
@@ -687,7 +711,10 @@ fn idle_rows(
         )));
     }
     if !has_selection {
-        rows.push(MenuRow::Item(cmd(t!("Select All").into_owned(), "SELECTALL")));
+        rows.push(MenuRow::Item(cmd(
+            t!("Select All").into_owned(),
+            "SELECTALL",
+        )));
     }
     rows.push(MenuRow::Item(MenuItem::new(
         t!("Quick Select...").into_owned(),
@@ -709,7 +736,11 @@ fn idle_rows(
 fn grip_rows(grip: &GripMenuContext) -> Vec<MenuRow> {
     let g = |label: String, cmd: GripMenuCmd| MenuItem::new(label, MenuAction::Grip(cmd));
     vec![
-        MenuRow::Item(MenuItem::new(t!("Enter").into_owned(), MenuAction::Enter).hint("⏎").default()),
+        MenuRow::Item(
+            MenuItem::new(t!("Enter").into_owned(), MenuAction::Enter)
+                .hint("⏎")
+                .default(),
+        ),
         MenuRow::Separator,
         MenuRow::Item(
             g(t!("Stretch").into_owned(), GripMenuCmd::Stretch)
@@ -744,7 +775,9 @@ mod tests {
             match row {
                 MenuRow::Item(item) => out.push(item.label.clone()),
                 MenuRow::Separator => out.push("---".into()),
-                MenuRow::Submenu { label, items, open, .. } => {
+                MenuRow::Submenu {
+                    label, items, open, ..
+                } => {
                     out.push(format!("{label} >"));
                     if *open {
                         out.extend(items.iter().map(|i| format!("  {}", i.label)));
@@ -985,9 +1018,15 @@ mod tests {
         let undo = t!("Undo %{label}", label = "LINE").into_owned();
         assert!(rows.contains(&undo), "{rows:?}");
         let sel = menu.selectable();
-        let redo = sel.iter().find(|s| s.action == MenuAction::Redo).expect("redo row");
+        let redo = sel
+            .iter()
+            .find(|s| s.action == MenuAction::Redo)
+            .expect("redo row");
         assert!(!redo.enabled);
-        let undo = sel.iter().find(|s| s.action == MenuAction::Undo).expect("undo row");
+        let undo = sel
+            .iter()
+            .find(|s| s.action == MenuAction::Undo)
+            .expect("undo row");
         assert!(undo.enabled);
     }
 
@@ -995,7 +1034,9 @@ mod tests {
     fn selectable_skips_separators_and_closed_submenus() {
         let menu = build_context_menu(&idle_ctx(false), None);
         let sel = menu.selectable();
-        assert!(sel.iter().all(|s| s.action != MenuAction::Command("PASTECLIP".into())));
+        assert!(sel
+            .iter()
+            .all(|s| s.action != MenuAction::Command("PASTECLIP".into())));
         assert!(sel.iter().any(|s| s.header == Some(SubmenuId::Clipboard)));
         let open = build_context_menu(&idle_ctx(false), Some(SubmenuId::Clipboard));
         assert!(open

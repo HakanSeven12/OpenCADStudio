@@ -494,23 +494,23 @@ impl OpenCADStudio {
                                         self.show_constraint_values,
                                     ),
                                 }];
-                                props.extend(scene
-                                    .named_parameters()
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(index, parameter)| Property {
-                                        label: String::new(),
-                                        field: "named_parameter",
-                                        value: PropValue::ParamRow {
-                                            index,
-                                            name: parameter.name.clone(),
-                                            formula: parameter.source.clone(),
-                                            resolved: scene
-                                                .named_parameters()
-                                                .resolve(&parameter.name)
-                                                .map_err(|error| error.to_string()),
-                                        },
-                                    }));
+                                props.extend(scene.named_parameters().iter().enumerate().map(
+                                    |(index, parameter)| {
+                                        Property {
+                                            label: String::new(),
+                                            field: "named_parameter",
+                                            value: PropValue::ParamRow {
+                                                index,
+                                                name: parameter.name.clone(),
+                                                formula: parameter.source.clone(),
+                                                resolved: scene
+                                                    .named_parameters()
+                                                    .resolve(&parameter.name)
+                                                    .map_err(|error| error.to_string()),
+                                            },
+                                        }
+                                    },
+                                ));
                                 props.push(Property {
                                     label: String::new(),
                                     field: "named_parameter_add",
@@ -2800,14 +2800,10 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
     ) {
         let retain_size = self.constraint_solve_mode
             && !driven_refs.is_empty()
-            && driven_refs.iter().all(|reference| reference.marker.is_some());
-        self.invalidate_property_targets_with_originals(
-            i,
-            handles,
-            driven_refs,
-            retain_size,
-            &[],
-        );
+            && driven_refs
+                .iter()
+                .all(|reference| reference.marker.is_some());
+        self.invalidate_property_targets_with_originals(i, handles, driven_refs, retain_size, &[]);
     }
 
     pub(super) fn invalidate_property_targets_with_originals(
@@ -2847,14 +2843,12 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             .iter()
             .map(|&handle| (handle, crate::scene::ChangeKind::Modified))
             .collect();
-        self.tabs[i]
-            .scene
-            .bump_entities_with_parametric_originals(
-                &changes,
-                driven_refs,
-                retain_size,
-                retained_originals,
-            );
+        self.tabs[i].scene.bump_entities_with_parametric_originals(
+            &changes,
+            driven_refs,
+            retain_size,
+            retained_originals,
+        );
     }
 
     /// Apply a single-property edit to every handle in `handles`, recording the

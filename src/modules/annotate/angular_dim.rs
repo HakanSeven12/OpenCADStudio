@@ -2,8 +2,7 @@ use acadrust::entities::{Dimension, DimensionAngular2Ln, DimensionAngular3Pt};
 use acadrust::types::{Handle, Vector3};
 use acadrust::EntityType;
 use cadkernel::geom2d::{
-    closest_point, line_line, Arc as KernelArc, BulgeArc, Curve as KernelCurve,
-    Line as KernelLine,
+    closest_point, line_line, Arc as KernelArc, BulgeArc, Curve as KernelCurve, Line as KernelLine,
 };
 
 use crate::command::{
@@ -29,7 +28,10 @@ pub fn tool() -> ToolDef {
 enum Step {
     Vertex,
     FirstRay(DVec3),
-    SecondRay { vertex: DVec3, first: DVec3 },
+    SecondRay {
+        vertex: DVec3,
+        first: DVec3,
+    },
     CircleSecondRay {
         vertex: DVec3,
         first: DVec3,
@@ -61,10 +63,16 @@ struct SourceLocator {
 }
 
 impl SourceLocator {
-    const INFERRED: Self = Self { marker: None, parameter: 0.0 };
+    const INFERRED: Self = Self {
+        marker: None,
+        parameter: 0.0,
+    };
 
     const fn explicit(marker: i32, parameter: f64) -> Self {
-        Self { marker: Some(marker), parameter }
+        Self {
+            marker: Some(marker),
+            parameter,
+        }
     }
 
     fn bind(self, handle: Handle) -> DimensionAssociationSource {
@@ -150,9 +158,10 @@ impl AngularDimensionCommand {
         dim.base.definition_point = dim.definition_point;
         dim.base.text_middle_point = dim.definition_point;
         dim.base.insertion_point = dim.definition_point;
-        if self.quadrant_lock.is_some_and(|frame| {
-            !point_angle_in_frame(vertex, picked_text, frame)
-        }) {
+        if self
+            .quadrant_lock
+            .is_some_and(|frame| !point_angle_in_frame(vertex, picked_text, frame))
+        {
             dim.base.text_middle_point = v3(picked_text);
             dim.base.insertion_point = dim.base.text_middle_point;
             dim.base.text_user_positioned = true;
@@ -191,15 +200,7 @@ impl AngularDimensionCommand {
             return CmdResult::NeedPoint;
         };
         let arc_point = locked_arc_point(vertex, picked_text, self.quadrant_lock);
-        if two_line_frame(
-            first_start,
-            first_end,
-            second_start,
-            second_end,
-            arc_point,
-        )
-        .is_none()
-        {
+        if two_line_frame(first_start, first_end, second_start, second_end, arc_point).is_none() {
             return CmdResult::NeedPoint;
         }
         let mut dim = DimensionAngular2Ln::default();
@@ -211,9 +212,10 @@ impl AngularDimensionCommand {
         dim.base.definition_point = dim.definition_point;
         dim.base.text_middle_point = dim.dimension_arc;
         dim.base.insertion_point = dim.dimension_arc;
-        if self.quadrant_lock.is_some_and(|frame| {
-            !point_angle_in_frame(vertex, picked_text, frame)
-        }) {
+        if self
+            .quadrant_lock
+            .is_some_and(|frame| !point_angle_in_frame(vertex, picked_text, frame))
+        {
             dim.base.text_middle_point = v3(picked_text);
             dim.base.insertion_point = dim.base.text_middle_point;
             dim.base.text_user_positioned = true;
@@ -245,7 +247,11 @@ impl AngularDimensionCommand {
 
     fn editor_anchor(&self) -> DVec3 {
         match self.step {
-            Step::ArcPoint3 { vertex, first, second } => {
+            Step::ArcPoint3 {
+                vertex,
+                first,
+                second,
+            } => {
                 let radius = vertex.distance(first).max(vertex.distance(second)).max(1.0);
                 let first_angle = self.plane.angle(vertex, first).unwrap_or(0.0);
                 let second_angle = self.plane.angle(vertex, second).unwrap_or(first_angle);
@@ -274,11 +280,14 @@ impl AngularDimensionCommand {
                     (first_start + second_start) * 0.5,
                 )
                 .map(|(vertex, start, end)| {
-                    self.plane.to_world(vertex + DVec3::new(
-                        ((start + end) * 0.5).cos(),
-                        ((start + end) * 0.5).sin(),
-                        0.0,
-                    ))
+                    self.plane.to_world(
+                        vertex
+                            + DVec3::new(
+                                ((start + end) * 0.5).cos(),
+                                ((start + end) * 0.5).sin(),
+                                0.0,
+                            ),
+                    )
                 })
                 .unwrap_or_else(|| self.plane.to_world(first_start))
             }
@@ -289,7 +298,11 @@ impl AngularDimensionCommand {
     fn set_quadrant_from_point(&mut self, point: DVec3) -> bool {
         let point = self.plane.to_local(point);
         let frame = match self.step {
-            Step::ArcPoint3 { vertex, first, second } => two_line_frame(
+            Step::ArcPoint3 {
+                vertex,
+                first,
+                second,
+            } => two_line_frame(
                 self.plane.to_local(vertex),
                 self.plane.to_local(first),
                 self.plane.to_local(vertex),
@@ -350,28 +363,21 @@ impl CadCommand for AngularDimensionCommand {
         if self.selecting_object {
             return match self.step {
                 Step::SecondLine { .. } => t!("DIMANGULAR  Select second line:").into_owned(),
-                _ => t!(
-                    "DIMANGULAR  Select arc, circle, line, or specify an angle vertex:"
-                )
-                .into_owned(),
+                _ => t!("DIMANGULAR  Select arc, circle, line, or specify an angle vertex:")
+                    .into_owned(),
             };
         }
         match self.step {
-            Step::Vertex => t!(
-                "DIMANGULAR  Specify angle vertex:"
-            )
-            .into_owned(),
-            Step::FirstRay(_) => {
-                t!("DIMANGULAR  Specify first extension line point:").into_owned()
-            }
+            Step::Vertex => t!("DIMANGULAR  Specify angle vertex:").into_owned(),
+            Step::FirstRay(_) => t!("DIMANGULAR  Specify first extension line point:").into_owned(),
             Step::SecondRay { .. } | Step::CircleSecondRay { .. } => {
                 t!("DIMANGULAR  Specify second extension line point:").into_owned()
             }
             Step::SecondLine { .. } => t!("DIMANGULAR  Select second line:").into_owned(),
-            Step::ArcPoint3 { .. } | Step::ArcPoint2 { .. } => t!(
-                "DIMANGULAR  Specify dimension arc location [Mtext/Text/Angle/Quadrant]:"
-            )
-            .into_owned(),
+            Step::ArcPoint3 { .. } | Step::ArcPoint2 { .. } => {
+                t!("DIMANGULAR  Specify dimension arc location [Mtext/Text/Angle/Quadrant]:")
+                    .into_owned()
+            }
         }
     }
 
@@ -408,7 +414,10 @@ impl CadCommand for AngularDimensionCommand {
                 if point.distance_squared(vertex) <= 1.0e-24 {
                     return CmdResult::NeedPoint;
                 }
-                self.step = Step::SecondRay { vertex, first: point };
+                self.step = Step::SecondRay {
+                    vertex,
+                    first: point,
+                };
                 CmdResult::NeedPoint
             }
             Step::SecondRay { vertex, first } => {
@@ -427,10 +436,18 @@ impl CadCommand for AngularDimensionCommand {
                 {
                     return CmdResult::NeedPoint;
                 }
-                self.step = Step::ArcPoint3 { vertex, first, second: point };
+                self.step = Step::ArcPoint3 {
+                    vertex,
+                    first,
+                    second: point,
+                };
                 CmdResult::NeedPoint
             }
-            Step::CircleSecondRay { vertex, first, source } => {
+            Step::CircleSecondRay {
+                vertex,
+                first,
+                source,
+            } => {
                 if point.distance_squared(vertex) <= 1.0e-24 {
                     return CmdResult::NeedPoint;
                 }
@@ -439,25 +456,25 @@ impl CadCommand for AngularDimensionCommand {
                     Some(DimensionAssociationSource::inferred(source)),
                     None,
                 ];
-                self.step = Step::ArcPoint3 { vertex, first, second: point };
+                self.step = Step::ArcPoint3 {
+                    vertex,
+                    first,
+                    second: point,
+                };
                 CmdResult::NeedPoint
             }
             Step::SecondLine { .. } => CmdResult::NeedPoint,
-            Step::ArcPoint3 { vertex, first, second } => {
-                self.finish_three_point(vertex, first, second, point)
-            }
+            Step::ArcPoint3 {
+                vertex,
+                first,
+                second,
+            } => self.finish_three_point(vertex, first, second, point),
             Step::ArcPoint2 {
                 first_start,
                 first_end,
                 second_start,
                 second_end,
-            } => self.finish_two_line(
-                first_start,
-                first_end,
-                second_start,
-                second_end,
-                point,
-            ),
+            } => self.finish_two_line(first_start, first_end, second_start, second_end, point),
         }
     }
 
@@ -533,7 +550,11 @@ impl CadCommand for AngularDimensionCommand {
     }
 
     fn options(&self) -> Vec<CmdOption> {
-        if self.placement_step() && !self.awaiting_text && !self.awaiting_angle && !self.awaiting_quadrant {
+        if self.placement_step()
+            && !self.awaiting_text
+            && !self.awaiting_angle
+            && !self.awaiting_quadrant
+        {
             vec![
                 CmdOption::new("MText", "MTEXT"),
                 CmdOption::new("Text", "TEXT"),
@@ -727,7 +748,11 @@ impl CadCommand for AngularDimensionCommand {
                     .map(|reference| Some(reference.bind(handle)))
                     .collect();
                 self.selecting_object = false;
-                self.step = Step::ArcPoint3 { vertex: center, first, second };
+                self.step = Step::ArcPoint3 {
+                    vertex: center,
+                    first,
+                    second,
+                };
                 CmdResult::NeedPoint
             }
             (Step::Vertex, PickedCurve::Circle { center, .. }) => {
@@ -759,18 +784,25 @@ impl CadCommand for AngularDimensionCommand {
             Step::CircleSecondRay { vertex, first, .. } => {
                 vec![vertex, first, nan(), vertex, point]
             }
-            Step::ArcPoint3 { vertex, first, second } => {
+            Step::ArcPoint3 {
+                vertex,
+                first,
+                second,
+            } => {
                 let vertex = self.plane.to_local(vertex);
                 let first = self.plane.to_local(first);
                 let second = self.plane.to_local(second);
-                let point = locked_arc_point(
-                    vertex,
-                    self.plane.to_local(point),
-                    self.quadrant_lock,
-                );
+                let point =
+                    locked_arc_point(vertex, self.plane.to_local(point), self.quadrant_lock);
                 angular_preview(vertex, first, second, point)
                     .into_iter()
-                    .map(|value| if value.is_nan() { value } else { self.plane.to_world(value) })
+                    .map(|value| {
+                        if value.is_nan() {
+                            value
+                        } else {
+                            self.plane.to_world(value)
+                        }
+                    })
                     .collect()
             }
             Step::ArcPoint2 {
@@ -784,25 +816,19 @@ impl CadCommand for AngularDimensionCommand {
                 let second_start = self.plane.to_local(second_start);
                 let second_end = self.plane.to_local(second_end);
                 let point = self.plane.to_local(point);
-                let point = two_line_frame(
-                    first_start,
-                    first_end,
-                    second_start,
-                    second_end,
-                    point,
-                )
-                .map(|(vertex, _, _)| locked_arc_point(vertex, point, self.quadrant_lock))
-                .unwrap_or(point);
-                two_line_preview(
-                    first_start,
-                    first_end,
-                    second_start,
-                    second_end,
-                    point,
-                )
-                .into_iter()
-                .map(|value| if value.is_nan() { value } else { self.plane.to_world(value) })
-                .collect()
+                let point = two_line_frame(first_start, first_end, second_start, second_end, point)
+                    .map(|(vertex, _, _)| locked_arc_point(vertex, point, self.quadrant_lock))
+                    .unwrap_or(point);
+                two_line_preview(first_start, first_end, second_start, second_end, point)
+                    .into_iter()
+                    .map(|value| {
+                        if value.is_nan() {
+                            value
+                        } else {
+                            self.plane.to_world(value)
+                        }
+                    })
+                    .collect()
             }
         };
         Some(preview_wire(points))
@@ -870,13 +896,13 @@ fn picked_curve(entity: &EntityType, click: DVec3) -> Option<PickedCurve> {
                 .iter()
                 .map(|vertex| [vertex.location.x, vertex.location.y])
                 .collect();
-            let bulges: Vec<_> = polyline.vertices.iter().map(|vertex| vertex.bulge).collect();
-            let segment = nearest_segment_index(
-                &points,
-                &bulges,
-                polyline.is_closed,
-                [click.0, click.1],
-            )?;
+            let bulges: Vec<_> = polyline
+                .vertices
+                .iter()
+                .map(|vertex| vertex.bulge)
+                .collect();
+            let segment =
+                nearest_segment_index(&points, &bulges, polyline.is_closed, [click.0, click.1])?;
             let first = polyline.vertices[segment];
             let second = polyline.vertices[(segment + 1) % polyline.vertices.len()];
             polyline_segment(
@@ -900,12 +926,8 @@ fn picked_curve(entity: &EntityType, click: DVec3) -> Option<PickedCurve> {
                 .map(|vertex| [vertex.location.x, vertex.location.y])
                 .collect();
             let bulges: Vec<_> = vertices.iter().map(|vertex| vertex.bulge).collect();
-            let segment = nearest_segment_index(
-                &points,
-                &bulges,
-                polyline.is_closed(),
-                [click.0, click.1],
-            )?;
+            let segment =
+                nearest_segment_index(&points, &bulges, polyline.is_closed(), [click.0, click.1])?;
             let first = &vertices[segment];
             let second = &vertices[(segment + 1) % vertices.len()];
             polyline_segment(
@@ -931,7 +953,11 @@ fn nearest_segment_index(
     if points.len() < 2 {
         return None;
     }
-    let count = if closed { points.len() } else { points.len() - 1 };
+    let count = if closed {
+        points.len()
+    } else {
+        points.len() - 1
+    };
     (0..count).min_by(|first, second| {
         polyline_segment_distance_squared(
             points[*first],
@@ -940,11 +966,11 @@ fn nearest_segment_index(
             click,
         )
         .total_cmp(&polyline_segment_distance_squared(
-                points[*second],
-                points[(*second + 1) % points.len()],
-                bulges.get(*second).copied().unwrap_or(0.0),
-                click,
-            ))
+            points[*second],
+            points[(*second + 1) % points.len()],
+            bulges.get(*second).copied().unwrap_or(0.0),
+            click,
+        ))
     })
 }
 
@@ -962,7 +988,10 @@ fn polyline_segment_curve(first: [f64; 2], second: [f64; 2], bulge: f64) -> Kern
             end_angle,
         })
     } else {
-        KernelCurve::Line(KernelLine { start: first, end: second })
+        KernelCurve::Line(KernelLine {
+            start: first,
+            end: second,
+        })
     }
 }
 
@@ -1027,10 +1056,16 @@ fn polyline_segment(
 
 fn curve_is_coplanar(curve: &PickedCurve, plane: WorkingPlane) -> bool {
     let (points, normal): (Vec<DVec3>, Option<DVec3>) = match curve {
-        PickedCurve::Line { start, end, normal, .. } => (vec![*start, *end], *normal),
-        PickedCurve::Arc { center, first, second, normal, .. } => {
-            (vec![*center, *first, *second], Some(*normal))
-        }
+        PickedCurve::Line {
+            start, end, normal, ..
+        } => (vec![*start, *end], *normal),
+        PickedCurve::Arc {
+            center,
+            first,
+            second,
+            normal,
+            ..
+        } => (vec![*center, *first, *second], Some(*normal)),
         PickedCurve::Circle { center, normal } => (vec![*center], Some(*normal)),
     };
     if let Some(normal) = normal {
@@ -1039,7 +1074,10 @@ fn curve_is_coplanar(curve: &PickedCurve, plane: WorkingPlane) -> bool {
             return false;
         }
     }
-    let local: Vec<_> = points.into_iter().map(|point| plane.to_local(point)).collect();
+    let local: Vec<_> = points
+        .into_iter()
+        .map(|point| plane.to_local(point))
+        .collect();
     let scale = local
         .iter()
         .map(|point| point.x.abs().max(point.y.abs()).max(1.0))
@@ -1069,12 +1107,10 @@ fn lines_parallel_in_plane(
     .is_none()
 }
 
-fn locked_arc_point(
-    vertex: DVec3,
-    point: DVec3,
-    frame: Option<(f64, f64)>,
-) -> DVec3 {
-    let Some((start, end)) = frame else { return point };
+fn locked_arc_point(vertex: DVec3, point: DVec3, frame: Option<(f64, f64)>) -> DVec3 {
+    let Some((start, end)) = frame else {
+        return point;
+    };
     let radius = ((point.x - vertex.x).powi(2) + (point.y - vertex.y).powi(2)).sqrt();
     if radius <= 1.0e-12 {
         return point;
@@ -1147,13 +1183,9 @@ fn two_line_preview(
     second_end: DVec3,
     arc_point: DVec3,
 ) -> Vec<DVec3> {
-    let Some((vertex, start, end)) = two_line_frame(
-        first_start,
-        first_end,
-        second_start,
-        second_end,
-        arc_point,
-    ) else {
+    let Some((vertex, start, end)) =
+        two_line_frame(first_start, first_end, second_start, second_end, arc_point)
+    else {
         return vec![first_start, first_end, nan(), second_start, second_end];
     };
     angular_preview_with_frame(vertex, first_start, second_start, arc_point, start, end)
@@ -1213,7 +1245,10 @@ fn preview_wire(points: Vec<DVec3>) -> WireModel {
         dash_align_end: None,
         text_verts: Vec::new(),
         name: "dimangular_preview".to_string(),
-        points: points.into_iter().map(|point| [point.x as f32, point.y as f32, point.z as f32]).collect(),
+        points: points
+            .into_iter()
+            .map(|point| [point.x as f32, point.y as f32, point.z as f32])
+            .collect(),
         points_low: Vec::new(),
         color: WireModel::CYAN,
         selected: false,
@@ -1231,4 +1266,6 @@ fn preview_wire(points: Vec<DVec3>) -> WireModel {
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["DIMANGULAR"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["DIMANGULAR"]
+});

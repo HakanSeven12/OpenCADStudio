@@ -57,7 +57,11 @@ pub fn fetch_patrons() -> Result<Vec<(String, i64)>, String> {
     let agent = crate::network::agent(std::time::Duration::from_secs(15));
 
     // The token is creator-scoped, so its first campaign is the one to list.
-    let campaigns = get_json(&agent, token, "https://www.patreon.com/api/oauth2/v2/campaigns")?;
+    let campaigns = get_json(
+        &agent,
+        token,
+        "https://www.patreon.com/api/oauth2/v2/campaigns",
+    )?;
     let campaign_id = campaigns["data"][0]["id"]
         .as_str()
         .ok_or("no Patreon campaign found for this token")?
@@ -85,12 +89,8 @@ pub fn fetch_patrons() -> Result<Vec<(String, i64)>, String> {
         if let Some(arr) = page["data"].as_array() {
             for m in arr {
                 let attrs = &m["attributes"];
-                let Some(usd_cents) = latest_recent_paid_usd(
-                    m,
-                    included,
-                    &usd_rates,
-                    &cutoff_date,
-                ) else {
+                let Some(usd_cents) = latest_recent_paid_usd(m, included, &usd_rates, &cutoff_date)
+                else {
                     continue;
                 };
                 let name = attrs["full_name"].as_str().unwrap_or("").trim();
@@ -128,8 +128,7 @@ fn latest_recent_paid_usd(
             continue;
         };
         let Some(event) = included.iter().find(|entry| {
-            entry["id"].as_str() == Some(id)
-                && entry["type"].as_str() == Some(resource_type)
+            entry["id"].as_str() == Some(id) && entry["type"].as_str() == Some(resource_type)
         }) else {
             continue;
         };
@@ -173,9 +172,7 @@ fn latest_recent_paid_usd(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn fetch_usd_rates(
-    agent: &ureq::Agent,
-) -> Result<std::collections::HashMap<String, f64>, String> {
+fn fetch_usd_rates(agent: &ureq::Agent) -> Result<std::collections::HashMap<String, f64>, String> {
     let json = get_public_json(agent, USD_RATES_URL)?;
     let entries = json
         .as_array()
@@ -214,8 +211,7 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let day_of_era = z - era * 146_097;
     let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096)
-            / 365;
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
     let mut year = year_of_era + era * 400;
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_prime = (5 * day_of_year + 2) / 153;
@@ -265,11 +261,7 @@ pub async fn fetch_patrons_web() -> Result<Vec<(String, i64)>, String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn get_json(
-    agent: &ureq::Agent,
-    token: &str,
-    url: &str,
-) -> Result<serde_json::Value, String> {
+fn get_json(agent: &ureq::Agent, token: &str, url: &str) -> Result<serde_json::Value, String> {
     let body = agent
         .get(url)
         .header("Authorization", &format!("Bearer {token}"))

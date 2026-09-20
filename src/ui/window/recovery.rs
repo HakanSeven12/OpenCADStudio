@@ -4,9 +4,7 @@ use crate::ui::style::common::muted_style;
 use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Background, Border, Element, Fill, Length, Shrink, Theme};
 
-fn status_style(
-    status: RecoveryStatus,
-) -> impl Fn(&Theme) -> iced::widget::text::Style + Copy {
+fn status_style(status: RecoveryStatus) -> impl Fn(&Theme) -> iced::widget::text::Style + Copy {
     move |theme: &Theme| iced::widget::text::Style {
         color: Some(match status {
             RecoveryStatus::Recovered => theme.palette().warning.base.color,
@@ -107,9 +105,13 @@ pub fn view_window<'a>(
     }
     if let Some(path) = &report.log_path {
         details = details.push(
-            text(format!("{}: {}", crate::tr!("recovery", "log-path"), path.display()))
-                .size(10)
-                .style(muted_style),
+            text(format!(
+                "{}: {}",
+                crate::tr!("recovery", "log-path"),
+                path.display()
+            ))
+            .size(10)
+            .style(muted_style),
         );
     } else if let Some(error) = &report.log_error {
         details = details.push(

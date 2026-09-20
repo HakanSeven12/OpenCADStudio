@@ -50,7 +50,10 @@ impl From<ProxyError> for PluginRequestError {
 }
 
 /// Send a length-framed bincode message over a generic stream.
-pub fn send_framed<W: Write>(writer: &mut W, msg: &impl serde::Serialize) -> Result<(), ProxyError> {
+pub fn send_framed<W: Write>(
+    writer: &mut W,
+    msg: &impl serde::Serialize,
+) -> Result<(), ProxyError> {
     let bytes = bincode::serialize(msg)?;
     if bytes.len() > MAX_MESSAGE_SIZE {
         return Err(ProxyError::TooLarge(bytes.len()));
@@ -63,7 +66,9 @@ pub fn send_framed<W: Write>(writer: &mut W, msg: &impl serde::Serialize) -> Res
 }
 
 /// Receive a length-framed bincode message from a generic stream.
-pub fn recv_framed<R: Read, T: serde::de::DeserializeOwned>(reader: &mut R) -> Result<T, ProxyError> {
+pub fn recv_framed<R: Read, T: serde::de::DeserializeOwned>(
+    reader: &mut R,
+) -> Result<T, ProxyError> {
     let mut len_buf = [0u8; 8];
     reader.read_exact(&mut len_buf)?;
     let len = u64::from_le_bytes(len_buf) as usize;
@@ -114,10 +119,12 @@ fn read_with_poll<R: Read>(
     let mut off = 0;
     while off < buf.len() {
         match reader.read(&mut buf[off..]) {
-            Ok(0) => return Err(PollError::Io(ProxyError::Io(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                "proxy disconnected",
-            )))),
+            Ok(0) => {
+                return Err(PollError::Io(ProxyError::Io(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "proxy disconnected",
+                ))))
+            }
             Ok(n) => off += n,
             Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {
                 if let Err(err) = poll() {
@@ -386,7 +393,8 @@ mod tests {
             run_request_proxy(listener, sender, token).ok();
         });
 
-        let sender = ProxyPluginRequestSender::connect_with_token("127.0.0.1", port, &token).unwrap();
+        let sender =
+            ProxyPluginRequestSender::connect_with_token("127.0.0.1", port, &token).unwrap();
         let resp = sender
             .request(PluginRequest::PushInfo("hello proxy".to_string()))
             .unwrap();

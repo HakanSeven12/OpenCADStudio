@@ -8,9 +8,9 @@
 // Single-object commands (e.g. LAYMCUR) use `instant()` instead: the first
 // completed selection action fires straight away, no Enter required.
 
+use crate::t;
 use acadrust::Handle;
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdOption, CmdResult};
 use crate::modules::draw::fence::FencePick;
@@ -288,6 +288,29 @@ impl CadCommand for SelectObjectsCommand {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["ARRAY", "ARRAYPATH", "ARRAYPOLAR", "ARRAYRECT", "BLOCK", "COPY", "COPYCLIP", "CUTCLIP", "ERASE", "EXPLODE", "GROUP", "LAYFRZ", "LAYLCK", "LAYMCUR", "LAYOFF", "LAYULK", "MIRROR", "MOVE", "ROTATE", "SCALE", "STRETCH"] });  // SelectObjectsCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &[
+        "ARRAY",
+        "ARRAYPATH",
+        "ARRAYPOLAR",
+        "ARRAYRECT",
+        "BLOCK",
+        "COPY",
+        "COPYCLIP",
+        "CUTCLIP",
+        "ERASE",
+        "EXPLODE",
+        "GROUP",
+        "LAYFRZ",
+        "LAYLCK",
+        "LAYMCUR",
+        "LAYOFF",
+        "LAYULK",
+        "MIRROR",
+        "MOVE",
+        "ROTATE",
+        "SCALE",
+        "STRETCH"
+    ]
+}); // SelectObjectsCommand

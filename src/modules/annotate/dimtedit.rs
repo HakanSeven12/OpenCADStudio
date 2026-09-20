@@ -125,9 +125,7 @@ impl CadCommand for DimTeditCommand {
         }
         if !matches!(self.picked_entity.as_ref(), Some(EntityType::Dimension(_))) {
             self.picked_entity = None;
-            return CmdResult::ReportError(
-                t!("DIMTEDIT: select a dimension.").into_owned(),
-            );
+            return CmdResult::ReportError(t!("DIMTEDIT: select a dimension.").into_owned());
         }
         self.step = Step::PickTextPos {
             handle,
@@ -141,12 +139,8 @@ impl CadCommand for DimTeditCommand {
         match &mut self.step {
             Step::PickTextPos { handle, entity } => match keyword.as_str() {
                 "L" | "LEFT" => Some(Self::finish_placement(*handle, entity, Placement::Left)),
-                "R" | "RIGHT" => {
-                    Some(Self::finish_placement(*handle, entity, Placement::Right))
-                }
-                "C" | "CENTER" => {
-                    Some(Self::finish_placement(*handle, entity, Placement::Center))
-                }
+                "R" | "RIGHT" => Some(Self::finish_placement(*handle, entity, Placement::Right)),
+                "C" | "CENTER" => Some(Self::finish_placement(*handle, entity, Placement::Center)),
                 "H" | "HOME" => Some(Self::finish_placement(*handle, entity, Placement::Home)),
                 "A" | "ANGLE" => {
                     let handle = *handle;
@@ -259,9 +253,7 @@ fn dimension_line_endpoints(dimension: &Dimension) -> Option<(DVec3, DVec3)> {
     let second = DVec3::new(second.x, second.y, second.z);
     let definition = DVec3::new(definition.x, definition.y, definition.z);
     let perpendicular = DVec3::new(-axis.y, axis.x, 0.0);
-    let project = |point: DVec3| {
-        point + perpendicular * (definition - point).dot(perpendicular)
-    };
+    let project = |point: DVec3| point + perpendicular * (definition - point).dot(perpendicular);
     let first = project(first);
     let second = project(second);
     if first.dot(axis) <= second.dot(axis) {
@@ -297,4 +289,6 @@ fn apply_placement(dimension: &mut Dimension, placement: Placement) {
     base.attachment_point = attachment;
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["DIMTED", "DIMTEDIT"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["DIMTED", "DIMTEDIT"]
+});

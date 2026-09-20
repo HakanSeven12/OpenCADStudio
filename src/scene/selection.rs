@@ -2,7 +2,10 @@ use super::*;
 
 /// The first PE_URL string is the URL; later strings describe the link.
 pub(crate) fn pe_url_of(entity: &EntityType) -> Option<&str> {
-    entity.common().extended_data.get_record("PE_URL")
+    entity
+        .common()
+        .extended_data
+        .get_record("PE_URL")
         .and_then(|record| {
             record.values.iter().find_map(|value| match value {
                 acadrust::xdata::XDataValue::String(text) => Some(text.trim()),
@@ -32,17 +35,17 @@ impl Scene {
     /// Clicking/copying/deleting either side expands to the complete pair.
     /// Every LEADER that points at `annotation`, resolved once per
     /// `geometry_epoch` rather than by walking the document per handle.
-    fn leaders_by_annotation(
-        &self,
-    ) -> std::cell::Ref<'_, (u64, HashMap<Handle, Vec<Handle>>)> {
+    fn leaders_by_annotation(&self) -> std::cell::Ref<'_, (u64, HashMap<Handle, Vec<Handle>>)> {
         {
             let cache = self.leaders_by_annotation_cache.borrow();
-            if cache.as_ref().is_some_and(|(epoch, _)| *epoch == self.geometry_epoch) {
+            if cache
+                .as_ref()
+                .is_some_and(|(epoch, _)| *epoch == self.geometry_epoch)
+            {
                 drop(cache);
-                return std::cell::Ref::map(
-                    self.leaders_by_annotation_cache.borrow(),
-                    |c| c.as_ref().unwrap(),
-                );
+                return std::cell::Ref::map(self.leaders_by_annotation_cache.borrow(), |c| {
+                    c.as_ref().unwrap()
+                });
             }
         }
         let mut by_annotation: HashMap<Handle, Vec<Handle>> = HashMap::default();
@@ -56,8 +59,7 @@ impl Scene {
                 }
             }
         }
-        *self.leaders_by_annotation_cache.borrow_mut() =
-            Some((self.geometry_epoch, by_annotation));
+        *self.leaders_by_annotation_cache.borrow_mut() = Some((self.geometry_epoch, by_annotation));
         std::cell::Ref::map(self.leaders_by_annotation_cache.borrow(), |c| {
             c.as_ref().unwrap()
         })
@@ -104,14 +106,14 @@ impl Scene {
         if handles.is_empty() {
             return;
         }
-        let doomed: HashSet<Handle> =
-            self.expanded_with_leaders(handles).into_iter().collect();
+        let doomed: HashSet<Handle> = self.expanded_with_leaders(handles).into_iter().collect();
         let mut changed = false;
         for handle in &doomed {
             changed |= self.selected.remove(handle);
         }
         if changed {
-            self.selected_order.retain(|handle| !doomed.contains(handle));
+            self.selected_order
+                .retain(|handle| !doomed.contains(handle));
             self.bump_selection_set();
         }
     }
@@ -300,9 +302,7 @@ impl Scene {
     fn qselect_candidate_handles(&self, scope: crate::app::QSelectScope) -> Vec<Handle> {
         match scope {
             crate::app::QSelectScope::CurrentSpace => self.current_layout_entity_handles(),
-            crate::app::QSelectScope::CurrentSelection => {
-                self.selected_handles_in_order()
-            }
+            crate::app::QSelectScope::CurrentSelection => self.selected_handles_in_order(),
         }
     }
 
@@ -416,26 +416,24 @@ impl Scene {
             } else {
                 match (property_field, op) {
                     (None, _) | (_, QSelectOp::Any) => true,
-                    (Some(field), op) => {
-                        match self.entity_property_value(e, field) {
-                            Some(actual) => match op {
-                                QSelectOp::Eq => actual.eq_ignore_ascii_case(value),
-                                QSelectOp::Neq => !actual.eq_ignore_ascii_case(value),
-                                QSelectOp::Gt | QSelectOp::Lt => {
-                                    match (
-                                        crate::entities::common::parse_f64(&actual),
-                                        crate::entities::common::parse_f64(value),
-                                    ) {
-                                        (Some(a), Some(b)) if matches!(op, QSelectOp::Gt) => a > b,
-                                        (Some(a), Some(b)) => a < b,
-                                        _ => false,
-                                    }
+                    (Some(field), op) => match self.entity_property_value(e, field) {
+                        Some(actual) => match op {
+                            QSelectOp::Eq => actual.eq_ignore_ascii_case(value),
+                            QSelectOp::Neq => !actual.eq_ignore_ascii_case(value),
+                            QSelectOp::Gt | QSelectOp::Lt => {
+                                match (
+                                    crate::entities::common::parse_f64(&actual),
+                                    crate::entities::common::parse_f64(value),
+                                ) {
+                                    (Some(a), Some(b)) if matches!(op, QSelectOp::Gt) => a > b,
+                                    (Some(a), Some(b)) => a < b,
+                                    _ => false,
                                 }
-                                QSelectOp::Any => true,
-                            },
-                            None => false,
-                        }
-                    }
+                            }
+                            QSelectOp::Any => true,
+                        },
+                        None => false,
+                    },
                 }
             };
             let matches_filter = type_ok && prop_ok;
@@ -475,10 +473,7 @@ impl Scene {
         // Incremental: fold the changes since the cached epoch into the set.
         if let Some(since) = cached_epoch {
             if let Some(deltas) = self.replay_since(since) {
-                if deltas
-                    .iter()
-                    .all(|(_, kind)| *kind == ChangeKind::Added)
-                {
+                if deltas.iter().all(|(_, kind)| *kind == ChangeKind::Added) {
                     let mut cache = self.layout_type_names_cache.borrow_mut();
                     if let Some((epoch, _, present, names)) = cache.as_mut() {
                         let mut added = false;
@@ -499,8 +494,7 @@ impl Scene {
                         // Only rebuild the list when the set actually moved;
                         // otherwise the existing `Arc` is still the answer.
                         if added {
-                            *names =
-                                std::sync::Arc::new(present.iter().cloned().collect());
+                            *names = std::sync::Arc::new(present.iter().cloned().collect());
                         }
                         *epoch = self.geometry_epoch;
                         return std::sync::Arc::clone(names);
@@ -509,8 +503,7 @@ impl Scene {
             }
         }
 
-        let mut present: std::collections::BTreeSet<String> =
-            std::collections::BTreeSet::new();
+        let mut present: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         if let Some(record) = self
             .document
             .block_records
@@ -564,17 +557,17 @@ impl Scene {
         type_name: Option<&str>,
         scope: crate::app::QSelectScope,
     ) -> Vec<crate::app::QSelectPropertyChoice> {
+        use crate::app::{QSelectPropertyChoice, QSelectValueEditor};
         use crate::entities::traits::{entity_type_name, EntityTypeOps};
         use crate::scene::model::object::PropValue;
-        use crate::app::{QSelectPropertyChoice, QSelectValueEditor};
 
         let candidate_handles: Vec<Handle> = self
             .qselect_candidate_handles(scope)
             .into_iter()
             .filter(|h| {
-                self.document.get_entity(*h).is_some_and(|entity| {
-                    type_name.is_none_or(|t| entity_type_name(entity) == t)
-                })
+                self.document
+                    .get_entity(*h)
+                    .is_some_and(|entity| type_name.is_none_or(|t| entity_type_name(entity) == t))
             })
             .collect();
 
@@ -593,15 +586,18 @@ impl Scene {
                 .map(|linetype| linetype.name.clone()),
         );
 
-        let choice = |field: &str, label: String, editor: QSelectValueEditor| {
-            QSelectPropertyChoice {
+        let choice =
+            |field: &str, label: String, editor: QSelectValueEditor| QSelectPropertyChoice {
                 field: field.to_string(),
                 label,
                 editor,
-            }
-        };
+            };
         let mut out = vec![
-            choice("handle", crate::t!("Handle").into_owned(), QSelectValueEditor::Text),
+            choice(
+                "handle",
+                crate::t!("Handle").into_owned(),
+                QSelectValueEditor::Text,
+            ),
             choice(
                 "color",
                 crate::t!("Color").into_owned(),
@@ -732,17 +728,19 @@ impl Scene {
                                     }
                                     QSelectValueEditor::Choice(values)
                                 }
-                                PropValue::ColorChoice(_)
-                                | PropValue::NamedColorChoice { .. } => QSelectValueEditor::Choice(vec![
-                                    "ByLayer".into(),
-                                    "ByBlock".into(),
-                                ]),
-                                PropValue::LwChoice(_)
-                                | PropValue::FieldLwChoice { .. } => QSelectValueEditor::Choice(vec![
-                                    "ByLayer".into(),
-                                    "ByBlock".into(),
-                                    "Default".into(),
-                                ]),
+                                PropValue::ColorChoice(_) | PropValue::NamedColorChoice { .. } => {
+                                    QSelectValueEditor::Choice(vec![
+                                        "ByLayer".into(),
+                                        "ByBlock".into(),
+                                    ])
+                                }
+                                PropValue::LwChoice(_) | PropValue::FieldLwChoice { .. } => {
+                                    QSelectValueEditor::Choice(vec![
+                                        "ByLayer".into(),
+                                        "ByBlock".into(),
+                                        "Default".into(),
+                                    ])
+                                }
                                 PropValue::LinetypeChoice(_) => {
                                     QSelectValueEditor::Choice(linetype_options.clone())
                                 }
@@ -758,10 +756,7 @@ impl Scene {
                                     QSelectValueEditor::Choice(patterns)
                                 }
                                 PropValue::BoolToggle { .. } => {
-                                    QSelectValueEditor::Choice(vec![
-                                        "false".into(),
-                                        "true".into(),
-                                    ])
+                                    QSelectValueEditor::Choice(vec!["false".into(), "true".into()])
                                 }
                                 PropValue::AttrText { .. } => QSelectValueEditor::Text,
                                 PropValue::Stepper { .. }
@@ -802,7 +797,10 @@ impl Scene {
                     continue;
                 };
                 if let Some(value) = self.entity_property_value(entity, &property.field) {
-                    if !options.iter().any(|option| option.eq_ignore_ascii_case(&value)) {
+                    if !options
+                        .iter()
+                        .any(|option| option.eq_ignore_ascii_case(&value))
+                    {
                         options.push(value);
                     }
                 }
@@ -895,8 +893,7 @@ impl Scene {
                     PropValue::EditChoice { value, .. } => value,
                     PropValue::ColorChoice(c) => Self::format_color(c),
                     PropValue::NamedColorChoice { name, .. } => name,
-                    PropValue::LwChoice(lw)
-                    | PropValue::FieldLwChoice { value: lw, .. } => {
+                    PropValue::LwChoice(lw) | PropValue::FieldLwChoice { value: lw, .. } => {
                         Self::format_lineweight(lw)
                     }
                     PropValue::LinetypeChoice(s) => s,
@@ -1337,7 +1334,11 @@ mod tests {
 
         scene.add_entity(EntityType::Circle(Circle::new()));
         let third = scene.entity_type_names_in_layout();
-        assert_eq!(third.as_slice(), ["Circle", "Line"], "a new type must appear");
+        assert_eq!(
+            third.as_slice(),
+            ["Circle", "Line"],
+            "a new type must appear"
+        );
 
         // The incremental answer has to be the answer a full walk gives.
         scene.layout_type_names_cache.borrow_mut().take();

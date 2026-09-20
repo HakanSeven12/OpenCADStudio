@@ -54,26 +54,24 @@ pub fn parse_document(
         "dwg" => {
             if recovery_mode {
                 DwgReader::from_stream_with_options(
-                        Cursor::new(Arc::clone(&bytes)),
-                        DwgReadOptions::failsafe(),
-                    )
-                    .read_with_stats()
+                    Cursor::new(Arc::clone(&bytes)),
+                    DwgReadOptions::failsafe(),
+                )
+                .read_with_stats()
             } else {
-                DwgReader::from_stream(Cursor::new(Arc::clone(&bytes)))
-                    .read_with_stats()
+                DwgReader::from_stream(Cursor::new(Arc::clone(&bytes))).read_with_stats()
             }
         }
         "dxf" => {
             if recovery_mode {
-                DxfReader::from_reader(Cursor::new(Arc::clone(&bytes)))
-                    .and_then(|reader| {
-                        reader
-                            .with_configuration(DxfReaderConfiguration {
-                                failsafe: true,
-                                ..DxfReaderConfiguration::default()
-                            })
-                            .read_with_stats()
-                    })
+                DxfReader::from_reader(Cursor::new(Arc::clone(&bytes))).and_then(|reader| {
+                    reader
+                        .with_configuration(DxfReaderConfiguration {
+                            failsafe: true,
+                            ..DxfReaderConfiguration::default()
+                        })
+                        .read_with_stats()
+                })
             } else {
                 DxfReader::from_reader(Cursor::new(Arc::clone(&bytes)))
                     .and_then(|reader| reader.read_with_stats())
@@ -96,9 +94,7 @@ pub fn parse_document(
     };
     if !outcome.stats.has_usable_drawing_data() {
         let error = if recovery_mode {
-            format!(
-                "initial read failed: {initial_error}; recovery found no usable drawing data"
-            )
+            format!("initial read failed: {initial_error}; recovery found no usable drawing data")
         } else {
             "initial read returned no source drawing records".to_string()
         };
@@ -134,8 +130,8 @@ pub fn parse_document(
         );
         outcome.stats.recovered_errors = outcome.stats.recovered_errors.saturating_add(1);
     }
-    let source_sha256 = report_fingerprint_needed(&outcome.stats)
-        .then(|| sha256_document_bytes(&bytes));
+    let source_sha256 =
+        report_fingerprint_needed(&outcome.stats).then(|| sha256_document_bytes(&bytes));
     report_stage.call1(&JsValue::NULL, &JsValue::from_str("serialize document"))?;
     let encoded = encode_result(Ok(outcome), source_sha256, false, &bytes)?;
     report_stage.call1(&JsValue::NULL, &JsValue::from_str("copy output"))?;
@@ -213,7 +209,7 @@ fn encode_result(
         recoverable_parse_error,
         runtime_fields,
     ))
-        .map_err(|error| worker_error(error.to_string(), bytes, true))?;
+    .map_err(|error| worker_error(error.to_string(), bytes, true))?;
     Ok(Uint8Array::from(encoded.as_slice()))
 }
 

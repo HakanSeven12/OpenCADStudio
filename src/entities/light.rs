@@ -9,15 +9,15 @@
 //! zoom) via [`relative_render`], falling back to a small fixed world size when
 //! no world-per-pixel factor is available (e.g. snapshot tessellation).
 
+use crate::t;
 use acadrust::entities::Light;
 use acadrust::EntityType;
-use crate::t;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
     center_grip, edit_angle_prop, edit_prop as edit, ro_prop, square_grip,
 };
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;
@@ -298,7 +298,11 @@ impl PropertyEditable for Light {
                             value: self.plot_glyph,
                         },
                     },
-                    ro_prop(t!("Color").as_ref(), "li_color", format!("{:?}", self.light_color)),
+                    ro_prop(
+                        t!("Color").as_ref(),
+                        "li_color",
+                        format!("{:?}", self.light_color),
+                    ),
                     edit(t!("Intensity").as_ref(), "li_intensity", self.intensity),
                     Property {
                         label: t!("Attenuation").into_owned(),
@@ -325,13 +329,23 @@ impl PropertyEditable for Light {
                             value: self.use_attenuation_limits,
                         },
                     },
-                    edit(t!("Start Limit").as_ref(), "li_start", self.attenuation_start_limit),
-                    edit(t!("End Limit").as_ref(), "li_end", self.attenuation_end_limit),
-                    edit_angle_prop(t!("Hotspot Angle").as_ref(),
+                    edit(
+                        t!("Start Limit").as_ref(),
+                        "li_start",
+                        self.attenuation_start_limit,
+                    ),
+                    edit(
+                        t!("End Limit").as_ref(),
+                        "li_end",
+                        self.attenuation_end_limit,
+                    ),
+                    edit_angle_prop(
+                        t!("Hotspot Angle").as_ref(),
                         "li_hotspot",
                         self.hotspot_angle.to_degrees(),
                     ),
-                    edit_angle_prop(t!("Falloff Angle").as_ref(),
+                    edit_angle_prop(
+                        t!("Falloff Angle").as_ref(),
                         "li_falloff",
                         self.falloff_angle.to_degrees(),
                     ),
@@ -348,9 +362,18 @@ impl PropertyEditable for Light {
                             value: self.cast_shadows,
                         },
                     },
-                    ro_prop(t!("Type").as_ref(), "li_shadow_type", self.shadow_type.to_string()),
-                    ro_prop(t!("Map Size").as_ref(), "li_shadow_size", self.shadow_map_size.to_string()),
-                    ro_prop(t!("Softness").as_ref(),
+                    ro_prop(
+                        t!("Type").as_ref(),
+                        "li_shadow_type",
+                        self.shadow_type.to_string(),
+                    ),
+                    ro_prop(
+                        t!("Map Size").as_ref(),
+                        "li_shadow_size",
+                        self.shadow_map_size.to_string(),
+                    ),
+                    ro_prop(
+                        t!("Softness").as_ref(),
                         "li_shadow_softness",
                         self.shadow_map_softness.to_string(),
                     ),

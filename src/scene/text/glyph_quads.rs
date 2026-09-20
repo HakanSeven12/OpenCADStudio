@@ -278,11 +278,16 @@ mod tests {
         let mut atlas = GlyphAtlas::new(512, 512);
         let plain = layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "AB");
         // `\L…\l` underlines the run — same glyph quads plus one decoration quad.
-        let under = layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "\\LAB\\l");
+        let under = layout_glyph_quads(
+            &mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "\\LAB\\l",
+        );
         assert_eq!(under.len(), plain.len() + 1, "underline adds one quad");
         // The decoration quad samples the atlas's solid texel (degenerate UV).
         let deco = under.last().unwrap();
-        assert_eq!(deco.uv_min, deco.uv_max, "decoration quad uses the solid UV");
+        assert_eq!(
+            deco.uv_min, deco.uv_max,
+            "decoration quad uses the solid UV"
+        );
         assert_eq!(deco.uv_min, atlas.solid_uv());
     }
 }

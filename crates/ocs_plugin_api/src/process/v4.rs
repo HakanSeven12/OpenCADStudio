@@ -146,12 +146,7 @@ impl V4Connection {
                     payload,
                 }) => {
                     if tab_id.is_none_or(|request_tab| request_tab == host.tab_id()) {
-                        self.respond_to_plugin_request(
-                            host,
-                            rid,
-                            payload,
-                            on_start_interactive,
-                        )?;
+                        self.respond_to_plugin_request(host, rid, payload, on_start_interactive)?;
                     } else {
                         self.deferred
                             .lock()
@@ -168,9 +163,7 @@ impl V4Connection {
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     self.shared.alive.store(false, Ordering::SeqCst);
-                    return Err(PluginError::Runner(
-                        "V4 reader thread disconnected".into(),
-                    ));
+                    return Err(PluginError::Runner("V4 reader thread disconnected".into()));
                 }
             }
         }
@@ -218,12 +211,7 @@ impl V4Connection {
                     payload,
                 }) => {
                     if tab_id.is_none_or(|request_tab| request_tab == current_tab_id) {
-                        self.respond_to_plugin_request(
-                            host,
-                            id,
-                            payload,
-                            on_start_interactive,
-                        )?;
+                        self.respond_to_plugin_request(host, id, payload, on_start_interactive)?;
                     } else {
                         self.deferred
                             .lock()
@@ -239,9 +227,7 @@ impl V4Connection {
                 Err(mpsc::TryRecvError::Empty) => return Ok(()),
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.shared.alive.store(false, Ordering::SeqCst);
-                    return Err(PluginError::Runner(
-                        "V4 reader thread disconnected".into(),
-                    ));
+                    return Err(PluginError::Runner("V4 reader thread disconnected".into()));
                 }
             }
         }
@@ -325,7 +311,11 @@ impl V4Connection {
         while self.shared.alive.load(Ordering::SeqCst) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
-        let _ = self.reader_handle.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let _ = self
+            .reader_handle
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
     }
 }
 
@@ -435,15 +425,15 @@ mod tests {
         fn push_undo(&mut self, _label: &str) {}
         fn set_dirty(&mut self) {}
         fn push_info(&mut self, msg: &str) {
-            self.push_info_messages.lock().unwrap().push(msg.to_string());
+            self.push_info_messages
+                .lock()
+                .unwrap()
+                .push(msg.to_string());
         }
         fn push_output(&mut self, _msg: &str) {}
         fn push_error(&mut self, _msg: &str) {}
         fn start_interactive(&mut self, _command: Box<dyn crate::host::InteractiveCommand>) {}
-        fn plugin_state_any(
-            &self,
-            _plugin_id: &str,
-        ) -> Option<&(dyn std::any::Any + Send + Sync)> {
+        fn plugin_state_any(&self, _plugin_id: &str) -> Option<&(dyn std::any::Any + Send + Sync)> {
             None
         }
         fn plugin_state_any_mut(
@@ -525,7 +515,10 @@ mod tests {
             // Read the host's V4 request and respond.
             let req = recv::<HostToPluginV4>(&mut runner_stream).unwrap();
             match req {
-                HostToPluginV4::Request { id, payload: HostRequest::Dispatch { cmd } } => {
+                HostToPluginV4::Request {
+                    id,
+                    payload: HostRequest::Dispatch { cmd },
+                } => {
                     assert_eq!(cmd, "HELLO");
                     send(
                         &mut runner_stream,
@@ -542,7 +535,13 @@ mod tests {
 
         let mut host = DummyHost::new();
         let resp = conn
-            .call(&mut host, HostRequest::Dispatch { cmd: "HELLO".to_string() }, &mut |_| {})
+            .call(
+                &mut host,
+                HostRequest::Dispatch {
+                    cmd: "HELLO".to_string(),
+                },
+                &mut |_| {},
+            )
             .unwrap();
         assert!(matches!(resp, HostResponse::Bool(true)));
         runner.join().unwrap();
@@ -561,7 +560,10 @@ mod tests {
         let runner = thread::spawn(move || {
             let req = recv::<HostToPluginV4>(&mut runner_stream).unwrap();
             match req {
-                HostToPluginV4::Request { id, payload: HostRequest::Dispatch { .. } } => {
+                HostToPluginV4::Request {
+                    id,
+                    payload: HostRequest::Dispatch { .. },
+                } => {
                     // Send a nested plugin request.
                     send(
                         &mut runner_stream,
@@ -575,8 +577,10 @@ mod tests {
                     // Read the response to the nested request.
                     let resp = recv::<HostToPluginV4>(&mut runner_stream).unwrap();
                     match resp {
-                        HostToPluginV4::Response { id: rid, payload: PluginResponse::Ok }
-                            if rid == 99 => {}
+                        HostToPluginV4::Response {
+                            id: rid,
+                            payload: PluginResponse::Ok,
+                        } if rid == 99 => {}
                         other => panic!("unexpected nested response: {other:?}"),
                     }
                     // Now respond to the original dispatch.
@@ -595,11 +599,21 @@ mod tests {
 
         let mut host = DummyHost::new();
         let resp = conn
-            .call(&mut host, HostRequest::Dispatch { cmd: "NESTED".to_string() }, &mut |_| {})
+            .call(
+                &mut host,
+                HostRequest::Dispatch {
+                    cmd: "NESTED".to_string(),
+                },
+                &mut |_| {},
+            )
             .unwrap();
         assert!(matches!(resp, HostResponse::Bool(true)));
         let infos = host.take_push_info();
-        assert_eq!(infos, vec!["nested".to_string()], "push_info should be delivered to host");
+        assert_eq!(
+            infos,
+            vec!["nested".to_string()],
+            "push_info should be delivered to host"
+        );
         runner.join().unwrap();
         restore_test_env();
     }
@@ -680,7 +694,11 @@ mod tests {
 
         std::thread::sleep(Duration::from_millis(200));
         let got = received.lock().unwrap().clone();
-        assert_eq!(got.len(), 1, "second notification should survive handler panic");
+        assert_eq!(
+            got.len(),
+            1,
+            "second notification should survive handler panic"
+        );
         assert_eq!(got[0].0, Some(1));
         runner.join().unwrap();
         drop(conn);
@@ -728,7 +746,10 @@ mod tests {
             count <= 3,
             "rate limiter should drop most notifications, got {count}"
         );
-        assert!(conn.is_alive(), "connection should survive rate-limited flood");
+        assert!(
+            conn.is_alive(),
+            "connection should survive rate-limited flood"
+        );
         runner.join().unwrap();
         drop(conn);
         std::env::remove_var("OCS_PLUGIN_NOTIFY_RATE_LIMIT");
@@ -761,7 +782,10 @@ mod tests {
                     assert_eq!(command_id, 1);
                     assert_eq!(source, CommandSource::Editor);
                     assert_eq!(code, "1+1");
-                    assert_eq!(tab_index, 0, "ExecuteCode should be tied to the host's tab index");
+                    assert_eq!(
+                        tab_index, 0,
+                        "ExecuteCode should be tied to the host's tab index"
+                    );
                     thread::sleep(Duration::from_millis(100));
                     send(
                         &mut runner_stream,

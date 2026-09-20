@@ -81,7 +81,10 @@ mod tests {
         let handles = vec![Handle::new(2), Handle::new(5)];
         let mut command = ConstraintBarOptionCommand::new(handles.clone());
 
-        assert_eq!(relaunch(command.on_enter()), ("GCSHOW".to_string(), handles));
+        assert_eq!(
+            relaunch(command.on_enter()),
+            ("GCSHOW".to_string(), handles)
+        );
     }
 
     #[test]

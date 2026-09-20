@@ -27,9 +27,7 @@ pub fn from_screenshot(
     let height = screenshot.size.height as f32;
     let left = (bounds.x * scale).floor().clamp(0.0, width) as u32;
     let top = (bounds.y * scale).floor().clamp(0.0, height) as u32;
-    let right = ((bounds.x + bounds.width) * scale)
-        .ceil()
-        .clamp(0.0, width) as u32;
+    let right = ((bounds.x + bounds.width) * scale).ceil().clamp(0.0, width) as u32;
     let bottom = ((bounds.y + bounds.height) * scale)
         .ceil()
         .clamp(0.0, height) as u32;
@@ -61,9 +59,15 @@ const MAX_DIM: u32 = 256;
 /// Canvas dimensions for an aspect ratio, longest edge = [`MAX_DIM`].
 fn canvas_dims(aspect: f64) -> (u32, u32) {
     if aspect >= 1.0 {
-        (MAX_DIM, ((MAX_DIM as f64 / aspect).round() as u32).clamp(16, MAX_DIM))
+        (
+            MAX_DIM,
+            ((MAX_DIM as f64 / aspect).round() as u32).clamp(16, MAX_DIM),
+        )
     } else {
-        (((MAX_DIM as f64 * aspect).round() as u32).clamp(16, MAX_DIM), MAX_DIM)
+        (
+            ((MAX_DIM as f64 * aspect).round() as u32).clamp(16, MAX_DIM),
+            MAX_DIM,
+        )
     }
 }
 
@@ -73,10 +77,16 @@ fn encode(img: RgbImage, png: bool) -> Option<Preview> {
         let mut buf = Cursor::new(Vec::new());
         img.write_to(&mut buf, ImageFormat::Png).ok()?;
         let data = buf.into_inner();
-        return (!data.is_empty()).then_some(Preview { format: PreviewFormat::Png, data });
+        return (!data.is_empty()).then_some(Preview {
+            format: PreviewFormat::Png,
+            data,
+        });
     }
     let data = rle8_dib(&img).or_else(|| bmp24_dib(&img))?;
-    Some(Preview { format: PreviewFormat::Bmp, data })
+    Some(Preview {
+        format: PreviewFormat::Bmp,
+        data,
+    })
 }
 
 /// Build an 8-bit palettised, `BI_RLE8`-compressed DIB. `None` when the image
@@ -194,7 +204,11 @@ mod tests {
     fn dib_to_bmp(dib: &[u8]) -> Vec<u8> {
         let bi_size = u32::from_le_bytes([dib[0], dib[1], dib[2], dib[3]]) as usize;
         let bpp = u16::from_le_bytes([dib[14], dib[15]]) as usize;
-        let palette = if (1..=8).contains(&bpp) { (1usize << bpp) * 4 } else { 0 };
+        let palette = if (1..=8).contains(&bpp) {
+            (1usize << bpp) * 4
+        } else {
+            0
+        };
         let mut v = Vec::with_capacity(14 + dib.len());
         v.extend_from_slice(b"BM");
         v.extend_from_slice(&((14 + dib.len()) as u32).to_le_bytes());
@@ -220,18 +234,31 @@ mod tests {
         let bmp = encode(image, false).unwrap();
         assert_eq!(bmp.format, PreviewFormat::Bmp);
         // 8-bit, BI_RLE8.
-        assert_eq!(u16::from_le_bytes([bmp.data[14], bmp.data[15]]), 8, "bitcount");
+        assert_eq!(
+            u16::from_le_bytes([bmp.data[14], bmp.data[15]]),
+            8,
+            "bitcount"
+        );
         assert_eq!(
             u32::from_le_bytes([bmp.data[16], bmp.data[17], bmp.data[18], bmp.data[19]]),
             1,
             "compression = BI_RLE8"
         );
         // Far under a 24-bit DIB of the same canvas (256·256·3 = 196 608).
-        assert!(bmp.data.len() < 196_608 / 10, "rle8 {} not << 24-bit", bmp.data.len());
+        assert!(
+            bmp.data.len() < 196_608 / 10,
+            "rle8 {} not << 24-bit",
+            bmp.data.len()
+        );
         // Decodes through the exact path the reader uses, line preserved.
-        let img = image::load_from_memory(&dib_to_bmp(&bmp.data)).expect("rle8 decodes").to_rgb8();
+        let img = image::load_from_memory(&dib_to_bmp(&bmp.data))
+            .expect("rle8 decodes")
+            .to_rgb8();
         assert_eq!((img.width(), img.height()), (MAX_DIM, MAX_DIM));
-        assert!(img.pixels().any(|px| px.0 == [0, 0, 0]), "black line missing");
+        assert!(
+            img.pixels().any(|px| px.0 == [0, 0, 0]),
+            "black line missing"
+        );
     }
 
     #[test]
@@ -239,7 +266,8 @@ mod tests {
         let image = RgbImage::from_pixel(MAX_DIM, MAX_DIM, image::Rgb([255, 255, 255]));
         let p = encode(image, true).unwrap();
         assert_eq!(p.format, PreviewFormat::Png);
-        let img = image::load_from_memory_with_format(&p.data, ImageFormat::Png).expect("png decodes");
+        let img =
+            image::load_from_memory_with_format(&p.data, ImageFormat::Png).expect("png decodes");
         assert_eq!((img.width(), img.height()), (MAX_DIM, MAX_DIM));
     }
 }

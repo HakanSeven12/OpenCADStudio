@@ -47,15 +47,15 @@ impl Mesh3dCommand {
     }
 
     fn current_indices(&self) -> (usize, usize) {
-        let index = self.points.len().min(self.total_vertices().saturating_sub(1));
+        let index = self
+            .points
+            .len()
+            .min(self.total_vertices().saturating_sub(1));
         (index / self.n.max(1), index % self.n.max(1))
     }
 
     fn build(&self) -> Option<EntityType> {
-        if self.m < MIN_SIZE
-            || self.n < MIN_SIZE
-            || self.points.len() != self.total_vertices()
-        {
+        if self.m < MIN_SIZE || self.n < MIN_SIZE || self.points.len() != self.total_vertices() {
             return None;
         }
         let mut mesh = PolygonMesh::new();

@@ -53,11 +53,7 @@ pub fn resolve(document: &CadDocument, host: Handle) -> Option<String> {
     acadrust::fields::resolve(document, host, &OcsFieldContext)
 }
 
-pub fn resolve_handle(
-    document: &CadDocument,
-    field: Handle,
-    host: Handle,
-) -> Option<String> {
+pub fn resolve_handle(document: &CadDocument, field: Handle, host: Handle) -> Option<String> {
     acadrust::fields::resolve_handle(document, field, host, &OcsFieldContext)
 }
 

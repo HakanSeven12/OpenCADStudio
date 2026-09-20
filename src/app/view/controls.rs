@@ -346,26 +346,26 @@ pub(super) fn dyn_component_value(
     ) && relative
         && !comma_cartesian;
     match f.component {
-        DynComponent::X if relative => crate::entities::common::format_length(if wh { dx.abs() } else { dx }),
-        DynComponent::Y if relative => crate::entities::common::format_length(if wh { dy.abs() } else { dy }),
+        DynComponent::X if relative => {
+            crate::entities::common::format_length(if wh { dx.abs() } else { dx })
+        }
+        DynComponent::Y if relative => {
+            crate::entities::common::format_length(if wh { dy.abs() } else { dy })
+        }
         DynComponent::Z if relative => crate::entities::common::format_length(0.0),
         DynComponent::X => crate::entities::common::format_length(p.x),
         DynComponent::Y => crate::entities::common::format_length(p.y),
         DynComponent::Z => crate::entities::common::format_length(p.z),
         // Scaled by the role so a diameter box reads twice the radius.
-        DynComponent::Distance => {
-            crate::entities::common::format_length(
-                (dx * dx + dy * dy).sqrt() * f.role.value_scale() as f64,
-            )
-        }
+        DynComponent::Distance => crate::entities::common::format_length(
+            (dx * dx + dy * dy).sqrt() * f.role.value_scale() as f64,
+        ),
         // Shared rule: unsigned magnitude of the short angle, so CW (below the
         // reference axis) reads positive (e.g. 30°, not -30°/330°). The
         // committed value stays signed (see dyn_resolve_point).
-        DynComponent::Angle => {
-            crate::entities::common::format_angle(
-                (crate::command::dyn_display_angle_deg(dy.atan2(dx) as f32) as f64).to_radians(),
-            )
-        }
+        DynComponent::Angle => crate::entities::common::format_angle(
+            (crate::command::dyn_display_angle_deg(dy.atan2(dx) as f32) as f64).to_radians(),
+        ),
         // Typed-only scalar — no geometric value to track when empty.
         DynComponent::Scalar => String::new(),
     }

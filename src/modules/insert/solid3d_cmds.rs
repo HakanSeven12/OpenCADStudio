@@ -9,8 +9,8 @@ use crate::command::{
     CadCommand, CmdOption, CmdResult, ExtrudeExtent, ExtrudeMode, LoftOptions,
     LoftSectionSelection, SelectionEntity, SweepOptions, WorkingPlane,
 };
-use crate::scene::WireModel;
 use crate::scene::model::presspull_model::{PresspullTarget, PresspullTargetKind};
+use crate::scene::WireModel;
 use crate::t;
 
 // ── EXTRUDE command ────────────────────────────────────────────────────────
@@ -64,7 +64,9 @@ enum ExtrudeStep {
 
 impl ExtrudeCommand {
     pub fn new_named(name: &str, color: [f32; 4]) -> Self {
-        let defaults = *extrude_defaults().lock().unwrap_or_else(|error| error.into_inner());
+        let defaults = *extrude_defaults()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         Self {
             command_name: match name {
                 "THICKEN" => "THICKEN",
@@ -185,16 +187,12 @@ fn preview_body_wires(
         .into_iter()
         .filter(|edge| edge.positions.len() >= 2)
         .map(|edge| {
-            WireModel::solid_f64(
-                "EXTRUDE-PREVIEW".to_owned(),
-                edge.positions,
-                color,
-                false,
-            )
+            WireModel::solid_f64("EXTRUDE-PREVIEW".to_owned(), edge.positions, color, false)
         })
         .collect::<Vec<_>>();
     wires.extend(
-        wireframe.isolines
+        wireframe
+            .isolines
             .into_iter()
             .filter(|line| line.positions.len() >= 2)
             .map(|line| {
@@ -215,29 +213,44 @@ impl CadCommand for ExtrudeCommand {
     }
     fn prompt(&self) -> String {
         match self.step {
-            ExtrudeStep::Pick => t!("EXTRUDE  Select objects to extrude or [Mode] (Enter to finish):").into_owned(),
+            ExtrudeStep::Pick => {
+                t!("EXTRUDE  Select objects to extrude or [Mode] (Enter to finish):").into_owned()
+            }
             ExtrudeStep::Mode => format!(
                 "{} <{}>:",
                 t!("EXTRUDE  Creation mode [Solid/Surface]"),
-                if self.mode == ExtrudeMode::Solid { "Solid" } else { "Surface" }
+                if self.mode == ExtrudeMode::Solid {
+                    "Solid"
+                } else {
+                    "Surface"
+                }
             ),
             ExtrudeStep::Height => {
                 let base = t!("EXTRUDE  Specify height or [Direction/Path/Taper angle/Expression]");
                 self.last_height.map_or_else(
                     || format!("{base}:"),
-                    |height| format!("{base} <{}>:", crate::entities::common::format_length(height)),
+                    |height| {
+                        format!(
+                            "{base} <{}>:",
+                            crate::entities::common::format_length(height)
+                        )
+                    },
                 )
             }
             ExtrudeStep::DirectionStart => t!("EXTRUDE  Start point of direction:").into_owned(),
             ExtrudeStep::DirectionEnd => t!("EXTRUDE  End point of direction:").into_owned(),
-            ExtrudeStep::Path => t!("EXTRUDE  Select extrusion path or [Taper angle]:").into_owned(),
+            ExtrudeStep::Path => {
+                t!("EXTRUDE  Select extrusion path or [Taper angle]:").into_owned()
+            }
             ExtrudeStep::Taper => format!(
                 "{} <{}>:",
                 t!("EXTRUDE  Specify taper angle or [Expression]"),
                 crate::entities::common::format_angle(self.taper_angle)
             ),
             ExtrudeStep::Expression => t!("EXTRUDE  Enter height expression:").into_owned(),
-            ExtrudeStep::TaperExpression => t!("EXTRUDE  Enter taper angle expression:").into_owned(),
+            ExtrudeStep::TaperExpression => {
+                t!("EXTRUDE  Enter taper angle expression:").into_owned()
+            }
         }
     }
     fn options(&self) -> Vec<CmdOption> {
@@ -456,8 +469,7 @@ impl CadCommand for ExtrudeCommand {
         }
     }
     fn cursor_axis(&self) -> Option<(DVec3, DVec3)> {
-        (self.step == ExtrudeStep::Height)
-            .then_some((self.anchor, self.profile_direction?))
+        (self.step == ExtrudeStep::Height).then_some((self.anchor, self.profile_direction?))
     }
     fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
         (self.step == ExtrudeStep::Height).then_some(crate::command::DynSpec {
@@ -584,9 +596,7 @@ impl CadCommand for ThickenCommand {
                 t!("Specify thickness"),
                 crate::entities::common::format_length(self.last_distance)
             ),
-            ThickenStep::SecondPoint => {
-                t!("Specify second point:").into_owned()
-            }
+            ThickenStep::SecondPoint => t!("Specify second point:").into_owned(),
         }
     }
 
@@ -604,9 +614,9 @@ impl CadCommand for ThickenCommand {
         }
         Some(match crate::entities::common::parse_typed_length(value) {
             Some(distance) if distance.is_finite() => self.finish(distance),
-            _ => CmdResult::ReportError(
-                t!("Requires numeric distance or two points.").into_owned(),
-            ),
+            _ => {
+                CmdResult::ReportError(t!("Requires numeric distance or two points.").into_owned())
+            }
         })
     }
 
@@ -641,9 +651,9 @@ impl CadCommand for ThickenCommand {
                 CmdResult::NeedPoint
             }
             ThickenStep::Distance => self.finish(self.last_distance),
-            ThickenStep::SecondPoint => CmdResult::ReportError(
-                t!("Requires numeric distance or two points.").into_owned(),
-            ),
+            ThickenStep::SecondPoint => {
+                CmdResult::ReportError(t!("Requires numeric distance or two points.").into_owned())
+            }
         }
     }
 
@@ -749,21 +759,45 @@ impl PresspullCommand {
     }
 
     fn has_target(&self, target: &PresspullTarget) -> bool {
-        self.targets.iter().any(|selected| match (&selected.kind, &target.kind) {
-            (
-                PresspullTargetKind::Profile { source: Some(first), .. },
-                PresspullTargetKind::Profile { source: Some(second), .. },
-            ) => first == second,
-            (
-                PresspullTargetKind::Face { handle: first, face: first_face, .. },
-                PresspullTargetKind::Face { handle: second, face: second_face, .. },
-            ) => first == second && first_face == second_face,
-            (
-                PresspullTargetKind::Profile { source: None, entity: first, owner: first_owner },
-                PresspullTargetKind::Profile { source: None, entity: second, owner: second_owner },
-            ) => first_owner == second_owner && first == second,
-            _ => false,
-        })
+        self.targets
+            .iter()
+            .any(|selected| match (&selected.kind, &target.kind) {
+                (
+                    PresspullTargetKind::Profile {
+                        source: Some(first),
+                        ..
+                    },
+                    PresspullTargetKind::Profile {
+                        source: Some(second),
+                        ..
+                    },
+                ) => first == second,
+                (
+                    PresspullTargetKind::Face {
+                        handle: first,
+                        face: first_face,
+                        ..
+                    },
+                    PresspullTargetKind::Face {
+                        handle: second,
+                        face: second_face,
+                        ..
+                    },
+                ) => first == second && first_face == second_face,
+                (
+                    PresspullTargetKind::Profile {
+                        source: None,
+                        entity: first,
+                        owner: first_owner,
+                    },
+                    PresspullTargetKind::Profile {
+                        source: None,
+                        entity: second,
+                        owner: second_owner,
+                    },
+                ) => first_owner == second_owner && first == second,
+                _ => false,
+            })
     }
 
     fn pick(&self, handle: Option<Handle>, point: DVec3) -> CmdResult {
@@ -816,9 +850,10 @@ impl CadCommand for PresspullCommand {
             PresspullStep::Pick => {
                 t!("PRESSPULL  Select object or bounded area (Enter to finish):").into_owned()
             }
-            PresspullStep::Multiple => {
-                t!("PRESSPULL  Select additional objects or bounded areas [Undo] (Enter for height):").into_owned()
-            }
+            PresspullStep::Multiple => t!(
+                "PRESSPULL  Select additional objects or bounded areas [Undo] (Enter for height):"
+            )
+            .into_owned(),
             PresspullStep::Height => {
                 t!("PRESSPULL  Specify signed extrusion height or [Multiple/Undo]:").into_owned()
             }
@@ -832,7 +867,10 @@ impl CadCommand for PresspullCommand {
                 vec![CmdOption::new("Undo", "UNDO"), CmdOption::enter("Height")]
             }
             PresspullStep::Height => {
-                vec![CmdOption::new("Multiple", "MULTIPLE"), CmdOption::new("Undo", "UNDO")]
+                vec![
+                    CmdOption::new("Multiple", "MULTIPLE"),
+                    CmdOption::new("Undo", "UNDO"),
+                ]
             }
         }
     }
@@ -858,7 +896,8 @@ impl CadCommand for PresspullCommand {
     }
 
     fn set_working_plane(&mut self, plane: WorkingPlane) {
-        if self.working_plane.origin != plane.origin || self.working_plane.x != plane.x
+        if self.working_plane.origin != plane.origin
+            || self.working_plane.x != plane.x
             || self.working_plane.y != plane.y
         {
             self.hover_key = None;
@@ -880,40 +919,66 @@ impl CadCommand for PresspullCommand {
     }
 
     fn on_deferred_entity_hover(
-        &mut self, scene: &crate::scene::Scene, handle: Option<Handle>, point: DVec3,
+        &mut self,
+        scene: &crate::scene::Scene,
+        handle: Option<Handle>,
+        point: DVec3,
     ) -> Vec<WireModel> {
         if !self.needs_entity_pick() {
             return Vec::new();
         }
-        let key = (scene.geometry_epoch, handle, point.to_array().map(f64::to_bits), self.ctrl);
+        let key = (
+            scene.geometry_epoch,
+            handle,
+            point.to_array().map(f64::to_bits),
+            self.ctrl,
+        );
         if self.hover_key == Some(key) {
             return self.hover_cache.clone();
         }
         self.hover_key = Some(key);
         self.hover_cache.clear();
         let Ok(target) = crate::scene::model::presspull_model::resolve_target(
-            scene, handle, point, self.working_plane, self.ctrl,
-        ) else { return Vec::new(); };
+            scene,
+            handle,
+            point,
+            self.working_plane,
+            self.ctrl,
+        ) else {
+            return Vec::new();
+        };
         let geometry = match target.kind {
-            PresspullTargetKind::Profile { entity, .. } =>
+            PresspullTargetKind::Profile { entity, .. } => {
                 crate::scene::model::presspull_model::profile_geometry(&entity)
-                    .map(|(plane, loops, _)| (plane, loops)),
-            PresspullTargetKind::Face { body, face, .. } =>
+                    .map(|(plane, loops, _)| (plane, loops))
+            }
+            PresspullTargetKind::Face { body, face, .. } => {
                 cadkernel::brep::planar_face_profile(&body, face)
-                    .map(|profile| (profile.plane, profile.loops)),
+                    .map(|profile| (profile.plane, profile.loops))
+            }
         };
         if let Some((plane, loops)) = geometry {
-            self.hover_cache = loops.into_iter().flatten().filter_map(|curve| {
-                let points = curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
-                    .into_iter().map(|point| plane.point_at(point)).collect::<Vec<_>>();
-                (points.len() >= 2).then(|| {
-                    let mut wire = WireModel::solid_f64(
-                        "PRESSPULL-BOUNDARY-HOVER".to_owned(), points, [1.0, 0.65, 0.1, 1.0], false,
-                    );
-                    wire.line_weight_px = 2.0;
-                    wire
+            self.hover_cache = loops
+                .into_iter()
+                .flatten()
+                .filter_map(|curve| {
+                    let points = curve
+                        .tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
+                        .into_iter()
+                        .map(|point| plane.point_at(point))
+                        .collect::<Vec<_>>();
+                    (points.len() >= 2).then(|| {
+                        let mut wire = WireModel::solid_f64(
+                            "PRESSPULL-BOUNDARY-HOVER".to_owned(),
+                            points,
+                            [1.0, 0.65, 0.1, 1.0],
+                            false,
+                        );
+                        wire.line_weight_px = 2.0;
+                        wire
+                    })
                 })
-            }).collect();
+                .collect();
         }
         self.hover_cache.clone()
     }
@@ -929,7 +994,8 @@ impl CadCommand for PresspullCommand {
         if self.needs_entity_pick() {
             return self.pick(None, point);
         }
-        self.height(point).map_or(CmdResult::NeedPoint, |height| self.finish(height))
+        self.height(point)
+            .map_or(CmdResult::NeedPoint, |height| self.finish(height))
     }
 
     fn on_presspull_target(&mut self, mut target: PresspullTarget) {
@@ -1043,14 +1109,18 @@ impl CadCommand for PresspullCommand {
         };
         let key = (self.target_generation, height.to_bits());
         if self.preview_key != Some(key) {
-            self.preview_cache = self.targets.iter().flat_map(|target| {
-                crate::scene::model::presspull_model::preview_wires(
-                    target,
-                    height,
-                    self.color,
-                    self.isolines,
-                )
-            }).collect();
+            self.preview_cache = self
+                .targets
+                .iter()
+                .flat_map(|target| {
+                    crate::scene::model::presspull_model::preview_wires(
+                        target,
+                        height,
+                        self.color,
+                        self.isolines,
+                    )
+                })
+                .collect();
             self.preview_key = Some(key);
         }
         self.preview_cache.clone()
@@ -1108,7 +1178,9 @@ enum RevolveStep {
 
 impl RevolveCommand {
     pub fn new(color: [f32; 4], isolines: usize) -> Self {
-        let defaults = *revolve_defaults().lock().unwrap_or_else(|error| error.into_inner());
+        let defaults = *revolve_defaults()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         Self {
             step: RevolveStep::Pick,
             handles: Vec::new(),
@@ -1128,7 +1200,10 @@ impl RevolveCommand {
     }
 
     pub fn set_preselection(&mut self, profiles: Vec<(Handle, EntityType)>) {
-        let selected_handles = profiles.iter().map(|(handle, _)| *handle).collect::<Vec<_>>();
+        let selected_handles = profiles
+            .iter()
+            .map(|(handle, _)| *handle)
+            .collect::<Vec<_>>();
         self.preview_profiles = profiles
             .into_iter()
             .filter(|(_, entity)| {
@@ -1233,13 +1308,7 @@ impl RevolveCommand {
                         start_angle,
                     )
                 } else {
-                    crate::scene::model::sweep_model::revolved(
-                        entity,
-                        from,
-                        to,
-                        angle,
-                        start_angle,
-                    )
+                    crate::scene::model::sweep_model::revolved(entity, from, to, angle, start_angle)
                 };
                 body.map(|body| preview_body_wires(&body, self.color, self.isolines))
                     .unwrap_or_default()
@@ -1260,7 +1329,9 @@ impl RevolveCommand {
     fn finish(&self, angle: f64) -> CmdResult {
         let angle = self.signed_angle(angle);
         if angle.is_finite() && angle.abs() > 1e-9 && angle.abs() <= std::f64::consts::TAU + 1e-9 {
-            let mut defaults = revolve_defaults().lock().unwrap_or_else(|error| error.into_inner());
+            let mut defaults = revolve_defaults()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             defaults.mode = self.mode;
             defaults.angle = angle.abs();
             defaults.start_angle = self.start_angle;
@@ -1299,15 +1370,25 @@ impl CadCommand for RevolveCommand {
     }
     fn prompt(&self) -> String {
         match self.step {
-            RevolveStep::Pick => t!("REVOLVE  Select objects to revolve or [Mode] (Enter to finish):").into_owned(),
+            RevolveStep::Pick => {
+                t!("REVOLVE  Select objects to revolve or [Mode] (Enter to finish):").into_owned()
+            }
             RevolveStep::Mode => format!(
                 "{} <{}>:",
                 t!("REVOLVE  Creation mode [Solid/Surface]"),
-                if self.mode == ExtrudeMode::Solid { "Solid" } else { "Surface" }
+                if self.mode == ExtrudeMode::Solid {
+                    "Solid"
+                } else {
+                    "Surface"
+                }
             ),
-            RevolveStep::AxisStart => t!("REVOLVE  Specify axis start point or [Object/X/Y/Z/Mode]:").into_owned(),
+            RevolveStep::AxisStart => {
+                t!("REVOLVE  Specify axis start point or [Object/X/Y/Z/Mode]:").into_owned()
+            }
             RevolveStep::AxisEnd => t!("REVOLVE  Axis end point:").into_owned(),
-            RevolveStep::AxisObject => t!("REVOLVE  Select line, ray, or construction line for axis:").into_owned(),
+            RevolveStep::AxisObject => {
+                t!("REVOLVE  Select line, ray, or construction line for axis:").into_owned()
+            }
             RevolveStep::Angle => format!(
                 "{} <{}>:",
                 t!("REVOLVE  Specify angle of revolution or [Start angle/Reverse/Expression]"),
@@ -1529,7 +1610,10 @@ impl CadCommand for RevolveCommand {
         if self.step != RevolveStep::Pick {
             return;
         }
-        let selected_handles = entities.iter().map(|entry| entry.handle).collect::<Vec<_>>();
+        let selected_handles = entities
+            .iter()
+            .map(|entry| entry.handle)
+            .collect::<Vec<_>>();
         self.preview_profiles = entities
             .into_iter()
             .filter(|entry| {
@@ -1570,7 +1654,9 @@ impl CadCommand for RevolveCommand {
                 anchor: crate::command::DynAnchor::Point(
                     self.angle_anchor().unwrap_or(self.axis_start),
                 ),
-                fields: vec![crate::command::DynFieldSpec::new(crate::command::DynRole::Angle)],
+                fields: vec![crate::command::DynFieldSpec::new(
+                    crate::command::DynRole::Angle,
+                )],
                 guide: crate::command::DynGuide::None,
                 ref_point: self.profile_reference(),
             }
@@ -1668,7 +1754,10 @@ impl SweepCommand {
         self.profiles.clear();
         for (handle, entity) in profiles {
             if !handle.is_null()
-                && !self.profiles.iter().any(|(selected, _)| *selected == handle)
+                && !self
+                    .profiles
+                    .iter()
+                    .any(|(selected, _)| *selected == handle)
                 && crate::scene::model::sweep_model::is_sweep_profile(&entity)
             {
                 self.profiles.push((handle, entity));
@@ -1679,11 +1768,17 @@ impl SweepCommand {
     }
 
     fn contains_profile(&self, handle: Handle) -> bool {
-        self.profiles.iter().any(|(selected, _)| *selected == handle)
+        self.profiles
+            .iter()
+            .any(|(selected, _)| *selected == handle)
     }
 
     fn selection_options(&self) -> Option<SweepOptions> {
-        let profiles = self.profiles.iter().map(|(_, entity)| entity.clone()).collect::<Vec<_>>();
+        let profiles = self
+            .profiles
+            .iter()
+            .map(|(_, entity)| entity.clone())
+            .collect::<Vec<_>>();
         crate::scene::model::sweep_model::sweep_selection_options(&profiles, self.options)
     }
 
@@ -1717,7 +1812,10 @@ impl SweepCommand {
 
     fn length_anchor(&self) -> DVec3 {
         self.reference_start
-            .or_else(|| self.selection_options().and_then(|options| options.base_point))
+            .or_else(|| {
+                self.selection_options()
+                    .and_then(|options| options.base_point)
+            })
             .unwrap_or(DVec3::ZERO)
     }
 }
@@ -1728,13 +1826,21 @@ impl CadCommand for SweepCommand {
     }
     fn prompt(&self) -> String {
         match self.step {
-            SweepStep::PickProfiles => t!("SWEEP  Select objects to sweep or [Mode] (Enter to finish):").into_owned(),
+            SweepStep::PickProfiles => {
+                t!("SWEEP  Select objects to sweep or [Mode] (Enter to finish):").into_owned()
+            }
             SweepStep::Mode => format!(
                 "{} <{}>:",
                 t!("SWEEP  Creation mode [Solid/Surface]"),
-                if self.mode == ExtrudeMode::Solid { "Solid" } else { "Surface" },
+                if self.mode == ExtrudeMode::Solid {
+                    "Solid"
+                } else {
+                    "Surface"
+                },
             ),
-            SweepStep::PickPath => t!("SWEEP  Select sweep path or [Alignment/Base point/Scale/Twist]:").into_owned(),
+            SweepStep::PickPath => {
+                t!("SWEEP  Select sweep path or [Alignment/Base point/Scale/Twist]:").into_owned()
+            }
             SweepStep::Alignment => format!(
                 "{} <{}>:",
                 t!("SWEEP  Align sweep object perpendicular to path [Yes/No]"),
@@ -1742,7 +1848,9 @@ impl CadCommand for SweepCommand {
             ),
             SweepStep::BasePoint => t!("SWEEP  Specify base point:").into_owned(),
             SweepStep::Scale => format!(
-                "{} <{}>:", t!("SWEEP  Enter scale factor or [Reference]"), self.options.scale,
+                "{} <{}>:",
+                t!("SWEEP  Enter scale factor or [Reference]"),
+                self.options.scale,
             ),
             SweepStep::ReferenceLength => format!(
                 "{} <{}>:",
@@ -1755,8 +1863,12 @@ impl CadCommand for SweepCommand {
                 t!("SWEEP  Specify new length or [Points]"),
                 crate::entities::common::format_length(self.reference_length * self.options.scale),
             ),
-            SweepStep::NewLengthStart => t!("SWEEP  Specify first point of new length:").into_owned(),
-            SweepStep::NewLengthEnd => t!("SWEEP  Specify second point of new length:").into_owned(),
+            SweepStep::NewLengthStart => {
+                t!("SWEEP  Specify first point of new length:").into_owned()
+            }
+            SweepStep::NewLengthEnd => {
+                t!("SWEEP  Specify second point of new length:").into_owned()
+            }
             SweepStep::Twist => format!(
                 "{} <{}>:",
                 t!("SWEEP  Specify twist angle or [Bank]"),
@@ -1767,8 +1879,13 @@ impl CadCommand for SweepCommand {
 
     fn options(&self) -> Vec<CmdOption> {
         match self.step {
-            SweepStep::PickProfiles => vec![CmdOption::new("Mode", "MODE"), CmdOption::enter("Done")],
-            SweepStep::Mode => vec![CmdOption::new("Solid", "SOLID"), CmdOption::new("Surface", "SURFACE")],
+            SweepStep::PickProfiles => {
+                vec![CmdOption::new("Mode", "MODE"), CmdOption::enter("Done")]
+            }
+            SweepStep::Mode => vec![
+                CmdOption::new("Solid", "SOLID"),
+                CmdOption::new("Surface", "SURFACE"),
+            ],
             SweepStep::PickPath => vec![
                 CmdOption::new("Alignment", "ALIGNMENT"),
                 CmdOption::new("Base point", "BASE"),
@@ -1797,11 +1914,15 @@ impl CadCommand for SweepCommand {
             return CmdResult::NeedPoint;
         }
         let path = self.injected_path.take().or_else(|| {
-            self.hover_path.as_ref()
+            self.hover_path
+                .as_ref()
                 .filter(|(hovered, _)| *hovered == handle)
                 .map(|(_, entity)| entity.clone())
         });
-        if path.as_ref().is_some_and(crate::scene::model::sweep_model::is_sweep_path) {
+        if path
+            .as_ref()
+            .is_some_and(crate::scene::model::sweep_model::is_sweep_path)
+        {
             self.finish(handle)
         } else {
             CmdResult::NeedPoint
@@ -1844,15 +1965,24 @@ impl CadCommand for SweepCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        matches!(self.step,
-            SweepStep::PickProfiles | SweepStep::Mode | SweepStep::PickPath
-                | SweepStep::Alignment | SweepStep::Scale | SweepStep::ReferenceLength
-                | SweepStep::NewLength | SweepStep::Twist
+        matches!(
+            self.step,
+            SweepStep::PickProfiles
+                | SweepStep::Mode
+                | SweepStep::PickPath
+                | SweepStep::Alignment
+                | SweepStep::Scale
+                | SweepStep::ReferenceLength
+                | SweepStep::NewLength
+                | SweepStep::Twist
         )
     }
 
     fn point_step_accepts_keywords(&self) -> bool {
-        matches!(self.step, SweepStep::PickPath | SweepStep::ReferenceLength | SweepStep::NewLength)
+        matches!(
+            self.step,
+            SweepStep::PickPath | SweepStep::ReferenceLength | SweepStep::NewLength
+        )
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
@@ -1947,8 +2077,9 @@ impl CadCommand for SweepCommand {
                 self.step = SweepStep::PickPath;
             }
             SweepStep::Mode => self.step = SweepStep::PickProfiles,
-            SweepStep::Alignment | SweepStep::Scale | SweepStep::Twist
-                | SweepStep::NewLength => self.step = SweepStep::PickPath,
+            SweepStep::Alignment | SweepStep::Scale | SweepStep::Twist | SweepStep::NewLength => {
+                self.step = SweepStep::PickPath
+            }
             SweepStep::ReferenceLength => self.step = SweepStep::NewLength,
             _ => return CmdResult::Cancel,
         }
@@ -1965,7 +2096,12 @@ impl CadCommand for SweepCommand {
 
     fn inject_selection_entities(&mut self, entities: Vec<SelectionEntity>) {
         if self.step == SweepStep::PickProfiles {
-            self.set_profiles(entities.into_iter().map(|entry| (entry.handle, entry.entity)).collect());
+            self.set_profiles(
+                entities
+                    .into_iter()
+                    .map(|entry| (entry.handle, entry.entity))
+                    .collect(),
+            );
         }
     }
 
@@ -1987,7 +2123,10 @@ impl CadCommand for SweepCommand {
         self.step == SweepStep::PickPath
             && !handle.is_null()
             && !self.contains_profile(handle)
-            && self.hover_path.as_ref().is_none_or(|(hovered, _)| *hovered != handle)
+            && self
+                .hover_path
+                .as_ref()
+                .is_none_or(|(hovered, _)| *hovered != handle)
     }
 
     fn inject_hover_entity(&mut self, handle: Handle, entity: EntityType) {
@@ -2017,11 +2156,17 @@ impl CadCommand for SweepCommand {
         let Some(options) = self.selection_options() else {
             return Vec::new();
         };
-        self.preview_cache = self.profiles.iter().flat_map(|(_, profile)| {
-            crate::scene::model::sweep_model::swept_with_options(profile, path, self.mode, options)
+        self.preview_cache = self
+            .profiles
+            .iter()
+            .flat_map(|(_, profile)| {
+                crate::scene::model::sweep_model::swept_with_options(
+                    profile, path, self.mode, options,
+                )
                 .map(|body| preview_body_wires(&body, self.color, self.isolines))
                 .unwrap_or_default()
-        }).collect();
+            })
+            .collect();
         self.preview_cache.clone()
     }
 }
@@ -2124,15 +2269,25 @@ impl LoftCommand {
                 && crate::scene::model::loft_command_model::is_section(&entity)
             {
                 command.store_entity(handle, entity);
-                command.state.sections.push(LoftSectionSelection::Entity(handle));
+                command
+                    .state
+                    .sections
+                    .push(LoftSectionSelection::Entity(handle));
             }
         }
-        let invalid_point = command.state.sections.iter().enumerate().find_map(|(index, section)| {
-            (command.is_point_section(section)
-                && ((index > 0 && index + 1 < command.state.sections.len())
-                    || (index > 0 && command.is_point_section(&command.state.sections[index - 1]))))
-                .then_some(index)
-        });
+        let invalid_point =
+            command
+                .state
+                .sections
+                .iter()
+                .enumerate()
+                .find_map(|(index, section)| {
+                    (command.is_point_section(section)
+                        && ((index > 0 && index + 1 < command.state.sections.len())
+                            || (index > 0
+                                && command.is_point_section(&command.state.sections[index - 1]))))
+                    .then_some(index)
+                });
         if let Some(index) = invalid_point {
             command.state.sections.truncate(index);
             command.notice = Some(t!("Point cross-sections are allowed only at the first or last end, with a curve between point ends.").into_owned());
@@ -2162,17 +2317,24 @@ impl LoftCommand {
     fn is_point_section(&self, section: &LoftSectionSelection) -> bool {
         match section {
             LoftSectionSelection::Point(_) => true,
-            LoftSectionSelection::Entity(handle) => self.available.iter().any(|(id, entity)| {
-                id == handle && matches!(entity, EntityType::Point(_))
-            }),
+            LoftSectionSelection::Entity(handle) => self
+                .available
+                .iter()
+                .any(|(id, entity)| id == handle && matches!(entity, EntityType::Point(_))),
             LoftSectionSelection::Join(_) => false,
         }
     }
 
     fn point_ends(&self) -> (bool, bool) {
         (
-            self.state.sections.first().is_some_and(|section| self.is_point_section(section)),
-            self.state.sections.last().is_some_and(|section| self.is_point_section(section)),
+            self.state
+                .sections
+                .first()
+                .is_some_and(|section| self.is_point_section(section)),
+            self.state
+                .sections
+                .last()
+                .is_some_and(|section| self.is_point_section(section)),
         )
     }
 
@@ -2201,7 +2363,11 @@ impl LoftCommand {
 
     fn can_close(&self) -> bool {
         self.state.sections.len() >= 3
-            && !self.state.sections.iter().any(|section| self.is_point_section(section))
+            && !self
+                .state
+                .sections
+                .iter()
+                .any(|section| self.is_point_section(section))
     }
 
     fn key(&self) -> LoftPreviewKey {
@@ -2233,7 +2399,8 @@ impl LoftCommand {
                 Ok(body) => {
                     // Only edges/isolines: do not triangulate faces on mouse movement.
                     // Keep the transient cage blue without changing the result's layer color.
-                    self.preview_cache = preview_body_wires(&body, WireModel::SELECTED, self.isolines);
+                    self.preview_cache =
+                        preview_body_wires(&body, WireModel::SELECTED, self.isolines);
                 }
                 Err(error) => self.preview_error = Some(error),
             }
@@ -2246,15 +2413,24 @@ impl LoftCommand {
         if self.state.sections.len() < 2 {
             return self.invalid(t!("LOFT requires at least two cross-sections.").into_owned());
         }
-        if self.state.sections.iter().enumerate().any(|(index, section)| {
-            self.is_point_section(section)
-                && ((index > 0 && index + 1 < self.state.sections.len())
-                    || (index > 0 && self.is_point_section(&self.state.sections[index - 1])))
-        }) {
+        if self
+            .state
+            .sections
+            .iter()
+            .enumerate()
+            .any(|(index, section)| {
+                self.is_point_section(section)
+                    && ((index > 0 && index + 1 < self.state.sections.len())
+                        || (index > 0 && self.is_point_section(&self.state.sections[index - 1])))
+            })
+        {
             return self.invalid(t!("Point cross-sections are allowed only at the first or last end, with a curve between point ends.").into_owned());
         }
         if self.state.options.closed && !self.can_close() {
-            return self.invalid(t!("A closed loft requires at least three curve cross-sections and no point ends.").into_owned());
+            return self.invalid(
+                t!("A closed loft requires at least three curve cross-sections and no point ends.")
+                    .into_owned(),
+            );
         }
         let key = self.key();
         self.cached_preview(key);
@@ -2285,15 +2461,23 @@ impl LoftCommand {
 
     fn add_section(&mut self, handle: Handle) -> CmdResult {
         if self.state.sections.len() >= 2 && self.point_ends().1 {
-            return self.invalid(t!("A point must remain the last cross-section; use Undo to change the end.").into_owned());
+            return self.invalid(
+                t!("A point must remain the last cross-section; use Undo to change the end.")
+                    .into_owned(),
+            );
         }
         if self.contains_section(handle) {
             return self.invalid(t!("That cross-section is already selected.").into_owned());
         }
-        if self.available.iter().find(|(id, _)| *id == handle)
+        if self
+            .available
+            .iter()
+            .find(|(id, _)| *id == handle)
             .is_none_or(|(_, entity)| !crate::scene::model::loft_command_model::is_section(entity))
         {
-            return self.invalid(t!("Select a supported planar curve or region cross-section.").into_owned());
+            return self.invalid(
+                t!("Select a supported planar curve or region cross-section.").into_owned(),
+            );
         }
         let section = LoftSectionSelection::Entity(handle);
         let point = self.is_point_section(&section);
@@ -2360,7 +2544,11 @@ impl LoftCommand {
     }
 
     fn keyword(text: &str, choices: &[&str]) -> Option<usize> {
-        let keyword = text.trim().trim_start_matches('_').replace([' ', '-'], "").to_ascii_uppercase();
+        let keyword = text
+            .trim()
+            .trim_start_matches('_')
+            .replace([' ', '-'], "")
+            .to_ascii_uppercase();
         let keyword = match keyword.as_str() {
             "CROSSSECTIONSONLY" => "CROSSSECTIONS",
             "BULGEMAGNITUDE" => "BULGE",
@@ -2372,7 +2560,10 @@ impl LoftCommand {
         if let Some(index) = choices.iter().position(|choice| *choice == keyword) {
             return Some(index);
         }
-        let mut matches = choices.iter().enumerate().filter(|(_, choice)| choice.starts_with(keyword));
+        let mut matches = choices
+            .iter()
+            .enumerate()
+            .filter(|(_, choice)| choice.starts_with(keyword));
         let index = matches.next()?.0;
         matches.next().is_none().then_some(index)
     }
@@ -2441,11 +2632,23 @@ impl CadCommand for LoftCommand {
     }
     fn options(&self) -> Vec<CmdOption> {
         let mut options = match self.state.step {
-            LoftStep::Sections => vec![CmdOption::new("Point", "POINT"), CmdOption::new("Join", "JOIN"), CmdOption::new("Mode", "MODE")],
+            LoftStep::Sections => vec![
+                CmdOption::new("Point", "POINT"),
+                CmdOption::new("Join", "JOIN"),
+                CmdOption::new("Mode", "MODE"),
+            ],
             LoftStep::Join | LoftStep::Guides => vec![CmdOption::enter("Done")],
-            LoftStep::Mode => vec![CmdOption::new("Solid", "SOLID"), CmdOption::new("Surface", "SURFACE")],
+            LoftStep::Mode => vec![
+                CmdOption::new("Solid", "SOLID"),
+                CmdOption::new("Surface", "SURFACE"),
+            ],
             LoftStep::Options => {
-                let mut choices = vec![CmdOption::new("Guides", "GUIDES"), CmdOption::new("Path", "PATH"), CmdOption::new("Cross sections only", "CROSSSECTIONS"), CmdOption::new("Settings", "SETTINGS")];
+                let mut choices = vec![
+                    CmdOption::new("Guides", "GUIDES"),
+                    CmdOption::new("Path", "PATH"),
+                    CmdOption::new("Cross sections only", "CROSSSECTIONS"),
+                    CmdOption::new("Settings", "SETTINGS"),
+                ];
                 let (start, end) = self.point_ends();
                 if start || end {
                     choices.push(CmdOption::new("Continuity", "CONTINUITY"));
@@ -2467,13 +2670,20 @@ impl CadCommand for LoftCommand {
                 choices
             }
             LoftStep::Normals => vec![
-                CmdOption::new("Ruled", "RULED"), CmdOption::new("Smooth", "SMOOTH"),
-                CmdOption::new("First normal", "FIRSTNORMAL"), CmdOption::new("Last normal", "LASTNORMAL"),
-                CmdOption::new("Ends normal", "ENDSNORMAL"), CmdOption::new("All normal", "ALLNORMAL"),
+                CmdOption::new("Ruled", "RULED"),
+                CmdOption::new("Smooth", "SMOOTH"),
+                CmdOption::new("First normal", "FIRSTNORMAL"),
+                CmdOption::new("Last normal", "LASTNORMAL"),
+                CmdOption::new("Ends normal", "ENDSNORMAL"),
+                CmdOption::new("All normal", "ALLNORMAL"),
                 CmdOption::new("Use draft angles", "USEDRAFTANGLES"),
             ],
-            LoftStep::Closed | LoftStep::AlignDirection => vec![CmdOption::new("Yes", "YES"), CmdOption::new("No", "NO")],
-            LoftStep::StartContinuity | LoftStep::EndContinuity => vec![CmdOption::new("G0", "G0"), CmdOption::new("G1", "G1")],
+            LoftStep::Closed | LoftStep::AlignDirection => {
+                vec![CmdOption::new("Yes", "YES"), CmdOption::new("No", "NO")]
+            }
+            LoftStep::StartContinuity | LoftStep::EndContinuity => {
+                vec![CmdOption::new("G0", "G0"), CmdOption::new("G1", "G1")]
+            }
             _ => Vec::new(),
         };
         if !matches!(self.state.step, LoftStep::Sections | LoftStep::Options) {
@@ -2482,7 +2692,10 @@ impl CadCommand for LoftCommand {
         options
     }
     fn needs_entity_pick(&self) -> bool {
-        matches!(self.state.step, LoftStep::Sections | LoftStep::Join | LoftStep::Guides | LoftStep::Path)
+        matches!(
+            self.state.step,
+            LoftStep::Sections | LoftStep::Join | LoftStep::Guides | LoftStep::Path
+        )
     }
     fn entity_pick_highlights_hover(&self) -> bool {
         self.needs_entity_pick()
@@ -2505,10 +2718,17 @@ impl CadCommand for LoftCommand {
             return self.add_section(handle);
         }
         if self.contains_section(handle) {
-            return self.invalid(t!("A cross-section cannot also be a guide, path, or joined edge.").into_owned());
+            return self.invalid(
+                t!("A cross-section cannot also be a guide, path, or joined edge.").into_owned(),
+            );
         }
-        if self.available.iter().find(|(id, _)| *id == handle)
-            .is_none_or(|(_, entity)| !crate::scene::model::loft_command_model::is_guide_or_path(entity))
+        if self
+            .available
+            .iter()
+            .find(|(id, _)| *id == handle)
+            .is_none_or(|(_, entity)| {
+                !crate::scene::model::loft_command_model::is_guide_or_path(entity)
+            })
         {
             return self.invalid(t!("Select a supported guide or path curve.").into_owned());
         }
@@ -2553,7 +2773,11 @@ impl CadCommand for LoftCommand {
         self.remember();
         self.state.sections.push(LoftSectionSelection::Point(point));
         self.state.options.closed = false;
-        self.state.step = if self.state.sections.len() >= 2 { LoftStep::Options } else { LoftStep::Sections };
+        self.state.step = if self.state.sections.len() >= 2 {
+            LoftStep::Options
+        } else {
+            LoftStep::Sections
+        };
         CmdResult::NeedPoint
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
@@ -2724,7 +2948,8 @@ impl CadCommand for LoftCommand {
         Some(self.undo_selection())
     }
     fn wants_hover_entity(&self, handle: Handle) -> bool {
-        self.needs_entity_pick() && !handle.is_null()
+        self.needs_entity_pick()
+            && !handle.is_null()
             && !self.available.iter().any(|(id, _)| *id == handle)
     }
     fn inject_hover_entity(&mut self, handle: Handle, entity: EntityType) {
@@ -2735,7 +2960,9 @@ impl CadCommand for LoftCommand {
         if !handle.is_null() && !self.contains_section(handle) {
             if let Some((_, entity)) = self.available.iter().find(|(id, _)| *id == handle) {
                 match self.state.step {
-                    LoftStep::Sections if crate::scene::model::loft_command_model::is_section(entity) => {
+                    LoftStep::Sections
+                        if crate::scene::model::loft_command_model::is_section(entity) =>
+                    {
                         let section = LoftSectionSelection::Entity(handle);
                         let point = self.is_point_section(&section);
                         if !(self.point_ends().1 && (point || self.state.sections.len() >= 2)) {
@@ -2745,9 +2972,17 @@ impl CadCommand for LoftCommand {
                             }
                         }
                     }
-                    LoftStep::Guides if !key.guides.contains(&handle)
-                        && crate::scene::model::loft_command_model::is_guide_or_path(entity) => key.guides.push(handle),
-                    LoftStep::Path if crate::scene::model::loft_command_model::is_guide_or_path(entity) => {
+                    LoftStep::Guides
+                        if !key.guides.contains(&handle)
+                            && crate::scene::model::loft_command_model::is_guide_or_path(
+                                entity,
+                            ) =>
+                    {
+                        key.guides.push(handle)
+                    }
+                    LoftStep::Path
+                        if crate::scene::model::loft_command_model::is_guide_or_path(entity) =>
+                    {
                         key.path = Some(handle);
                         key.guides.clear();
                     }
@@ -2759,7 +2994,8 @@ impl CadCommand for LoftCommand {
     }
     fn on_preview_wires(&mut self, point: DVec3) -> Vec<WireModel> {
         let mut key = self.key();
-        if self.state.step == LoftStep::Point && point.is_finite()
+        if self.state.step == LoftStep::Point
+            && point.is_finite()
             && !key.sections.is_empty()
             && !self.point_ends().1
         {
@@ -2840,7 +3076,9 @@ inventory::submit!(crate::command::CommandRegistration {
     names: &["EXTRUDE", "THICKEN", "PRESSPULL"]
 });
 inventory::submit!(crate::command::CommandRegistration { names: &["LOFT"] });
-inventory::submit!(crate::command::CommandRegistration { names: &["REVOLVE"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["REVOLVE"]
+});
 
 #[cfg(test)]
 mod extrude_command_tests {
@@ -2908,18 +3146,38 @@ mod thicken_command_tests {
     fn thicken_filters_selection_recovers_from_invalid_text_and_measures_two_points() {
         let handle = Handle::new(42);
         let mut command = ThickenCommand::new(vec![
-            (Handle::new(1), EntityType::Line(acadrust::entities::Line::default())),
-            (handle, EntityType::Surface(acadrust::entities::Surface::new(acadrust::entities::SurfaceKind::Plane))),
+            (
+                Handle::new(1),
+                EntityType::Line(acadrust::entities::Line::default()),
+            ),
+            (
+                handle,
+                EntityType::Surface(acadrust::entities::Surface::new(
+                    acadrust::entities::SurfaceKind::Plane,
+                )),
+            ),
         ]);
         assert!(!command.is_selection_gathering());
         assert_eq!(command.handles, vec![handle]);
-        assert!(matches!(command.on_text_input("bad"), Some(CmdResult::ReportError(_))));
+        assert!(matches!(
+            command.on_text_input("bad"),
+            Some(CmdResult::ReportError(_))
+        ));
         assert!(command.input_kind().wants_text());
-        assert!(matches!(command.on_text_input("-2"), Some(CmdResult::ThickenEntities { distance: -2.0, .. })));
-        assert!(matches!(command.on_point(DVec3::ZERO), CmdResult::NeedPoint));
+        assert!(matches!(
+            command.on_text_input("-2"),
+            Some(CmdResult::ThickenEntities { distance: -2.0, .. })
+        ));
+        assert!(matches!(
+            command.on_point(DVec3::ZERO),
+            CmdResult::NeedPoint
+        ));
         assert!(command.on_undo_step().is_some());
         let _ = command.on_point(DVec3::ZERO);
-        assert!(matches!(command.on_point(DVec3::new(3.0, 4.0, 0.0)), CmdResult::ThickenEntities { distance: 5.0, .. }));
+        assert!(matches!(
+            command.on_point(DVec3::new(3.0, 4.0, 0.0)),
+            CmdResult::ThickenEntities { distance: 5.0, .. }
+        ));
         let mut empty = ThickenCommand::new(Vec::new());
         assert!(empty.is_selection_gathering());
         assert!(matches!(empty.on_enter(), CmdResult::Measurement(_)));

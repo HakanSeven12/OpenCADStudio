@@ -1,9 +1,9 @@
 // 3DPOLY creates open or closed non-planar paths.
 
+use crate::t;
 use acadrust::entities::Polyline3D;
 use acadrust::types::Vector3;
 use acadrust::EntityType;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -103,9 +103,9 @@ impl CadCommand for Poly3dCommand {
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         match text.trim().to_uppercase().as_str() {
-            "C" | "CLOSE" if self.points.len() >= 3 => self
-                .build(true)
-                .map(CmdResult::CommitAndExit),
+            "C" | "CLOSE" if self.points.len() >= 3 => {
+                self.build(true).map(CmdResult::CommitAndExit)
+            }
             "C" | "CLOSE" => Some(CmdResult::NeedPoint),
             "U" | "UNDO" => {
                 self.points.pop();
@@ -133,4 +133,4 @@ impl CadCommand for Poly3dCommand {
 }
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["3DPOLY"] });  // Poly3dCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["3DPOLY"] }); // Poly3dCommand

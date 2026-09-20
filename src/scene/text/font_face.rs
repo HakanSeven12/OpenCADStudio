@@ -73,7 +73,8 @@ impl Face {
         let is_builtin = lff::is_builtin(font_name);
         let has_sys = sysfont::has_family(font_name);
         if !is_builtin && has_sys {
-            let canonical = sysfont::canonical_family_name(font_name).unwrap_or_else(|| font_name.to_string());
+            let canonical =
+                sysfont::canonical_family_name(font_name).unwrap_or_else(|| font_name.to_string());
             let word = ttf_glyph::glyph(&canonical, ' ')
                 .map(|g| g.advance)
                 // Fall back to a sensible blank-width if the font has no space.
@@ -164,8 +165,7 @@ mod tests {
             .find(|f| ttf_glyph::glyph(f, 'A').is_some())
             .expect("a system family with an 'A'");
         assert!(matches!(Face::resolve(fam), Face::Ttf { .. }));
-        let (strokes, _) =
-            lff::tessellate_text_ex([0.0, 0.0], 10.0, 0.0, 1.0, 0.0, fam, "ABC");
+        let (strokes, _) = lff::tessellate_text_ex([0.0, 0.0], 10.0, 0.0, 1.0, 0.0, fam, "ABC");
         assert!(!strokes.is_empty(), "TTF run produced no strokes");
     }
 
@@ -219,7 +219,7 @@ mod tests {
             eprintln!("no system fonts; skipping");
             return;
         }
-        
+
         // Arial and Cambria are typical on Windows/Mac/Linux
         for test_name in &["arial", "ARIAL", "ARIALN", "cambria"] {
             let resolved = Face::resolve(test_name);
@@ -227,14 +227,18 @@ mod tests {
                 Face::Ttf { family, .. } => {
                     assert!(
                         family == "Arial" || family == "Arial Narrow" || family == "Cambria",
-                        "Resolved to unexpected family name: {}", family
+                        "Resolved to unexpected family name: {}",
+                        family
                     );
                 }
                 Face::Lff(_) => {
                     // It's possible some test environments don't have Arial or Cambria,
                     // but if they are present in sysfont::families() (or we can fallback),
                     // they should resolve to Ttf. If they aren't installed, Lff fallback is accepted.
-                    eprintln!("Font {} resolved to Lff (probably not installed)", test_name);
+                    eprintln!(
+                        "Font {} resolved to Lff (probably not installed)",
+                        test_name
+                    );
                 }
                 Face::Shx { .. } => {
                     // A system TTF name never resolves to an SHX shape font.

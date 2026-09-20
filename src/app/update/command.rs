@@ -4,23 +4,22 @@
 use super::util::*;
 use super::{format_size, VIEWCUBE_HIT_SIZE};
 use crate::app::helpers::{
-    parse_coord, polar_constrain_near, ucs_rotate_vec, ucs_to_wcs, ucs_z_axis,
-    CoordKind,
+    parse_coord, polar_constrain_near, ucs_rotate_vec, ucs_to_wcs, ucs_z_axis, CoordKind,
 };
-use crate::app::{Message, OpenCADStudio, POLY_START_DELAY_MS};
 use crate::app::TextEntryMode;
+use crate::app::{Message, OpenCADStudio, POLY_START_DELAY_MS};
 use crate::modules::ModuleEvent;
-use crate::scene::pick::grip::{
-    find_hit_grip, find_hit_grip_paper, find_hit_grip_rte, GripEdit, GripEditMode,
-};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::plugin::v4_support;
 use crate::scene::model::object::{GripApply, PropValue};
+use crate::scene::pick::grip::{
+    find_hit_grip, find_hit_grip_paper, find_hit_grip_rte, GripEdit, GripEditMode,
+};
 use crate::scene::{
     self, hover_id, CubeRegion, Scene, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX,
 };
-use crate::ui::PropertiesPanel;
 use crate::ui::window::attribute_editor::{AttrRow, AttrTab};
+use crate::ui::PropertiesPanel;
 use acadrust::types::Color as AcadColor;
 use acadrust::{EntityType as AcadEntityType, Handle};
 use iced::time::Instant;
@@ -71,10 +70,10 @@ fn polyline_vertex_count(entity: &AcadEntityType) -> Option<usize> {
 }
 
 impl OpenCADStudio {
-pub(super) fn begin_tab_close_queue(&mut self, tab_ids: Vec<u64>) -> Task<Message> {
-                self.pending_tab_closes.clear();
-                self.pending_tab_closes.extend(tab_ids);
-                self.continue_tab_close_queue()
+    pub(super) fn begin_tab_close_queue(&mut self, tab_ids: Vec<u64>) -> Task<Message> {
+        self.pending_tab_closes.clear();
+        self.pending_tab_closes.extend(tab_ids);
+        self.continue_tab_close_queue()
     }
 
     /// Close queued drawings until a dirty tab requires confirmation. Queue
@@ -99,759 +98,690 @@ pub(super) fn begin_tab_close_queue(&mut self, tab_ids: Vec<u64>) -> Task<Messag
         Task::batch(tasks)
     }
 
-pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
-                // Start tab is fixed — close requests on it are no-ops.
-                if self.tabs.get(idx).map_or(false, |t| t.is_start) {
-                    return Task::none();
-                }
-                // Closing a tab shifts indices / the active tab. The attribute
-                // editor holds a document-local handle into one tab, so drop it
-                // now rather than risk it applying to a different tab's document.
-                self.cancel_attr_editor();
-                if self.tabs.get(idx).map_or(false, |t| t.dirty) {
-                    self.pending_close = Some(crate::app::PendingClose::Tab(idx));
-                    return self.open_unsaved_dialog_window();
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                let tab_id = self.tabs.get(idx).map(|t| t.id);
-                // This tab is closing for good — drop its autosave recovery copy.
-                #[cfg(not(target_arch = "wasm32"))]
-                let _ = std::fs::remove_file(self.autosave_target(idx));
-                // Only-tab case: when the lone non-start tab closes, fall
-                // back to the Start tab if it exists; otherwise spawn a
-                // fresh blank drawing (legacy behaviour).
-                if self.tabs.len() == 1 {
-                    self.tab_counter += 1;
-                    self.tabs[0] = crate::app::document::DocumentTab::new_drawing(self.tab_counter);
-                    self.active_tab = 0;
-                    self.apply_display_defaults(0);
-                } else {
-                    self.tabs.remove(idx);
-                    if self.active_tab >= self.tabs.len() {
-                        self.active_tab = self.tabs.len() - 1;
-                    }
-                }
-                // The active tab is now either a brand-new blank or a
-                // different existing tab; in both cases the ribbon needs
-                // to track that doc's defaults / selection. #21.
-                self.sync_ribbon_layers();
-                self.sync_ribbon_styles();
-                self.sync_ribbon_from_selection();
-                #[cfg(not(target_arch = "wasm32"))]
-                if let Some(tab_id) = tab_id {
-                    v4_support::on_tab_closed(tab_id);
-                }
-                Task::none()
+    pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
+        // Start tab is fixed — close requests on it are no-ops.
+        if self.tabs.get(idx).map_or(false, |t| t.is_start) {
+            return Task::none();
+        }
+        // Closing a tab shifts indices / the active tab. The attribute
+        // editor holds a document-local handle into one tab, so drop it
+        // now rather than risk it applying to a different tab's document.
+        self.cancel_attr_editor();
+        if self.tabs.get(idx).map_or(false, |t| t.dirty) {
+            self.pending_close = Some(crate::app::PendingClose::Tab(idx));
+            return self.open_unsaved_dialog_window();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let tab_id = self.tabs.get(idx).map(|t| t.id);
+        // This tab is closing for good — drop its autosave recovery copy.
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = std::fs::remove_file(self.autosave_target(idx));
+        // Only-tab case: when the lone non-start tab closes, fall
+        // back to the Start tab if it exists; otherwise spawn a
+        // fresh blank drawing (legacy behaviour).
+        if self.tabs.len() == 1 {
+            self.tab_counter += 1;
+            self.tabs[0] = crate::app::document::DocumentTab::new_drawing(self.tab_counter);
+            self.active_tab = 0;
+            self.apply_display_defaults(0);
+        } else {
+            self.tabs.remove(idx);
+            if self.active_tab >= self.tabs.len() {
+                self.active_tab = self.tabs.len() - 1;
+            }
+        }
+        // The active tab is now either a brand-new blank or a
+        // different existing tab; in both cases the ribbon needs
+        // to track that doc's defaults / selection. #21.
+        self.sync_ribbon_layers();
+        self.sync_ribbon_styles();
+        self.sync_ribbon_from_selection();
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(tab_id) = tab_id {
+            v4_support::on_tab_closed(tab_id);
+        }
+        Task::none()
     }
 
     pub(super) fn on_command_append_char(&mut self, s: String) -> Task<Message> {
-                // While the MText preview is up, typed glyphs edit it directly.
-                if self.mtext_editor.as_ref().is_some_and(|e| e.show_preview) {
-                    if s.chars().all(|c| !c.is_control()) {
-                        self.mtext_type(&s);
-                    }
-                    return Task::none();
+        // While the MText preview is up, typed glyphs edit it directly.
+        if self.mtext_editor.as_ref().is_some_and(|e| e.show_preview) {
+            if s.chars().all(|c| !c.is_control()) {
+                self.mtext_type(&s);
+            }
+            return Task::none();
+        }
+        // Filter out control characters — only push the typed
+        // glyph(s). `Tab`, etc. arrive as Named keys, not here.
+        if s.chars().all(|c| !c.is_control()) {
+            let i = self.active_tab;
+            // `,` is the coordinate separator in dynamic input,
+            // not a decimal point: typing it locks the current
+            // field's buffer and advances to the next coordinate,
+            // reshaping the field set when going polar → cartesian
+            // (Distance → X, Y) or 2-D → 3-D (X, Y → X, Y, Z).
+            // See #35.
+            if s == "," && self.dyn_input && !self.tabs[i].dyn_fields.is_empty() {
+                self.dyn_comma_advance();
+                self.command_line.autocomplete_cursor = None;
+                self.refresh_active_cmd_preview(i);
+                return self.focus_cmd_input();
+            }
+            // In dynamic point entry, `@` and `#` are coordinate-mode
+            // switches rather than command-line text. Consuming them
+            // here keeps the prefix out of the command buffer while
+            // the following digits continue into the dynamic fields.
+            if matches!(s.as_str(), "@" | "#")
+                && self.command_line.input.is_empty()
+                && self.dyn_input
+                && self.dyn_has_coordinate_fields(i)
+            {
+                self.dyn_set_coordinate_mode(s == "#");
+                self.command_line.autocomplete_cursor = None;
+                self.refresh_active_cmd_preview(i);
+                return self.focus_cmd_input();
+            }
+            // While dynamic input is showing fields, numeric and
+            // expression glyphs edit the focused field instead of
+            // the command line. Letters still go to the command line
+            // so command-option keywords keep working.
+            let dyn_field_char = !s.is_empty()
+                && s.chars().all(|c| {
+                    c.is_ascii_digit()
+                        || matches!(c, '.' | '-' | '+' | '*' | '/' | '^' | '%' | '(' | ')')
+                });
+            if dyn_field_char
+                && self.command_line.input.is_empty()
+                && self.dyn_input
+                && !self.tabs[i].dyn_fields.is_empty()
+            {
+                let a = self.tabs[i]
+                    .dyn_active
+                    .min(self.tabs[i].dyn_fields.len() - 1);
+                self.tabs[i].dyn_fields[a]
+                    .buffer
+                    .get_or_insert_with(String::new)
+                    .push_str(&s);
+                if self.tabs[i]
+                    .active_grip
+                    .as_ref()
+                    .is_some_and(|grip| grip.mode.uses_scalar_dynamic_input())
+                {
+                    self.command_line.input.push_str(&s);
                 }
-                // Filter out control characters — only push the typed
-                // glyph(s). `Tab`, etc. arrive as Named keys, not here.
-                if s.chars().all(|c| !c.is_control()) {
-                    let i = self.active_tab;
-                    // `,` is the coordinate separator in dynamic input,
-                    // not a decimal point: typing it locks the current
-                    // field's buffer and advances to the next coordinate,
-                    // reshaping the field set when going polar → cartesian
-                    // (Distance → X, Y) or 2-D → 3-D (X, Y → X, Y, Z).
-                    // See #35.
-                    if s == "," && self.dyn_input && !self.tabs[i].dyn_fields.is_empty() {
-                        self.dyn_comma_advance();
-                        self.command_line.autocomplete_cursor = None;
-                        self.refresh_active_cmd_preview(i);
-                        return self.focus_cmd_input();
-                    }
-                    // In dynamic point entry, `@` and `#` are coordinate-mode
-                    // switches rather than command-line text. Consuming them
-                    // here keeps the prefix out of the command buffer while
-                    // the following digits continue into the dynamic fields.
-                    if matches!(s.as_str(), "@" | "#")
-                        && self.command_line.input.is_empty()
-                        && self.dyn_input
-                        && self.dyn_has_coordinate_fields(i)
-                    {
-                        self.dyn_set_coordinate_mode(s == "#");
-                        self.command_line.autocomplete_cursor = None;
-                        self.refresh_active_cmd_preview(i);
-                        return self.focus_cmd_input();
-                    }
-                    // While dynamic input is showing fields, numeric and
-                    // expression glyphs edit the focused field instead of
-                    // the command line. Letters still go to the command line
-                    // so command-option keywords keep working.
-                    let dyn_field_char = !s.is_empty()
-                        && s.chars().all(|c| {
-                            c.is_ascii_digit()
-                                || matches!(c, '.' | '-' | '+' | '*' | '/' | '^' | '%' | '(' | ')')
-                        });
-                    if dyn_field_char
-                        && self.command_line.input.is_empty()
-                        && self.dyn_input
-                        && !self.tabs[i].dyn_fields.is_empty()
-                    {
-                        let a = self.tabs[i]
-                            .dyn_active
-                            .min(self.tabs[i].dyn_fields.len() - 1);
-                        self.tabs[i].dyn_fields[a]
-                            .buffer
-                            .get_or_insert_with(String::new)
-                            .push_str(&s);
-                        if self.tabs[i]
-                            .active_grip
-                            .as_ref()
-                            .is_some_and(|grip| grip.mode.uses_scalar_dynamic_input())
-                        {
-                            self.command_line.input.push_str(&s);
+            } else {
+                // Command-line entry is shown uppercase — except in
+                // free-form text prompts, where the typed case is the
+                // content (matches the CommandInput route).
+                if self.is_free_text_active() {
+                    self.command_line.input.push_str(&s);
+                } else {
+                    self.command_line.input.push_str(&s.to_uppercase());
+                }
+                self.command_line.cancel_history_navigation();
+                // Live incremental search for INSERT/MINSERT (see CommandInput)
+                let live = self.command_line.input.clone();
+                let i = self.active_tab;
+                let (should_update, opts, prompt) =
+                    if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
+                        if cmd.on_live_input(&live) {
+                            (true, cmd.options(), cmd.prompt())
+                        } else {
+                            (false, Vec::new(), String::new())
                         }
                     } else {
-                        // Command-line entry is shown uppercase — except in
-                        // free-form text prompts, where the typed case is the
-                        // content (matches the CommandInput route).
-                        if self.is_free_text_active() {
-                            self.command_line.input.push_str(&s);
-                        } else {
-                            self.command_line.input.push_str(&s.to_uppercase());
-                        }
-                        self.command_line.cancel_history_navigation();
-                        // Live incremental search for INSERT/MINSERT (see CommandInput)
-                        let live = self.command_line.input.clone();
-                        let i = self.active_tab;
-                        let (should_update, opts, prompt) = if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
-                            if cmd.on_live_input(&live) { (true, cmd.options(), cmd.prompt()) } else { (false, Vec::new(), String::new()) }
-                        } else { (false, Vec::new(), String::new()) };
-                        if should_update {
-                            self.command_line.set_step_options(opts);
-                            if let Some(last) = self.command_line.history.last_mut() { if last.pinned { last.text = prompt; } }
+                        (false, Vec::new(), String::new())
+                    };
+                if should_update {
+                    self.command_line.set_step_options(opts);
+                    if let Some(last) = self.command_line.history.last_mut() {
+                        if last.pinned {
+                            last.text = prompt;
                         }
                     }
                 }
-                self.command_line.autocomplete_cursor = None;
-                self.focus_cmd_input()
+            }
+        }
+        self.command_line.autocomplete_cursor = None;
+        self.focus_cmd_input()
     }
 
     pub(super) fn on_command_backspace(&mut self) -> Task<Message> {
-                if self.mtext_editor.as_ref().is_some_and(|e| e.show_preview) {
-                    self.mtext_backspace();
-                    return Task::none();
+        if self.mtext_editor.as_ref().is_some_and(|e| e.show_preview) {
+            self.mtext_backspace();
+            return Task::none();
+        }
+        let i = self.active_tab;
+        // Backspace edits the focused dynamic-input field first;
+        // emptying it unlocks the field (back to cursor tracking).
+        if self.dyn_input && !self.tabs[i].dyn_fields.is_empty() {
+            let a = self.tabs[i]
+                .dyn_active
+                .min(self.tabs[i].dyn_fields.len() - 1);
+            if let Some(buf) = self.tabs[i].dyn_fields[a].buffer.as_mut() {
+                buf.pop();
+                if buf.is_empty() {
+                    self.tabs[i].dyn_fields[a].buffer = None;
                 }
-                let i = self.active_tab;
-                // Backspace edits the focused dynamic-input field first;
-                // emptying it unlocks the field (back to cursor tracking).
-                if self.dyn_input && !self.tabs[i].dyn_fields.is_empty() {
-                    let a = self.tabs[i]
-                        .dyn_active
-                        .min(self.tabs[i].dyn_fields.len() - 1);
-                    if let Some(buf) = self.tabs[i].dyn_fields[a].buffer.as_mut() {
-                        buf.pop();
-                        if buf.is_empty() {
-                            self.tabs[i].dyn_fields[a].buffer = None;
-                        }
-                        if self.tabs[i]
-                            .active_grip
-                            .as_ref()
-                            .is_some_and(|grip| grip.mode.uses_scalar_dynamic_input())
-                        {
-                            self.command_line.input.pop();
-                        }
-                        return self.focus_cmd_input();
-                    }
-                }
-                self.command_line.input.pop();
-                self.command_line.autocomplete_cursor = None;
-                self.command_line.cancel_history_navigation();
-                // Live incremental search for INSERT/MINSERT
+                if self.tabs[i]
+                    .active_grip
+                    .as_ref()
+                    .is_some_and(|grip| grip.mode.uses_scalar_dynamic_input())
                 {
-                    let live = self.command_line.input.clone();
-                    let i = self.active_tab;
-                    let (should_update, opts, prompt) = if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
-                        if cmd.on_live_input(&live) { (true, cmd.options(), cmd.prompt()) } else { (false, Vec::new(), String::new()) }
-                    } else { (false, Vec::new(), String::new()) };
-                    if should_update {
-                        self.command_line.set_step_options(opts);
-                        if let Some(last) = self.command_line.history.last_mut() { if last.pinned { last.text = prompt; } }
+                    self.command_line.input.pop();
+                }
+                return self.focus_cmd_input();
+            }
+        }
+        self.command_line.input.pop();
+        self.command_line.autocomplete_cursor = None;
+        self.command_line.cancel_history_navigation();
+        // Live incremental search for INSERT/MINSERT
+        {
+            let live = self.command_line.input.clone();
+            let i = self.active_tab;
+            let (should_update, opts, prompt) = if let Some(cmd) = self.tabs[i].active_cmd.as_mut()
+            {
+                if cmd.on_live_input(&live) {
+                    (true, cmd.options(), cmd.prompt())
+                } else {
+                    (false, Vec::new(), String::new())
+                }
+            } else {
+                (false, Vec::new(), String::new())
+            };
+            if should_update {
+                self.command_line.set_step_options(opts);
+                if let Some(last) = self.command_line.history.last_mut() {
+                    if last.pinned {
+                        last.text = prompt;
                     }
                 }
-                self.focus_cmd_input()
+            }
+        }
+        self.focus_cmd_input()
     }
 
     pub(super) fn on_command_submit(&mut self) -> Task<Message> {
-                // Submitting a command implicitly dismisses the history
-                // dropdown so the dispatched command's new prompt is
-                // immediately visible on the overlay.
-                self.command_line.close_history();
-                // A leading `>` was only a "literal spaces" typing hint (see
-                // CommandSpace) — drop it before the input is interpreted.
-                // Free-form text prompts keep it: there it is content, not a
-                // hint, so a cell value like `>Note` commits verbatim.
-                if !self.is_free_text_active() && self.command_line.input.starts_with('>') {
-                    self.command_line.input.remove(0);
+        // Submitting a command implicitly dismisses the history
+        // dropdown so the dispatched command's new prompt is
+        // immediately visible on the overlay.
+        self.command_line.close_history();
+        // A leading `>` was only a "literal spaces" typing hint (see
+        // CommandSpace) — drop it before the input is interpreted.
+        // Free-form text prompts keep it: there it is content, not a
+        // hint, so a cell value like `>Note` commits verbatim.
+        if !self.is_free_text_active() && self.command_line.input.starts_with('>') {
+            self.command_line.input.remove(0);
+        }
+        // Grip-menu value prompt — consume the typed number and
+        // route it through `apply_grip_menu_value`.
+        // Interactive grip prompts are valid only while their matching
+        // grip edit is alive. Do not let a stale Radius / Lengthen /
+        // Arc Length prompt consume Enter or coordinates from a later
+        // drawing command.
+        let stale_interactive_grip_prompt = self.grip_pending.as_ref().is_some_and(|pending| {
+            let expected_mode = match pending.action {
+                crate::scene::model::object::GripMenuAction::Lengthen => {
+                    Some(GripEditMode::Lengthen)
                 }
-                // Grip-menu value prompt — consume the typed number and
-                // route it through `apply_grip_menu_value`.
-                // Interactive grip prompts are valid only while their matching
-                // grip edit is alive. Do not let a stale Radius / Lengthen /
-                // Arc Length prompt consume Enter or coordinates from a later
-                // drawing command.
-                let stale_interactive_grip_prompt = self.grip_pending.as_ref().is_some_and(|pending| {
-                    let expected_mode = match pending.action {
-                        crate::scene::model::object::GripMenuAction::Lengthen => {
-                            Some(GripEditMode::Lengthen)
-                        }
-                        crate::scene::model::object::GripMenuAction::Radius => {
-                            Some(GripEditMode::Radius)
-                        }
-                        crate::scene::model::object::GripMenuAction::ArcLength => {
-                            Some(GripEditMode::ArcLength)
-                        }
-                        crate::scene::model::object::GripMenuAction::RectangleWidth => {
-                            Some(GripEditMode::RectangleWidth)
-                        }
-                        crate::scene::model::object::GripMenuAction::RectangleHeight => {
-                            Some(GripEditMode::RectangleHeight)
-                        }
-                        crate::scene::model::object::GripMenuAction::MoveParallel => {
-                            Some(GripEditMode::MoveParallel)
-                        }
-                        _ => None,
-                    };
-                    expected_mode.is_some_and(|mode| {
-                        !self.tabs[self.active_tab].active_grip.as_ref().is_some_and(|grip| {
-                            grip.mode == mode
-                                && grip.handle == pending.handle
-                                && grip.grip_id == pending.grip_id
-                        })
+                crate::scene::model::object::GripMenuAction::Radius => Some(GripEditMode::Radius),
+                crate::scene::model::object::GripMenuAction::ArcLength => {
+                    Some(GripEditMode::ArcLength)
+                }
+                crate::scene::model::object::GripMenuAction::RectangleWidth => {
+                    Some(GripEditMode::RectangleWidth)
+                }
+                crate::scene::model::object::GripMenuAction::RectangleHeight => {
+                    Some(GripEditMode::RectangleHeight)
+                }
+                crate::scene::model::object::GripMenuAction::MoveParallel => {
+                    Some(GripEditMode::MoveParallel)
+                }
+                _ => None,
+            };
+            expected_mode.is_some_and(|mode| {
+                !self.tabs[self.active_tab]
+                    .active_grip
+                    .as_ref()
+                    .is_some_and(|grip| {
+                        grip.mode == mode
+                            && grip.handle == pending.handle
+                            && grip.grip_id == pending.grip_id
                     })
-                });
-                if stale_interactive_grip_prompt {
-                    self.grip_pending = None;
-                }
-                if let Some(pending) = self.grip_pending.take() {
-                    let i = self.active_tab;
-                    if self.reject_locked_edit(i, pending.handle) {
-                        self.cancel_active_grip_edit();
-                        return Task::none();
-                    }
-                    // Dynamic Input keeps numeric typing in its focused field.
-                    // Fall back to the command-line buffer so the established
-                    // prompt workflow remains unchanged when DYN is disabled.
-                    let dyn_value = self.tabs[i]
+            })
+        });
+        if stale_interactive_grip_prompt {
+            self.grip_pending = None;
+        }
+        if let Some(pending) = self.grip_pending.take() {
+            let i = self.active_tab;
+            if self.reject_locked_edit(i, pending.handle) {
+                self.cancel_active_grip_edit();
+                return Task::none();
+            }
+            // Dynamic Input keeps numeric typing in its focused field.
+            // Fall back to the command-line buffer so the established
+            // prompt workflow remains unchanged when DYN is disabled.
+            let dyn_value = self.tabs[i]
+                .dyn_fields
+                .iter()
+                .find_map(|field| field.buffer.as_deref());
+            let entered = dyn_value.unwrap_or(self.command_line.input.trim());
+            let raw = crate::app::expr_eval::eval_to_string(entered);
+            self.command_line.input.clear();
+            let Ok(v) = raw.parse::<f64>() else {
+                self.command_line.push_error(
+                    crate::tf!("{}: expected a number, got \"{raw}\"", pending.label).as_ref(),
+                );
+                self.grip_pending = Some(pending);
+                return self.focus_cmd_input();
+            };
+            let interactive_value_grip = self.tabs[i].active_grip.as_ref().is_some_and(|grip| {
+                matches!(
+                    (grip.mode, pending.action),
+                    (
+                        GripEditMode::Lengthen,
+                        crate::scene::model::object::GripMenuAction::Lengthen,
+                    ) | (
+                        GripEditMode::Radius,
+                        crate::scene::model::object::GripMenuAction::Radius,
+                    ) | (
+                        GripEditMode::ArcLength,
+                        crate::scene::model::object::GripMenuAction::ArcLength,
+                    ) | (
+                        GripEditMode::RectangleWidth,
+                        crate::scene::model::object::GripMenuAction::RectangleWidth,
+                    ) | (
+                        GripEditMode::RectangleHeight,
+                        crate::scene::model::object::GripMenuAction::RectangleHeight,
+                    ) | (
+                        GripEditMode::MoveParallel,
+                        crate::scene::model::object::GripMenuAction::MoveParallel,
+                    )
+                ) && grip.handle == pending.handle
+                    && grip.grip_id == pending.grip_id
+            });
+            if interactive_value_grip {
+                self.cancel_active_grip_edit();
+            }
+            use crate::entities::traits::EntityTypeOps;
+            self.push_undo_snapshot(i, pending.label);
+            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(pending.handle) {
+                entity.apply_grip_menu_value(pending.grip_id, pending.action, v);
+            }
+            // A typed grip-menu value reshapes dimensions too — drop a
+            // stale baked *D block (no-op for non-dims). (#398)
+            self.tabs[i]
+                .scene
+                .invalidate_dim_block_recorded(pending.handle);
+            self.tabs[i]
+                .scene
+                .bump_entities(&[(pending.handle, crate::scene::ChangeKind::Modified)]);
+            self.tabs[i].dirty = true;
+            self.refresh_selected_grips();
+            self.refresh_properties();
+            return Task::none();
+        }
+
+        // Numeric entry while a normal grip stretch is active.
+        //
+        // With Dynamic Input enabled, typed values live in the shared
+        // Distance / Angle fields. Resolve those fields into an exact
+        // world point. Without DYN input, preserve the existing direct-
+        // distance command-line behaviour.
+        {
+            let i = self.active_tab;
+
+            if let Some(grip) = self.tabs[i].active_grip.clone() {
+                if matches!(
+                    grip.mode,
+                    GripEditMode::Stretch | GripEditMode::RectangleResize
+                ) {
+                    let dyn_locked = self.tabs[i]
                         .dyn_fields
                         .iter()
-                        .find_map(|field| field.buffer.as_deref());
-                    let entered = dyn_value.unwrap_or(self.command_line.input.trim());
-                    let raw = crate::app::expr_eval::eval_to_string(entered);
-                    self.command_line.input.clear();
-                    let Ok(v) = raw.parse::<f64>() else {
-                        self.command_line.push_error(crate::tf!(
-                            "{}: expected a number, got \"{raw}\"",
-                            pending.label
-                        ).as_ref());
-                        self.grip_pending = Some(pending);
-                        return self.focus_cmd_input();
-                    };
-                    let interactive_value_grip = self.tabs[i]
-                        .active_grip
-                        .as_ref()
-                        .is_some_and(|grip| {
-                            matches!(
-                                (grip.mode, pending.action),
-                                (
-                                    GripEditMode::Lengthen,
-                                    crate::scene::model::object::GripMenuAction::Lengthen,
-                                ) | (
-                                    GripEditMode::Radius,
-                                    crate::scene::model::object::GripMenuAction::Radius,
-                                ) | (
-                                    GripEditMode::ArcLength,
-                                    crate::scene::model::object::GripMenuAction::ArcLength,
-                                ) | (
-                                    GripEditMode::RectangleWidth,
-                                    crate::scene::model::object::GripMenuAction::RectangleWidth,
-                                ) | (
-                                    GripEditMode::RectangleHeight,
-                                    crate::scene::model::object::GripMenuAction::RectangleHeight,
-                                ) | (
-                                    GripEditMode::MoveParallel,
-                                    crate::scene::model::object::GripMenuAction::MoveParallel,
-                                )
-                            )
-                                && grip.handle == pending.handle
-                                && grip.grip_id == pending.grip_id
-                        });
-                    if interactive_value_grip {
-                        self.cancel_active_grip_edit();
-                    }
-                    use crate::entities::traits::EntityTypeOps;
-                    self.push_undo_snapshot(i, pending.label);
-                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(pending.handle)
-                    {
-                        entity.apply_grip_menu_value(pending.grip_id, pending.action, v);
-                    }
-                    // A typed grip-menu value reshapes dimensions too — drop a
-                    // stale baked *D block (no-op for non-dims). (#398)
-                    self.tabs[i]
-                        .scene
-                        .invalidate_dim_block_recorded(pending.handle);
-                    self.tabs[i].scene.bump_entities(&[(
-                        pending.handle,
-                        crate::scene::ChangeKind::Modified,
-                    )]);
-                    self.tabs[i].dirty = true;
-                    self.refresh_selected_grips();
-                    self.refresh_properties();
-                    return Task::none();
-                }
+                        .any(|field| field.buffer.is_some());
 
-                // Numeric entry while a normal grip stretch is active.
-                //
-                // With Dynamic Input enabled, typed values live in the shared
-                // Distance / Angle fields. Resolve those fields into an exact
-                // world point. Without DYN input, preserve the existing direct-
-                // distance command-line behaviour.
-                {
-                    let i = self.active_tab;
-
-                    if let Some(grip) = self.tabs[i].active_grip.clone() {
-                        if matches!(grip.mode, GripEditMode::Stretch | GripEditMode::RectangleResize) {
-                            let dyn_locked = self.tabs[i]
-                                .dyn_fields
-                                .iter()
-                                .any(|field| field.buffer.is_some());
-
-                            let target = if matches!(grip.mode, GripEditMode::RectangleResize) {
-                                grip.rectangle_frame.map(|(opposite, width_axis, height_axis)| {
-                                    let cursor_delta = self.tabs[i].last_cursor_world - opposite;
-                                    let mut width = cursor_delta.dot(width_axis);
-                                    let mut height = cursor_delta.dot(height_axis);
-                                    for field in &self.tabs[i].dyn_fields {
-                                        let value = field
-                                            .buffer
-                                            .as_ref()
-                                            .and_then(|buffer| crate::app::expr_eval::eval_number(buffer));
-                                        if let Some(value) = value {
-                                            match field.role {
-                                                crate::command::DynRole::Width => {
-                                                    width = value.abs().copysign(width);
-                                                }
-                                                crate::command::DynRole::Height => {
-                                                    height = value.abs().copysign(height);
-                                                }
-                                                _ => {}
+                    let target = if matches!(grip.mode, GripEditMode::RectangleResize) {
+                        grip.rectangle_frame
+                            .map(|(opposite, width_axis, height_axis)| {
+                                let cursor_delta = self.tabs[i].last_cursor_world - opposite;
+                                let mut width = cursor_delta.dot(width_axis);
+                                let mut height = cursor_delta.dot(height_axis);
+                                for field in &self.tabs[i].dyn_fields {
+                                    let value = field.buffer.as_ref().and_then(|buffer| {
+                                        crate::app::expr_eval::eval_number(buffer)
+                                    });
+                                    if let Some(value) = value {
+                                        match field.role {
+                                            crate::command::DynRole::Width => {
+                                                width = value.abs().copysign(width);
                                             }
+                                            crate::command::DynRole::Height => {
+                                                height = value.abs().copysign(height);
+                                            }
+                                            _ => {}
                                         }
                                     }
-                                    opposite + width_axis * width + height_axis * height
-                                })
-                            } else if dyn_locked {
-                                // Distance only:
-                                //   keep the cursor's current direction.
-                                //
-                                // Distance + Angle:
-                                //   resolve both typed values from the grip's
-                                //   original position (`dyn_anchor`).
-                                self.dyn_resolve_point()
+                                }
+                                opposite + width_axis * width + height_axis * height
+                            })
+                    } else if dyn_locked {
+                        // Distance only:
+                        //   keep the cursor's current direction.
+                        //
+                        // Distance + Angle:
+                        //   resolve both typed values from the grip's
+                        //   original position (`dyn_anchor`).
+                        self.dyn_resolve_point()
+                    } else {
+                        // Legacy command-line direct-distance entry.
+                        let text =
+                            crate::app::expr_eval::eval_to_string(self.command_line.input.trim());
+
+                        crate::app::expr_eval::eval_number(text.trim()).map(|dist| {
+                            let cursor = self.tabs[i].last_cursor_world;
+
+                            // If the cursor is following OTRACK or Extension,
+                            // preserve the existing reference-ray behaviour.
+                            if let Some((base, dir)) = self.active_distance_ray(i) {
+                                base + dir * dist
                             } else {
-                                // Legacy command-line direct-distance entry.
-                                let text = crate::app::expr_eval::eval_to_string(
-                                    self.command_line.input.trim(),
-                                );
+                                let direction = cursor - grip.origin_world;
+                                let len = direction.length();
 
-                                crate::app::expr_eval::eval_number(text.trim()).map(|dist| {
-                                    let cursor = self.tabs[i].last_cursor_world;
-
-                                    // If the cursor is following OTRACK or Extension,
-                                    // preserve the existing reference-ray behaviour.
-                                    if let Some((base, dir)) = self.active_distance_ray(i) {
-                                        base + dir * dist
-                                    } else {
-                                        let direction = cursor - grip.origin_world;
-                                        let len = direction.length();
-
-                                        if len <= 1e-12 {
-                                            grip.origin_world
-                                        } else {
-                                            grip.origin_world + direction / len * dist
-                                        }
-                                    }
-                                })
-                            };
-
-                            if let Some(target) = target {
-                                // Typed Dynamic Input can commit a grip before the mouse has moved.
-                                //
-                                // Normally the first ViewportMove initializes the grip preview handles and
-                                // snapshots the original entities. Without that move the document changes,
-                                // so the refreshed grips move, but the resident wire tessellation is never
-                                // invalidated by the normal grip-finalization path.
-                                //
-                                // Seed the same bookkeeping here before modifying the entities.
-                                if self.grip_preview_handles.is_empty() {
-                                    let mut seen_handles = rustc_hash::FxHashSet::default();
-
-                                    let edited_handles: Vec<_> = grip
-                                        .targets
-                                        .iter()
-                                        .map(|target| target.handle)
-                                        .filter(|handle| seen_handles.insert(*handle))
-                                        .collect();
-
-                                    if self.grip_dirty_before.is_none() {
-                                        self.grip_dirty_before = Some(self.tabs[i].dirty);
-                                    }
-
-                                    if self.grip_originals.is_empty() {
-                                        self.grip_originals = edited_handles
-                                            .iter()
-                                            .filter_map(|&handle| {
-                                                self.tabs[i]
-                                                    .scene
-                                                    .document
-                                                    .get_entity(handle)
-                                                    .cloned()
-                                                    .map(|entity| (handle, entity))
-                                            })
-                                            .collect();
-                                    }
-
-                                    self.capture_grip_history_originals(i, &edited_handles);
-
-                                    self.grip_preview_handles = edited_handles;
-                                }
-                                let delta = target - grip.last_world;
-
-                                let actions: Vec<_> = if let Some((opposite, width_axis, height_axis)) = grip.rectangle_frame {
-                                    let opposite_id = (grip.grip_id + 2) % 4;
-                                    let mut edits = Vec::with_capacity(3);
-                                    for adjacent_id in [(opposite_id + 1) % 4, (opposite_id + 3) % 4] {
-                                        if let Some(original) = self.tabs[i]
-                                            .selected_grip_handles
-                                            .iter()
-                                            .zip(self.tabs[i].selected_grips.iter())
-                                            .find(|(owner, candidate)| **owner == grip.handle && candidate.id == adjacent_id)
-                                            .map(|(_, candidate)| candidate.world)
-                                        {
-                                            let d = original - opposite;
-                                            let axis = if d.dot(width_axis).abs() >= d.dot(height_axis).abs() {
-                                                width_axis
-                                            } else {
-                                                height_axis
-                                            };
-                                            edits.push((grip.handle, adjacent_id, GripApply::Absolute(
-                                                opposite + axis * (target - opposite).dot(axis),
-                                            )));
-                                        }
-                                    }
-                                    edits.push((grip.handle, grip.grip_id, GripApply::Absolute(target)));
-                                    edits
+                                if len <= 1e-12 {
+                                    grip.origin_world
                                 } else {
-                                    grip.targets.iter().map(|target_grip| {
-                                        let apply = if target_grip.is_translate {
-                                            GripApply::Translate(delta)
+                                    grip.origin_world + direction / len * dist
+                                }
+                            }
+                        })
+                    };
+
+                    if let Some(target) = target {
+                        // Typed Dynamic Input can commit a grip before the mouse has moved.
+                        //
+                        // Normally the first ViewportMove initializes the grip preview handles and
+                        // snapshots the original entities. Without that move the document changes,
+                        // so the refreshed grips move, but the resident wire tessellation is never
+                        // invalidated by the normal grip-finalization path.
+                        //
+                        // Seed the same bookkeeping here before modifying the entities.
+                        if self.grip_preview_handles.is_empty() {
+                            let mut seen_handles = rustc_hash::FxHashSet::default();
+
+                            let edited_handles: Vec<_> = grip
+                                .targets
+                                .iter()
+                                .map(|target| target.handle)
+                                .filter(|handle| seen_handles.insert(*handle))
+                                .collect();
+
+                            if self.grip_dirty_before.is_none() {
+                                self.grip_dirty_before = Some(self.tabs[i].dirty);
+                            }
+
+                            if self.grip_originals.is_empty() {
+                                self.grip_originals = edited_handles
+                                    .iter()
+                                    .filter_map(|&handle| {
+                                        self.tabs[i]
+                                            .scene
+                                            .document
+                                            .get_entity(handle)
+                                            .cloned()
+                                            .map(|entity| (handle, entity))
+                                    })
+                                    .collect();
+                            }
+
+                            self.capture_grip_history_originals(i, &edited_handles);
+
+                            self.grip_preview_handles = edited_handles;
+                        }
+                        let delta = target - grip.last_world;
+
+                        let actions: Vec<_> = if let Some((opposite, width_axis, height_axis)) =
+                            grip.rectangle_frame
+                        {
+                            let opposite_id = (grip.grip_id + 2) % 4;
+                            let mut edits = Vec::with_capacity(3);
+                            for adjacent_id in [(opposite_id + 1) % 4, (opposite_id + 3) % 4] {
+                                if let Some(original) = self.tabs[i]
+                                    .selected_grip_handles
+                                    .iter()
+                                    .zip(self.tabs[i].selected_grips.iter())
+                                    .find(|(owner, candidate)| {
+                                        **owner == grip.handle && candidate.id == adjacent_id
+                                    })
+                                    .map(|(_, candidate)| candidate.world)
+                                {
+                                    let d = original - opposite;
+                                    let axis =
+                                        if d.dot(width_axis).abs() >= d.dot(height_axis).abs() {
+                                            width_axis
                                         } else {
-                                            GripApply::Absolute(
-                                                target_grip.last_world + delta,
-                                            )
+                                            height_axis
                                         };
-
-                                        (
-                                            target_grip.handle,
-                                            target_grip.grip_id,
-                                            apply,
-                                        )
-                                    }).collect()
-                                };
-
-                                for (handle, grip_id, apply) in actions {
-                                    self.tabs[i]
-                                        .scene
-                                        .apply_grip(handle, grip_id, apply);
-                                }
-                                self.solve_grip_constraints(i, &grip);
-
-                                // Keep GripEdit synchronized so the normal commit
-                                // path records the exact final position.
-                                if let Some(active) = self.tabs[i].active_grip.as_mut() {
-                                    active.last_world = target;
-
-                                    for target_grip in &mut active.targets {
-                                        target_grip.last_world += delta;
-                                    }
-                                }
-
-                                self.tabs[i].last_cursor_world = target;
-                                self.command_line.input.clear();
-
-                                // Consume the typed Dynamic Input values.
-                                for field in &mut self.tabs[i].dyn_fields {
-                                    field.buffer = None;
-                                }
-                                self.tabs[i].dyn_active = 0;
-                                self.dyn_user_reshaped = false;
-                                self.dyn_coord_absolute = false;
-
-                                self.tabs[i].dirty = true;
-
-                                // Reuse the existing grip finalization path:
-                                // undo grouping, preview restoration, cleanup, etc.
-                                let task = self.on_viewport_left_release();
-
-                                // active_grip is now gone, so remove the temporary
-                                // Distance / Angle fields as well.
-                                self.sync_dyn_fields();
-
-                                // A typed grip commit bypasses the normal viewport point-release
-                                // tracking cleanup. Drop the consumed OTRACK / Extension guide now
-                                // so no stale tracking ray remains visible after the grip edit.
-                                self.reset_tracking_after_point();
-
-                                return task;
-                            }
-                        }
-                    }
-                }
-                // Interactive VPORTS: the entry after a bare `VPORTS` is the
-                // tiled configuration. Empty input defaults to SINGLE.
-                if self.awaiting_vports {
-                    self.awaiting_vports = false;
-                    let cfg = self.command_line.input.trim().to_string();
-                    self.command_line.input.clear();
-                    let cfg = if cfg.is_empty() {
-                        "SINGLE".to_string()
-                    } else {
-                        cfg
-                    };
-                    return self.dispatch_command(&format!("VPORTS {cfg}"));
-                }
-                // Interactive system-variable value: after a bare `MIRRTEXT`
-                // (etc.) the next entry is the new value; empty Enter keeps the
-                // current setting.
-                if let Some(name) = self.pending_setvar.take() {
-                    let val = self.command_line.input.trim().to_string();
-                    self.command_line.input.clear();
-                    if val.is_empty() {
-                        return Task::none();
-                    }
-                    return self.dispatch_command(&format!("SETVAR {name} {val}"));
-                }
-                let i_tab = self.active_tab;
-                if self.tabs[i_tab].active_cmd.is_none() {
-                    if let Some(command) = self.command_line.selected_suggestion() {
-                        self.command_line.input.clear();
-                        self.command_line.autocomplete_cursor = None;
-                        return self.dispatch_command(&command);
-                    }
-                }
-                let i = self.active_tab;
-                // A whole multi-token command line (`UCS Z 90`, `LINE 0,0
-                // 10,10`, `PDMODE 3`) — typable now that Space is literal — is
-                // processed as one unit: feed the tokens to a running command,
-                // or start a new one through the shared runner that the headless
-                // automation feeder uses too.
-                {
-                    // Skip token-splitting when the active command collects
-                    // free-form text with spaces (TEXT / MTEXT / a name) — it
-                    // wants the whole line as one input.
-                    let wants_spaces = self.tabs[i]
-                        .active_cmd
-                        .as_ref()
-                        .map(|c| c.is_free_text_step())
-                        .unwrap_or(false);
-                    let raw = self.command_line.input.clone();
-                    let toks: Vec<String> = raw.split_whitespace().map(String::from).collect();
-                    if toks.len() > 1 && !wants_spaces {
-                        self.command_line.input.clear();
-                        if self.tabs[i].active_cmd.is_some() {
-                            let mut tasks = Vec::new();
-                            for tok in &toks {
-                                if self.tabs[i].active_cmd.is_none() {
-                                    break;
-                                }
-                                tasks.push(self.feed_active_cmd(tok));
-                            }
-                            return Task::batch(tasks);
-                        }
-                        return self.run_command_line(&raw);
-                    }
-                }
-                // With the command line empty, a typed dynamic-input value
-                // commits as a point pick instead of an empty submit.
-                if self.tabs[i].active_cmd.is_some() && self.command_line.input.trim().is_empty() {
-                    if let Some(task) = self.try_dyn_commit() {
-                        return task;
-                    }
-                }
-                if self.tabs[i].active_cmd.is_some() {
-                    // Free-form text is the content itself: no expression
-                    // evaluation, or a cell value like `5*2` would commit as
-                    // `10`. Single-token prompts keep the calculator behavior.
-                    let free_text = self.tabs[i]
-                        .active_cmd
-                        .as_ref()
-                        .map(|c| c.is_free_text_step())
-                        .unwrap_or(false);
-                    let raw = self.command_line.input.trim().to_string();
-                    let is_mtp = raw.trim_start_matches('_').eq_ignore_ascii_case("MTP")
-                        || raw.trim_start_matches('_').eq_ignore_ascii_case("M2P");
-                    if is_mtp {
-                        let is_point_step = !self.tabs[i]
-                            .active_cmd
-                            .as_ref()
-                            .map(|c| c.input_kind().wants_text())
-                            .unwrap_or(true)
-                            || self.tabs[i]
-                                .active_cmd
-                                .as_ref()
-                                .map(|c| c.point_step_accepts_keywords())
-                                .unwrap_or(false);
-                        let not_entity_pick = !self.tabs[i]
-                            .active_cmd
-                            .as_ref()
-                            .map(|c| c.needs_entity_pick())
-                            .unwrap_or(false);
-                        if is_point_step && not_entity_pick {
-                            self.command_line.input.clear();
-                            self.start_mtp_modifier(i);
-                            return self.focus_cmd_input();
-                        }
-                    }
-                    let text = if free_text {
-                        raw
-                    } else {
-                        crate::app::expr_eval::eval_to_string(&raw)
-                    };
-                    self.command_line.input.clear();
-                    // Remember the token for the context menu's Recent Input
-                    // list (prose steps excluded: a table cell or text body
-                    // is not a reusable value).
-                    let is_prose = self.tabs[i]
-                        .active_cmd
-                        .as_ref()
-                        .is_some_and(|c| c.input_kind().is_free_text());
-                    if !is_prose {
-                        self.command_line.record_recent_input(&text);
-                    }
-
-                    // Offer the typed text to the command's option handler
-                    // first (keywords like PLINE's A/L/C, a radius, …). If it
-                    // consumes the text we're done; if it returns None the
-                    // text falls through to the Enter / coordinate handling
-                    // below, so a bare Enter still terminates and typed points
-                    // still work when dynamic input is off. See #97.
-                    // Selection keywords (P / L) at a Select objects prompt
-                    // consume the token before any other interpretation (#426).
-                    if let Some(task) = self.try_selection_keyword(&text) {
-                        return task;
-                    }
-                    if self.tabs[i]
-                        .active_cmd
-                        .as_ref()
-                        .map(|c| c.input_kind().wants_text())
-                        .unwrap_or(false)
-                    {
-                        // An empty submit must not be handed to on_text_input —
-                        // a text step would commit the empty string (wiping a
-                        // table cell, clearing an attribute). It falls through
-                        // to the Enter handling below, which ends the step the
-                        // same way a bare Enter does: unchanged.
-                        if !text.is_empty() {
-                            self.push_ucs_to_cmd(i);
-                            if let Some(result) = self.tabs[i]
-                                .active_cmd
-                                .as_mut()
-                                .and_then(|c| c.on_text_input(&text))
-                            {
-                                return self.apply_cmd_result(result);
-                            }
-                        }
-                    }
-
-                    if text.is_empty() {
-                        return self.feed_command(crate::command::StepInput::Enter);
-                    }
-
-                    // OTRACK and Extension both allow a bare scalar to act as a
-                    // distance measured along the active reference ray.
-                    if let Some((base, dir)) = self.active_distance_ray(i) {
-                        if let Some(dist) = crate::app::expr_eval::eval_number(text.trim()) {
-                            let pt = base + dir * dist;
-                            if !self.command_point_allowed(i, pt) {
-                                return Task::none();
-                            }
-                            self.last_point = Some(pt);
-                            self.dyn_user_reshaped = false;
-                            self.dyn_coord_absolute = false;
-                            self.sync_dyn_fields();
-                            self.reset_tracking_after_point();
-                            self.push_ucs_to_cmd(i);
-                            let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(pt));
-                            if let Some(r) = result {
-                                let task = self.apply_cmd_result(r);
-                                self.refresh_active_cmd_preview(i);
-                                return task;
-                            }
-                            return Task::none();
-                        }
-                    }
-
-                    if let Some((coord, kind)) = parse_coord(&text) {
-                        // Command-line coordinates are absolute by default,
-                        // independent of DYN: `@` forces relative, `#` forces
-                        // absolute, and a bare value is absolute. (Relative-by-
-                        // default lives in the DYN tooltip path — see
-                        // `dyn_resolve_point`; command-line coordinates stay
-                        // absolute regardless of the DYN setting.)
-                        let want_relative = matches!(kind, CoordKind::Relative);
-                        let ucs = self.tabs[i].active_ucs.clone();
-                        let wcs_pt = match (want_relative, self.last_point) {
-                            (true, Some(base)) => {
-                                // Offset from the last point, rotated by the
-                                // UCS axes (no origin translation).
-                                let offset = match &ucs {
-                                    Some(u) => ucs_rotate_vec(coord, u),
-                                    None => coord,
-                                };
-                                base + offset
-                            }
-                            _ => {
-                                // Absolute: typed coordinates are in active UCS.
-                                match &ucs {
-                                    Some(u) => ucs_to_wcs(coord, u),
-                                    None => coord,
+                                    edits.push((
+                                        grip.handle,
+                                        adjacent_id,
+                                        GripApply::Absolute(
+                                            opposite + axis * (target - opposite).dot(axis),
+                                        ),
+                                    ));
                                 }
                             }
+                            edits.push((grip.handle, grip.grip_id, GripApply::Absolute(target)));
+                            edits
+                        } else {
+                            grip.targets
+                                .iter()
+                                .map(|target_grip| {
+                                    let apply = if target_grip.is_translate {
+                                        GripApply::Translate(delta)
+                                    } else {
+                                        GripApply::Absolute(target_grip.last_world + delta)
+                                    };
+
+                                    (target_grip.handle, target_grip.grip_id, apply)
+                                })
+                                .collect()
                         };
-                        if !self.command_point_allowed(i, wcs_pt) {
-                            return Task::none();
+
+                        for (handle, grip_id, apply) in actions {
+                            self.tabs[i].scene.apply_grip(handle, grip_id, apply);
                         }
-                        self.last_point = Some(wcs_pt);
+                        self.solve_grip_constraints(i, &grip);
+
+                        // Keep GripEdit synchronized so the normal commit
+                        // path records the exact final position.
+                        if let Some(active) = self.tabs[i].active_grip.as_mut() {
+                            active.last_world = target;
+
+                            for target_grip in &mut active.targets {
+                                target_grip.last_world += delta;
+                            }
+                        }
+
+                        self.tabs[i].last_cursor_world = target;
+                        self.command_line.input.clear();
+
+                        // Consume the typed Dynamic Input values.
+                        for field in &mut self.tabs[i].dyn_fields {
+                            field.buffer = None;
+                        }
+                        self.tabs[i].dyn_active = 0;
                         self.dyn_user_reshaped = false;
                         self.dyn_coord_absolute = false;
-                        self.sync_dyn_fields();
-                        self.reset_tracking_after_point();
-                        self.push_ucs_to_cmd(i);
-                        let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(wcs_pt));
-                        if let Some(r) = result {
-                            let task = self.apply_cmd_result(r);
-                            // The rubber-band preview that the command
-                            // last published reflects the *previous*
-                            // last_point — a typed coordinate doesn't
-                            // fire a mouse-move, so re-run the preview
-                            // hook now using the current cursor world
-                            // pos so the next segment immediately starts
-                            // from the just-committed point. See #32.
-                            self.refresh_active_cmd_preview(i);
-                            return task;
-                        }
-                        return Task::none();
-                    }
 
+                        self.tabs[i].dirty = true;
+
+                        // Reuse the existing grip finalization path:
+                        // undo grouping, preview restoration, cleanup, etc.
+                        let task = self.on_viewport_left_release();
+
+                        // active_grip is now gone, so remove the temporary
+                        // Distance / Angle fields as well.
+                        self.sync_dyn_fields();
+
+                        // A typed grip commit bypasses the normal viewport point-release
+                        // tracking cleanup. Drop the consumed OTRACK / Extension guide now
+                        // so no stale tracking ray remains visible after the grip edit.
+                        self.reset_tracking_after_point();
+
+                        return task;
+                    }
+                }
+            }
+        }
+        // Interactive VPORTS: the entry after a bare `VPORTS` is the
+        // tiled configuration. Empty input defaults to SINGLE.
+        if self.awaiting_vports {
+            self.awaiting_vports = false;
+            let cfg = self.command_line.input.trim().to_string();
+            self.command_line.input.clear();
+            let cfg = if cfg.is_empty() {
+                "SINGLE".to_string()
+            } else {
+                cfg
+            };
+            return self.dispatch_command(&format!("VPORTS {cfg}"));
+        }
+        // Interactive system-variable value: after a bare `MIRRTEXT`
+        // (etc.) the next entry is the new value; empty Enter keeps the
+        // current setting.
+        if let Some(name) = self.pending_setvar.take() {
+            let val = self.command_line.input.trim().to_string();
+            self.command_line.input.clear();
+            if val.is_empty() {
+                return Task::none();
+            }
+            return self.dispatch_command(&format!("SETVAR {name} {val}"));
+        }
+        let i_tab = self.active_tab;
+        if self.tabs[i_tab].active_cmd.is_none() {
+            if let Some(command) = self.command_line.selected_suggestion() {
+                self.command_line.input.clear();
+                self.command_line.autocomplete_cursor = None;
+                return self.dispatch_command(&command);
+            }
+        }
+        let i = self.active_tab;
+        // A whole multi-token command line (`UCS Z 90`, `LINE 0,0
+        // 10,10`, `PDMODE 3`) — typable now that Space is literal — is
+        // processed as one unit: feed the tokens to a running command,
+        // or start a new one through the shared runner that the headless
+        // automation feeder uses too.
+        {
+            // Skip token-splitting when the active command collects
+            // free-form text with spaces (TEXT / MTEXT / a name) — it
+            // wants the whole line as one input.
+            let wants_spaces = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.is_free_text_step())
+                .unwrap_or(false);
+            let raw = self.command_line.input.clone();
+            let toks: Vec<String> = raw.split_whitespace().map(String::from).collect();
+            if toks.len() > 1 && !wants_spaces {
+                self.command_line.input.clear();
+                if self.tabs[i].active_cmd.is_some() {
+                    let mut tasks = Vec::new();
+                    for tok in &toks {
+                        if self.tabs[i].active_cmd.is_none() {
+                            break;
+                        }
+                        tasks.push(self.feed_active_cmd(tok));
+                    }
+                    return Task::batch(tasks);
+                }
+                return self.run_command_line(&raw);
+            }
+        }
+        // With the command line empty, a typed dynamic-input value
+        // commits as a point pick instead of an empty submit.
+        if self.tabs[i].active_cmd.is_some() && self.command_line.input.trim().is_empty() {
+            if let Some(task) = self.try_dyn_commit() {
+                return task;
+            }
+        }
+        if self.tabs[i].active_cmd.is_some() {
+            // Free-form text is the content itself: no expression
+            // evaluation, or a cell value like `5*2` would commit as
+            // `10`. Single-token prompts keep the calculator behavior.
+            let free_text = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.is_free_text_step())
+                .unwrap_or(false);
+            let raw = self.command_line.input.trim().to_string();
+            let is_mtp = raw.trim_start_matches('_').eq_ignore_ascii_case("MTP")
+                || raw.trim_start_matches('_').eq_ignore_ascii_case("M2P");
+            if is_mtp {
+                let is_point_step = !self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .map(|c| c.input_kind().wants_text())
+                    .unwrap_or(true)
+                    || self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .map(|c| c.point_step_accepts_keywords())
+                        .unwrap_or(false);
+                let not_entity_pick = !self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .map(|c| c.needs_entity_pick())
+                    .unwrap_or(false);
+                if is_point_step && not_entity_pick {
+                    self.command_line.input.clear();
+                    self.start_mtp_modifier(i);
+                    return self.focus_cmd_input();
+                }
+            }
+            let text = if free_text {
+                raw
+            } else {
+                crate::app::expr_eval::eval_to_string(&raw)
+            };
+            self.command_line.input.clear();
+            // Remember the token for the context menu's Recent Input
+            // list (prose steps excluded: a table cell or text body
+            // is not a reusable value).
+            let is_prose = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|c| c.input_kind().is_free_text());
+            if !is_prose {
+                self.command_line.record_recent_input(&text);
+            }
+
+            // Offer the typed text to the command's option handler
+            // first (keywords like PLINE's A/L/C, a radius, …). If it
+            // consumes the text we're done; if it returns None the
+            // text falls through to the Enter / coordinate handling
+            // below, so a bare Enter still terminates and typed points
+            // still work when dynamic input is off. See #97.
+            // Selection keywords (P / L) at a Select objects prompt
+            // consume the token before any other interpretation (#426).
+            if let Some(task) = self.try_selection_keyword(&text) {
+                return task;
+            }
+            if self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.input_kind().wants_text())
+                .unwrap_or(false)
+            {
+                // An empty submit must not be handed to on_text_input —
+                // a text step would commit the empty string (wiping a
+                // table cell, clearing an attribute). It falls through
+                // to the Enter handling below, which ends the step the
+                // same way a bare Enter does: unchanged.
+                if !text.is_empty() {
                     self.push_ucs_to_cmd(i);
                     if let Some(result) = self.tabs[i]
                         .active_cmd
@@ -860,23 +790,114 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     {
                         return self.apply_cmd_result(result);
                     }
+                }
+            }
 
-                    self.command_line.push_error(crate::tf!(
+            if text.is_empty() {
+                return self.feed_command(crate::command::StepInput::Enter);
+            }
+
+            // OTRACK and Extension both allow a bare scalar to act as a
+            // distance measured along the active reference ray.
+            if let Some((base, dir)) = self.active_distance_ray(i) {
+                if let Some(dist) = crate::app::expr_eval::eval_number(text.trim()) {
+                    let pt = base + dir * dist;
+                    if !self.command_point_allowed(i, pt) {
+                        return Task::none();
+                    }
+                    self.last_point = Some(pt);
+                    self.dyn_user_reshaped = false;
+                    self.dyn_coord_absolute = false;
+                    self.sync_dyn_fields();
+                    self.reset_tracking_after_point();
+                    self.push_ucs_to_cmd(i);
+                    let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(pt));
+                    if let Some(r) = result {
+                        let task = self.apply_cmd_result(r);
+                        self.refresh_active_cmd_preview(i);
+                        return task;
+                    }
+                    return Task::none();
+                }
+            }
+
+            if let Some((coord, kind)) = parse_coord(&text) {
+                // Command-line coordinates are absolute by default,
+                // independent of DYN: `@` forces relative, `#` forces
+                // absolute, and a bare value is absolute. (Relative-by-
+                // default lives in the DYN tooltip path — see
+                // `dyn_resolve_point`; command-line coordinates stay
+                // absolute regardless of the DYN setting.)
+                let want_relative = matches!(kind, CoordKind::Relative);
+                let ucs = self.tabs[i].active_ucs.clone();
+                let wcs_pt = match (want_relative, self.last_point) {
+                    (true, Some(base)) => {
+                        // Offset from the last point, rotated by the
+                        // UCS axes (no origin translation).
+                        let offset = match &ucs {
+                            Some(u) => ucs_rotate_vec(coord, u),
+                            None => coord,
+                        };
+                        base + offset
+                    }
+                    _ => {
+                        // Absolute: typed coordinates are in active UCS.
+                        match &ucs {
+                            Some(u) => ucs_to_wcs(coord, u),
+                            None => coord,
+                        }
+                    }
+                };
+                if !self.command_point_allowed(i, wcs_pt) {
+                    return Task::none();
+                }
+                self.last_point = Some(wcs_pt);
+                self.dyn_user_reshaped = false;
+                self.dyn_coord_absolute = false;
+                self.sync_dyn_fields();
+                self.reset_tracking_after_point();
+                self.push_ucs_to_cmd(i);
+                let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(wcs_pt));
+                if let Some(r) = result {
+                    let task = self.apply_cmd_result(r);
+                    // The rubber-band preview that the command
+                    // last published reflects the *previous*
+                    // last_point — a typed coordinate doesn't
+                    // fire a mouse-move, so re-run the preview
+                    // hook now using the current cursor world
+                    // pos so the next segment immediately starts
+                    // from the just-committed point. See #32.
+                    self.refresh_active_cmd_preview(i);
+                    return task;
+                }
+                return Task::none();
+            }
+
+            self.push_ucs_to_cmd(i);
+            if let Some(result) = self.tabs[i]
+                .active_cmd
+                .as_mut()
+                .and_then(|c| c.on_text_input(&text))
+            {
+                return self.apply_cmd_result(result);
+            }
+
+            self.command_line.push_error(crate::tf!(
                         "Expected Cartesian, polar, cylindrical or spherical coordinates, or a number; got: \"{text}\""
                     ).as_ref());
-                    return self.focus_cmd_input();
-                }
-                if let Some(cmd) = self.command_line.submit() {
-                    return self.dispatch_command_or_suggest(&cmd);
-                }
-                // Empty Enter / Space with no active command repeats the
-                // last dispatched command — same shortcut `CommandFinalize`
-                // already implements, mirrored here so the trailing-space
-                // submit path goes through it too.
-                if let Some(cmd) = self.tabs[i].last_cmd.clone() {
-                    return self.dispatch_command(&cmd);
-                }
-                Task::none()
+            return self.focus_cmd_input();
+        }
+        if let Some(cmd) = self.command_line.submit() {
+            return self.dispatch_command_or_suggest(&cmd);
+        }
+        // Empty Enter / Space with no active command repeats the
+        // last dispatched command — same shortcut `CommandFinalize`
+        // already implements, mirrored here so the trailing-space
+        // submit path goes through it too.
+        if let Some(cmd) = self.tabs[i].last_cmd.clone() {
+            return self.dispatch_command(&cmd);
+        }
+        Task::none()
     }
 
     /// The active command's current step collects free-form prose from the
@@ -904,359 +925,365 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
     }
 
     pub(super) fn on_command_finalize(&mut self) -> Task<Message> {
-                // In the MText preview, Enter inserts a line break. The
-                // free-text prompt case falls through deliberately: for it
-                // Enter *finishes* the edit (Shift+Enter breaks the line,
-                // handled by the SHIFT+ENTER shortcut route).
-                if self.text_entry_mode() == TextEntryMode::MTextPreview {
-                    self.mtext_type("\n");
-                    return Task::none();
-                }
-                // Grip popup open → Enter commits the highlighted item.
-                if self.grip_popup.is_some() {
-                    let idx = self.grip_popup.as_ref().map(|p| p.selected).unwrap_or(0);
-                    return Task::done(Message::GripMenuPick(idx));
-                }
-                // Any typed command-line text must be submitted rather than
-                // finalising. The focused-input Enter routes through
-                // CommandSubmit, but when the field isn't focused — e.g. at
-                // startup before the window grabs focus, or a command started
-                // from the ribbon — its Enter arrives here. Forward a non-empty
-                // buffer to the same submit path so typing a command name (or
-                // an option keyword like "R") and pressing Enter works without
-                // first clicking into the command line (issue #99).
-                if !self.command_line.input.trim().is_empty() {
-                    return self.update(Message::CommandSubmit);
-                }
-                // A grip edit is not an active CAD command, but its Dynamic Input
-                // fields use the same keyboard path. Route Enter through CommandSubmit,
-                // whose grip branch resolves Distance / Angle and finalizes the edit.
-                let i = self.active_tab;
-                let grip_dyn_locked = self.tabs[i].active_grip.is_some()
-                    && self.dyn_input
-                    && self.tabs[i]
-                        .dyn_fields
-                        .iter()
-                        .any(|field| field.locked());
+        // In the MText preview, Enter inserts a line break. The
+        // free-text prompt case falls through deliberately: for it
+        // Enter *finishes* the edit (Shift+Enter breaks the line,
+        // handled by the SHIFT+ENTER shortcut route).
+        if self.text_entry_mode() == TextEntryMode::MTextPreview {
+            self.mtext_type("\n");
+            return Task::none();
+        }
+        // Grip popup open → Enter commits the highlighted item.
+        if self.grip_popup.is_some() {
+            let idx = self.grip_popup.as_ref().map(|p| p.selected).unwrap_or(0);
+            return Task::done(Message::GripMenuPick(idx));
+        }
+        // Any typed command-line text must be submitted rather than
+        // finalising. The focused-input Enter routes through
+        // CommandSubmit, but when the field isn't focused — e.g. at
+        // startup before the window grabs focus, or a command started
+        // from the ribbon — its Enter arrives here. Forward a non-empty
+        // buffer to the same submit path so typing a command name (or
+        // an option keyword like "R") and pressing Enter works without
+        // first clicking into the command line (issue #99).
+        if !self.command_line.input.trim().is_empty() {
+            return self.update(Message::CommandSubmit);
+        }
+        // A grip edit is not an active CAD command, but its Dynamic Input
+        // fields use the same keyboard path. Route Enter through CommandSubmit,
+        // whose grip branch resolves Distance / Angle and finalizes the edit.
+        let i = self.active_tab;
+        let grip_dyn_locked = self.tabs[i].active_grip.is_some()
+            && self.dyn_input
+            && self.tabs[i].dyn_fields.iter().any(|field| field.locked());
 
-                if grip_dyn_locked {
-                    return self.update(Message::CommandSubmit);
-                }
-                // Enter while a grip is hot places it where it is (or keeps
-                // it hot when it has not moved) — it must not fall through to
-                // "repeat the last command", which would discard the edit.
-                if self.tabs[i].active_grip.is_some() && self.tabs[i].active_cmd.is_none() {
-                    return self.commit_active_grip_edit();
-                }
+        if grip_dyn_locked {
+            return self.update(Message::CommandSubmit);
+        }
+        // Enter while a grip is hot places it where it is (or keeps
+        // it hot when it has not moved) — it must not fall through to
+        // "repeat the last command", which would discard the edit.
+        if self.tabs[i].active_grip.is_some() && self.tabs[i].active_cmd.is_none() {
+            return self.commit_active_grip_edit();
+        }
 
-                // Normal command Dynamic Input commit.
-                if let Some(task) = self.try_dyn_commit() {
-                    return task;
-                }
+        // Normal command Dynamic Input commit.
+        if let Some(task) = self.try_dyn_commit() {
+            return task;
+        }
 
-                let i = self.active_tab;
-                if self.tabs[i].active_cmd.is_some() {
-                    self.feed_command(crate::command::StepInput::Enter)
-                } else if let Some(cmd) = self.tabs[i].last_cmd.clone() {
-                    self.dispatch_command(&cmd)
-                } else {
-                    Task::none()
-                }
+        let i = self.active_tab;
+        if self.tabs[i].active_cmd.is_some() {
+            self.feed_command(crate::command::StepInput::Enter)
+        } else if let Some(cmd) = self.tabs[i].last_cmd.clone() {
+            self.dispatch_command(&cmd)
+        } else {
+            Task::none()
+        }
     }
 
     pub(super) fn on_command_escape(&mut self) -> Task<Message> {
         if self.ribbon.escape_extension() {
             return Task::none();
         }
-                // Esc drops an unconsumed one-shot snap override and closes
-                // its menu (#337). Falls through — Esc keeps its usual effect.
-                self.snap_override_popup = None;
-                self.snapper.clear_override();
-                // Open MText editor swallows Escape (cancel without committing).
-                if self.mtext_editor.is_some() {
-                    self.mtext_cancel();
-                    return self.post_editor_closed(false);
-                }
-                // The in-place TEXT editor likewise cancels on Escape.
-                if self.text_inline.is_some() {
-                    self.text_inline_cancel();
-                    return self.post_editor_closed(false);
-                }
-                // Esc cancels an armed pane move.
-                if self.pane_move_from.take().is_some() {
-                    return Task::none();
-                }
-                // Esc cancels a pending system-variable value prompt.
-                if self.pending_setvar.take().is_some() {
-                    self.command_line.push_info(crate::t!("*Cancel*").as_ref());
-                    return Task::none();
-                }
-                // UCS icon: Esc ends any grip drag and clears the selection
-                // (only when no command owns Escape).
-                if self.tabs[self.active_tab].active_cmd.is_none()
-                    && (self.ucs_grip_drag.is_some() || self.ucs_icon_selected)
-                {
-                    let i = self.active_tab;
-                    // A UCS grip drag is live-only until mouse release. Reload
-                    // the persisted pane UCS so Escape really cancels it.
-                    if self.ucs_grip_drag.take().is_some() {
-                        self.tabs[i].refresh_active_ucs();
-                        self.tabs[i].scene.camera_generation += 1;
-                    }
-                    self.ucs_icon_selected = false;
-                    self.ucs_icon_hover = false;
-                    self.tabs[i].snap_result = None;
-                    return Task::none();
-                }
-                // Leave an interactive navigation mode and end its in-flight
-                // drag. Orbit exits silently; PAN keeps its existing message.
-                if self.tabs[self.active_tab].pan_mode
-                    || self.tabs[self.active_tab].orbit_mode
-                    || self.tabs[self.active_tab].zoom_dynamic_mode
-                {
-                    let i = self.active_tab;
-                    let was_pan = self.tabs[i].pan_mode;
-                    self.tabs[i].pan_mode = false;
-                    self.tabs[i].orbit_mode = false;
-                    self.tabs[i].zoom_dynamic_mode = false;
-                    {
-                        let mut sel = self.tabs[i].scene.selection.borrow_mut();
-                        sel.middle_down = false;
-                        sel.middle_last_pos = None;
-                        sel.orbit_pivot = None;
-                        sel.box_anchor = None;
-                        sel.box_anchor_world = None;
-                        sel.box_current = None;
-                        sel.box_crossing_locked = false;
-                    }
-                    if was_pan {
-                        self.command_line.push_output(crate::t!("PAN ended.").as_ref());
-                    }
-                    self.ribbon.deactivate_tool();
-                    return Task::none();
-                }
-                // Grip popup intercepts Escape — dismisses the menu
-                // without doing anything else.
-                if self.grip_popup.take().is_some() {
-                    self.grip_hover = None;
-                    return Task::none();
-                }
-                if self.visibility_popup.take().is_some() {
-                    return Task::none();
-                }
-                if self.tabs[self.active_tab].active_grip.is_some() {
-                    self.grip_pending = None;
-                    self.command_line.input.clear();
-                    if self.cancel_active_grip_edit() {
-                        return Task::none();
-                    }
-                }
-                if self.grip_pending.take().is_some() {
-                    self.command_line.input.clear();
-                    return Task::none();
-                }
-                // A hot grip (click-move-click placement in progress) rolls
-                // back to its pre-drag image on Escape.
-                if self.cancel_active_grip_edit() {
-                    return Task::none();
-                }
-                // Cancel layout rename first, then fall through.
-                let i_e = self.active_tab;
-                if let Some(state) = self.qselect.take() {
-                    self.qselect_settings = Some((&state).into());
-                    self.reset_modal_geometry();
-                    return Task::none();
-                }
-                {
-                    let mut sel = self.tabs[i_e].scene.selection.borrow_mut();
-                    if sel.context_menu.is_some() {
-                        sel.context_menu = None;
-                        return Task::none();
-                    }
-                }
-                if self.layout_rename_state.take().is_some() {
-                    return Task::none();
-                }
-                // Typed text on the command line cancels first — one
-                // Esc empties the buffer, a second Esc then escalates
-                // to whatever the current mode would otherwise do
-                // (cancel command / exit viewport / deselect).
-                if !self.command_line.input.is_empty() {
-                    self.command_line.input.clear();
-                    self.command_line.autocomplete_cursor = None;
-                    self.command_line.close_history();
-                    return Task::none();
-                }
-                let i = self.active_tab;
-                if self.tabs[i].active_cmd.is_some() {
-                    let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_escape());
-                    if let Some(r) = result {
-                        return self.apply_cmd_result(r);
-                    }
-                } else if self.tabs[i].scene.active_viewport.is_some() {
-                    // ESC while in MSPACE → exit back to paper space.
-                    return Task::done(Message::ExitViewport);
-                } else {
-                    self.tabs[i].scene.deselect_all();
-                    self.refresh_properties();
-                    let mut sel = self.tabs[i].scene.selection.borrow_mut();
-                    sel.box_anchor = None;
-                    // Also drop the world-space anchor, or the next pan/zoom
-                    // re-projects it back into `box_anchor` and the cancelled
-                    // marquee springs back to life (reproject_box_anchor).
-                    sel.box_anchor_world = None;
-                    sel.box_current = None;
-                    sel.box_crossing = false;
-                }
-                Task::none()
+        // Esc drops an unconsumed one-shot snap override and closes
+        // its menu (#337). Falls through — Esc keeps its usual effect.
+        self.snap_override_popup = None;
+        self.snapper.clear_override();
+        // Open MText editor swallows Escape (cancel without committing).
+        if self.mtext_editor.is_some() {
+            self.mtext_cancel();
+            return self.post_editor_closed(false);
+        }
+        // The in-place TEXT editor likewise cancels on Escape.
+        if self.text_inline.is_some() {
+            self.text_inline_cancel();
+            return self.post_editor_closed(false);
+        }
+        // Esc cancels an armed pane move.
+        if self.pane_move_from.take().is_some() {
+            return Task::none();
+        }
+        // Esc cancels a pending system-variable value prompt.
+        if self.pending_setvar.take().is_some() {
+            self.command_line.push_info(crate::t!("*Cancel*").as_ref());
+            return Task::none();
+        }
+        // UCS icon: Esc ends any grip drag and clears the selection
+        // (only when no command owns Escape).
+        if self.tabs[self.active_tab].active_cmd.is_none()
+            && (self.ucs_grip_drag.is_some() || self.ucs_icon_selected)
+        {
+            let i = self.active_tab;
+            // A UCS grip drag is live-only until mouse release. Reload
+            // the persisted pane UCS so Escape really cancels it.
+            if self.ucs_grip_drag.take().is_some() {
+                self.tabs[i].refresh_active_ucs();
+                self.tabs[i].scene.camera_generation += 1;
+            }
+            self.ucs_icon_selected = false;
+            self.ucs_icon_hover = false;
+            self.tabs[i].snap_result = None;
+            return Task::none();
+        }
+        // Leave an interactive navigation mode and end its in-flight
+        // drag. Orbit exits silently; PAN keeps its existing message.
+        if self.tabs[self.active_tab].pan_mode
+            || self.tabs[self.active_tab].orbit_mode
+            || self.tabs[self.active_tab].zoom_dynamic_mode
+        {
+            let i = self.active_tab;
+            let was_pan = self.tabs[i].pan_mode;
+            self.tabs[i].pan_mode = false;
+            self.tabs[i].orbit_mode = false;
+            self.tabs[i].zoom_dynamic_mode = false;
+            {
+                let mut sel = self.tabs[i].scene.selection.borrow_mut();
+                sel.middle_down = false;
+                sel.middle_last_pos = None;
+                sel.orbit_pivot = None;
+                sel.box_anchor = None;
+                sel.box_anchor_world = None;
+                sel.box_current = None;
+                sel.box_crossing_locked = false;
+            }
+            if was_pan {
+                self.command_line
+                    .push_output(crate::t!("PAN ended.").as_ref());
+            }
+            self.ribbon.deactivate_tool();
+            return Task::none();
+        }
+        // Grip popup intercepts Escape — dismisses the menu
+        // without doing anything else.
+        if self.grip_popup.take().is_some() {
+            self.grip_hover = None;
+            return Task::none();
+        }
+        if self.visibility_popup.take().is_some() {
+            return Task::none();
+        }
+        if self.tabs[self.active_tab].active_grip.is_some() {
+            self.grip_pending = None;
+            self.command_line.input.clear();
+            if self.cancel_active_grip_edit() {
+                return Task::none();
+            }
+        }
+        if self.grip_pending.take().is_some() {
+            self.command_line.input.clear();
+            return Task::none();
+        }
+        // A hot grip (click-move-click placement in progress) rolls
+        // back to its pre-drag image on Escape.
+        if self.cancel_active_grip_edit() {
+            return Task::none();
+        }
+        // Cancel layout rename first, then fall through.
+        let i_e = self.active_tab;
+        if let Some(state) = self.qselect.take() {
+            self.qselect_settings = Some((&state).into());
+            self.reset_modal_geometry();
+            return Task::none();
+        }
+        {
+            let mut sel = self.tabs[i_e].scene.selection.borrow_mut();
+            if sel.context_menu.is_some() {
+                sel.context_menu = None;
+                return Task::none();
+            }
+        }
+        if self.layout_rename_state.take().is_some() {
+            return Task::none();
+        }
+        // Typed text on the command line cancels first — one
+        // Esc empties the buffer, a second Esc then escalates
+        // to whatever the current mode would otherwise do
+        // (cancel command / exit viewport / deselect).
+        if !self.command_line.input.is_empty() {
+            self.command_line.input.clear();
+            self.command_line.autocomplete_cursor = None;
+            self.command_line.close_history();
+            return Task::none();
+        }
+        let i = self.active_tab;
+        if self.tabs[i].active_cmd.is_some() {
+            let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_escape());
+            if let Some(r) = result {
+                return self.apply_cmd_result(r);
+            }
+        } else if self.tabs[i].scene.active_viewport.is_some() {
+            // ESC while in MSPACE → exit back to paper space.
+            return Task::done(Message::ExitViewport);
+        } else {
+            self.tabs[i].scene.deselect_all();
+            self.refresh_properties();
+            let mut sel = self.tabs[i].scene.selection.borrow_mut();
+            sel.box_anchor = None;
+            // Also drop the world-space anchor, or the next pan/zoom
+            // re-projects it back into `box_anchor` and the cancelled
+            // marquee springs back to life (reproject_box_anchor).
+            sel.box_anchor_world = None;
+            sel.box_current = None;
+            sel.box_crossing = false;
+        }
+        Task::none()
     }
 
-    pub(super) fn on_layer_toggle_vp_freeze(&mut self, layer_idx: usize, vp_col_idx: usize) -> Task<Message> {
-                let i = self.active_tab;
-                let vp_handle = self.tabs[i]
-                    .layers
-                    .vp_cols
-                    .get(vp_col_idx)
-                    .map(|c| c.handle);
-                let layer_name = self.tabs[i]
-                    .layers
-                    .layers
-                    .get(layer_idx)
-                    .map(|l| l.name.clone());
+    pub(super) fn on_layer_toggle_vp_freeze(
+        &mut self,
+        layer_idx: usize,
+        vp_col_idx: usize,
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        let vp_handle = self.tabs[i]
+            .layers
+            .vp_cols
+            .get(vp_col_idx)
+            .map(|c| c.handle);
+        let layer_name = self.tabs[i]
+            .layers
+            .layers
+            .get(layer_idx)
+            .map(|l| l.name.clone());
 
-                if let (Some(vp_handle), Some(layer_name)) = (vp_handle, layer_name) {
-                    // Get the layer handle from the document
-                    if let Some(doc_layer) = self.tabs[i].scene.document.layers.get(&layer_name) {
-                        let layer_handle = doc_layer.handle;
-                        self.push_undo_snapshot(i, "VPLAYER");
+        if let (Some(vp_handle), Some(layer_name)) = (vp_handle, layer_name) {
+            // Get the layer handle from the document
+            if let Some(doc_layer) = self.tabs[i].scene.document.layers.get(&layer_name) {
+                let layer_handle = doc_layer.handle;
+                self.push_undo_snapshot(i, "VPLAYER");
 
-                        // Toggle frozen_layers on the viewport entity
-                        for e in self.tabs[i].scene.document.entities_mut() {
-                            if let acadrust::EntityType::Viewport(vp) = e {
-                                if vp.common.handle == vp_handle {
-                                    if vp.frozen_layers.contains(&layer_handle) {
-                                        vp.frozen_layers.retain(|h| h != &layer_handle);
-                                    } else {
-                                        vp.frozen_layers.push(layer_handle);
-                                    }
-                                    break;
-                                }
+                // Toggle frozen_layers on the viewport entity
+                for e in self.tabs[i].scene.document.entities_mut() {
+                    if let acadrust::EntityType::Viewport(vp) = e {
+                        if vp.common.handle == vp_handle {
+                            if vp.frozen_layers.contains(&layer_handle) {
+                                vp.frozen_layers.retain(|h| h != &layer_handle);
+                            } else {
+                                vp.frozen_layers.push(layer_handle);
                             }
+                            break;
                         }
-
-                        // Re-sync layer panel with updated VP info
-                        let vp_info = self.tabs[i].scene.viewport_list();
-                        let doc_layers = self.tabs[i].scene.document.layers.clone();
-                        self.tabs[i]
-                            .layers
-                            .sync_with_viewports(&doc_layers, vp_info);
-                        // Per-viewport layer visibility changes the resident
-                        // assembly, not any entity's tessellated geometry.
-                        self.tabs[i].scene.bump_geometry_no_blocks();
-                        self.tabs[i].dirty = true;
                     }
                 }
-                Task::none()
-    }
 
-    pub(super) fn on_layer_new(&mut self) -> Task<Message> {
-                let i = self.active_tab;
-                let mut n = 1;
-                let new_name = loop {
-                    let candidate = format!("Layer{}", n);
-                    if !self.tabs[i].scene.document.layers.contains(&candidate) {
-                        break candidate;
-                    }
-                    n += 1;
-                };
-                self.push_undo_snapshot(i, "LAYER NEW");
-                use acadrust::tables::layer::Layer as DocLayer;
-                // A layer needs a real handle or it is dropped on a DWG save
-                // (the format is handle-based; issue #67).
-                let mut dl = DocLayer::new(&new_name);
-                // `allocate_handle` advances the seed so the layer gets a
-                // unique handle; the non-advancing `next_handle` getter hands
-                // out the same value twice and the later object overwrites it.
-                dl.handle = self.tabs[i].scene.document.allocate_handle();
-                let _ = self.tabs[i].scene.document.layers.add(dl);
-                self.tabs[i].dirty = true;
-                let doc_layers = self.tabs[i].scene.document.layers.clone();
+                // Re-sync layer panel with updated VP info
                 let vp_info = self.tabs[i].scene.viewport_list();
+                let doc_layers = self.tabs[i].scene.document.layers.clone();
                 self.tabs[i]
                     .layers
                     .sync_with_viewports(&doc_layers, vp_info);
-                let new_idx = self.tabs[i]
-                    .layers
-                    .layers
-                    .iter()
-                    .position(|l| l.name == new_name);
-                if let Some(idx) = new_idx {
-                    self.tabs[i].layers.selected = Some(idx);
-                    self.tabs[i].layers.selected_multi = vec![idx];
-                    self.tabs[i].layers.editing = Some(idx);
-                    self.tabs[i].layers.edit_buf = new_name.clone();
-                }
-                self.sync_ribbon_layers();
-                // With alphabetical ordering (#270) the new layer can land
-                // anywhere in a long list; scroll its row into view so the
-                // rename prompt is visible (#271). Offset is layout-independent
-                // (idx × fixed row height), so it holds even before the freshly
-                // added row is measured.
-                match new_idx {
-                    Some(idx) => iced::widget::operation::scroll_to(
-                        iced::advanced::widget::Id::new(
-                            crate::ui::window::layers::LAYER_TABLE_SCROLL_ID,
-                        ),
-                        iced::widget::scrollable::AbsoluteOffset {
-                            x: 0.0,
-                            y: idx as f32 * crate::ui::ROW_H,
-                        },
-                    ),
-                    None => Task::none(),
-                }
+                // Per-viewport layer visibility changes the resident
+                // assembly, not any entity's tessellated geometry.
+                self.tabs[i].scene.bump_geometry_no_blocks();
+                self.tabs[i].dirty = true;
+            }
+        }
+        Task::none()
+    }
+
+    pub(super) fn on_layer_new(&mut self) -> Task<Message> {
+        let i = self.active_tab;
+        let mut n = 1;
+        let new_name = loop {
+            let candidate = format!("Layer{}", n);
+            if !self.tabs[i].scene.document.layers.contains(&candidate) {
+                break candidate;
+            }
+            n += 1;
+        };
+        self.push_undo_snapshot(i, "LAYER NEW");
+        use acadrust::tables::layer::Layer as DocLayer;
+        // A layer needs a real handle or it is dropped on a DWG save
+        // (the format is handle-based; issue #67).
+        let mut dl = DocLayer::new(&new_name);
+        // `allocate_handle` advances the seed so the layer gets a
+        // unique handle; the non-advancing `next_handle` getter hands
+        // out the same value twice and the later object overwrites it.
+        dl.handle = self.tabs[i].scene.document.allocate_handle();
+        let _ = self.tabs[i].scene.document.layers.add(dl);
+        self.tabs[i].dirty = true;
+        let doc_layers = self.tabs[i].scene.document.layers.clone();
+        let vp_info = self.tabs[i].scene.viewport_list();
+        self.tabs[i]
+            .layers
+            .sync_with_viewports(&doc_layers, vp_info);
+        let new_idx = self.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .position(|l| l.name == new_name);
+        if let Some(idx) = new_idx {
+            self.tabs[i].layers.selected = Some(idx);
+            self.tabs[i].layers.selected_multi = vec![idx];
+            self.tabs[i].layers.editing = Some(idx);
+            self.tabs[i].layers.edit_buf = new_name.clone();
+        }
+        self.sync_ribbon_layers();
+        // With alphabetical ordering (#270) the new layer can land
+        // anywhere in a long list; scroll its row into view so the
+        // rename prompt is visible (#271). Offset is layout-independent
+        // (idx × fixed row height), so it holds even before the freshly
+        // added row is measured.
+        match new_idx {
+            Some(idx) => iced::widget::operation::scroll_to(
+                iced::advanced::widget::Id::new(crate::ui::window::layers::LAYER_TABLE_SCROLL_ID),
+                iced::widget::scrollable::AbsoluteOffset {
+                    x: 0.0,
+                    y: idx as f32 * crate::ui::ROW_H,
+                },
+            ),
+            None => Task::none(),
+        }
     }
 
     pub(super) fn on_layer_delete(&mut self) -> Task<Message> {
-                let i = self.active_tab;
-                // Every selected layer (multi-select), or the anchor if none.
-                let mut names = self.selected_layer_names(i);
-                if names.is_empty() {
-                    return Task::none();
-                }
-                // Layer "0" and the current layer can't be deleted — drop them
-                // from the batch and note it.
-                let current = self.tabs[i].scene.document.header.current_layer_name.clone();
-                let before = names.len();
-                names.retain(|n| n != "0" && *n != current);
-                if names.len() < before {
-                    self.command_line
-                        .push_info(crate::t!("Layer \"0\" and the current layer can't be deleted — skipped.").as_ref());
-                }
-                if names.is_empty() {
-                    return Task::none();
-                }
-                // Total objects across the layers. Empty → delete straight away;
-                // non-empty → warn first (deleting also removes those objects).
-                let count = self.tabs[i]
-                    .scene
-                    .document
-                    .entities()
-                    .filter(|e| names.contains(&e.common().layer))
-                    .count();
-                if count == 0 {
-                    self.push_undo_snapshot(i, "LAYER DELETE");
-                    for name in &names {
-                        self.tabs[i].scene.document.layers.remove(name);
-                    }
-                    self.tabs[i].dirty = true;
-                    self.sync_layer_panel(i);
-                } else {
-                    self.layer_delete_pending = Some((names, count));
-                    self.active_modal = Some(crate::app::ModalKind::LayerDeleteWarning);
-                    self.modal_offset = iced::Vector::ZERO;
-                    self.modal_resize = iced::Vector::ZERO;
-                }
-                Task::none()
+        let i = self.active_tab;
+        // Every selected layer (multi-select), or the anchor if none.
+        let mut names = self.selected_layer_names(i);
+        if names.is_empty() {
+            return Task::none();
+        }
+        // Layer "0" and the current layer can't be deleted — drop them
+        // from the batch and note it.
+        let current = self.tabs[i]
+            .scene
+            .document
+            .header
+            .current_layer_name
+            .clone();
+        let before = names.len();
+        names.retain(|n| n != "0" && *n != current);
+        if names.len() < before {
+            self.command_line.push_info(
+                crate::t!("Layer \"0\" and the current layer can't be deleted — skipped.").as_ref(),
+            );
+        }
+        if names.is_empty() {
+            return Task::none();
+        }
+        // Total objects across the layers. Empty → delete straight away;
+        // non-empty → warn first (deleting also removes those objects).
+        let count = self.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter(|e| names.contains(&e.common().layer))
+            .count();
+        if count == 0 {
+            self.push_undo_snapshot(i, "LAYER DELETE");
+            for name in &names {
+                self.tabs[i].scene.document.layers.remove(name);
+            }
+            self.tabs[i].dirty = true;
+            self.sync_layer_panel(i);
+        } else {
+            self.layer_delete_pending = Some((names, count));
+            self.active_modal = Some(crate::app::ModalKind::LayerDeleteWarning);
+            self.modal_offset = iced::Vector::ZERO;
+            self.modal_resize = iced::Vector::ZERO;
+        }
+        Task::none()
     }
 
     /// User confirmed deleting non-empty layer(s): erase every object on them,
@@ -1323,542 +1350,498 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
     fn sync_layer_panel(&mut self, i: usize) {
         let doc_layers = self.tabs[i].scene.document.layers.clone();
         let vp_info = self.tabs[i].scene.viewport_list();
-        self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
+        self.tabs[i]
+            .layers
+            .sync_with_viewports(&doc_layers, vp_info);
         self.tabs[i].layers.selected = None;
         self.tabs[i].layers.selected_multi.clear();
         self.sync_ribbon_layers();
     }
 
     pub(super) fn on_layer_set_current(&mut self) -> Task<Message> {
-                let i = self.active_tab;
-                if let Some(idx) = self.tabs[i].layers.selected {
-                    if let Some(layer) = self.tabs[i].layers.layers.get(idx) {
-                        let name = layer.name.clone();
-                        if name == self.tabs[i].layers.current_layer {
-                            return Task::none();
-                        }
-                        // Mirror the change into the document header (CLAYER) too,
-                        // not just the per-tab default. Otherwise the no-selection
-                        // ribbon refresh (e.g. after Esc) re-reads the stale header
-                        // layer and the dropdown snaps back to it. See #93.
-                        let handle = self.tabs[i]
-                            .scene
-                            .document
-                            .layers
-                            .get(&name)
-                            .map(|l| l.handle)
-                            .unwrap_or(acadrust::types::Handle::NULL);
-                        self.tabs[i].scene.document.header.current_layer_name = name.clone();
-                        self.tabs[i].scene.document.header.current_layer_handle = handle;
-                        self.tabs[i].active_layer = name.clone();
-                        self.tabs[i].layers.current_layer = name.clone();
-                        self.tabs[i].dirty = true;
-                        self.ribbon.active_layer = name;
-                    }
+        let i = self.active_tab;
+        if let Some(idx) = self.tabs[i].layers.selected {
+            if let Some(layer) = self.tabs[i].layers.layers.get(idx) {
+                let name = layer.name.clone();
+                if name == self.tabs[i].layers.current_layer {
+                    return Task::none();
                 }
-                Task::none()
+                // Mirror the change into the document header (CLAYER) too,
+                // not just the per-tab default. Otherwise the no-selection
+                // ribbon refresh (e.g. after Esc) re-reads the stale header
+                // layer and the dropdown snaps back to it. See #93.
+                let handle = self.tabs[i]
+                    .scene
+                    .document
+                    .layers
+                    .get(&name)
+                    .map(|l| l.handle)
+                    .unwrap_or(acadrust::types::Handle::NULL);
+                self.tabs[i].scene.document.header.current_layer_name = name.clone();
+                self.tabs[i].scene.document.header.current_layer_handle = handle;
+                self.tabs[i].active_layer = name.clone();
+                self.tabs[i].layers.current_layer = name.clone();
+                self.tabs[i].dirty = true;
+                self.ribbon.active_layer = name;
+            }
+        }
+        Task::none()
     }
 
     pub(super) fn on_layer_rename_commit(&mut self) -> Task<Message> {
-                let i = self.active_tab;
-                let editing_idx = self.tabs[i].layers.editing.take();
-                if let Some(idx) = editing_idx {
-                    let new_name = self.tabs[i].layers.edit_buf.trim().to_string();
-                    let old_name = self.tabs[i]
-                        .layers
-                        .layers
-                        .get(idx)
-                        .map(|l| l.name.clone())
-                        .unwrap_or_default();
-                    if !new_name.is_empty() && new_name != old_name {
-                        self.push_undo_snapshot(i, "LAYER RENAME");
-                        if !self.tabs[i].rename_layer(&old_name, &new_name) {
-                            self.discard_last_undo_entry(i);
-                        }
-                    }
-                    self.tabs[i].layers.edit_buf.clear();
-                    self.refresh_layer_panel();
+        let i = self.active_tab;
+        let editing_idx = self.tabs[i].layers.editing.take();
+        if let Some(idx) = editing_idx {
+            let new_name = self.tabs[i].layers.edit_buf.trim().to_string();
+            let old_name = self.tabs[i]
+                .layers
+                .layers
+                .get(idx)
+                .map(|l| l.name.clone())
+                .unwrap_or_default();
+            if !new_name.is_empty() && new_name != old_name {
+                self.push_undo_snapshot(i, "LAYER RENAME");
+                if !self.tabs[i].rename_layer(&old_name, &new_name) {
+                    self.discard_last_undo_entry(i);
                 }
-                Task::none()
+            }
+            self.tabs[i].layers.edit_buf.clear();
+            self.refresh_layer_panel();
+        }
+        Task::none()
     }
 
     pub(super) fn on_grip_menu_pick(&mut self, idx: usize) -> Task<Message> {
-                let i = self.active_tab;
-                let Some(popup) = self.grip_popup.take() else {
-                    return Task::none();
+        let i = self.active_tab;
+        let Some(popup) = self.grip_popup.take() else {
+            return Task::none();
+        };
+        if self.reject_locked_edit(i, popup.handle) {
+            return Task::none();
+        }
+        self.grip_hover = None;
+        let Some(item) = popup.items.get(idx).cloned() else {
+            return Task::none();
+        };
+        use crate::entities::traits::EntityTypeOps;
+        use crate::scene::model::object::GripMenuAction;
+        if matches!(
+            item.action,
+            GripMenuAction::Stretch
+                | GripMenuAction::RectangleResize
+                | GripMenuAction::MoveWithText
+                | GripMenuAction::MoveWithDimLine
+                | GripMenuAction::MoveWithLeader
+                | GripMenuAction::MoveIndependent
+        ) {
+            let is_dimension = matches!(
+                self.tabs[i].scene.document.get_entity(popup.handle),
+                Some(acadrust::EntityType::Dimension(_))
+            );
+            if is_dimension {
+                let movement = match item.action {
+                    GripMenuAction::MoveWithDimLine => Some("Keep dim line with text"),
+                    GripMenuAction::MoveWithLeader => Some("Move text, add leader"),
+                    GripMenuAction::MoveIndependent => Some("Move text, no leader"),
+                    _ => None,
                 };
-                if self.reject_locked_edit(i, popup.handle) {
-                    return Task::none();
-                }
-                self.grip_hover = None;
-                let Some(item) = popup.items.get(idx).cloned() else {
-                    return Task::none();
-                };
-                use crate::entities::traits::EntityTypeOps;
-                use crate::scene::model::object::GripMenuAction;
-                if matches!(
-                    item.action,
-                    GripMenuAction::Stretch
-                        | GripMenuAction::RectangleResize
-                        | GripMenuAction::MoveWithText
-                        | GripMenuAction::MoveWithDimLine
-                        | GripMenuAction::MoveWithLeader
-                        | GripMenuAction::MoveIndependent
-                ) {
-                    let is_dimension = matches!(
-                        self.tabs[i].scene.document.get_entity(popup.handle),
-                        Some(acadrust::EntityType::Dimension(_))
+                if let Some(movement) = movement {
+                    crate::entities::dim_override::set_property(
+                        &mut self.tabs[i].scene.document,
+                        popup.handle,
+                        "dim_text_movement",
+                        movement,
                     );
-                    if is_dimension {
-                        let movement = match item.action {
-                            GripMenuAction::MoveWithDimLine => Some("Keep dim line with text"),
-                            GripMenuAction::MoveWithLeader => Some("Move text, add leader"),
-                            GripMenuAction::MoveIndependent => Some("Move text, no leader"),
-                            _ => None,
-                        };
-                        if let Some(movement) = movement {
-                            crate::entities::dim_override::set_property(
-                                &mut self.tabs[i].scene.document,
-                                popup.handle,
-                                "dim_text_movement",
-                                movement,
-                            );
-                            self.tabs[i].dirty = true;
-                            self.tabs[i].scene.bump_entities(&[(
-                                popup.handle,
-                                crate::scene::ChangeKind::Modified,
-                            )]);
-                        }
-                    }
-                    // Stretch / Move = grab this grip. Engage it so the next
-                    // click places it (click-move-click) — same as picking the
-                    // grip directly in the viewport. Without this the menu just
-                    // closed and the grip never became hot (issue #48).
-                    if let Some((_, g)) = self.tabs[i]
-                        .selected_grip_handles
-                        .iter()
-                        .zip(self.tabs[i].selected_grips.iter())
-                        .find(|(owner, g)| **owner == popup.handle && g.id == popup.grip_id)
-                    {
-                        // Only multileaders use the whole-object grip.
-                        let is_multileader = matches!(
-                            self.tabs[i].scene.document.get_entity(popup.handle),
-                            Some(acadrust::EntityType::MultiLeader(_))
-                        );
-                        let (grip_id, is_translate) =
-                            if matches!(item.action, GripMenuAction::MoveWithLeader)
-                                && is_multileader
-                            {
-                                (crate::entities::multileader::MOVE_ALL_GRIP, true)
-                            } else {
-                                (
-                                    popup.grip_id,
-                                    matches!(item.action, GripMenuAction::MoveWithText)
-                                        || (!is_dimension && g.is_midpoint),
-                                )
+                    self.tabs[i].dirty = true;
+                    self.tabs[i]
+                        .scene
+                        .bump_entities(&[(popup.handle, crate::scene::ChangeKind::Modified)]);
+                }
+            }
+            // Stretch / Move = grab this grip. Engage it so the next
+            // click places it (click-move-click) — same as picking the
+            // grip directly in the viewport. Without this the menu just
+            // closed and the grip never became hot (issue #48).
+            if let Some((_, g)) = self.tabs[i]
+                .selected_grip_handles
+                .iter()
+                .zip(self.tabs[i].selected_grips.iter())
+                .find(|(owner, g)| **owner == popup.handle && g.id == popup.grip_id)
+            {
+                // Only multileaders use the whole-object grip.
+                let is_multileader = matches!(
+                    self.tabs[i].scene.document.get_entity(popup.handle),
+                    Some(acadrust::EntityType::MultiLeader(_))
+                );
+                let (grip_id, is_translate) =
+                    if matches!(item.action, GripMenuAction::MoveWithLeader) && is_multileader {
+                        (crate::entities::multileader::MOVE_ALL_GRIP, true)
+                    } else {
+                        (
+                            popup.grip_id,
+                            matches!(item.action, GripMenuAction::MoveWithText)
+                                || (!is_dimension && g.is_midpoint),
+                        )
+                    };
+                if matches!(item.action, GripMenuAction::RectangleResize) {
+                    let rectangle = self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(popup.handle)
+                        .and_then(|entity| {
+                            let AcadEntityType::LwPolyline(polyline) = entity else {
+                                return None;
                             };
-                        if matches!(item.action, GripMenuAction::RectangleResize) {
-                            let rectangle = self.tabs[i]
+                            let (frame, plane) =
+                                crate::entities::lwpolyline::rectangle_frame(polyline)?;
+                            let opposite = polyline.vertices.get((popup.grip_id + 2) % 4)?.location;
+                            Some((
+                                glam::DVec3::from_array(plane.point_at([opposite.x, opposite.y])),
+                                glam::DVec3::from_array(plane.vector_at(frame.width_axis))
+                                    .try_normalize()?,
+                                glam::DVec3::from_array(plane.vector_at(frame.height_axis))
+                                    .try_normalize()?,
+                            ))
+                        });
+                    if let Some((opposite, width_axis, height_axis)) = rectangle {
+                        if self.grip_originals.is_empty() {
+                            self.grip_originals = self.tabs[i]
                                 .scene
                                 .document
                                 .get_entity(popup.handle)
-                                .and_then(|entity| {
-                                    let AcadEntityType::LwPolyline(polyline) = entity else {
-                                        return None;
-                                    };
-                                    let (frame, plane) =
-                                        crate::entities::lwpolyline::rectangle_frame(polyline)?;
-                                    let opposite = polyline
-                                        .vertices
-                                        .get((popup.grip_id + 2) % 4)?
-                                        .location;
-                                    Some((
-                                        glam::DVec3::from_array(
-                                            plane.point_at([opposite.x, opposite.y]),
-                                        ),
-                                        glam::DVec3::from_array(plane.vector_at(frame.width_axis))
-                                            .try_normalize()?,
-                                        glam::DVec3::from_array(plane.vector_at(frame.height_axis))
-                                            .try_normalize()?,
-                                    ))
-                                });
-                            if let Some((opposite, width_axis, height_axis)) = rectangle {
-                                if self.grip_originals.is_empty() {
-                                    self.grip_originals = self.tabs[i]
-                                        .scene
-                                        .document
-                                        .get_entity(popup.handle)
-                                        .cloned()
-                                        .map(|entity| vec![(popup.handle, entity)])
-                                        .unwrap_or_default();
-                                }
-                                self.tabs[i].active_grip = Some(GripEdit::rectangle_resize(
-                                    popup.handle,
-                                    popup.grip_id,
-                                    g.world,
-                                    opposite,
-                                    width_axis,
-                                    height_axis,
-                                ));
-                                self.sync_dyn_fields();
-                            }
-                        } else {
-                            self.tabs[i].active_grip = Some(GripEdit::single(
-                                popup.handle,
-                                grip_id,
-                                is_translate,
-                                g.world,
-                            ));
+                                .cloned()
+                                .map(|entity| vec![(popup.handle, entity)])
+                                .unwrap_or_default();
                         }
-                    }
-                    return Task::none();
-                }
-                // Actions that need a follow-up number stash a pending
-                // state + prompt; the next typed value drives
-                // `apply_grip_menu_value`.
-                let prompt = self.tabs[i]
-                    .scene
-                    .document
-                    .get_entity(popup.handle)
-                    .and_then(|e| e.grip_menu_value_prompt(popup.grip_id, item.action));
-                if let Some(label) = prompt {
-                    self.grip_pending = Some(crate::app::GripPendingValue {
-                        handle: popup.handle,
-                        grip_id: popup.grip_id,
-                        action: item.action,
-                        label,
-                    });
-                    if matches!(
-                        item.action,
-                        GripMenuAction::Lengthen
-                            | GripMenuAction::Radius
-                            | GripMenuAction::ArcLength
-                            | GripMenuAction::RectangleWidth
-                            | GripMenuAction::RectangleHeight
-                            | GripMenuAction::MoveParallel
-                    ) {
-                        if let Some((_, grip)) = self.tabs[i]
-                            .selected_grip_handles
-                            .iter()
-                            .zip(self.tabs[i].selected_grips.iter())
-                            .find(|(owner, grip)| {
-                                **owner == popup.handle && grip.id == popup.grip_id
-                            })
-                        {
-                            if self.grip_originals.is_empty() {
-                                self.grip_originals = self.tabs[i]
-                                    .scene
-                                    .document
-                                    .get_entity(popup.handle)
-                                    .cloned()
-                                    .map(|entity| vec![(popup.handle, entity)])
-                                    .unwrap_or_default();
-                            }
-                            self.tabs[i].active_grip = Some(match item.action {
-                                GripMenuAction::Radius => GripEdit::radius(
-                                    popup.handle,
-                                    popup.grip_id,
-                                    grip.world,
-                                ),
-                                GripMenuAction::ArcLength => GripEdit::arc_length(
-                                    popup.handle,
-                                    popup.grip_id,
-                                    grip.world,
-                                ),
-                                GripMenuAction::RectangleWidth => GripEdit::rectangle_width(
-                                    popup.handle,
-                                    popup.grip_id,
-                                    grip.world,
-                                ),
-                                GripMenuAction::RectangleHeight => GripEdit::rectangle_height(
-                                    popup.handle,
-                                    popup.grip_id,
-                                    grip.world,
-                                ),
-                                GripMenuAction::MoveParallel => GripEdit::move_parallel(
-                                    popup.handle,
-                                    popup.grip_id,
-                                    grip.world,
-                                ),
-                                _ => GripEdit::lengthen(
-                                    popup.handle,
-                                    popup.grip_id,
-                                    grip.world,
-                                ),
-                            });
-                        }
-                        // Popup actions do not pass through the normal grip
-                        // press handler, which is where dynamic fields are
-                        // usually seeded. Build the value field
-                        // immediately so it is visible before the next mouse
-                        // move (and so keyboard input has a field to target).
+                        self.tabs[i].active_grip = Some(GripEdit::rectangle_resize(
+                            popup.handle,
+                            popup.grip_id,
+                            g.world,
+                            opposite,
+                            width_axis,
+                            height_axis,
+                        ));
                         self.sync_dyn_fields();
-                        if matches!(item.action, GripMenuAction::Radius) {
-                            self.command_line.push_info(
-                                crate::t!("Specify point or enter radius:").as_ref(),
-                            );
-                        } else if matches!(item.action, GripMenuAction::ArcLength) {
-                            self.command_line.push_info(
-                                crate::t!("Specify point or enter arc length:").as_ref(),
-                            );
-                        } else if matches!(item.action, GripMenuAction::RectangleWidth) {
-                            self.command_line.push_info("Specify point or enter width:");
-                        } else if matches!(item.action, GripMenuAction::RectangleHeight) {
-                            self.command_line.push_info("Specify point or enter height:");
-                        } else if matches!(item.action, GripMenuAction::MoveParallel) {
-                            self.command_line.push_info("Specify point or enter parallel offset:");
-                        } else {
-                            self.command_line.push_info(
-                                crate::t!("Specify point or enter distance:").as_ref(),
-                            );
-                        }
-                    } else {
-                        self.command_line.push_info(crate::tf!("{label}:").as_ref());
                     }
-                    return self.focus_cmd_input();
+                } else {
+                    self.tabs[i].active_grip = Some(GripEdit::single(
+                        popup.handle,
+                        grip_id,
+                        is_translate,
+                        g.world,
+                    ));
                 }
-                // Break at vertex replaces the entity with the split pieces —
-                // structural, so it can't ride the in-place apply below.
-                if matches!(item.action, GripMenuAction::BreakVertex) {
-                    let pieces = match self.tabs[i].scene.document.get_entity(popup.handle) {
-                        Some(acadrust::EntityType::LwPolyline(p)) => {
-                            crate::entities::lwpolyline::break_at_vertex(p, popup.grip_id)
-                        }
-                        _ => None,
-                    };
-                    match pieces {
-                        Some(pieces) => {
-                            self.push_undo_snapshot(i, "BREAK");
-                            self.tabs[i].scene.erase_entities(&[popup.handle]);
-                            for e in pieces {
-                                self.tabs[i].scene.add_entity(e);
-                            }
-                            self.tabs[i].dirty = true;
-                            self.refresh_selected_grips();
-                            self.refresh_properties();
-                            self.command_line.push_output(crate::t!("Polyline broken at vertex.").as_ref());
-                        }
-                        None => self
-                            .command_line
-                            .push_error(crate::t!("Cannot break at this vertex.").as_ref()),
-                    }
-                    return Task::none();
-                }
-                // Polyline Add Vertex is an interactive placement, not an
-                // immediate midpoint edit. Seed the undo snapshot before the
-                // provisional vertex exists, then engage its new grip so the
-                // regular snap/ortho/polar preview follows the cursor. One
-                // click commits the whole append+move; Escape restores the
-                // original entity.
-                if matches!(item.action, GripMenuAction::AddVertex) {
-                    let placement = self.tabs[i]
-                        .scene
-                        .document
-                        .get_entity(popup.handle)
-                        .cloned()
-                        .and_then(|original| {
-                            polyline_add_vertex_target(&original, popup.grip_id)
-                                .map(|(new_gid, old_len)| (original, new_gid, old_len))
-                        });
-                    if let Some((original, new_gid, old_len)) = placement {
-                        let dirty_before = self.tabs[i].dirty;
-                        if let Some(entity) =
-                            self.tabs[i].scene.document.get_entity_mut(popup.handle)
-                        {
-                            entity.apply_grip_menu(popup.grip_id, item.action);
-                        }
-                        let inserted = self.tabs[i]
+            }
+            return Task::none();
+        }
+        // Actions that need a follow-up number stash a pending
+        // state + prompt; the next typed value drives
+        // `apply_grip_menu_value`.
+        let prompt = self.tabs[i]
+            .scene
+            .document
+            .get_entity(popup.handle)
+            .and_then(|e| e.grip_menu_value_prompt(popup.grip_id, item.action));
+        if let Some(label) = prompt {
+            self.grip_pending = Some(crate::app::GripPendingValue {
+                handle: popup.handle,
+                grip_id: popup.grip_id,
+                action: item.action,
+                label,
+            });
+            if matches!(
+                item.action,
+                GripMenuAction::Lengthen
+                    | GripMenuAction::Radius
+                    | GripMenuAction::ArcLength
+                    | GripMenuAction::RectangleWidth
+                    | GripMenuAction::RectangleHeight
+                    | GripMenuAction::MoveParallel
+            ) {
+                if let Some((_, grip)) = self.tabs[i]
+                    .selected_grip_handles
+                    .iter()
+                    .zip(self.tabs[i].selected_grips.iter())
+                    .find(|(owner, grip)| **owner == popup.handle && grip.id == popup.grip_id)
+                {
+                    if self.grip_originals.is_empty() {
+                        self.grip_originals = self.tabs[i]
                             .scene
                             .document
                             .get_entity(popup.handle)
-                            .and_then(polyline_vertex_count)
-                            .is_some_and(|len| len == old_len + 1);
-                        if !inserted {
-                            if let Some(entity) =
-                                self.tabs[i].scene.document.get_entity_mut(popup.handle)
-                            {
-                                *entity = original;
-                            }
-                            self.tabs[i].scene.bump_entities(&[
-                                (popup.handle, crate::scene::ChangeKind::Modified),
-                            ]);
-                            self.tabs[i].dirty = dirty_before;
-                            self.refresh_selected_grips();
-                            self.refresh_properties();
-                            self.command_line.push_error(crate::t!("Cannot add a vertex here.").as_ref());
-                            return Task::none();
-                        }
-                        self.tabs[i]
-                            .scene
-                            .bump_entities(&[(popup.handle, crate::scene::ChangeKind::Modified)]);
-                        self.tabs[i].dirty = true;
-                        self.refresh_selected_grips();
-                        self.refresh_properties();
-                        let grip_world = self.tabs[i]
-                            .selected_grip_handles
-                            .iter()
-                            .zip(self.tabs[i].selected_grips.iter())
-                            .find(|(owner, grip)| {
-                                **owner == popup.handle && grip.id == new_gid
-                            })
-                            .map(|(_, grip)| grip.world);
-                        if let Some(grip_world) = grip_world {
-                            self.grip_originals = vec![(popup.handle, original)];
-                            self.grip_dirty_before = Some(dirty_before);
-                            self.tabs[i].active_grip = Some(GripEdit::single(
-                                popup.handle,
-                                new_gid,
-                                false,
-                                grip_world,
-                            ));
-                            self.command_line
-                                .push_info(crate::t!("Specify new vertex location:").as_ref());
-                        } else {
-                            if let Some(entity) =
-                                self.tabs[i].scene.document.get_entity_mut(popup.handle)
-                            {
-                                *entity = original;
-                            }
-                            self.tabs[i].scene.bump_entities(&[
-                                (popup.handle, crate::scene::ChangeKind::Modified),
-                            ]);
-                            self.tabs[i].dirty = dirty_before;
-                            self.refresh_selected_grips();
-                            self.refresh_properties();
-                            self.command_line
-                                .push_error(crate::t!("Cannot place the new vertex.").as_ref());
-                        }
-                        return Task::none();
+                            .cloned()
+                            .map(|entity| vec![(popup.handle, entity)])
+                            .unwrap_or_default();
                     }
+                    self.tabs[i].active_grip = Some(match item.action {
+                        GripMenuAction::Radius => {
+                            GripEdit::radius(popup.handle, popup.grip_id, grip.world)
+                        }
+                        GripMenuAction::ArcLength => {
+                            GripEdit::arc_length(popup.handle, popup.grip_id, grip.world)
+                        }
+                        GripMenuAction::RectangleWidth => {
+                            GripEdit::rectangle_width(popup.handle, popup.grip_id, grip.world)
+                        }
+                        GripMenuAction::RectangleHeight => {
+                            GripEdit::rectangle_height(popup.handle, popup.grip_id, grip.world)
+                        }
+                        GripMenuAction::MoveParallel => {
+                            GripEdit::move_parallel(popup.handle, popup.grip_id, grip.world)
+                        }
+                        _ => GripEdit::lengthen(popup.handle, popup.grip_id, grip.world),
+                    });
                 }
-                // One-shot action — apply immediately.
-                let unchanged = item.label.starts_with('✓')
-                    || self.tabs[i]
-                        .scene
-                        .document
-                        .get_entity(popup.handle)
-                        .is_some_and(|entity| match (item.action, entity) {
-                            (GripMenuAction::ShowFit, acadrust::EntityType::Spline(spline)) => {
-                                crate::entities::spline::shows_fit_points(spline)
-                            }
-                            (
-                                GripMenuAction::ShowControlVertices,
-                                acadrust::EntityType::Spline(spline),
-                            ) => {
-                                crate::entities::spline::shows_control_vertices(spline)
-                            }
-                            _ => false,
-                        });
-                if unchanged {
-                    return Task::none();
-                }
-                self.push_undo_snapshot(i, item.label);
-                // For Add Leader, the new arrow becomes the last grip; remember
-                // its id so we can grab it for placement right after.
-                let add_leader_gid = if matches!(item.action, GripMenuAction::AddLeader) {
-                    self.tabs[i]
-                        .scene
-                        .document
-                        .get_entity(popup.handle)
-                        .and_then(|e| match e {
-                            acadrust::EntityType::MultiLeader(ml) => Some(
-                                ml.context
-                                    .leader_roots
-                                    .iter()
-                                    .flat_map(|r| r.lines.iter())
-                                    .map(|l| l.points.len())
-                                    .sum::<usize>(),
-                            ),
-                            _ => None,
-                        })
+                // Popup actions do not pass through the normal grip
+                // press handler, which is where dynamic fields are
+                // usually seeded. Build the value field
+                // immediately so it is visible before the next mouse
+                // move (and so keyboard input has a field to target).
+                self.sync_dyn_fields();
+                if matches!(item.action, GripMenuAction::Radius) {
+                    self.command_line
+                        .push_info(crate::t!("Specify point or enter radius:").as_ref());
+                } else if matches!(item.action, GripMenuAction::ArcLength) {
+                    self.command_line
+                        .push_info(crate::t!("Specify point or enter arc length:").as_ref());
+                } else if matches!(item.action, GripMenuAction::RectangleWidth) {
+                    self.command_line.push_info("Specify point or enter width:");
+                } else if matches!(item.action, GripMenuAction::RectangleHeight) {
+                    self.command_line
+                        .push_info("Specify point or enter height:");
+                } else if matches!(item.action, GripMenuAction::MoveParallel) {
+                    self.command_line
+                        .push_info("Specify point or enter parallel offset:");
                 } else {
-                    None
-                };
+                    self.command_line
+                        .push_info(crate::t!("Specify point or enter distance:").as_ref());
+                }
+            } else {
+                self.command_line.push_info(crate::tf!("{label}:").as_ref());
+            }
+            return self.focus_cmd_input();
+        }
+        // Break at vertex replaces the entity with the split pieces —
+        // structural, so it can't ride the in-place apply below.
+        if matches!(item.action, GripMenuAction::BreakVertex) {
+            let pieces = match self.tabs[i].scene.document.get_entity(popup.handle) {
+                Some(acadrust::EntityType::LwPolyline(p)) => {
+                    crate::entities::lwpolyline::break_at_vertex(p, popup.grip_id)
+                }
+                _ => None,
+            };
+            match pieces {
+                Some(pieces) => {
+                    self.push_undo_snapshot(i, "BREAK");
+                    self.tabs[i].scene.erase_entities(&[popup.handle]);
+                    for e in pieces {
+                        self.tabs[i].scene.add_entity(e);
+                    }
+                    self.tabs[i].dirty = true;
+                    self.refresh_selected_grips();
+                    self.refresh_properties();
+                    self.command_line
+                        .push_output(crate::t!("Polyline broken at vertex.").as_ref());
+                }
+                None => self
+                    .command_line
+                    .push_error(crate::t!("Cannot break at this vertex.").as_ref()),
+            }
+            return Task::none();
+        }
+        // Polyline Add Vertex is an interactive placement, not an
+        // immediate midpoint edit. Seed the undo snapshot before the
+        // provisional vertex exists, then engage its new grip so the
+        // regular snap/ortho/polar preview follows the cursor. One
+        // click commits the whole append+move; Escape restores the
+        // original entity.
+        if matches!(item.action, GripMenuAction::AddVertex) {
+            let placement = self.tabs[i]
+                .scene
+                .document
+                .get_entity(popup.handle)
+                .cloned()
+                .and_then(|original| {
+                    polyline_add_vertex_target(&original, popup.grip_id)
+                        .map(|(new_gid, old_len)| (original, new_gid, old_len))
+                });
+            if let Some((original, new_gid, old_len)) = placement {
+                let dirty_before = self.tabs[i].dirty;
                 if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(popup.handle) {
                     entity.apply_grip_menu(popup.grip_id, item.action);
                 }
-                // Menu actions reshape dimensions too — drop a stale baked *D
-                // block so the edit is visible (no-op for non-dims). (#398)
-                self.tabs[i]
+                let inserted = self.tabs[i]
                     .scene
-                    .invalidate_dim_block_recorded(popup.handle);
+                    .document
+                    .get_entity(popup.handle)
+                    .and_then(polyline_vertex_count)
+                    .is_some_and(|len| len == old_len + 1);
+                if !inserted {
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(popup.handle) {
+                        *entity = original;
+                    }
+                    self.tabs[i]
+                        .scene
+                        .bump_entities(&[(popup.handle, crate::scene::ChangeKind::Modified)]);
+                    self.tabs[i].dirty = dirty_before;
+                    self.refresh_selected_grips();
+                    self.refresh_properties();
+                    self.command_line
+                        .push_error(crate::t!("Cannot add a vertex here.").as_ref());
+                    return Task::none();
+                }
                 self.tabs[i]
                     .scene
                     .bump_entities(&[(popup.handle, crate::scene::ChangeKind::Modified)]);
                 self.tabs[i].dirty = true;
                 self.refresh_selected_grips();
                 self.refresh_properties();
-                // Grab the new arrow so it follows the cursor (click places it,
-                // Esc removes it).
-                if let Some(new_gid) = add_leader_gid {
-                    if let Some((_, g)) = self.tabs[i]
-                        .selected_grip_handles
-                        .iter()
-                        .zip(self.tabs[i].selected_grips.iter())
-                        .find(|(owner, g)| **owner == popup.handle && g.id == new_gid)
-                    {
-                        self.tabs[i].active_grip = Some(GripEdit::single(
-                            popup.handle,
-                            new_gid,
-                            false,
-                            g.world,
-                        ));
-                        self.grip_add_provisional = Some((popup.handle, new_gid));
+                let grip_world = self.tabs[i]
+                    .selected_grip_handles
+                    .iter()
+                    .zip(self.tabs[i].selected_grips.iter())
+                    .find(|(owner, grip)| **owner == popup.handle && grip.id == new_gid)
+                    .map(|(_, grip)| grip.world);
+                if let Some(grip_world) = grip_world {
+                    self.grip_originals = vec![(popup.handle, original)];
+                    self.grip_dirty_before = Some(dirty_before);
+                    self.tabs[i].active_grip =
+                        Some(GripEdit::single(popup.handle, new_gid, false, grip_world));
+                    self.command_line
+                        .push_info(crate::t!("Specify new vertex location:").as_ref());
+                } else {
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(popup.handle) {
+                        *entity = original;
                     }
+                    self.tabs[i]
+                        .scene
+                        .bump_entities(&[(popup.handle, crate::scene::ChangeKind::Modified)]);
+                    self.tabs[i].dirty = dirty_before;
+                    self.refresh_selected_grips();
+                    self.refresh_properties();
+                    self.command_line
+                        .push_error(crate::t!("Cannot place the new vertex.").as_ref());
                 }
-                // Convert to Arc enters placement: the segment grip goes hot
-                // in Absolute mode, so the arc re-fits through the cursor as
-                // it moves and the next click seats it (#339).
-                if matches!(item.action, GripMenuAction::ConvertToArc) {
-                    if let Some((_, g)) = self.tabs[i]
-                        .selected_grip_handles
-                        .iter()
-                        .zip(self.tabs[i].selected_grips.iter())
-                        .find(|(owner, g)| **owner == popup.handle && g.id == popup.grip_id)
-                    {
-                        self.tabs[i].active_grip = Some(GripEdit::single(
-                            popup.handle,
-                            popup.grip_id,
-                            false,
-                            g.world,
-                        ));
+                return Task::none();
+            }
+        }
+        // One-shot action — apply immediately.
+        let unchanged = item.label.starts_with('✓')
+            || self.tabs[i]
+                .scene
+                .document
+                .get_entity(popup.handle)
+                .is_some_and(|entity| match (item.action, entity) {
+                    (GripMenuAction::ShowFit, acadrust::EntityType::Spline(spline)) => {
+                        crate::entities::spline::shows_fit_points(spline)
                     }
-                }
-                Task::none()
+                    (GripMenuAction::ShowControlVertices, acadrust::EntityType::Spline(spline)) => {
+                        crate::entities::spline::shows_control_vertices(spline)
+                    }
+                    _ => false,
+                });
+        if unchanged {
+            return Task::none();
+        }
+        self.push_undo_snapshot(i, item.label);
+        // For Add Leader, the new arrow becomes the last grip; remember
+        // its id so we can grab it for placement right after.
+        let add_leader_gid = if matches!(item.action, GripMenuAction::AddLeader) {
+            self.tabs[i]
+                .scene
+                .document
+                .get_entity(popup.handle)
+                .and_then(|e| match e {
+                    acadrust::EntityType::MultiLeader(ml) => Some(
+                        ml.context
+                            .leader_roots
+                            .iter()
+                            .flat_map(|r| r.lines.iter())
+                            .map(|l| l.points.len())
+                            .sum::<usize>(),
+                    ),
+                    _ => None,
+                })
+        } else {
+            None
+        };
+        if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(popup.handle) {
+            entity.apply_grip_menu(popup.grip_id, item.action);
+        }
+        // Menu actions reshape dimensions too — drop a stale baked *D
+        // block so the edit is visible (no-op for non-dims). (#398)
+        self.tabs[i]
+            .scene
+            .invalidate_dim_block_recorded(popup.handle);
+        self.tabs[i]
+            .scene
+            .bump_entities(&[(popup.handle, crate::scene::ChangeKind::Modified)]);
+        self.tabs[i].dirty = true;
+        self.refresh_selected_grips();
+        self.refresh_properties();
+        // Grab the new arrow so it follows the cursor (click places it,
+        // Esc removes it).
+        if let Some(new_gid) = add_leader_gid {
+            if let Some((_, g)) = self.tabs[i]
+                .selected_grip_handles
+                .iter()
+                .zip(self.tabs[i].selected_grips.iter())
+                .find(|(owner, g)| **owner == popup.handle && g.id == new_gid)
+            {
+                self.tabs[i].active_grip =
+                    Some(GripEdit::single(popup.handle, new_gid, false, g.world));
+                self.grip_add_provisional = Some((popup.handle, new_gid));
+            }
+        }
+        // Convert to Arc enters placement: the segment grip goes hot
+        // in Absolute mode, so the arc re-fits through the cursor as
+        // it moves and the next click seats it (#339).
+        if matches!(item.action, GripMenuAction::ConvertToArc) {
+            if let Some((_, g)) = self.tabs[i]
+                .selected_grip_handles
+                .iter()
+                .zip(self.tabs[i].selected_grips.iter())
+                .find(|(owner, g)| **owner == popup.handle && g.id == popup.grip_id)
+            {
+                self.tabs[i].active_grip = Some(GripEdit::single(
+                    popup.handle,
+                    popup.grip_id,
+                    false,
+                    g.world,
+                ));
+            }
+        }
+        Task::none()
     }
 
     pub(super) fn on_paste_shortcut(&mut self) -> Task<Message> {
-                if self.mtext_editor.is_some() {
-                    // Web reads via the browser's async Clipboard API (iced's
-                    // sync clipboard read returns nothing there); native uses
-                    // iced's clipboard.
-                    #[cfg(target_arch = "wasm32")]
-                    return Task::perform(
-                        crate::sys::read_clipboard_text(),
-                        Message::MTextPasteClip,
-                    );
-                    #[cfg(not(target_arch = "wasm32"))]
-                    return iced::clipboard::read_text().map(|result| {
-                        Message::MTextPasteClip(result.ok().map(|text| (*text).clone()))
-                    });
-                }
-                if self.text_inline.is_some() {
-                    // Web: the iced text_input can't reach the async clipboard,
-                    // so paste it ourselves. Native: the focused text_input
-                    // already handled Ctrl+V — doing it here would duplicate.
-                    #[cfg(target_arch = "wasm32")]
-                    return Task::perform(
-                        crate::sys::read_clipboard_text(),
-                        Message::TextInlinePasteClip,
-                    );
-                    #[cfg(not(target_arch = "wasm32"))]
-                    return Task::none();
-                }
-                if self.clipboard.is_empty() {
-                    self.read_system_clipboard_for_paste()
-                } else {
-                    Task::done(Message::Command("PASTECLIP".to_string()))
-                }
+        if self.mtext_editor.is_some() {
+            // Web reads via the browser's async Clipboard API (iced's
+            // sync clipboard read returns nothing there); native uses
+            // iced's clipboard.
+            #[cfg(target_arch = "wasm32")]
+            return Task::perform(crate::sys::read_clipboard_text(), Message::MTextPasteClip);
+            #[cfg(not(target_arch = "wasm32"))]
+            return iced::clipboard::read_text()
+                .map(|result| Message::MTextPasteClip(result.ok().map(|text| (*text).clone())));
+        }
+        if self.text_inline.is_some() {
+            // Web: the iced text_input can't reach the async clipboard,
+            // so paste it ourselves. Native: the focused text_input
+            // already handled Ctrl+V — doing it here would duplicate.
+            #[cfg(target_arch = "wasm32")]
+            return Task::perform(
+                crate::sys::read_clipboard_text(),
+                Message::TextInlinePasteClip,
+            );
+            #[cfg(not(target_arch = "wasm32"))]
+            return Task::none();
+        }
+        if self.clipboard.is_empty() {
+            self.read_system_clipboard_for_paste()
+        } else {
+            Task::done(Message::Command("PASTECLIP".to_string()))
+        }
     }
 
     pub(in crate::app) fn read_system_clipboard_for_paste(&self) -> Task<Message> {
@@ -1866,9 +1849,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
         {
             Task::perform(crate::sys::read_clipboard_text(), |text| {
                 Message::SystemClipboardPaste(match text {
-                    Some(text) if !text.is_empty() => {
-                        crate::app::SystemClipboardText::Text(text)
-                    }
+                    Some(text) if !text.is_empty() => crate::app::SystemClipboardText::Text(text),
                     _ => crate::app::SystemClipboardText::EmptyOrUnsupported,
                 })
             })
@@ -1895,122 +1876,122 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
     }
 
     pub(super) fn on_qselect_open(&mut self) -> Task<Message> {
-                let i = self.active_tab;
-                self.tabs[i].scene.selection.borrow_mut().context_menu = None;
-                let remembered = self.qselect_settings.clone();
-                let scope = remembered.as_ref().map_or(
-                    crate::app::QSelectScope::CurrentSpace,
-                    |settings| settings.scope,
-                );
-                let available_types = self.tabs[i].scene.qselect_entity_type_names(scope);
-                let type_filter = if let Some(settings) = remembered.as_ref() {
-                    settings
-                        .type_filter
-                        .as_ref()
-                        .filter(|selected| available_types.iter().any(|item| item == *selected))
-                        .cloned()
-                } else {
-                    self.tabs[i]
-                        .scene
-                        .selected
-                        .iter()
-                        .next()
-                        .and_then(|handle| self.tabs[i].scene.document.get_entity(*handle))
-                        .map(crate::entities::traits::entity_type_name)
-                        .map(str::to_string)
-                };
-                let available_properties = self.tabs[i]
-                    .scene
-                    .qselect_properties(type_filter.as_deref(), scope);
-                let candidate_count = self.tabs[i].scene.qselect_candidate_count(scope);
-                let property = remembered
-                    .as_ref()
-                    .and_then(|settings| settings.property_field.as_ref())
-                    .and_then(|field| {
-                        available_properties
-                            .iter()
-                            .find(|property| property.field == *field)
-                            .cloned()
-                    });
-                let mut operator = remembered
-                    .as_ref()
-                    .map_or(crate::app::QSelectOp::Eq, |settings| settings.operator);
-                if matches!(operator, crate::app::QSelectOp::Gt | crate::app::QSelectOp::Lt)
-                    && !property.as_ref().is_some_and(|property| {
-                        matches!(property.editor, crate::app::QSelectValueEditor::Number)
-                    })
-                {
-                    operator = crate::app::QSelectOp::Eq;
-                }
-                let value = remembered.as_ref().map_or_else(String::new, |settings| {
-                    if settings.property_field.is_none() || property.is_some() {
-                        settings.value.clone()
-                    } else {
-                        String::new()
-                    }
-                });
-                let mode = remembered
-                    .as_ref()
-                    .map_or(crate::app::QSelectMode::Include, |settings| settings.mode);
-                let append = matches!(scope, crate::app::QSelectScope::CurrentSpace)
-                    && remembered.as_ref().is_some_and(|settings| settings.append);
-                self.qselect = Some(crate::app::QSelectState {
-                    scope,
-                    available_types,
-                    available_properties,
-                    candidate_count,
-                    type_filter,
-                    property,
-                    operator,
-                    value,
-                    mode,
-                    append,
-                    error: None,
-                });
-                self.reset_modal_geometry();
-                Task::none()
+        let i = self.active_tab;
+        self.tabs[i].scene.selection.borrow_mut().context_menu = None;
+        let remembered = self.qselect_settings.clone();
+        let scope = remembered
+            .as_ref()
+            .map_or(crate::app::QSelectScope::CurrentSpace, |settings| {
+                settings.scope
+            });
+        let available_types = self.tabs[i].scene.qselect_entity_type_names(scope);
+        let type_filter = if let Some(settings) = remembered.as_ref() {
+            settings
+                .type_filter
+                .as_ref()
+                .filter(|selected| available_types.iter().any(|item| item == *selected))
+                .cloned()
+        } else {
+            self.tabs[i]
+                .scene
+                .selected
+                .iter()
+                .next()
+                .and_then(|handle| self.tabs[i].scene.document.get_entity(*handle))
+                .map(crate::entities::traits::entity_type_name)
+                .map(str::to_string)
+        };
+        let available_properties = self.tabs[i]
+            .scene
+            .qselect_properties(type_filter.as_deref(), scope);
+        let candidate_count = self.tabs[i].scene.qselect_candidate_count(scope);
+        let property = remembered
+            .as_ref()
+            .and_then(|settings| settings.property_field.as_ref())
+            .and_then(|field| {
+                available_properties
+                    .iter()
+                    .find(|property| property.field == *field)
+                    .cloned()
+            });
+        let mut operator = remembered
+            .as_ref()
+            .map_or(crate::app::QSelectOp::Eq, |settings| settings.operator);
+        if matches!(
+            operator,
+            crate::app::QSelectOp::Gt | crate::app::QSelectOp::Lt
+        ) && !property.as_ref().is_some_and(|property| {
+            matches!(property.editor, crate::app::QSelectValueEditor::Number)
+        }) {
+            operator = crate::app::QSelectOp::Eq;
+        }
+        let value = remembered.as_ref().map_or_else(String::new, |settings| {
+            if settings.property_field.is_none() || property.is_some() {
+                settings.value.clone()
+            } else {
+                String::new()
+            }
+        });
+        let mode = remembered
+            .as_ref()
+            .map_or(crate::app::QSelectMode::Include, |settings| settings.mode);
+        let append = matches!(scope, crate::app::QSelectScope::CurrentSpace)
+            && remembered.as_ref().is_some_and(|settings| settings.append);
+        self.qselect = Some(crate::app::QSelectState {
+            scope,
+            available_types,
+            available_properties,
+            candidate_count,
+            type_filter,
+            property,
+            operator,
+            value,
+            mode,
+            append,
+            error: None,
+        });
+        self.reset_modal_geometry();
+        Task::none()
     }
 
     pub(super) fn on_ribbon_layer_changed(&mut self, layer: String) -> Task<Message> {
-                let i = self.active_tab;
-                self.ribbon.close_dropdown();
-                let handles = self.property_target_handles(i);
-                if handles.is_empty() {
-                    if self.has_property_selection(i) {
-                        return Task::none();
-                    }
-                    // No selection — change the creation default. Persist
-                    // into the tab's header (CLAYER) so it survives a tab
-                    // switch and rides the next save. #21.
-                    let handle = self.tabs[i]
-                        .scene
-                        .document
-                        .layers
-                        .get(&layer)
-                        .map(|l| l.handle)
-                        .unwrap_or(acadrust::types::Handle::NULL);
-                    self.tabs[i].scene.document.header.current_layer_name = layer.clone();
-                    self.tabs[i].scene.document.header.current_layer_handle = handle;
-                    self.tabs[i].active_layer = layer.clone();
-                    self.tabs[i].layers.current_layer = layer.clone();
-                    self.tabs[i].dirty = true;
-                    self.ribbon.active_layer = layer;
-                } else {
-                    // Apply to the selection; leave the creation default alone
-                    // ("Make current" is a separate action).
-                    // Layer drives by-layer colour/linetype/lineweight, which are
-                    // baked into the cached wire geometry — re-tessellate so the
-                    // change shows immediately (issue #231 class).
-                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                        if let Some(entity) =
-                            app.tabs[i].scene.document.get_entity_mut(handle)
-                        {
-                            crate::scene::view::dispatch::apply_common_prop(entity, "layer", &layer);
-                        }
-                    });
-                    self.ribbon.active_layer = layer;
+        let i = self.active_tab;
+        self.ribbon.close_dropdown();
+        let handles = self.property_target_handles(i);
+        if handles.is_empty() {
+            if self.has_property_selection(i) {
+                return Task::none();
+            }
+            // No selection — change the creation default. Persist
+            // into the tab's header (CLAYER) so it survives a tab
+            // switch and rides the next save. #21.
+            let handle = self.tabs[i]
+                .scene
+                .document
+                .layers
+                .get(&layer)
+                .map(|l| l.handle)
+                .unwrap_or(acadrust::types::Handle::NULL);
+            self.tabs[i].scene.document.header.current_layer_name = layer.clone();
+            self.tabs[i].scene.document.header.current_layer_handle = handle;
+            self.tabs[i].active_layer = layer.clone();
+            self.tabs[i].layers.current_layer = layer.clone();
+            self.tabs[i].dirty = true;
+            self.ribbon.active_layer = layer;
+        } else {
+            // Apply to the selection; leave the creation default alone
+            // ("Make current" is a separate action).
+            // Layer drives by-layer colour/linetype/lineweight, which are
+            // baked into the cached wire geometry — re-tessellate so the
+            // change shows immediately (issue #231 class).
+            self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                    crate::scene::view::dispatch::apply_common_prop(entity, "layer", &layer);
                 }
-                Task::none()
+            });
+            self.ribbon.active_layer = layer;
+        }
+        Task::none()
     }
 
     pub(super) fn on_ribbon_color_changed(&mut self, color: AcadColor) -> Task<Message> {
@@ -2019,168 +2000,171 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
         self.ribbon.close_dropdown();
         self.note_recent_color(color);
         let handles = self.property_target_handles(i);
-                if handles.is_empty() {
-                    if self.has_property_selection(i) {
-                        return Task::none();
-                    }
-                    // Persist the new default into the tab's header so it
-                    // round-trips through tab switches and writes back on
-                    // save (CECOLOR). #21.
-                    self.tabs[i].scene.document.header.current_entity_color = color;
-                    self.tabs[i].dirty = true;
-                    self.ribbon.active_color = color;
-                } else {
-                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                        if let Some(entity) =
-                            app.tabs[i].scene.document.get_entity_mut(handle)
-                        {
-                            crate::scene::view::dispatch::apply_color(entity, color);
-                        }
-                    });
-                    self.ribbon.active_color = color;
+        if handles.is_empty() {
+            if self.has_property_selection(i) {
+                return Task::none();
+            }
+            // Persist the new default into the tab's header so it
+            // round-trips through tab switches and writes back on
+            // save (CECOLOR). #21.
+            self.tabs[i].scene.document.header.current_entity_color = color;
+            self.tabs[i].dirty = true;
+            self.ribbon.active_color = color;
+        } else {
+            self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                    crate::scene::view::dispatch::apply_color(entity, color);
                 }
-                Task::none()
+            });
+            self.ribbon.active_color = color;
+        }
+        Task::none()
     }
 
     pub(super) fn on_ribbon_linetype_changed(&mut self, lt: String) -> Task<Message> {
-                let i = self.active_tab;
-                self.ribbon.close_dropdown();
-                let handles = self.property_target_handles(i);
-                if handles.is_empty() {
-                    if self.has_property_selection(i) {
-                        return Task::none();
-                    }
-                    // Persist into the tab's header (CELTYPE). Resolve to a
-                    // handle when the name matches a line_types entry so the
-                    // handle-based lookup stays in sync. #21.
-                    let handle = self.tabs[i]
-                        .scene
-                        .document
-                        .line_types
-                        .iter()
-                        .find(|x| x.name.eq_ignore_ascii_case(&lt))
-                        .map(|x| x.handle)
-                        .unwrap_or(acadrust::types::Handle::NULL);
-                    self.tabs[i].scene.document.header.current_linetype_name = lt.clone();
-                    self.tabs[i].scene.document.header.current_linetype_handle = handle;
-                    self.tabs[i].dirty = true;
-                    self.ribbon.active_linetype = lt;
-                } else {
-                    // Linetype is baked into the cached wire geometry —
-                    // re-tessellate so the dashed/solid look updates immediately
-                    // (issue #231 class).
-                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                        if let Some(entity) =
-                            app.tabs[i].scene.document.get_entity_mut(handle)
-                        {
-                            crate::scene::view::dispatch::apply_common_prop(entity, "linetype", &lt);
-                        }
-                    });
-                    self.ribbon.active_linetype = lt;
+        let i = self.active_tab;
+        self.ribbon.close_dropdown();
+        let handles = self.property_target_handles(i);
+        if handles.is_empty() {
+            if self.has_property_selection(i) {
+                return Task::none();
+            }
+            // Persist into the tab's header (CELTYPE). Resolve to a
+            // handle when the name matches a line_types entry so the
+            // handle-based lookup stays in sync. #21.
+            let handle = self.tabs[i]
+                .scene
+                .document
+                .line_types
+                .iter()
+                .find(|x| x.name.eq_ignore_ascii_case(&lt))
+                .map(|x| x.handle)
+                .unwrap_or(acadrust::types::Handle::NULL);
+            self.tabs[i].scene.document.header.current_linetype_name = lt.clone();
+            self.tabs[i].scene.document.header.current_linetype_handle = handle;
+            self.tabs[i].dirty = true;
+            self.ribbon.active_linetype = lt;
+        } else {
+            // Linetype is baked into the cached wire geometry —
+            // re-tessellate so the dashed/solid look updates immediately
+            // (issue #231 class).
+            self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                    crate::scene::view::dispatch::apply_common_prop(entity, "linetype", &lt);
                 }
-                Task::none()
+            });
+            self.ribbon.active_linetype = lt;
+        }
+        Task::none()
     }
 
-    pub(super) fn on_ribbon_style_changed(&mut self, key: crate::modules::StyleKey, name: String) -> Task<Message> {
-                use crate::modules::StyleKey;
-                self.ribbon.close_dropdown();
-                match key {
-                    StyleKey::TextStyle => {
-                        self.ribbon.active_text_style = name.clone();
-                        let i = self.active_tab;
-                        let found = self.tabs[i]
-                            .scene
-                            .document
-                            .text_styles
-                            .iter()
-                            .find(|s| s.name == name)
-                            .map(|ts| ts.handle);
-                        if let Some(h) = found {
-                            self.tabs[i].scene.document.header.current_text_style_handle = h;
-                            self.tabs[i].scene.document.header.current_text_style_name = name;
-                        }
-                    }
-                    StyleKey::DimStyle => {
-                        self.ribbon.active_dim_style = name.clone();
-                        let i = self.active_tab;
-                        let found = self.tabs[i]
-                            .scene
-                            .document
-                            .dim_styles
-                            .get(&name)
-                            .map(|ds| ds.handle);
-                        if let Some(h) = found {
-                            self.tabs[i].scene.document.header.current_dimstyle_handle = h;
-                            self.tabs[i].scene.document.header.current_dimstyle_name = name;
-                        }
-                    }
-                    StyleKey::MLeaderStyle => {
-                        let i = self.active_tab;
-
-                        self.ribbon.active_mleader_style = name.clone();
-                        self.tabs[i].active_mleader_style = name.clone();
-
-                        self.tabs[i]
-                            .scene
-                            .document
-                            .header
-                            .current_mleader_style_name = name;
-
-                        self.tabs[i].dirty = true;
-                    }
-                    StyleKey::TableStyle => {
-                        self.ribbon.active_table_style = name;
-                    }
+    pub(super) fn on_ribbon_style_changed(
+        &mut self,
+        key: crate::modules::StyleKey,
+        name: String,
+    ) -> Task<Message> {
+        use crate::modules::StyleKey;
+        self.ribbon.close_dropdown();
+        match key {
+            StyleKey::TextStyle => {
+                self.ribbon.active_text_style = name.clone();
+                let i = self.active_tab;
+                let found = self.tabs[i]
+                    .scene
+                    .document
+                    .text_styles
+                    .iter()
+                    .find(|s| s.name == name)
+                    .map(|ts| ts.handle);
+                if let Some(h) = found {
+                    self.tabs[i].scene.document.header.current_text_style_handle = h;
+                    self.tabs[i].scene.document.header.current_text_style_name = name;
                 }
-                Task::none()
+            }
+            StyleKey::DimStyle => {
+                self.ribbon.active_dim_style = name.clone();
+                let i = self.active_tab;
+                let found = self.tabs[i]
+                    .scene
+                    .document
+                    .dim_styles
+                    .get(&name)
+                    .map(|ds| ds.handle);
+                if let Some(h) = found {
+                    self.tabs[i].scene.document.header.current_dimstyle_handle = h;
+                    self.tabs[i].scene.document.header.current_dimstyle_name = name;
+                }
+            }
+            StyleKey::MLeaderStyle => {
+                let i = self.active_tab;
+
+                self.ribbon.active_mleader_style = name.clone();
+                self.tabs[i].active_mleader_style = name.clone();
+
+                self.tabs[i]
+                    .scene
+                    .document
+                    .header
+                    .current_mleader_style_name = name;
+
+                self.tabs[i].dirty = true;
+            }
+            StyleKey::TableStyle => {
+                self.ribbon.active_table_style = name;
+            }
+        }
+        Task::none()
     }
 
     pub(super) fn on_prop_hatch_pattern_changed(&mut self, name: String) -> Task<Message> {
-                let i = self.active_tab;
-                let handles = self.property_target_handles(i);
-                if !handles.is_empty() {
-                    use crate::scene::model::hatch_patterns;
-                    if let Some(entry) = hatch_patterns::find(&name) {
-                        self.push_undo_snapshot(i, "HATCHEDIT");
-                        for &handle in &handles {
-                            if let Some(acadrust::EntityType::Hatch(dxf)) =
-                                self.tabs[i].scene.document.get_entity_mut(handle)
-                            {
-                                let mut pattern = hatch_patterns::build_dxf_pattern(entry);
-                                // Stored pattern lines are final world-space
-                                // geometry. Preserve the selected hatch's scale,
-                                // angle and origin when replacing the catalog
-                                // pattern.
-                                crate::entities::hatch::scale_pattern_geometry(
-                                    &mut pattern,
-                                    dxf.pattern_scale,
-                                );
-                                crate::entities::hatch::rotate_pattern_geometry(
-                                    &mut pattern,
-                                    dxf.pattern_angle,
-                                );
-                                let origin = dxf.pattern_origin();
-                                crate::entities::hatch::translate_pattern_geometry(&mut pattern, origin.x, origin.y);
-                                dxf.pattern = pattern;
-                                dxf.is_solid = matches!(
-                                    entry.gpu,
-                                    crate::scene::model::hatch_model::HatchPattern::Solid
-                                );
-                                dxf.pattern_type =
-                                    acadrust::entities::HatchPatternType::Predefined;
-                                dxf.gradient_color.enabled = false;
-                            }
-                            if let Some(model) = self.tabs[i].scene.hatches.get_mut(&handle) {
-                                model.pattern = entry.gpu.clone();
-                                model.name = name.clone();
-                            }
-                        }
-                        self.invalidate_property_targets(i, &handles);
-                        self.tabs[i].dirty = true;
-                        self.refresh_properties();
+        let i = self.active_tab;
+        let handles = self.property_target_handles(i);
+        if !handles.is_empty() {
+            use crate::scene::model::hatch_patterns;
+            if let Some(entry) = hatch_patterns::find(&name) {
+                self.push_undo_snapshot(i, "HATCHEDIT");
+                for &handle in &handles {
+                    if let Some(acadrust::EntityType::Hatch(dxf)) =
+                        self.tabs[i].scene.document.get_entity_mut(handle)
+                    {
+                        let mut pattern = hatch_patterns::build_dxf_pattern(entry);
+                        // Stored pattern lines are final world-space
+                        // geometry. Preserve the selected hatch's scale,
+                        // angle and origin when replacing the catalog
+                        // pattern.
+                        crate::entities::hatch::scale_pattern_geometry(
+                            &mut pattern,
+                            dxf.pattern_scale,
+                        );
+                        crate::entities::hatch::rotate_pattern_geometry(
+                            &mut pattern,
+                            dxf.pattern_angle,
+                        );
+                        let origin = dxf.pattern_origin();
+                        crate::entities::hatch::translate_pattern_geometry(
+                            &mut pattern,
+                            origin.x,
+                            origin.y,
+                        );
+                        dxf.pattern = pattern;
+                        dxf.is_solid = matches!(
+                            entry.gpu,
+                            crate::scene::model::hatch_model::HatchPattern::Solid
+                        );
+                        dxf.pattern_type = acadrust::entities::HatchPatternType::Predefined;
+                        dxf.gradient_color.enabled = false;
+                    }
+                    if let Some(model) = self.tabs[i].scene.hatches.get_mut(&handle) {
+                        model.pattern = entry.gpu.clone();
+                        model.name = name.clone();
                     }
                 }
-                Task::none()
+                self.invalidate_property_targets(i, &handles);
+                self.tabs[i].dirty = true;
+                self.refresh_properties();
+            }
+        }
+        Task::none()
     }
 
     pub(super) fn on_prop_geom_choice_changed(
@@ -2288,16 +2272,17 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     if self.tabs[i].scene.is_layer_locked(handle) {
                         continue;
                     }
-                    let Some(mut state) = self.tabs[i]
-                        .scene
-                        .document
-                        .get_entity(handle)
-                        .and_then(|entity| match entity {
-                            acadrust::EntityType::Surface(surface) => Some(
-                                crate::entities::solid3d::surface_property_state(surface),
-                            ),
-                            _ => None,
-                        })
+                    let Some(mut state) =
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .get_entity(handle)
+                            .and_then(|entity| match entity {
+                                acadrust::EntityType::Surface(surface) => {
+                                    Some(crate::entities::solid3d::surface_property_state(surface))
+                                }
+                                _ => None,
+                            })
                     else {
                         continue;
                     };
@@ -2317,7 +2302,9 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         &mut self.tabs[i].scene.document,
                         handle,
                         crate::entities::solid3d::SURFACE_PROPERTIES_APP,
-                        Some(crate::entities::solid3d::surface_property_xdata_values(state)),
+                        Some(crate::entities::solid3d::surface_property_xdata_values(
+                            state,
+                        )),
                     );
                     if field == PROP_SURFACE_WIREFRAME_TYPE {
                         self.tabs[i].scene.reseed_derived_caches(handle);
@@ -2446,1199 +2433,1148 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     }
                 }
             } else if field == "vp_ucs_name" {
-                        // Resolve UCS name → cloned data, then mutate viewports.
-                        let ucs_data = self.tabs[i]
-                            .scene
-                            .document
-                            .ucss
-                            .iter()
-                            .find(|u| u.name == value)
-                            .cloned();
-                        if let Some(ucs) = ucs_data {
-                            for handle in &handles {
-                                if let Some(acadrust::EntityType::Viewport(vp)) =
-                                    self.tabs[i].scene.document.get_entity_mut(*handle)
-                                {
-                                    vp.ucs_handle = ucs.handle;
-                                    vp.ucs_origin = ucs.origin.clone();
-                                    vp.ucs_x_axis = ucs.x_axis.clone();
-                                    vp.ucs_y_axis = ucs.y_axis.clone();
-                                    vp.ucs_per_viewport = true;
-                                }
+                // Resolve UCS name → cloned data, then mutate viewports.
+                let ucs_data = self.tabs[i]
+                    .scene
+                    .document
+                    .ucss
+                    .iter()
+                    .find(|u| u.name == value)
+                    .cloned();
+                if let Some(ucs) = ucs_data {
+                    for handle in &handles {
+                        if let Some(acadrust::EntityType::Viewport(vp)) =
+                            self.tabs[i].scene.document.get_entity_mut(*handle)
+                        {
+                            vp.ucs_handle = ucs.handle;
+                            vp.ucs_origin = ucs.origin.clone();
+                            vp.ucs_x_axis = ucs.x_axis.clone();
+                            vp.ucs_y_axis = ucs.y_axis.clone();
+                            vp.ucs_per_viewport = true;
+                        }
+                    }
+                }
+            } else if field == "vp_named_view" {
+                // Assign a named view to viewport(s): copy camera parameters.
+                let view_data = self.tabs[i]
+                    .scene
+                    .document
+                    .views
+                    .iter()
+                    .find(|v| v.name == value)
+                    .cloned();
+                if let Some(view) = view_data {
+                    for handle in &handles {
+                        if let Some(acadrust::EntityType::Viewport(vp)) =
+                            self.tabs[i].scene.document.get_entity_mut(*handle)
+                        {
+                            vp.view_target = view.target.clone();
+                            vp.view_direction = view.direction.clone();
+                            if view.height > 0.0 {
+                                vp.view_height = view.height;
                             }
                         }
-                    } else if field == "vp_named_view" {
-                        // Assign a named view to viewport(s): copy camera parameters.
-                        let view_data = self.tabs[i]
-                            .scene
-                            .document
-                            .views
-                            .iter()
-                            .find(|v| v.name == value)
-                            .cloned();
-                        if let Some(view) = view_data {
-                            for handle in &handles {
-                                if let Some(acadrust::EntityType::Viewport(vp)) =
-                                    self.tabs[i].scene.document.get_entity_mut(*handle)
-                                {
-                                    vp.view_target = view.target.clone();
-                                    vp.view_direction = view.direction.clone();
-                                    if view.height > 0.0 {
-                                        vp.view_height = view.height;
-                                    }
-                                }
-                            }
-                            self.tabs[i].scene.camera_generation += 1;
-                        }
-                    } else if matches!(
-                        field,
-                        "mleader_style"
-                            | "text_style_handle"
-                            | "arrowhead_handle"
-                            | "line_type_handle"
-                            | "block_content_handle"
-                    ) {
-                        // Resolve a picked name back to the handle the MLEADER
-                        // stores. The style/text-style rows keep their existing
-                        // handle on a failed lookup; the arrowhead/linetype rows
-                        // take the resolved value directly (None = the default
-                        // "Closed filled" / "ByBlock" option).
-                        let doc = &self.tabs[i].scene.document;
-                        let resolved_mleader_style = (field == "mleader_style")
-                            .then(|| {
-                                doc.objects.values().find_map(|object| match object {
-                                    acadrust::objects::ObjectType::MultiLeaderStyle(style)
-                                        if style.name == value => Some(style.clone()),
-                                    _ => None,
-                                })
-                            })
-                            .flatten();
-                        let resolved: Option<acadrust::Handle> = match field {
-                            "mleader_style" => {
-                                resolved_mleader_style.as_ref().map(|style| style.handle)
-                            }
-                            "text_style_handle" => doc
-                                .text_styles
-                                .iter()
-                                .find(|s| s.name == value)
-                                .map(|s| s.handle),
-                            "arrowhead_handle" => {
-                                if value == "Closed filled" {
-                                    None
-                                } else {
-                                    doc.block_records
-                                        .iter()
-                                        .find(|b| b.name == value)
-                                        .map(|b| b.handle)
-                                }
-                            }
-                            "line_type_handle" => {
-                                if value == "ByBlock" {
-                                    None
-                                } else {
-                                    doc.line_types
-                                        .iter()
-                                        .find(|l| l.name == value)
-                                        .map(|l| l.handle)
-                                }
-                            }
-                            "block_content_handle" => doc
-                                .block_records
-                                .iter()
-                                .find(|block| block.name == value)
-                                .map(|block| block.handle),
-                            _ => None,
-                        };
-                        for &handle in &handles {
-                            if self.tabs[i].scene.is_layer_locked(handle) {
-                                continue;
-                            }
-                            let mut style_annotation = None;
-                            if field == "mleader_style" {
-                                if let Some(style) = &resolved_mleader_style {
-                                    crate::scene::annotative::apply_mleader_style_to_object(
-                                        &mut self.tabs[i].scene.document,
-                                        handle,
-                                        style,
-                                    );
-                                    style_annotation = Some(style.is_annotative);
-                                }
-                            } else if let Some(acadrust::EntityType::MultiLeader(ml)) =
-                                self.tabs[i].scene.document.get_entity_mut(handle)
+                    }
+                    self.tabs[i].scene.camera_generation += 1;
+                }
+            } else if matches!(
+                field,
+                "mleader_style"
+                    | "text_style_handle"
+                    | "arrowhead_handle"
+                    | "line_type_handle"
+                    | "block_content_handle"
+            ) {
+                // Resolve a picked name back to the handle the MLEADER
+                // stores. The style/text-style rows keep their existing
+                // handle on a failed lookup; the arrowhead/linetype rows
+                // take the resolved value directly (None = the default
+                // "Closed filled" / "ByBlock" option).
+                let doc = &self.tabs[i].scene.document;
+                let resolved_mleader_style = (field == "mleader_style")
+                    .then(|| {
+                        doc.objects.values().find_map(|object| match object {
+                            acadrust::objects::ObjectType::MultiLeaderStyle(style)
+                                if style.name == value =>
                             {
-                                match field {
-                                    "text_style_handle" => {
-                                        if let Some(h) = resolved {
-                                            ml.text_style_handle = Some(h);
-                                            ml.context.text_style_handle = Some(h);
-                                            ml.property_override_flags.insert(
+                                Some(style.clone())
+                            }
+                            _ => None,
+                        })
+                    })
+                    .flatten();
+                let resolved: Option<acadrust::Handle> = match field {
+                    "mleader_style" => resolved_mleader_style.as_ref().map(|style| style.handle),
+                    "text_style_handle" => doc
+                        .text_styles
+                        .iter()
+                        .find(|s| s.name == value)
+                        .map(|s| s.handle),
+                    "arrowhead_handle" => {
+                        if value == "Closed filled" {
+                            None
+                        } else {
+                            doc.block_records
+                                .iter()
+                                .find(|b| b.name == value)
+                                .map(|b| b.handle)
+                        }
+                    }
+                    "line_type_handle" => {
+                        if value == "ByBlock" {
+                            None
+                        } else {
+                            doc.line_types
+                                .iter()
+                                .find(|l| l.name == value)
+                                .map(|l| l.handle)
+                        }
+                    }
+                    "block_content_handle" => doc
+                        .block_records
+                        .iter()
+                        .find(|block| block.name == value)
+                        .map(|block| block.handle),
+                    _ => None,
+                };
+                for &handle in &handles {
+                    if self.tabs[i].scene.is_layer_locked(handle) {
+                        continue;
+                    }
+                    let mut style_annotation = None;
+                    if field == "mleader_style" {
+                        if let Some(style) = &resolved_mleader_style {
+                            crate::scene::annotative::apply_mleader_style_to_object(
+                                &mut self.tabs[i].scene.document,
+                                handle,
+                                style,
+                            );
+                            style_annotation = Some(style.is_annotative);
+                        }
+                    } else if let Some(acadrust::EntityType::MultiLeader(ml)) =
+                        self.tabs[i].scene.document.get_entity_mut(handle)
+                    {
+                        match field {
+                            "text_style_handle" => {
+                                if let Some(h) = resolved {
+                                    ml.text_style_handle = Some(h);
+                                    ml.context.text_style_handle = Some(h);
+                                    ml.property_override_flags.insert(
                                                 acadrust::entities::MultiLeaderPropertyOverrideFlags::TEXT_STYLE,
                                             );
-                                        }
-                                    }
-                                    "arrowhead_handle" => {
-                                        ml.arrowhead_handle = resolved;
-                                        for root in &mut ml.context.leader_roots {
-                                            for line in &mut root.lines {
-                                                line.arrowhead_handle = resolved;
-                                                line.override_flags.insert(
+                                }
+                            }
+                            "arrowhead_handle" => {
+                                ml.arrowhead_handle = resolved;
+                                for root in &mut ml.context.leader_roots {
+                                    for line in &mut root.lines {
+                                        line.arrowhead_handle = resolved;
+                                        line.override_flags.insert(
                                                     acadrust::entities::LeaderLinePropertyOverrideFlags::ARROWHEAD,
                                                 );
-                                            }
-                                        }
-                                        ml.property_override_flags.insert(
-                                            acadrust::entities::MultiLeaderPropertyOverrideFlags::ARROWHEAD,
-                                        );
                                     }
-                                    "line_type_handle" => {
-                                        ml.line_type_handle = resolved;
-                                        for root in &mut ml.context.leader_roots {
-                                            for line in &mut root.lines {
-                                                line.line_type_handle = resolved;
-                                                line.override_flags.insert(
+                                }
+                                ml.property_override_flags.insert(
+                                    acadrust::entities::MultiLeaderPropertyOverrideFlags::ARROWHEAD,
+                                );
+                            }
+                            "line_type_handle" => {
+                                ml.line_type_handle = resolved;
+                                for root in &mut ml.context.leader_roots {
+                                    for line in &mut root.lines {
+                                        line.line_type_handle = resolved;
+                                        line.override_flags.insert(
                                                     acadrust::entities::LeaderLinePropertyOverrideFlags::LINE_TYPE,
                                                 );
-                                            }
-                                        }
-                                        ml.property_override_flags.insert(
+                                    }
+                                }
+                                ml.property_override_flags.insert(
                                             acadrust::entities::MultiLeaderPropertyOverrideFlags::LEADER_LINE_TYPE,
                                         );
-                                    }
-                                    "block_content_handle" => {
-                                        if let Some(block_handle) = resolved {
-                                            ml.block_content_handle = Some(block_handle);
-                                            ml.context.block_content_handle = Some(block_handle);
-                                            ml.context.has_block_contents = true;
-                                            ml.context.block_content_location =
-                                                ml.context.content_base_point;
-                                            ml.property_override_flags.insert(
+                            }
+                            "block_content_handle" => {
+                                if let Some(block_handle) = resolved {
+                                    ml.block_content_handle = Some(block_handle);
+                                    ml.context.block_content_handle = Some(block_handle);
+                                    ml.context.has_block_contents = true;
+                                    ml.context.block_content_location =
+                                        ml.context.content_base_point;
+                                    ml.property_override_flags.insert(
                                                 acadrust::entities::MultiLeaderPropertyOverrideFlags::BLOCK_CONTENT,
                                             );
-                                        }
-                                    }
-                                    _ => {}
                                 }
                             }
-                            if let Some(annotative) = style_annotation {
-                                if annotative {
-                                    if let Some(scale) =
-                                        self.tabs[i].scene.creation_annotation_scale_handle()
-                                    {
-                                        crate::scene::annotative::create_annotation_context(
-                                            &mut self.tabs[i].scene.document,
-                                            handle,
-                                            scale,
-                                        );
-                                    }
-                                } else {
-                                    crate::scene::annotative::clear_annotation_context(
-                                        &mut self.tabs[i].scene.document,
-                                        handle,
-                                    );
-                                }
-                            }
+                            _ => {}
                         }
-                    } else if matches!(field, "arrow_block" | "dim_line_lw" | "text_pos_vert") {
-                        // Leader dim-var overrides picked from a dropdown. The
-                        // arrow block resolves a friendly arrowhead name to a
-                        // block handle ("Closed filled" clears the override →
-                        // reverts to the style); the other two map a label to
-                        // the DIMLWD / DIMTAD enum value.
-                        use crate::entities::dim_override as dov;
-                        use acadrust::xdata::XDataValue;
-                        let arrow_h: Option<acadrust::Handle> =
-                            if field == "arrow_block" && value != "Closed filled" {
-                                self.tabs[i]
-                                    .scene
-                                    .document
-                                    .block_records
-                                    .iter()
-                                    .find(|b| {
-                                        crate::app::properties::arrowhead_label(&b.name) == value
-                                    })
-                                    .map(|b| b.handle)
-                            } else {
-                                None
-                            };
-                        for &handle in &handles {
-                            if self.tabs[i].scene.is_layer_locked(handle) {
-                                continue;
-                            }
-                            // Only leaders carry these rows; skip anything else so
-                            // a multi-type selection can't get stray overrides.
-                            if !matches!(
-                                self.tabs[i].scene.document.get_entity(handle),
-                                Some(acadrust::EntityType::Leader(_))
-                            ) {
-                                continue;
-                            }
-                            let doc = &mut self.tabs[i].scene.document;
-                            match field {
-                                "dim_line_lw" => dov::set(
-                                    doc,
+                    }
+                    if let Some(annotative) = style_annotation {
+                        if annotative {
+                            if let Some(scale) =
+                                self.tabs[i].scene.creation_annotation_scale_handle()
+                            {
+                                crate::scene::annotative::create_annotation_context(
+                                    &mut self.tabs[i].scene.document,
                                     handle,
-                                    dov::DIMLWD,
-                                    Some(XDataValue::Integer16(
-                                        crate::app::properties::dim_lineweight_from_label(&value),
-                                    )),
-                                ),
-                                "text_pos_vert" => dov::set(
-                                    doc,
-                                    handle,
-                                    dov::DIMTAD,
-                                    Some(XDataValue::Integer16(
-                                        crate::app::properties::dimtad_from_label(&value),
-                                    )),
-                                ),
-                                "arrow_block" => {
-                                    // "Closed filled" is an explicit override to
-                                    // the null-handle default arrow (not a clear),
-                                    // so the pick sticks even when the style's
-                                    // arrow differs.
-                                    if value == "Closed filled" {
-                                        dov::set(
-                                            doc,
-                                            handle,
-                                            dov::DIMLDRBLK,
-                                            Some(XDataValue::Handle(acadrust::Handle::NULL)),
-                                        );
-                                    } else if let Some(h) = arrow_h {
-                                        dov::set(
-                                            doc,
-                                            handle,
-                                            dov::DIMLDRBLK,
-                                            Some(XDataValue::Handle(h)),
-                                        );
-                                    }
-                                }
-                                _ => {}
+                                    scale,
+                                );
                             }
+                        } else {
+                            crate::scene::annotative::clear_annotation_context(
+                                &mut self.tabs[i].scene.document,
+                                handle,
+                            );
                         }
-                    } else if field == "block" {
-                        // Name dropdown on a block reference: re-point the
-                        // selected inserts to the picked definition. A stale
-                        // typed value in the text buffer would mask the pick,
-                        // so drop it; the pick also closes the list.
+                    }
+                }
+            } else if matches!(field, "arrow_block" | "dim_line_lw" | "text_pos_vert") {
+                // Leader dim-var overrides picked from a dropdown. The
+                // arrow block resolves a friendly arrowhead name to a
+                // block handle ("Closed filled" clears the override →
+                // reverts to the style); the other two map a label to
+                // the DIMLWD / DIMTAD enum value.
+                use crate::entities::dim_override as dov;
+                use acadrust::xdata::XDataValue;
+                let arrow_h: Option<acadrust::Handle> =
+                    if field == "arrow_block" && value != "Closed filled" {
                         self.tabs[i]
-                            .properties
-                            .edit_buf
-                            .remove(&crate::ui::properties::FieldKey::Geom("block"));
-                        self.tabs[i].properties.edit_choice_open = false;
-                        let canon = self.tabs[i]
                             .scene
                             .document
                             .block_records
-                            .get(&value)
-                            .map(|br| br.name.clone());
-                        if let Some(canon) = canon {
-                            let mut changes = Vec::new();
-                            for &handle in &handles {
-                                if self.tabs[i].scene.is_layer_locked(handle) {
-                                    continue;
-                                }
-                                if let Some(acadrust::EntityType::Insert(ins)) =
-                                    self.tabs[i].scene.document.get_entity_mut(handle)
-                                {
-                                    if ins.block_name != canon {
-                                        ins.block_name = canon.clone();
-                                        changes.push((
-                                            handle,
-                                            crate::scene::ChangeKind::Modified,
-                                        ));
-                                    }
-                                }
-                            }
-                            if !changes.is_empty() {
-                                self.tabs[i].scene.bump_entities(&changes);
+                            .iter()
+                            .find(|b| crate::app::properties::arrowhead_label(&b.name) == value)
+                            .map(|b| b.handle)
+                    } else {
+                        None
+                    };
+                for &handle in &handles {
+                    if self.tabs[i].scene.is_layer_locked(handle) {
+                        continue;
+                    }
+                    // Only leaders carry these rows; skip anything else so
+                    // a multi-type selection can't get stray overrides.
+                    if !matches!(
+                        self.tabs[i].scene.document.get_entity(handle),
+                        Some(acadrust::EntityType::Leader(_))
+                    ) {
+                        continue;
+                    }
+                    let doc = &mut self.tabs[i].scene.document;
+                    match field {
+                        "dim_line_lw" => dov::set(
+                            doc,
+                            handle,
+                            dov::DIMLWD,
+                            Some(XDataValue::Integer16(
+                                crate::app::properties::dim_lineweight_from_label(&value),
+                            )),
+                        ),
+                        "text_pos_vert" => dov::set(
+                            doc,
+                            handle,
+                            dov::DIMTAD,
+                            Some(XDataValue::Integer16(
+                                crate::app::properties::dimtad_from_label(&value),
+                            )),
+                        ),
+                        "arrow_block" => {
+                            // "Closed filled" is an explicit override to
+                            // the null-handle default arrow (not a clear),
+                            // so the pick sticks even when the style's
+                            // arrow differs.
+                            if value == "Closed filled" {
+                                dov::set(
+                                    doc,
+                                    handle,
+                                    dov::DIMLDRBLK,
+                                    Some(XDataValue::Handle(acadrust::Handle::NULL)),
+                                );
+                            } else if let Some(h) = arrow_h {
+                                dov::set(doc, handle, dov::DIMLDRBLK, Some(XDataValue::Handle(h)));
                             }
                         }
-                    } else if field == "tbl_style_handle" {
-                        let style_handle = self.tabs[i]
+                        _ => {}
+                    }
+                }
+            } else if field == "block" {
+                // Name dropdown on a block reference: re-point the
+                // selected inserts to the picked definition. A stale
+                // typed value in the text buffer would mask the pick,
+                // so drop it; the pick also closes the list.
+                self.tabs[i]
+                    .properties
+                    .edit_buf
+                    .remove(&crate::ui::properties::FieldKey::Geom("block"));
+                self.tabs[i].properties.edit_choice_open = false;
+                let canon = self.tabs[i]
+                    .scene
+                    .document
+                    .block_records
+                    .get(&value)
+                    .map(|br| br.name.clone());
+                if let Some(canon) = canon {
+                    let mut changes = Vec::new();
+                    for &handle in &handles {
+                        if self.tabs[i].scene.is_layer_locked(handle) {
+                            continue;
+                        }
+                        if let Some(acadrust::EntityType::Insert(ins)) =
+                            self.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            if ins.block_name != canon {
+                                ins.block_name = canon.clone();
+                                changes.push((handle, crate::scene::ChangeKind::Modified));
+                            }
+                        }
+                    }
+                    if !changes.is_empty() {
+                        self.tabs[i].scene.bump_entities(&changes);
+                    }
+                }
+            } else if field == "tbl_style_handle" {
+                let style_handle =
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .objects
+                        .iter()
+                        .find_map(|(handle, object)| match object {
+                            acadrust::objects::ObjectType::TableStyle(style)
+                                if style.name.eq_ignore_ascii_case(value.trim()) =>
+                            {
+                                Some(*handle)
+                            }
+                            _ => None,
+                        });
+                if let Some(style_handle) = style_handle {
+                    for &handle in &handles {
+                        if let Some(acadrust::EntityType::Table(table)) =
+                            self.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            table.table_style_handle = Some(style_handle);
+                        }
+                    }
+                }
+            } else if field == "transparency" {
+                for &handle in &handles {
+                    if self.tabs[i].scene.is_layer_locked(handle) {
+                        continue;
+                    }
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                        crate::scene::view::dispatch::apply_common_prop(
+                            entity,
+                            "transparency",
+                            &value,
+                        );
+                    }
+                }
+            } else if field == "plot_style" {
+                if self.tabs[i].scene.document.header.plotstyle_mode {
+                    self.refresh_properties();
+                    return Task::none();
+                }
+                // Named plot-style pick: ByLayer / ByBlock clear the
+                // handle; a named style resolves through the drawing's
+                // ACAD_PLOTSTYLENAME dictionary to its placeholder handle.
+                let dict_h = self.tabs[i]
+                    .scene
+                    .document
+                    .header
+                    .acad_plotstylename_dict_handle;
+                let ph: Option<acadrust::Handle> =
+                    crate::scene::annotative::as_dict(&self.tabs[i].scene.document, dict_h)
+                        .and_then(|d| d.entries.iter().find(|(n, _)| *n == value).map(|(_, h)| *h));
+                for &handle in &handles {
+                    if self.tabs[i].scene.is_layer_locked(handle) {
+                        continue;
+                    }
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                        let common = entity.common_mut();
+                        match value.as_str() {
+                            "ByLayer" => {
+                                common.plotstyle_flags = 0;
+                                common.plotstyle_handle = None;
+                            }
+                            "ByBlock" => {
+                                common.plotstyle_flags = 1;
+                                common.plotstyle_handle = None;
+                            }
+                            "Normal" => {
+                                common.plotstyle_flags = 2;
+                                common.plotstyle_handle = None;
+                            }
+                            _ => {
+                                if let Some(h) = ph {
+                                    common.plotstyle_flags = 3;
+                                    common.plotstyle_handle = Some(h);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if field == "material" {
+                // Material source: ByLayer / ByBlock clear the handle; a
+                // named material sets flag 3 + its handle (resolved here
+                // because the update loop holds the document).
+                let mat_handle: Option<acadrust::Handle> = self.tabs[i]
+                    .scene
+                    .document
+                    .objects
+                    .iter()
+                    .find_map(|(h, o)| match o {
+                        acadrust::objects::ObjectType::Material(m) if m.name == value => Some(*h),
+                        _ => None,
+                    });
+                for &handle in &handles {
+                    if self.tabs[i].scene.is_layer_locked(handle) {
+                        continue;
+                    }
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                        let common = entity.common_mut();
+                        match value.as_str() {
+                            "ByLayer" => {
+                                common.material_flags = 0;
+                                common.material_handle = None;
+                            }
+                            "ByBlock" => {
+                                common.material_flags = 1;
+                                common.material_handle = None;
+                            }
+                            "Global" => {
+                                common.material_flags = 2;
+                                common.material_handle = None;
+                            }
+                            _ => {
+                                if let Some(h) = mat_handle {
+                                    common.material_flags = 3;
+                                    common.material_handle = Some(h);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                let plane = if self.tabs[i].editing_model_space() {
+                    self.tabs[i].ucs_xform().working_plane()
+                } else {
+                    crate::command::WorkingPlane::default()
+                };
+                for &handle in &handles {
+                    let mline_style =
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .get_entity(handle)
+                            .and_then(|entity| match entity {
+                                acadrust::EntityType::MLine(mline) => {
+                                    crate::entities::mline::resolved_mline_style(
+                                        mline,
+                                        &self.tabs[i].scene.document,
+                                    )
+                                    .cloned()
+                                }
+                                _ => None,
+                            });
+                    if matches!(field, "text_x" | "text_y") {
+                        crate::entities::dimension::materialize_large_radial_text_position(
+                            &mut self.tabs[i].scene.document,
+                            handle,
+                            &value,
+                        );
+                    }
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                        crate::scene::view::dispatch::apply_geom_prop_in_working_plane(
+                            entity, field, &value, plane,
+                        );
+                        if matches!(field, "ml_justification" | "ml_scale") {
+                            if let (acadrust::EntityType::MLine(mline), Some(style)) =
+                                (entity, mline_style.as_ref())
+                            {
+                                crate::modules::draw::draw::mline::sync_mline_element_parameters(
+                                    mline, style,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            if field.starts_with("tbl_") {
+                for &handle in &handles {
+                    if let Some(acadrust::EntityType::Table(table)) =
+                        self.tabs[i].scene.document.get_entity_mut(handle)
+                    {
+                        table.block_record_handle = None;
+                    }
+                }
+            }
+            self.invalidate_property_targets(i, &handles);
+            self.tabs[i].dirty = true;
+            self.tabs[i].properties.edit_choice_open = false;
+            if field == "spline_method" {
+                self.tabs[i].properties.prop_vertex = 0;
+                self.tabs[i].properties.prop_vertex_indicator_active = false;
+            }
+            self.refresh_properties();
+        } else {
+            match field {
+                "transparency" => {
+                    let Some(transparency) =
+                        crate::scene::creation_style::parse_current_transparency(&value)
+                    else {
+                        self.command_line.push_error(
+                            "Transparency: expected ByLayer, ByBlock, or an integer from 0 to 90.",
+                        );
+                        self.refresh_properties();
+                        return Task::none();
+                    };
+                    if self.tabs[i].scene.document.current_entity_transparency() != transparency {
+                        self.push_undo_snapshot(i, "CETRANSPARENCY");
+                        if self.tabs[i]
+                            .scene
+                            .document
+                            .set_current_entity_transparency(transparency)
+                        {
+                            self.tabs[i].dirty = true;
+                        } else {
+                            self.discard_last_undo_entry(i);
+                            self.command_line.push_error(
+                                "CETRANSPARENCY: drawing variable dictionary is invalid.",
+                            );
+                        }
+                    }
+                    self.refresh_properties();
+                }
+                "material" => {
+                    let mat_handle: Option<acadrust::Handle> = self.tabs[i]
+                        .scene
+                        .document
+                        .objects
+                        .iter()
+                        .find_map(|(h, o)| match o {
+                            acadrust::objects::ObjectType::Material(m) if m.name == value => {
+                                Some(*h)
+                            }
+                            _ => None,
+                        });
+                    match value.as_str() {
+                        "ByLayer" | "ByBlock" | "Global" => {
+                            self.tabs[i].scene.document.header.current_material_handle =
+                                acadrust::Handle::NULL;
+                        }
+                        _ => {
+                            if let Some(h) = mat_handle {
+                                self.tabs[i].scene.document.header.current_material_handle = h;
+                            }
+                        }
+                    }
+                    self.tabs[i].dirty = true;
+                    self.refresh_properties();
+                }
+                "plot_style" => {
+                    if self.tabs[i].scene.document.header.plotstyle_mode {
+                        self.refresh_properties();
+                        return Task::none();
+                    }
+                    match value.as_str() {
+                        "ByBlock" => self.tabs[i].scene.document.header.current_plotstyle_type = 1,
+                        "Normal" => self.tabs[i].scene.document.header.current_plotstyle_type = 2,
+                        _ => self.tabs[i].scene.document.header.current_plotstyle_type = 0,
+                    }
+                    self.tabs[i].dirty = true;
+                    self.refresh_properties();
+                }
+                "view_plot_style_table" => {
+                    let next = if value.eq_ignore_ascii_case("None") {
+                        String::new()
+                    } else {
+                        value.clone()
+                    };
+                    let layout_name = self.tabs[i].scene.current_layout.clone();
+                    let current = self.tabs[i]
+                        .scene
+                        .document
+                        .objects
+                        .values()
+                        .find_map(|object| {
+                            let acadrust::objects::ObjectType::Layout(layout) = object else {
+                                return None;
+                            };
+                            layout
+                                .name
+                                .eq_ignore_ascii_case(&layout_name)
+                                .then(|| layout.plot_style_sheet.clone())
+                        })
+                        .unwrap_or_else(|| self.tabs[i].scene.document.header.stylesheet.clone());
+                    if current != next {
+                        self.push_undo_snapshot(i, "PLOTSTYLE");
+                        for object in self.tabs[i].scene.document.objects.values_mut() {
+                            if let acadrust::objects::ObjectType::Layout(layout) = object {
+                                if layout.name.eq_ignore_ascii_case(&layout_name) {
+                                    layout.plot_style_sheet = next.clone();
+                                    layout.plot_flags.plot_plot_styles = !next.is_empty();
+                                    layout.plot_flags.show_plot_styles = !next.is_empty();
+                                }
+                            }
+                        }
+                        self.tabs[i].scene.document.header.stylesheet = next;
+                        self.tabs[i].dirty = true;
+                    }
+                    self.refresh_properties();
+                }
+                "view_annotation_scale" => {
+                    let current = self.tabs[i]
+                        .scene
+                        .document
+                        .header
+                        .current_annotation_scale
+                        .clone();
+                    if !current.eq_ignore_ascii_case(&value) {
+                        self.push_undo_snapshot(i, "CANNOSCALE");
+                        if self.tabs[i]
+                            .scene
+                            .set_annotation_scale_named(&value)
+                            .is_some()
+                        {
+                            self.tabs[i].dirty = true;
+                        } else {
+                            self.discard_last_undo_entry(i);
+                        }
+                    }
+                    self.refresh_properties();
+                }
+                "view_ucs_icon_on" => {
+                    let next = value.eq_ignore_ascii_case("Yes");
+                    let active_viewport = self.tabs[i].scene.active_viewport;
+                    let current = active_viewport
+                        .and_then(|handle| self.tabs[i].scene.document.get_entity(handle))
+                        .and_then(|entity| match entity {
+                            acadrust::EntityType::Viewport(viewport) => {
+                                Some(viewport.ucs_icon_visible)
+                            }
+                            _ => None,
+                        })
+                        .or_else(|| {
+                            self.tabs[i]
+                                .scene
+                                .document
+                                .vports
+                                .iter()
+                                .find(|viewport| {
+                                    viewport
+                                        .name
+                                        .trim_start_matches('*')
+                                        .eq_ignore_ascii_case("active")
+                                })
+                                .map(|viewport| viewport.ucsicon_lower)
+                        })
+                        .unwrap_or(self.show_ucs_icon);
+                    if current != next {
+                        self.push_undo_snapshot(i, "UCSICON");
+                        if let Some(handle) = active_viewport {
+                            if let Some(acadrust::EntityType::Viewport(viewport)) =
+                                self.tabs[i].scene.document.get_entity_mut(handle)
+                            {
+                                viewport.ucs_icon_visible = next;
+                            }
+                        } else if let Some(viewport) = self.tabs[i]
+                            .scene
+                            .document
+                            .vports
+                            .iter_mut()
+                            .find(|viewport| {
+                                viewport
+                                    .name
+                                    .trim_start_matches('*')
+                                    .eq_ignore_ascii_case("active")
+                            })
+                        {
+                            viewport.ucsicon_lower = next;
+                        }
+                        self.show_ucs_icon = next;
+                        self.persist_settings_if_changed();
+                        self.tabs[i].dirty = true;
+                    }
+                    self.refresh_properties();
+                }
+                "view_ucs_icon_at_origin" => {
+                    let next = value.eq_ignore_ascii_case("Yes");
+                    let active_viewport = self.tabs[i].scene.active_viewport;
+                    let current = active_viewport
+                        .and_then(|handle| self.tabs[i].scene.document.get_entity(handle))
+                        .and_then(|entity| match entity {
+                            acadrust::EntityType::Viewport(viewport) => {
+                                Some(viewport.status.ucs_icon_at_origin)
+                            }
+                            _ => None,
+                        })
+                        .or_else(|| {
+                            self.tabs[i]
+                                .scene
+                                .document
+                                .vports
+                                .iter()
+                                .find(|viewport| {
+                                    viewport
+                                        .name
+                                        .trim_start_matches('*')
+                                        .eq_ignore_ascii_case("active")
+                                })
+                                .map(|viewport| viewport.ucsicon_origin)
+                        })
+                        .unwrap_or(self.ucs_icon_at_origin);
+                    if current != next {
+                        self.push_undo_snapshot(i, "UCSICON");
+                        if let Some(handle) = active_viewport {
+                            if let Some(acadrust::EntityType::Viewport(viewport)) =
+                                self.tabs[i].scene.document.get_entity_mut(handle)
+                            {
+                                viewport.status.ucs_icon_at_origin = next;
+                            }
+                        } else if let Some(viewport) = self.tabs[i]
+                            .scene
+                            .document
+                            .vports
+                            .iter_mut()
+                            .find(|viewport| {
+                                viewport
+                                    .name
+                                    .trim_start_matches('*')
+                                    .eq_ignore_ascii_case("active")
+                            })
+                        {
+                            viewport.ucsicon_origin = next;
+                        }
+                        self.ucs_icon_at_origin = next;
+                        self.persist_settings_if_changed();
+                        self.tabs[i].dirty = true;
+                    }
+                    self.refresh_properties();
+                }
+                "view_ucs_per_viewport" => {
+                    let next = value.eq_ignore_ascii_case("Yes");
+                    let active_viewport = self.tabs[i].scene.active_viewport;
+                    let current = active_viewport
+                        .and_then(|handle| self.tabs[i].scene.document.get_entity(handle))
+                        .and_then(|entity| match entity {
+                            acadrust::EntityType::Viewport(viewport) => {
+                                Some(viewport.ucs_per_viewport)
+                            }
+                            _ => None,
+                        })
+                        .or_else(|| {
+                            self.tabs[i]
+                                .scene
+                                .document
+                                .vports
+                                .iter()
+                                .find(|viewport| {
+                                    viewport
+                                        .name
+                                        .trim_start_matches('*')
+                                        .eq_ignore_ascii_case("active")
+                                })
+                                .map(|viewport| viewport.ucs_per_viewport)
+                        })
+                        .unwrap_or(true);
+                    if current != next {
+                        self.push_undo_snapshot(i, "UCSVP");
+                        if let Some(handle) = active_viewport {
+                            if let Some(acadrust::EntityType::Viewport(viewport)) =
+                                self.tabs[i].scene.document.get_entity_mut(handle)
+                            {
+                                viewport.ucs_per_viewport = next;
+                            }
+                        } else if let Some(viewport) = self.tabs[i]
+                            .scene
+                            .document
+                            .vports
+                            .iter_mut()
+                            .find(|viewport| {
+                                viewport
+                                    .name
+                                    .trim_start_matches('*')
+                                    .eq_ignore_ascii_case("active")
+                            })
+                        {
+                            viewport.ucs_per_viewport = next;
+                        }
+                        self.tabs[i].dirty = true;
+                    }
+                    self.refresh_properties();
+                }
+                "view_visual_style" => {
+                    use acadrust::entities::ViewportRenderMode as Mode;
+                    let mode = match value.as_str() {
+                        "2D Wireframe" | "Wireframe 2D" => Some(Mode::Wireframe2D),
+                        "3D Wireframe" | "Wireframe 3D" => Some(Mode::Wireframe3D),
+                        "Hidden Line" => Some(Mode::HiddenLine),
+                        "Flat Shaded" => Some(Mode::FlatShaded),
+                        "Gouraud Shaded" => Some(Mode::GouraudShaded),
+                        "Flat Shaded + Edges" => Some(Mode::FlatShadedWithEdges),
+                        "Gouraud Shaded + Edges" => Some(Mode::GouraudShadedWithEdges),
+                        _ => None,
+                    };
+                    if let Some(mode) = mode {
+                        let task = self.on_set_render_mode(mode);
+                        self.refresh_properties();
+                        return task;
+                    }
+                    self.refresh_properties();
+                }
+                _ => {}
+            }
+        }
+        Task::none()
+    }
+
+    pub(super) fn on_prop_geom_commit(&mut self, field: &'static str) -> Task<Message> {
+        let i = self.active_tab;
+        self.tabs[i].properties.active_field = None;
+        let handles = self.property_target_handles(i);
+        if !handles.is_empty() {
+            let driven_reference = match field {
+                "start_x" | "start_y" | "start_z" => Some(Some(0)),
+                "end_x" | "end_y" | "end_z" => Some(Some(1)),
+                "center_x" | "center_y" | "center_z" => Some(Some(-3)),
+                "radius" | "diameter" | "circumference" | "area" | "major_r" | "minor_r"
+                | "ratio" => Some(None),
+                _ => None,
+            };
+            let retain_size = self.constraint_solve_mode
+                && driven_reference.is_some_and(|marker| marker.is_some());
+            let retained_originals: Vec<_> = if retain_size {
+                handles
+                    .iter()
+                    .filter_map(|handle| {
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .get_entity(*handle)
+                            .cloned()
+                            .map(|entity| (*handle, entity))
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let evaluates_expression = self.tabs[i]
+                .properties
+                .sections
+                .iter()
+                .flat_map(|section| section.props.iter())
+                .find(|property| property.field == field)
+                .is_some_and(|property| matches!(property.value, PropValue::EditText(_)));
+            if let Some(raw_val) = self.tabs[i]
+                .properties
+                .edit_buf
+                .remove(&crate::ui::properties::FieldKey::Geom(field))
+            {
+                let val = if evaluates_expression {
+                    crate::app::expr_eval::eval_to_string(&raw_val)
+                } else {
+                    raw_val
+                };
+                if matches!(
+                    field,
+                    "current_fit_point" | "current_control_point" | "pm_current_vertex"
+                ) {
+                    let count = handles
+                        .iter()
+                        .filter_map(|handle| {
+                            let entity = self.tabs[i].scene.document.get_entity(*handle)?;
+                            match (field, entity) {
+                                ("current_fit_point", acadrust::EntityType::Spline(spline)) => {
+                                    Some(spline.fit_points.len())
+                                }
+                                ("current_control_point", acadrust::EntityType::Spline(spline)) => {
+                                    Some(crate::entities::spline::control_vertex_count(spline))
+                                }
+                                ("pm_current_vertex", acadrust::EntityType::PolygonMesh(mesh)) => {
+                                    Some(mesh.vertices.len())
+                                }
+                                _ => None,
+                            }
+                        })
+                        .min()
+                        .unwrap_or(0);
+                    if let Ok(requested) = val.trim().parse::<usize>() {
+                        if count > 0 {
+                            let next = requested.clamp(1, count) - 1;
+                            self.tabs[i].properties.prop_vertex = next;
+                            self.tabs[i].properties.prop_vertex_indicator_active = true;
+                        }
+                    }
+                    self.refresh_properties();
+                    return Task::none();
+                }
+                self.push_undo_snapshot(i, "CHPROP");
+                if field == "tbl_style_handle" {
+                    let style_handle =
+                        self.tabs[i]
                             .scene
                             .document
                             .objects
                             .iter()
                             .find_map(|(handle, object)| match object {
                                 acadrust::objects::ObjectType::TableStyle(style)
-                                    if style.name.eq_ignore_ascii_case(value.trim()) =>
+                                    if style.name.eq_ignore_ascii_case(val.trim()) =>
                                 {
                                     Some(*handle)
                                 }
                                 _ => None,
                             });
-                        if let Some(style_handle) = style_handle {
-                            for &handle in &handles {
-                                if let Some(acadrust::EntityType::Table(table)) =
-                                    self.tabs[i].scene.document.get_entity_mut(handle)
-                                {
-                                    table.table_style_handle = Some(style_handle);
-                                }
-                            }
-                        }
-                    } else if field == "transparency" {
-                        for &handle in &handles {
-                            if self.tabs[i].scene.is_layer_locked(handle) {
-                                continue;
-                            }
-                            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                                crate::scene::view::dispatch::apply_common_prop(entity, "transparency", &value);
-                            }
-                        }
-                    } else if field == "plot_style" {
-                        if self.tabs[i].scene.document.header.plotstyle_mode {
-                            self.refresh_properties();
-                            return Task::none();
-                        }
-                        // Named plot-style pick: ByLayer / ByBlock clear the
-                        // handle; a named style resolves through the drawing's
-                        // ACAD_PLOTSTYLENAME dictionary to its placeholder handle.
-                        let dict_h =
-                            self.tabs[i].scene.document.header.acad_plotstylename_dict_handle;
-                        let ph: Option<acadrust::Handle> =
-                            crate::scene::annotative::as_dict(&self.tabs[i].scene.document, dict_h)
-                                .and_then(|d| {
-                                    d.entries
-                                        .iter()
-                                        .find(|(n, _)| *n == value)
-                                        .map(|(_, h)| *h)
-                                });
-                        for &handle in &handles {
-                            if self.tabs[i].scene.is_layer_locked(handle) {
-                                continue;
-                            }
-                            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle)
-                            {
-                                let common = entity.common_mut();
-                                match value.as_str() {
-                                    "ByLayer" => {
-                                        common.plotstyle_flags = 0;
-                                        common.plotstyle_handle = None;
-                                    }
-                                    "ByBlock" => {
-                                        common.plotstyle_flags = 1;
-                                        common.plotstyle_handle = None;
-                                    }
-                                    "Normal" => {
-                                        common.plotstyle_flags = 2;
-                                        common.plotstyle_handle = None;
-                                    }
-                                    _ => {
-                                        if let Some(h) = ph {
-                                            common.plotstyle_flags = 3;
-                                            common.plotstyle_handle = Some(h);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else if field == "material" {
-                        // Material source: ByLayer / ByBlock clear the handle; a
-                        // named material sets flag 3 + its handle (resolved here
-                        // because the update loop holds the document).
-                        let mat_handle: Option<acadrust::Handle> = self.tabs[i]
-                            .scene
-                            .document
-                            .objects
-                            .iter()
-                            .find_map(|(h, o)| match o {
-                                acadrust::objects::ObjectType::Material(m) if m.name == value => {
-                                    Some(*h)
-                                }
-                                _ => None,
-                            });
-                        for &handle in &handles {
-                            if self.tabs[i].scene.is_layer_locked(handle) {
-                                continue;
-                            }
-                            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle)
-                            {
-                                let common = entity.common_mut();
-                                match value.as_str() {
-                                    "ByLayer" => {
-                                        common.material_flags = 0;
-                                        common.material_handle = None;
-                                    }
-                                    "ByBlock" => {
-                                        common.material_flags = 1;
-                                        common.material_handle = None;
-                                    }
-                                    "Global" => {
-                                        common.material_flags = 2;
-                                        common.material_handle = None;
-                                    }
-                                    _ => {
-                                        if let Some(h) = mat_handle {
-                                            common.material_flags = 3;
-                                            common.material_handle = Some(h);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        let plane = if self.tabs[i].editing_model_space() {
-                            self.tabs[i].ucs_xform().working_plane()
-                        } else {
-                            crate::command::WorkingPlane::default()
-                        };
-                        for &handle in &handles {
-                            let mline_style = self.tabs[i]
-                                .scene
-                                .document
-                                .get_entity(handle)
-                                .and_then(|entity| match entity {
-                                    acadrust::EntityType::MLine(mline) => {
-                                        crate::entities::mline::resolved_mline_style(
-                                            mline,
-                                            &self.tabs[i].scene.document,
-                                        )
-                                        .cloned()
-                                    }
-                                    _ => None,
-                                });
-                            if matches!(field, "text_x" | "text_y") {
-                                crate::entities::dimension::materialize_large_radial_text_position(
-                                    &mut self.tabs[i].scene.document,
-                                    handle,
-                                    &value,
-                                );
-                            }
-                            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle)
-                            {
-                                crate::scene::view::dispatch::apply_geom_prop_in_working_plane(
-                                    entity,
-                                    field,
-                                    &value,
-                                    plane,
-                                );
-                                if matches!(field, "ml_justification" | "ml_scale") {
-                                    if let (
-                                        acadrust::EntityType::MLine(mline),
-                                        Some(style),
-                                    ) = (entity, mline_style.as_ref())
-                                    {
-                                        crate::modules::draw::draw::mline::sync_mline_element_parameters(
-                                            mline, style,
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if field.starts_with("tbl_") {
+                    if let Some(style_handle) = style_handle {
                         for &handle in &handles {
                             if let Some(acadrust::EntityType::Table(table)) =
                                 self.tabs[i].scene.document.get_entity_mut(handle)
                             {
-                                table.block_record_handle = None;
+                                table.table_style_handle = Some(style_handle);
                             }
                         }
                     }
-                    self.invalidate_property_targets(i, &handles);
-                    self.tabs[i].dirty = true;
+                } else if field == "block" {
+                    // Name row on a block reference: an existing name
+                    // re-points the selected inserts; a new one renames
+                    // the definition they share. Commit closes the list.
                     self.tabs[i].properties.edit_choice_open = false;
-                    if field == "spline_method" {
-                        self.tabs[i].properties.prop_vertex = 0;
-                        self.tabs[i].properties.prop_vertex_indicator_active = false;
+                    self.apply_block_name_commit(i, &handles, val.trim());
+                } else if field == "frozen_layers" {
+                    // Resolve layer names → handles, then apply to viewports.
+                    let layer_handles: Vec<acadrust::Handle> = val
+                        .split(',')
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .filter_map(|name| {
+                            self.tabs[i]
+                                .scene
+                                .document
+                                .layers
+                                .iter()
+                                .find(|l| l.name.eq_ignore_ascii_case(name))
+                                .map(|l| l.handle)
+                        })
+                        .collect();
+                    for &handle in &handles {
+                        if let Some(acadrust::EntityType::Viewport(vp)) =
+                            self.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            vp.frozen_layers = layer_handles.clone();
+                        }
                     }
-                    self.refresh_properties();
                 } else {
-                    match field {
-                        "transparency" => {
-                            let Some(transparency) = crate::scene::creation_style::parse_current_transparency(&value) else {
-                                self.command_line.push_error("Transparency: expected ByLayer, ByBlock, or an integer from 0 to 90.");
-                                self.refresh_properties();
-                                return Task::none();
-                            };
-                            if self.tabs[i].scene.document.current_entity_transparency()
-                                != transparency
-                            {
-                                self.push_undo_snapshot(i, "CETRANSPARENCY");
-                                if self.tabs[i]
-                                    .scene
-                                    .document
-                                    .set_current_entity_transparency(transparency)
-                                {
-                                    self.tabs[i].dirty = true;
+                    // Per-vertex geometry edits (vertex_x/y, widths) target
+                    // the vertex the Current Vertex stepper is on. (polyline)
+                    crate::scene::view::dispatch::set_prop_current_vertex(
+                        self.tabs[i].properties.prop_vertex,
+                    );
+                    let plane = if self.tabs[i].editing_model_space() {
+                        self.tabs[i].ucs_xform().working_plane()
+                    } else {
+                        crate::command::WorkingPlane::default()
+                    };
+                    for &handle in &handles {
+                        // Skip objects on a locked layer.
+                        if self.tabs[i].scene.is_layer_locked(handle) {
+                            continue;
+                        }
+                        match field {
+                            "tol_text_height" => {
+                                use crate::entities::dim_override as dov;
+                                let trimmed = val.trim();
+                                if trimmed.is_empty() {
+                                    dov::set(
+                                        &mut self.tabs[i].scene.document,
+                                        handle,
+                                        dov::DIMTXT,
+                                        None,
+                                    );
+                                } else if let Ok(height) = trimmed.parse::<f64>() {
+                                    if height > 0.0 {
+                                        dov::set(
+                                            &mut self.tabs[i].scene.document,
+                                            handle,
+                                            dov::DIMTXT,
+                                            Some(acadrust::xdata::XDataValue::Real(height)),
+                                        );
+                                    }
+                                }
+                            }
+                            _ if field.starts_with("dim_") => {
+                                if matches!(
+                                    self.tabs[i].scene.document.get_entity(handle),
+                                    Some(acadrust::EntityType::Dimension(_))
+                                ) {
+                                    let applied = crate::entities::dim_override::set_property(
+                                        &mut self.tabs[i].scene.document,
+                                        handle,
+                                        field,
+                                        &val,
+                                    );
+                                    if applied && field == "dim_text_inside" {
+                                        if let Some(acadrust::EntityType::Dimension(
+                                            acadrust::entities::Dimension::LargeRadial(dimension),
+                                        )) = self.tabs[i].scene.document.get_entity_mut(handle)
+                                        {
+                                            dimension.base.text_user_positioned = false;
+                                        }
+                                    }
+                                }
+                            }
+                            "hyperlink" => {
+                                // Stored in the standard PE_URL XDATA
+                                // record; an empty value clears it.
+                                let vals = if val.trim().is_empty() {
+                                    None
                                 } else {
-                                    self.discard_last_undo_entry(i);
-                                    self.command_line.push_error(
-                                        "CETRANSPARENCY: drawing variable dictionary is invalid.",
+                                    Some(vec![acadrust::xdata::XDataValue::String(val.clone())])
+                                };
+                                crate::scene::view::dispatch::set_entity_xdata(
+                                    &mut self.tabs[i].scene.document,
+                                    handle,
+                                    "PE_URL",
+                                    vals,
+                                );
+                            }
+                            "arrow_size" | "text_offset" | "dim_scale_overall" => {
+                                // Real-valued leader dim-var overrides
+                                // (ACAD_DSTYLE). A blank value clears the
+                                // override → reverts to the style; an
+                                // unparseable entry is ignored so a typo
+                                // can't silently wipe a stored override.
+                                use crate::entities::dim_override as dov;
+                                let code = match field {
+                                    "arrow_size" => dov::DIMASZ,
+                                    "text_offset" => dov::DIMGAP,
+                                    _ => dov::DIMSCALE,
+                                };
+                                let trimmed = val.trim();
+                                if trimmed.is_empty() {
+                                    dov::set(&mut self.tabs[i].scene.document, handle, code, None);
+                                } else if let Ok(n) = trimmed.parse::<f64>() {
+                                    dov::set(
+                                        &mut self.tabs[i].scene.document,
+                                        handle,
+                                        code,
+                                        Some(acadrust::xdata::XDataValue::Real(n)),
                                     );
                                 }
                             }
-                            self.refresh_properties();
-                        }
-                        "material" => {
-                            let mat_handle: Option<acadrust::Handle> = self.tabs[i]
-                                .scene
-                                .document
-                                .objects
-                                .iter()
-                                .find_map(|(h, o)| match o {
-                                    acadrust::objects::ObjectType::Material(m) if m.name == value => {
-                                        Some(*h)
-                                    }
-                                    _ => None,
-                                });
-                            match value.as_str() {
-                                "ByLayer" | "ByBlock" | "Global" => {
-                                    self.tabs[i].scene.document.header.current_material_handle =
-                                        acadrust::Handle::NULL;
-                                }
-                                _ => {
-                                    if let Some(h) = mat_handle {
-                                        self.tabs[i].scene.document.header.current_material_handle =
-                                            h;
-                                    }
-                                }
-                            }
-                            self.tabs[i].dirty = true;
-                            self.refresh_properties();
-                        }
-                        "plot_style" => {
-                            if self.tabs[i].scene.document.header.plotstyle_mode {
-                                self.refresh_properties();
-                                return Task::none();
-                            }
-                            match value.as_str() {
-                                "ByBlock" => {
-                                    self.tabs[i].scene.document.header.current_plotstyle_type = 1
-                                }
-                                "Normal" => {
-                                    self.tabs[i].scene.document.header.current_plotstyle_type = 2
-                                }
-                                _ => self.tabs[i].scene.document.header.current_plotstyle_type = 0,
-                            }
-                            self.tabs[i].dirty = true;
-                            self.refresh_properties();
-                        }
-                        "view_plot_style_table" => {
-                            let next = if value.eq_ignore_ascii_case("None") {
-                                String::new()
-                            } else {
-                                value.clone()
-                            };
-                            let layout_name = self.tabs[i].scene.current_layout.clone();
-                            let current = self.tabs[i]
-                                .scene
-                                .document
-                                .objects
-                                .values()
-                                .find_map(|object| {
-                                    let acadrust::objects::ObjectType::Layout(layout) = object
-                                    else {
-                                        return None;
-                                    };
-                                    layout
-                                        .name
-                                        .eq_ignore_ascii_case(&layout_name)
-                                        .then(|| layout.plot_style_sheet.clone())
-                                })
-                                .unwrap_or_else(|| {
-                                    self.tabs[i].scene.document.header.stylesheet.clone()
-                                });
-                            if current != next {
-                                self.push_undo_snapshot(i, "PLOTSTYLE");
-                                for object in self.tabs[i].scene.document.objects.values_mut() {
-                                    if let acadrust::objects::ObjectType::Layout(layout) = object {
-                                        if layout.name.eq_ignore_ascii_case(&layout_name) {
-                                            layout.plot_style_sheet = next.clone();
-                                            layout.plot_flags.plot_plot_styles = !next.is_empty();
-                                            layout.plot_flags.show_plot_styles = !next.is_empty();
-                                        }
-                                    }
-                                }
-                                self.tabs[i].scene.document.header.stylesheet = next;
-                                self.tabs[i].dirty = true;
-                            }
-                            self.refresh_properties();
-                        }
-                        "view_annotation_scale" => {
-                            let current = self.tabs[i]
-                                .scene
-                                .document
-                                .header
-                                .current_annotation_scale
-                                .clone();
-                            if !current.eq_ignore_ascii_case(&value) {
-                                self.push_undo_snapshot(i, "CANNOSCALE");
-                                if self.tabs[i].scene.set_annotation_scale_named(&value).is_some() {
-                                    self.tabs[i].dirty = true;
-                                } else {
-                                    self.discard_last_undo_entry(i);
-                                }
-                            }
-                            self.refresh_properties();
-                        }
-                        "view_ucs_icon_on" => {
-                            let next = value.eq_ignore_ascii_case("Yes");
-                            let active_viewport = self.tabs[i].scene.active_viewport;
-                            let current = active_viewport
-                                .and_then(|handle| self.tabs[i].scene.document.get_entity(handle))
-                                .and_then(|entity| match entity {
-                                    acadrust::EntityType::Viewport(viewport) => {
-                                        Some(viewport.ucs_icon_visible)
-                                    }
-                                    _ => None,
-                                })
-                                .or_else(|| {
-                                    self.tabs[i]
-                                        .scene
-                                        .document
-                                        .vports
-                                        .iter()
-                                        .find(|viewport| {
-                                            viewport
-                                                .name
-                                                .trim_start_matches('*')
-                                                .eq_ignore_ascii_case("active")
-                                        })
-                                        .map(|viewport| viewport.ucsicon_lower)
-                                })
-                                .unwrap_or(self.show_ucs_icon);
-                            if current != next {
-                                self.push_undo_snapshot(i, "UCSICON");
-                                if let Some(handle) = active_viewport {
-                                    if let Some(acadrust::EntityType::Viewport(viewport)) =
-                                        self.tabs[i].scene.document.get_entity_mut(handle)
-                                    {
-                                        viewport.ucs_icon_visible = next;
-                                    }
-                                } else if let Some(viewport) = self.tabs[i]
-                                    .scene
-                                    .document
-                                    .vports
-                                    .iter_mut()
-                                    .find(|viewport| {
-                                        viewport
-                                            .name
-                                            .trim_start_matches('*')
-                                            .eq_ignore_ascii_case("active")
-                                    })
-                                {
-                                    viewport.ucsicon_lower = next;
-                                }
-                                self.show_ucs_icon = next;
-                                self.persist_settings_if_changed();
-                                self.tabs[i].dirty = true;
-                            }
-                            self.refresh_properties();
-                        }
-                        "view_ucs_icon_at_origin" => {
-                            let next = value.eq_ignore_ascii_case("Yes");
-                            let active_viewport = self.tabs[i].scene.active_viewport;
-                            let current = active_viewport
-                                .and_then(|handle| self.tabs[i].scene.document.get_entity(handle))
-                                .and_then(|entity| match entity {
-                                    acadrust::EntityType::Viewport(viewport) => {
-                                        Some(viewport.status.ucs_icon_at_origin)
-                                    }
-                                    _ => None,
-                                })
-                                .or_else(|| {
-                                    self.tabs[i]
-                                        .scene
-                                        .document
-                                        .vports
-                                        .iter()
-                                        .find(|viewport| {
-                                            viewport
-                                                .name
-                                                .trim_start_matches('*')
-                                                .eq_ignore_ascii_case("active")
-                                        })
-                                        .map(|viewport| viewport.ucsicon_origin)
-                                })
-                                .unwrap_or(self.ucs_icon_at_origin);
-                            if current != next {
-                                self.push_undo_snapshot(i, "UCSICON");
-                                if let Some(handle) = active_viewport {
-                                    if let Some(acadrust::EntityType::Viewport(viewport)) =
-                                        self.tabs[i].scene.document.get_entity_mut(handle)
-                                    {
-                                        viewport.status.ucs_icon_at_origin = next;
-                                    }
-                                } else if let Some(viewport) = self.tabs[i]
-                                    .scene
-                                    .document
-                                    .vports
-                                    .iter_mut()
-                                    .find(|viewport| {
-                                        viewport
-                                            .name
-                                            .trim_start_matches('*')
-                                            .eq_ignore_ascii_case("active")
-                                    })
-                                {
-                                    viewport.ucsicon_origin = next;
-                                }
-                                self.ucs_icon_at_origin = next;
-                                self.persist_settings_if_changed();
-                                self.tabs[i].dirty = true;
-                            }
-                            self.refresh_properties();
-                        }
-                        "view_ucs_per_viewport" => {
-                            let next = value.eq_ignore_ascii_case("Yes");
-                            let active_viewport = self.tabs[i].scene.active_viewport;
-                            let current = active_viewport
-                                .and_then(|handle| self.tabs[i].scene.document.get_entity(handle))
-                                .and_then(|entity| match entity {
-                                    acadrust::EntityType::Viewport(viewport) => {
-                                        Some(viewport.ucs_per_viewport)
-                                    }
-                                    _ => None,
-                                })
-                                .or_else(|| {
-                                    self.tabs[i]
-                                        .scene
-                                        .document
-                                        .vports
-                                        .iter()
-                                        .find(|viewport| {
-                                            viewport
-                                                .name
-                                                .trim_start_matches('*')
-                                                .eq_ignore_ascii_case("active")
-                                        })
-                                        .map(|viewport| viewport.ucs_per_viewport)
-                                })
-                                .unwrap_or(true);
-                            if current != next {
-                                self.push_undo_snapshot(i, "UCSVP");
-                                if let Some(handle) = active_viewport {
-                                    if let Some(acadrust::EntityType::Viewport(viewport)) =
-                                        self.tabs[i].scene.document.get_entity_mut(handle)
-                                    {
-                                        viewport.ucs_per_viewport = next;
-                                    }
-                                } else if let Some(viewport) = self.tabs[i]
-                                    .scene
-                                    .document
-                                    .vports
-                                    .iter_mut()
-                                    .find(|viewport| {
-                                        viewport
-                                            .name
-                                            .trim_start_matches('*')
-                                            .eq_ignore_ascii_case("active")
-                                    })
-                                {
-                                    viewport.ucs_per_viewport = next;
-                                }
-                                self.tabs[i].dirty = true;
-                            }
-                            self.refresh_properties();
-                        }
-                        "view_visual_style" => {
-                            use acadrust::entities::ViewportRenderMode as Mode;
-                            let mode = match value.as_str() {
-                                "2D Wireframe" | "Wireframe 2D" => Some(Mode::Wireframe2D),
-                                "3D Wireframe" | "Wireframe 3D" => Some(Mode::Wireframe3D),
-                                "Hidden Line" => Some(Mode::HiddenLine),
-                                "Flat Shaded" => Some(Mode::FlatShaded),
-                                "Gouraud Shaded" => Some(Mode::GouraudShaded),
-                                "Flat Shaded + Edges" => Some(Mode::FlatShadedWithEdges),
-                                "Gouraud Shaded + Edges" => {
-                                    Some(Mode::GouraudShadedWithEdges)
-                                }
-                                _ => None,
-                            };
-                            if let Some(mode) = mode {
-                                let task = self.on_set_render_mode(mode);
-                                self.refresh_properties();
-                                return task;
-                            }
-                            self.refresh_properties();
-                        }
-                        _ => {}
-                    }
-                }
-                Task::none()
-    }
-
-    pub(super) fn on_prop_geom_commit(&mut self, field: &'static str) -> Task<Message> {
-                let i = self.active_tab;
-                self.tabs[i].properties.active_field = None;
-                let handles = self.property_target_handles(i);
-                if !handles.is_empty() {
-                    let driven_reference = match field {
-                        "start_x" | "start_y" | "start_z" => Some(Some(0)),
-                        "end_x" | "end_y" | "end_z" => Some(Some(1)),
-                        "center_x" | "center_y" | "center_z" => Some(Some(-3)),
-                        "radius" | "diameter" | "circumference" | "area"
-                        | "major_r" | "minor_r" | "ratio" => Some(None),
-                        _ => None,
-                    };
-                    let retain_size = self.constraint_solve_mode
-                        && driven_reference.is_some_and(|marker| marker.is_some());
-                    let retained_originals: Vec<_> = if retain_size {
-                        handles
-                            .iter()
-                            .filter_map(|handle| {
-                                self.tabs[i]
-                                    .scene
-                                    .document
-                                    .get_entity(*handle)
-                                    .cloned()
-                                    .map(|entity| (*handle, entity))
-                            })
-                            .collect()
-                    } else {
-                        Vec::new()
-                    };
-                    let evaluates_expression = self.tabs[i]
-                        .properties
-                        .sections
-                        .iter()
-                        .flat_map(|section| section.props.iter())
-                        .find(|property| property.field == field)
-                        .is_some_and(|property| {
-                            matches!(property.value, PropValue::EditText(_))
-                        });
-                    if let Some(raw_val) = self.tabs[i]
-                        .properties
-                        .edit_buf
-                        .remove(&crate::ui::properties::FieldKey::Geom(field))
-                    {
-                        let val = if evaluates_expression {
-                            crate::app::expr_eval::eval_to_string(&raw_val)
-                        } else {
-                            raw_val
-                        };
-                        if matches!(
-                            field,
-                            "current_fit_point" | "current_control_point" | "pm_current_vertex"
-                        ) {
-                            let count = handles
-                                .iter()
-                                .filter_map(|handle| {
-                                    let entity = self.tabs[i].scene.document.get_entity(*handle)?;
-                                    match (field, entity) {
-                                        (
-                                            "current_fit_point",
-                                            acadrust::EntityType::Spline(spline),
-                                        ) => Some(spline.fit_points.len()),
-                                        (
-                                            "current_control_point",
-                                            acadrust::EntityType::Spline(spline),
-                                        ) => Some(
-                                            crate::entities::spline::control_vertex_count(spline),
-                                        ),
-                                        (
-                                            "pm_current_vertex",
-                                            acadrust::EntityType::PolygonMesh(mesh),
-                                        ) => Some(mesh.vertices.len()),
-                                        _ => None,
-                                    }
-                                })
-                                .min()
-                                .unwrap_or(0);
-                            if let Ok(requested) = val.trim().parse::<usize>() {
-                                if count > 0 {
-                                    let next = requested.clamp(1, count) - 1;
-                                    self.tabs[i].properties.prop_vertex = next;
-                                    self.tabs[i].properties.prop_vertex_indicator_active = true;
-                                }
-                            }
-                            self.refresh_properties();
-                            return Task::none();
-                        }
-                        self.push_undo_snapshot(i, "CHPROP");
-                        if field == "tbl_style_handle" {
-                            let style_handle = self.tabs[i]
-                                .scene
-                                .document
-                                .objects
-                                .iter()
-                                .find_map(|(handle, object)| match object {
-                                    acadrust::objects::ObjectType::TableStyle(style)
-                                        if style.name.eq_ignore_ascii_case(val.trim()) =>
-                                    {
-                                        Some(*handle)
-                                    }
-                                    _ => None,
-                                });
-                            if let Some(style_handle) = style_handle {
-                                for &handle in &handles {
-                                    if let Some(acadrust::EntityType::Table(table)) =
-                                        self.tabs[i].scene.document.get_entity_mut(handle)
-                                    {
-                                        table.table_style_handle = Some(style_handle);
-                                    }
-                                }
-                            }
-                        } else if field == "block" {
-                            // Name row on a block reference: an existing name
-                            // re-points the selected inserts; a new one renames
-                            // the definition they share. Commit closes the list.
-                            self.tabs[i].properties.edit_choice_open = false;
-                            self.apply_block_name_commit(i, &handles, val.trim());
-                        } else if field == "frozen_layers" {
-                            // Resolve layer names → handles, then apply to viewports.
-                            let layer_handles: Vec<acadrust::Handle> = val
-                                .split(',')
-                                .map(|s| s.trim())
-                                .filter(|s| !s.is_empty())
-                                .filter_map(|name| {
-                                    self.tabs[i]
-                                        .scene
-                                        .document
-                                        .layers
-                                        .iter()
-                                        .find(|l| l.name.eq_ignore_ascii_case(name))
-                                        .map(|l| l.handle)
-                                })
-                                .collect();
-                            for &handle in &handles {
-                                if let Some(acadrust::EntityType::Viewport(vp)) =
+                            "linetype_scale" | "transparency" | "thickness" => {
+                                // Thickness (DXF 39 extrusion) is a General-
+                                // group common prop, not a geometry-group one:
+                                // route it to apply_common_prop (which handles
+                                // it via set_entity_thickness). apply_geom_prop
+                                // ignores it, so the edit would otherwise be a
+                                // silent no-op and revert to the old value.
+                                if let Some(entity) =
                                     self.tabs[i].scene.document.get_entity_mut(handle)
                                 {
-                                    vp.frozen_layers = layer_handles.clone();
+                                    crate::scene::view::dispatch::apply_common_prop(
+                                        entity, field, &val,
+                                    );
                                 }
                             }
-                        } else {
-                            // Per-vertex geometry edits (vertex_x/y, widths) target
-                            // the vertex the Current Vertex stepper is on. (polyline)
-                            crate::scene::view::dispatch::set_prop_current_vertex(
-                                self.tabs[i].properties.prop_vertex,
-                            );
-                            let plane = if self.tabs[i].editing_model_space() {
-                                self.tabs[i].ucs_xform().working_plane()
-                            } else {
-                                crate::command::WorkingPlane::default()
-                            };
-                            for &handle in &handles {
-                                // Skip objects on a locked layer.
-                                if self.tabs[i].scene.is_layer_locked(handle) {
-                                    continue;
-                                }
-                                match field {
-                                    "tol_text_height" => {
-                                        use crate::entities::dim_override as dov;
-                                        let trimmed = val.trim();
-                                        if trimmed.is_empty() {
-                                            dov::set(
-                                                &mut self.tabs[i].scene.document,
-                                                handle,
-                                                dov::DIMTXT,
-                                                None,
-                                            );
-                                        } else if let Ok(height) = trimmed.parse::<f64>() {
-                                            if height > 0.0 {
-                                                dov::set(
-                                                    &mut self.tabs[i].scene.document,
-                                                    handle,
-                                                    dov::DIMTXT,
-                                                    Some(acadrust::xdata::XDataValue::Real(height)),
-                                                );
-                                            }
-                                        }
-                                    }
-                                    _ if field.starts_with("dim_") => {
-                                        if matches!(
-                                            self.tabs[i].scene.document.get_entity(handle),
-                                            Some(acadrust::EntityType::Dimension(_))
-                                        ) {
-                                            let applied = crate::entities::dim_override::set_property(
-                                                &mut self.tabs[i].scene.document,
-                                                handle,
-                                                field,
-                                                &val,
-                                            );
-                                            if applied && field == "dim_text_inside" {
-                                                if let Some(acadrust::EntityType::Dimension(
-                                                    acadrust::entities::Dimension::LargeRadial(
-                                                        dimension,
-                                                    ),
-                                                )) = self.tabs[i]
-                                                    .scene
-                                                    .document
-                                                    .get_entity_mut(handle)
-                                                {
-                                                    dimension.base.text_user_positioned = false;
+                            _ => {
+                                if crate::scene::model::solid_history::is_primitive_property(field)
+                                {
+                                    self.tabs[i]
+                                        .scene
+                                        .apply_solid_history_property(handle, field, &val);
+                                } else if self.tabs[i]
+                                    .scene
+                                    .apply_solid_position_property(handle, field, &val, plane)
+                                    .is_none()
+                                {
+                                    let mline_style =
+                                        self.tabs[i].scene.document.get_entity(handle).and_then(
+                                            |entity| match entity {
+                                                acadrust::EntityType::MLine(mline) => {
+                                                    crate::entities::mline::resolved_mline_style(
+                                                        mline,
+                                                        &self.tabs[i].scene.document,
+                                                    )
+                                                    .cloned()
                                                 }
-                                            }
-                                        }
-                                    }
-                                    "hyperlink" => {
-                                        // Stored in the standard PE_URL XDATA
-                                        // record; an empty value clears it.
-                                        let vals = if val.trim().is_empty() {
-                                            None
-                                        } else {
-                                            Some(vec![acadrust::xdata::XDataValue::String(
-                                                val.clone(),
-                                            )])
-                                        };
-                                        crate::scene::view::dispatch::set_entity_xdata(
-                                            &mut self.tabs[i].scene.document,
-                                            handle,
-                                            "PE_URL",
-                                            vals,
+                                                _ => None,
+                                            },
                                         );
-                                    }
-                                    "arrow_size" | "text_offset" | "dim_scale_overall" => {
-                                        // Real-valued leader dim-var overrides
-                                        // (ACAD_DSTYLE). A blank value clears the
-                                        // override → reverts to the style; an
-                                        // unparseable entry is ignored so a typo
-                                        // can't silently wipe a stored override.
-                                        use crate::entities::dim_override as dov;
-                                        let code = match field {
-                                            "arrow_size" => dov::DIMASZ,
-                                            "text_offset" => dov::DIMGAP,
-                                            _ => dov::DIMSCALE,
-                                        };
-                                        let trimmed = val.trim();
-                                        if trimmed.is_empty() {
-                                            dov::set(
-                                                &mut self.tabs[i].scene.document,
-                                                handle,
-                                                code,
-                                                None,
-                                            );
-                                        } else if let Ok(n) = trimmed.parse::<f64>() {
-                                            dov::set(
-                                                &mut self.tabs[i].scene.document,
-                                                handle,
-                                                code,
-                                                Some(acadrust::xdata::XDataValue::Real(n)),
-                                            );
-                                        }
-                                    }
-                                    "linetype_scale" | "transparency" | "thickness" => {
-                                        // Thickness (DXF 39 extrusion) is a General-
-                                        // group common prop, not a geometry-group one:
-                                        // route it to apply_common_prop (which handles
-                                        // it via set_entity_thickness). apply_geom_prop
-                                        // ignores it, so the edit would otherwise be a
-                                        // silent no-op and revert to the old value.
-                                        if let Some(entity) =
-                                            self.tabs[i].scene.document.get_entity_mut(handle)
-                                        {
-                                            crate::scene::view::dispatch::apply_common_prop(
-                                                entity, field, &val,
-                                            );
-                                        }
-                                    }
-                                    _ => {
-                                        if crate::scene::model::solid_history::is_primitive_property(
-                                            field,
-                                        ) {
-                                            self.tabs[i].scene.apply_solid_history_property(
-                                                handle,
-                                                field,
-                                                &val,
-                                            );
-                                        } else if self.tabs[i]
-                                            .scene
-                                            .apply_solid_position_property(
-                                                handle,
-                                                field,
-                                                &val,
-                                                plane,
-                                            )
-                                            .is_none()
-                                        {
-                                            let mline_style = self.tabs[i]
-                                                .scene
-                                                .document
-                                                .get_entity(handle)
-                                                .and_then(|entity| match entity {
-                                                    acadrust::EntityType::MLine(mline) => {
-                                                        crate::entities::mline::resolved_mline_style(
-                                                            mline,
-                                                            &self.tabs[i].scene.document,
-                                                        )
-                                                        .cloned()
-                                                    }
-                                                    _ => None,
-                                                });
-                                            if matches!(field, "text_x" | "text_y") {
-                                                crate::entities::dimension::materialize_large_radial_text_position(
+                                    if matches!(field, "text_x" | "text_y") {
+                                        crate::entities::dimension::materialize_large_radial_text_position(
                                                     &mut self.tabs[i].scene.document,
                                                     handle,
                                                     &val,
                                                 );
-                                            }
-                                            if let Some(entity) = self.tabs[i]
-                                                .scene
-                                                .document
-                                                .get_entity_mut(handle)
-                                            {
-                                                crate::scene::view::dispatch::apply_geom_prop_in_working_plane(
+                                    }
+                                    if let Some(entity) =
+                                        self.tabs[i].scene.document.get_entity_mut(handle)
+                                    {
+                                        crate::scene::view::dispatch::apply_geom_prop_in_working_plane(
                                                     entity,
                                                     field,
                                                     &val,
                                                     plane,
                                                 );
-                                                if field == "ml_scale" {
-                                                    if let (
-                                                        acadrust::EntityType::MLine(mline),
-                                                        Some(style),
-                                                    ) = (entity, mline_style.as_ref())
-                                                    {
-                                                        crate::modules::draw::draw::mline::sync_mline_element_parameters(
+                                        if field == "ml_scale" {
+                                            if let (
+                                                acadrust::EntityType::MLine(mline),
+                                                Some(style),
+                                            ) = (entity, mline_style.as_ref())
+                                            {
+                                                crate::modules::draw::draw::mline::sync_mline_element_parameters(
                                                             mline, style,
                                                         );
-                                                    }
-                                                }
-                                            }
-                                            if matches!(field, "srf_u_isolines" | "srf_v_isolines")
-                                            {
-                                                self.tabs[i].scene.reseed_derived_caches(handle);
                                             }
                                         }
                                     }
+                                    if matches!(field, "srf_u_isolines" | "srf_v_isolines") {
+                                        self.tabs[i].scene.reseed_derived_caches(handle);
+                                    }
                                 }
                             }
                         }
-                        if field.starts_with("tbl_") {
-                            for &handle in &handles {
-                                if let Some(acadrust::EntityType::Table(table)) =
-                                    self.tabs[i].scene.document.get_entity_mut(handle)
-                                {
-                                    table.block_record_handle = None;
-                                }
-                            }
-                        }
-                        let driven_refs: Vec<_> = driven_reference
-                            .into_iter()
-                            .flat_map(|marker| {
-                                handles.iter().copied().map(move |handle| match marker {
-                                    Some(marker) => {
-                                        crate::scene::parametric_constraints::ParametricRef::point(
-                                            handle, marker,
-                                        )
-                                    }
-                                    None => {
-                                        crate::scene::parametric_constraints::ParametricRef::whole(
-                                            handle,
-                                        )
-                                    }
-                                })
-                            })
-                            .collect();
-                        self.invalidate_property_targets_with_originals(
-                            i,
-                            &handles,
-                            &driven_refs,
-                            retain_size,
-                            &retained_originals,
-                        );
-                        self.tabs[i].dirty = true;
-                        self.refresh_properties();
                     }
-                } else {
-                    let _ = self.tabs[i]
-                        .properties
-                        .edit_buf
-                        .remove(&crate::ui::properties::FieldKey::Geom(field));
-                    self.refresh_properties();
                 }
-                Task::none()
+                if field.starts_with("tbl_") {
+                    for &handle in &handles {
+                        if let Some(acadrust::EntityType::Table(table)) =
+                            self.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            table.block_record_handle = None;
+                        }
+                    }
+                }
+                let driven_refs: Vec<_> = driven_reference
+                    .into_iter()
+                    .flat_map(|marker| {
+                        handles.iter().copied().map(move |handle| match marker {
+                            Some(marker) => {
+                                crate::scene::parametric_constraints::ParametricRef::point(
+                                    handle, marker,
+                                )
+                            }
+                            None => {
+                                crate::scene::parametric_constraints::ParametricRef::whole(handle)
+                            }
+                        })
+                    })
+                    .collect();
+                self.invalidate_property_targets_with_originals(
+                    i,
+                    &handles,
+                    &driven_refs,
+                    retain_size,
+                    &retained_originals,
+                );
+                self.tabs[i].dirty = true;
+                self.refresh_properties();
+            }
+        } else {
+            let _ = self.tabs[i]
+                .properties
+                .edit_buf
+                .remove(&crate::ui::properties::FieldKey::Geom(field));
+            self.refresh_properties();
+        }
+        Task::none()
     }
 
     /// Properties-panel Name commit for block references. A `new` matching an
@@ -3652,12 +3588,17 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
         }
         // Existing target → swap the selected references to it. Anonymous,
         // xref and xref-dependent definitions are not valid targets.
-        let target = self.tabs[i].scene.document.block_records.get(new).map(|br| {
-            (
-                br.name.clone(),
-                br.is_anonymous() || br.flags.is_xref || br.name.contains('|'),
-            )
-        });
+        let target = self.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get(new)
+            .map(|br| {
+                (
+                    br.name.clone(),
+                    br.is_anonymous() || br.flags.is_xref || br.name.contains('|'),
+                )
+            });
         if let Some((canon, protected)) = target {
             if protected {
                 return;
@@ -3755,9 +3696,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     .collect::<Vec<_>>();
                 Ok((ins.block_name.clone(), rows))
             }
-            Some(acadrust::EntityType::Insert(_)) => {
-                Err("ATTEDIT  This block has no attributes.")
-            }
+            Some(acadrust::EntityType::Insert(_)) => Err("ATTEDIT  This block has no attributes."),
             _ => Err("ATTEDIT  Select a block with attributes."),
         };
         match result {
@@ -3811,9 +3750,12 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
         // The block's layer may have been locked while the editor was open —
         // refuse to write attributes to a locked-layer block.
         if let Some(layer) = self.tabs[i].scene.locked_layer_name(handle) {
-            self.command_line.push_info(crate::tf!(
+            self.command_line.push_info(
+                crate::tf!(
                 "Object is on locked layer \"{layer}\" — unlock the layer to edit its attributes."
-            ).as_ref());
+            )
+                .as_ref(),
+            );
             return Task::none();
         }
         // Snapshot the working copy so the document can be mutated while the
@@ -3997,7 +3939,13 @@ mod layer_rename_tests {
         let i = app.active_tab;
         let old_name = app.tabs[i].layers.edit_buf.clone();
         rename_layer(&mut app, &old_name, "TEST");
-        let handle = app.tabs[i].scene.document.layers.get("TEST").unwrap().handle;
+        let handle = app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("TEST")
+            .unwrap()
+            .handle;
 
         rename_layer(&mut app, "TEST", "test");
 
@@ -4025,7 +3973,10 @@ mod layer_rename_tests {
     fn current_layer_rename_updates_name_and_allocated_handle() {
         let mut app = app_with_editing_layer();
         let i = app.active_tab;
-        let idx = app.tabs[i].layers.editing.expect("new layer is being edited");
+        let idx = app.tabs[i]
+            .layers
+            .editing
+            .expect("new layer is being edited");
         let old_name = app.tabs[i].layers.layers[idx].name.clone();
         app.tabs[i]
             .scene
@@ -4039,12 +3990,7 @@ mod layer_rename_tests {
 
         rename_layer(&mut app, &old_name, "Renamed");
 
-        let layer = app.tabs[i]
-            .scene
-            .document
-            .layers
-            .get("Renamed")
-            .unwrap();
+        let layer = app.tabs[i].scene.document.layers.get("Renamed").unwrap();
         assert!(layer.handle.is_valid());
         assert_eq!(app.tabs[i].active_layer, "Renamed");
         assert_eq!(app.tabs[i].layers.current_layer, "Renamed");
@@ -4063,7 +4009,10 @@ mod layer_rename_tests {
     fn layer_rename_undo_redo_restores_active_layer() {
         let mut app = app_with_editing_layer();
         let i = app.active_tab;
-        let idx = app.tabs[i].layers.editing.expect("new layer is being edited");
+        let idx = app.tabs[i]
+            .layers
+            .editing
+            .expect("new layer is being edited");
         let old_name = app.tabs[i].layers.layers[idx].name.clone();
         app.tabs[i].layers.selected = Some(idx);
         let _ = app.on_layer_set_current();
@@ -4089,7 +4038,10 @@ mod layer_rename_tests {
         let old_name = app.tabs[i].layers.edit_buf.clone();
         rename_layer(&mut app, &old_name, "A");
         let _ = app.on_layer_new();
-        let b_idx = app.tabs[i].layers.editing.expect("new layer is being edited");
+        let b_idx = app.tabs[i]
+            .layers
+            .editing
+            .expect("new layer is being edited");
         app.tabs[i].layers.selected = Some(b_idx);
         let _ = app.on_layer_set_current();
         let header_name = app.tabs[i].scene.document.header.current_layer_name.clone();

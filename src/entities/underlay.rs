@@ -4,13 +4,15 @@
 // Grips:  insertion point + clip boundary vertices.
 // Props:  position, scales, rotation, contrast, fade, flags.
 
-use acadrust::entities::{Underlay, UnderlayDisplayFlags};
 use crate::t;
+use acadrust::entities::{Underlay, UnderlayDisplayFlags};
 use glam::DVec3;
 
 use crate::command::EntityTransform;
-use crate::entities::common::{center_grip, edit_angle_prop as edit_angle, edit_prop as edit, ro_prop as ro, square_grip};
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::entities::common::{
+    center_grip, edit_angle_prop as edit_angle, edit_prop as edit, ro_prop as ro, square_grip,
+};
+use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;
@@ -43,10 +45,7 @@ fn cross_wire(origin: [f64; 3], size: f64) -> Vec<[f64; 3]> {
 /// when its definition resolves and the page rasterises: page inches × the
 /// entity scale, rotated about the insertion. `None` keeps the cross
 /// placeholder.
-fn page_quad(
-    u: &Underlay,
-    document: &acadrust::CadDocument,
-) -> Option<[[f64; 3]; 4]> {
+fn page_quad(u: &Underlay, document: &acadrust::CadDocument) -> Option<[[f64; 3]; 4]> {
     let def = match document.objects.get(&u.definition_handle) {
         Some(acadrust::objects::ObjectType::UnderlayDefinition(d)) => d,
         _ => return None,
@@ -93,7 +92,14 @@ impl RenderConvertible for Underlay {
             Some(RenderEntity {
                 pick_tris,
                 object: RenderObject::Lines(pts),
-                snap_pts: vec![(glam::DVec3::new(self.insertion_point.x, self.insertion_point.y, self.insertion_point.z), SnapHint::Node)],
+                snap_pts: vec![(
+                    glam::DVec3::new(
+                        self.insertion_point.x,
+                        self.insertion_point.y,
+                        self.insertion_point.z,
+                    ),
+                    SnapHint::Node,
+                )],
                 tangent_geoms: vec![],
                 key_vertices: key,
                 fill_tris: vec![],
@@ -106,7 +112,14 @@ impl RenderConvertible for Underlay {
             Some(RenderEntity {
                 pick_tris,
                 object: RenderObject::Lines(pts),
-                snap_pts: vec![(glam::DVec3::new(self.insertion_point.x, self.insertion_point.y, self.insertion_point.z), SnapHint::Node)],
+                snap_pts: vec![(
+                    glam::DVec3::new(
+                        self.insertion_point.x,
+                        self.insertion_point.y,
+                        self.insertion_point.z,
+                    ),
+                    SnapHint::Node,
+                )],
                 tangent_geoms: vec![],
                 key_vertices: q.to_vec(),
                 fill_tris: vec![],
@@ -117,7 +130,14 @@ impl RenderConvertible for Underlay {
             Some(RenderEntity {
                 pick_tris: Vec::new(),
                 object: RenderObject::Lines(pts),
-                snap_pts: vec![(glam::DVec3::new(self.insertion_point.x, self.insertion_point.y, self.insertion_point.z), SnapHint::Node)],
+                snap_pts: vec![(
+                    glam::DVec3::new(
+                        self.insertion_point.x,
+                        self.insertion_point.y,
+                        self.insertion_point.z,
+                    ),
+                    SnapHint::Node,
+                )],
                 tangent_geoms: vec![],
                 key_vertices: vec![origin],
                 fill_tris: vec![],
@@ -222,7 +242,9 @@ impl PropertyEditable for Underlay {
         let show = self.flags.contains(UnderlayDisplayFlags::ON);
         let clipping = self.flags.contains(UnderlayDisplayFlags::CLIPPING);
         let monochrome = self.flags.contains(UnderlayDisplayFlags::MONOCHROME);
-        let adjust_bg = self.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND);
+        let adjust_bg = self
+            .flags
+            .contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND);
 
         vec![
             PropSection {
@@ -234,9 +256,21 @@ impl PropertyEditable for Underlay {
                     edit(t!("Scale X").as_ref(), "ul_sx", self.x_scale),
                     edit(t!("Scale Y").as_ref(), "ul_sy", self.y_scale),
                     edit(t!("Scale Z").as_ref(), "ul_sz", self.z_scale),
-                    ro(t!("Width").as_ref(), "ul_width", crate::entities::common::format_length(width)),
-                    ro(t!("Height").as_ref(), "ul_height", crate::entities::common::format_length(height)),
-                    edit_angle(t!("Rotation").as_ref(), "ul_rot", self.rotation.to_degrees()),
+                    ro(
+                        t!("Width").as_ref(),
+                        "ul_width",
+                        crate::entities::common::format_length(width),
+                    ),
+                    ro(
+                        t!("Height").as_ref(),
+                        "ul_height",
+                        crate::entities::common::format_length(height),
+                    ),
+                    edit_angle(
+                        t!("Rotation").as_ref(),
+                        "ul_rot",
+                        self.rotation.to_degrees(),
+                    ),
                 ],
             },
             PropSection {
@@ -312,7 +346,9 @@ impl PropertyEditable for Underlay {
             }
             "ul_adjust_bg" => {
                 let on = if value == "toggle" {
-                    !self.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND)
+                    !self
+                        .flags
+                        .contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND)
                 } else {
                     value == "true"
                 };
@@ -384,8 +420,15 @@ impl Transformable for Underlay {
                 self.insertion_point.y += d.y as f64;
                 self.insertion_point.z += d.z as f64;
             }
-            EntityTransform::Mirror { p1, p2, working_normal } => {
-                if !working_normal.normalize_or(DVec3::Z).abs_diff_eq(DVec3::Z, 1e-10) {
+            EntityTransform::Mirror {
+                p1,
+                p2,
+                working_normal,
+            } => {
+                if !working_normal
+                    .normalize_or(DVec3::Z)
+                    .abs_diff_eq(DVec3::Z, 1e-10)
+                {
                     acadrust::Entity::apply_transform(
                         self,
                         &crate::scene::view::transform::reflection_about_working_line(
@@ -420,13 +463,14 @@ impl Transformable for Underlay {
                 self.y_scale *= f;
                 self.z_scale *= f;
             }
-            EntityTransform::Rotate { center, axis, angle_rad } => {
+            EntityTransform::Rotate {
+                center,
+                axis,
+                angle_rad,
+            } => {
                 if !axis.normalize_or(DVec3::Z).abs_diff_eq(DVec3::Z, 1e-10) {
                     crate::scene::view::transform::apply_standard_transform(
-                        self,
-                        *center,
-                        *axis,
-                        *angle_rad,
+                        self, *center, *axis, *angle_rad,
                     );
                     return;
                 }

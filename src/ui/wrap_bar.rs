@@ -25,8 +25,8 @@ use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, tree, Widget};
 use iced::advanced::{mouse, overlay, renderer, Renderer as _, Shell};
 use iced::{
-    Background, Border, Element, Event, Length, Point, Rectangle, Renderer, Shadow, Size,
-    Theme, Vector,
+    Background, Border, Element, Event, Length, Point, Rectangle, Renderer, Shadow, Size, Theme,
+    Vector,
 };
 
 use crate::app::Message;
@@ -140,8 +140,7 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapBar<'a> {
         // Measure blocks at their natural (unwrapped) width so the fit decision
         // and one-row placement use true content widths. A flex-wrap `trail`
         // (WrapFlow) only wraps when it is later laid out with a bounded width.
-        let natural =
-            layout::Limits::new(Size::ZERO, Size::new(f32::INFINITY, f32::INFINITY));
+        let natural = layout::Limits::new(Size::ZERO, Size::new(f32::INFINITY, f32::INFINITY));
 
         let has_middle = self.middle.is_some();
         let trail_idx = if has_middle { 2 } else { 1 };
@@ -150,11 +149,10 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapBar<'a> {
             self.lead
                 .as_widget_mut()
                 .layout(&mut tree.children[0], renderer, &natural);
-        let mut trail_node = self.trail.as_widget_mut().layout(
-            &mut tree.children[trail_idx],
-            renderer,
-            &natural,
-        );
+        let mut trail_node =
+            self.trail
+                .as_widget_mut()
+                .layout(&mut tree.children[trail_idx], renderer, &natural);
 
         let mut lead_sz = lead_node.size();
         let mut trail_sz = trail_node.size();
@@ -165,8 +163,8 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapBar<'a> {
             lead_sz.width + self.spacing + trail_sz.width
         };
 
-        let fits = max.width.is_finite()
-            && lead_sz.width + self.spacing + trail_sz.width <= max.width;
+        let fits =
+            max.width.is_finite() && lead_sz.width + self.spacing + trail_sz.width <= max.width;
 
         let row_h = lead_sz.height.max(trail_sz.height).max(self.min_row_h);
         let bounded = layout::Limits::new(Size::ZERO, Size::new(width, f32::INFINITY));
@@ -203,10 +201,10 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapBar<'a> {
             // 2-slot dual-wrap: lead and trail each wrap within their OWN row
             // band. When the lead itself wrapped, first try the unused space on
             // its final row before adding another row for the trail.
-            lead_node =
-                self.lead
-                    .as_widget_mut()
-                    .layout(&mut tree.children[0], renderer, &bounded);
+            lead_node = self
+                .lead
+                .as_widget_mut()
+                .layout(&mut tree.children[0], renderer, &bounded);
             lead_sz = lead_node.size();
             let lead_h = lead_sz.height.max(self.min_row_h);
 
@@ -228,15 +226,12 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapBar<'a> {
                         .filter_map(|child| {
                             let bounds = child.bounds();
                             let child_center = bounds.y + bounds.height / 2.0;
-                            ((child_center - center).abs() < 0.5)
-                                .then_some(bounds.x + bounds.width)
+                            ((child_center - center).abs() < 0.5).then_some(bounds.x + bounds.width)
                         })
                         .fold(0.0f32, f32::max);
                     let trail_x = (width - trail_sz.width).max(0.0);
-                    (last_right + self.spacing <= trail_x).then_some((
-                        trail_x,
-                        lead_pos.y + center - trail_sz.height / 2.0,
-                    ))
+                    (last_right + self.spacing <= trail_x)
+                        .then_some((trail_x, lead_pos.y + center - trail_sz.height / 2.0))
                 })
             } else {
                 None
@@ -258,8 +253,7 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapBar<'a> {
                 } else {
                     0.0
                 };
-                trail_pos =
-                    Point::new(trail_x, lead_h + (trail_h - trail_sz.height) / 2.0);
+                trail_pos = Point::new(trail_x, lead_h + (trail_h - trail_sz.height) / 2.0);
                 total_h = lead_h + trail_h;
             }
         }
@@ -538,8 +532,7 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapFlow<'a> {
         limits: &layout::Limits,
     ) -> layout::Node {
         let max_w = limits.max().width;
-        let natural =
-            layout::Limits::new(Size::ZERO, Size::new(f32::INFINITY, f32::INFINITY));
+        let natural = layout::Limits::new(Size::ZERO, Size::new(f32::INFINITY, f32::INFINITY));
 
         // Measure each item exactly once and total their widths.
         let mut measured: Vec<layout::Node> = Vec::with_capacity(self.items.len());
@@ -556,8 +549,7 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapFlow<'a> {
         // (i.e. the flow is already width-constrained, e.g. overflowing tabs).
         let n = measured.len();
         if let Some(out) = &self.natural_width_out {
-            let natural_width =
-                sum_w + n.saturating_sub(1) as f32 * self.spacing_x;
+            let natural_width = sum_w + n.saturating_sub(1) as f32 * self.spacing_x;
             out.fetch_max(natural_width.to_bits(), Ordering::Relaxed);
         }
         let mut eff_gap = self.spacing_x;
@@ -569,8 +561,7 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapFlow<'a> {
             }
         }
 
-        let mut positioned: Vec<(layout::Node, f32, f32, usize)> =
-            Vec::with_capacity(n);
+        let mut positioned: Vec<(layout::Node, f32, f32, usize)> = Vec::with_capacity(n);
         let mut row_widths = vec![0.0f32];
         let mut x = 0.0f32;
         let mut y = 0.0f32;
@@ -658,13 +649,9 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapFlow<'a> {
             .zip(tree.children.iter())
             .zip(layout.children())
         {
-            let i = item.as_widget().mouse_interaction(
-                state,
-                child_layout,
-                cursor,
-                viewport,
-                renderer,
-            );
+            let i =
+                item.as_widget()
+                    .mouse_interaction(state, child_layout, cursor, viewport, renderer);
             if i != mouse::Interaction::default() {
                 interaction = i;
             }
@@ -706,8 +693,15 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapFlow<'a> {
             .zip(tree.children.iter())
             .zip(layout.children())
         {
-            item.as_widget()
-                .draw(state, renderer, theme, style, child_layout, cursor, viewport);
+            item.as_widget().draw(
+                state,
+                renderer,
+                theme,
+                style,
+                child_layout,
+                cursor,
+                viewport,
+            );
         }
     }
 
@@ -791,14 +785,15 @@ impl<'a> Widget<Message, Theme, Renderer> for DensitySwap<'a> {
         limits: &layout::Limits,
     ) -> layout::Node {
         let max_w = limits.max().width;
-        let natural =
-            layout::Limits::new(Size::ZERO, Size::new(f32::INFINITY, f32::INFINITY));
+        let natural = layout::Limits::new(Size::ZERO, Size::new(f32::INFINITY, f32::INFINITY));
 
         // Widest-first: keep the first variant whose natural width fits; else the
         // last (which is expected to wrap to fit any width).
         let mut pick = self.variants.len().saturating_sub(1);
         for (i, v) in self.variants.iter_mut().enumerate() {
-            let n = v.as_widget_mut().layout(&mut tree.children[i], renderer, &natural);
+            let n = v
+                .as_widget_mut()
+                .layout(&mut tree.children[i], renderer, &natural);
             if i == 0 {
                 for out in &self.width0_out {
                     out.store(n.size().width.to_bits(), Ordering::Relaxed);
@@ -879,9 +874,12 @@ impl<'a> Widget<Message, Theme, Renderer> for DensitySwap<'a> {
     ) {
         let i = self.chosen.get();
         if let Some(child_layout) = layout.children().next() {
-            self.variants[i]
-                .as_widget_mut()
-                .operate(&mut tree.children[i], child_layout, renderer, operation);
+            self.variants[i].as_widget_mut().operate(
+                &mut tree.children[i],
+                child_layout,
+                renderer,
+                operation,
+            );
         }
     }
 
@@ -1008,9 +1006,13 @@ impl<'a> Widget<Message, Theme, Renderer> for PosReport<'a> {
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
-        self.child
-            .as_widget()
-            .mouse_interaction(&tree.children[0], layout, cursor, viewport, renderer)
+        self.child.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
     }
 
     fn operate(
@@ -1128,46 +1130,42 @@ impl<'a> ReorderTab<'a> {
 
     fn drop_target(&self, point: Point) -> Option<(Message, Rectangle, bool)> {
         match &self.source {
-            ReorderSource::Document { from, targets } => {
-                targets.iter().find_map(|&to| {
-                    if to == *from {
-                        return None;
-                    }
-                    let bounds = dropdown_bounds(&format!("DOC_TAB:{to}"))?;
-                    bounds.contains(point).then(|| {
-                        let after = point.x >= bounds.x + bounds.width / 2.0;
-                        (
-                            Message::TabReorder {
-                                from: *from,
-                                to,
-                                after,
-                            },
-                            bounds,
+            ReorderSource::Document { from, targets } => targets.iter().find_map(|&to| {
+                if to == *from {
+                    return None;
+                }
+                let bounds = dropdown_bounds(&format!("DOC_TAB:{to}"))?;
+                bounds.contains(point).then(|| {
+                    let after = point.x >= bounds.x + bounds.width / 2.0;
+                    (
+                        Message::TabReorder {
+                            from: *from,
+                            to,
                             after,
-                        )
-                    })
+                        },
+                        bounds,
+                        after,
+                    )
                 })
-            }
-            ReorderSource::Layout { from, targets } => {
-                targets.iter().find_map(|to| {
-                    if to == from {
-                        return None;
-                    }
-                    let bounds = dropdown_bounds(&format!("SB_LAYOUT_TAB:{to}"))?;
-                    bounds.contains(point).then(|| {
-                        let after = point.x >= bounds.x + bounds.width / 2.0;
-                        (
-                            Message::LayoutReorder {
-                                from: from.clone(),
-                                to: to.clone(),
-                                after,
-                            },
-                            bounds,
+            }),
+            ReorderSource::Layout { from, targets } => targets.iter().find_map(|to| {
+                if to == from {
+                    return None;
+                }
+                let bounds = dropdown_bounds(&format!("SB_LAYOUT_TAB:{to}"))?;
+                bounds.contains(point).then(|| {
+                    let after = point.x >= bounds.x + bounds.width / 2.0;
+                    (
+                        Message::LayoutReorder {
+                            from: from.clone(),
+                            to: to.clone(),
                             after,
-                        )
-                    })
+                        },
+                        bounds,
+                        after,
+                    )
                 })
-            }
+            }),
         }
     }
 }
@@ -1276,9 +1274,13 @@ impl<'a> Widget<Message, Theme, Renderer> for ReorderTab<'a> {
         if cursor.is_over(layout.bounds()) {
             return mouse::Interaction::Grab;
         }
-        self.child
-            .as_widget()
-            .mouse_interaction(&tree.children[0], layout, cursor, viewport, renderer)
+        self.child.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
     }
 
     fn operate(

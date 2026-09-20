@@ -66,9 +66,12 @@ impl SplineCommand {
     }
 
     pub fn with_document(mut self, document: &CadDocument) -> Self {
-        self.convertible = document.entities().filter_map(|entity| {
-            spline_from_polyline(entity).map(|spline| (entity.common().handle, spline))
-        }).collect();
+        self.convertible = document
+            .entities()
+            .filter_map(|entity| {
+                spline_from_polyline(entity).map(|spline| (entity.common().handle, spline))
+            })
+            .collect();
         self
     }
 
@@ -93,7 +96,11 @@ fn control_spline(points: &[[f64; 3]], degree: usize, closed: bool) -> Option<Sp
     let curve = cadkernel::space::NurbsCurve3::from_control_polygon(degree, points, closed)?;
     let mut spline = Spline {
         degree: curve.degree() as i32,
-        control_points: curve.control_points().iter().map(|p| Vector3::new(p[0], p[1], p[2])).collect(),
+        control_points: curve
+            .control_points()
+            .iter()
+            .map(|p| Vector3::new(p[0], p[1], p[2]))
+            .collect(),
         knots: curve.knots().to_vec(),
         weights: curve.weights().to_vec(),
         ..Default::default()
@@ -107,16 +114,32 @@ fn control_spline(points: &[[f64; 3]], degree: usize, closed: bool) -> Option<Sp
 fn spline_from_polyline(entity: &EntityType) -> Option<Spline> {
     let (degree, points, closed, normal) = match entity {
         EntityType::Polyline2D(poly) if poly.flags.is_spline_fit() => {
-            let degree = match poly.smooth_surface as i16 { 5 => 2, 6 => 3, _ => return None };
+            let degree = match poly.smooth_surface as i16 {
+                5 => 2,
+                6 => 3,
+                _ => return None,
+            };
             let plane = crate::entities::curve::ocs_plane(poly.normal, poly.elevation);
-            let controls: Vec<_> = poly.vertices.iter().filter(|vertex| vertex.flags.bits() & 16 != 0)
-                .map(|vertex| plane.point_at([vertex.location.x, vertex.location.y])).collect();
+            let controls: Vec<_> = poly
+                .vertices
+                .iter()
+                .filter(|vertex| vertex.flags.bits() & 16 != 0)
+                .map(|vertex| plane.point_at([vertex.location.x, vertex.location.y]))
+                .collect();
             (degree, controls, poly.is_closed(), poly.normal)
         }
         EntityType::Polyline3D(poly) if poly.flags.spline_fit => {
-            let degree = match poly.smooth_type as i16 { 5 => 2, 6 => 3, _ => return None };
-            let controls: Vec<_> = poly.vertices.iter().filter(|vertex| vertex.flags & 16 != 0)
-                .map(|vertex| [vertex.position.x, vertex.position.y, vertex.position.z]).collect();
+            let degree = match poly.smooth_type as i16 {
+                5 => 2,
+                6 => 3,
+                _ => return None,
+            };
+            let controls: Vec<_> = poly
+                .vertices
+                .iter()
+                .filter(|vertex| vertex.flags & 16 != 0)
+                .map(|vertex| [vertex.position.x, vertex.position.y, vertex.position.z])
+                .collect();
             (degree, controls, poly.is_closed(), poly.normal)
         }
         _ => return None,
@@ -155,7 +178,9 @@ impl CadCommand for SplineCommand {
     }
 
     fn prompt(&self) -> String {
-        if self.choosing_objects { return t!("Select spline-fit polylines:").to_string(); }
+        if self.choosing_objects {
+            return t!("Select spline-fit polylines:").to_string();
+        }
         if self.choosing_degree {
             format!("SPLINE  Enter degree of spline <{}>:", self.degree)
         } else if self.choosing_method {
@@ -176,20 +201,33 @@ impl CadCommand for SplineCommand {
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
-        if self.choosing_objects { return Vec::new(); }
+        if self.choosing_objects {
+            return Vec::new();
+        }
         if self.choosing_method {
             return vec![
                 CmdOption::new("Fit", "FIT"),
                 CmdOption::new("Control vertices", "CV"),
             ];
         }
-        if self.choosing_degree { return vec![]; }
-        if self.choosing_tangent { return vec![]; }
+        if self.choosing_degree {
+            return vec![];
+        }
+        if self.choosing_tangent {
+            return vec![];
+        }
         if self.choosing_knots {
-            return vec![CmdOption::new("Chord", "CH"), CmdOption::new("Square root", "S"), CmdOption::new("Uniform", "U")];
+            return vec![
+                CmdOption::new("Chord", "CH"),
+                CmdOption::new("Square root", "S"),
+                CmdOption::new("Uniform", "U"),
+            ];
         }
         if self.pts.is_empty() {
-            let mut options = vec![CmdOption::new(t!("Method").as_ref(), "M"), CmdOption::new("Object", "O")];
+            let mut options = vec![
+                CmdOption::new(t!("Method").as_ref(), "M"),
+                CmdOption::new("Object", "O"),
+            ];
             if self.control_vertices {
                 options.push(CmdOption::new("Degree", "D"));
             } else {
@@ -198,8 +236,12 @@ impl CadCommand for SplineCommand {
             return options;
         }
         let mut opts = vec![];
-        if self.pts.len() >= 3 { opts.push(CmdOption::new(t!("Close").as_ref(), "C")); }
-        if !self.control_vertices { opts.push(CmdOption::new("Tangency", "T")); }
+        if self.pts.len() >= 3 {
+            opts.push(CmdOption::new(t!("Close").as_ref(), "C"));
+        }
+        if !self.control_vertices {
+            opts.push(CmdOption::new("Tangency", "T"));
+        }
         // Undo only makes sense once a control point exists.
         opts.push(CmdOption::new(t!("Undo").as_ref(), "U"));
         opts.push(CmdOption::enter(t!("Done").as_ref()));
@@ -207,23 +249,40 @@ impl CadCommand for SplineCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
-        if self.choosing_objects || self.choosing_method || self.choosing_knots
-            || self.choosing_degree || !pt.is_finite() {
+        if self.choosing_objects
+            || self.choosing_method
+            || self.choosing_knots
+            || self.choosing_degree
+            || !pt.is_finite()
+        {
             return CmdResult::NeedPoint;
         }
         if self.choosing_tangent {
-            let Some(anchor) = self.pts.last() else { return CmdResult::NeedPoint; };
-            let Some(dir) = (pt - *anchor).try_normalize() else { return CmdResult::NeedPoint; };
+            let Some(anchor) = self.pts.last() else {
+                return CmdResult::NeedPoint;
+            };
+            let Some(dir) = (pt - *anchor).try_normalize() else {
+                return CmdResult::NeedPoint;
+            };
             let tangent = Vector3::new(dir.x, dir.y, dir.z);
-            if self.pts.len() == 1 { self.begin_tangent = tangent; }
-            else { self.end_tangent = tangent; }
+            if self.pts.len() == 1 {
+                self.begin_tangent = tangent;
+            } else {
+                self.end_tangent = tangent;
+            }
             self.choosing_tangent = false;
             if self.pts.len() > 1 {
-                return self.build(false).map_or(CmdResult::NeedPoint, CmdResult::CommitAndExit);
+                return self
+                    .build(false)
+                    .map_or(CmdResult::NeedPoint, CmdResult::CommitAndExit);
             }
             return CmdResult::NeedPoint;
         }
-        if self.pts.last().is_some_and(|last| last.distance_squared(pt) < 1e-20) {
+        if self
+            .pts
+            .last()
+            .is_some_and(|last| last.distance_squared(pt) < 1e-20)
+        {
             return CmdResult::NeedPoint;
         }
         self.pts.push(pt);
@@ -232,11 +291,20 @@ impl CadCommand for SplineCommand {
 
     fn on_enter(&mut self) -> CmdResult {
         if self.choosing_objects {
-            let replacements = self.selected_objects.iter().filter_map(|handle| {
-                self.convertible.get(handle).map(|spline| (*handle, vec![EntityType::Spline(spline.clone())]))
-            }).collect::<Vec<_>>();
-            return if replacements.is_empty() { CmdResult::Cancel }
-                else { CmdResult::ReplaceMany(replacements, Vec::new()) };
+            let replacements = self
+                .selected_objects
+                .iter()
+                .filter_map(|handle| {
+                    self.convertible
+                        .get(handle)
+                        .map(|spline| (*handle, vec![EntityType::Spline(spline.clone())]))
+                })
+                .collect::<Vec<_>>();
+            return if replacements.is_empty() {
+                CmdResult::Cancel
+            } else {
+                CmdResult::ReplaceMany(replacements, Vec::new())
+            };
         }
 
         if self.choosing_method || self.choosing_knots || self.choosing_degree {
@@ -245,7 +313,9 @@ impl CadCommand for SplineCommand {
             self.choosing_knots = false;
             return CmdResult::NeedPoint;
         }
-        if self.choosing_tangent { return CmdResult::NeedPoint; }
+        if self.choosing_tangent {
+            return CmdResult::NeedPoint;
+        }
         match self.build(false) {
             Some(e) => CmdResult::CommitAndExit(e),
             None => CmdResult::Cancel,
@@ -253,13 +323,22 @@ impl CadCommand for SplineCommand {
     }
 
     fn enter_accepts_default_start(&self) -> bool {
-        self.pts.is_empty() && !self.choosing_method && !self.choosing_objects
-            && !self.choosing_knots && !self.choosing_degree && !self.choosing_tangent
+        self.pts.is_empty()
+            && !self.choosing_method
+            && !self.choosing_objects
+            && !self.choosing_knots
+            && !self.choosing_degree
+            && !self.choosing_tangent
     }
 
-    fn is_selection_gathering(&self) -> bool { self.choosing_objects }
+    fn is_selection_gathering(&self) -> bool {
+        self.choosing_objects
+    }
     fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
-        self.selected_objects = handles.into_iter().filter(|handle| self.convertible.contains_key(handle)).collect();
+        self.selected_objects = handles
+            .into_iter()
+            .filter(|handle| self.convertible.contains_key(handle))
+            .collect();
         CmdResult::NeedPoint
     }
 
@@ -268,11 +347,15 @@ impl CadCommand for SplineCommand {
     }
 
     fn on_undo_step(&mut self) -> Option<CmdResult> {
-        if self.pts.is_empty() { return None; }
+        if self.pts.is_empty() {
+            return None;
+        }
         self.pts.pop();
         self.end_tangent = Vector3::ZERO;
         self.choosing_tangent = false;
-        if self.pts.is_empty() { self.begin_tangent = Vector3::ZERO; }
+        if self.pts.is_empty() {
+            self.begin_tangent = Vector3::ZERO;
+        }
         Some(CmdResult::NeedPoint)
     }
 
@@ -285,9 +368,15 @@ impl CadCommand for SplineCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        if self.choosing_tangent { return None; }
+        if self.choosing_tangent {
+            return None;
+        }
         if self.choosing_degree {
-            self.degree = text.trim().parse::<usize>().ok().filter(|d| (1..=10).contains(d))?;
+            self.degree = text
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .filter(|d| (1..=10).contains(d))?;
             self.choosing_degree = false;
             return Some(CmdResult::NeedPoint);
         }
@@ -336,29 +425,37 @@ impl CadCommand for SplineCommand {
                 Some(e) => Some(CmdResult::CommitAndExit(e)),
                 None => Some(CmdResult::NeedPoint),
             },
-            "U" | "UNDO" => {
-                self.on_undo_step().or(Some(CmdResult::NeedPoint))
-            }
+            "U" | "UNDO" => self.on_undo_step().or(Some(CmdResult::NeedPoint)),
             _ => None,
         }
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
-        if self.pts.is_empty() || self.choosing_objects || self.choosing_method
-            || self.choosing_knots || self.choosing_degree || self.choosing_tangent {
+        if self.pts.is_empty()
+            || self.choosing_objects
+            || self.choosing_method
+            || self.choosing_knots
+            || self.choosing_degree
+            || self.choosing_tangent
+        {
             return None;
         }
         // Preview the committed construction method.
         self.pts.push(pt);
         let entity = self.build(false);
         self.pts.pop();
-        let Some(EntityType::Spline(spline)) = entity else { return None; };
+        let Some(EntityType::Spline(spline)) = entity else {
+            return None;
+        };
         let points = crate::entities::curve::spline_curve(&spline)
             .map(|curve| crate::entities::curve::curve_points(&curve))
             .unwrap_or_else(|| crate::entities::spline::measurement_polyline(&spline));
         Some(WireModel::solid(
             "rubber_band".into(),
-            points.into_iter().map(|p| [p[0] as f32, p[1] as f32, p[2] as f32]).collect(),
+            points
+                .into_iter()
+                .map(|p| [p[0] as f32, p[1] as f32, p[2] as f32])
+                .collect(),
             WireModel::CYAN,
             false,
         ))
@@ -390,14 +487,35 @@ mod tests {
     #[test]
     fn fit_options_persist_parameterization_and_endpoint_tangents() {
         let mut command = SplineCommand::new();
-        assert!(matches!(command.on_text_input("K"), Some(CmdResult::NeedPoint)));
-        assert!(matches!(command.on_text_input("S"), Some(CmdResult::NeedPoint)));
-        assert!(matches!(command.on_point(DVec3::ZERO), CmdResult::NeedPoint));
-        assert!(matches!(command.on_text_input("T"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(
+            command.on_text_input("K"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("S"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_point(DVec3::ZERO),
+            CmdResult::NeedPoint
+        ));
+        assert!(matches!(
+            command.on_text_input("T"),
+            Some(CmdResult::NeedPoint)
+        ));
         assert!(matches!(command.on_point(DVec3::X), CmdResult::NeedPoint));
-        assert!(matches!(command.on_point(DVec3::new(1.0, 1.0, 0.0)), CmdResult::NeedPoint));
-        assert!(matches!(command.on_point(DVec3::new(2.0, 0.0, 0.0)), CmdResult::NeedPoint));
-        assert!(matches!(command.on_text_input("T"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(
+            command.on_point(DVec3::new(1.0, 1.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
+        assert!(matches!(
+            command.on_point(DVec3::new(2.0, 0.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
+        assert!(matches!(
+            command.on_text_input("T"),
+            Some(CmdResult::NeedPoint)
+        ));
 
         let CmdResult::CommitAndExit(EntityType::Spline(spline)) =
             command.on_point(DVec3::new(2.0, 1.0, 0.0))
@@ -413,8 +531,14 @@ mod tests {
     #[test]
     fn control_degree_is_clamped_to_the_available_points() {
         let mut command = SplineCommand::control_vertices();
-        assert!(matches!(command.on_text_input("D"), Some(CmdResult::NeedPoint)));
-        assert!(matches!(command.on_text_input("10"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(
+            command.on_text_input("D"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("10"),
+            Some(CmdResult::NeedPoint)
+        ));
         for point in [DVec3::ZERO, DVec3::X, DVec3::Y] {
             assert!(matches!(command.on_point(point), CmdResult::NeedPoint));
         }
@@ -437,7 +561,10 @@ mod tests {
         .expect("valid converted spline");
         let mut command = SplineCommand::new();
         command.convertible.insert(handle, converted.clone());
-        assert!(matches!(command.on_text_input("O"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(
+            command.on_text_input("O"),
+            Some(CmdResult::NeedPoint)
+        ));
         assert!(command.is_selection_gathering());
         assert!(matches!(
             command.on_selection_complete(vec![handle]),
@@ -488,10 +615,19 @@ mod tests {
     #[test]
     fn duplicate_points_and_point_undo_keep_tangent_state_consistent() {
         let mut command = SplineCommand::new();
-        assert!(matches!(command.on_point(DVec3::ZERO), CmdResult::NeedPoint));
-        assert!(matches!(command.on_point(DVec3::ZERO), CmdResult::NeedPoint));
+        assert!(matches!(
+            command.on_point(DVec3::ZERO),
+            CmdResult::NeedPoint
+        ));
+        assert!(matches!(
+            command.on_point(DVec3::ZERO),
+            CmdResult::NeedPoint
+        ));
         assert_eq!(command.pts.len(), 1);
-        assert!(matches!(command.on_text_input("T"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(
+            command.on_text_input("T"),
+            Some(CmdResult::NeedPoint)
+        ));
         assert!(matches!(command.on_point(DVec3::X), CmdResult::NeedPoint));
         assert_ne!(command.begin_tangent, Vector3::ZERO);
         assert!(command.on_undo_step().is_some());

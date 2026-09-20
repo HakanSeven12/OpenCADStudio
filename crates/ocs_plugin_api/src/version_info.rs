@@ -147,11 +147,16 @@ mod tests {
             value["ocs_plugin_api_version"].as_str(),
             Some(env!("CARGO_PKG_VERSION"))
         );
-        assert_eq!(value["api_version"].as_i64(), Some(crate::API_VERSION as i64));
+        assert_eq!(
+            value["api_version"].as_i64(),
+            Some(crate::API_VERSION as i64)
+        );
         assert_eq!(value["api_version_min_supported"].as_i64(), Some(2));
 
         // acadrust_version should have a patch component (e.g. "0.4.0").
-        let acadrust = value["acadrust_version"].as_str().expect("acadrust_version string");
+        let acadrust = value["acadrust_version"]
+            .as_str()
+            .expect("acadrust_version string");
         assert_eq!(acadrust.split('.').count(), 3);
     }
 
@@ -220,10 +225,10 @@ mod tests {
         assert!(acadrust_source_hash("").is_none());
         assert!(acadrust_source_hash("registry+https://crates.io").is_none());
         assert!(acadrust_source_hash("git+https://github.com/foo/bar.git#short").is_none());
-        assert!(
-            acadrust_source_hash("git+https://github.com/foo/bar.git#gggggggggggggggggggggggggggggggggggggggg")
-                .is_none()
-        );
+        assert!(acadrust_source_hash(
+            "git+https://github.com/foo/bar.git#gggggggggggggggggggggggggggggggggggggggg"
+        )
+        .is_none());
     }
 
     #[test]

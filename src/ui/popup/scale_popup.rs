@@ -1,8 +1,8 @@
 //! Annotation / viewport scale status menu.
 
+use crate::t;
 use iced::widget::{button, row, text};
 use iced::{Element, Fill};
-use crate::t;
 
 use crate::app::Message;
 use crate::ui::statusbar::status_menu::Entry;
@@ -28,9 +28,7 @@ pub fn menu_entries(
                 label.eq_ignore_ascii_case(current_scale_name)
                     || (current_scale_name.is_empty()
                         && viewport_scale
-                            .map(|vs| {
-                                (vs - vp_scale).abs() < 0.001 * vp_scale.max(0.001)
-                            })
+                            .map(|vs| (vs - vp_scale).abs() < 0.001 * vp_scale.max(0.001))
                             .unwrap_or(false))
             };
             let msg = if is_model {

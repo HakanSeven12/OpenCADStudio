@@ -84,9 +84,15 @@ impl HatchGpu {
             })),
         });
         let vertex_layouts = if uses_storage {
-            vec![storage::HatchVertex::layout(), storage::HatchPlacement::layout()]
+            vec![
+                storage::HatchVertex::layout(),
+                storage::HatchPlacement::layout(),
+            ]
         } else {
-            vec![texture::vertex_layout(), texture::TextureHatchPlacement::layout()]
+            vec![
+                texture::vertex_layout(),
+                texture::TextureHatchPlacement::layout(),
+            ]
         };
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(if uses_storage {
@@ -180,7 +186,8 @@ impl HatchGpu {
                     .filter(|hatch| hatch.boundary.len() >= 3)
                     .cloned()
                     .collect();
-                *resident = StorageHatchBatch::build(device, queue, &self.bind_group_layout, &renderable);
+                *resident =
+                    StorageHatchBatch::build(device, queue, &self.bind_group_layout, &renderable);
             }
             HatchBackend::Texture { resident, .. } => {
                 let renderable: Vec<HatchModel> = hatches
@@ -188,12 +195,8 @@ impl HatchGpu {
                     .filter(|hatch| hatch.boundary.len() >= 3)
                     .cloned()
                     .collect();
-                *resident = TextureHatch::from_models(
-                    device,
-                    queue,
-                    &renderable,
-                    &self.bind_group_layout,
-                );
+                *resident =
+                    TextureHatch::from_models(device, queue, &renderable, &self.bind_group_layout);
             }
         }
     }
@@ -211,7 +214,8 @@ impl HatchGpu {
                     .filter(|hatch| hatch.boundary.len() >= 3)
                     .cloned()
                     .collect();
-                *preview = StorageHatchBatch::build(device, queue, &self.bind_group_layout, &renderable);
+                *preview =
+                    StorageHatchBatch::build(device, queue, &self.bind_group_layout, &renderable);
             }
             HatchBackend::Texture { preview, .. } => {
                 let renderable: Vec<HatchModel> = hatches
@@ -219,12 +223,8 @@ impl HatchGpu {
                     .filter(|hatch| hatch.boundary.len() >= 3)
                     .cloned()
                     .collect();
-                *preview = TextureHatch::from_models(
-                    device,
-                    queue,
-                    &renderable,
-                    &self.bind_group_layout,
-                );
+                *preview =
+                    TextureHatch::from_models(device, queue, &renderable, &self.bind_group_layout);
             }
         }
     }
@@ -236,8 +236,7 @@ impl HatchGpu {
         queue: &wgpu::Queue,
         mut is_visible: impl FnMut([f32; 4]) -> bool,
     ) -> usize {
-        let HatchBackend::Storage { resident, .. } = &mut self.backend
-        else {
+        let HatchBackend::Storage { resident, .. } = &mut self.backend else {
             return 0;
         };
         let mut updated = 0;
@@ -287,10 +286,7 @@ impl HatchGpu {
                     pass.set_bind_group(1, &hatch.bind_group, &[]);
                     pass.set_vertex_buffer(0, hatch.vertex_buffer.slice(..));
                     pass.set_vertex_buffer(1, hatch.placement_buffer.slice(..));
-                    pass.set_index_buffer(
-                        hatch.index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
+                    pass.set_index_buffer(hatch.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..hatch.index_count, 0, 0..hatch.instance_count);
                 }
             }

@@ -53,20 +53,14 @@ fn cmd_input_id() -> iced::widget::Id {
 
 fn mcp_status(enabled: bool, busy: bool) -> (&'static str, Color) {
     if !enabled {
-        (
-            "MCP control is off",
-            Color::from_rgb(0.90, 0.35, 0.35),
-        )
+        ("MCP control is off", Color::from_rgb(0.90, 0.35, 0.35))
     } else if busy {
         (
             "MCP is handling a request",
             Color::from_rgb(0.95, 0.72, 0.25),
         )
     } else {
-        (
-            "MCP control is ready",
-            Color::from_rgb(0.35, 0.85, 0.55),
-        )
+        ("MCP control is ready", Color::from_rgb(0.35, 0.85, 0.55))
     }
 }
 
@@ -87,9 +81,9 @@ fn strip_option_listing(s: &str, options: &[CmdOption]) -> String {
     let is_listing = inner.contains('/')
         || inner.contains('|')
         || inner.contains('=')
-        || options.iter().any(|o| {
-            o.label.eq_ignore_ascii_case(inner) || o.keyword.eq_ignore_ascii_case(inner)
-        });
+        || options
+            .iter()
+            .any(|o| o.label.eq_ignore_ascii_case(inner) || o.keyword.eq_ignore_ascii_case(inner));
     if !is_listing {
         return s.to_string();
     }
@@ -524,8 +518,11 @@ impl CommandLine {
         if self.cliprompt_lines == 0 {
             return 0;
         }
-        let visible: Vec<&HistoryEntry> =
-            self.history.iter().filter(|e| self.entry_visible(e)).collect();
+        let visible: Vec<&HistoryEntry> = self
+            .history
+            .iter()
+            .filter(|e| self.entry_visible(e))
+            .collect();
         visible.len().min(self.cliprompt_lines as usize)
     }
 
@@ -629,8 +626,11 @@ impl CommandLine {
         // Only the most recent entries pushed within COMMANDLINEFADETIME
         // show on the overlay (0 skips transient lines). The dropdown button
         // keeps the full backlog reachable when the user actually wants it.
-        let mut visible: Vec<&HistoryEntry> =
-            self.history.iter().filter(|e| self.entry_visible(e)).collect();
+        let mut visible: Vec<&HistoryEntry> = self
+            .history
+            .iter()
+            .filter(|e| self.entry_visible(e))
+            .collect();
         // Keep the active prompt/options immediately above the input. Commands
         // may emit informational lines while waiting for the next option; those
         // lines belong above the pinned interaction row, not below it.
@@ -712,9 +712,7 @@ impl CommandLine {
                     p.background.base.text,
                     4.5,
                 );
-                iced::widget::text::Style {
-                    color: Some(color),
-                }
+                iced::widget::text::Style { color: Some(color) }
             },
         ))
         .padding([5, 8]);
@@ -851,8 +849,8 @@ impl CommandLine {
         let mcp_tip = container(text(t!(mcp_tooltip)).size(11))
             .padding([3, 6])
             .style(container::bordered_box);
-        let mcp_btn = container(tooltip(mcp_btn, mcp_tip, tooltip::Position::Top).gap(4))
-            .padding(Padding {
+        let mcp_btn =
+            container(tooltip(mcp_btn, mcp_tip, tooltip::Position::Top).gap(4)).padding(Padding {
                 top: 0.0,
                 right: 6.0,
                 bottom: 0.0,
@@ -931,7 +929,12 @@ impl CommandLine {
             .padding([2, 8]);
             let panel = container(column![header, log])
                 .width(Length::Fill)
-                .padding(Padding { top: 2.0, right: 8.0, bottom: 4.0, left: 8.0 });
+                .padding(Padding {
+                    top: 2.0,
+                    right: 8.0,
+                    bottom: 4.0,
+                    left: 8.0,
+                });
             let resize = iced::widget::mouse_area(
                 container(crate::ui::icons::themed_primary(
                     crate::ui::icons::RESIZE,

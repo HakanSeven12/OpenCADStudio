@@ -97,9 +97,9 @@ impl CadCommand for CoincidentConstraintCommand {
             }
             Step::FirstObject => "COINCIDENT  Select object:".to_string(),
             Step::Second(_) => "COINCIDENT  Select second point or object:".to_string(),
-            Step::PointsOnCurve { multiple: false, .. } => {
-                "COINCIDENT  Select point or [Multiple]:".to_string()
-            }
+            Step::PointsOnCurve {
+                multiple: false, ..
+            } => "COINCIDENT  Select point or [Multiple]:".to_string(),
             Step::PointsOnCurve { multiple: true, .. } => {
                 "COINCIDENT  Select points to coincide with the first object (Enter = done):"
                     .to_string()
@@ -143,7 +143,9 @@ impl CadCommand for CoincidentConstraintCommand {
                 CmdOption::new("Object", "O"),
                 CmdOption::new("Autoconstrain", "A"),
             ],
-            Step::PointsOnCurve { multiple: false, .. } => vec![
+            Step::PointsOnCurve {
+                multiple: false, ..
+            } => vec![
                 CmdOption::new("Point", "P"),
                 CmdOption::new("Multiple", "M"),
             ],
@@ -161,17 +163,16 @@ impl CadCommand for CoincidentConstraintCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let keyword = text
-            .trim()
-            .trim_start_matches('_')
-            .to_ascii_uppercase();
+        let keyword = text.trim().trim_start_matches('_').to_ascii_uppercase();
         match (&mut self.step, keyword.as_str()) {
             (Step::First, "O" | "OBJECT") => {
                 self.step = Step::FirstObject;
                 Some(CmdResult::NeedPoint)
             }
             (Step::First, "A" | "AUTOCONSTRAIN") => {
-                self.step = Step::AutoConstrain { handles: Vec::new() };
+                self.step = Step::AutoConstrain {
+                    handles: Vec::new(),
+                };
                 Some(CmdResult::NeedPoint)
             }
             (Step::PointsOnCurve { multiple, .. }, "M" | "MULTIPLE") => {
@@ -211,10 +212,7 @@ impl CadCommand for CoincidentConstraintCommand {
             .picked_entity
             .as_ref()
             .is_some_and(|entity| Self::picked_constraint_point(entity, point));
-        let is_curve = self
-            .picked_entity
-            .as_ref()
-            .is_some_and(Self::valid_curve);
+        let is_curve = self.picked_entity.as_ref().is_some_and(Self::valid_curve);
         self.picked_entity = None;
 
         match self.step.clone() {
@@ -312,9 +310,10 @@ mod tests {
             command.on_text_input("Object"),
             Some(CmdResult::NeedPoint)
         ));
-        command.inject_picked_entity(EntityType::Line(
-            acadrust::entities::Line::from_points(Vector3::ZERO, Vector3::UNIT_X),
-        ));
+        command.inject_picked_entity(EntityType::Line(acadrust::entities::Line::from_points(
+            Vector3::ZERO,
+            Vector3::UNIT_X,
+        )));
         let handle = Handle::new(7);
         assert!(matches!(
             command.on_entity_pick(handle, DVec3::ZERO),

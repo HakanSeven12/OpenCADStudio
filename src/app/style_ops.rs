@@ -18,9 +18,7 @@
 //! style added without a handle (dropped on DWG save, issue #67).
 
 use super::OpenCADStudio;
-use acadrust::objects::{
-    Dictionary, MLineStyle, MultiLeaderStyle, ObjectType, TableStyle,
-};
+use acadrust::objects::{Dictionary, MLineStyle, MultiLeaderStyle, ObjectType, TableStyle};
 use acadrust::tables::{DimStyle, TextStyle};
 use acadrust::types::Handle;
 
@@ -38,12 +36,7 @@ fn mleaderstyle_dict_handle(doc: &acadrust::CadDocument) -> Option<Handle> {
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case(MLEADERSTYLE_DICT_NAME))
         .map(|(_, handle)| *handle)
-        .filter(|handle| {
-            matches!(
-                doc.objects.get(handle),
-                Some(ObjectType::Dictionary(_))
-            )
-        })
+        .filter(|handle| matches!(doc.objects.get(handle), Some(ObjectType::Dictionary(_))))
 }
 
 fn import_mleaderstyle_names_from_dictionary(doc: &mut acadrust::CadDocument) {
@@ -57,9 +50,7 @@ fn import_mleaderstyle_names_from_dictionary(doc: &mut acadrust::CadDocument) {
     };
 
     for (name, handle) in entries {
-        if let Some(ObjectType::MultiLeaderStyle(style)) =
-            doc.objects.get_mut(&handle)
-        {
+        if let Some(ObjectType::MultiLeaderStyle(style)) = doc.objects.get_mut(&handle) {
             style.name = name;
             style.owner_handle = dict_h;
         }
@@ -78,12 +69,9 @@ fn sync_mleaderstyle_dictionary(doc: &mut acadrust::CadDocument) {
         _ => None,
     };
 
-    let dict_h = match existing.filter(|handle| {
-        matches!(
-            doc.objects.get(handle),
-            Some(ObjectType::Dictionary(_))
-        )
-    }) {
+    let dict_h = match existing
+        .filter(|handle| matches!(doc.objects.get(handle), Some(ObjectType::Dictionary(_))))
+    {
         Some(handle) => handle,
         None => {
             let handle = doc.allocate_handle();
@@ -92,8 +80,7 @@ fn sync_mleaderstyle_dictionary(doc: &mut acadrust::CadDocument) {
             dict.handle = handle;
             dict.owner = root_h;
 
-            doc.objects
-                .insert(handle, ObjectType::Dictionary(dict));
+            doc.objects.insert(handle, ObjectType::Dictionary(dict));
 
             handle
         }
@@ -110,21 +97,15 @@ fn sync_mleaderstyle_dictionary(doc: &mut acadrust::CadDocument) {
         .objects
         .iter()
         .filter_map(|(&handle, object)| match object {
-            ObjectType::MultiLeaderStyle(style) => {
-                Some((style.name.clone(), handle))
-            }
+            ObjectType::MultiLeaderStyle(style) => Some((style.name.clone(), handle)),
             _ => None,
         })
         .collect();
 
-    entries.sort_by(|a, b| {
-        a.0.to_lowercase().cmp(&b.0.to_lowercase())
-    });
+    entries.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
 
     for (_, handle) in &entries {
-        if let Some(ObjectType::MultiLeaderStyle(style)) =
-            doc.objects.get_mut(handle)
-        {
+        if let Some(ObjectType::MultiLeaderStyle(style)) = doc.objects.get_mut(handle) {
             style.owner_handle = dict_h;
         }
     }
@@ -184,7 +165,8 @@ pub(crate) fn ensure_standard_styles(doc: &mut acadrust::CadDocument) {
     }) {
         let mut s = MultiLeaderStyle::standard();
         s.handle = doc.allocate_handle();
-        doc.objects.insert(s.handle, ObjectType::MultiLeaderStyle(s));
+        doc.objects
+            .insert(s.handle, ObjectType::MultiLeaderStyle(s));
     }
     sync_mleaderstyle_dictionary(doc);
 
@@ -428,7 +410,11 @@ impl OpenCADStudio {
         let doc = &self.tabs[i].scene.document;
         match kind {
             StyleKind::Text => {
-                if doc.header.current_text_style_name.eq_ignore_ascii_case(name) {
+                if doc
+                    .header
+                    .current_text_style_name
+                    .eq_ignore_ascii_case(name)
+                {
                     return true;
                 }
                 let style_handle = doc.text_styles.get(name).map(|style| style.handle);
@@ -441,16 +427,16 @@ impl OpenCADStudio {
                     EntityType::AttributeDefinition(attribute) => {
                         attribute.text_style.eq_ignore_ascii_case(name)
                     }
-                    EntityType::Insert(insert) => insert.attributes.iter().any(|attribute| {
-                        attribute.text_style.eq_ignore_ascii_case(name)
-                    }),
-                    EntityType::MultiLeader(leader) => [
-                        leader.text_style_handle,
-                        leader.context.text_style_handle,
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .any(|handle| Some(handle) == style_handle),
+                    EntityType::Insert(insert) => insert
+                        .attributes
+                        .iter()
+                        .any(|attribute| attribute.text_style.eq_ignore_ascii_case(name)),
+                    EntityType::MultiLeader(leader) => {
+                        [leader.text_style_handle, leader.context.text_style_handle]
+                            .into_iter()
+                            .flatten()
+                            .any(|handle| Some(handle) == style_handle)
+                    }
                     EntityType::Table(table) => table.rows.iter().any(|row| {
                         row.style
                             .as_ref()
@@ -498,9 +484,9 @@ impl OpenCADStudio {
                         EntityType::Leader(leader) => {
                             leader.dimension_style.eq_ignore_ascii_case(name)
                         }
-                        EntityType::Tolerance(tolerance) => tolerance
-                            .dimension_style_name
-                            .eq_ignore_ascii_case(name),
+                        EntityType::Tolerance(tolerance) => {
+                            tolerance.dimension_style_name.eq_ignore_ascii_case(name)
+                        }
                         _ => false,
                     })
             }
@@ -509,14 +495,15 @@ impl OpenCADStudio {
                     return false;
                 };
                 let is_current = match kind {
-                    StyleKind::Table => {
-                        doc.header.current_table_style_name.eq_ignore_ascii_case(name)
-                    }
+                    StyleKind::Table => doc
+                        .header
+                        .current_table_style_name
+                        .eq_ignore_ascii_case(name),
                     StyleKind::MLeader => {
-                        doc.header.current_mleader_style_name.eq_ignore_ascii_case(name)
-                            || self.tabs[i]
-                                .active_mleader_style
-                                .eq_ignore_ascii_case(name)
+                        doc.header
+                            .current_mleader_style_name
+                            .eq_ignore_ascii_case(name)
+                            || self.tabs[i].active_mleader_style.eq_ignore_ascii_case(name)
                     }
                     StyleKind::MLine => doc.header.multiline_style.eq_ignore_ascii_case(name),
                     StyleKind::Text | StyleKind::Dim => false,
@@ -648,7 +635,11 @@ impl OpenCADStudio {
                 if self.ribbon.active_table_style.eq_ignore_ascii_case(old) {
                     self.ribbon.active_table_style = new.to_string();
                 }
-                if doc.header.current_table_style_name.eq_ignore_ascii_case(old) {
+                if doc
+                    .header
+                    .current_table_style_name
+                    .eq_ignore_ascii_case(old)
+                {
                     doc.header.current_table_style_name = new.to_string();
                 }
             }
@@ -732,7 +723,7 @@ impl OpenCADStudio {
     }
 
     pub(super) fn style_delete(&mut self, kind: StyleKind) {
-        let name = self.style_selected(kind);        
+        let name = self.style_selected(kind);
         if name.eq_ignore_ascii_case("Standard") {
             self.command_line
                 .push_error(crate::t!("Cannot delete the Standard style.").as_ref());
@@ -893,34 +884,24 @@ impl OpenCADStudio {
             self.sync_ribbon_styles();
             return;
         };
-        sync_mleaderstyle_dictionary(
-            &mut self.tabs[i].scene.document,
-        );
+        sync_mleaderstyle_dictionary(&mut self.tabs[i].scene.document);
 
         let edited = self.capture_style_state();
         let changed = edited != stage.baseline;
         if changed {
             self.tabs[i].dirty = true;
             let (text_names, dim_names, object_handles) = edited.changed_keys(&stage.baseline);
-            let changed_mleader_styles:
-                Vec<acadrust::objects::MultiLeaderStyle> =
-                object_handles
-                    .iter()
-                    .filter_map(|handle| {
-                        match self.tabs[i]
-                            .scene
-                            .document
-                            .objects
-                            .get(handle)
-                        {
-                            Some(
-                                acadrust::objects::ObjectType::
-                                    MultiLeaderStyle(style),
-                            ) => Some(style.clone()),
-                            _ => None,
+            let changed_mleader_styles: Vec<acadrust::objects::MultiLeaderStyle> = object_handles
+                .iter()
+                .filter_map(
+                    |handle| match self.tabs[i].scene.document.objects.get(handle) {
+                        Some(acadrust::objects::ObjectType::MultiLeaderStyle(style)) => {
+                            Some(style.clone())
                         }
-                    })
-                    .collect();
+                        _ => None,
+                    },
+                )
+                .collect();
 
             let mut changed_mleaders = Vec::new();
 
@@ -929,42 +910,34 @@ impl OpenCADStudio {
                     let doc = &self.tabs[i].scene.document;
 
                     doc.entities()
-                        .filter_map(|entity| {
-                            match entity {
-                                acadrust::EntityType::MultiLeader(ml)
-                                    if ml.style_handle
-                                        == Some(style.handle) =>
-                                {
-                                    Some(ml.common.handle)
-                                }
-                                _ => None,
+                        .filter_map(|entity| match entity {
+                            acadrust::EntityType::MultiLeader(ml)
+                                if ml.style_handle == Some(style.handle) =>
+                            {
+                                Some(ml.common.handle)
                             }
+                            _ => None,
                         })
                         .collect()
                 };
 
                 for handle in entity_handles {
-                    if crate::scene::annotative::
-                        apply_mleader_style_to_object(
-                            &mut self.tabs[i].scene.document,
-                            handle,
-                            &style,
-                        )
-                    {
-                        changed_mleaders.push((
-                            handle,
-                            crate::scene::ChangeKind::Modified,
-                        ));
+                    if crate::scene::annotative::apply_mleader_style_to_object(
+                        &mut self.tabs[i].scene.document,
+                        handle,
+                        &style,
+                    ) {
+                        changed_mleaders.push((handle, crate::scene::ChangeKind::Modified));
                     }
                 }
             }
 
             if !changed_mleaders.is_empty() {
-                self.tabs[i]
-                    .scene
-                    .bump_entities(&changed_mleaders);
+                self.tabs[i].scene.bump_entities(&changed_mleaders);
             }
-            self.tabs[i].scene.invalidate_text_style_dependencies_many(&text_names);
+            self.tabs[i]
+                .scene
+                .invalidate_text_style_dependencies_many(&text_names);
             self.tabs[i]
                 .scene
                 .invalidate_dim_style_dependencies_many(&dim_names);
@@ -1154,7 +1127,8 @@ impl OpenCADStudio {
         let root_h = self.tabs[i].scene.document.header.named_objects_dict_handle;
         let cur_scalelist_h = self.tabs[i].scene.scalelist_dict_handle();
         let doc = &mut self.tabs[i].scene.document;
-        doc.objects.retain(|_, o| !matches!(o, ObjectType::Scale(_)));
+        doc.objects
+            .retain(|_, o| !matches!(o, ObjectType::Scale(_)));
         if let Some(h) = cur_scalelist_h {
             doc.objects.remove(&h);
         }

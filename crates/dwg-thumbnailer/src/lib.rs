@@ -74,14 +74,14 @@ pub fn badge_dwg(img: &mut RgbaImage) {
         let label = label.to_rgba8();
         if label.width() > 0 && label.height() > 0 {
             let mut target_h = ((band_h as f32 * 0.72) as u32).max(1);
-            let mut target_w = ((label.width() as f32 * target_h as f32 / label.height() as f32)
-                as u32)
-                .max(1);
+            let mut target_w =
+                ((label.width() as f32 * target_h as f32 / label.height() as f32) as u32).max(1);
             // Don't let a wide wordmark spill past the thumbnail edges.
             let max_w = ((w as f32 * 0.90) as u32).max(1);
             if target_w > max_w {
                 target_w = max_w;
-                target_h = ((label.height() as f32 * target_w as f32 / label.width() as f32) as u32)
+                target_h = ((label.height() as f32 * target_w as f32 / label.width() as f32)
+                    as u32)
                     .max(1);
             }
             let label = image::imageops::thumbnail(&label, target_w, target_h);
@@ -197,7 +197,9 @@ fn parse_preview_container(buf: &[u8], base: u64) -> Option<(Fmt, &[u8])> {
 fn decode(format: Fmt, data: &[u8]) -> Option<RgbaImage> {
     let img = match format {
         Fmt::Png => image::load_from_memory_with_format(data, ImageFormat::Png).ok()?,
-        Fmt::Bmp => image::load_from_memory_with_format(&dib_to_bmp(data), ImageFormat::Bmp).ok()?,
+        Fmt::Bmp => {
+            image::load_from_memory_with_format(&dib_to_bmp(data), ImageFormat::Bmp).ok()?
+        }
     };
     Some(img.to_rgba8())
 }
@@ -235,7 +237,9 @@ pub unsafe extern "C" fn dwg_thumbnail_png(
         return false;
     }
     let cstr = std::ffi::CStr::from_ptr(path_utf8);
-    let Ok(path) = cstr.to_str() else { return false };
+    let Ok(path) = cstr.to_str() else {
+        return false;
+    };
     let Some(mut img) = extract(Path::new(path), max_dim) else {
         return false;
     };
@@ -271,7 +275,11 @@ fn dib_to_bmp(dib: &[u8]) -> Vec<u8> {
     }
     let bi_size = u32::from_le_bytes([dib[0], dib[1], dib[2], dib[3]]) as usize;
     let bpp = u16::from_le_bytes([dib[14], dib[15]]) as usize;
-    let palette = if (1..=8).contains(&bpp) { (1usize << bpp) * 4 } else { 0 };
+    let palette = if (1..=8).contains(&bpp) {
+        (1usize << bpp) * 4
+    } else {
+        0
+    };
     let mut v = Vec::with_capacity(14 + dib.len());
     v.extend_from_slice(b"BM");
     v.extend_from_slice(&((14 + dib.len()) as u32).to_le_bytes());

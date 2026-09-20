@@ -320,7 +320,9 @@ mod imp {
         let resp_val = JsFuture::from(win.fetch_with_str(script.asset()))
             .await
             .map_err(|e| format!("{e:?}"))?;
-        let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "bad response".to_string())?;
+        let resp: web_sys::Response = resp_val
+            .dyn_into()
+            .map_err(|_| "bad response".to_string())?;
         if !resp.ok() {
             return Err(format!("HTTP {}", resp.status()));
         }

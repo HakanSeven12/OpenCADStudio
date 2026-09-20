@@ -17,11 +17,7 @@ pub struct BoundarySource {
 /// Boundary welding tolerance for tessellated wires.
 const WELD_TOLERANCE: f64 = 1.0e-6;
 
-fn wire_segments_on_plane(
-    wire: &WireModel,
-    plane: WorkingPlane,
-    tolerance: f64,
-) -> Vec<Line> {
+fn wire_segments_on_plane(wire: &WireModel, plane: WorkingPlane, tolerance: f64) -> Vec<Line> {
     let mut segments = Vec::new();
     let mut previous: Option<glam::DVec3> = None;
     for (index, high) in wire.points.iter().copied().enumerate() {
@@ -54,11 +50,7 @@ fn wire_segments_on_plane(
     segments
 }
 
-fn entity_curves_on_plane(
-    entity: &EntityType,
-    plane: WorkingPlane,
-    tolerance: f64,
-) -> Vec<Curve> {
+fn entity_curves_on_plane(entity: &EntityType, plane: WorkingPlane, tolerance: f64) -> Vec<Curve> {
     let Some(planar) = crate::entities::curve::entity_curve(entity) else {
         return Vec::new();
     };
@@ -105,8 +97,7 @@ fn entity_boundary_source_on_plane(
                     let start = pair[0];
                     let end = pair[1];
 
-                    (start.iter().chain(&end).all(|value| value.is_finite())
-                        && start != end)
+                    (start.iter().chain(&end).all(|value| value.is_finite()) && start != end)
                         .then_some(Line { start, end })
                 })
                 .collect::<Vec<_>>()
@@ -129,10 +120,7 @@ fn hatch_path_seed(path: &acadrust::entities::BoundaryPath) -> Option<[f64; 2]> 
     let (points, triangles) = triangulate(&ring, &[]);
     if let Some(triangle) = triangles.first() {
         let [a, b, c] = triangle.map(|vertex| points[vertex]);
-        Some([
-            (a[0] + b[0] + c[0]) / 3.0,
-            (a[1] + b[1] + c[1]) / 3.0,
-        ])
+        Some([(a[0] + b[0] + c[0]) / 3.0, (a[1] + b[1] + c[1]) / 3.0])
     } else {
         Some([
             ring.iter().map(|point| point[0]).sum::<f64>() / ring.len() as f64,
@@ -244,8 +232,8 @@ fn curve_forward(curve: &Curve, start: [f64; 2], next: [f64; 2]) -> bool {
 }
 
 fn stored_arc_angles(start: f64, end: f64, counter_clockwise: bool, whole: bool) -> (f64, f64) {
-    let stored_start = if counter_clockwise { start } else { -start }
-        .rem_euclid(std::f64::consts::TAU);
+    let stored_start =
+        if counter_clockwise { start } else { -start }.rem_euclid(std::f64::consts::TAU);
     let sweep = if whole {
         std::f64::consts::TAU
     } else if counter_clockwise {
@@ -326,7 +314,11 @@ fn exact_boundary_edge(
         }
         Curve::Nurbs(source) => {
             let trimmed = if whole_curve {
-                Some(if forward { source.clone() } else { source.reversed() })
+                Some(if forward {
+                    source.clone()
+                } else {
+                    source.reversed()
+                })
             } else {
                 source.trimmed(source.parameter_at(start), source.parameter_at(end))
             };
@@ -355,12 +347,10 @@ fn exact_boundary_edge(
                 end_tangent: Vector2::new(0.0, 0.0),
             })
         }
-        Curve::Polyline(_) | Curve::Ray(_) | Curve::XLine(_) => {
-            BoundaryEdge::Line(LineEdge {
-                start: Vector2::new(start[0], start[1]),
-                end: Vector2::new(end[0], end[1]),
-            })
-        }
+        Curve::Polyline(_) | Curve::Ray(_) | Curve::XLine(_) => BoundaryEdge::Line(LineEdge {
+            start: Vector2::new(start[0], start[1]),
+            end: Vector2::new(end[0], end[1]),
+        }),
     }
 }
 
@@ -377,7 +367,7 @@ pub(crate) fn exact_hatch_paths(
         .iter()
         .enumerate()
         .filter_map(|(ring_index, ring)| {
-            let (points, curves) = refined_boundary_ring(ring, sources, tolerance); 
+            let (points, curves) = refined_boundary_ring(ring, sources, tolerance);
             let count = points.len();
             if count < 3 {
                 return None;
@@ -392,17 +382,13 @@ pub(crate) fn exact_hatch_paths(
             }
             let mut path = BoundaryPath::with_flags(BoundaryPathFlags::from_bits(bits));
 
-            let all_same = curves.first().is_some_and(|first| {
-                first.is_some() && curves.iter().all(|curve| curve == first)
-            });
+            let all_same = curves
+                .first()
+                .is_some_and(|first| first.is_some() && curves.iter().all(|curve| curve == first));
             if all_same {
                 let curve = curves[0].as_ref();
                 path.add_edge(exact_boundary_edge(
-                    curve,
-                    points[0],
-                    points[0],
-                    points[1],
-                    true,
+                    curve, points[0], points[0], points[1], true,
                 ));
             } else {
                 let start_index = (0..count)
@@ -448,9 +434,7 @@ pub(crate) fn boundary_entities(
         .filter_map(|ring| {
             let mut points = Vec::with_capacity(ring.len());
             for &point in ring {
-                if point.iter().all(|value| value.is_finite())
-                    && points.last() != Some(&point)
-                {
+                if point.iter().all(|value| value.is_finite()) && points.last() != Some(&point) {
                     points.push(point);
                 }
             }
@@ -500,17 +484,15 @@ fn edge_curve(
             .values()
             .flat_map(|source| source.curves.iter())
             .filter(|curve| {
-                distance_to(curve, edge.start).min(distance_to(curve, edge.end))
-                    <= tolerance * 4.0
+                distance_to(curve, edge.start).min(distance_to(curve, edge.end)) <= tolerance * 4.0
             })
             .collect(),
     };
     candidates
         .into_iter()
         .min_by(|left, right| {
-            let error = |curve: &Curve| {
-                distance_to(curve, edge.start) + distance_to(curve, edge.end)
-            };
+            let error =
+                |curve: &Curve| distance_to(curve, edge.start) + distance_to(curve, edge.end);
             error(left).total_cmp(&error(right))
         })
         .cloned()
@@ -520,9 +502,8 @@ fn nearest_crossing(a: &Curve, b: &Curve, point: [f64; 2], tolerance: f64) -> Op
     intersect(a, b, Tolerance::new(tolerance))
         .into_iter()
         .min_by(|left, right| {
-            let distance = |candidate: [f64; 2]| {
-                (candidate[0] - point[0]).hypot(candidate[1] - point[1])
-            };
+            let distance =
+                |candidate: [f64; 2]| (candidate[0] - point[0]).hypot(candidate[1] - point[1]);
             distance(left.point).total_cmp(&distance(right.point))
         })
         .map(|crossing| crossing.point)
@@ -570,9 +551,7 @@ fn refined_boundary_ring(
 }
 
 fn normalized_delta(from: f64, to: f64) -> f64 {
-    (to - from + std::f64::consts::PI)
-        .rem_euclid(std::f64::consts::TAU)
-        - std::f64::consts::PI
+    (to - from + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
 }
 
 fn curve_edge_bulge(curve: &Curve, start: [f64; 2], end: [f64; 2]) -> f64 {
@@ -614,9 +593,7 @@ fn boundary_polyline(
             vertex.bulge = edge_curves
                 .get(index)
                 .and_then(|curve| curve.as_ref())
-                .map(|curve| {
-                    curve_edge_bulge(curve, *point, points[(index + 1) % points.len()])
-                })
+                .map(|curve| curve_edge_bulge(curve, *point, points[(index + 1) % points.len()]))
                 .unwrap_or(0.0);
             vertex
         })
@@ -655,10 +632,16 @@ pub(crate) fn boundary_entities_from_sources(
 }
 
 impl Scene {
-    pub(crate) fn replace_hatch_association(&mut self,handle:Handle,paths:Vec<acadrust::entities::BoundaryPath>) {
-        let Some(EntityType::Hatch(hatch))=self.document.get_entity_mut(handle) else{return;};
-        hatch.paths=paths;
-        hatch.is_associative=true;
+    pub(crate) fn replace_hatch_association(
+        &mut self,
+        handle: Handle,
+        paths: Vec<acadrust::entities::BoundaryPath>,
+    ) {
+        let Some(EntityType::Hatch(hatch)) = self.document.get_entity_mut(handle) else {
+            return;
+        };
+        hatch.paths = paths;
+        hatch.is_associative = true;
         self.associative_hatch_source_cache.borrow_mut().take();
         self.refresh_fill_model(handle);
     }
@@ -682,7 +665,8 @@ impl Scene {
                 }
             }
         } else {
-            path.boundary_handles.retain(|handle| !handles.contains(handle));
+            path.boundary_handles
+                .retain(|handle| !handles.contains(handle));
         }
         if path.boundary_handles.is_empty() {
             path.flags.set_external(false);
@@ -707,10 +691,7 @@ impl Scene {
         true
     }
 
-    fn associative_hatch_dependents(
-        &self,
-        changed: &rustc_hash::FxHashSet<Handle>,
-    ) -> Vec<Handle> {
+    fn associative_hatch_dependents(&self, changed: &rustc_hash::FxHashSet<Handle>) -> Vec<Handle> {
         if self.associative_hatch_source_cache.borrow().is_none() {
             let mut index: HashMap<Handle, Vec<Handle>> = HashMap::default();
             for entity in self.document.entities() {
@@ -751,8 +732,7 @@ impl Scene {
         if changes.is_empty() {
             return Vec::new();
         }
-        let changed: rustc_hash::FxHashSet<_> =
-            changes.iter().map(|(handle, _)| *handle).collect();
+        let changed: rustc_hash::FxHashSet<_> = changes.iter().map(|(handle, _)| *handle).collect();
         let candidates: Vec<_> = self
             .associative_hatch_dependents(&changed)
             .into_iter()
@@ -805,11 +785,7 @@ impl Scene {
                             .document
                             .get_entity(*source)
                             .and_then(|entity| {
-                                entity_boundary_source_on_plane(
-                                    entity,
-                                    plane,
-                                    WELD_TOLERANCE,
-                                )
+                                entity_boundary_source_on_plane(entity, plane, WELD_TOLERANCE)
                             })
                             .or_else(|| all_sources.get(source).cloned());
 
@@ -942,9 +918,7 @@ impl Scene {
     }
 }
 
-fn hatch_path_geometry(
-    path: &acadrust::entities::BoundaryPath,
-) -> (Vec<[f64; 2]>, Vec<f64>) {
+fn hatch_path_geometry(path: &acadrust::entities::BoundaryPath) -> (Vec<[f64; 2]>, Vec<f64>) {
     let edges: Vec<_> = path
         .edges
         .iter()

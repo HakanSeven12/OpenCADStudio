@@ -269,10 +269,8 @@ impl FaceEdgeCommand {
         let selected_corners = Self::corners(&self.faces[selected_face].1);
         let selected_start = selected_corners[selected_edge];
         let selected_end = selected_corners[(selected_edge + 1) % 4];
-        let make_invisible = !edge_is_invisible(
-            self.faces[selected_face].1.invisible_edges,
-            selected_edge,
-        );
+        let make_invisible =
+            !edge_is_invisible(self.faces[selected_face].1.invisible_edges, selected_edge);
         let mut replacements = Vec::new();
         self.pending_replacements.clear();
         for (handle, face) in &self.faces {
@@ -376,7 +374,11 @@ impl CadCommand for FaceEdgeCommand {
     }
 
     fn on_entity_pick(&mut self, handle: Handle, picked: DVec3) -> CmdResult {
-        let Some(index) = self.faces.iter().position(|(candidate, _)| *candidate == handle) else {
+        let Some(index) = self
+            .faces
+            .iter()
+            .position(|(candidate, _)| *candidate == handle)
+        else {
             return CmdResult::NeedPoint;
         };
         if self.mode == EdgeMode::DisplaySelect {
@@ -396,7 +398,11 @@ impl CadCommand for FaceEdgeCommand {
     }
 
     fn on_hover_entity(&mut self, handle: Handle, picked: DVec3) -> Vec<WireModel> {
-        let Some((_, face)) = self.faces.iter().find(|(candidate, _)| *candidate == handle) else {
+        let Some((_, face)) = self
+            .faces
+            .iter()
+            .find(|(candidate, _)| *candidate == handle)
+        else {
             return Vec::new();
         };
         if self.mode == EdgeMode::DisplaySelect
@@ -406,9 +412,7 @@ impl CadCommand for FaceEdgeCommand {
             let mut points = Vec::new();
             let corners = Self::corners(face);
             for edge in 0..4 {
-                if corners[edge].distance(corners[(edge + 1) % 4])
-                    > Tolerance::default().linear()
-                {
+                if corners[edge].distance(corners[(edge + 1) % 4]) > Tolerance::default().linear() {
                     append_segment(
                         &mut points,
                         corners[edge].to_array(),
@@ -480,9 +484,7 @@ impl CadCommand for FaceEdgeCommand {
 
     fn on_entity_replaced(&mut self, old: Handle, new_handles: &[Handle]) {
         if let Some(new_handle) = new_handles.first().copied() {
-            if let Some((handle, face)) =
-                self.faces.iter_mut().find(|(handle, _)| *handle == old)
-            {
+            if let Some((handle, face)) = self.faces.iter_mut().find(|(handle, _)| *handle == old) {
                 if let Some(updated) = self.pending_replacements.remove(&old) {
                     *face = updated;
                 }

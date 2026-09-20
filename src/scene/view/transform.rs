@@ -13,7 +13,10 @@ where
     T: acadrust::Entity,
 {
     let t = Transform::from_translation(to_v3(-center))
-        .then(&Transform::from_rotation(to_v3(axis.normalize_or(DVec3::Z)), angle_rad))
+        .then(&Transform::from_rotation(
+            to_v3(axis.normalize_or(DVec3::Z)),
+            angle_rad,
+        ))
         .then(&Transform::from_translation(to_v3(center)));
     entity.apply_transform(&t);
 }
@@ -34,23 +37,24 @@ where
 {
     match t {
         EntityTransform::Translate(d) => entity.translate(to_v3(*d)),
-        EntityTransform::Rotate { center, axis, angle_rad } => {
-            apply_standard_transform(entity, *center, *axis, *angle_rad)
-        }
+        EntityTransform::Rotate {
+            center,
+            axis,
+            angle_rad,
+        } => apply_standard_transform(entity, *center, *axis, *angle_rad),
         EntityTransform::Scale { center, factor } => apply_standard_scale(entity, *center, *factor),
         EntityTransform::Mirror {
             p1,
             p2,
             working_normal,
         } => {
-            if working_normal.normalize_or(DVec3::Z).abs_diff_eq(DVec3::Z, 1e-10) {
+            if working_normal
+                .normalize_or(DVec3::Z)
+                .abs_diff_eq(DVec3::Z, 1e-10)
+            {
                 mirror(entity, *p1, *p2)
             } else {
-                entity.apply_transform(&reflection_about_working_line(
-                    *p1,
-                    *p2,
-                    *working_normal,
-                ));
+                entity.apply_transform(&reflection_about_working_line(*p1, *p2, *working_normal));
             }
         }
         EntityTransform::Affine(transform) => entity.apply_transform(transform),
@@ -84,9 +88,24 @@ pub fn reflection_about_working_line(
     let d = 2.0 * n.dot(p1);
     Transform::from_matrix(Matrix4 {
         m: [
-            [1.0 - 2.0 * n.x * n.x, -2.0 * n.x * n.y, -2.0 * n.x * n.z, d * n.x],
-            [-2.0 * n.y * n.x, 1.0 - 2.0 * n.y * n.y, -2.0 * n.y * n.z, d * n.y],
-            [-2.0 * n.z * n.x, -2.0 * n.z * n.y, 1.0 - 2.0 * n.z * n.z, d * n.z],
+            [
+                1.0 - 2.0 * n.x * n.x,
+                -2.0 * n.x * n.y,
+                -2.0 * n.x * n.z,
+                d * n.x,
+            ],
+            [
+                -2.0 * n.y * n.x,
+                1.0 - 2.0 * n.y * n.y,
+                -2.0 * n.y * n.z,
+                d * n.y,
+            ],
+            [
+                -2.0 * n.z * n.x,
+                -2.0 * n.z * n.y,
+                1.0 - 2.0 * n.z * n.z,
+                d * n.z,
+            ],
             [0.0, 0.0, 0.0, 1.0],
         ],
     })
@@ -264,10 +283,14 @@ mod ocs_axes_142 {
     #[test]
     fn x_normal_axes_nonzero() {
         let (ax, ay) = super::ocs_axes((-1.0, 0.0, 0.0));
-        let nz = |v: (f64,f64,f64)| v.0.abs()+v.1.abs()+v.2.abs();
+        let nz = |v: (f64, f64, f64)| v.0.abs() + v.1.abs() + v.2.abs();
         assert!(nz(ax) > 0.5, "ax collapsed: {:?}", ax);
         assert!(nz(ay) > 0.5, "ay collapsed: {:?}", ay);
-        let p = super::ocs_point_to_wcs((-25.0, 90.0, 0.0), (-1.0,0.0,0.0));
-        assert!(p.0.abs()+p.1.abs()+p.2.abs() > 1.0, "point collapsed: {:?}", p);
+        let p = super::ocs_point_to_wcs((-25.0, 90.0, 0.0), (-1.0, 0.0, 0.0));
+        assert!(
+            p.0.abs() + p.1.abs() + p.2.abs() > 1.0,
+            "point collapsed: {:?}",
+            p
+        );
     }
 }

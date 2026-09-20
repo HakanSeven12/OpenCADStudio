@@ -1,6 +1,4 @@
-use acadrust::objects::{
-    ObjectType, VisualStyle, VisualStyleProperty, VisualStylePropertyValue,
-};
+use acadrust::objects::{ObjectType, VisualStyle, VisualStyleProperty, VisualStylePropertyValue};
 use acadrust::{CadDocument, EntityType, Handle};
 
 #[derive(Clone, Debug)]
@@ -240,10 +238,7 @@ pub(crate) fn resolve_visual_style_handle(
         .map(|(handle, style)| MeshVisualStyle::from_dwg(handle, style))
 }
 
-fn visual_style(
-    document: &CadDocument,
-    handle: Option<Handle>,
-) -> Option<(Handle, &VisualStyle)> {
+fn visual_style(document: &CadDocument, handle: Option<Handle>) -> Option<(Handle, &VisualStyle)> {
     let handle = handle.filter(|handle| handle.is_valid())?;
     match document.objects.get(&handle) {
         Some(ObjectType::VisualStyle(style)) => Some((handle, style)),

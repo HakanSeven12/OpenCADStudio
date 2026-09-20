@@ -212,31 +212,53 @@ pub fn extract_ellipse_instance_from_geom(
         minor_axis_ratio,
         start_param,
         end_param,
-    } = *geom else {
+    } = *geom
+    else {
         return None;
     };
 
-    let major_len_sq = major_axis[0] * major_axis[0] + major_axis[1] * major_axis[1] + major_axis[2] * major_axis[2];
+    let major_len_sq = major_axis[0] * major_axis[0]
+        + major_axis[1] * major_axis[1]
+        + major_axis[2] * major_axis[2];
     let norm_len_sq = normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2];
-    if major_len_sq <= 1e-12 || !major_len_sq.is_finite() || major_len_sq > 1e12
-        || norm_len_sq <= 1e-12 || !norm_len_sq.is_finite()
-        || minor_axis_ratio <= 1e-6 || !minor_axis_ratio.is_finite()
-        || !start_param.is_finite() || !end_param.is_finite()
+    if major_len_sq <= 1e-12
+        || !major_len_sq.is_finite()
+        || major_len_sq > 1e12
+        || norm_len_sq <= 1e-12
+        || !norm_len_sq.is_finite()
+        || minor_axis_ratio <= 1e-6
+        || !minor_axis_ratio.is_finite()
+        || !start_param.is_finite()
+        || !end_param.is_finite()
     {
         return None;
     }
 
     let (ch, cl) = split_ds_xyz(center[0], center[1], center[2]);
     let hw = wire.line_weight_px * 0.5;
-    let pat0 = [wire.pattern[0], wire.pattern[1], wire.pattern[2], wire.pattern[3]];
-    let pat1 = [wire.pattern[4], wire.pattern[5], wire.pattern[6], wire.pattern[7]];
+    let pat0 = [
+        wire.pattern[0],
+        wire.pattern[1],
+        wire.pattern[2],
+        wire.pattern[3],
+    ];
+    let pat1 = [
+        wire.pattern[4],
+        wire.pattern[5],
+        wire.pattern[6],
+        wire.pattern[7],
+    ];
 
     Some(EllipseInstance {
         center_high: ch,
         _pad0: 0.0,
         center_low: cl,
         minor_axis_ratio: minor_axis_ratio.min(1.0) as f32,
-        major_axis: [major_axis[0] as f32, major_axis[1] as f32, major_axis[2] as f32],
+        major_axis: [
+            major_axis[0] as f32,
+            major_axis[1] as f32,
+            major_axis[2] as f32,
+        ],
         start_param: start_param as f32,
         normal: [normal[0] as f32, normal[1] as f32, normal[2] as f32],
         end_param: end_param as f32,
@@ -319,14 +341,16 @@ mod tests {
     #[test]
     fn extract_ellipse_instance_success() {
         let mut wire = crate::scene::WireModel::default();
-        wire.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::PlanarEllipse {
-            center: [100.0, 200.0, 300.0],
-            major_axis: [50.0, 0.0, 0.0],
-            normal: [0.0, 0.0, 1.0],
-            minor_axis_ratio: 0.5,
-            start_param: 0.0,
-            end_param: std::f64::consts::TAU,
-        });
+        wire.tangent_geoms.push(
+            crate::scene::model::wire_model::TangentGeom::PlanarEllipse {
+                center: [100.0, 200.0, 300.0],
+                major_axis: [50.0, 0.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                minor_axis_ratio: 0.5,
+                start_param: 0.0,
+                end_param: std::f64::consts::TAU,
+            },
+        );
         wire.line_weight_px = 2.0;
         wire.color = [1.0, 0.5, 0.0, 1.0];
 
@@ -344,14 +368,16 @@ mod tests {
     #[test]
     fn extract_elliptical_arc_instance_success() {
         let mut wire = crate::scene::WireModel::default();
-        wire.tangent_geoms.push(crate::scene::model::wire_model::TangentGeom::PlanarEllipse {
-            center: [0.0, 0.0, 0.0],
-            major_axis: [10.0, 0.0, 0.0],
-            normal: [0.0, 0.0, 1.0],
-            minor_axis_ratio: 0.8,
-            start_param: 0.5,
-            end_param: 2.5,
-        });
+        wire.tangent_geoms.push(
+            crate::scene::model::wire_model::TangentGeom::PlanarEllipse {
+                center: [0.0, 0.0, 0.0],
+                major_axis: [10.0, 0.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                minor_axis_ratio: 0.8,
+                start_param: 0.5,
+                end_param: 2.5,
+            },
+        );
         wire.line_weight_px = 1.0;
         wire.color = [0.0, 1.0, 0.0, 1.0];
 

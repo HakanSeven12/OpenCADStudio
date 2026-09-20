@@ -1,5 +1,5 @@
-use acadrust::{entities::Line, Entity};
 use crate::t;
+use acadrust::{entities::Line, Entity};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
@@ -28,8 +28,16 @@ fn to_render(line: &Line) -> RenderEntity {
                 key_vertices.push([point.x, point.y, point.z]);
             }
             tangent_geoms.push(TangentGeom::Line {
-                p1: [segment[0].x as f32, segment[0].y as f32, segment[0].z as f32],
-                p2: [segment[1].x as f32, segment[1].y as f32, segment[1].z as f32],
+                p1: [
+                    segment[0].x as f32,
+                    segment[0].y as f32,
+                    segment[0].z as f32,
+                ],
+                p2: [
+                    segment[1].x as f32,
+                    segment[1].y as f32,
+                    segment[1].z as f32,
+                ],
             });
         }
         let center = crate::scene::centermark::dvec(association.center);
@@ -116,7 +124,11 @@ fn grips(line: &Line) -> Vec<GripDef> {
                 + association.length_adjustments[index]
                 + association.overshoots[index])
                 .max(extension_start);
-            result.push(oriented_triangle_grip(index + 5, center + *direction * distance, *direction));
+            result.push(oriented_triangle_grip(
+                index + 5,
+                center + *direction * distance,
+                *direction,
+            ));
         }
         return result;
     }
@@ -152,11 +164,20 @@ fn properties(line: &Line) -> Vec<PropSection> {
                     label: "Show extension".to_owned(),
                     field: "centermark_show_extension",
                     value: PropValue::Choice {
-                        selected: if association.show_extensions { "Yes" } else { "No" }.to_owned(),
+                        selected: if association.show_extensions {
+                            "Yes"
+                        } else {
+                            "No"
+                        }
+                        .to_owned(),
                         options: vec!["Yes".to_owned(), "No".to_owned()],
                     },
                 },
-                edit("Cross size", "centermark_cross_size", association.cross_size),
+                edit(
+                    "Cross size",
+                    "centermark_cross_size",
+                    association.cross_size,
+                ),
                 edit("Cross gap", "centermark_cross_gap", association.cross_gap),
                 edit(
                     "Extension length",
@@ -187,7 +208,11 @@ fn properties(line: &Line) -> Vec<PropSection> {
                     "centerline_end_extension",
                     association.end_extension,
                 ),
-                ro(t!("Length").as_ref(), "length", format_length(line.length())),
+                ro(
+                    t!("Length").as_ref(),
+                    "length",
+                    format_length(line.length()),
+                ),
                 ro(
                     "Associative",
                     "centerline_associative",
@@ -212,7 +237,11 @@ fn properties(line: &Line) -> Vec<PropSection> {
             ro(t!("Delta X").as_ref(), "delta_x", format_length(dx)),
             ro(t!("Delta Y").as_ref(), "delta_y", format_length(dy)),
             ro(t!("Delta Z").as_ref(), "delta_z", format_length(dz)),
-            ro(t!("Length").as_ref(), "length", format_length(line.length())),
+            ro(
+                t!("Length").as_ref(),
+                "length",
+                format_length(line.length()),
+            ),
             ro(t!("Angle").as_ref(), "angle", format_direction(angle)),
             edit(t!("Normal X").as_ref(), "normal_x", line.normal.x),
             edit(t!("Normal Y").as_ref(), "normal_y", line.normal.y),
@@ -233,8 +262,12 @@ fn apply_geom_prop(line: &mut Line, field: &str, value: &str) {
                 );
             }
             "centermark_cross_size" | "centermark_cross_gap" | "centermark_extension_length" => {
-                let Some(number) = parse_f64(value) else { return; };
-                if !number.is_finite() || number < 0.0 { return; }
+                let Some(number) = parse_f64(value) else {
+                    return;
+                };
+                if !number.is_finite() || number < 0.0 {
+                    return;
+                }
                 match field {
                     "centermark_cross_size" => association.cross_size = number,
                     "centermark_cross_gap" => association.cross_gap = number,
@@ -317,7 +350,8 @@ fn apply_grip(line: &mut Line, grip_id: usize, apply: GripApply) {
                 let moved = center + delta;
                 association.center = acadrust::types::Vector3::new(moved.x, moved.y, moved.z);
                 let origin = crate::scene::centermark::dvec(association.plane_origin) + delta;
-                association.plane_origin = acadrust::types::Vector3::new(origin.x, origin.y, origin.z);
+                association.plane_origin =
+                    acadrust::types::Vector3::new(origin.x, origin.y, origin.z);
                 association.associated = false;
             }
             (id @ 1..=4, GripApply::Absolute(point)) => {
@@ -413,17 +447,29 @@ fn apply_plain_transform(line: &mut Line, t: &EntityTransform) {
         EntityTransform::Translate(d) => {
             line.translate(acadrust::types::Vector3::new(d.x, d.y, d.z));
         }
-        EntityTransform::Rotate { center, axis, angle_rad } => {
-            crate::scene::view::transform::apply_standard_transform(line, *center, *axis, *angle_rad);
+        EntityTransform::Rotate {
+            center,
+            axis,
+            angle_rad,
+        } => {
+            crate::scene::view::transform::apply_standard_transform(
+                line, *center, *axis, *angle_rad,
+            );
         }
         EntityTransform::Scale { center, factor } => {
             crate::scene::view::transform::apply_standard_scale(line, *center, *factor);
         }
-        EntityTransform::Mirror { p1, p2, working_normal } => {
+        EntityTransform::Mirror {
+            p1,
+            p2,
+            working_normal,
+        } => {
             acadrust::Entity::apply_transform(
                 line,
                 &crate::scene::view::transform::reflection_about_working_line(
-                    *p1, *p2, *working_normal,
+                    *p1,
+                    *p2,
+                    *working_normal,
                 ),
             );
         }
@@ -479,7 +525,11 @@ fn apply_transform(line: &mut Line, t: &EntityTransform) {
         association.cross_size *= scale;
         association.cross_gap *= scale;
         association.extension_length *= scale;
-        for value in association.length_adjustments.iter_mut().chain(association.overshoots.iter_mut()) {
+        for value in association
+            .length_adjustments
+            .iter_mut()
+            .chain(association.overshoots.iter_mut())
+        {
             *value *= scale;
         }
         association.associated = false;
@@ -536,7 +586,11 @@ impl crate::entities::traits::Grippable for Line {
             ]
         }
     }
-    fn apply_grip_menu(&mut self, _grip_id: usize, _action: crate::scene::model::object::GripMenuAction) {
+    fn apply_grip_menu(
+        &mut self,
+        _grip_id: usize,
+        _action: crate::scene::model::object::GripMenuAction,
+    ) {
         // Lengthen needs a follow-up distance — handled by
         // `apply_grip_menu_value`.
     }

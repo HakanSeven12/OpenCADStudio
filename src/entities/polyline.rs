@@ -1,12 +1,12 @@
-use acadrust::entities::{Polyline, Polyline2D, Polyline3D};
 use crate::t;
+use acadrust::entities::{Polyline, Polyline2D, Polyline3D};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
     edit_prop as edit, format_area, format_length, parse_f64, ro_prop as ro, square_grip,
     stepper_prop as stepper, VARIES_LABEL,
 };
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
+use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
 use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::TangentGeom;
@@ -92,7 +92,11 @@ impl Grippable for Polyline {
         ]
     }
 
-    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
+    fn apply_grip_menu(
+        &mut self,
+        grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+    ) {
         use crate::scene::model::object::GripMenuAction as A;
         let n = self.vertices.len();
         match action {
@@ -127,7 +131,11 @@ impl PropertyEditable for Polyline {
         vec![PropSection {
             title: t!("Geometry").into_owned(),
             props: vec![
-                ro(t!("Vertices").as_ref(), "vertices", self.vertices.len().to_string()),
+                ro(
+                    t!("Vertices").as_ref(),
+                    "vertices",
+                    self.vertices.len().to_string(),
+                ),
                 Property {
                     label: t!("Closed").into_owned(),
                     field: "pl_closed",
@@ -154,16 +162,20 @@ impl PropertyEditable for Polyline {
 
 impl Transformable for Polyline {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
-            for v in &mut entity.vertices {
-                crate::scene::view::transform::reflect_xy_point(
-                    &mut v.location.x,
-                    &mut v.location.y,
-                    p1,
-                    p2,
-                );
-            }
-        });
+        crate::scene::view::transform::apply_standard_entity_transform(
+            self,
+            t,
+            |entity, p1, p2| {
+                for v in &mut entity.vertices {
+                    crate::scene::view::transform::reflect_xy_point(
+                        &mut v.location.x,
+                        &mut v.location.y,
+                        p1,
+                        p2,
+                    );
+                }
+            },
+        );
     }
 }
 
@@ -176,14 +188,10 @@ impl Transformable for Polyline {
 /// spokes across the fitted curve (#408). `None` = no fit data, draw the
 /// stored vertices as-is. A fit-flagged polyline whose fit points are missing
 /// falls back to the stored vertices rather than drawing nothing.
-pub fn drawn_vertices2d(
-    pl: &Polyline2D,
-) -> Option<Vec<acadrust::entities::Vertex2D>> {
+pub fn drawn_vertices2d(pl: &Polyline2D) -> Option<Vec<acadrust::entities::Vertex2D>> {
     use acadrust::entities::polyline::VertexFlags;
     let has_fit = pl.vertices.iter().any(|v| {
-        v.flags.bits()
-            & (VertexFlags::SPLINE_VERTEX.bits() | VertexFlags::EXTRA_VERTEX.bits())
-            != 0
+        v.flags.bits() & (VertexFlags::SPLINE_VERTEX.bits() | VertexFlags::EXTRA_VERTEX.bits()) != 0
     });
     if !has_fit {
         return None;
@@ -227,9 +235,8 @@ fn tessellate_polyline2d(pl: &Polyline2D, fill_mode: bool) -> RenderEntity {
     };
 
     if !fill_mode {
-        let continuous = pl.flags.bits()
-            & acadrust::entities::PolylineFlags::LINETYPE_CONTINUOUS.bits()
-            != 0;
+        let continuous =
+            pl.flags.bits() & acadrust::entities::PolylineFlags::LINETYPE_CONTINUOUS.bits() != 0;
         let mut boundary = crate::entities::common::wide_band_outline(
             &band_verts_2d(pl),
             pl.is_closed(),
@@ -296,7 +303,9 @@ fn tessellate_polyline2d(pl: &Polyline2D, fill_mode: bool) -> RenderEntity {
             } else if let Some(arc) =
                 crate::entities::common::BulgeArc::from_bulge([ox0, oy0], [ox1, oy1], bulge)
             {
-                tgs.push(crate::entities::common::bulge_arc_to_tangent(&arc, &to_wcs, normal));
+                tgs.push(crate::entities::common::bulge_arc_to_tangent(
+                    &arc, &to_wcs, normal,
+                ));
                 for s in arc
                     .tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
                     .into_iter()
@@ -374,7 +383,9 @@ fn tessellate_polyline2d(pl: &Polyline2D, fill_mode: bool) -> RenderEntity {
             [v1.location.x, v1.location.y],
             bulge,
         ) {
-            tangents.push(crate::entities::common::bulge_arc_to_tangent(&arc, &to_wcs, normal));
+            tangents.push(crate::entities::common::bulge_arc_to_tangent(
+                &arc, &to_wcs, normal,
+            ));
         }
 
         if i == 0 {
@@ -389,11 +400,8 @@ fn tessellate_polyline2d(pl: &Polyline2D, fill_mode: bool) -> RenderEntity {
     // uniform-width one keeps the constant-band Contour.
     let object = match tapered_band_verts_2d(&band_verts) {
         Some(band_verts) => {
-            let (pts, widths) = crate::entities::common::tapered_band_points(
-                band_verts,
-                pl.is_closed(),
-                &to_wcs,
-            );
+            let (pts, widths) =
+                crate::entities::common::tapered_band_points(band_verts, pl.is_closed(), &to_wcs);
             RenderObject::TaperedLines(pts, widths)
         }
         None => RenderObject::Lines(
@@ -413,9 +421,7 @@ fn tessellate_polyline2d(pl: &Polyline2D, fill_mode: bool) -> RenderEntity {
 }
 
 /// Effective segment widths for a Polyline2D band.
-fn band_verts_2d(
-    pl: &acadrust::entities::Polyline2D,
-) -> Vec<([f64; 2], f64, f64, f64)> {
+fn band_verts_2d(pl: &acadrust::entities::Polyline2D) -> Vec<([f64; 2], f64, f64, f64)> {
     let default_start = pl.start_width;
     let default_end = pl.end_width;
     let filtered = drawn_vertices2d(pl);
@@ -481,7 +487,9 @@ fn centerline_metadata_2d(
             [end.location.x, end.location.y],
             start.bulge,
         ) {
-            tangents.push(crate::entities::common::bulge_arc_to_tangent(&arc, to_wcs, normal));
+            tangents.push(crate::entities::common::bulge_arc_to_tangent(
+                &arc, to_wcs, normal,
+            ));
         }
         if index == 0 {
             key_vertices.push([p0.0, p0.1, p0.2]);
@@ -540,7 +548,11 @@ impl Grippable for Polyline2D {
         ]
     }
 
-    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
+    fn apply_grip_menu(
+        &mut self,
+        grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+    ) {
         use crate::scene::model::object::GripMenuAction as A;
         let n = self.vertices.len();
         let elev = self.elevation;
@@ -623,8 +635,7 @@ pub(crate) fn polyline2d_vertex_segment_widths(
 
 pub(crate) fn polyline2d_global_width(pline: &Polyline2D) -> Option<f64> {
     let filtered = drawn_vertices2d(pline);
-    let verts: &[acadrust::entities::Vertex2D] =
-        filtered.as_deref().unwrap_or(&pline.vertices);
+    let verts: &[acadrust::entities::Vertex2D] = filtered.as_deref().unwrap_or(&pline.vertices);
     let count = verts.len();
     let seg_count = if pline.is_closed() {
         count
@@ -659,7 +670,11 @@ impl PropertyEditable for Polyline2D {
         let n = self.vertices.len();
         let mut area = 0.0;
         let mut length = 0.0;
-        let seg_count = if self.is_closed() { n } else { n.saturating_sub(1) };
+        let seg_count = if self.is_closed() {
+            n
+        } else {
+            n.saturating_sub(1)
+        };
         for i in 0..seg_count {
             let a = &self.vertices[i].location;
             let b = &self.vertices[(i + 1) % n].location;
@@ -698,10 +713,18 @@ impl PropertyEditable for Polyline2D {
             PropSection {
                 title: t!("Geometry").into_owned(),
                 props: vec![
-                    stepper(t!("Current Vertex").as_ref(), "pl2_current_vertex", vertex_label),
+                    stepper(
+                        t!("Current Vertex").as_ref(),
+                        "pl2_current_vertex",
+                        vertex_label,
+                    ),
                     edit(t!("Vertex X").as_ref(), "pl2_vertex_x", vertex_x),
                     edit(t!("Vertex Y").as_ref(), "pl2_vertex_y", vertex_y),
-                    edit(t!("Start segment width").as_ref(), "pl2_seg_start_w", seg_start_w),
+                    edit(
+                        t!("Start segment width").as_ref(),
+                        "pl2_seg_start_w",
+                        seg_start_w,
+                    ),
                     edit(t!("End segment width").as_ref(), "pl2_seg_end_w", seg_end_w),
                     global_width_prop,
                     edit(t!("Elevation").as_ref(), "pl2_elevation", self.elevation),
@@ -843,19 +866,23 @@ impl PropertyEditable for Polyline2D {
 
 impl Transformable for Polyline2D {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
-            for v in &mut entity.vertices {
-                crate::scene::view::transform::reflect_xy_point(
-                    &mut v.location.x,
-                    &mut v.location.y,
-                    p1,
-                    p2,
-                );
-                // Bulge encodes which side the arc bows to; a reflection
-                // reverses it or every curved segment flips to the wrong side.
-                v.bulge = -v.bulge;
-            }
-        });
+        crate::scene::view::transform::apply_standard_entity_transform(
+            self,
+            t,
+            |entity, p1, p2| {
+                for v in &mut entity.vertices {
+                    crate::scene::view::transform::reflect_xy_point(
+                        &mut v.location.x,
+                        &mut v.location.y,
+                        p1,
+                        p2,
+                    );
+                    // Bulge encodes which side the arc bows to; a reflection
+                    // reverses it or every curved segment flips to the wrong side.
+                    v.bulge = -v.bulge;
+                }
+            },
+        );
     }
 }
 
@@ -885,9 +912,7 @@ fn polyline3d_control_indices(pl: &Polyline3D) -> Vec<usize> {
         .vertices
         .iter()
         .enumerate()
-        .filter_map(|(index, vertex)| {
-            (vertex.flags & POLY3D_SPLINE_POINT == 0).then_some(index)
-        })
+        .filter_map(|(index, vertex)| (vertex.flags & POLY3D_SPLINE_POINT == 0).then_some(index))
         .collect();
     if controls.is_empty() {
         (0..pl.vertices.len()).collect()
@@ -931,8 +956,7 @@ fn polyline3d_length(pl: &Polyline3D) -> f64 {
         .map(|pair| Vec3::from(pair[0]).distance(Vec3::from(pair[1])))
         .sum::<f64>();
     if pl.is_closed() && points.len() >= 2 {
-        length += Vec3::from(points[0])
-            .distance(Vec3::from(points[points.len() - 1]));
+        length += Vec3::from(points[0]).distance(Vec3::from(points[points.len() - 1]));
     }
     length
 }
@@ -1009,9 +1033,8 @@ fn rebuild_polyline3d_fit(pl: &mut Polyline3D) -> bool {
         .map(|vertex| vertex.layer.clone())
         .unwrap_or_else(|| "0".to_string());
     let curve_vertices = samples.into_iter().map(|point| {
-        let mut vertex = acadrust::entities::Vertex3DPolyline::from_xyz(
-            point[0], point[1], point[2],
-        );
+        let mut vertex =
+            acadrust::entities::Vertex3DPolyline::from_xyz(point[0], point[1], point[2]);
         vertex.layer = vertex_layer.clone();
         vertex.flags = POLY3D_VERTEX | POLY3D_SPLINE_POINT;
         vertex
@@ -1103,9 +1126,7 @@ impl Grippable for Polyline3D {
                     v.position.z = p.z as f64;
                 }
             }
-            if self.smooth_type
-                != acadrust::entities::polyline3d::SmoothSurfaceType::None
-            {
+            if self.smooth_type != acadrust::entities::polyline3d::SmoothSurfaceType::None {
                 let _ = rebuild_polyline3d_fit(self);
             }
         }
@@ -1140,7 +1161,11 @@ impl Grippable for Polyline3D {
         items
     }
 
-    fn apply_grip_menu(&mut self, grip_id: usize, action: crate::scene::model::object::GripMenuAction) {
+    fn apply_grip_menu(
+        &mut self,
+        grip_id: usize,
+        action: crate::scene::model::object::GripMenuAction,
+    ) {
         use crate::scene::model::object::GripMenuAction as A;
         use acadrust::entities::polyline3d::SmoothSurfaceType as SST;
 
@@ -1153,10 +1178,8 @@ impl Grippable for Polyline3D {
                     if n >= 2 {
                         let previous = &controls[n - 2].position;
                         let last = &controls[n - 1].position;
-                        let next = Vec3::new(previous.x, previous.y, previous.z).lerp(
-                            Vec3::new(last.x, last.y, last.z),
-                            2.0,
-                        );
+                        let next = Vec3::new(previous.x, previous.y, previous.z)
+                            .lerp(Vec3::new(last.x, last.y, last.z), 2.0);
                         new_v.position.x = next.x;
                         new_v.position.y = next.y;
                         new_v.position.z = next.z;
@@ -1167,10 +1190,8 @@ impl Grippable for Polyline3D {
                     let i1 = (grip_id + 1) % n;
                     let v0 = &controls[grip_id];
                     let v1 = &controls[i1];
-                    let midpoint = Vec3::new(v0.position.x, v0.position.y, v0.position.z).lerp(
-                        Vec3::new(v1.position.x, v1.position.y, v1.position.z),
-                        0.5,
-                    );
+                    let midpoint = Vec3::new(v0.position.x, v0.position.y, v0.position.z)
+                        .lerp(Vec3::new(v1.position.x, v1.position.y, v1.position.z), 0.5);
                     let mut new_v = v0.clone();
                     new_v.position.x = midpoint.x;
                     new_v.position.y = midpoint.y;
@@ -1296,9 +1317,7 @@ impl PropertyEditable for Polyline3D {
                 } else {
                     self.open();
                 }
-                if self.smooth_type
-                    != acadrust::entities::polyline3d::SmoothSurfaceType::None
-                {
+                if self.smooth_type != acadrust::entities::polyline3d::SmoothSurfaceType::None {
                     let _ = rebuild_polyline3d_fit(self);
                 }
             }
@@ -1356,16 +1375,20 @@ impl PropertyEditable for Polyline3D {
 
 impl Transformable for Polyline3D {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
-            for v in &mut entity.vertices {
-                crate::scene::view::transform::reflect_xy_point(
-                    &mut v.position.x,
-                    &mut v.position.y,
-                    p1,
-                    p2,
-                );
-            }
-        });
+        crate::scene::view::transform::apply_standard_entity_transform(
+            self,
+            t,
+            |entity, p1, p2| {
+                for v in &mut entity.vertices {
+                    crate::scene::view::transform::reflect_xy_point(
+                        &mut v.position.x,
+                        &mut v.position.y,
+                        p1,
+                        p2,
+                    );
+                }
+            },
+        );
     }
 }
 /// Generate solid-fill boundary polygons for each wide segment of a Polyline2D.
@@ -1431,7 +1454,8 @@ mod tests {
         pl.start_width = start_w;
         pl.end_width = end_w;
         for i in 0..count {
-            pl.vertices.push(Vertex2D::new(Vector3::new(i as f64 * 10.0, 0.0, 0.0)));
+            pl.vertices
+                .push(Vertex2D::new(Vector3::new(i as f64 * 10.0, 0.0, 0.0)));
         }
         pl
     }
@@ -1443,7 +1467,10 @@ mod tests {
 
         let props = pl.geometry_properties(&[]);
         let geom_props = &props[0].props;
-        let gw = geom_props.iter().find(|p| p.field == "pl2_start_w").unwrap();
+        let gw = geom_props
+            .iter()
+            .find(|p| p.field == "pl2_start_w")
+            .unwrap();
         match &gw.value {
             PropValue::EditText(val) => assert_eq!(parse_f64(val), Some(4.0)),
             _ => panic!("expected EditText"),
@@ -1460,7 +1487,10 @@ mod tests {
 
         let props = pl.geometry_properties(&[]);
         let geom_props = &props[0].props;
-        let gw = geom_props.iter().find(|p| p.field == "pl2_start_w").unwrap();
+        let gw = geom_props
+            .iter()
+            .find(|p| p.field == "pl2_start_w")
+            .unwrap();
         match &gw.value {
             PropValue::EditText(val) => assert_eq!(val, VARIES_LABEL),
             _ => panic!("expected EditText with VARIES_LABEL"),

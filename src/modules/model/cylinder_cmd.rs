@@ -29,7 +29,10 @@ enum Step {
     EllipseSecond(DVec3),
     EllipseThird(DVec3, DVec3),
     TtrFirst,
-    TtrSecond { object: TangentObject, hit: DVec3 },
+    TtrSecond {
+        object: TangentObject,
+        hit: DVec3,
+    },
     TtrRadius {
         first: TangentObject,
         second: TangentObject,
@@ -60,8 +63,7 @@ impl Default for Defaults {
 }
 
 fn defaults() -> &'static std::sync::Mutex<Defaults> {
-    static DEFAULTS: std::sync::OnceLock<std::sync::Mutex<Defaults>> =
-        std::sync::OnceLock::new();
+    static DEFAULTS: std::sync::OnceLock<std::sync::Mutex<Defaults>> = std::sync::OnceLock::new();
     DEFAULTS.get_or_init(|| std::sync::Mutex::new(Defaults::default()))
 }
 
@@ -76,10 +78,7 @@ pub struct CylinderCommand {
 
 impl CylinderCommand {
     pub fn new() -> Self {
-        let remembered = defaults()
-            .lock()
-            .map(|value| *value)
-            .unwrap_or_default();
+        let remembered = defaults().lock().map(|value| *value).unwrap_or_default();
         Self {
             step: Step::BaseCenter,
             frame: None,
@@ -372,10 +371,7 @@ impl CylinderCommand {
                 })
             }
             Step::EllipseCenterFirstAxis(center) => (number > 0.0).then(|| {
-                self.step = Step::EllipseCenterSecondAxis(
-                    center,
-                    center + self.plane.x * number,
-                );
+                self.step = Step::EllipseCenterSecondAxis(center, center + self.plane.x * number);
                 CmdResult::NeedPoint
             }),
             Step::TtrRadius { .. } => {
@@ -475,48 +471,64 @@ impl CadCommand for CylinderCommand {
 
     fn prompt(&self) -> String {
         match self.step {
-            Step::BaseCenter =>
-                t!("CYLINDER  Specify center point of base or [3P/2P/Ttr/Elliptical]:").into_owned(),
+            Step::BaseCenter => {
+                t!("CYLINDER  Specify center point of base or [3P/2P/Ttr/Elliptical]:").into_owned()
+            }
             Step::BaseRadius => crate::tf!(
                 "CYLINDER  Specify base radius or [Diameter] <{:.4}>:",
                 self.remembered.major_radius
-            ).into_owned(),
+            )
+            .into_owned(),
             Step::BaseDiameter => crate::tf!(
                 "CYLINDER  Specify base diameter <{:.4}>:",
                 self.remembered.major_radius * 2.0
-            ).into_owned(),
+            )
+            .into_owned(),
             Step::ThreePointFirst => t!("CYLINDER  Specify first point on base:").into_owned(),
             Step::ThreePointSecond(_) => t!("CYLINDER  Specify second point on base:").into_owned(),
-            Step::ThreePointThird(_, _) => t!("CYLINDER  Specify third point on base:").into_owned(),
-            Step::TwoPointFirst => t!("CYLINDER  Specify first endpoint of base diameter:").into_owned(),
-            Step::TwoPointSecond(_) => t!("CYLINDER  Specify second endpoint of base diameter:").into_owned(),
-            Step::EllipseFirst =>
-                t!("CYLINDER  Specify endpoint of first axis or [Center]:").into_owned(),
+            Step::ThreePointThird(_, _) => {
+                t!("CYLINDER  Specify third point on base:").into_owned()
+            }
+            Step::TwoPointFirst => {
+                t!("CYLINDER  Specify first endpoint of base diameter:").into_owned()
+            }
+            Step::TwoPointSecond(_) => {
+                t!("CYLINDER  Specify second endpoint of base diameter:").into_owned()
+            }
+            Step::EllipseFirst => {
+                t!("CYLINDER  Specify endpoint of first axis or [Center]:").into_owned()
+            }
             Step::EllipseCenter => t!("CYLINDER  Specify center point:").into_owned(),
             Step::EllipseCenterFirstAxis(_) => crate::tf!(
                 "CYLINDER  Specify distance to first axis <{:.4}>:",
                 self.remembered.major_radius
-            ).into_owned(),
-            Step::EllipseCenterSecondAxis(_, _) =>
-                t!("CYLINDER  Specify endpoint of second axis:").into_owned(),
-            Step::EllipseSecond(_) =>
-                t!("CYLINDER  Specify other endpoint of first axis:").into_owned(),
-            Step::EllipseThird(_, _) =>
-                t!("CYLINDER  Specify endpoint of second axis:").into_owned(),
+            )
+            .into_owned(),
+            Step::EllipseCenterSecondAxis(_, _) => {
+                t!("CYLINDER  Specify endpoint of second axis:").into_owned()
+            }
+            Step::EllipseSecond(_) => {
+                t!("CYLINDER  Specify other endpoint of first axis:").into_owned()
+            }
+            Step::EllipseThird(_, _) => {
+                t!("CYLINDER  Specify endpoint of second axis:").into_owned()
+            }
             Step::TtrFirst => t!("CYLINDER  Select first tangent object:").into_owned(),
             Step::TtrSecond { .. } => t!("CYLINDER  Select second tangent object:").into_owned(),
             Step::TtrRadius { .. } => crate::tf!(
                 "CYLINDER  Specify base radius <{:.4}>:",
                 self.remembered.major_radius
-            ).into_owned(),
+            )
+            .into_owned(),
             Step::Height => crate::tf!(
                 "CYLINDER  Specify height or [2Point/Axis endpoint] <{:.4}>:",
                 self.remembered.height
-            ).into_owned(),
-            Step::HeightFirstPoint =>
-                t!("CYLINDER  Specify first point for height:").into_owned(),
-            Step::HeightSecondPoint(_) =>
-                t!("CYLINDER  Specify second point for height:").into_owned(),
+            )
+            .into_owned(),
+            Step::HeightFirstPoint => t!("CYLINDER  Specify first point for height:").into_owned(),
+            Step::HeightSecondPoint(_) => {
+                t!("CYLINDER  Specify second point for height:").into_owned()
+            }
             Step::AxisEndpoint => t!("CYLINDER  Specify axis endpoint:").into_owned(),
         }
     }
@@ -804,9 +816,7 @@ fn push_ellipse(
     const SEGMENTS: usize = 64;
     for index in 0..=SEGMENTS {
         let angle = index as f64 / SEGMENTS as f64 * std::f64::consts::TAU;
-        let point = center
-            + x_axis * (x_radius * angle.cos())
-            + y_axis * (y_radius * angle.sin());
+        let point = center + x_axis * (x_radius * angle.cos()) + y_axis * (y_radius * angle.sin());
         points.push(point.as_vec3().to_array());
     }
 }

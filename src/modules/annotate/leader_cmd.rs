@@ -88,7 +88,7 @@ impl LeaderCommand {
             return CmdResult::Cancel;
         }
 
-            let local: Vec<DVec3> = self
+        let local: Vec<DVec3> = self
             .verts
             .iter()
             .map(|point| self.plane.to_local(*point))
@@ -110,11 +110,7 @@ impl LeaderCommand {
         let elbow = *local.last().unwrap_or(&first);
         let sign = if elbow.x >= first.x { 1.0 } else { -1.0 };
 
-        let landing_end = DVec3::new(
-            elbow.x + sign * displayed_landing,
-            elbow.y,
-            elbow.z,
-        );
+        let landing_end = DVec3::new(elbow.x + sign * displayed_landing, elbow.y, elbow.z);
 
         leader_points.push(landing_end);
 
@@ -130,8 +126,7 @@ impl LeaderCommand {
         leader.arrow_enabled = self.arrow_enabled;
 
         // The MTEXT starts at the real end of the landing.
-        let (anchor, attach) =
-            annotation_anchor(&leader_points, 0.0, Mat4::IDENTITY);
+        let (anchor, attach) = annotation_anchor(&leader_points, 0.0, Mat4::IDENTITY);
 
         // Store the MTEXT at its native model-space size for the current
         // annotation scale. Its annotation contexts then scale it relatively
@@ -175,8 +170,10 @@ impl CadCommand for LeaderCommand {
 
     fn prompt(&self) -> String {
         if self.step == Step::Format {
-            return t!("LEADER  Enter leader formatting option [Spline/Straight/Arrow/None] <exit>:")
-                .into_owned();
+            return t!(
+                "LEADER  Enter leader formatting option [Spline/Straight/Arrow/None] <exit>:"
+            )
+            .into_owned();
         }
         if self.step == Step::AnnotationOptions {
             return t!("LEADER  Enter an annotation option [None/Mtext]:").into_owned();
@@ -322,10 +319,7 @@ impl CadCommand for LeaderCommand {
             .map(|point| self.plane.to_local(*point).as_vec3())
             .collect();
         pts.push(self.plane.to_local(pt).as_vec3());
-        let mut preview = preview_wire(
-            &pts,
-            (self.arrow_size * self.display_scale) as f32,
-        );
+        let mut preview = preview_wire(&pts, (self.arrow_size * self.display_scale) as f32);
         preview.points = preview
             .points
             .iter()
@@ -378,11 +372,7 @@ fn build_leader(
 /// Text anchor at the end of the landing line, and the attachment point that
 /// keeps the text reading away from the leader (text to the right of a
 /// left-pointing landing, to the left of a right-pointing one).
-fn annotation_anchor(
-    verts: &[DVec3],
-    landing_length: f64,
-    ucs: Mat4,
-) -> (DVec3, AttachmentPoint) {
+fn annotation_anchor(verts: &[DVec3], landing_length: f64, ucs: Mat4) -> (DVec3, AttachmentPoint) {
     let last = *verts.last().unwrap();
     let prev = verts[verts.len() - 2];
 
@@ -450,9 +440,9 @@ fn preview_wire(pts: &[Vec3], arrow_size: f32) -> WireModel {
         render_instance: None,
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
-            dash_from_start: false,
-            dash_align_end: None,
-            text_verts: Vec::new(),
+        dash_from_start: false,
+        dash_align_end: None,
+        text_verts: Vec::new(),
         name: "leader_preview".into(),
         points,
         points_low: Vec::new(),
@@ -492,6 +482,5 @@ pub fn arrowhead_wings(tip: Vec3, next: Vec3, size: f32) -> [Vec3; 2] {
     ]
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["LEADER"] });  // LeaderCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["LEADER"] }); // LeaderCommand

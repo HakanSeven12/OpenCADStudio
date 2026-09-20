@@ -9,10 +9,10 @@
 //   two points. The new absolute angle is then typed or picked from the center;
 //   the applied rotation is new-angle - reference-angle.
 
+use crate::t;
 use acadrust::Handle;
 use cadkernel::geom2d::{self, Curve as KernelCurve};
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, DynField, EntityTransform, WorkingPlane};
 use crate::modules::draw::defaults;
@@ -73,11 +73,7 @@ impl RotateCommand {
         )
     }
 
-    fn angle_arc(
-        center: [f64; 2],
-        radius: f64,
-        angle: f64,
-    ) -> Option<(geom2d::Arc, bool)> {
+    fn angle_arc(center: [f64; 2], radius: f64, angle: f64) -> Option<(geom2d::Arc, bool)> {
         let (start, end, reverse) = if angle > 0.0 {
             (0.0, angle, false)
         } else {
@@ -108,11 +104,8 @@ impl RotateCommand {
             return guides;
         }
 
-        let Some((arc, reverse)) = Self::angle_arc(
-            [center_local.x, center_local.y],
-            radius,
-            angle,
-        ) else {
+        let Some((arc, reverse)) = Self::angle_arc([center_local.x, center_local.y], radius, angle)
+        else {
             return guides;
         };
         let mut points = KernelCurve::Arc(arc).tessellate_angle(TAU / 64.0);
@@ -159,9 +152,7 @@ impl CadCommand for RotateCommand {
             Step::RefFirst { .. } => {
                 t!("ROTATE  Specify first reference point or type reference angle:").into_owned()
             }
-            Step::RefSecond { .. } => {
-                t!("ROTATE  Specify second reference point:").into_owned()
-            }
+            Step::RefSecond { .. } => t!("ROTATE  Specify second reference point:").into_owned(),
             Step::RefNew { ref_angle, .. } => {
                 let a = format!("{:.1}°", ref_angle.to_degrees());
                 t!("ROTATE  Specify new absolute angle  [ref=%{a}]:", a = a).into_owned()
@@ -243,10 +234,7 @@ impl CadCommand for RotateCommand {
             Step::RefFirst { center } => {
                 let center = *center;
                 let ref_angle = crate::entities::common::parse_typed_angle(t)?;
-                self.step = Step::RefNew {
-                    center,
-                    ref_angle,
-                };
+                self.step = Step::RefNew { center, ref_angle };
                 Some(CmdResult::NeedPoint)
             }
             Step::RefNew { center, ref_angle } => {
@@ -289,11 +277,7 @@ impl CadCommand for RotateCommand {
             .wire_models
             .iter()
             .map(|w| {
-                w.rotated_about_axis(
-                    center.as_vec3(),
-                    self.plane.z.as_vec3(),
-                    angle_rad as f32,
-                )
+                w.rotated_about_axis(center.as_vec3(), self.plane.z.as_vec3(), angle_rad as f32)
             })
             .collect();
         let radius = self.plane.vector_to_local(pt - center).truncate().length();
@@ -354,11 +338,7 @@ impl CadCommand for RotateCommand {
         let point = if angle.abs() <= f64::EPSILON {
             [center_local.x + radius, center_local.y]
         } else {
-            let (arc, _) = Self::angle_arc(
-                [center_local.x, center_local.y],
-                radius,
-                angle,
-            )?;
+            let (arc, _) = Self::angle_arc([center_local.x, center_local.y], radius, angle)?;
             KernelCurve::Arc(arc).point_at(0.5)
         };
         Some(

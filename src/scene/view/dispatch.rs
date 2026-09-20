@@ -5,8 +5,8 @@ use acadrust::{EntityType, Handle};
 
 use crate::command::EntityTransform;
 use crate::entities::traits::EntityTypeOps;
-use crate::scene::model::object::{GripDef, PropSection};
 use crate::scene::cache::properties;
+use crate::scene::model::object::{GripDef, PropSection};
 
 thread_local! {
     /// Which vertex a multi-vertex entity's Properties panel is focused on
@@ -81,11 +81,14 @@ pub fn properties_sectioned(
         sections.extend(groups);
     }
     if let Some(thickness) = entity_thickness(entity) {
-        let already_present = sections.iter().flat_map(|section| &section.props).any(|property| {
-            property.field == "thickness"
-                || property.field == "sl_thickness"
-                || property.label == crate::t!("Thickness").as_ref()
-        });
+        let already_present = sections
+            .iter()
+            .flat_map(|section| &section.props)
+            .any(|property| {
+                property.field == "thickness"
+                    || property.field == "sl_thickness"
+                    || property.label == crate::t!("Thickness").as_ref()
+            });
         if !already_present {
             if let Some(geometry) = sections
                 .iter_mut()
@@ -327,7 +330,11 @@ pub fn apply_geom_prop(entity: &mut EntityType, field: &str, value: &str) {
     EntityTypeOps::apply_geom_prop(entity, field, value);
 }
 
-pub fn apply_grip(entity: &mut EntityType, grip_id: usize, apply: crate::scene::model::object::GripApply) {
+pub fn apply_grip(
+    entity: &mut EntityType,
+    grip_id: usize,
+    apply: crate::scene::model::object::GripApply,
+) {
     use crate::scene::model::object::GripApply;
     // Grip drags arrive in world space; per-entity apply code writes raw
     // fields, which for planar entities live in OCS — convert first (the
@@ -371,11 +378,7 @@ pub fn refit_arc_grips(
             .collect::<Vec<_>>(),
         None => edits.to_vec(),
     };
-    Some(crate::entities::arc::refit_grips(
-        arc,
-        original_arc,
-        &edits,
-    ))
+    Some(crate::entities::arc::refit_grips(arc, original_arc, &edits))
 }
 
 /// Convert a world-space cursor point into the value expected by an
@@ -388,8 +391,7 @@ pub fn grip_menu_point_value(
 ) -> Option<f64> {
     let point = match planar_ocs_normal(entity) {
         Some(normal) => {
-            let (x, y, z) =
-                super::transform::wcs_point_to_ocs((point.x, point.y, point.z), normal);
+            let (x, y, z) = super::transform::wcs_point_to_ocs((point.x, point.y, point.z), normal);
             glam::DVec3::new(x, y, z)
         }
         None => point,
@@ -418,7 +420,12 @@ mod tests {
             .any(|property| property.field == "thickness"));
         let geometry = sections
             .iter()
-            .find(|section| section.props.iter().any(|property| property.field == "start_x"))
+            .find(|section| {
+                section
+                    .props
+                    .iter()
+                    .any(|property| property.field == "start_x")
+            })
             .unwrap();
         assert_eq!(geometry.props.last().unwrap().field, "thickness");
     }

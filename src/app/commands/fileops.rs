@@ -10,8 +10,9 @@ impl OpenCADStudio {
             // Tabs without a path (never saved) are skipped with a note.
             "SAVEALL" => {
                 if self.read_only {
-                    self.command_line
-                        .push_error(crate::t!("Read-only session (--read-only): saving is disabled.").as_ref());
+                    self.command_line.push_error(
+                        crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+                    );
                     return Some(Task::none());
                 }
                 #[cfg(not(target_arch = "wasm32"))]
@@ -23,47 +24,47 @@ impl OpenCADStudio {
                             continue;
                         }
                         if let Some(path) = self.tabs[t].current_path.clone() {
-                            if self
-                                .active_save_jobs
-                                .contains_key(&self.tabs[t].id)
-                            {
-                                self.command_line.push_info(crate::tf!(
-                                    "SAVEALL: {} already has a save running",
-                                    path.display()
-                                ).as_ref());
+                            if self.active_save_jobs.contains_key(&self.tabs[t].id) {
+                                self.command_line.push_info(
+                                    crate::tf!(
+                                        "SAVEALL: {} already has a save running",
+                                        path.display()
+                                    )
+                                    .as_ref(),
+                                );
                                 skipped += 1;
                                 continue;
                             }
-                            match self.save_tab_synchronously_protected(
-                                t,
-                                path.clone(),
-                                false,
-                            ) {
+                            match self.save_tab_synchronously_protected(t, path.clone(), false) {
                                 Ok(()) => {
                                     saved += 1;
                                 }
-                                Err(e) => self.command_line.push_error(crate::tf!(
-                                    "SAVEALL: {} failed: {e}",
-                                    path.display()
-                                ).as_ref()),
+                                Err(e) => self.command_line.push_error(
+                                    crate::tf!("SAVEALL: {} failed: {e}", path.display()).as_ref(),
+                                ),
                             }
                         } else {
                             skipped += 1;
                         }
                     }
-                    self.command_line.push_output(crate::tf!(
-                        "SAVEALL: saved {saved} drawing(s){}.",
-                        if skipped > 0 {
-                            crate::tf!("; {skipped} need SAVEAS (no file path yet)").into_owned()
-                        } else {
-                            String::new()
-                        }
-                    ).as_ref());
+                    self.command_line.push_output(
+                        crate::tf!(
+                            "SAVEALL: saved {saved} drawing(s){}.",
+                            if skipped > 0 {
+                                crate::tf!("; {skipped} need SAVEAS (no file path yet)")
+                                    .into_owned()
+                            } else {
+                                String::new()
+                            }
+                        )
+                        .as_ref(),
+                    );
                 }
                 #[cfg(target_arch = "wasm32")]
                 {
-                    self.command_line
-                        .push_info(crate::t!("SAVEALL: save each tab individually in the web build.").as_ref());
+                    self.command_line.push_info(
+                        crate::t!("SAVEALL: save each tab individually in the web build.").as_ref(),
+                    );
                 }
                 return Some(Task::none());
             }
@@ -87,7 +88,8 @@ impl OpenCADStudio {
             // without undoing any work done since.
             "OOPS" => {
                 if self.oops_cache.is_empty() {
-                    self.command_line.push_info(crate::t!("OOPS: nothing to restore.").as_ref());
+                    self.command_line
+                        .push_info(crate::t!("OOPS: nothing to restore.").as_ref());
                 } else {
                     let restored = std::mem::take(&mut self.oops_cache);
                     let pending = self.begin_undo(i, "OOPS", restored.len(), true);
@@ -181,7 +183,11 @@ impl OpenCADStudio {
                             }
                             for d in deps {
                                 let dp = PathBuf::from(&d);
-                                let resolved = if dp.is_absolute() { dp } else { parent.join(&dp) };
+                                let resolved = if dp.is_absolute() {
+                                    dp
+                                } else {
+                                    parent.join(&dp)
+                                };
                                 if resolved.exists() {
                                     if let Some(fname) = resolved.file_name() {
                                         if std::fs::copy(&resolved, folder.join(fname)).is_ok() {
@@ -190,18 +196,23 @@ impl OpenCADStudio {
                                     }
                                 }
                             }
-                            self.command_line.push_output(crate::tf!(
-                                "{cmd}: packaged {copied} file(s) into {}",
-                                folder.display()
-                            ).as_ref());
+                            self.command_line.push_output(
+                                crate::tf!(
+                                    "{cmd}: packaged {copied} file(s) into {}",
+                                    folder.display()
+                                )
+                                .as_ref(),
+                            );
                         }
                         Err(e) => self
                             .command_line
                             .push_error(crate::tf!("{cmd}: cannot create folder ({e}).").as_ref()),
                     }
                 } else {
-                    self.command_line
-                        .push_error(crate::t!("ARCHIVE: save the drawing first (it has no file path yet).").as_ref());
+                    self.command_line.push_error(
+                        crate::t!("ARCHIVE: save the drawing first (it has no file path yet).")
+                            .as_ref(),
+                    );
                 }
             }
 
@@ -220,11 +231,14 @@ impl OpenCADStudio {
             "PERF" => {
                 self.perf_hud = !self.perf_hud;
                 crate::perf::set_ui_enabled(self.perf_hud);
-                self.command_line.push_info(crate::t!(if self.perf_hud {
-                    "PERF panel on — tracing render and interaction costs"
-                } else {
-                    "PERF panel off"
-                }).as_ref());
+                self.command_line.push_info(
+                    crate::t!(if self.perf_hud {
+                        "PERF panel on — tracing render and interaction costs"
+                    } else {
+                        "PERF panel off"
+                    })
+                    .as_ref(),
+                );
                 return Some(Task::none());
             }
 
@@ -256,14 +270,16 @@ impl OpenCADStudio {
                     self.model_space.mode = crate::app::config::ModelSpaceMode::MatchTheme;
                     self.sync_model_space_theme(true);
                     self.persist_settings_if_changed();
-                    self.command_line
-                        .push_output(crate::t!("Model space background set to Match Theme.").as_ref());
+                    self.command_line.push_output(
+                        crate::t!("Model space background set to Match Theme.").as_ref(),
+                    );
                 } else if first_arg == "CLASSIC" {
                     self.model_space.mode = crate::app::config::ModelSpaceMode::ClassicDark;
                     self.sync_model_space_theme(true);
                     self.persist_settings_if_changed();
-                    self.command_line
-                        .push_output(crate::t!("Model space background set to Classic CAD Dark.").as_ref());
+                    self.command_line.push_output(
+                        crate::t!("Model space background set to Classic CAD Dark.").as_ref(),
+                    );
                 } else if first_arg == "DEFAULT" || first_arg == "RESET" {
                     if is_paper {
                         self.model_space.custom_paper_bg = None;
@@ -279,31 +295,48 @@ impl OpenCADStudio {
                         .push_output(crate::t!("Background reset to default.").as_ref());
                 } else if first_arg == "DESK" {
                     let sub_args = &args[1..];
-                    let sub_first = sub_args.first().map(|s| s.to_uppercase()).unwrap_or_default();
+                    let sub_first = sub_args
+                        .first()
+                        .map(|s| s.to_uppercase())
+                        .unwrap_or_default();
                     if sub_first == "DEFAULT" || sub_first == "RESET" {
                         self.model_space.custom_desk_bg = None;
                         self.sync_model_space_theme(false);
                         self.persist_settings_if_changed();
-                        self.command_line
-                            .push_output(crate::t!("Paper desk surround background reset to default.").as_ref());
+                        self.command_line.push_output(
+                            crate::t!("Paper desk surround background reset to default.").as_ref(),
+                        );
                     } else if let Some(rgba) = parse_background_color(sub_args) {
                         let [r, g, b, _] = rgba;
-                        let rgb = [(r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8];
+                        let rgb = [
+                            (r * 255.0).round() as u8,
+                            (g * 255.0).round() as u8,
+                            (b * 255.0).round() as u8,
+                        ];
                         self.model_space.custom_desk_bg = Some(rgb);
                         self.sync_model_space_theme(false);
                         self.persist_settings_if_changed();
-                        self.command_line.push_output(crate::tf!(
-                            "Desk surround background: rgb({}, {}, {})",
-                            rgb[0],
-                            rgb[1],
-                            rgb[2]
-                        ).as_ref());
+                        self.command_line.push_output(
+                            crate::tf!(
+                                "Desk surround background: rgb({}, {}, {})",
+                                rgb[0],
+                                rgb[1],
+                                rgb[2]
+                            )
+                            .as_ref(),
+                        );
                     } else {
-                        self.command_line.push_info(crate::t!("Usage: BACKGROUND DESK <r> <g> <b> | DEFAULT").as_ref());
+                        self.command_line.push_info(
+                            crate::t!("Usage: BACKGROUND DESK <r> <g> <b> | DEFAULT").as_ref(),
+                        );
                     }
                 } else if let Some(rgba) = parse_background_color(&args) {
                     let [r, g, b, _] = rgba;
-                    let rgb = [(r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8];
+                    let rgb = [
+                        (r * 255.0).round() as u8,
+                        (g * 255.0).round() as u8,
+                        (b * 255.0).round() as u8,
+                    ];
                     if is_paper {
                         self.model_space.custom_paper_bg = Some(rgb);
                         self.paper_bg_input = crate::app::config::rgb_to_hex(rgb);
@@ -314,12 +347,9 @@ impl OpenCADStudio {
                     }
                     self.sync_model_space_theme(true);
                     self.persist_settings_if_changed();
-                    self.command_line.push_output(crate::tf!(
-                        "Background: rgb({}, {}, {})",
-                        rgb[0],
-                        rgb[1],
-                        rgb[2]
-                    ).as_ref());
+                    self.command_line.push_output(
+                        crate::tf!("Background: rgb({}, {}, {})", rgb[0], rgb[1], rgb[2]).as_ref(),
+                    );
                 } else {
                     self.command_line.push_info(
                         crate::t!("Usage: BACKGROUND <r> <g> <b> (0–255) | THEME|CLASSIC|DEFAULT|DESK|BLACK|DARKGRAY|GRAY|LIGHTGRAY|WHITE").as_ref(),
@@ -355,10 +385,10 @@ impl OpenCADStudio {
                                 .filter(|l| !l.starts_with('#') && !l.starts_with(';'))
                                 .map(|l| Task::done(Message::ScriptLine(l.to_string())))
                                 .collect();
-                            self.command_line.push_output(crate::tf!(
-                                "SCRIPT: running {} command(s) from {p}.",
-                                cmds.len()
-                            ).as_ref());
+                            self.command_line.push_output(
+                                crate::tf!("SCRIPT: running {} command(s) from {p}.", cmds.len())
+                                    .as_ref(),
+                            );
                             return Some(Task::batch(cmds));
                         }
                         Err(e) => {

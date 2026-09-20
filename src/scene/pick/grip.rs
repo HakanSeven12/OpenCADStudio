@@ -88,12 +88,7 @@ pub struct GripTarget {
 }
 
 impl GripEdit {
-    pub fn single(
-        handle: Handle,
-        grip_id: usize,
-        is_translate: bool,
-        world: DVec3,
-    ) -> Self {
+    pub fn single(handle: Handle, grip_id: usize, is_translate: bool, world: DVec3) -> Self {
         Self {
             handle,
             grip_id,
@@ -295,7 +290,12 @@ pub fn find_hit_grip(
 /// (see `Scene::composed_viewport_view`) instead of a real camera. `pub(crate)`
 /// so any other single-point world→screen projection (e.g. constraint-glyph
 /// anchors) can reuse it instead of re-deriving the same NDC math.
-pub(crate) fn project_rte(world: DVec3, view_rot: Mat4, eye: DVec3, bounds: Rectangle) -> Option<Vec2> {
+pub(crate) fn project_rte(
+    world: DVec3,
+    view_rot: Mat4,
+    eye: DVec3,
+    bounds: Rectangle,
+) -> Option<Vec2> {
     let rel = (world - eye).as_vec3();
     let clip = view_rot * rel.extend(1.0);
     if clip.w.abs() < 1e-9 {

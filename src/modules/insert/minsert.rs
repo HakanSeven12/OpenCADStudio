@@ -6,11 +6,11 @@
 //! entity is a single [`Insert`] with its array fields set, which the renderer
 //! replicates over `row_count × column_count` using the row/column spacing.
 
+use crate::t;
 use acadrust::entities::Insert;
 use acadrust::types::Vector3;
 use acadrust::EntityType;
 use glam::DVec3;
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -76,7 +76,8 @@ impl MinsertCommand {
         usage_rank: rustc_hash::FxHashMap<String, (u32, usize)>,
         cliprompt_lines: u8,
     ) -> Self {
-        let limit = (cliprompt_lines as usize).clamp(0, crate::modules::insert::picker::MAX_SUGGESTIONS);
+        let limit =
+            (cliprompt_lines as usize).clamp(0, crate::modules::insert::picker::MAX_SUGGESTIONS);
         let picker = crate::modules::insert::picker::BlockPicker::new(available, usage_rank, limit);
         Self {
             picker,
@@ -134,7 +135,11 @@ impl CadCommand for MinsertCommand {
                 let needle = self.picker.needle();
                 let filtered = self.picker.filtered();
                 if !needle.is_empty() && filtered.is_empty() {
-                    return t!("MINSERT  No matching blocks for \"%{needle}\"", needle = needle).into_owned();
+                    return t!(
+                        "MINSERT  No matching blocks for \"%{needle}\"",
+                        needle = needle
+                    )
+                    .into_owned();
                 }
                 if needle.is_empty() {
                     let total = self.picker.total();
@@ -142,25 +147,31 @@ impl CadCommand for MinsertCommand {
                     if total <= shown {
                         t!("MINSERT  Enter block name:").into_owned()
                     } else {
-                        t!("MINSERT  Enter block name:  [%{shown} of %{total} — type to search]", shown = shown, total = total).into_owned()
+                        t!(
+                            "MINSERT  Enter block name:  [%{shown} of %{total} — type to search]",
+                            shown = shown,
+                            total = total
+                        )
+                        .into_owned()
                     }
                 } else {
-                    t!("MINSERT  Enter block name:  \"%{needle}\"  [%{shown} matches]", needle = needle, shown = filtered.len()).into_owned()
+                    t!(
+                        "MINSERT  Enter block name:  \"%{needle}\"  [%{shown} matches]",
+                        needle = needle,
+                        shown = filtered.len()
+                    )
+                    .into_owned()
                 }
             }
-            Step::Point { name } => {
-                t!(
-                    "MINSERT  Specify insertion point for \"%{name}\":",
-                    name = name
-                )
-                .into_owned()
-            }
+            Step::Point { name } => t!(
+                "MINSERT  Specify insertion point for \"%{name}\":",
+                name = name
+            )
+            .into_owned(),
             Step::Params { idx, .. } => match idx {
-                ParamIdx::Rows => t!(
-                    "MINSERT  Enter number of rows <%{rows}>:",
-                    rows = self.rows
-                )
-                .into_owned(),
+                ParamIdx::Rows => {
+                    t!("MINSERT  Enter number of rows <%{rows}>:", rows = self.rows).into_owned()
+                }
                 ParamIdx::Columns => t!(
                     "MINSERT  Enter number of columns <%{cols}>:",
                     cols = self.columns
@@ -214,7 +225,12 @@ impl CadCommand for MinsertCommand {
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
         match &self.step {
-            Step::Name => self.picker.filtered().iter().map(|n| crate::command::CmdOption::new(n, n)).collect(),
+            Step::Name => self
+                .picker
+                .filtered()
+                .iter()
+                .map(|n| crate::command::CmdOption::new(n, n))
+                .collect(),
             _ => Vec::new(),
         }
     }

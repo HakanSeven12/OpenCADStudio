@@ -5,10 +5,10 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use OpenCADStudio::app;
-#[cfg(not(target_arch = "wasm32"))]
-use OpenCADStudio::{cli, io, mcp};
 #[cfg(target_arch = "wasm32")]
 use OpenCADStudio::sys;
+#[cfg(not(target_arch = "wasm32"))]
+use OpenCADStudio::{cli, io, mcp};
 
 fn main() -> iced::Result {
     // Web (wasm) uses the single-window entry; native uses the multi-window

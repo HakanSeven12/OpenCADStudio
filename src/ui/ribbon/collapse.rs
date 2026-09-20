@@ -15,8 +15,8 @@ use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Widget};
 use iced::advanced::{mouse, overlay, renderer, Renderer as _, Shell};
 use iced::{
-    Background, Border, Element, Event, Length, Point, Rectangle, Renderer, Shadow, Size,
-    Theme, Vector,
+    Background, Border, Element, Event, Length, Point, Rectangle, Renderer, Shadow, Size, Theme,
+    Vector,
 };
 
 use crate::app::Message;
@@ -59,9 +59,7 @@ const MAX_PANEL_SQUEEZE: f32 = 8.0;
 /// How the ribbon tool panels are sized. `Auto` adapts to the window width (the
 /// step-by-step degradation); the others pin every panel to one density so the
 /// user can override the automatic choice. The selection is persisted.
-#[derive(
-    Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub enum CollapseMode {
     /// Size panels to the window: degrade from the right as space runs out.
     #[default]
@@ -93,7 +91,6 @@ impl CollapseMode {
         }
     }
 
-
     /// The degradation level every panel is pinned to, or `None` for `Auto`.
     fn forced_level(self) -> Option<Level> {
         match self {
@@ -103,7 +100,6 @@ impl CollapseMode {
             CollapseMode::Collapsed => Some(Level::Collapsed),
         }
     }
-
 }
 
 impl std::fmt::Display for CollapseMode {
@@ -130,11 +126,7 @@ pub(crate) struct Widths {
 /// panel at a time: first Full -> Compact, then Compact -> Collapsed, each phase
 /// only while the row still overflows; if even the all-collapsed row overflows,
 /// every collapsed panel drops to Tight at once. Forced modes pin everything.
-pub(crate) fn decide_levels(
-    mode: CollapseMode,
-    widths: &[Widths],
-    max_w: f32,
-) -> Vec<Level> {
+pub(crate) fn decide_levels(mode: CollapseMode, widths: &[Widths], max_w: f32) -> Vec<Level> {
     if let Some(level) = mode.forced_level() {
         return vec![level; widths.len()];
     }
@@ -144,9 +136,8 @@ pub(crate) fn decide_levels(
         Level::Collapsed => widths[i].button,
         Level::Tight => widths[i].tight,
     };
-    let total = |levels: &[Level]| -> f32 {
-        (0..levels.len()).map(|i| width_of(levels[i], i)).sum()
-    };
+    let total =
+        |levels: &[Level]| -> f32 { (0..levels.len()).map(|i| width_of(levels[i], i)).sum() };
     let mut levels = vec![Level::Full; widths.len()];
     for degraded in [Level::Compact, Level::Collapsed] {
         for i in (0..widths.len()).rev() {
@@ -264,17 +255,33 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
         let auto = self.mode == CollapseMode::Auto;
         if auto {
             for i in 0..n {
-                let f = self.panels[i].elements[Level::Full as usize].as_widget_mut()
+                let f = self.panels[i].elements[Level::Full as usize]
+                    .as_widget_mut()
                     .layout(&mut tree.children[slot(i, Level::Full)], renderer, &natural)
                     .size();
-                let c = self.panels[i].elements[Level::Compact as usize].as_widget_mut()
-                    .layout(&mut tree.children[slot(i, Level::Compact)], renderer, &natural)
+                let c = self.panels[i].elements[Level::Compact as usize]
+                    .as_widget_mut()
+                    .layout(
+                        &mut tree.children[slot(i, Level::Compact)],
+                        renderer,
+                        &natural,
+                    )
                     .size();
-                let b = self.panels[i].elements[Level::Collapsed as usize].as_widget_mut()
-                    .layout(&mut tree.children[slot(i, Level::Collapsed)], renderer, &natural)
+                let b = self.panels[i].elements[Level::Collapsed as usize]
+                    .as_widget_mut()
+                    .layout(
+                        &mut tree.children[slot(i, Level::Collapsed)],
+                        renderer,
+                        &natural,
+                    )
                     .size();
-                let t = self.panels[i].elements[Level::Tight as usize].as_widget_mut()
-                    .layout(&mut tree.children[slot(i, Level::Tight)], renderer, &natural)
+                let t = self.panels[i].elements[Level::Tight as usize]
+                    .as_widget_mut()
+                    .layout(
+                        &mut tree.children[slot(i, Level::Tight)],
+                        renderer,
+                        &natural,
+                    )
                     .size();
                 widths.push(Widths {
                     full: f.width,
@@ -294,10 +301,7 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
         // The row is "tight" once any panel has dropped to its small icon — the
         // last, most cramped state. The tab bar hides its mode selector then.
         if let Some(out) = &self.tight_out {
-            out.store(
-                levels.iter().any(|&l| l == Level::Tight),
-                Ordering::Relaxed,
-            );
+            out.store(levels.iter().any(|&l| l == Level::Tight), Ordering::Relaxed);
         }
         *self.levels.borrow_mut() = levels.clone();
 
@@ -357,10 +361,7 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
                     .fold(0.0f32, f32::max)
             }
         } else {
-            placed
-                .iter()
-                .map(|(_, _, h)| *h)
-                .fold(self.row_h, f32::max)
+            placed.iter().map(|(_, _, h)| *h).fold(self.row_h, f32::max)
         };
         let children: Vec<layout::Node> = placed
             .into_iter()
@@ -522,8 +523,7 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
                 {
                     let child_layout = layout.children().nth(p).unwrap();
                     let b = child_layout.bounds();
-                    let anchor =
-                        Point::new(b.x + translation.x, b.y + b.height + translation.y);
+                    let anchor = Point::new(b.x + translation.x, b.y + b.height + translation.y);
                     // The flyout is the panel's own `full` rendering (the row
                     // never shows slot 0 while the panel is button-form, so it
                     // is free to double as the overlay content).
@@ -543,8 +543,7 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
         // Split borrows so each shown child and its tree slot are disjoint.
         let mut overlays = Vec::new();
         let mut tree_rest = tree.children.as_mut_slice();
-        for ((i, panel), child_layout) in
-            self.panels.iter_mut().enumerate().zip(layout.children())
+        for ((i, panel), child_layout) in self.panels.iter_mut().enumerate().zip(layout.children())
         {
             if tree_rest.len() < SLOTS {
                 break;
@@ -683,9 +682,13 @@ impl overlay::Overlay<Message, Theme, Renderer> for FlyoutOverlay<'_, '_> {
         renderer: &Renderer,
     ) -> mouse::Interaction {
         let child = layout.children().next().unwrap();
-        self.content
-            .as_widget()
-            .mouse_interaction(self.tree, child, cursor, &child.bounds(), renderer)
+        self.content.as_widget().mouse_interaction(
+            self.tree,
+            child,
+            cursor,
+            &child.bounds(),
+            renderer,
+        )
     }
 }
 
@@ -734,10 +737,7 @@ mod tests {
     /// compact first, and stops as soon as the row fits.
     #[test]
     fn auto_degrades_from_the_right_one_panel_at_a_time() {
-        let widths = [
-            w(50.0, 40.0, 30.0, 20.0),
-            w(200.0, 100.0, 60.0, 30.0),
-        ];
+        let widths = [w(50.0, 40.0, 30.0, 20.0), w(200.0, 100.0, 60.0, 30.0)];
         // Full row = 250 > 240; rightmost compact => 50 + 100 = 150 <= 240.
         assert_eq!(
             decide_levels(CollapseMode::Auto, &widths, 240.0),
@@ -800,10 +800,7 @@ mod tests {
     fn no_panels_stays_empty() {
         assert_eq!(decide_levels(CollapseMode::Auto, &[], 1e9), vec![]);
         assert_eq!(decide_levels(CollapseMode::Full, &[], 1e9), vec![]);
-        assert_eq!(
-            decide_levels(CollapseMode::Collapsed, &[], 1e9),
-            vec![]
-        );
+        assert_eq!(decide_levels(CollapseMode::Collapsed, &[], 1e9), vec![]);
     }
 
     /// A single panel walked the whole ladder as the width shrinks: FULL,
@@ -910,9 +907,8 @@ mod tests {
                 2 => widths[i].button,
                 _ => widths[i].tight,
             };
-            let total = |levels: &[u8]| -> f32 {
-                (0..levels.len()).map(|i| width_of(levels[i], i)).sum()
-            };
+            let total =
+                |levels: &[u8]| -> f32 { (0..levels.len()).map(|i| width_of(levels[i], i)).sum() };
             let mut levels = vec![0u8; widths.len()];
             for degraded in [1u8, 2u8] {
                 for i in (0..widths.len()).rev() {
@@ -923,10 +919,7 @@ mod tests {
                 }
             }
             if total(&levels) > max_w {
-                levels
-                    .iter_mut()
-                    .filter(|l| **l == 2)
-                    .for_each(|l| *l = 3);
+                levels.iter_mut().filter(|l| **l == 2).for_each(|l| *l = 3);
             }
             levels
         }
@@ -936,13 +929,21 @@ mod tests {
             for _ in 0..40 {
                 let mut widths = Vec::with_capacity(n);
                 for _ in 0..n {
-                    rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                    rng = rng
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
                     let full = (rng % 2000) as f32 / 10.0;
-                    rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                    rng = rng
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
                     let compact = (rng % (full as u64 * 10 + 1)) as f32 / 10.0;
-                    rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                    rng = rng
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
                     let button = (rng % (compact as u64 * 10 + 1)) as f32 / 10.0;
-                    rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                    rng = rng
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
                     let tight = (rng % (button as u64 * 10 + 1)) as f32 / 10.0;
                     widths.push(Widths {
                         full,

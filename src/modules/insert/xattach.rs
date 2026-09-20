@@ -334,6 +334,8 @@ pub fn prepare_xref_block(
         anonymous: false,
         has_attributes: false,
         is_external: false,
+        // A freshly attached reference is loaded; UNLOAD flips this later.
+        is_xref_unloaded: false,
     };
     br.xref_path = store_path.clone();
     let _ = scene.document.block_records.add(br);

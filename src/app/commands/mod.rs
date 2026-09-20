@@ -12,6 +12,7 @@ mod fileops;
 mod inquiry;
 mod layerprops;
 mod layers;
+mod plotvars;
 mod styleprops;
 mod view;
 
@@ -262,6 +263,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_layerprops(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_plotvars(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_styleprops(cmd, i) {
@@ -563,6 +567,16 @@ inventory::submit!(crate::command::CommandRegistration {
         "DELOBJ",
         "PLINEGEN",
         "PSLTSCALE",
+        // Plot preferences and the current-layout variables (commands/plotvars.rs).
+        "PLOTOFFSET",
+        "PAPERUPDATE",
+        "PLOTROTMODE",
+        "PLOTTRANSPARENCYOVERRIDE",
+        "BACKGROUNDPLOT",
+        "CTAB",
+        "TILEMODE",
+        "PSETUPIN",
+        "-PSETUPIN",
         "DISPSILH",
         "WORLDVIEW",
         "LIMCHECK",
@@ -720,6 +734,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "PERF",
         "PERSP",
         "PLOT",
+        "PRINTERS",
         "PLOTSTYLE",
         "PLOTSTYLEEDITOR",
         "PLOTSTYLEPANEL",

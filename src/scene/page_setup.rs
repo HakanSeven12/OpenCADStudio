@@ -6,7 +6,7 @@
 
 use super::Scene;
 use acadrust::objects::{Dictionary, Layout, ObjectType, PlotSettings};
-use acadrust::Handle;
+use acadrust::{CadDocument, Handle};
 
 /// Give a freshly created paper layout the page setup a new drawing starts
 /// with — ISO A4 landscape on no plotter, plotted 1:1 as a layout — stored the
@@ -59,33 +59,59 @@ pub fn rotated_margins(
     }
 }
 
-impl Scene {
-    /// Handle of the `ACAD_PLOTSETTINGS` dictionary, located robustly.
-    ///
-    /// The canonical path is the header's `acad_plotsettings_dict_handle`, but
-    /// DWGs written by other programs don't always leave that pointer resolvable
-    /// (the header handle points at no loaded dictionary — see
-    /// [`crate::scene::annotative::root_named_dict_handle`]). In that case fall
-    /// back to the dictionary that owns the drawing's `PlotSettings` objects,
-    /// mirroring [`Scene::scalelist_dict_handle`]. Returns `None` when the
-    /// drawing genuinely has no named page setups.
-    fn plotsettings_dict_handle(&self) -> Option<Handle> {
-        let dh = self.document.header.acad_plotsettings_dict_handle;
-        if matches!(
-            self.document.objects.get(&dh),
-            Some(ObjectType::Dictionary(_))
-        ) {
-            return Some(dh);
-        }
-        let owner = self.document.objects.values().find_map(|o| match o {
-            ObjectType::PlotSettings(ps) => Some(ps.owner),
+/// Handle of a document's `ACAD_PLOTSETTINGS` dictionary, located robustly.
+///
+/// The canonical path is the header's `acad_plotsettings_dict_handle`, but
+/// DWGs written by other programs don't always leave that pointer resolvable
+/// (the header handle points at no loaded dictionary — see
+/// [`crate::scene::annotative::root_named_dict_handle`]). In that case fall
+/// back to the dictionary that owns the drawing's `PlotSettings` objects,
+/// mirroring [`Scene::scalelist_dict_handle`]. Returns `None` when the
+/// drawing genuinely has no named page setups.
+fn plotsettings_dict_handle_in(document: &CadDocument) -> Option<Handle> {
+    let dh = document.header.acad_plotsettings_dict_handle;
+    if matches!(document.objects.get(&dh), Some(ObjectType::Dictionary(_))) {
+        return Some(dh);
+    }
+    let owner = document.objects.values().find_map(|o| match o {
+        ObjectType::PlotSettings(ps) => Some(ps.owner),
+        _ => None,
+    })?;
+    matches!(document.objects.get(&owner), Some(ObjectType::Dictionary(_))).then_some(owner)
+}
+
+/// The named page setups of any document — `(name, settings)` in dictionary
+/// order. Reads a drawing that is not open in the editor (the source of a
+/// `PSETUPIN` import) the same way the editor reads its own.
+pub fn document_page_setups(document: &CadDocument) -> Vec<(String, PlotSettings)> {
+    let Some(dh) = plotsettings_dict_handle_in(document) else {
+        return Vec::new();
+    };
+    let Some(ObjectType::Dictionary(dict)) = document.objects.get(&dh) else {
+        return Vec::new();
+    };
+    dict.entries
+        .iter()
+        .filter_map(|(name, handle)| match document.objects.get(handle) {
+            Some(ObjectType::PlotSettings(ps)) => Some((name.clone(), ps.clone())),
             _ => None,
-        })?;
-        matches!(
-            self.document.objects.get(&owner),
-            Some(ObjectType::Dictionary(_))
-        )
-        .then_some(owner)
+        })
+        .collect()
+}
+
+/// A page setup copied out of another drawing, made safe for this one: the
+/// handles it pointed at (a plot view, a visual style) meant something only
+/// in its source, so they are dropped while the names, which travel, stay.
+pub fn detach_page_setup(ps: &mut PlotSettings) {
+    ps.plot_view_handle = Handle::NULL;
+    ps.visual_style_handle = Handle::NULL;
+    ps.reactors.clear();
+    ps.xdictionary_handle = None;
+}
+
+impl Scene {
+    fn plotsettings_dict_handle(&self) -> Option<Handle> {
+        plotsettings_dict_handle_in(&self.document)
     }
 
     /// Names of the document's named page setups, in dictionary order.
@@ -97,6 +123,13 @@ impl Scene {
             Some(ObjectType::Dictionary(d)) => d.entries.iter().map(|(k, _)| k.clone()).collect(),
             _ => Vec::new(),
         }
+    }
+
+    /// Bring a page setup from another drawing in under `name`, replacing
+    /// one of that name the way `PSETUPIN` redefines it.
+    pub fn import_page_setup(&mut self, name: &str, mut ps: PlotSettings) {
+        detach_page_setup(&mut ps);
+        self.page_setup_save(name, ps);
     }
 
     /// Clone the named page setup's `PlotSettings`, or `None` if absent.

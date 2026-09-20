@@ -248,6 +248,7 @@ fn command_category(name: &str) -> &'static str {
         "GCHORIZONTAL",
         "VCONSTRAINT",
         "ECONSTRAINT",
+        "GCEQUAL",
         "TCONSTRAINT",
         "GCCONCENTRIC",
         "NRCONSTRAINT",
@@ -326,11 +327,18 @@ fn active_command_metadata(command: &dyn crate::command::CadCommand) -> Value {
         accepts.push("entity");
     }
     if accepts.is_empty() && !command.needs_tangent_pick() {
-        accepts.push(match command.input_kind() {
+        let kind = match command.input_kind() {
             InputKind::Point => "point",
             InputKind::SingleToken => "token",
             InputKind::FreeText => "text",
-        });
+        };
+        // A point step that also takes keyword letters (MOVE/COPY's base
+        // point with [Displacement]) reports SingleToken so the letters reach
+        // the command line, but it still takes a point.
+        if command.point_step_accepts_keywords() && kind != "point" {
+            accepts.push("point");
+        }
+        accepts.push(kind);
     }
     if options.iter().any(|option| !option.keyword.is_empty()) && !accepts.contains(&"token") {
         accepts.push("token");
@@ -1484,6 +1492,40 @@ mod tests {
         assert_eq!(reply["code"], "invalid_request", "{reply}");
         assert_eq!(app.tabs.len(), tabs);
         assert!(app.opening.is_none());
+    }
+
+    #[test]
+    fn point_steps_that_take_keywords_accept_points() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"CIRCLE 0,0 3"}));
+        request(&mut app, json!({"op":"select","type":"CIRCLE"}));
+        let started = request(&mut app, json!({"op":"start","cmd":"MOVE"}));
+        assert_eq!(started["status"], "waiting_input", "{started}");
+        let command = &started["state"]["command"];
+        let accepts = command["accepts"].as_array().unwrap();
+        assert!(accepts.contains(&json!("point")), "{command}");
+        assert!(accepts.contains(&json!("token")), "{command}");
+        assert_eq!(command["input_example"]["kind"], "point");
+        let base = request(
+            &mut app,
+            json!({"op":"input","kind":"point","point":[0.,0.,0.]}),
+        );
+        assert_eq!(base["status"], "waiting_input", "{base}");
+        let moved = request(
+            &mut app,
+            json!({"op":"input","kind":"point","point":[0.,-10.,0.]}),
+        );
+        assert_eq!(moved["status"], "completed", "{moved}");
+        let circle = app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| match e {
+                acadrust::EntityType::Circle(c) => Some(c.center.y),
+                _ => None,
+            });
+        assert_eq!(circle, Some(-10.0));
     }
 
     #[test]

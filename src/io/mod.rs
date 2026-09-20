@@ -21,6 +21,14 @@ pub mod recovery;
 pub mod single_instance;
 pub mod step;
 pub mod stl;
+pub mod xref;
+pub mod xref_model;
+pub mod linetypes;
+pub mod patterns;
+pub mod update_check;
+pub mod paper_catalog;
+pub mod plot_device;
+pub mod windows_media;
 pub mod thumbnail;
 pub mod update_check;
 #[cfg(target_arch = "wasm32")]
@@ -309,10 +317,62 @@ async fn open_path_with_phase_attempt(
             let initial_fingerprint = crate::io::edit_lock::FileFingerprint::capture(&path2).ok();
             let attempted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 (|| -> Result<_, OpenAttemptFailure> {
-                    use iced::time::Instant;
-                    progress2.set(crate::app::OPEN_PHASE_PARSING, 200, 0, 1000);
-                    let t_parse = Instant::now();
-                    let parser_progress = {
+        use iced::time::Instant;
+                progress2.set(crate::app::OPEN_PHASE_PARSING, 200, 0, 1000);
+        let t_parse = Instant::now();
+        let parser_progress = {
+                    let progress = Arc::clone(&progress2);
+                    let callback: Arc<dyn Fn(u16) + Send + Sync> = Arc::new(move |value| {
+                        progress.set_fraction(
+                            crate::app::OPEN_PHASE_PARSING,
+                            200,
+                            5600,
+                            value as usize,
+                            1000,
+                        );
+                    });
+                    callback
+                };
+                std::fs::File::open(&path2).map_err(|error| {
+                    // 32 = ERROR_SHARING_VIOLATION, 33 = ERROR_LOCK_VIOLATION:
+                    // another program holds the drawing without read sharing,
+                    // so nothing on the machine can read the bytes until it
+                    // closes the file — not even read-only.
+                    let message = match error.raw_os_error() {
+                        Some(32) | Some(33) => format!(
+                            "\"{}\" is in use by another program. Close the file there and \
+                             reopen it here, or open a copy of the file.",
+                            path2.display()
+                        ),
+                        _ => format!("failed to open drawing: {error}"),
+                    };
+                    OpenAttemptFailure {
+                        message,
+                        read_stats: None,
+                        recoverable: false,
+                    }
+                })?;
+                let outcome = load_file_for_open(&path2, Some(parser_progress), &attempt)?;
+                let read_stats = outcome.stats;
+                let mut doc = outcome.document;
+        let parse_ms = t_parse.elapsed().as_millis() as u32;
+                progress2.set(crate::app::OPEN_PHASE_PARSING, 5800, 1000, 1000);
+        let t_purge = Instant::now();
+        let dropped = purge_corrupt_entities(&mut doc);
+        let purge_ms = t_purge.elapsed().as_millis() as u32;
+                if matches!(attempt, OpenAttempt::Strict) && dropped > 0 {
+                    return Err(OpenAttemptFailure {
+                        message: format!(
+                            "normal read found {dropped} structurally invalid drawing records"
+                        ),
+                        read_stats: Some(read_stats),
+                        recoverable: true,
+                    });
+                }
+                progress2.set(crate::app::OPEN_PHASE_XREF, 6000, 0, 1);
+                let t_xref = Instant::now();
+                let (xref_infos, xref_dropped) = if let Some(base_dir) = path2.parent() {
+                    let xref_progress = {
                         let progress = Arc::clone(&progress2);
                         let callback: Arc<dyn Fn(u16) + Send + Sync> = Arc::new(move |value| {
                             progress.set_fraction(
@@ -1003,18 +1063,117 @@ fn read_dwg_path(
         DwgReadOptions::default()
     };
     #[cfg(not(target_arch = "wasm32"))]
-    let mut reader = {
-        let mut reader = DwgReader::from_mmap(path).map_err(ReaderFailure::from_reader)?;
-        reader.options = options;
+    {
+        // The memory-mapped read is the fast path, but a mapped file is read
+        // through the page-fault handler: a file that shrinks while mapped
+        // (a writer saving over it) or a cloud placeholder that cannot page
+        // in raises an in-page exception the process cannot catch. Both are
+        // ordinary I/O errors through plain reads, so anything that can
+        // fault — or refuses to open under a third-party lock — falls back
+        // to one in-memory snapshot read below.
+        if !cloud_placeholder(path) {
+            match DwgReader::from_mmap(path) {
+                Ok(mut reader) => {
+                    reader.options = options.clone();
+                    if let Some(progress) = &progress {
+                        reader.set_progress_callback(progress.clone());
+                    }
+                    match reader.read_with_stats() {
+                        Ok(outcome) => return Ok(outcome),
+                        // The file shrank or became unreadable mid-parse;
+                        // retry from a snapshot instead of reporting a bare
+                        // I/O error.
+                        Err(acadrust::DxfError::Io(_)) => {}
+                        Err(error) => return Err(ReaderFailure::from_reader(error)),
+                    }
+                }
+                // Locked or unmappable: the snapshot read surfaces the real
+                // error when the file genuinely cannot be read.
+                Err(_) => {}
+            }
+        }
+        let bytes = read_drawing_snapshot(path).map_err(|error| {
+            ReaderFailure::terminal(format!(
+                "failed to open drawing (is it in use by another program?): {error}"
+            ))
+        })?;
+        let mut reader = DwgReader::from_stream_with_options(std::io::Cursor::new(bytes), options);
+        if let Some(progress) = progress {
+            reader.set_progress_callback(progress);
+        }
         reader
-    };
-    #[cfg(target_arch = "wasm32")]
-    let mut reader =
-        DwgReader::from_file_with_options(path, options).map_err(ReaderFailure::from_reader)?;
-    if let Some(progress) = progress {
-        reader.set_progress_callback(progress);
+            .read_with_stats()
+            .map_err(ReaderFailure::from_reader)
     }
-    reader.read_with_stats().map_err(ReaderFailure::from_reader)
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut reader = DwgReader::from_file_with_options(path, options)
+            .map_err(ReaderFailure::from_reader)?;
+        if let Some(progress) = progress {
+            reader.set_progress_callback(progress);
+        }
+        reader
+            .read_with_stats()
+            .map_err(ReaderFailure::from_reader)
+    }
+}
+
+/// Windows cloud-placeholder files (OneDrive "Files On Demand" and similar)
+/// page their bytes in on demand; faulting a placeholder through a memory map
+/// can raise an in-page exception that kills the process. Plain reads hydrate
+/// the file instead. Checks `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`,
+/// `FILE_ATTRIBUTE_RECALL_ON_OPEN` and `FILE_ATTRIBUTE_OFFLINE`.
+#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+fn cloud_placeholder(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_OFFLINE: u32 = 0x1000;
+    const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x0004_0000;
+    const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
+    std::fs::metadata(path)
+        .map(|meta| {
+            let attrs = meta.file_attributes();
+            attrs
+                & (FILE_ATTRIBUTE_OFFLINE
+                    | FILE_ATTRIBUTE_RECALL_ON_OPEN
+                    | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)
+                != 0
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
+fn cloud_placeholder(_path: &Path) -> bool {
+    false
+}
+
+/// Read the whole drawing through the most permissive share mode the platform
+/// offers. On Windows `std::fs::read` opens without `FILE_SHARE_DELETE`, so a
+/// concurrent atomic-save replace makes the read fail even though every byte
+/// was readable. A snapshot can never fault: a writer shrinking the file
+/// mid-read just ends the read early.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_drawing_snapshot(path: &Path) -> std::io::Result<Vec<u8>> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::io::Read;
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        };
+
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .open(path)?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::fs::read(path)
+    }
 }
 
 fn read_dxf_path(path: &Path, failsafe: bool) -> Result<acadrust::ReadOutcome, ReaderFailure> {
@@ -1498,7 +1657,12 @@ mod save_failure_tests {
 // ── Plot Style Table ──────────────────────────────────────────────────────
 
 /// Show a file-open dialog and load the selected CTB or STB file.
-pub async fn pick_plot_style() -> Option<plot_style::PlotStyleTable> {
+/// Pick a plot style table file and load it. `Ok(None)` when the picker was
+/// cancelled; `Err` says why the chosen file could not be read. A table
+/// picked from outside the plot styles folder is copied into it (unless a
+/// file of that name is already there), so the dialog lists it from now on
+/// and page setups naming it resolve after a restart.
+pub async fn pick_plot_style() -> Result<Option<plot_style::PlotStyleTable>, String> {
     let dialog = crate::sys::file_dialog()
         .set_title(crate::t!("Load Plot Style Table").as_ref())
         .add_filter(crate::t!("Plot Style Tables").as_ref(), &["ctb", "CTB"])
@@ -1509,8 +1673,26 @@ pub async fn pick_plot_style() -> Option<plot_style::PlotStyleTable> {
         Ok(dir) => dialog.set_directory(dir),
         Err(_) => dialog,
     };
-    let handle = dialog.pick_file().await?;
-    plot_style::PlotStyleTable::load(&crate::sys::handle_path(&handle)).ok()
+    let Some(handle) = dialog.pick_file().await else {
+        return Ok(None);
+    };
+    let path = crate::sys::handle_path(&handle);
+    let table = plot_style::PlotStyleTable::load(&path)?;
+    #[cfg(not(target_arch = "wasm32"))]
+    if let (Ok(dir), Some(file_name)) = (plot_style::ensure_plot_styles_dir(), path.file_name()) {
+        let destination = dir.join(file_name);
+        let same_place = path.parent().is_some_and(|parent| {
+            parent
+                .canonicalize()
+                .ok()
+                .zip(dir.canonicalize().ok())
+                .is_some_and(|(a, b)| a == b)
+        });
+        if !same_place && !destination.exists() {
+            let _ = std::fs::copy(&path, &destination);
+        }
+    }
+    Ok(Some(table))
 }
 
 // ── Image file picker ─────────────────────────────────────────────────────

@@ -98,7 +98,7 @@ impl HorizontalConstraintCommand {
         CmdResult::ReportError("No valid constraint point found.".to_string())
     }
 
-    fn segment_is_straight(entity: &EntityType, index: usize) -> bool {
+    pub(crate) fn segment_is_straight(entity: &EntityType, index: usize) -> bool {
         match entity {
             EntityType::LwPolyline(polyline) => polyline
                 .vertices

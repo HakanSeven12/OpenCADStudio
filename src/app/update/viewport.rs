@@ -6059,6 +6059,12 @@ properties={:.1}ms picked={}",
                     crate::tf!("Layout \"{new_name}\" created — use MVIEW to add a viewport")
                         .as_ref(),
                 );
+                // The option that greets every new layout with its page setup.
+                let switch_task = if self.plot_dialog.page_setup_on_new_layout {
+                    Task::batch([switch_task, self.on_plot_dialog_open()])
+                } else {
+                    switch_task
+                };
                 self.tabs[i].dirty = true;
                 return Task::batch([cancel_task, switch_task]);
             }

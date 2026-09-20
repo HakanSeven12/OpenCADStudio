@@ -227,18 +227,24 @@ fn standard_scale_for_ratio(paper: f64, drawing: f64) -> Option<acadrust::object
         .map(|(_, _, scale)| *scale)
 }
 
+/// `12.5000` → `12.5`, `3.0000` → `3`: a fixed-precision number without its
+/// trailing zeros, for fields the user reads back.
+fn trim_decimals(text: &str) -> String {
+    if text.contains('.') {
+        text.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        text.to_string()
+    }
+}
+
 /// A scale-list name for a plot scale the drawing has no name for, spelled as
 /// the ratio it is (`1:250`, `25.4:1`) so the value survives in the picker
 /// instead of collapsing to 1:1.
 fn ratio_scale_name(factor: f64) -> String {
-    let trim = |value: f64| {
-        let text = format!("{value:.4}");
-        text.trim_end_matches('0').trim_end_matches('.').to_string()
-    };
     if factor >= 1.0 {
-        format!("{}:1", trim(factor))
+        format!("{}:1", trim_decimals(&format!("{factor:.4}")))
     } else {
-        format!("1:{}", trim(1.0 / factor))
+        format!("1:{}", trim_decimals(&format!("{:.4}", 1.0 / factor)))
     }
 }
 
@@ -3137,6 +3143,143 @@ impl OpenCADStudio {
         iced::exit()
     }
 
+    /// The plot scale as `paper : drawing` in the dialog's page-setup unit,
+    /// with the standard code it names when it names one. The dialog's
+    /// factor is per the drawing's scale-family unit (inches for an imperial
+    /// drawing, else millimetres) and already includes the drawing-unit
+    /// factor; the page setup counts per its own unit. A named ratio is kept
+    /// as written when no drawing-unit factor hides inside it — a metre
+    /// drawing plotting "1:100" really plots 10 mm per unit, which is what
+    /// the file must say — and its standard code is kept even across a
+    /// paper-unit conversion, the way the commercial application writes
+    /// "1:1" on an inch page setup over a millimetre paper space as
+    /// `1 in = 25.4 units`.
+    fn dialog_plot_scale_ratio(&self) -> ((f64, f64), Option<acadrust::objects::ScaledType>) {
+        let d = &self.plot_dialog;
+        let scene = &self.tabs[self.active_tab].scene;
+        let factor = plot_dialog_scale_factor(d);
+        let conversion = scene.scale_family_unit_mm() / d.paper_units.to_mm(1.0);
+        let named = scene.scale_ratio(&d.scale).filter(|(paper, drawing)| {
+            (paper / drawing - factor).abs() <= 1e-9 * factor.abs().max(1.0)
+        });
+        let standard = named.and_then(|(paper, drawing)| standard_scale_for_ratio(paper, drawing));
+        let ratio = match named {
+            Some((paper, drawing)) if (conversion - 1.0).abs() <= 1e-12 => (paper, drawing),
+            _ => {
+                let per_unit = (factor * conversion).max(1e-9);
+                if per_unit >= 1.0 {
+                    (per_unit, 1.0)
+                } else {
+                    (1.0, 1.0 / per_unit)
+                }
+            }
+        };
+        (ratio, standard)
+    }
+
+    /// `PAPERUPDATE`: when the printer that just answered does not list the
+    /// dialog's sheet, either switch to the printer's default sheet (1) or
+    /// keep the sheet and say so (0).
+    fn reconcile_sheet_with_printer(&mut self, printer: &str) {
+        let d = &self.plot_dialog;
+        let Some(caps) = d.printer_media.as_ref() else {
+            return;
+        };
+        if caps.media.is_empty() {
+            return;
+        }
+        let paper = plot_dialog_paper(d);
+        if caps.margins_for(&paper).is_some() {
+            return;
+        }
+        let sheet = paper.display();
+        if d.paper_update == 1 {
+            let Some(default) = caps
+                .default_paper
+                .clone()
+                .or_else(|| caps.media.first().map(|media| media.paper.clone()))
+            else {
+                return;
+            };
+            let d = &mut self.plot_dialog;
+            d.paper = default.canonical.to_string();
+            (d.paper_width_mm, d.paper_height_mm) = default.sheet_mm(plot_dialog_orientation(d));
+            let default = default.display();
+            self.command_line.push_info(
+                crate::tf!(
+                    "{printer} does not support {sheet}; switched to its default sheet \
+                     {default} (PAPERUPDATE = 1)."
+                )
+                .as_ref(),
+            );
+        } else {
+            self.command_line.push_info(
+                crate::tf!(
+                    "{printer} does not support {sheet}; the sheet is kept (PAPERUPDATE = 0)."
+                )
+                .as_ref(),
+            );
+        }
+    }
+
+    /// Spell the picked scale in the custom fields.
+    fn refresh_custom_scale_fields(&mut self) {
+        let ((paper, drawing), _) = self.dialog_plot_scale_ratio();
+        let d = &mut self.plot_dialog;
+        d.custom_scale_paper = trim_decimals(&format!("{paper:.6}"));
+        d.custom_scale_drawing = trim_decimals(&format!("{drawing:.6}"));
+    }
+
+    /// Make the typed custom ratio the plot scale: the scale list's name for
+    /// it when it has one, else the ratio itself.
+    fn adopt_custom_scale(&mut self) {
+        let d = &self.plot_dialog;
+        if d.area == "Layout" {
+            return;
+        }
+        let (Ok(paper), Ok(drawing)) = (
+            d.custom_scale_paper.trim().parse::<f64>(),
+            d.custom_scale_drawing.trim().parse::<f64>(),
+        ) else {
+            return;
+        };
+        if !(paper > 0.0 && drawing > 0.0 && paper.is_finite() && drawing.is_finite()) {
+            return;
+        }
+        let conversion =
+            self.tabs[self.active_tab].scene.scale_family_unit_mm() / d.paper_units.to_mm(1.0);
+        let factor = paper / drawing / conversion;
+        let d = &mut self.plot_dialog;
+        d.scale = scale_name_for_factor(&d.scales, factor).unwrap_or_else(|| {
+            let name = ratio_scale_name(factor);
+            if !d.scales.iter().any(|(n, _)| n == &name) {
+                d.scales.push((name.clone(), factor));
+                d.scales
+                    .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            }
+            name
+        });
+    }
+
+    /// The plot origin in millimetres from the sheet's corner: the dialog's
+    /// offsets in the page-setup unit, counted from the printable area's
+    /// corner unless `PLOTOFFSET` says from the paper edge.
+    fn dialog_plot_origin_mm(&self) -> (f64, f64) {
+        let d = &self.plot_dialog;
+        let x = d.paper_units.to_mm(d.offset_x.trim().parse::<f64>().unwrap_or(0.0));
+        let y = d.paper_units.to_mm(d.offset_y.trim().parse::<f64>().unwrap_or(0.0));
+        if d.plot_offset_from_edge {
+            return (x, y);
+        }
+        let ps = self.plot_settings_from_dialog(self.dialog_base_settings());
+        let m = ps.margins;
+        let (left, bottom, ..) = crate::scene::rotated_margins(
+            (m.left, m.bottom, m.right, m.top),
+            ps.rotation.to_code(),
+        );
+        (x + left, y + bottom)
+    }
+
     /// The settings the dialog edits on top of: the named page setup it was
     /// loaded from, else the active layout's own, else a fresh metric sheet.
     /// Everything the dialog has no control for (viewport-border and
@@ -3165,9 +3308,10 @@ impl OpenCADStudio {
         mut ps: acadrust::objects::PlotSettings,
     ) -> acadrust::objects::PlotSettings {
         use crate::io::paper_catalog::Orientation;
-        use acadrust::objects::{PlotType, ScaledType, ShadePlotMode, ShadePlotResolutionLevel};
+        use acadrust::objects::{
+            PlotPaperUnits, PlotType, ScaledType, ShadePlotMode, ShadePlotResolutionLevel,
+        };
         let d = &self.plot_dialog;
-        let scene = &self.tabs[self.active_tab].scene;
         // Names and margins are decided against the stored settings before
         // any field is overwritten.
         let paper_size = paper_name_for_settings(d, &ps);
@@ -3211,15 +3355,20 @@ impl OpenCADStudio {
             }
         }
         ps.flags.plot_centered = d.center && !layout_area;
-        ps.origin_x = if layout_area {
-            0.0
+        // Offsets are typed in the page-setup unit; the file keeps millimetres.
+        let (origin_x, origin_y) = if layout_area {
+            (0.0, 0.0)
         } else {
-            d.offset_x.parse::<f64>().unwrap_or(0.0)
+            (
+                d.paper_units.to_mm(d.offset_x.trim().parse::<f64>().unwrap_or(0.0)),
+                d.paper_units.to_mm(d.offset_y.trim().parse::<f64>().unwrap_or(0.0)),
+            )
         };
-        ps.origin_y = if layout_area {
-            0.0
-        } else {
-            d.offset_y.parse::<f64>().unwrap_or(0.0)
+        ps.origin_x = origin_x;
+        ps.origin_y = origin_y;
+        ps.paper_units = match d.paper_units {
+            crate::io::paper_catalog::PaperUnits::Inches => PlotPaperUnits::Inches,
+            crate::io::paper_catalog::PaperUnits::Millimeters => PlotPaperUnits::Millimeters,
         };
         if d.fit_to_paper && !layout_area {
             ps.set_scale_to_fit();
@@ -3227,36 +3376,10 @@ impl OpenCADStudio {
             // "standard scale" bit and leaves the ratio it computed.
             ps.flags.use_standard_scale = true;
         } else {
-            // The dialog's factor is per the drawing's scale-family unit
-            // (inches for an imperial drawing, else millimetres) and already
-            // includes the drawing-unit factor; the file stores it per the
-            // layout's paper unit. A named ratio is kept as written when no
-            // drawing-unit factor hides inside it — a metre drawing plotting
-            // "1:100" really plots 10 mm per unit, which is what the file
-            // must say — and its standard code is kept even across a
-            // paper-unit conversion, the way the commercial application
-            // writes "1:1" on an inch page setup over a millimetre paper
-            // space as `1 in = 25.4 units`. A layout plot goes through the
-            // same path: the dialog holds it at 1:1, which the conversion
-            // turns into whatever keeps the paper space's unit intact.
-            let factor = plot_dialog_scale_factor(d);
-            let conversion = scene.scale_family_unit_mm() / plot_paper_unit_mm(ps.paper_units);
-            let named = scene.scale_ratio(&d.scale).filter(|(paper, drawing)| {
-                (paper / drawing - factor).abs() <= 1e-9 * factor.abs().max(1.0)
-            });
-            let standard =
-                named.and_then(|(paper, drawing)| standard_scale_for_ratio(paper, drawing));
-            let (numerator, denominator) = match named {
-                Some((paper, drawing)) if (conversion - 1.0).abs() <= 1e-12 => (paper, drawing),
-                _ => {
-                    let per_unit = (factor * conversion).max(1e-9);
-                    if per_unit >= 1.0 {
-                        (per_unit, 1.0)
-                    } else {
-                        (1.0, 1.0 / per_unit)
-                    }
-                }
-            };
+            // A layout plot goes through the same path as the other areas:
+            // the dialog holds it at 1:1, which the unit conversion turns
+            // into whatever keeps the paper space's unit intact.
+            let ((numerator, denominator), standard) = self.dialog_plot_scale_ratio();
             // The commercial application leaves the "standard scale" bit
             // clear even for a standard code and keeps the ratio in the
             // numerator/denominator pair; readers that trust the bit would
@@ -3273,7 +3396,7 @@ impl OpenCADStudio {
         ps.flags.plot_plot_styles = d.apply_plot_styles;
         ps.flags.show_plot_styles = d.show_plot_styles;
         ps.flags.draw_viewports_first = d.paperspace_last;
-        ps.flags.plot_hidden = d.shade == "Hidden Line";
+        ps.flags.plot_hidden = d.hide_paperspace;
         ps.shade_plot_mode = match d.shade.as_str() {
             "2D Wireframe" | "3D Wireframe" => ShadePlotMode::Wireframe,
             "Hidden Line" => ShadePlotMode::Hidden,
@@ -3606,7 +3729,7 @@ impl OpenCADStudio {
                 })
                 .map_err(|error| crate::tf!("Export failed: {error}").into_owned())
         };
-        self.run_print_all_work(dialog.background, work)
+        self.run_print_all_work(dialog.background_publish, work)
     }
 
     pub(super) fn on_print_all_print(&mut self) -> Task<Message> {
@@ -3725,8 +3848,7 @@ impl OpenCADStudio {
             // Only the explicit upside-down choice rotates layout content here.
             let rotation = dialog_rotation;
             let centered = self.plot_dialog.center;
-            let origin_x = self.plot_dialog.offset_x.parse::<f64>().unwrap_or(0.0);
-            let origin_y = self.plot_dialog.offset_y.parse::<f64>().unwrap_or(0.0);
+            let (origin_x, origin_y) = self.dialog_plot_origin_mm();
 
             let (scale, offset_x, offset_y) = if plot_extents {
                 let (min_x, min_y, max_x, max_y) =
@@ -4000,7 +4122,16 @@ impl OpenCADStudio {
             .collect();
         // Keep session-only choices while loading drawing fields from the layout.
         let d = &mut self.plot_dialog;
-        d.printers = crate::io::print_to_printer::list_printers();
+        match crate::io::print_to_printer::list_printers() {
+            Ok(printers) => {
+                d.printers = printers;
+                d.printers_error = None;
+            }
+            Err(error) => {
+                d.printers = Vec::new();
+                d.printers_error = Some(error);
+            }
+        }
         d.default_printer = crate::io::plot_device::default_printer_name();
         d.plot_styles = crate::io::plot_style::available_ctb_names();
         d.scales = scales;
@@ -4051,6 +4182,10 @@ impl OpenCADStudio {
             self.plot_dialog.scale_lw = false;
         }
         self.refresh_page_setups();
+        if let Some(error) = self.plot_dialog.printers_error.clone() {
+            self.command_line
+                .push_warning(crate::tf!("Could not list printers: {error}").as_ref());
+        }
         self.plot_prev = Some(previous);
         let cur = self.tabs[self.active_tab].scene.current_layout.clone();
         let layout_entry = format!("*{cur}*");
@@ -4224,12 +4359,14 @@ impl OpenCADStudio {
     /// print job honours. Without a named printer, or where the options
     /// cannot be listed, the platform's printer settings open instead.
     fn on_printer_properties(&mut self) -> Task<Message> {
-        let Some(printer) = self
+        // "Default" is a real printer: its preferences sheet is the one to
+        // open, not the system's printer list.
+        let chosen = self
             .plot_dialog
             .printer
             .clone()
-            .filter(|_| !self.plot_dialog.to_file)
-        else {
+            .or_else(|| self.plot_dialog.default_printer.clone());
+        let Some(printer) = chosen.filter(|_| !self.plot_dialog.to_file) else {
             self.open_printer_settings_fallback();
             return Task::none();
         };
@@ -4341,6 +4478,7 @@ impl OpenCADStudio {
                 let d = &mut self.plot_dialog;
                 if !d.to_file && d.printer.as_deref() == Some(printer.as_str()) {
                     d.printer_media = caps;
+                    self.reconcile_sheet_with_printer(&printer);
                 }
                 Task::none()
             }
@@ -4349,6 +4487,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             M::PrinterProperties => self.on_printer_properties(),
+            M::Import(msg) => self.on_page_setup_import(msg),
             M::PrinterOptionsLoaded(printer, result) => {
                 if let Some(draft) = self.plot_dialog.printer_editor.as_mut() {
                     if draft.printer == printer {
@@ -4459,7 +4598,42 @@ impl OpenCADStudio {
             M::Scale(s) => {
                 if self.plot_dialog.area != "Layout" {
                     self.plot_dialog.scale = s;
+                    self.refresh_custom_scale_fields();
                 }
+                Task::none()
+            }
+            M::PaperUnits(s) => {
+                use crate::io::paper_catalog::PaperUnits;
+                let units = if s == "Inches" {
+                    PaperUnits::Inches
+                } else {
+                    PaperUnits::Millimeters
+                };
+                let d = &mut self.plot_dialog;
+                if units != d.paper_units {
+                    // The offsets are physical distances: re-spell them in the
+                    // new unit. The scale converts with the unit on its own.
+                    let convert = |text: &str| {
+                        text.parse::<f64>()
+                            .map(|value| units.from_mm(d.paper_units.to_mm(value)))
+                            .map(|value| trim_decimals(&format!("{value:.6}")))
+                            .unwrap_or_else(|_| text.to_string())
+                    };
+                    d.offset_x = convert(&d.offset_x);
+                    d.offset_y = convert(&d.offset_y);
+                    d.paper_units = units;
+                    self.refresh_custom_scale_fields();
+                }
+                Task::none()
+            }
+            M::CustomScalePaper(s) => {
+                self.plot_dialog.custom_scale_paper = s;
+                self.adopt_custom_scale();
+                Task::none()
+            }
+            M::CustomScaleDrawing(s) => {
+                self.plot_dialog.custom_scale_drawing = s;
+                self.adopt_custom_scale();
                 Task::none()
             }
             M::Quality(s) => {
@@ -4510,6 +4684,8 @@ impl OpenCADStudio {
                         d.paperspace_last = !d.paperspace_last
                     }
                     PlotFlag::Stamp => d.stamp = !d.stamp,
+                    PlotFlag::HidePaperspace => d.hide_paperspace = !d.hide_paperspace,
+                    PlotFlag::SaveToLayout => d.save_to_layout = !d.save_to_layout,
                     _ => {}
                 }
                 Task::none()
@@ -4523,18 +4699,22 @@ impl OpenCADStudio {
                     self.plot_dialog.apply_plot_styles = false;
                     self.plot_dialog.show_plot_styles = false;
                     self.plot_dialog.style_missing = false;
+                    self.plot_dialog.style_error = None;
                 } else {
                     match crate::io::plot_style::PlotStyleTable::load_named(&name) {
                         Ok(table) => {
                             self.plot_dialog.style_name = table.name.clone();
                             self.plot_dialog.apply_plot_styles = true;
                             self.plot_dialog.style_missing = false;
+                            self.plot_dialog.style_error = None;
+                            self.report_plot_style_warnings(&table);
                             self.active_plot_style = Some(table);
                         }
                         Err(error) => {
                             self.plot_dialog.style_name = name;
                             self.plot_dialog.style_missing = true;
                             self.command_line.push_error(&error);
+                            self.plot_dialog.style_error = Some(error);
                         }
                     }
                 }
@@ -4709,7 +4889,7 @@ impl OpenCADStudio {
         }
     }
 
-    fn refresh_page_setups(&mut self) {
+    pub(super) fn refresh_page_setups(&mut self) {
         use crate::ui::window::plot::{SETUP_NONE, SETUP_PREV};
         let scene = &self.tabs[self.active_tab].scene;
         // <none> / <previous>, then layouts (`*name*`), then named setups.
@@ -4722,7 +4902,7 @@ impl OpenCADStudio {
     /// Apply a page-setup list selection to the editor. Handles the pseudo
     /// entries (`<none>` / `<previous>`), layout rows (`*name*`) and named
     /// setups.
-    fn select_page_setup(&mut self, name: &str) {
+    pub(super) fn select_page_setup(&mut self, name: &str) {
         use crate::ui::window::plot::{SETUP_NONE, SETUP_PREV};
         self.plot_dialog.selected_setup = name.to_string();
         if name == SETUP_NONE {
@@ -4744,12 +4924,15 @@ impl OpenCADStudio {
             d.center = true;
             d.offset_x = "0.0".into();
             d.offset_y = "0.0".into();
+            d.paper_units = crate::io::paper_catalog::PaperUnits::Millimeters;
             d.upside_down = false;
+            d.hide_paperspace = false;
             d.fit_to_paper = is_model;
             d.scale_lw = false;
             d.scale = scale_name_for_factor(&d.scales, 1.0)
                 .or_else(|| d.scales.first().map(|(name, _)| name.clone()))
                 .unwrap_or_else(|| "1:1".into());
+            self.refresh_custom_scale_fields();
         } else if name == SETUP_PREV {
             if let Some(prev) = self.plot_prev.clone() {
                 self.plot_dialog.copy_settings_from(&prev);
@@ -4788,6 +4971,7 @@ impl OpenCADStudio {
 
     /// Load a `PlotSettings` into the dialog editor fields.
     fn load_plotsettings_into_dialog(&mut self, ps: &acadrust::objects::PlotSettings) {
+        use crate::io::paper_catalog::PaperUnits;
         use acadrust::objects::{PlotType, ShadePlotMode, ShadePlotResolutionLevel};
         self.plot_setup_template = Some(ps.clone());
         if matches!(ps.plot_type, PlotType::Window) && !ps.plot_window.is_empty() {
@@ -4799,16 +4983,19 @@ impl OpenCADStudio {
             ));
             self.plot_dialog.window = self.plot_window;
         }
+        let mut style_error = None;
         if !ps.current_style_sheet.is_empty()
             && self
                 .active_plot_style
                 .as_ref()
                 .is_none_or(|table| !table.name.eq_ignore_ascii_case(&ps.current_style_sheet))
         {
-            if let Ok(table) =
-                crate::io::plot_style::PlotStyleTable::load_named(&ps.current_style_sheet)
-            {
-                self.active_plot_style = Some(table);
+            match crate::io::plot_style::PlotStyleTable::load_named(&ps.current_style_sheet) {
+                Ok(table) => {
+                    self.report_plot_style_warnings(&table);
+                    self.active_plot_style = Some(table);
+                }
+                Err(error) => style_error = Some(error),
             }
         }
         let active_style_name = self
@@ -4864,8 +5051,13 @@ impl OpenCADStudio {
             d.area = "Extents".into();
         }
         d.center = ps.flags.plot_centered;
-        d.offset_x = format!("{:.2}", ps.origin_x);
-        d.offset_y = format!("{:.2}", ps.origin_y);
+        d.paper_units = match ps.paper_units {
+            acadrust::objects::PlotPaperUnits::Inches => PaperUnits::Inches,
+            _ => PaperUnits::Millimeters,
+        };
+        d.offset_x = trim_decimals(&format!("{:.4}", d.paper_units.from_mm(ps.origin_x)));
+        d.offset_y = trim_decimals(&format!("{:.4}", d.paper_units.from_mm(ps.origin_y)));
+        d.hide_paperspace = ps.flags.plot_hidden;
         let deg = ps.rotation.to_degrees() as i32;
         if matches!(deg, 90 | 270) {
             d.orientation = if d.orientation == "Portrait" {
@@ -4953,6 +5145,19 @@ impl OpenCADStudio {
         d.apply_plot_styles = ps.flags.plot_plot_styles;
         d.show_plot_styles = ps.flags.show_plot_styles;
         d.style_missing = !d.style_name.is_empty() && !style_loaded;
+        d.style_error = if d.style_missing { style_error } else { None };
+        self.refresh_custom_scale_fields();
+    }
+
+    /// Tell the user what a plot style table's loader had to tolerate.
+    pub(in crate::app) fn report_plot_style_warnings(
+        &mut self,
+        table: &crate::io::plot_style::PlotStyleTable,
+    ) {
+        for warning in &table.load_warnings {
+            let name = &table.name;
+            self.command_line.push_warning(&format!("{name}: {warning}"));
+        }
     }
 
     /// Copy transient paper/scale choices out of the dialog without changing
@@ -4979,9 +5184,15 @@ impl OpenCADStudio {
         }
         // Remember the user's print preferences across sessions.
         self.save_config();
-        // Preview and normal printing must not resize/mutate the live layout;
-        // the runtime paper/scale choices still drive this one plot operation.
-        self.sync_dialog_plot_runtime();
+        // A preview never touches the layout; a sent plot writes the dialog
+        // into it when "Save changes to layout" is on, so the page setup
+        // remembers the last plot the way other applications expect. The
+        // runtime paper/scale choices drive this one plot operation either way.
+        if !preview && d.save_to_layout && d.paper_space {
+            self.apply_dialog_to_layout();
+        } else {
+            self.sync_dialog_plot_runtime();
+        }
         self.active_modal = None;
         self.reset_modal_geometry();
 
@@ -5092,7 +5303,12 @@ impl OpenCADStudio {
         crate::io::pdf_export::PdfPlotOptions {
             object_lineweights: d.lineweights,
             scale_lineweights: d.scale_lw && !d.fit_to_paper,
-            transparency: d.transparency,
+            // PLOTTRANSPARENCYOVERRIDE: 0 never, 2 always, 1 as the dialog says.
+            transparency: match d.transparency_override {
+                0 => false,
+                2 => true,
+                _ => d.transparency,
+            },
             stamp: d.stamp,
             merge_lines: d.merge_lines,
         }
@@ -5241,15 +5457,16 @@ impl OpenCADStudio {
         };
         let (scale, centered_x, centered_y) =
             window_to_sheet((win_w, win_h), (sheet_w, sheet_h), scale_sel);
+        let (origin_x, origin_y) = self.dialog_plot_origin_mm();
         let target_x = if self.plot_dialog.center {
             centered_x
         } else {
-            self.plot_dialog.offset_x.parse::<f64>().unwrap_or(0.0)
+            origin_x
         };
         let target_y = if self.plot_dialog.center {
             centered_y
         } else {
-            self.plot_dialog.offset_y.parse::<f64>().unwrap_or(0.0)
+            origin_y
         };
         let scene = &self.tabs[i].scene;
         let (wx0, wy0, wx1, wy1) = (x0 as f32, y0 as f32, x1 as f32, y1 as f32);
@@ -5818,6 +6035,158 @@ mod plot_paper_tests {
             (x0 + 18.0).abs() < 1e-9 && (y0 + 5.0).abs() < 1e-9,
             "{x0} {y0}"
         );
+    }
+
+    #[test]
+    fn hide_paperspace_objects_is_its_own_flag() {
+        use crate::ui::window::plot::PlotFlag;
+        let mut app = app_with_printer_named_sheet();
+        let _ = app.on_plot_dialog_open();
+        assert!(!app.plot_dialog.hide_paperspace);
+        // Shade plot "Hidden Line" is a shade mode, not this flag.
+        let _ = app.on_plot_dlg(PlotDlgMsg::Shade("Hidden Line".into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
+        assert!(!layout_settings(&app).flags.plot_hidden);
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(PlotFlag::HidePaperspace));
+        let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
+        assert!(layout_settings(&app).flags.plot_hidden);
+        let _ = app.on_plot_dialog_open();
+        assert!(app.plot_dialog.hide_paperspace);
+    }
+
+    #[test]
+    fn switching_the_page_setup_unit_respells_offsets_and_keeps_the_output() {
+        use acadrust::objects::{PlotPaperUnits, ScaledType};
+        use crate::ui::window::plot::PlotFlag;
+        let mut app = app_with_printer_named_sheet();
+        let _ = app.on_plot_dialog_open();
+        let sheet_before = app.tabs[app.active_tab].scene.paper_limits().unwrap();
+        let _ = app.on_plot_dlg(PlotDlgMsg::Area("Extents".into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(PlotFlag::FitToPaper));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(PlotFlag::Center));
+        let _ = app.on_plot_dlg(PlotDlgMsg::OffsetX("25.4".into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Scale("1:100".into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::PaperUnits("Inches".into()));
+        let d = &app.plot_dialog;
+        assert_eq!(d.offset_x, "1", "25.4 mm is 1 inch");
+        assert_eq!((d.custom_scale_paper.as_str(), d.custom_scale_drawing.as_str()), ("1", "2540"));
+        let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
+        let ps = layout_settings(&app);
+        assert_eq!(ps.paper_units, PlotPaperUnits::Inches);
+        assert!((ps.origin_x - 25.4).abs() < 1e-9, "the file keeps millimetres");
+        assert_eq!(ps.scale_type, ScaledType::OneToHundred);
+        assert_eq!((ps.scale_numerator, ps.scale_denominator), (1.0, 2540.0));
+        // Back to millimetres: the same physical setup, spelled in mm.
+        let _ = app.on_plot_dlg(PlotDlgMsg::PaperUnits("Millimeters".into()));
+        assert_eq!(app.plot_dialog.offset_x, "25.4");
+        assert_eq!(app.plot_dialog.custom_scale_drawing, "100");
+        let _ = app.on_plot_dlg(PlotDlgMsg::Area("Layout".into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::PaperUnits("Inches".into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
+        // An inch page setup over the millimetre paper space leaves the
+        // sheet where it was.
+        let ps = layout_settings(&app);
+        assert_eq!((ps.scale_numerator, ps.scale_denominator), (1.0, 25.4));
+        let sheet_after = app.tabs[app.active_tab].scene.paper_limits().unwrap();
+        let size = |((x0, y0), (x1, y1)): ((f64, f64), (f64, f64))| (x1 - x0, y1 - y0);
+        let (before, after) = (size(sheet_before), size(sheet_after));
+        assert!((before.0 - after.0).abs() < 1e-9 && (before.1 - after.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn custom_scale_fields_follow_and_drive_the_picker() {
+        use acadrust::objects::ScaledType;
+        use crate::ui::window::plot::PlotFlag;
+        let mut app = app_with_printer_named_sheet();
+        let _ = app.on_plot_dialog_open();
+        let _ = app.on_plot_dlg(PlotDlgMsg::Area("Extents".into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(PlotFlag::FitToPaper));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Scale("1:100".into()));
+        let d = &app.plot_dialog;
+        assert_eq!((d.custom_scale_paper.as_str(), d.custom_scale_drawing.as_str()), ("1", "100"));
+        // A typed ratio the list knows is picked under its name…
+        let _ = app.on_plot_dlg(PlotDlgMsg::CustomScalePaper("2".into()));
+        assert_eq!(app.plot_dialog.scale, "1:50");
+        // …one it does not know becomes a ratio entry of its own.
+        let _ = app.on_plot_dlg(PlotDlgMsg::CustomScaleDrawing("6".into()));
+        assert_eq!(app.plot_dialog.scale, "1:3");
+        let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
+        let ps = layout_settings(&app);
+        assert_eq!(ps.scale_type, ScaledType::CustomScale);
+        assert_eq!((ps.scale_numerator, ps.scale_denominator), (1.0, 3.0));
+        // Half-typed or nonsense values leave the scale alone.
+        let _ = app.on_plot_dlg(PlotDlgMsg::CustomScaleDrawing("".into()));
+        assert_eq!(app.plot_dialog.scale, "1:3");
+        let _ = app.on_plot_dlg(PlotDlgMsg::CustomScaleDrawing("-4".into()));
+        assert_eq!(app.plot_dialog.scale, "1:3");
+    }
+
+    #[test]
+    fn the_plot_origin_counts_from_the_printable_corner_unless_plotoffset_says_edge() {
+        use crate::ui::window::plot::PlotFlag;
+        let mut app = app_with_printer_named_sheet();
+        let _ = app.on_plot_dialog_open();
+        let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_PDF.into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Area("Extents".into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(PlotFlag::Center));
+        let _ = app.on_plot_dlg(PlotDlgMsg::OffsetX("10".into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::OffsetY("20".into()));
+        // The PDF driver's margins on the drawing's landscape A4 medium:
+        // 5 left, 17 bottom.
+        assert_eq!(app.dialog_plot_origin_mm(), (15.0, 37.0));
+        let _ = app.run_command_line("PLOTOFFSET 1");
+        assert_eq!(app.dialog_plot_origin_mm(), (10.0, 20.0));
+        let _ = app.on_plot_dlg(PlotDlgMsg::PaperUnits("Inches".into()));
+        let (x, y) = app.dialog_plot_origin_mm();
+        assert!((x - 10.0).abs() < 1e-4, "unit change keeps the distance");
+        assert!((y - 20.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn sending_a_plot_saves_the_dialog_into_the_layout_when_asked() {
+        use crate::ui::window::plot::PlotFlag;
+        let mut app = app_with_printer_named_sheet();
+        let _ = app.on_plot_dialog_open();
+        assert!(app.plot_dialog.save_to_layout, "on by default, as expected of a page setup");
+        let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_PDF.into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Paper("ISO_A3_(297.00_x_420.00_MM)".into()));
+        // A preview never writes the layout.
+        let _ = app.on_plot_dlg(PlotDlgMsg::Preview);
+        assert_eq!(layout_paper(&app).0, "A4");
+        let _ = app.on_plot_dialog_open();
+        let _ = app.on_plot_dlg(PlotDlgMsg::Paper("ISO_A3_(297.00_x_420.00_MM)".into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Commit);
+        assert_eq!(layout_paper(&app).0, "ISO_A3_(297.00_x_420.00_MM)");
+        // Switched off, a plot leaves the layout alone.
+        let _ = app.on_plot_dialog_open();
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(PlotFlag::SaveToLayout));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Paper("ISO_A2_(420.00_x_594.00_MM)".into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Commit);
+        assert_eq!(layout_paper(&app).0, "ISO_A3_(297.00_x_420.00_MM)");
+    }
+
+    #[test]
+    fn paperupdate_decides_what_happens_to_an_unsupported_sheet() {
+        use crate::io::paper_catalog::{resolve, Margins};
+        use crate::io::plot_device::{PrinterCapabilities, PrinterMedia};
+        let a3 = resolve("ISO_A3_(297.00_x_420.00_MM)").unwrap();
+        let media = PrinterMedia { paper: a3.clone(), margins: Margins::uniform(3.0), borderless: false };
+        let caps = std::sync::Arc::new(PrinterCapabilities { media: vec![media], default_paper: Some(a3) });
+        let mut app = app_with_printer_named_sheet();
+        let _ = app.on_plot_dialog_open();
+        let _ = app.on_plot_dlg(PlotDlgMsg::Printer("OCS Test Printer".into()));
+        // PAPERUPDATE 0: the sheet is kept and the mismatch reported.
+        let media = |caps| PlotDlgMsg::PrinterMedia("OCS Test Printer".into(), Some(caps));
+        let _ = app.on_plot_dlg(media(caps.clone()));
+        assert_eq!(app.plot_dialog.paper, "ISO_A4_(210.00_x_297.00_MM)");
+        let last = app.command_line.history.last().map(|line| line.text.clone());
+        assert!(last.as_deref().unwrap_or("").contains("PAPERUPDATE = 0"), "{last:?}");
+        // PAPERUPDATE 1: the printer's default sheet takes over, in the
+        // dialog's orientation.
+        let _ = app.run_command_line("PAPERUPDATE 1");
+        let _ = app.on_plot_dlg(media(caps));
+        assert_eq!(app.plot_dialog.paper, "ISO_A3_(297.00_x_420.00_MM)");
+        assert_eq!(super::plot_dialog_sheet_mm(&app.plot_dialog), (420.0, 297.0));
     }
 
     #[test]

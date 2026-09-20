@@ -372,7 +372,12 @@ pub struct UserSettings {
     pub crosshair_color: Option<[u8; 3]>,
     /// Model-space lineweight preview scale as a percentage.
     pub lineweight_display_scale: i32,
-    /// Isometric drafting changes the grid and crosshair to the active axis pair.
+    /// Isometric drafting changes the grid and crosshair to the active axis
+    /// pair. Session-only: a persisted On turned every drawing's crosshair
+    /// into the isoplane pair (one vertical, one diagonal line) on every
+    /// launch, with no visible control to switch it back off. Turn it on for
+    /// a session with ISODRAFT; ISOPLANE keeps its persisted value.
+    #[serde(skip)]
     pub isometric_drafting: bool,
     pub iso_plane: IsoPlane,
     /// SNAPANG in degrees, applied in the active UCS plane.
@@ -790,5 +795,28 @@ mod tests {
         );
         assert!(!cfg.settings.pick_add, "the rest of the file must survive");
         assert_eq!(cfg.settings.savetime_min, 42);
+    }
+
+    #[test]
+    fn isometric_drafting_never_persists_or_loads() {
+        // A persisted On used to bring the isoplane crosshair (vertical +
+        // diagonal arms) back on every launch for every drawing. The flag is
+        // session-only now: it is dropped when saving and ignored when a
+        // settings file still carries it.
+        let mut settings = UserSettings::default();
+        settings.isometric_drafting = true;
+        let json = serde_json::to_string(&settings).expect("serialize settings");
+        assert!(
+            !json.contains("isometric_drafting"),
+            "the saved settings must not carry the session-only flag: {json}"
+        );
+
+        let with_flag = r#"{ "isometric_drafting": true, "iso_plane": "Left" }"#;
+        let loaded: UserSettings =
+            serde_json::from_str(with_flag).expect("an old settings file must still parse");
+        assert!(
+            !loaded.isometric_drafting,
+            "a persisted On must not turn isometric drafting back on"
+        );
     }
 }

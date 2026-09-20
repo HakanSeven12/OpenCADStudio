@@ -61,10 +61,22 @@ impl OpenCADStudio {
             None => String::new(),
         }
     }
-    pub(super) fn plot_modal_content<'s>(&'s self, extra: iced::Vector) -> Element<'s, Message> {
-        sized_flow(extra, 940, 620, |flow| {
-            crate::ui::window::plot::view_window(&self.plot_dialog, self.print_all_options, flow)
-        })
+    pub(super) fn plot_modal_content<'s>(
+        &'s self,
+        extra: iced::Vector,
+    ) -> Element<'s, Message> {
+        sized_flow(
+            extra,
+            940,
+            690,
+            |flow| {
+                crate::ui::window::plot::view_window(
+                    &self.plot_dialog,
+                    self.print_all_options,
+                    flow,
+                )
+            },
+        )
     }
     /// Build the currently-open modal dialog's content (Plan B), or `None`.
     /// Iced 0.15 measures the content first, so dialogs start at their natural
@@ -238,67 +250,55 @@ impl OpenCADStudio {
                     )
                 })
             }
-            super::super::ModalKind::Options => sized_flow(ex, 880, 620, |flow| {
-                crate::ui::window::options::view_window(
-                    &self.default_save_format,
-                    self.file_assoc_enabled,
-                    self.show_constraint_values,
-                    &self.ui_theme,
-                    &self.theme_color_inputs,
-                    self.language,
-                    self.options_tab,
-                    self.cursor_size,
-                    crate::ui::window::options::SelectionPrefs {
-                        pick_box: self.pick_box,
-                        pick_add: self.pick_add,
-                        pick_drag_rect: self.pick_drag_rect,
-                        grip_object_limit: self.grip_object_limit,
-                        selection_cycling: self.selection_cycling,
-                    },
-                    crate::ui::window::options::AppPrefs {
-                        savetime_min: self.savetime_min,
-                        backup_on_save: self.backup_on_save,
-                        textfill: crate::scene::text::sdf_atlas::textfill(),
-                        cliprompt_lines: self.cliprompt_lines,
-                        commandline_fade_ms: self.commandline_fade_ms,
-                        zoom_wheel_reversed: self.zoom_wheel_reversed,
-                        zoom_factor: self.zoom_factor,
-                        texteditmode: self.texteditmode,
-                        dimension_continue_mode: self.dimension_continue_mode,
-                        qdim_snap_priority: self.quick_dimension_snap_priority,
-                        annotation_auto_scale: self.annotation_auto_scale,
-                        polar_increment_deg: self.polar_increment_deg,
-                        show_viewcube: self.show_viewcube,
-                        show_ucs_icon: self.show_ucs_icon,
-                        ucs_icon_at_origin: self.ucs_icon_at_origin,
-                        right_click_mode: self.right_click_mode,
-                        right_click_hold_ms: self.right_click_hold_ms,
-                    },
-                    crate::ui::window::options::spacemouse::view(
-                        self.spacemouse_preferences,
-                        self.spacemouse.status(),
-                        self.spacemouse_paused,
-                        self.spacemouse_details,
-                    ),
-                    &self.snap_angle_input,
-                    {
-                        let header = self
-                            .tabs
-                            .get(self.active_tab)
-                            .map(|tab| &tab.scene.document.header);
-                        crate::ui::window::options::DrawingPrefs {
-                            available: header.is_some(),
-                            isolines: header.map_or(4, |h| h.isolines),
-                            display_silhouette: header.is_some_and(|h| h.display_silhouette),
-                            surface_u: header.map_or(6, |h| h.surface_u_density),
-                            surface_v: header.map_or(6, |h| h.surface_v_density),
-                            surface_type: header.map_or(6, |h| h.surface_type),
-                            record_solid_history: header.is_some_and(|h| h.record_solid_history),
-                            show_solid_history: header.map_or(1, |h| h.show_solid_history),
-                        }
-                    },
-                    {
-                        #[cfg(not(target_arch = "wasm32"))]
+            super::super::ModalKind::Options => {
+                let dirty = self.options_dirty();
+                let close_confirm = self.options_close_confirm;
+                sized_flow(
+                ex,
+                880,
+                620,
+                |flow| {
+                    crate::ui::window::options::view_window(
+                        &self.default_save_format,
+                        self.file_assoc_enabled,
+                        self.show_constraint_values,
+                        &self.ui_theme,
+                        &self.theme_color_inputs,
+                        self.language,
+                        self.options_tab,
+                        self.cursor_size,
+                        crate::ui::window::options::SelectionPrefs {
+                            pick_box: self.pick_box,
+                            pick_add: self.pick_add,
+                            pick_drag_rect: self.pick_drag_rect,
+                            grip_object_limit: self.grip_object_limit,
+                            selection_cycling: self.selection_cycling,
+                        },
+                        crate::ui::window::options::AppPrefs {
+                            savetime_min: self.savetime_min,
+                            backup_on_save: self.backup_on_save,
+                            page_setup_on_new_layout: self.plot_dialog.page_setup_on_new_layout,
+                            textfill: crate::scene::text::sdf_atlas::textfill(),
+                            cliprompt_lines: self.cliprompt_lines,
+                            commandline_fade_ms: self.commandline_fade_ms,
+                            zoom_wheel_reversed: self.zoom_wheel_reversed,
+                            zoom_factor: self.zoom_factor,
+                            texteditmode: self.texteditmode,
+                            dimension_continue_mode: self.dimension_continue_mode,
+                            qdim_snap_priority: self.quick_dimension_snap_priority,
+                            annotation_auto_scale: self.annotation_auto_scale,
+                            polar_increment_deg: self.polar_increment_deg,
+                            show_viewcube: self.show_viewcube,
+                            show_ucs_icon: self.show_ucs_icon,
+                            ucs_icon_at_origin: self.ucs_icon_at_origin,
+                            right_click_mode: self.right_click_mode,
+                            right_click_hold_ms: self.right_click_hold_ms,
+                        },
+                        crate::ui::window::options::spacemouse::view(
+                            self.spacemouse_preferences, self.spacemouse.status(),
+                            self.spacemouse_paused, self.spacemouse_details,
+                        ),
+                        &self.snap_angle_input,
                         {
                             crate::ui::window::options::Folders {
                                 config: crate::config::config_dir()
@@ -314,23 +314,43 @@ impl OpenCADStudio {
                         }
                         #[cfg(target_arch = "wasm32")]
                         {
-                            crate::ui::window::options::Folders::default()
-                        }
-                    },
-                    self.double_click_block_refedit,
-                    self.double_click_block_attedit,
-                    self.cursor_type,
-                    self.crosshair_color,
-                    &self.crosshair_color_input,
-                    self.lineweight_display_scale,
-                    &self.model_space,
-                    &self.model_bg_input,
-                    &self.paper_bg_input,
-                    &self.desk_bg_input,
-                    self.bg_picker,
-                    flow,
+                            #[cfg(not(target_arch = "wasm32"))]
+                            {
+                                crate::ui::window::options::Folders {
+                                    config: crate::config::config_dir()
+                                        .map(|p| p.display().to_string()),
+                                    plot_styles: crate::io::plot_style::plot_styles_dir()
+                                        .ok()
+                                        .map(|p| p.display().to_string()),
+                                    plugins: crate::plugin::external::plugins_dir()
+                                        .map(|p| p.display().to_string()),
+                                    autosave: crate::config::config_dir()
+                                        .map(|_| std::env::temp_dir().display().to_string()),
+                                }
+                            }
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                crate::ui::window::options::Folders::default()
+                            }
+                        },
+                        self.double_click_block_refedit,
+                        self.double_click_block_attedit,
+                        self.cursor_type,
+                        self.crosshair_color,
+                        &self.crosshair_color_input,
+                        self.lineweight_display_scale,
+                        &self.model_space,
+                        &self.model_bg_input,
+                        &self.paper_bg_input,
+                        &self.desk_bg_input,
+                        self.bg_picker,
+                        dirty,
+                        close_confirm,
+                        flow,
+                    )
+                },
                 )
-            }),
+            }
             super::super::ModalKind::DraftingSettings => {
                 let state = self.drafting_settings_state.as_ref();
                 let dirty = self.drafting_settings_dirty();

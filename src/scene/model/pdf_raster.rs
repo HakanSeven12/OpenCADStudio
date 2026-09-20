@@ -69,6 +69,13 @@ pub fn rasterize_page_at_dpi(path: &str, page: &str, dpi: f32) -> Option<Arc<Pdf
     built
 }
 
+/// Rasterise without touching the memo: for one-off consumers such as a
+/// print job, whose 300 DPI page would otherwise stay cached for the whole
+/// session (tens of megabytes per sheet).
+pub fn rasterize_page_at_dpi_uncached(path: &str, page: &str, dpi: f32) -> Option<Arc<PdfPage>> {
+    rasterize_uncached(path, page, dpi)
+}
+
 fn rasterize_uncached(path: &str, page: &str, dpi: f32) -> Option<Arc<PdfPage>> {
     let bytes = source_bytes(path)?;
     let pdf = Pdf::new(bytes).ok()?;

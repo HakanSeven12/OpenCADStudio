@@ -190,28 +190,36 @@ impl PrinterCapabilities {
     }
 }
 
-fn capability_cache() -> &'static Mutex<HashMap<String, Arc<PrinterCapabilities>>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Arc<PrinterCapabilities>>>> = OnceLock::new();
+/// Answers per printer for the session; a printer that could not be asked
+/// is remembered as `None` too, so a slow failing query (an offline network
+/// queue) runs once, not on every dialog open.
+type CapabilityCache = HashMap<String, Option<Arc<PrinterCapabilities>>>;
+
+fn capability_cache() -> &'static Mutex<CapabilityCache> {
+    static CACHE: OnceLock<Mutex<CapabilityCache>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// The cached capabilities of `printer`, if they were queried already.
 pub fn cached_printer_capabilities(printer: &str) -> Option<Arc<PrinterCapabilities>> {
-    capability_cache().lock().ok()?.get(printer).cloned()
+    capability_cache().lock().ok()?.get(printer).cloned().flatten()
 }
 
-/// Query `printer` for its media (blocking, one process spawn) and cache the
-/// answer. Returns `None` when the platform cannot answer — the plot dialog
-/// then falls back to the paper catalogue with unverified margins.
+/// Query `printer` for its media (blocking: a process spawn or a driver
+/// round trip) and cache the answer. Returns `None` when the platform or
+/// the printer cannot answer — the plot dialog then falls back to the paper
+/// catalogue with unverified margins.
 pub fn printer_capabilities(printer: &str) -> Option<Arc<PrinterCapabilities>> {
-    if let Some(cached) = cached_printer_capabilities(printer) {
-        return Some(cached);
+    if let Ok(cache) = capability_cache().lock() {
+        if let Some(answer) = cache.get(printer) {
+            return answer.clone();
+        }
     }
-    let caps = Arc::new(query_printer_capabilities(printer)?);
+    let caps = query_printer_capabilities(printer).map(Arc::new);
     if let Ok(mut cache) = capability_cache().lock() {
-        cache.insert(printer.to_string(), Arc::clone(&caps));
+        cache.insert(printer.to_string(), caps.clone());
     }
-    Some(caps)
+    caps
 }
 
 /// Name of the system default printer, when the platform reports one.
@@ -232,8 +240,14 @@ pub fn default_printer_name() -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
-/// Windows default printer discovery lands with native GDI printing.
-#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+/// The spooler's default printer, by name — the same lookup every direct
+/// print job resolves "Default" through, so the dialog names what will print.
+#[cfg(target_os = "windows")]
+pub fn default_printer_name() -> Option<String> {
+    crate::io::print_to_printer::windows_default_printer().ok()
+}
+
+#[cfg(target_arch = "wasm32")]
 pub fn default_printer_name() -> Option<String> {
     None
 }
@@ -255,9 +269,15 @@ fn query_printer_capabilities(printer: &str) -> Option<PrinterCapabilities> {
     parse_ipp_media(&String::from_utf8_lossy(&output.stdout))
 }
 
-/// Windows media enumeration (`DeviceCapabilities`) lands with native GDI
-/// printing; until then the catalogue serves every printer.
-#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+/// The driver's sheet tables and a printer DC's margins (see
+/// `windows_media`); `None` for a queue that lists no sheet.
+#[cfg(target_os = "windows")]
+fn query_printer_capabilities(printer: &str) -> Option<PrinterCapabilities> {
+    let raw = crate::io::print_to_printer::windows_printer_media(printer)?;
+    crate::io::windows_media::printer_media(&raw)
+}
+
+#[cfg(target_arch = "wasm32")]
 fn query_printer_capabilities(_printer: &str) -> Option<PrinterCapabilities> {
     None
 }
@@ -270,6 +290,7 @@ fn query_printer_capabilities(_printer: &str) -> Option<PrinterCapabilities> {
 /// with sizes and margins in hundredths of a millimetre, and
 /// `media-default (keyword) = iso_a4_210x297mm`. Borderless variants repeat a
 /// size with zero margins; they collapse onto the bordered entry.
+#[cfg_attr(any(target_arch = "wasm32", target_os = "windows"), allow(dead_code))]
 fn parse_ipp_media(text: &str) -> Option<PrinterCapabilities> {
     let database = attribute_value(text, "media-col-database")?;
     let mut media: Vec<PrinterMedia> = Vec::new();
@@ -331,6 +352,7 @@ fn parse_ipp_media(text: &str) -> Option<PrinterCapabilities> {
 }
 
 /// The text after `name (…) = ` on the line that declares `name`.
+#[cfg_attr(any(target_arch = "wasm32", target_os = "windows"), allow(dead_code))]
 fn attribute_value<'a>(text: &'a str, name: &str) -> Option<&'a str> {
     text.lines().find_map(|line| {
         let line = line.trim_start();
@@ -344,12 +366,14 @@ fn attribute_value<'a>(text: &'a str, name: &str) -> Option<&'a str> {
     })
 }
 
+#[cfg_attr(any(target_arch = "wasm32", target_os = "windows"), allow(dead_code))]
 fn collection_size_mm(entry: &str) -> Option<(f64, f64)> {
     let x = hundredths(entry, "x-dimension")?;
     let y = hundredths(entry, "y-dimension")?;
     (x > 0.0 && y > 0.0).then_some((x, y))
 }
 
+#[cfg_attr(any(target_arch = "wasm32", target_os = "windows"), allow(dead_code))]
 fn hundredths(entry: &str, key: &str) -> Option<f64> {
     let start = entry.find(key)? + key.len();
     let rest = entry[start..].trim_start_matches('=');
@@ -357,10 +381,12 @@ fn hundredths(entry: &str, key: &str) -> Option<f64> {
     digits.parse::<f64>().ok().map(|v| v / 100.0)
 }
 
+#[cfg_attr(any(target_arch = "wasm32", target_os = "windows"), allow(dead_code))]
 fn hundredths_mm(entry: &str, key: &str) -> f64 {
     hundredths(entry, key).unwrap_or(0.0)
 }
 
+#[cfg_attr(any(target_arch = "wasm32", target_os = "windows"), allow(dead_code))]
 fn portrait(w: f64, h: f64) -> (f64, f64) {
     if w <= h {
         (w, h)
@@ -371,6 +397,7 @@ fn portrait(w: f64, h: f64) -> (f64, f64) {
 
 /// Dimensions from a PWG self-describing media name such as
 /// `iso_a4_210x297mm` or `na_letter_8.5x11in`.
+#[cfg_attr(any(target_arch = "wasm32", target_os = "windows"), allow(dead_code))]
 fn pwg_size_mm(name: &str) -> Option<(f64, f64)> {
     let dims = name.rsplit('_').next()?;
     let (dims, units) = dims

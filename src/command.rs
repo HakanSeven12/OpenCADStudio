@@ -1599,6 +1599,17 @@ pub enum CmdResult {
         kind: crate::scene::parametric_constraints::ConstraintKind,
         pick: CoincidentPick,
     },
+    /// Adds an Equal relation from `first` to each of `others` (the second
+    /// object, or a Multiple set). The host resizes every follower to the
+    /// first object's length or radius before the relation holds it there.
+    AddEqualConstraint {
+        first: crate::scene::parametric_constraints::ParametricRef,
+        others: Vec<crate::scene::parametric_constraints::ParametricRef>,
+        /// A Multiple flow: the command stays for more picks; an empty
+        /// `others` is its Enter and prints the summary line.
+        multiple: bool,
+        label: &'static str,
+    },
     /// Adds a point or object symmetry relation around a picked line. The
     /// first reference and axis remain fixed during initial placement.
     AddSymmetricConstraint {
@@ -2437,6 +2448,11 @@ pub trait CadCommand: Send {
         false
     }
 
+    /// Take a typed coordinate at an object prompt as a pick at that point.
+    fn typed_point_picks_entity(&self) -> bool {
+        false
+    }
+
     /// Include filled hatch / DXF SOLID regions in the entity hit-test.
     ///
     /// Most entity-pick commands operate on curve geometry and intentionally
@@ -2901,6 +2917,7 @@ mod constraint_registry_tests {
             "QCONSTRAINT",
             "GCPERPENDICULAR",
             "ECONSTRAINT",
+            "GCEQUAL",
             "TCONSTRAINT",
             "GCCONCENTRIC",
             "NRCONSTRAINT",

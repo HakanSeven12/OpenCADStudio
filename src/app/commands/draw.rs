@@ -1571,7 +1571,17 @@ impl OpenCADStudio {
                 }
             }
 
-            "PCONSTRAINT" | "ECONSTRAINT" | "LCONSTRAINT" | "NRCONSTRAINT" => {
+            "ECONSTRAINT" | "GCEQUAL" => {
+                use crate::modules::parametric::EqualConstraintCommand;
+                // Both objects are picked inside the command, as in the
+                // reference; a selection made beforehand is not used.
+                self.tabs[i].scene.deselect_all();
+                let command = EqualConstraintCommand::new();
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+
+            "PCONSTRAINT" | "LCONSTRAINT" | "NRCONSTRAINT" => {
                 let handles = self.tabs[i].scene.selected_handles_in_order();
                 if handles.is_empty() {
                     use crate::modules::draw::select::SelectObjectsCommand;
@@ -1588,8 +1598,7 @@ impl OpenCADStudio {
                     let (kind, label) = match cmd {
                         "PCONSTRAINT" => (ConstraintKind::Parallel, "Parallel constraint"),
                         "LCONSTRAINT" => (ConstraintKind::Colinear, "Colinear constraint"),
-                        "NRCONSTRAINT" => (ConstraintKind::Normal, "Normal constraint"),
-                        _ => (ConstraintKind::Equal, "Equal constraint"),
+                        _ => (ConstraintKind::Normal, "Normal constraint"),
                     };
                     return Some(self.apply_cmd_result(CmdResult::AddParametricConstraint {
                         kind,

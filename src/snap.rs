@@ -2817,7 +2817,21 @@ fn wire_plane(wire: &WireModel) -> Option<WirePlane> {
     None
 }
 
-fn tangent_line_endpoints(wire: &WireModel, p1: [f32; 3], p2: [f32; 3]) -> (DVec3, DVec3) {
+/// Resolve a `TangentGeom::Line`'s f32 endpoints to the wire's f64
+/// `key_vertices`. The two lists are not index-aligned in general — a split
+/// polyline keeps every vertex but only its straight geoms, a center mark
+/// stores two vertices per segment, a block entry appends per entity — so the
+/// vertices are found by value. `cursor` carries the slot of the previous
+/// match: the geoms come in vertex order, so the next pair sits at or just
+/// after it and the scan is amortised linear over the wire rather than
+/// quadratic (a dense contour polyline is checked against every curved wire
+/// in the aperture on each cursor move).
+fn tangent_line_endpoints(
+    wire: &WireModel,
+    p1: [f32; 3],
+    p2: [f32; 3],
+    cursor: &mut usize,
+) -> (DVec3, DVec3) {
     if wire.points.len() == 2 && wire.tangent_geoms.len() == 1 {
         return (wp_f64(wire, 0), wp_f64(wire, 1));
     }
@@ -2829,9 +2843,11 @@ fn tangent_line_endpoints(wire: &WireModel, p1: [f32; 3], p2: [f32; 3]) -> (DVec
     };
     let count = wire.key_vertices.len();
     if count >= 2 {
-        for start in 0..count {
+        for step in 0..count {
+            let start = (*cursor + step) % count;
             let end = (start + 1) % count;
             if matches(wire.key_vertices[start], p1) && matches(wire.key_vertices[end], p2) {
+                *cursor = end;
                 return (
                     DVec3::from_array(wire.key_vertices[start]),
                     DVec3::from_array(wire.key_vertices[end]),
@@ -2873,10 +2889,11 @@ fn curves_in_frame(wire: &WireModel, frame: &WirePlane, tol: f64) -> Option<Vec<
         (p2[1] - c2[1]).atan2(p2[0] - c2[0])
     };
 
+    let mut vertex_cursor = 0usize;
     for geom in &wire.tangent_geoms {
         match geom {
             TangentGeom::Line { p1, p2 } => {
-                let (p1, p2) = tangent_line_endpoints(wire, *p1, *p2);
+                let (p1, p2) = tangent_line_endpoints(wire, *p1, *p2, &mut vertex_cursor);
                 if !frame.contains(p1, tol) || !frame.contains(p2, tol) {
                     return None;
                 }
@@ -4747,5 +4764,129 @@ mod ext_tests {
             line_pt.is_some(),
             "expected line crossing at (-5, 0, 0), got {pts:?}"
         );
+    }
+
+    fn xy_circle(cx: f64, cy: f64, radius: f64) -> WireModel {
+        WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarCircle {
+                center: [cx, cy, 0.0],
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, 1.0, 0.0],
+                radius,
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn line_geom(a: [f64; 3], b: [f64; 3]) -> TangentGeom {
+        TangentGeom::Line {
+            p1: [a[0] as f32, a[1] as f32, a[2] as f32],
+            p2: [b[0] as f32, b[1] as f32, b[2] as f32],
+        }
+    }
+
+    /// A center mark (`entities/line.rs`) stores two `key_vertices` per
+    /// segment plus the centre, so index `i` of `tangent_geoms` does not name
+    /// vertex `i`; the endpoints must be found by value.
+    #[test]
+    fn exact_curve_intersections_handles_center_mark_vertex_layout() {
+        let segments: [([f64; 3], [f64; 3]); 4] = [
+            ([-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+            ([0.0, -1.0, 0.0], [0.0, 1.0, 0.0]),
+            ([2.0, 0.0, 0.0], [7.0, 0.0, 0.0]),
+            ([0.0, 2.0, 0.0], [0.0, 7.0, 0.0]),
+        ];
+        let mut mark = WireModel::default();
+        for (a, b) in segments {
+            mark.key_vertices.push(a);
+            mark.key_vertices.push(b);
+            mark.tangent_geoms.push(line_geom(a, b));
+        }
+        mark.key_vertices.push([0.0, 0.0, 0.0]);
+
+        let mut pts = exact_curve_intersections(&mark, &xy_circle(0.0, 0.0, 5.0))
+            .expect("the extension lines cross the circle");
+        pts.sort_by(|a, b| a.x.total_cmp(&b.x));
+        assert_eq!(pts.len(), 2, "only the two extension lines reach r=5: {pts:?}");
+        assert!((pts[0] - DVec3::new(0.0, 5.0, 0.0)).length() < 1e-9, "{pts:?}");
+        assert!((pts[1] - DVec3::new(5.0, 0.0, 0.0)).length() < 1e-9, "{pts:?}");
+    }
+
+    /// A block entry (`cache/block_cache.rs`) appends each entity's
+    /// `key_vertices` and `tangent_geoms` in turn; the seam between two
+    /// entities must not be read as a segment.
+    #[test]
+    fn exact_curve_intersections_handles_block_entry_vertex_layout() {
+        let (a0, a1) = ([-10.0, 0.0, 0.0], [10.0, 0.0, 0.0]);
+        let (b0, b1) = ([20.0, -10.0, 0.0], [20.0, 10.0, 0.0]);
+        let block = WireModel {
+            key_vertices: vec![a0, a1, b0, b1],
+            tangent_geoms: vec![
+                line_geom(a0, a1),
+                line_geom(b0, b1),
+                TangentGeom::PlanarCircle {
+                    center: [30.0, 0.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 1.0,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let mut pts = exact_curve_intersections(&block, &xy_circle(0.0, 0.0, 5.0))
+            .expect("the first line crosses the circle");
+        pts.sort_by(|a, b| a.x.total_cmp(&b.x));
+        assert_eq!(pts.len(), 2, "the seam a1->b0 is not a segment: {pts:?}");
+        assert!((pts[0] - DVec3::new(-5.0, 0.0, 0.0)).length() < 1e-9, "{pts:?}");
+        assert!((pts[1] - DVec3::new(5.0, 0.0, 0.0)).length() < 1e-9, "{pts:?}");
+    }
+
+    /// The closing segment of a closed polyline runs from the last vertex
+    /// back to the first; it must still resolve to f64 vertices rather than
+    /// the f32 geom endpoints, which drift by centimetres at UTM scale.
+    #[test]
+    fn exact_curve_intersections_closing_segment_keeps_f64_vertices() {
+        let (ox, oy) = (500_000.123456, 4_000_000.654321);
+        let v = [
+            [ox + 10.0, oy, 0.0],
+            [ox + 10.0, oy + 10.0, 0.0],
+            [ox, oy + 10.0, 0.0],
+            [ox, oy, 0.0],
+        ];
+        let square = WireModel {
+            key_vertices: v.to_vec(),
+            tangent_geoms: (0..4).map(|i| line_geom(v[i], v[(i + 1) % 4])).collect(),
+            ..Default::default()
+        };
+
+        // Centred on the closing edge x = ox, so both crossings sit on it.
+        let pts = exact_curve_intersections(&square, &xy_circle(ox, oy + 5.0, 1.0))
+            .expect("the circle crosses the closing edge");
+        assert_eq!(pts.len(), 2, "{pts:?}");
+        for p in &pts {
+            assert!((p.x - ox).abs() < 1e-9, "closing edge fell back to f32 endpoints: {p:?}");
+        }
+    }
+
+    /// The by-value vertex lookup must stay linear over the wire: each geom's
+    /// pair is expected at the cursor left by the previous match.
+    #[test]
+    fn tangent_line_endpoints_cursor_walks_the_wire_once() {
+        let n = 64;
+        let verts: Vec<[f64; 3]> = (0..=n).map(|i| [i as f64, (i % 3) as f64, 0.0]).collect();
+        let wire = WireModel {
+            key_vertices: verts.clone(),
+            tangent_geoms: (0..n).map(|i| line_geom(verts[i], verts[i + 1])).collect(),
+            ..Default::default()
+        };
+        let mut cursor = 0usize;
+        for (i, geom) in wire.tangent_geoms.iter().enumerate() {
+            let TangentGeom::Line { p1, p2 } = geom else { unreachable!() };
+            let (a, b) = tangent_line_endpoints(&wire, *p1, *p2, &mut cursor);
+            assert_eq!(a, DVec3::from_array(verts[i]));
+            assert_eq!(b, DVec3::from_array(verts[i + 1]));
+            assert_eq!(cursor, i + 1, "cursor must land on the segment's end vertex");
+        }
     }
 }

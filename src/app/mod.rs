@@ -16,6 +16,7 @@ mod dimension_preview_tests;
 mod document;
 mod drafting_settings;
 pub(crate) mod expr_eval;
+mod options_session;
 mod find_replace;
 pub(crate) mod helpers;
 mod history;
@@ -575,6 +576,10 @@ pub(super) struct OpenCADStudio {
     dyn_input: bool,
     /// Currently visible page in the application Options dialog.
     options_tab: crate::ui::window::options::OptionsTab,
+    /// The Options window's commit point (see `options_session`).
+    options_saved: Option<options_session::OptionsSnapshot>,
+    /// Close was pressed with unapplied changes; the discard guard is up.
+    options_close_confirm: bool,
     spacemouse: crate::input::spacemouse::Service,
     spacemouse_preferences: crate::input::spacemouse::Preferences,
     spacemouse_paused: bool,
@@ -2201,6 +2206,10 @@ pub enum Message {
     SaveTimeChanged(i32),
     /// Toggle keeping a `.bak` copy when overwriting a drawing (ISAVEBAK).
     BackupOnSaveChanged(bool),
+    /// A drawing was picked to import page setups from (`PSETUPIN`).
+    PageSetupImportFile(std::path::PathBuf),
+    /// Options: open the Plot / Page Setup dialog for every new layout.
+    PageSetupOnNewLayoutChanged(bool),
     /// Toggle filled TrueType glyphs (TEXTFILL).
     TextFillChanged(bool),
     /// Change how many prompt lines sit above the command window (CLIPROMPTLINES).
@@ -2861,6 +2870,14 @@ pub enum Message {
     DraftingSettingsClose,
     DraftingSettingsCloseDiscard,
     DraftingSettingsCloseKeep,
+    /// Options window: commit the changes made so far.
+    OptionsApply,
+    /// Options window: commit and close.
+    OptionsOk,
+    /// Options window: close, asking first when changes would be lost.
+    OptionsClose,
+    OptionsCloseDiscard,
+    OptionsCloseKeep,
     AutoConstrainSelectRow(usize),
     AutoConstrainToggleKind(settings::AutoConstraintKind),
     AutoConstrainMoveUp,
@@ -3462,7 +3479,9 @@ pub enum Message {
     /// Open file dialog to load a CTB/STB plot style table.
     PlotStyleLoad,
     /// Callback when the user picks (or cancels) a CTB/STB file.
-    PlotStyleLoaded(Option<crate::io::plot_style::PlotStyleTable>),
+    /// The Load… picker finished: a table, nothing (cancelled), or why the
+    /// file could not be read.
+    PlotStyleLoaded(Result<Option<crate::io::plot_style::PlotStyleTable>, String>),
     /// Clear the active plot style table.
     PlotStyleClear,
     /// Open/close the Plot Style panel.
@@ -3902,6 +3921,8 @@ impl OpenCADStudio {
             grid_beyond_limits: true,
             dyn_input: true,
             options_tab: crate::ui::window::options::OptionsTab::General,
+            options_saved: None,
+            options_close_confirm: false,
             spacemouse: {
                 let service = crate::input::spacemouse::Service::default();
                 service.set_actions(navigation::actions());

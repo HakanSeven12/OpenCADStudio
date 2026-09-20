@@ -94,6 +94,7 @@ mod context_menu;
 mod dialog;
 mod dynamic;
 mod file;
+mod page_setup_import;
 mod style;
 mod util;
 mod viewport;
@@ -175,6 +176,10 @@ impl OpenCADStudio {
             self.drafting_settings_close_confirm = false;
             self.drafting_settings_state = None;
             self.drafting_settings_saved = None;
+        }
+        if self.active_modal == Some(Options) {
+            self.options_saved = None;
+            self.options_close_confirm = false;
         }
         #[cfg(not(target_arch = "wasm32"))]
         if self.active_modal == Some(FileInUse) {
@@ -7078,7 +7083,35 @@ impl OpenCADStudio {
             }
             // ── Options / About windows ───────────────────────────────────
             Message::OptionsOpen => {
-                self.active_modal = Some(super::ModalKind::Options);
+                self.options_open();
+                Task::none()
+            }
+            Message::OptionsApply => {
+                self.options_apply();
+                Task::none()
+            }
+            Message::OptionsOk => {
+                self.options_apply();
+                self.options_forget();
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::OptionsClose => {
+                if !self.options_close_confirm && self.options_dirty() {
+                    self.options_close_confirm = true;
+                    return Task::none();
+                }
+                self.options_discard();
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::OptionsCloseDiscard => {
+                self.options_discard();
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::OptionsCloseKeep => {
+                self.options_close_confirm = false;
                 Task::none()
             }
 
@@ -7392,6 +7425,12 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::PageSetupImportFile(path) => self.on_page_setup_import_file(path),
+            Message::PageSetupOnNewLayoutChanged(enabled) => {
+                self.plot_dialog.page_setup_on_new_layout = enabled;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
             Message::BackupOnSaveChanged(enabled) => {
                 self.backup_on_save = enabled;
                 self.persist_settings_if_changed();
@@ -7688,6 +7727,10 @@ impl OpenCADStudio {
             Message::CloseModal => {
                 if self.active_modal == Some(super::ModalKind::RecoveryPrompt) {
                     return self.update(Message::RecoveryDecline);
+                }
+                // The Options window's × and Esc behave like its Close button.
+                if self.active_modal == Some(super::ModalKind::Options) {
+                    return self.update(Message::OptionsClose);
                 }
                 // Closing the shortcut editor with un-applied rows needs an
                 // explicit discard; a second close attempt (or the overlay's
@@ -8917,7 +8960,7 @@ impl OpenCADStudio {
             Message::PlotStyleLoad => {
                 Task::perform(crate::io::pick_plot_style(), Message::PlotStyleLoaded)
             }
-            Message::PlotStyleLoaded(Some(table)) => {
+            Message::PlotStyleLoaded(Ok(Some(table))) => {
                 if table.is_stb {
                     self.command_line.push_error(
                         crate::t!(
@@ -8929,6 +8972,8 @@ impl OpenCADStudio {
                 }
                 self.plot_dialog.style_name = table.name.clone();
                 self.plot_dialog.style_missing = false;
+                self.plot_dialog.style_error = None;
+                self.report_plot_style_warnings(&table);
                 self.command_line.push_output(
                     crate::tf!(
                         "Plot style '{}' loaded ({} color entries).",
@@ -8945,7 +8990,15 @@ impl OpenCADStudio {
                 self.plot_dialog.plot_styles = crate::io::plot_style::available_ctb_names();
                 Task::none()
             }
-            Message::PlotStyleLoaded(None) => Task::none(),
+            Message::PlotStyleLoaded(Ok(None)) => Task::none(),
+            Message::PlotStyleLoaded(Err(error)) => {
+                // The file the user pointed at could not be read: say why,
+                // in the dialog as well as on the command line.
+                self.command_line.push_error(&error);
+                self.plot_dialog.style_missing = true;
+                self.plot_dialog.style_error = Some(error);
+                Task::none()
+            }
             Message::PlotStyleClear => {
                 self.active_plot_style = None;
                 self.plot_dialog.style_name.clear();
@@ -8972,12 +9025,15 @@ impl OpenCADStudio {
                     if needs_load {
                         match crate::io::plot_style::PlotStyleTable::load_named(&selected_style) {
                             Ok(table) => {
+                                self.report_plot_style_warnings(&table);
                                 self.active_plot_style = Some(table);
                                 self.plot_dialog.style_missing = false;
+                                self.plot_dialog.style_error = None;
                             }
                             Err(error) => {
                                 self.plot_dialog.style_missing = true;
                                 self.command_line.push_error(&error);
+                                self.plot_dialog.style_error = Some(error);
                                 return Task::none();
                             }
                         }

@@ -33,7 +33,7 @@ pub(crate) mod centermark;
 pub(crate) mod dimension_assoc;
 pub(crate) mod dimension_assoc_chain;
 pub use dimension_assoc::{ReferenceStatus, ResolvedReference};
-pub use page_setup::{apply_default_page_setup, rotated_margins};
+pub use page_setup::{apply_default_page_setup, document_page_setups, rotated_margins};
 mod dwg_native_constraints;
 mod entity;
 mod group_layer;

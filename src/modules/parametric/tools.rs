@@ -166,6 +166,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "QCONSTRAINT",
         "GCPERPENDICULAR",
         "ECONSTRAINT",
+        "GCEQUAL",
         "TCONSTRAINT",
         "GCCONCENTRIC",
         "NRCONSTRAINT",

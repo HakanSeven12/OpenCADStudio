@@ -790,6 +790,21 @@ impl OpenCADStudio {
                     if self.command_point_allowed(i, wcs) {
                         self.last_point = Some(wcs);
                         self.push_ucs_to_cmd(i);
+                        // A typed coordinate at an object prompt is a pick at
+                        // that point, as in the reference.
+                        let picks_entity = self.tabs[i]
+                            .active_cmd
+                            .as_ref()
+                            .is_some_and(|command| command.typed_point_picks_entity());
+                        if picks_entity {
+                            let owner = self.tabs[i]
+                                .current_parametric_scope()
+                                .owner_handle(&self.tabs[i].scene.document);
+                            let handle =
+                                entity_at_typed_point(&self.tabs[i].scene.document, owner, wcs)
+                                    .unwrap_or(Handle::NULL);
+                            return self.feed_command(StepInput::EntityPick(handle, wcs));
+                        }
                         return self.feed_command(StepInput::Point(wcs));
                     }
                     return Task::none();
@@ -3288,6 +3303,125 @@ impl OpenCADStudio {
                     self.commit_undo_delta(i, pd);
                 }
             }
+            CmdResult::AddEqualConstraint {
+                first,
+                others,
+                multiple,
+                label,
+            } => {
+                use crate::modules::parametric::EqualConstraintCommand;
+                use crate::scene::parametric_constraints::{
+                    equal_size, equal_size_follower, ConstraintKind, EqualSize, ParametricRef,
+                };
+
+                let scope = self.tabs[i].current_parametric_scope();
+                // Enter ends a Multiple flow with the reference's summary line.
+                let finishing = multiple && others.is_empty();
+                let mut followers: Vec<ParametricRef> = Vec::new();
+                for other in others {
+                    let refs = [first, other];
+                    if other == first
+                        || self
+                            .tabs[i]
+                            .scene
+                            .validate_parametric_constraint(ConstraintKind::Equal, &refs, None)
+                            .is_err()
+                        || equal_size_follower(&self.tabs[i].scene.document, first, other)
+                            .is_none()
+                    {
+                        self.command_line
+                            .push_error(EqualConstraintCommand::INVALID_OBJECT);
+                        continue;
+                    }
+                    let exists = self.tabs[i]
+                        .scene
+                        .parametric_constraint_set(scope)
+                        .is_some_and(|set| {
+                            set.constraints.iter().any(|existing| {
+                                existing.enabled
+                                    && existing.kind == ConstraintKind::Equal
+                                    && (existing.refs == refs || existing.refs == [other, first])
+                            })
+                        });
+                    if exists {
+                        self.command_line
+                            .push_error("The constraint already exists on the selected objects.");
+                        continue;
+                    }
+                    followers.push(other);
+                }
+                if multiple && !finishing {
+                    if let Some(prompt) =
+                        self.tabs[i].active_cmd.as_ref().map(|command| command.prompt())
+                    {
+                        self.command_line.push_info(&prompt);
+                    }
+                } else {
+                    self.tabs[i].active_cmd = None;
+                }
+                self.tabs[i].snap_result = None;
+                if finishing {
+                    let summary = match equal_size(&self.tabs[i].scene.document, first) {
+                        Some(EqualSize::Radius(_)) => "Radius of objects made equal",
+                        _ => "Length of objects made equal",
+                    };
+                    self.command_line.push_output(summary);
+                }
+                if followers.is_empty() {
+                    return Task::none();
+                }
+                let constraints_before = self.tabs[i]
+                    .scene
+                    .parametric_constraint_set(scope)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        crate::scene::parametric_constraints::ParametricConstraintSet::new(scope)
+                    });
+                let mut touched = vec![first.entity];
+                for follower in &followers {
+                    if !touched.contains(&follower.entity) {
+                        touched.push(follower.entity);
+                    }
+                }
+                let pending = self.begin_undo(i, label, touched.len(), true);
+                self.tabs[i]
+                    .scene
+                    .record_undo_parametric_constraints_before(scope, constraints_before);
+                // The reference resizes the follower in place — its start (a
+                // circle its center) and direction stay, only its length or
+                // radius takes the first object's — so do that first and let
+                // the relation then hold what already fits.
+                for follower in &followers {
+                    if let Some(resized) =
+                        equal_size_follower(&self.tabs[i].scene.document, first, *follower)
+                    {
+                        self.tabs[i].scene.update_entity(resized);
+                    }
+                    let id = self.tabs[i]
+                        .scene
+                        .parametric_constraint_set_mut(scope)
+                        .add(ConstraintKind::Equal, vec![first, *follower], None);
+                    self.tabs[i].scene.note_parametric_constraint_applied(
+                        scope,
+                        id,
+                        self.constraint_bar_display,
+                    );
+                }
+                let changes = touched
+                    .into_iter()
+                    .map(|handle| (handle, crate::scene::ChangeKind::Modified))
+                    .collect::<Vec<_>>();
+                self.tabs[i].scene.bump_entities_with_parametric_policy(
+                    &changes,
+                    &[],
+                    self.constraint_solve_mode,
+                );
+                self.tabs[i].dirty = true;
+                self.refresh_properties();
+                if let Some(pd) = pending {
+                    self.commit_undo_delta(i, pd);
+                }
+            }
             CmdResult::AddFixedConstraint(pick) => {
                 use crate::modules::parametric::FixConstraintCommand;
                 use crate::scene::parametric_constraints::{
@@ -3529,6 +3663,53 @@ impl OpenCADStudio {
                                     )),
                                 );
                             }
+                        }
+                    }
+                }
+                // The solver cannot start from an axis lying exactly across
+                // the datum (its equations are singular there), so turn the
+                // object onto the axis about its anchor first — the
+                // reference turns it about that anchor too — and let the
+                // constraint hold what already fits.
+                if let Some((handle, anchor, end, vertex)) =
+                    crate::scene::parametric_constraints::axis_alignment_target(
+                        &self.tabs[i].scene.document,
+                        &refs,
+                    )
+                {
+                    let axis = (end.x - anchor.x, end.y - anchor.y);
+                    let length = axis.0.hypot(axis.1);
+                    let target = if axis.0 * direction.x + axis.1 * direction.y >= 0.0 {
+                        (direction.x, direction.y)
+                    } else {
+                        (-direction.x, -direction.y)
+                    };
+                    let angle = (axis.0 * target.1 - axis.1 * target.0)
+                        .atan2(axis.0 * target.0 + axis.1 * target.1);
+                    if length > 1.0e-9 && angle.abs() > 1.0e-9 {
+                        match vertex {
+                            Some(index) => {
+                                let moved =
+                                    self.tabs[i].scene.document.get_entity(handle).cloned();
+                                if let Some(mut entity) = moved {
+                                    if crate::scene::parametric_constraints::set_polyline_vertex(
+                                        &mut entity,
+                                        index,
+                                        anchor.x + length * target.0,
+                                        anchor.y + length * target.1,
+                                    ) {
+                                        self.tabs[i].scene.update_entity(entity);
+                                    }
+                                }
+                            }
+                            None => self.tabs[i].scene.transform_entities(
+                                &[handle],
+                                &EntityTransform::Rotate {
+                                    center: glam::DVec3::new(anchor.x, anchor.y, anchor.z),
+                                    axis: glam::DVec3::Z,
+                                    angle_rad: angle,
+                                },
+                            ),
                         }
                     }
                 }
@@ -7620,6 +7801,40 @@ impl OpenCADStudio {
 /// returning the new root handle. `allocate_handle` advances the document's
 /// handle counter — `next_handle()` only peeks, so reusing it would hand every
 /// object the same handle and collapse the dictionary chain.
+/// The entity a typed coordinate lands on while an object is asked for:
+/// the nearest planar curve of the edited space within a small share of
+/// that space's extent, the way a pick box takes the object under a click.
+fn entity_at_typed_point(
+    document: &acadrust::CadDocument,
+    owner: Handle,
+    point: glam::DVec3,
+) -> Option<Handle> {
+    let mut extent = 0.0f64;
+    let mut nearest: Option<(f64, Handle)> = None;
+    for entity in document.entities() {
+        let common = entity.common();
+        if common.owner_handle != owner {
+            continue;
+        }
+        let bounds = entity.as_entity().bounding_box();
+        extent = extent
+            .max((bounds.max.x - bounds.min.x).abs())
+            .max((bounds.max.y - bounds.min.y).abs());
+        let Some(distance) =
+            crate::scene::viewport_dimension_pick::planar_pick_distance(entity, point)
+        else {
+            continue;
+        };
+        if nearest.is_none_or(|(best, _)| distance < best) {
+            nearest = Some((distance, common.handle));
+        }
+    }
+    let tolerance = (extent * 0.002).max(1.0e-9);
+    nearest
+        .filter(|(distance, _)| *distance <= tolerance)
+        .map(|(_, handle)| handle)
+}
+
 fn recreate_ext_subtree(
     doc: &mut acadrust::CadDocument,
     cap: &crate::app::ClipExtObjects,

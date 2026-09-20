@@ -2549,6 +2549,87 @@ fn solve_scope(
             }
         }
     }
+    // Equal: the side that is not being edited follows the other's length
+    // or radius the way the reference does it — its start (a circle its
+    // center) and direction stay and only its end moves — so its size is
+    // not retained below, its other points are held and its direction is
+    // kept while the edit lasts. A chain of Equal relations follows along.
+    let edited = |handle: Handle| {
+        driven_refs.iter().any(|reference| reference.entity == handle)
+            || initial_fixed_refs.iter().any(|reference| reference.entity == handle)
+    };
+    let mut equal_followers: Vec<ParametricRef> = Vec::new();
+    let mut moving: Vec<Handle> = cache.keys().copied().filter(|handle| edited(*handle)).collect();
+    loop {
+        let before = equal_followers.len();
+        for constraint in &constraints {
+            if !constraint.enabled || constraint.kind != ConstraintKind::Equal {
+                continue;
+            }
+            let [a, b] = constraint.refs.as_slice() else { continue };
+            let follower = match (moving.contains(&a.entity), moving.contains(&b.entity)) {
+                (true, false) => *b,
+                (false, true) => *a,
+                _ => continue,
+            };
+            if !equal_followers.contains(&follower) {
+                equal_followers.push(follower);
+                moving.push(follower.entity);
+            }
+        }
+        if equal_followers.len() == before {
+            break;
+        }
+    }
+    for follower in &equal_followers {
+        let Some(geometry) = resolve_ref(document, &mut sys, &mut cache, *follower) else {
+            continue;
+        };
+        let mut hold = |anchor: ParametricRef| {
+            if !anchors.contains(&anchor) {
+                anchors.push(anchor);
+            }
+        };
+        let line = match &geometry {
+            EntityGeom::Line(line) => Some(*line),
+            EntityGeom::Polyline { .. } => follower
+                .segment_index()
+                .and_then(|index| geometry.line_segment(index)),
+            _ => None,
+        };
+        match &geometry {
+            EntityGeom::Circle(_) | EntityGeom::Arc(_) => {
+                hold(ParametricRef::center(follower.entity));
+            }
+            EntityGeom::Line(_) => hold(ParametricRef::point(follower.entity, 0)),
+            EntityGeom::Polyline { points, .. } => {
+                let moving_vertex = follower
+                    .segment_index()
+                    .map(|index| (index + 1) % points.len().max(1));
+                for index in (0..points.len()).filter(|index| Some(*index) != moving_vertex) {
+                    hold(ParametricRef::point(follower.entity, index as i32));
+                }
+            }
+            _ => {}
+        }
+        if let Some(line) = line {
+            let (dx, dy) = {
+                let store = sys.store();
+                (
+                    store.get(line.p2.x) - store.get(line.p1.x),
+                    store.get(line.p2.y) - store.get(line.p1.y),
+                )
+            };
+            if dx.hypot(dy) > f64::EPSILON {
+                let datum = GLine {
+                    p1: GPoint::new(sys.add_param(0.0, true), sys.add_param(0.0, true)),
+                    p2: GPoint::new(sys.add_param(dx, true), sys.add_param(dy, true)),
+                };
+                let parallel = ParallelConstraint::new(sys.store(), line, datum);
+                sys.add_constraint(Rc::new(parallel));
+            }
+        }
+    }
     if !retain_lengths {
         let mut axis_lines: Vec<_> = line_axes
             .into_iter()
@@ -2757,6 +2838,7 @@ fn solve_scope(
                         .get(2)
                         .is_some_and(|axis| axis.entity == *handle)
                 })
+                || equal_followers.iter().any(|follower| follower.entity == *handle)
             {
                 continue;
             }

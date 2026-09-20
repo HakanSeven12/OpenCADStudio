@@ -175,6 +175,10 @@ pub struct PlotStyleTable {
     pub aci_entries: Vec<PlotStyleEntry>, // 256 entries, index = ACI
     /// For STB: named style entries.
     pub named_entries: HashMap<String, PlotStyleEntry>,
+    /// What had to be tolerated to read the file (a bad checksum, a length
+    /// that did not add up, descriptions in a Windows code page): the file
+    /// loaded, but the user deserves to know it was not quite as written.
+    pub load_warnings: Vec<String>,
 }
 
 impl PlotStyleTable {
@@ -190,6 +194,7 @@ impl PlotStyleTable {
             lineweights: LW_TABLE.to_vec(),
             aci_entries: (0..=255).map(|_| PlotStyleEntry::default()).collect(),
             named_entries: HashMap::default(),
+            load_warnings: Vec::new(),
         }
     }
 
@@ -207,8 +212,10 @@ impl PlotStyleTable {
     pub fn from_bytes(name: impl Into<String>, raw: &[u8]) -> Result<Self, String> {
         let name = name.into();
         let is_stb = name.to_ascii_lowercase().ends_with(".stb");
-        let text = decompress_ctb(raw)?;
-        parse_plot_style_text(&text, name, is_stb)
+        let (text, warnings) = decompress_ctb(raw)?;
+        let mut table = parse_plot_style_text(&text, name, is_stb)?;
+        table.load_warnings = warnings;
+        Ok(table)
     }
 
     pub fn builtin(name: &str) -> Result<Self, String> {
@@ -263,10 +270,16 @@ impl PlotStyleTable {
         let path = Path::new(name);
         if path.components().count() != 1
             || !matches!(path.components().next(), Some(Component::Normal(_)))
-            || !path
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("ctb"))
         {
+            return Err(format!("Invalid plot style name: {name}"));
+        }
+        if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("stb")) {
+            return Err(crate::tf!(
+                "Named plot style tables (.stb) are not supported yet: {name}"
+            )
+            .into_owned());
+        }
+        if !path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("ctb")) {
             return Err(format!("Invalid plot style name: {name}"));
         }
 
@@ -285,7 +298,12 @@ impl PlotStyleTable {
                 .map(|entry| entry.path());
             return match matched {
                 Some(path) => Self::load(&path),
-                None => Self::builtin(name),
+                None => Self::builtin(name).map_err(|_| {
+                    // Not a built-in either: say where a copy would be found.
+                    let folder = dir.display();
+                    crate::tf!("{name} was not found in the plot styles folder ({folder}).")
+                        .into_owned()
+                }),
             };
         }
 
@@ -429,10 +447,18 @@ impl PlotStyleTable {
 
 // ── Deflate helpers ───────────────────────────────────────────────────────────
 
-/// Decompress a CTB/STB file's raw bytes into the text content.
+/// Decompress a CTB/STB file's raw bytes into the text content, with the
+/// things that had to be tolerated on the way.
 ///
-fn decompress_ctb(data: &[u8]) -> Result<String, String> {
+/// Files written by other applications are read as they are, not as the
+/// container says they should be: a checksum or a length that does not add
+/// up is reported and read past (the text is either there or the zlib
+/// stream fails on its own), a zlib stream with a bad trailer is retried as
+/// raw deflate, and text that is not UTF-8 is read as Windows-1252 — the
+/// code page those applications write descriptions in.
+fn decompress_ctb(data: &[u8]) -> Result<(String, Vec<String>), String> {
     const PREFIX: &[u8] = b"PIAFILEVERSION_2.0,CTBVER1,compress\r\npmzlibcodec";
+    let mut warnings = Vec::new();
     let mut decoded = Vec::new();
     if data.starts_with(PREFIX) {
         if data.len() < 60 {
@@ -441,20 +467,34 @@ fn decompress_ctb(data: &[u8]) -> Result<String, String> {
         let checksum = u32::from_le_bytes(data[48..52].try_into().unwrap());
         let text_len = u32::from_le_bytes(data[52..56].try_into().unwrap()) as usize;
         let compressed_len = u32::from_le_bytes(data[56..60].try_into().unwrap()) as usize;
-        if compressed_len > data.len() - 60 {
-            return Err("CTB compressed payload is truncated".into());
-        }
-        let payload = &data[60..60 + compressed_len];
+        let available = data.len() - 60;
+        let payload = if compressed_len > available {
+            warnings.push(format!(
+                "the header announces {compressed_len} compressed bytes \
+                 but the file holds {available}"
+            ));
+            &data[60..]
+        } else {
+            &data[60..60 + compressed_len]
+        };
         if adler32(payload) != checksum {
-            return Err("CTB compressed payload checksum mismatch".into());
+            warnings.push("the compressed payload's checksum does not match".into());
         }
-        use flate2::read::ZlibDecoder;
-        ZlibDecoder::new(payload)
-            .read_to_end(&mut decoded)
-            .map_err(|e| format!("CTB zlib decompress: {e}"))?;
-        if decoded.len() != text_len {
+        decoded = inflate_lenient(payload, &mut warnings)?;
+        // A byte or a few short is a header that counted its trailing NUL
+        // differently; far short of the announced text is a cut-off file,
+        // which the inflater does not always notice on its own.
+        const TOLERATED_SHORTFALL: usize = 16;
+        if decoded.len() + TOLERATED_SHORTFALL < text_len {
             return Err(format!(
-                "CTB content length mismatch: expected {text_len}, got {}",
+                "CTB text is incomplete: the header announces {text_len} bytes \
+                 but only {} could be read",
+                decoded.len()
+            ));
+        }
+        if decoded.len() != text_len {
+            warnings.push(format!(
+                "the header announces {text_len} bytes of text but {} were read",
                 decoded.len()
             ));
         }
@@ -466,10 +506,7 @@ fn decompress_ctb(data: &[u8]) -> Result<String, String> {
             .unwrap_or(0);
         let payload = &data[split_at..];
         if payload.starts_with(&[0x78]) {
-            use flate2::read::ZlibDecoder;
-            ZlibDecoder::new(payload)
-                .read_to_end(&mut decoded)
-                .map_err(|e| format!("legacy CTB zlib decompress: {e}"))?;
+            decoded = inflate_lenient(payload, &mut warnings)?;
         } else {
             use flate2::read::DeflateDecoder;
             DeflateDecoder::new(payload)
@@ -477,10 +514,72 @@ fn decompress_ctb(data: &[u8]) -> Result<String, String> {
                 .map_err(|e| format!("legacy CTB deflate decompress: {e}"))?;
         }
     }
-    if decoded.last() == Some(&0) {
+    while decoded.last() == Some(&0) {
         decoded.pop();
     }
-    String::from_utf8(decoded).map_err(|e| format!("CTB text is not UTF-8: {e}"))
+    let (text, code_page) = decode_plot_style_text(decoded);
+    if let Some(note) = code_page {
+        warnings.push(note);
+    }
+    Ok((text, warnings))
+}
+
+/// Inflate a zlib stream, falling back to the raw deflate data behind its
+/// two-byte header when the stream's own trailer is wrong.
+fn inflate_lenient(payload: &[u8], warnings: &mut Vec<String>) -> Result<Vec<u8>, String> {
+    use flate2::read::{DeflateDecoder, ZlibDecoder};
+    let mut decoded = Vec::new();
+    match ZlibDecoder::new(payload).read_to_end(&mut decoded) {
+        Ok(_) => Ok(decoded),
+        Err(zlib_error) if payload.len() > 2 => {
+            let mut raw = Vec::new();
+            DeflateDecoder::new(&payload[2..])
+                .read_to_end(&mut raw)
+                .map_err(|_| format!("CTB zlib decompress: {zlib_error}"))?;
+            warnings.push("the zlib stream is damaged; its deflate data was read directly".into());
+            Ok(raw)
+        }
+        Err(zlib_error) => Err(format!("CTB zlib decompress: {zlib_error}")),
+    }
+}
+
+/// The table's text out of its bytes: UTF-8 when it is, else Windows-1252
+/// (Latin-1 with the 0x80–0x9F block the code page defines), which is what
+/// applications on Western systems write into descriptions. Other code
+/// pages come out as readable but wrong characters in descriptions only —
+/// pens and colours are numbers and unaffected. The second value says when
+/// the fallback was taken.
+pub fn decode_plot_style_text(bytes: Vec<u8>) -> (String, Option<String>) {
+    match String::from_utf8(bytes) {
+        Ok(text) => (text, None),
+        Err(error) => {
+            let text = error
+                .into_bytes()
+                .into_iter()
+                .map(windows_1252_char)
+                .collect();
+            (
+                text,
+                Some("descriptions were read as Windows-1252 text (the file is not UTF-8)".into()),
+            )
+        }
+    }
+}
+
+/// One Windows-1252 byte as a character: Latin-1 except for the 0x80–0x9F
+/// block, which the code page fills with punctuation and accented letters.
+fn windows_1252_char(byte: u8) -> char {
+    const HIGH: [char; 32] = [
+        '\u{20AC}', '\u{FFFD}', '\u{201A}', '\u{0192}', '\u{201E}', '\u{2026}', '\u{2020}',
+        '\u{2021}', '\u{02C6}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{0152}', '\u{FFFD}',
+        '\u{017D}', '\u{FFFD}', '\u{FFFD}', '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}',
+        '\u{2022}', '\u{2013}', '\u{2014}', '\u{02DC}', '\u{2122}', '\u{0161}', '\u{203A}',
+        '\u{0153}', '\u{FFFD}', '\u{017E}', '\u{0178}',
+    ];
+    match byte {
+        0x80..=0x9F => HIGH[usize::from(byte - 0x80)],
+        _ => char::from(byte),
+    }
 }
 
 /// Compress plot-style text content as a CTB/STB file.
@@ -687,6 +786,7 @@ fn parse_plot_style_text(text: &str, name: String, is_stb: bool) -> Result<PlotS
         lineweights,
         aci_entries,
         named_entries,
+        load_warnings: Vec::new(),
     })
 }
 
@@ -796,5 +896,92 @@ mod round_trip_tests {
         let reloaded = saved_and_reloaded(&table);
         assert_eq!(reloaded.lineweights, table.lineweights);
         assert_eq!(reloaded.resolve_lineweight(1), Some(0.035));
+    }
+}
+
+#[cfg(test)]
+mod lenient_loading_tests {
+    use super::{compress_ctb, decode_plot_style_text, PlotStyleTable};
+
+    fn table_with_description(description: &str) -> PlotStyleTable {
+        let mut table = PlotStyleTable::identity("foreign.ctb");
+        table.description = description.to_string();
+        table.aci_entries[1].lineweight = 13;
+        table
+    }
+
+    fn compressed(table: &PlotStyleTable) -> Vec<u8> {
+        compress_ctb(table.to_text().as_bytes()).expect("compress")
+    }
+
+    /// The pen data must survive every tolerated defect.
+    fn assert_pens_kept(table: &PlotStyleTable) {
+        assert_eq!(table.aci_entries[1].lineweight, 13);
+    }
+
+    #[test]
+    fn a_wrong_checksum_is_reported_not_fatal() {
+        let mut bytes = compressed(&table_with_description("ok"));
+        bytes[48] ^= 0xFF;
+        let table = PlotStyleTable::from_bytes("foreign.ctb", &bytes).expect("loads");
+        assert_pens_kept(&table);
+        assert_eq!(table.load_warnings.len(), 1, "{:?}", table.load_warnings);
+        assert!(table.load_warnings[0].contains("checksum"));
+    }
+
+    #[test]
+    fn a_text_length_off_by_one_and_a_short_payload_field_are_tolerated() {
+        let mut bytes = compressed(&table_with_description("ok"));
+        let text_len = u32::from_le_bytes(bytes[52..56].try_into().unwrap());
+        bytes[52..56].copy_from_slice(&(text_len - 1).to_le_bytes());
+        let table = PlotStyleTable::from_bytes("foreign.ctb", &bytes).expect("loads");
+        assert_pens_kept(&table);
+        assert!(table.load_warnings.iter().any(|w| w.contains("bytes of text")));
+
+        let mut bytes = compressed(&table_with_description("ok"));
+        let compressed_len = u32::from_le_bytes(bytes[56..60].try_into().unwrap());
+        bytes[56..60].copy_from_slice(&(compressed_len + 100).to_le_bytes());
+        let table = PlotStyleTable::from_bytes("foreign.ctb", &bytes).expect("loads");
+        assert_pens_kept(&table);
+        assert!(table.load_warnings.iter().any(|w| w.contains("compressed bytes")));
+    }
+
+    #[test]
+    fn windows_1252_descriptions_are_read_with_a_note() {
+        // "Descripción" and "Ελληνικά" are not what a Western file holds; a
+        // Western one holds e.g. "Plumas – señal" in Windows-1252.
+        let text = table_with_description("marker").to_text();
+        let mut bytes = text.into_bytes();
+        let marker = bytes.windows(6).position(|w| w == b"marker").unwrap();
+        let cp1252 = [
+            0x50, 0x6C, 0x75, 0x6D, 0x61, 0x73, 0x20, 0x96, 0x20, 0x73, 0x65, 0xF1, 0x61, 0x6C,
+        ];
+        bytes.splice(marker..marker + 6, cp1252);
+        let compressed = compress_ctb(&bytes).unwrap();
+        let table = PlotStyleTable::from_bytes("foreign.ctb", &compressed).expect("loads");
+        assert_pens_kept(&table);
+        assert_eq!(table.description, "Plumas – señal");
+        assert!(table.load_warnings.iter().any(|w| w.contains("Windows-1252")));
+        // Clean UTF-8 gets no note.
+        let (text, note) = decode_plot_style_text("Ελληνικά".as_bytes().to_vec());
+        assert_eq!(text, "Ελληνικά");
+        assert!(note.is_none());
+    }
+
+    #[test]
+    fn a_truncated_stream_is_still_an_error() {
+        let bytes = compressed(&table_with_description("ok"));
+        let cut = &bytes[..bytes.len() / 2];
+        let error = PlotStyleTable::from_bytes("foreign.ctb", cut).unwrap_err();
+        assert!(error.contains("incomplete"), "{error}");
+    }
+
+    #[test]
+    fn named_tables_and_missing_files_get_a_reason() {
+        let error = PlotStyleTable::load_named("styles.stb").unwrap_err();
+        assert!(error.contains(".stb"), "{error}");
+        let error = PlotStyleTable::load_named("nowhere-to-be-found.ctb").unwrap_err();
+        assert!(error.contains("nowhere-to-be-found.ctb"), "{error}");
+        assert!(PlotStyleTable::load_named("../escape.ctb").is_err());
     }
 }

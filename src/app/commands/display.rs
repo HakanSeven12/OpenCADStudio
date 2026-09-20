@@ -937,6 +937,24 @@ impl OpenCADStudio {
             "PRINTALL" => {
                 return Some(Task::done(Message::PrintAllOpen));
             }
+            // PRINTERS — what the system reports about printing, on the
+            // command line: the default printer, every printer it lists (or
+            // why it could not), and how a plot will reach them. The report
+            // a user pastes into a bug report instead of a screenshot.
+            "PRINTERS" => {
+                for line in crate::io::print_to_printer::printer_report() {
+                    self.command_line.push_output(&line);
+                }
+            }
+            // PRINTERS <name> — what that printer reports about its sheets
+            // and printable area (asks the driver; may take a moment for an
+            // offline network queue).
+            cmd if cmd.starts_with("PRINTERS ") => {
+                let name = cmd["PRINTERS ".len()..].trim();
+                for line in crate::io::print_to_printer::printer_media_report(name) {
+                    self.command_line.push_output(&line);
+                }
+            }
             "EXPORT" | "EXPORTPDF" => {
                 return Some(Task::done(Message::PlotExport));
             }
@@ -2244,5 +2262,25 @@ mod tests {
             instance_color: None,
             instance_aabb: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod printers_command_tests {
+    use crate::app::OpenCADStudio;
+
+    #[test]
+    fn printers_reports_the_default_and_the_list() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let before = app.command_line.history.len();
+        let _ = app.run_command_line("PRINTERS");
+        let lines: Vec<String> = app.command_line.history[before..]
+            .iter()
+            .map(|line| line.text.clone())
+            .collect();
+        // One line for the default printer, at least one for the list (a
+        // count and names, "none", or the system's error).
+        assert!(lines.len() >= 2, "{lines:?}");
     }
 }

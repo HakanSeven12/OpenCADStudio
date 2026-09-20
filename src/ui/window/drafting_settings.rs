@@ -2,7 +2,7 @@ use crate::app::settings::IsoPlane;
 use crate::app::Message;
 use crate::snap::{SnapType, ALL_3D_SNAP_MODES, ALL_SNAP_MODES};
 use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input, Space};
-use iced::{Background, Border, Element, Fill, Length, Theme};
+use iced::{Background, Border, Element, Fill, Theme};
 use std::borrow::Cow;
 
 /// Active tab in the Drafting Settings dialog.
@@ -727,45 +727,9 @@ pub fn view_window<'a>(
     if !close_confirm {
         return main_content.into();
     }
-
-    let shield = iced::widget::mouse_area(
-        container(Space::new())
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(
-                    theme.palette().background.strongest.color.scale_alpha(0.55),
-                )),
-                ..Default::default()
-            }),
-    )
-    .on_press(Message::DraftingSettingsCloseKeep);
-
-    let warning_panel = container(
-        column![
-            text(crate::t!("Unsaved changes will be discarded.")).size(13.5),
-            Space::new().height(12),
-            row![
-                button(text(crate::t!("Discard && close")).size(12))
-                    .on_press(Message::DraftingSettingsCloseDiscard)
-                    .padding([5, 14])
-                    .style(button::danger),
-                button(text(crate::t!("Keep editing")).size(12))
-                    .on_press(Message::DraftingSettingsCloseKeep)
-                    .padding([5, 14])
-                    .style(button::secondary),
-            ]
-            .spacing(10),
-        ]
-        .spacing(0),
-    )
-    .padding([18, 22])
-    .style(container::rounded_box);
-
-    iced::widget::stack![
+    crate::ui::modal::discard_guard(
         main_content,
-        shield,
-        container(warning_panel).center_x(Fill).center_y(Fill)
-    ]
-    .into()
+        Message::DraftingSettingsCloseDiscard,
+        Message::DraftingSettingsCloseKeep,
+    )
 }

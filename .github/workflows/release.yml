@@ -521,8 +521,10 @@ jobs:
             OpenCADStudio.app/Contents/PlugIns/DWGThumbnail.appex
           codesign --force --sign - --timestamp=none OpenCADStudio.app
           codesign --verify --deep --strict --verbose=2 OpenCADStudio.app
-          codesign -d --entitlements - OpenCADStudio.app/Contents/PlugIns/DWGThumbnail.appex \
-            | python3 -c 'import plistlib, sys; assert plistlib.load(sys.stdin.buffer).get("com.apple.security.app-sandbox") is True'
+          # --xml keeps newer codesign builds from prefixing text headers,
+          # which made the entitlements parse fail with InvalidFileException.
+          codesign -d --entitlements - --xml OpenCADStudio.app/Contents/PlugIns/DWGThumbnail.appex \
+            | python3 -c 'import io, plistlib, sys; ent = plistlib.load(io.BytesIO(sys.stdin.buffer.read())); print("entitlements:", ent); assert ent.get("com.apple.security.app-sandbox") is True'
 
       - name: Create .dmg
         run: |

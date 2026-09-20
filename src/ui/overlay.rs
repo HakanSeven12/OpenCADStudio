@@ -2164,10 +2164,16 @@ impl canvas::Program<Message> for SelectionCanvas {
                             label == crate::scene::parametric_constraints::VERTICAL_POINTS_GLYPH,
                         );
                     } else {
+                        // The Equal symbol reads green on its badge, as asked.
+                        let color = if label == "=" {
+                            Color::from_rgb8(72, 199, 116)
+                        } else {
+                            fg
+                        };
                         frame.fill_text(canvas::Text {
                             content: label.clone(),
                             position: glyph_center,
-                            color: fg,
+                            color,
                             size: iced::Pixels(CONSTRAINT_GLYPH_SIZE),
                             align_x: iced::alignment::Horizontal::Center.into(),
                             align_y: iced::alignment::Vertical::Center,

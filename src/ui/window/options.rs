@@ -73,6 +73,8 @@ pub struct AppPrefs {
     pub right_click_mode: RightClickMode,
     /// SHORTCUTMENUDURATION: time-sensitive hold threshold, ms.
     pub right_click_hold_ms: i32,
+    /// Open the Plot / Page Setup dialog for every new layout.
+    pub page_setup_on_new_layout: bool,
 }
 
 /// The fixed locations the Files page lists.
@@ -206,6 +208,8 @@ pub fn view_window<'a>(
     paper_bg_input: &'a str,
     desk_bg_input: &'a str,
     bg_picker: Option<crate::app::BgTarget>,
+    dirty: bool,
+    close_confirm: bool,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
     let selected_format = crate::io::SAVE_FORMAT_OPTIONS
@@ -308,8 +312,18 @@ pub fn view_window<'a>(
         );
     }
 
+    // Changes show at once but are committed by OK / Apply; Close puts them
+    // back (asking first when there is something to lose).
+    let ok = button(text(crate::t!("OK")).size(12))
+        .on_press(Message::OptionsOk)
+        .padding([6, 18])
+        .style(button::primary);
+    let apply = button(text(crate::t!("Apply")).size(12))
+        .on_press_maybe(dirty.then_some(Message::OptionsApply))
+        .padding([6, 18])
+        .style(if dirty { button::secondary } else { button::text });
     let close = button(text(crate::tr!("action", "close")).size(12))
-        .on_press(Message::CloseModal)
+        .on_press(Message::OptionsClose)
         .padding([6, 18])
         .style(button::secondary);
 
@@ -361,6 +375,29 @@ pub fn view_window<'a>(
                 .style(button::secondary),
         ]
         .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(22),
+        text(crate::t!("Plotting")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Plot device, paper, scale and plot styles"))
+                .size(12)
+                .width(Fill),
+            button(text(crate::t!("Plot and Page Setup…")).size(11))
+                .on_press(Message::PlotDialogOpen)
+                .padding([4, 10])
+                .style(button::secondary),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(prefs.page_setup_on_new_layout)
+                .on_toggle(Message::PageSetupOnNewLayoutChanged)
+                .size(15),
+            text(crate::t!("Show the page setup for new layouts")).size(12),
+        ]
+        .spacing(8)
         .align_y(iced::Center),
     ]
     .spacing(0)
@@ -464,20 +501,6 @@ pub fn view_window<'a>(
             .size(12),
         ]
         .spacing(8)
-        .align_y(iced::Center),
-        Space::new().height(22),
-        text(crate::t!("Plotting")).size(15),
-        Space::new().height(10),
-        row![
-            text(crate::t!("Plot device, paper, scale and plot styles"))
-                .size(12)
-                .width(Fill),
-            button(text(crate::t!("Plot and Page Setup…")).size(11))
-                .on_press(Message::PlotDialogOpen)
-                .padding([4, 10])
-                .style(button::secondary),
-        ]
-        .spacing(10)
         .align_y(iced::Center),
     ]
     .spacing(0)
@@ -1667,7 +1690,7 @@ pub fn view_window<'a>(
         // controls at the trailing edge of the Options content.
         scrollable(content).spacing(8).height(Fill),
         Space::new().height(12),
-        row![Space::new().width(Fill), close],
+        row![Space::new().width(Fill), ok, apply, close].spacing(8),
     ]
     .width(Fill)
     .height(sizing.height);
@@ -1677,18 +1700,13 @@ pub fn view_window<'a>(
         .height(sizing.height);
 
     let intrinsic = sizing.width == crate::ui::modal::ModalSizing::INTRINSIC.width;
-    container(body)
+    let main = container(body)
         .style(container::rounded_box)
         .padding([16, 18])
-        .width(if intrinsic {
-            iced::Length::Fixed(DIALOG_WIDTH)
-        } else {
-            sizing.width
-        })
-        .height(if intrinsic {
-            iced::Length::Fixed(DIALOG_HEIGHT)
-        } else {
-            sizing.height
-        })
-        .into()
+        .width(if intrinsic { iced::Length::Fixed(DIALOG_WIDTH) } else { sizing.width })
+        .height(if intrinsic { iced::Length::Fixed(DIALOG_HEIGHT) } else { sizing.height });
+    if !close_confirm {
+        return main.into();
+    }
+    crate::ui::modal::discard_guard(main, Message::OptionsCloseDiscard, Message::OptionsCloseKeep)
 }

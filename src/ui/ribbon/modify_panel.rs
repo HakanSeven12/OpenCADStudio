@@ -111,7 +111,7 @@ pub(super) const TOOLS: &[Tool] = &[
     Tool {
         command: "DRAWORDER_FRONT",
         label: "Draw Order",
-        icon: include_bytes!("../../../assets/icons/modify_draworder.svg"),
+        icon: crate::ui::icon_catalog::bytes(crate::ui::icon_catalog::IconId::DrawOrder),
         options: &[
             ("DRAWORDER_FRONT", "Bring to Front"),
             ("DRAWORDER_BACK", "Send to Back"),

@@ -3,7 +3,7 @@
 use crate::app::Message;
 use crate::t;
 use crate::ui::style::common::muted_style;
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{button, column, container, row, scrollable, text, text_input, tooltip, Space};
 use iced::{Background, Element, Length, Theme};
 
 #[derive(Clone, Copy, Debug)]
@@ -136,6 +136,23 @@ pub fn view_window<'a>(
             command_box.style(danger_input_style)
         } else {
             command_box
+        };
+        let command_box: Element<'_, Message> = if command.trim().is_empty() {
+            command_box.into()
+        } else if let Some(descriptor) = crate::command::catalog::descriptor(command) {
+            let mut tip = column![text(descriptor.translated_label()).size(11)].spacing(2);
+            if let Some(description) = descriptor.translated_description() {
+                tip = tip.push(text(description).size(10).style(muted_style));
+            }
+            tooltip(
+                command_box,
+                container(tip).padding(6),
+                tooltip::Position::Left,
+            )
+            .gap(5)
+            .into()
+        } else {
+            command_box.into()
         };
         // Draft rows get a check (finish the addition, without applying) and
         // a cancel ✕; committed rows get the trash bin.

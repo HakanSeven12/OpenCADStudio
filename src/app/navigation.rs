@@ -301,7 +301,10 @@ impl OpenCADStudio {
 pub(super) fn actions() -> Vec<Action> {
     use crate::modules::{IconKind, ModuleEvent, RibbonItem, ToolDef};
     use std::collections::BTreeMap;
-    let mut names = crate::command::all_registered_command_names();
+    let mut names: Vec<&'static str> = crate::command::catalog::all()
+        .descriptors()
+        .map(|descriptor| descriptor.id)
+        .collect();
     names.extend([
         "UNDO",
         "REDO",
@@ -318,7 +321,7 @@ pub(super) fn actions() -> Vec<Action> {
     let mut actions: BTreeMap<String, Action> = names
         .into_iter()
         .map(|name| {
-            let label = match name {
+            let surface_label = match name {
                 "SPACEMOUSE" => "SpaceMouse preferences",
                 "SPACEMOUSEPAUSE" => "Pause / resume SpaceMouse",
                 "SPACEMOUSEPAN" => "SpaceMouse: pan only",
@@ -329,15 +332,24 @@ pub(super) fn actions() -> Vec<Action> {
                 "SPACEMOUSETOP" => "Top view",
                 _ => name,
             };
+            let label = crate::ui::command_presentation::label(name, surface_label);
+            let description = crate::ui::command_presentation::description(name).map_or_else(
+                || format!("{label} ({name})"),
+                |text| format!("{label} — {text} ({name})"),
+            );
+            let icon = crate::ui::command_presentation::icon(name)
+                .map(crate::ui::icon_catalog::bytes)
+                .or_else(|| {
+                    name.starts_with("SPACEMOUSE")
+                        .then_some(crate::ui::window::options::spacemouse::ICON)
+                });
             (
                 name.into(),
                 Action {
                     id: name.into(),
-                    label: crate::t!(label).into_owned(),
-                    description: format!("{} ({name})", crate::t!(label)),
-                    icon: name
-                        .starts_with("SPACEMOUSE")
-                        .then_some(crate::ui::window::options::spacemouse::ICON),
+                    label,
+                    description,
+                    icon,
                 },
             )
         })
@@ -349,12 +361,17 @@ pub(super) fn actions() -> Vec<Action> {
         icon: IconKind,
     ) {
         if let Some(action) = actions.get_mut(command) {
-            action.label = crate::t!(label).into_owned();
-            action.description = format!("{} ({command})", action.label);
-            action.icon = match icon {
-                IconKind::Svg(bytes) => Some(bytes),
-                _ => None,
-            };
+            action.label = crate::ui::command_presentation::label(command, label);
+            action.description = crate::ui::command_presentation::description(command).map_or_else(
+                || format!("{} ({command})", action.label),
+                |text| format!("{} — {text} ({command})", action.label),
+            );
+            action.icon = crate::ui::command_presentation::icon(command)
+                .map(crate::ui::icon_catalog::bytes)
+                .or_else(|| match icon {
+                    IconKind::Svg(bytes) => Some(bytes),
+                    _ => None,
+                });
         }
     }
     fn tool(actions: &mut BTreeMap<String, Action>, tool: &ToolDef) {
@@ -372,7 +389,7 @@ pub(super) fn actions() -> Vec<Action> {
                     RibbonItem::Dropdown { items, .. }
                     | RibbonItem::LabeledDropdown { items, .. }
                     | RibbonItem::LargeDropdown { items, .. } => {
-                        for (label, command, icon) in items {
+                        for (command, label, icon) in items {
                             describe(&mut actions, command, label, *icon);
                         }
                     }
@@ -412,6 +429,31 @@ mod tests {
         app.spacemouse.test_connect();
         app.sync_spacemouse();
         app
+    }
+
+    #[test]
+    fn command_actions_use_shared_catalog_metadata() {
+        let actions = actions();
+        let move_action = actions
+            .iter()
+            .find(|action| action.id == "MOVE")
+            .expect("MOVE action");
+        assert_eq!(
+            move_action.label,
+            crate::ui::command_presentation::label("MOVE", "")
+        );
+        assert!(move_action.description.contains("MOVE"));
+        assert!(move_action.icon.is_some());
+
+        let save_as = actions
+            .iter()
+            .find(|action| action.id == "SAVEAS")
+            .expect("SAVEAS action");
+        assert_eq!(
+            save_as.label,
+            crate::ui::command_presentation::label("SAVEAS", "")
+        );
+        assert!(save_as.icon.is_some());
     }
 
     #[test]

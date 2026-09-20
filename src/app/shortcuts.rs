@@ -348,3 +348,23 @@ impl OpenCADStudio {
             self.update(message)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_shipped_command_shortcut_has_catalog_metadata() {
+        let mut missing: Vec<String> = default_bindings()
+            .into_values()
+            .filter(|action| !INPUT_ACTIONS.contains(&action.as_str()))
+            .filter(|action| crate::command::catalog::descriptor(action).is_none())
+            .collect();
+        missing.sort();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "shortcut commands missing catalog descriptors: {missing:?}"
+        );
+    }
+}

@@ -875,12 +875,15 @@ impl Ribbon {
                 let is_current = *cmd == last_cmd;
                 let checkmark: Element<'_, Message> =
                     crate::ui::icons::themed_check_cell(is_current);
+                let resolved_icon =
+                    crate::ui::command_presentation::ribbon_icon(cmd, *item_icon);
                 let icon_el: Element<Message> =
-                    container(make_icon(*item_icon, 20.0))
+                    container(make_icon(resolved_icon, 20.0))
                         .width(Length::Fixed(20.0))
                         .into();
+                let resolved_label = crate::ui::command_presentation::label(cmd, label);
                 let label_el =
-                    text(t!(*label))
+                    text(resolved_label)
                         .size(11)
                         .wrapping(iced::advanced::text::Wrapping::None)
                         .style(move |theme: &Theme| iced::widget::text::Style {
@@ -1425,17 +1428,21 @@ fn representative<'g>(group: &'g RibbonGroup, last_used: Option<&str>) -> Option
 /// still get a representative icon.
 fn first_tool_icon(group: &RibbonGroup) -> Option<IconKind> {
     group.tools.iter().find_map(|it| match it {
-        RibbonItem::Tool(t) | RibbonItem::LabeledTool(t) | RibbonItem::LargeTool(t) => Some(t.icon),
-        RibbonItem::Dropdown { icon, .. }
-        | RibbonItem::LabeledDropdown { icon, .. }
-        | RibbonItem::LargeDropdown { icon, .. } => Some(*icon),
-        RibbonItem::PropertiesGroup { match_prop } => Some(match_prop.icon),
-        RibbonItem::LayerComboGroup { row2, .. } => row2.first().map(|t| t.icon),
+        RibbonItem::Tool(t) | RibbonItem::LabeledTool(t) | RibbonItem::LargeTool(t) => {
+            Some(widgets::tool_icon(t))
+        }
+        RibbonItem::Dropdown { icon, default, .. }
+        | RibbonItem::LabeledDropdown { icon, default, .. }
+        | RibbonItem::LargeDropdown { icon, default, .. } => Some(
+            crate::ui::command_presentation::ribbon_icon(default, *icon),
+        ),
+        RibbonItem::PropertiesGroup { match_prop } => Some(widgets::tool_icon(match_prop)),
+        RibbonItem::LayerComboGroup { row2, .. } => row2.first().map(widgets::tool_icon),
         RibbonItem::StyleComboGroup { rows, .. } => {
-            rows.first().and_then(|r| r.first()).map(|t| t.icon)
+            rows.first().and_then(|r| r.first()).map(widgets::tool_icon)
         },
         RibbonItem::ToolGrid { columns } => columns.first()
-            .and_then(|column| column.first()).map(|tool| tool.icon),
+            .and_then(|column| column.first()).map(widgets::tool_icon),
     })
 }
 

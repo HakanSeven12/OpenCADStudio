@@ -82,7 +82,6 @@ pub static GEAR: &[u8] = include_bytes!("../../assets/icons/ui/gear.svg");
 pub static DOT: &[u8] = include_bytes!("../../assets/icons/ui/dot.svg");
 pub static DIRTY_DOT: &[u8] = include_bytes!("../../assets/icons/ui/dirty_dot.svg");
 pub static ARROW_LONG_RIGHT: &[u8] = include_bytes!("../../assets/icons/ui/arrow_long_right.svg");
-
 // ── Status-bar toggle icons (issue #216) ──────────────────────────────────
 pub static ST_ORTHO: &[u8] = include_bytes!("../../assets/icons/status/ortho.svg");
 pub static ST_POLAR: &[u8] = include_bytes!("../../assets/icons/status/polar.svg");
@@ -311,6 +310,15 @@ pub fn semantic<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
         bytes,
         size,
         opacity: 1.0,
+    })
+}
+
+/// Render a semantic tool icon with the same fade used by disabled menu text.
+pub fn semantic_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
+    Element::new(SemanticIcon {
+        bytes,
+        size,
+        opacity: 0.42,
     })
 }
 
@@ -654,6 +662,14 @@ pub fn zoom_icon() -> &'static [u8] {
     NAV_ZOOM
 }
 
+pub fn undo_icon() -> &'static [u8] {
+    UNDO
+}
+
+pub fn redo_icon() -> &'static [u8] {
+    REDO
+}
+
 /// Layer visibility icon bytes (on / off).
 pub fn layer_visible(visible: bool) -> &'static [u8] {
     if visible {
@@ -707,6 +723,10 @@ pub fn themed_secondary_arrow_down<'a, M: 'a>(size: f32) -> Element<'a, M> {
 
 pub fn themed_disabled_arrow_down<'a, M: 'a>(size: f32) -> Element<'a, M> {
     themed_disabled(TRI_DOWN, size)
+}
+
+pub fn themed_disabled_arrow_right<'a, M: 'a>(size: f32) -> Element<'a, M> {
+    semantic_disabled(TRI_RIGHT, size)
 }
 
 pub fn themed_home<'a, M: 'a>(size: f32) -> Element<'a, M> {

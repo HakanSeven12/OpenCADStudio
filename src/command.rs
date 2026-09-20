@@ -11,6 +11,8 @@ use crate::scene::Scene;
 use acadrust::{EntityType, Handle};
 use glam::DVec3;
 
+pub mod catalog;
+
 #[derive(Clone, Debug)]
 pub enum HatchEditOperation {
     Appearance {

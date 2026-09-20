@@ -1129,15 +1129,21 @@ const MENU_GUTTER_W: f32 = 18.0;
 const MENU_ICON_SIZE: f32 = 14.0;
 
 /// The gutter cell: the row's glyph, or empty space of the same width.
-fn context_menu_gutter(icon: Option<MenuIcon>) -> Element<'static, Message> {
-    let bytes = icon.map(|icon| match icon {
-        MenuIcon::Snap(t) => crate::ui::icons::osnap(t),
-        MenuIcon::Mtp => crate::ui::icons::mtp_icon(),
-        MenuIcon::Pan => crate::ui::icons::pan_icon(),
-        MenuIcon::Zoom => crate::ui::icons::zoom_icon(),
-    });
-    let cell: Element<'static, Message> = match bytes {
-        Some(bytes) => crate::ui::icons::themed::<Message>(bytes, MENU_ICON_SIZE),
+fn context_menu_gutter(icon: Option<MenuIcon>, enabled: bool) -> Element<'static, Message> {
+    let cell: Element<'static, Message> = match icon {
+        Some(MenuIcon::Snap(t)) if enabled => {
+            crate::ui::icons::themed(crate::ui::icons::osnap(t), MENU_ICON_SIZE)
+        }
+        Some(MenuIcon::Snap(t)) => {
+            crate::ui::icons::themed_disabled(crate::ui::icons::osnap(t), MENU_ICON_SIZE)
+        }
+        Some(MenuIcon::Mtp) if enabled => {
+            crate::ui::icons::themed(crate::ui::icons::mtp_icon(), MENU_ICON_SIZE)
+        }
+        Some(MenuIcon::Mtp) => {
+            crate::ui::icons::themed_disabled(crate::ui::icons::mtp_icon(), MENU_ICON_SIZE)
+        }
+        Some(MenuIcon::Catalog(id)) => crate::ui::icon_catalog::render(id, MENU_ICON_SIZE, enabled),
         None => iced::widget::Space::new().width(MENU_ICON_SIZE).height(MENU_ICON_SIZE).into(),
     };
     container(cell)
@@ -1188,24 +1194,27 @@ pub(super) fn viewport_context_menu_overlay(
             MenuRow::Submenu {
                 id,
                 label,
+                icon,
                 items: children,
                 open,
             } => {
                 let is_hl = highlighted == Some(sel_idx);
-                let caret = if *open {
+                let enabled = !children.is_empty();
+                let caret = if !enabled {
+                    crate::ui::icons::themed_disabled_arrow_right(9.0)
+                } else if *open {
                     crate::ui::icons::themed_arrow_down(9.0)
                 } else {
                     crate::ui::icons::themed_arrow_right(9.0)
                 };
                 let content = row![
-                    context_menu_gutter(None),
+                    context_menu_gutter(*icon, enabled),
                     text(label.clone()).size(12),
                     iced::widget::Space::new().width(Fill),
                     caret,
                 ]
                 .spacing(4)
                 .align_y(iced::Center);
-                let enabled = !children.is_empty();
                 let mut btn = button(content)
                     .padding(iced::Padding {
                         top: 3.0,
@@ -1254,16 +1263,11 @@ pub(super) fn viewport_context_menu_overlay(
     position_canvas_overlay_clamped(pos, bottom_inset, offset, panel.into())
 }
 
-/// One menu row: label (bold for the default row, "✓ "-prefixed when
-/// checked), and the keyword hint right-aligned and dimmed. Disabled rows
+/// One menu row: label (bold for the default row), with a checked-state mark
+/// or keyword hint right-aligned in the same column as submenu carets. Disabled rows
 /// render without a press handler and with faded text.
 fn context_menu_row(item: &MenuItem, indent: f32, highlighted: bool) -> Element<'static, Message> {
-    let label = if item.checked {
-        format!("✓ {}", item.label)
-    } else {
-        item.label.clone()
-    };
-    let mut label_text = text(label).size(12);
+    let mut label_text = text(item.label.clone()).size(12);
     if item.default {
         label_text = label_text.font(iced::Font {
             weight: iced::font::Weight::Bold,
@@ -1271,7 +1275,7 @@ fn context_menu_row(item: &MenuItem, indent: f32, highlighted: bool) -> Element<
         });
     }
     let enabled = item.enabled;
-    let mut content = row![context_menu_gutter(item.icon), label_text]
+    let mut content = row![context_menu_gutter(item.icon, enabled), label_text]
         .spacing(4)
         .align_y(iced::Center);
     if let Some(hint) = item.hint.as_ref() {
@@ -1292,6 +1296,10 @@ fn context_menu_row(item: &MenuItem, indent: f32, highlighted: bool) -> Element<
                         }
                     }),
             );
+    } else if item.checked {
+        content = content
+            .push(iced::widget::Space::new().width(Fill))
+            .push(text("✓").size(12));
     }
     let mut btn = button(content)
         .padding(iced::Padding {

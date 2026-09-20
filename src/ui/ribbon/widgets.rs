@@ -363,6 +363,21 @@ pub(super) fn make_icon(icon: IconKind, size: f32) -> Element<'static, Message> 
     }
 }
 
+pub(super) fn tool_command(tool: &ToolDef) -> &str {
+    match &tool.event {
+        ModuleEvent::Command(command) => command,
+        _ => tool.id,
+    }
+}
+
+fn tool_label(tool: &ToolDef) -> String {
+    crate::ui::command_presentation::label(tool_command(tool), tool.label)
+}
+
+pub(super) fn tool_icon(tool: &ToolDef) -> IconKind {
+    crate::ui::command_presentation::ribbon_icon(tool_command(tool), tool.icon)
+}
+
 pub(super) fn is_active_tool(
     id: &str,
     active_tool: &Option<String>,
@@ -511,8 +526,9 @@ pub(super) fn render_small<'a>(
             let active = is_active_tool(t.id, active_tool, &state);
             let event = t.event.clone();
             let tool_id = t.id.to_string();
-            let tip_text = format!("{}\n{} {}", t!(t.label), t!("Command:"), t.id);
-            let btn = button(make_icon(t.icon, SMALL_ICON))
+            let command = tool_command(t);
+            let tip_text = crate::ui::command_presentation::tooltip(command, t.label);
+            let btn = button(make_icon(tool_icon(t), SMALL_ICON))
                 .on_press(Message::RibbonToolClick { tool_id, event })
                 .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
                 .width(Length::Fixed(SMALL_W))
@@ -529,10 +545,10 @@ pub(super) fn render_small<'a>(
             let active = is_active_tool(t.id, active_tool, &state);
             let event = t.event.clone();
             let tool_id = t.id.to_string();
-            let label = t!(t.label).into_owned();
-            let tip_text = format!("{}\n{} {}", label, t!("Command:"), t.id);
+            let label = tool_label(t);
+            let tip_text = crate::ui::command_presentation::tooltip(tool_command(t), t.label);
             let content = row![
-                container(make_icon(t.icon, SMALL_ICON)).width(Length::Fixed(SMALL_W)),
+                container(make_icon(tool_icon(t), SMALL_ICON)).width(Length::Fixed(SMALL_W)),
                 text(label).size(10).wrapping(advanced_text::Wrapping::None),
             ].spacing(3).align_y(iced::Center);
             let btn = button(content)
@@ -588,7 +604,9 @@ pub(super) fn render_small<'a>(
                 })
                 .or_else(|| items.first().map(|(_, lbl, _)| *lbl))
                 .unwrap_or(*id);
-            let tip_text = format!("{}\n{} {}", t!(cur_label), t!("Command:"), last);
+            let cur_icon = crate::ui::command_presentation::ribbon_icon(last, cur_icon);
+            let resolved_label = crate::ui::command_presentation::label(last, cur_label);
+            let tip_text = crate::ui::command_presentation::tooltip(last, cur_label);
 
             let icon_btn = button(make_icon(cur_icon, SMALL_ICON))
                 .on_press(Message::RibbonToolClick {
@@ -600,7 +618,7 @@ pub(super) fn render_small<'a>(
                 .height(ROW_H)
                 .padding([4, 4]);
 
-            let arr_tip = format!("{} {}", t!(cur_label), t!("options"));
+            let arr_tip = format!("{} {}", resolved_label, t!("options"));
             let arr_btn = button(
                 container(icons::themed_arrow_down(8.0))
                     .width(Fill)
@@ -641,6 +659,7 @@ pub(super) fn render_small<'a>(
                 items.iter().find(|(candidate, _, _)| *candidate == cmd)
                     .map(|(_, _, item_icon)| *item_icon)
             }).or_else(|| items.first().map(|(_, _, item_icon)| *item_icon)).unwrap_or(*icon);
+            let cur_icon = crate::ui::command_presentation::ribbon_icon(last, cur_icon);
             let localized_label = t!(*label).into_owned();
             let face = row![
                 container(make_icon(cur_icon, SMALL_ICON)).width(Length::Fixed(SMALL_W)),
@@ -658,7 +677,7 @@ pub(super) fn render_small<'a>(
                 .on_press(Message::ToggleRibbonDropdown(id.to_string()))
                 .style(move |theme: &Theme, status| tool_btn_style(theme, dd_open, status))
                 .width(Length::Fixed(ARROW_W)).height(ROW_H).padding(0);
-            let face_tip = format!("{}\n{} {}", localized_label, t!("Command:"), last);
+            let face_tip = crate::ui::command_presentation::tooltip(last, label);
             let arrow_tip = format!("{} {}", localized_label, t!("options"));
             PosReport::new(*id, row![
                 tooltip(face_btn, make_tip(face_tip), TipPos::Right)
@@ -726,8 +745,12 @@ pub(super) fn render_large_dropdown<'a>(
         .and_then(|cmd| items.iter().find(|(c, _, _)| *c == cmd).map(|(_, lbl, _)| *lbl))
         .or_else(|| items.first().map(|(_, lbl, _)| *lbl))
         .unwrap_or(id);
-    let label = t!(explicit_label.unwrap_or(cur_label)).into_owned();
-    let tip_text = format!("{}\n{} {}", t!(cur_label), t!("Command:"), last);
+    let cur_icon = crate::ui::command_presentation::ribbon_icon(last, cur_icon);
+    let label = explicit_label.map_or_else(
+        || crate::ui::command_presentation::label(last, cur_label),
+        |label| t!(label).into_owned(),
+    );
+    let tip_text = crate::ui::command_presentation::tooltip(last, cur_label);
     let arr_tip = format!("{} {}", label, t!("options"));
 
     // The label owns the bottom of the face. The icon's Fill container centers
@@ -805,9 +828,9 @@ fn tool_row<'a>(tools: &[ToolDef], active_tool: &Option<String>) -> Element<'a, 
         .iter()
         .map(|t| {
             let is_active = active_tool.as_deref() == Some(t.id);
-            let tip = t!(t.label);
+            let tip = crate::ui::command_presentation::tooltip(tool_command(t), t.label);
             let event = t.event.clone();
-            let icon_el: Element<Message> = make_icon(t.icon, 16.0);
+            let icon_el: Element<Message> = make_icon(tool_icon(t), 16.0);
             let msg = module_event_to_message(event);
             tooltip(
                 button(icon_el)
@@ -816,7 +839,7 @@ fn tool_row<'a>(tools: &[ToolDef], active_tool: &Option<String>) -> Element<'a, 
                         tool_btn_style(theme, is_active, status)
                     })
                     .padding([2, 5]),
-                make_tip(tip.to_string()),
+                make_tip(tip),
                 TipPos::Right,
             )
             .gap(4.0)
@@ -863,11 +886,11 @@ pub(super) fn render_large<'a>(
             let active = is_active_tool(t.id, active_tool, &state);
             let event = t.event.clone();
             let tool_id = t.id.to_string();
-            let label = t!(t.label).into_owned();
-            let tip_text = format!("{}\n{} {}", label, t!("Command:"), t.id);
+            let label = tool_label(t);
+            let tip_text = crate::ui::command_presentation::tooltip(tool_command(t), t.label);
             let btn = button(
                 column![
-                    container(make_icon(t.icon, LARGE_ICON))
+                    container(make_icon(tool_icon(t), LARGE_ICON))
                         .width(Fill)
                         .height(Fill)
                         .align_x(iced::Center)
@@ -1209,7 +1232,10 @@ pub(super) fn quick_access_btn<'a>(
 ) -> Element<'a, Message> {
     // The bundled UI SVGs are black-stroked; tint them to a light chrome grey so
     // they read on the dark top strip (raw black is invisible there).
-    let icon = icons::themed(icon_bytes, 16.0);
+    let icon = make_icon(
+        crate::ui::command_presentation::ribbon_icon(cmd, IconKind::Svg(icon_bytes)),
+        16.0,
+    );
     let btn = button(
         container(icon)
             .width(Fill)
@@ -1222,7 +1248,11 @@ pub(super) fn quick_access_btn<'a>(
     .width(Length::Fixed(TOP_HIST_W))
     .height(24)
     .padding([2, 0]);
-    tooltip(btn, make_tip(t!(label).into_owned()), TipPos::Bottom)
+    tooltip(
+        btn,
+        make_tip(crate::ui::command_presentation::tooltip(cmd, label)),
+        TipPos::Bottom,
+    )
         .gap(6.0)
         .delay(Duration::from_millis(400))
         .style(tip_style)
@@ -1237,6 +1267,12 @@ pub(super) fn render_history_control<'a>(
 ) -> Element<'a, Message> {
     let dd_open = open_dropdown.as_deref() == Some(dropdown_id);
     let active = count > 0;
+    let command = if dropdown_id == UNDO_HISTORY_ID {
+        "UNDO"
+    } else {
+        "REDO"
+    };
+    let resolved_label = crate::ui::command_presentation::label(command, label);
 
     let main_btn = {
         let glyph = if dropdown_id == UNDO_HISTORY_ID {
@@ -1270,7 +1306,7 @@ pub(super) fn render_history_control<'a>(
             btn,
             make_tip(format!(
                 "{}\n{}",
-                t!(label),
+                resolved_label,
                 t!("%{count} steps available", count = count)
             )),
             TipPos::Right,
@@ -1307,7 +1343,7 @@ pub(super) fn render_history_control<'a>(
             btn,
             make_tip(format!(
                 "{}",
-                t!("%{label} history", label = t!(label))
+                t!("%{label} history", label = resolved_label.clone())
             )),
             TipPos::Right,
         )

@@ -177,7 +177,8 @@ pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Ele
 }
 
 fn tool_button(tool: &Tool, active: bool, panel_id: &'static str) -> Element<'static, Message> {
-    let face = button(make_icon(IconKind::Svg(tool.icon), 23.0 * SCALE))
+    let icon = crate::ui::command_presentation::ribbon_icon(tool.command, IconKind::Svg(tool.icon));
+    let face = button(make_icon(icon, 23.0 * SCALE))
         .on_press(Message::DropdownSelectItem {
             dropdown_id: panel_id,
             cmd: tool.command,
@@ -190,7 +191,7 @@ fn tool_button(tool: &Tool, active: bool, panel_id: &'static str) -> Element<'st
         })
         .height(CELL)
         .padding(3.0 * SCALE);
-    let tip = format!("{}\n{} {}", t!(tool.label), t!("Command:"), tool.command);
+    let tip = crate::ui::command_presentation::tooltip(tool.command, tool.label);
     let face: Element<'static, Message> = tooltip(face, make_tip(tip), tooltip::Position::Bottom)
         .delay(Duration::from_millis(400))
         .style(tip_style)
@@ -235,7 +236,8 @@ pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element
             tool.options
                 .iter()
                 .map(|&(cmd, label)| {
-                    button(text(t!(label)).size(11))
+                    let label = crate::ui::command_presentation::label(cmd, label);
+                    button(text(label).size(11))
                         .on_press(Message::DropdownSelectItem {
                             dropdown_id: tool.command,
                             cmd,

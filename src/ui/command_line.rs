@@ -53,20 +53,14 @@ fn cmd_input_id() -> iced::widget::Id {
 
 fn mcp_status(enabled: bool, busy: bool) -> (&'static str, Color) {
     if !enabled {
-        (
-            "MCP control is off",
-            Color::from_rgb(0.90, 0.35, 0.35),
-        )
+        ("MCP control is off", Color::from_rgb(0.90, 0.35, 0.35))
     } else if busy {
         (
             "MCP is handling a request",
             Color::from_rgb(0.95, 0.72, 0.25),
         )
     } else {
-        (
-            "MCP control is ready",
-            Color::from_rgb(0.35, 0.85, 0.55),
-        )
+        ("MCP control is ready", Color::from_rgb(0.35, 0.85, 0.55))
     }
 }
 
@@ -87,9 +81,9 @@ fn strip_option_listing(s: &str, options: &[CmdOption]) -> String {
     let is_listing = inner.contains('/')
         || inner.contains('|')
         || inner.contains('=')
-        || options.iter().any(|o| {
-            o.label.eq_ignore_ascii_case(inner) || o.keyword.eq_ignore_ascii_case(inner)
-        });
+        || options
+            .iter()
+            .any(|o| o.label.eq_ignore_ascii_case(inner) || o.keyword.eq_ignore_ascii_case(inner));
     if !is_listing {
         return s.to_string();
     }
@@ -524,8 +518,11 @@ impl CommandLine {
         if self.cliprompt_lines == 0 {
             return 0;
         }
-        let visible: Vec<&HistoryEntry> =
-            self.history.iter().filter(|e| self.entry_visible(e)).collect();
+        let visible: Vec<&HistoryEntry> = self
+            .history
+            .iter()
+            .filter(|e| self.entry_visible(e))
+            .collect();
         visible.len().min(self.cliprompt_lines as usize)
     }
 
@@ -629,8 +626,11 @@ impl CommandLine {
         // Only the most recent entries pushed within COMMANDLINEFADETIME
         // show on the overlay (0 skips transient lines). The dropdown button
         // keeps the full backlog reachable when the user actually wants it.
-        let mut visible: Vec<&HistoryEntry> =
-            self.history.iter().filter(|e| self.entry_visible(e)).collect();
+        let mut visible: Vec<&HistoryEntry> = self
+            .history
+            .iter()
+            .filter(|e| self.entry_visible(e))
+            .collect();
         // Keep the active prompt/options immediately above the input. Commands
         // may emit informational lines while waiting for the next option; those
         // lines belong above the pinned interaction row, not below it.
@@ -712,9 +712,7 @@ impl CommandLine {
                     p.background.base.text,
                     4.5,
                 );
-                iced::widget::text::Style {
-                    color: Some(color),
-                }
+                iced::widget::text::Style { color: Some(color) }
             },
         ))
         .padding([5, 8]);
@@ -780,7 +778,29 @@ impl CommandLine {
                 let mut col = column![].spacing(0).width(Length::Fill);
                 for (idx, cmd) in matches.iter().enumerate() {
                     let is_selected = idx == cursor;
-                    let row = button(text(cmd.clone()).size(11))
+                    let label = crate::ui::command_presentation::label(cmd, "");
+                    let mut suggestion = row![].spacing(6).align_y(iced::Center);
+                    if let Some(icon) = crate::ui::command_presentation::icon(cmd) {
+                        suggestion = suggestion
+                            .push(crate::ui::icon_catalog::render::<Message>(icon, 14.0, true));
+                    }
+                    let labels = if label.eq_ignore_ascii_case(cmd) {
+                        column![text(cmd.clone()).size(11)]
+                    } else {
+                        column![
+                            text(cmd.clone()).size(11),
+                            text(label).size(9).style(|theme: &Theme| {
+                                iced::widget::text::Style {
+                                    color: Some(
+                                        theme.palette().background.base.text.scale_alpha(0.65),
+                                    ),
+                                }
+                            }),
+                        ]
+                        .spacing(0)
+                    };
+                    suggestion = suggestion.push(labels);
+                    let suggestion = button(suggestion)
                         .on_press(Message::CommandSuggestionPick(cmd.clone()))
                         .width(Length::Fill)
                         .padding([2, 8])
@@ -803,7 +823,20 @@ impl CommandLine {
                                 ..Default::default()
                             }
                         });
-                    col = col.push(row);
+                    let suggestion: Element<'_, Message> = if let Some(description) =
+                        crate::ui::command_presentation::description(cmd)
+                    {
+                        tooltip(
+                            suggestion,
+                            container(text(description).size(10)).padding(5),
+                            tooltip::Position::Left,
+                        )
+                        .gap(4)
+                        .into()
+                    } else {
+                        suggestion.into()
+                    };
+                    col = col.push(suggestion);
                 }
                 container(col)
                     .style(container::bordered_box)
@@ -851,8 +884,8 @@ impl CommandLine {
         let mcp_tip = container(text(t!(mcp_tooltip)).size(11))
             .padding([3, 6])
             .style(container::bordered_box);
-        let mcp_btn = container(tooltip(mcp_btn, mcp_tip, tooltip::Position::Top).gap(4))
-            .padding(Padding {
+        let mcp_btn =
+            container(tooltip(mcp_btn, mcp_tip, tooltip::Position::Top).gap(4)).padding(Padding {
                 top: 0.0,
                 right: 6.0,
                 bottom: 0.0,
@@ -931,7 +964,12 @@ impl CommandLine {
             .padding([2, 8]);
             let panel = container(column![header, log])
                 .width(Length::Fill)
-                .padding(Padding { top: 2.0, right: 8.0, bottom: 4.0, left: 8.0 });
+                .padding(Padding {
+                    top: 2.0,
+                    right: 8.0,
+                    bottom: 4.0,
+                    left: 8.0,
+                });
             let resize = iced::widget::mouse_area(
                 container(crate::ui::icons::themed_primary(
                     crate::ui::icons::RESIZE,
@@ -1021,10 +1059,9 @@ impl CommandLine {
 /// Shared by the suggestion popup and the Enter-key closest-match fallback so
 /// both agree on the top suggestion.
 ///
-/// Names come from `crate::command::all_registered_command_names()` — the
-/// compile-time `inventory` registry — merged with `dynamic`, the command names
-/// contributed by loaded plugins (runtime, so they can't be `&'static`; see
-/// #272). Returns owned strings to carry both sources.
+/// Names come from the shared command catalog (registered commands plus
+/// application-level actions), merged with `dynamic`, the command names
+/// contributed by loaded plugins. Returns owned strings to carry both sources.
 ///
 /// `aliases` is the `alias → command` table. Aliases themselves are dropped from
 /// the results, so a terse `CC` is typeable and dispatches (via the alias table)
@@ -1041,14 +1078,18 @@ pub fn ranked_matches(
     if needle.is_empty() {
         return Vec::new();
     }
-    let mut matches: Vec<String> = crate::command::all_registered_command_names()
-        .into_iter()
-        .map(|cmd| cmd.to_string())
+    let mut matches: Vec<String> = crate::command::catalog::all()
+        .descriptors()
+        .map(|descriptor| descriptor.id.to_string())
         // Plugin names are uppercased to match the built-ins and the needle,
         // so ranking and display stay consistent across both sources.
         .chain(dynamic.iter().map(|cmd| cmd.to_uppercase()))
         // Hide aliases (keys of the table); their target command still shows.
-        .filter(|cmd| cmd.contains(&needle) && !aliases.contains_key(cmd))
+        .filter(|cmd| {
+            !aliases.contains_key(cmd)
+                && (cmd.contains(&needle)
+                    || crate::ui::command_presentation::searchable_text(cmd).contains(&needle))
+        })
         .collect();
     matches.sort();
     matches.dedup();
@@ -1172,6 +1213,17 @@ mod tests {
     fn builtin_commands_still_match_with_an_empty_pool() {
         let m = ranked_matches("LINE", &[], &FxHashMap::default());
         assert!(m.iter().any(|c| c == "LINE"), "got {m:?}");
+    }
+
+    #[test]
+    fn authored_labels_and_descriptions_are_searchable() {
+        let select_all_label = crate::ui::command_presentation::label("SELECTALL", "");
+        let by_label = ranked_matches(&select_all_label, &[], &FxHashMap::default());
+        assert!(by_label.iter().any(|command| command == "SELECTALL"));
+
+        let line_description = crate::ui::command_presentation::description("LINE").unwrap();
+        let by_description = ranked_matches(&line_description, &[], &FxHashMap::default());
+        assert!(by_description.iter().any(|command| command == "LINE"));
     }
 
     #[test]

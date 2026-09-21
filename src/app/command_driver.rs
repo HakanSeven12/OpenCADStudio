@@ -589,6 +589,7 @@ impl OpenCADStudio {
     /// the headless automation feeder so both behave identically.
     pub(super) fn run_command_line(&mut self, cmd: &str) -> Task<Message> {
         let i = self.active_tab;
+        self.command_line.unconsumed.clear();
         let tokens: Vec<&str> = cmd.split_whitespace().collect();
         if tokens.len() <= 1 {
             return self.dispatch_command(cmd);
@@ -620,18 +621,64 @@ impl OpenCADStudio {
     /// Feed `tokens[1..]` to the active interactive command as points / option
     /// keywords, then terminate it as if Enter were pressed. No-op when no
     /// command is active.
+    ///
+    /// Two things happen when the tokens run out mid-way, both needed so a
+    /// headless caller can tell what actually happened:
+    ///
+    /// * If the in-place text editor took over (the `TEXT` content step — the
+    ///   command itself has already ended by then, `active_cmd` is `None`), the
+    ///   remaining tokens are that text: they are typed into the editor and
+    ///   committed, the same messages the control surface's `text_input` /
+    ///   `text_commit` actions dispatch. Without this the tail of the line was
+    ///   silently dropped and `TEXT 0,0 5 0 hi` created nothing at all.
+    /// * Anything still left over was never claimed by any prompt; it is
+    ///   recorded in [`CommandLine::unconsumed`] instead of vanishing.
     pub(super) fn finish_active_command(&mut self, tokens: &[String]) -> Task<Message> {
         let i = self.active_tab;
         if self.tabs[i].active_cmd.is_none() {
             return Task::none();
         }
         self.last_point = None;
+        // An editor that is *already* open belongs to someone else (an earlier
+        // line that stopped at the content step). Only the editor this line
+        // opens by feeding its own tokens may be handed the tail.
+        let editor_was_open = self.text_inline.is_some();
         let mut tasks = Vec::new();
+        // First token is the command verb itself; prompts start consuming after it.
+        let mut consumed = 1;
         for tok in &tokens[1..] {
             if self.tabs[i].active_cmd.is_none() {
                 break;
             }
             tasks.push(self.feed_active_cmd(tok));
+            consumed += 1;
+        }
+        if !editor_was_open && self.text_inline.is_some() && consumed < tokens.len() {
+            // Fill the editor the same way `Message::TextInlineInput` does, then
+            // commit *synchronously* so the outcome is observable: dispatching
+            // `TextInlineOk` as a task would hide whether the entity was really
+            // created, and the tail token would be counted as consumed either
+            // way — the caller would have no way to tell "text created" from
+            // "text silently dropped".
+            if let Some(editor) = self.text_inline.as_mut() {
+                editor.value = tokens[consumed..].join(" ");
+            }
+            let committed = self.text_inline_commit();
+            tasks.push(self.post_editor_closed(committed));
+            if committed {
+                consumed = tokens.len();
+                // `TEXT` repeats by design: on a committed string it re-arms for
+                // the next line (`open_next_line`), which re-opens the editor. A
+                // batch line is a complete unit, and leaving that repeat armed
+                // would make the *next* line get eaten as the next text position,
+                // so end the command here, exactly as Esc does in the GUI.
+                tasks.push(Task::done(Message::CommandEscape));
+            }
+            // On a failed commit the tokens stay unconsumed (assigned below), so
+            // the caller still sees the text it passed in.
+        }
+        if consumed < tokens.len() {
+            self.command_line.unconsumed = tokens[consumed..].to_vec();
         }
         tasks.push(self.feed_command(StepInput::Enter));
         Task::batch(tasks)
@@ -1869,6 +1916,9 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .is_some_and(|command| command.preserve_commit_layer());
+        // Task produced by a command the arm dispatches; it must reach the
+        // runtime or messages such as a chosen render mode are dropped.
+        let mut dispatched = Task::none();
         match result {
             CmdResult::OpenAutoConstrainSettings => {
                 self.auto_constrain_saved = Some(self.auto_constrain_settings.clone());
@@ -4771,7 +4821,7 @@ impl OpenCADStudio {
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
-                let _ = self.dispatch_command(&cmd);
+                dispatched = self.dispatch_command(&cmd);
             }
             CmdResult::Dispatch(cmd) => {
                 // End this interactive front-end, then run the assembled command
@@ -4780,7 +4830,7 @@ impl OpenCADStudio {
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
-                let _ = self.dispatch_command(&cmd);
+                dispatched = self.dispatch_command(&cmd);
             }
             CmdResult::EditTableCell { handle, point } => {
                 // TABLEDIT's pick: end the pick phase and hand (table, point)
@@ -7507,16 +7557,15 @@ impl OpenCADStudio {
         // The rich text canvas owns keyboard editing itself. Leaving the
         // hidden command input focused would make it consume Left/Right before
         // the editor can handle them.
-        if self.mtext_editor.is_some() {
-            return self.unfocus_widgets();
-        }
-        // The in-place TEXT editor needs keyboard focus on its own field.
-        if self.text_inline.is_some() {
-            return iced::widget::operation::focus(iced::widget::Id::new(
-                super::view::TEXT_INLINE_ID,
-            ));
-        }
-        self.focus_cmd_input()
+        let focus = if self.mtext_editor.is_some() {
+            self.unfocus_widgets()
+        } else if self.text_inline.is_some() {
+            // The in-place TEXT editor needs keyboard focus on its own field.
+            iced::widget::operation::focus(iced::widget::Id::new(super::view::TEXT_INLINE_ID))
+        } else {
+            self.focus_cmd_input()
+        };
+        Task::batch([dispatched, focus])
     }
 
     /// Restore the tangent-snap / ortho state that was in effect before the command started.
@@ -10113,5 +10162,44 @@ mod thicken_tests {
             .solid_history_operation(solids[0])
             .is_some());
         assert!(app.tabs[i].scene.document.get_entity(source).is_some());
+    }
+}
+
+#[cfg(test)]
+mod dispatched_command_task_tests {
+    use super::*;
+    use crate::command::CmdResult;
+    use acadrust::entities::ViewportRenderMode as Mode;
+
+    /// `CmdResult::Dispatch` and `CmdResult::Relaunch` run the assembled line
+    /// through `dispatch_command`, and the Task it returns must reach the
+    /// runtime: the render mode a VSCURRENT keyword picker chooses is applied
+    /// by a message that Task carries.
+    #[test]
+    fn dispatch_and_relaunch_keep_the_task_the_command_returns() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+
+        app.tabs[i].render_mode = Mode::Wireframe2D;
+        let task = app.apply_cmd_result(CmdResult::Dispatch("VSCURRENT GOURAUDSHADED".into()));
+        app.drive_headless_task(task).unwrap();
+        assert_eq!(
+            app.tabs[i].render_mode,
+            Mode::GouraudShaded,
+            "Dispatch dropped the dispatched command's task"
+        );
+
+        app.tabs[i].render_mode = Mode::Wireframe2D;
+        let task = app.apply_cmd_result(CmdResult::Relaunch(
+            "VSCURRENT GOURAUDSHADED".into(),
+            Vec::new(),
+        ));
+        app.drive_headless_task(task).unwrap();
+        assert_eq!(
+            app.tabs[i].render_mode,
+            Mode::GouraudShaded,
+            "Relaunch dropped the dispatched command's task"
+        );
     }
 }

@@ -87,8 +87,16 @@ impl EntityGeom {
             (EntityGeom::Line(l), 0) => Some(l.p1),
             (EntityGeom::Line(l), 1) => Some(l.p2),
             (EntityGeom::Ray(l), 0) => Some(l.p1),
-            (EntityGeom::Polyline { points, .. }, marker) if marker >= 0 => {
-                points.get(marker as usize).copied()
+            (EntityGeom::Polyline { points, closed, .. }, marker) if marker >= 0 => {
+                // The closing segment's end marker (one past the last vertex)
+                // is vertex 0 on a closed polyline, as in `line_segment`.
+                let index = marker as usize;
+                let index = if *closed && index == points.len() && !points.is_empty() {
+                    0
+                } else {
+                    index
+                };
+                points.get(index).copied()
             }
             (EntityGeom::Circle(c), -3) => Some(c.center),
             (EntityGeom::Arc(a), 0) => Some(a.start),

@@ -787,7 +787,7 @@ bg={bg_ms:.1}ms n={view_count}"
                                 && b.y.is_finite()
                                 && a.x.is_finite()
                                 && a.y.is_finite())
-                            .then_some((b, a))
+                                .then_some((b, a))
                         })
                         .collect()
                 }

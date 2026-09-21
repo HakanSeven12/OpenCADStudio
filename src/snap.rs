@@ -908,17 +908,19 @@ impl Snapper {
                 if sd < r && best_x.as_ref().map_or(true, |(bd, _)| sd < *bd) {
                     // Report an acquired tracking ray (not an auxiliary
                     // last_point ray) as base/dir for typed-distance entry.
-                    let (ot, other) =
-                        if rays[i].group != POLAR_GROUP && rays[i].group != ORTHO_GROUP {
-                            (&rays[i], &rays[j])
-                        } else {
-                            (&rays[j], &rays[i])
-                        };
+                    let (ot, other) = if rays[i].group != POLAR_GROUP
+                        && rays[i].group != ORTHO_GROUP
+                    {
+                        (&rays[i], &rays[j])
+                    } else {
+                        (&rays[j], &rays[i])
+                    };
                     // Point each ray the way the crossing lies from its own
                     // origin, so the guide drawn for it runs through the lock
                     // rather than away from it.
                     let outward = |ray: &Ray| {
-                        let t = (x.x - ray.origin.x) * ray.dir.x + (x.y - ray.origin.y) * ray.dir.y;
+                        let t = (x.x - ray.origin.x) * ray.dir.x
+                            + (x.y - ray.origin.y) * ray.dir.y;
                         if t >= 0.0 {
                             ray.dir
                         } else {

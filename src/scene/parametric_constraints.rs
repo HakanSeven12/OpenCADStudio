@@ -245,6 +245,9 @@ pub(crate) fn set_polyline_vertex(
     x: f64,
     y: f64,
 ) -> bool {
+    let Some(index) = polyline_vertex_index(entity, index) else {
+        return false;
+    };
     match entity {
         acadrust::EntityType::LwPolyline(polyline) => polyline
             .vertices
@@ -804,9 +807,27 @@ pub(crate) fn resolve_point(entity: &acadrust::EntityType, marker: i32) -> Optio
     if marker < 0 {
         return None;
     }
-    super::dimension_assoc::source_points(entity)
-        .get(marker as usize)
-        .copied()
+    let points = super::dimension_assoc::source_points(entity);
+    // The closing segment of a closed polyline runs back to vertex 0, so its
+    // end marker (one past the last vertex) names that vertex — the same wrap
+    // the solver's `line_segment` applies.
+    let index = match polyline_vertex_index(entity, marker as usize) {
+        Some(index) => index,
+        None => marker as usize,
+    };
+    points.get(index).copied()
+}
+
+/// `marker` as a vertex index of a polyline, wrapping the closing segment's
+/// end (one past the last vertex) onto vertex 0 when the polyline is closed.
+/// `None` for anything that is not a 2D polyline.
+pub(crate) fn polyline_vertex_index(entity: &acadrust::EntityType, marker: usize) -> Option<usize> {
+    let (count, closed) = match entity {
+        acadrust::EntityType::LwPolyline(polyline) => (polyline.vertices.len(), polyline.is_closed),
+        acadrust::EntityType::Polyline2D(polyline) => (polyline.vertices.len(), polyline.is_closed()),
+        _ => return None,
+    };
+    Some(if closed && marker == count && count > 0 { 0 } else { marker })
 }
 
 /// Below this squared distance (1e-6 world units), two points count as

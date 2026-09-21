@@ -77,5 +77,7 @@ pub fn handle_plugin_request(
         DocumentPath { tab_id } => PluginResponse::DocumentPath(
             host.document_path(tab_id).map(|path| path.into_os_string()),
         ),
+        AddLayer(config) => PluginResponse::OptHandle(host.add_layer(config)),
+        ModifyLayer(config) => PluginResponse::Bool(host.modify_layer(config)),
     }
 }

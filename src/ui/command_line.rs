@@ -123,6 +123,13 @@ pub struct CommandLine {
     pub history: Vec<HistoryEntry>,
     pub error_revision: u64,
     pub last_error: Option<String>,
+    /// Tokens from the last multi-token command line that no prompt ever
+    /// consumed — e.g. a trailing word after an in-place text step, or a typo'd
+    /// extra argument (`CIRCLE 0,0 5 9`). The headless automation feeder reports
+    /// them so a caller can tell "part of my line was silently dropped" from
+    /// "the command ran exactly as typed". Cleared at the start of every
+    /// `run_command_line`, not persisted.
+    pub unconsumed: Vec<String>,
     /// Successfully dispatched commands used for ↑/↓ recall, newest last.
     /// Stored separately because recall also maintains its own cursor and draft.
     pub cmd_recall: Vec<String>,
@@ -180,6 +187,7 @@ impl Default for CommandLine {
             history: Vec::new(),
             error_revision: 0,
             last_error: None,
+            unconsumed: Vec::new(),
             cmd_recall: Vec::new(),
             recent_commands: Vec::new(),
             recent_inputs: Vec::new(),

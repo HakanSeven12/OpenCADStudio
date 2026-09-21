@@ -1439,6 +1439,17 @@ impl Scene {
         if self.is_layer_locked(handle) {
             return;
         }
+        // An attribute grip sits on the displayed (annotation-scaled)
+        // attribute; the stored one is unscaled.
+        let apply = match self.document.get_entity(handle) {
+            Some(EntityType::Insert(insert)) => crate::entities::insert::unscale_attribute_grip(
+                insert,
+                self.annotation_scale,
+                grip_id,
+                apply,
+            ),
+            _ => apply,
+        };
         if self.apply_solid_history_grip(handle, grip_id, apply.clone()) {
             return;
         }

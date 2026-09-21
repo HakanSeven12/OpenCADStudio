@@ -69,6 +69,40 @@ pub(crate) use convert::tess::{
     entity_aabb, entity_world_aabb_f64, is_unindexable_entity, tessellate_entity_dim_text,
 };
 
+/// Mirror of the app snapper's F4 3D object-snap master (`snap3d_enabled`).
+///
+/// The snapper lives on the app while the solid edge-wire gate in
+/// [`tessellate_entity`] runs deep inside wire assembly, below any app
+/// state — so the toggle is published here, mirroring how `sdf_atlas`
+/// holds TEXTFILL. The gate's decision is baked into tessellated wire
+/// sets, so a flip must also invalidate cached wires
+/// (`Scene::bump_geometry_no_blocks`); the app's toggle path does that.
+static SNAP3D_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
+/// Whether the separate 3D object-snap system (F4) is currently enabled.
+pub(crate) fn snap3d_enabled() -> bool {
+    SNAP3D_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Publish the F4 3D object-snap master for the scene's solid edge-wire
+/// gate. Callers must invalidate cached scene wires afterwards.
+pub fn set_snap3d_enabled(on: bool) {
+    SNAP3D_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Tests only: the master mirror is process-global and the default harness
+/// runs tests in parallel, so a test that flips it holds this lock for its
+/// duration (same pattern as the xref source-registry guard) and restores
+/// the default before releasing.
+#[cfg(test)]
+pub(crate) fn snap3d_toggle_guard() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Keep construction-history curves in the same per-entity tessellation memo
 /// as their parent, so navigation never rebuilds them on every frame.
 #[allow(clippy::too_many_arguments)]
@@ -145,17 +179,21 @@ pub(crate) fn tessellate_entity(
         // treat it exactly like any 2-D entity's geometry.
         //
         // EXCEPT kernel B-rep solids: when the mesh cache carries real
-        // `geometry_edges`, the separate 3D object-snap system (F4 master +
-        // `enabled3d`, via `attach_solid_snaps`) already provides the
-        // corners and edge midpoints, and those must stay invisible to the
-        // 2D modes. The 2D edge wire is the FALLBACK for solids the 3D
-        // system cannot serve (e.g. an OBJ import's triangle-only cache).
-        let three_d_covered = matches!(
-            entity,
-            EntityType::Solid3D(_) | EntityType::Region(_) | EntityType::Body(_) | EntityType::Surface(_)
-        ) && volume_meshes
-            .and_then(|meshes| meshes.get(&handle))
-            .is_some_and(|set| !set.geometry_edges().0.is_empty());
+        // `geometry_edges` AND the separate 3D object-snap system (F4 master
+        // + `enabled3d`, via `attach_solid_snaps`) is actually enabled, that
+        // system already provides the corners and edge midpoints, and those
+        // must stay invisible to the 2D modes. The 2D edge wire is the
+        // FALLBACK whenever the 3D system cannot serve the solid — a
+        // triangle-only cache (e.g. an OBJ import), or the F4 master off,
+        // which would otherwise leave NEITHER system serving the solid.
+        let three_d_covered = snap3d_enabled()
+            && matches!(
+                entity,
+                EntityType::Solid3D(_) | EntityType::Region(_) | EntityType::Body(_) | EntityType::Surface(_)
+            )
+            && volume_meshes
+                .and_then(|meshes| meshes.get(&handle))
+                .is_some_and(|set| !set.geometry_edges().0.is_empty());
         if !three_d_covered {
             let stored = match entity {
                 EntityType::Solid3D(solid) => solid.wires.as_slice(),
@@ -10358,6 +10396,10 @@ impl Scene {
                     mix(channel.to_bits() as u64);
                 }
                 mix(avp.map(|h| h.value()).unwrap_or(0));
+                // The solid edge-wire gate bakes the F4 3D master into every
+                // wire set; a toggle must re-tessellate (the app's bump also
+                // drops the outer caches — this covers the per-entity memo).
+                mix(snap3d_enabled() as u64);
                 // SDF glyph quads bake the atlas UV of each tile, so a growth or
                 // a re-bake (which rescale / rewind every UV) makes memoized text
                 // address the wrong tile — garbage on screen, and a silent miss in

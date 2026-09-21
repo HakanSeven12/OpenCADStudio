@@ -2396,6 +2396,9 @@ impl OpenCADStudio {
     ) -> Task<Message> {
         self.thumbnail_capture_clean = false;
         let Some(i) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            // The tab closed while its capture was queued: the save is over
+            // (no serialization follows), so release the in-flight slot.
+            crate::io::fs_access::end_web_save(tab_id);
             return Task::none();
         };
         let preview = screenshot.as_ref().and_then(|screenshot| {
@@ -2443,11 +2446,12 @@ impl OpenCADStudio {
     }
 
     /// Web SAVE completion: the serializer worker (or inline fallback) has the
-    /// drawing bytes. When the tab holds a File System Access handle the
-    /// bytes go to it in place (createWritable needs no user gesture, so the
+    /// drawing bytes. When the tab still exists AND holds a File System
+    /// Access handle picked for the format these bytes were serialized as,
+    /// they go to it in place (createWritable needs no user gesture, so the
     /// write may happen long after the pick); completion continues in
-    /// `on_web_save_written`. Otherwise the legacy download fires — the only
-    /// artifact of the save, launched even if the tab was closed while
+    /// `on_web_save_written`. Anything else takes the legacy download — the
+    /// only artifact of the save, launched even if the tab was closed while
     /// serialization was in flight.
     #[cfg(target_arch = "wasm32")]
     pub(super) fn on_web_save_serialized(
@@ -2466,15 +2470,37 @@ impl OpenCADStudio {
             Err(error) => {
                 self.command_line
                     .push_error(crate::tf!("Save failed: {error}").as_ref());
+                crate::io::fs_access::end_web_save(tab_id);
                 return self.finish_web_save(false);
             }
         };
-        // In-place write through the handle picked at the confirm gesture
-        // (or an earlier one). The bookkeeping runs at write completion
-        // (WebSaveWritten) so a failed write cannot clear the dirty flag;
-        // the bytes ride back with the completion so the OPFS recent store
-        // gets the same copy the download path uses.
-        if let Some(picked_name) = crate::io::fs_access::handle_name(tab_id) {
+        // In-place write eligibility, all three required:
+        // * the tab still exists — a tab that closed while serialization ran
+        //   means the user declined this save (discard/close), and the
+        //   legacy contract for closed tabs is download-only;
+        // * a handle is held AND it was picked for the format these bytes
+        //   were serialized for (the pending ext recorded at capture time):
+        //   a Save As whose re-pick failed falls back to the download, and
+        //   the stale handle from the previous format must not receive the
+        //   fallback bytes (a .dwg file must never silently hold DXF).
+        let tab_exists = self.tabs.iter().position(|tab| tab.id == tab_id).is_some();
+        let target_ext = crate::io::fs_access::take_pending_save_ext(tab_id);
+        let write_in_place = tab_exists
+            && crate::io::fs_access::write_or_download(
+                crate::io::fs_access::handle_ext(tab_id).as_deref(),
+                target_ext.as_deref(),
+            );
+        if !write_in_place {
+            // Whatever handle is held is stale for these bytes (wrong
+            // format, unverifiable format, or a tab that declined the
+            // save): drop it so the next save re-picks instead of hitting
+            // the same mismatch. No handle held: the drop is a no-op.
+            crate::io::fs_access::drop_handle(tab_id);
+        } else if let Some(picked_name) = crate::io::fs_access::handle_name(tab_id) {
+            // The bookkeeping runs at write completion (WebSaveWritten) so a
+            // failed write cannot clear the dirty flag; the bytes ride back
+            // with the completion message so the OPFS recent store gets the
+            // same copy the download path uses.
             let download_name = picked_name.clone();
             return Task::perform(
                 async move {
@@ -2574,6 +2600,9 @@ impl OpenCADStudio {
         camera_generation: u64,
         bytes: Vec<u8>,
     ) -> Task<Message> {
+        // The save settled (download or in-place write): release the
+        // in-flight slot the on_save_file guard refuses against.
+        crate::io::fs_access::end_web_save(tab_id);
         let cache_name = std::path::Path::new(&filename)
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -3352,6 +3381,20 @@ impl OpenCADStudio {
         // once after the destination/version is known.
         #[cfg(target_arch = "wasm32")]
         {
+            // The web counterpart of native's active_save_jobs guard: one
+            // capture → serialize → write/download chain at a time. The
+            // window is seconds, so refuse rather than queue — same
+            // localized message the native flow shows.
+            if let Some(busy_tab) = crate::io::fs_access::web_save_in_flight() {
+                if self.tabs.iter().any(|tab| tab.id == busy_tab) {
+                    self.command_line
+                        .push_info(crate::t!("Save already running for this drawing.").as_ref());
+                    return Task::none();
+                }
+                // Stale marker (its tab closed before the save could
+                // settle): clear it instead of blocking every later save.
+                crate::io::fs_access::end_web_save(busy_tab);
+            }
             self.sync_view_state_for_save(i);
             self.stamp_header_sysvars(i);
         }
@@ -3579,6 +3622,12 @@ impl OpenCADStudio {
         ext: String,
         version: acadrust::DxfVersion,
     ) -> Task<Message> {
+        // The save is now committed to this tab and this format: mark it
+        // in flight (the web counterpart of native's active_save_jobs —
+        // on_save_file refuses a second save while the slot is held) and
+        // record the intended ext, which the completion half re-checks
+        // against the retained handle before writing.
+        crate::io::fs_access::begin_web_save(tab_id, &ext);
         let bounds = crate::ui::wrap_bar::dropdown_bounds(crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID);
         let Some(bounds) = bounds else {
             return Task::done(Message::WebSaveScreenshot {
@@ -3607,7 +3656,9 @@ impl OpenCADStudio {
     /// any previous one — Save As re-picks); `Ok(None)` (dismissed picker)
     /// cancels the save like a native save-dialog cancel; `Err` keeps the
     /// save alive through the legacy download, with a note that the copy
-    /// was downloaded.
+    /// was downloaded — after dropping any previously retained handle,
+    /// which was picked for the old format and must not receive the
+    /// fallback bytes.
     #[cfg(target_arch = "wasm32")]
     pub(super) fn on_web_save_handle_picked(
         &mut self,
@@ -3633,6 +3684,13 @@ impl OpenCADStudio {
                 Task::none()
             }
             Err(error) => {
+                // The picker failed and the download fallback is about to
+                // run with bytes serialized for `ext` — but any handle still
+                // held was picked for (possibly) the OTHER format (Save As
+                // to DXF on a .dwg handle, …). Drop it now so the stale
+                // handle cannot receive the fallback bytes when they land;
+                // the next save re-picks.
+                crate::io::fs_access::drop_handle(tab_id);
                 self.command_line.push_error(
                     crate::tf!(
                         "Save destination picker failed: {error}; downloading a copy instead"

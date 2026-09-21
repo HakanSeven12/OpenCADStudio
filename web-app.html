@@ -39,9 +39,13 @@
       }
       @keyframes ocs-spin { to { transform: rotate(360deg); } }
       /* Browser-menu print support: hidden on screen, the only thing shown on
-         paper. beforeprint snapshots the WebGL canvas into it (below), so the
+         paper. The Rust side keeps the img synchronized with the WebGL canvas
+         via a frame-callback readback (sys::refresh_print_snapshot), so the
          printout is the drawing instead of a blank page — WebGL canvases do
-         not composite into the print surface on their own. */
+         not composite into the print surface on their own. A `beforeprint`
+         listener cannot do this: wgpu runs without preserveDrawingBuffer, so
+         by then the drawing buffer is already cleared after composite, and
+         an async capture inside beforeprint finishes after printing started. */
       #print-snapshot { display: none; }
       @media print {
         body > *:not(#print-snapshot) { display: none !important; }
@@ -66,7 +70,12 @@
       <div class="title">Open <span>CAD</span> Studio</div>
       <div class="sub">Loading…</div>
     </div>
-    <!-- Print-only copy of the canvas; filled by beforeprint below. -->
+    <!-- Print-only copy of the canvas, kept ALWAYS WARM by the Rust side
+         (sys::refresh_print_snapshot runs off the frames subscription,
+         throttled to ~2 s): the snapshot must exist BEFORE beforeprint
+         fires, because the WebGL drawing buffer is cleared after each
+         composite and cannot be read from a beforeprint listener. No JS
+         here on purpose; the print CSS above does the rest. -->
     <img id="print-snapshot" alt="" />
     <script src="ocs-control.js" defer></script>
     <script>
@@ -81,32 +90,6 @@
         if (!("serviceWorker" in navigator)) return;
         navigator.serviceWorker.register("sw.js").catch(error => {
           console.warn("service worker registration failed; offline support disabled:", error);
-        });
-      })();
-    </script>
-    <script>
-      // Print support. The drawing lives in a WebGL canvas, which browsers
-      // rasterize as blank on the print surface. beforeprint therefore copies
-      // it onto a 2D canvas (the same drawImage readback the Rust side's
-      // sys::capture_canvas uses — no Rust state involved, the canvas is
-      // located from the DOM) and shows the snapshot in the print-only
-      // <img>; afterprint drops it again to free the PNG.
-      (() => {
-        const snapshot = document.getElementById("print-snapshot");
-        if (!snapshot) return;
-        window.addEventListener("beforeprint", () => {
-          const canvas = document.querySelector("canvas");
-          if (!canvas || !canvas.width || !canvas.height) return;
-          const copy = document.createElement("canvas");
-          copy.width = canvas.width;
-          copy.height = canvas.height;
-          const context = copy.getContext("2d");
-          if (!context) return;
-          context.drawImage(canvas, 0, 0);
-          snapshot.src = copy.toDataURL("image/png");
-        });
-        window.addEventListener("afterprint", () => {
-          snapshot.removeAttribute("src");
         });
       })();
     </script>

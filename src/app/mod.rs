@@ -798,6 +798,11 @@ pub(super) struct OpenCADStudio {
     main_window: Option<window::Id>,
     /// Hides drawing UI overlays for one thumbnail capture frame.
     thumbnail_capture_clean: bool,
+    /// Web: when the print-only snapshot `<img>` was last refreshed (see
+    /// [`crate::sys::refresh_print_snapshot`]). `None` = never captured, so
+    /// the first presented frame fills it.
+    #[cfg(target_arch = "wasm32")]
+    print_snapshot_at: Option<Instant>,
     #[cfg(not(target_arch = "wasm32"))]
     pending_native_thumbnail_save: Option<PendingNativeThumbnailSave>,
     #[cfg(target_arch = "wasm32")]
@@ -2099,6 +2104,12 @@ pub enum Message {
     /// directly and never emits this.
     #[cfg(target_arch = "wasm32")]
     ControlCaptureFrame,
+    /// Web: a frame was presented, so the print-only snapshot `<img>` can be
+    /// refreshed from the still-readable canvas (see
+    /// [`crate::sys::refresh_print_snapshot`]). The handler throttles to one
+    /// capture every 2 s; native never emits this.
+    #[cfg(target_arch = "wasm32")]
+    PrintSnapshotFrame,
     ControlToggle,
     Tick(Instant),
     /// Periodic drain of plugin-to-host requests that arrived outside a host
@@ -4264,6 +4275,8 @@ impl OpenCADStudio {
             pending_click_snap: None,
             main_window: None,
             thumbnail_capture_clean: false,
+            #[cfg(target_arch = "wasm32")]
+            print_snapshot_at: None,
             #[cfg(not(target_arch = "wasm32"))]
             pending_native_thumbnail_save: None,
             #[cfg(target_arch = "wasm32")]
@@ -4642,6 +4655,30 @@ impl OpenCADStudio {
         app.apply_config(crate::app::config::AppConfig::default());
         app.last_saved_config = Some(app.current_config());
         app
+    }
+
+    /// Web: keep the print-only snapshot `<img>` always warm
+    /// ([`crate::sys::refresh_print_snapshot`]). Runs on every presented
+    /// frame but captures at most once every 2 s, and only while the page is
+    /// visible — a hidden tab presents no frames anyway, and skipping keeps a
+    /// backgrounded app from burning encode cycles it cannot need. Frames
+    /// only arrive while the window is actually redrawing, so an idle app
+    /// performs no captures at all; the printout may thus lag the canvas by
+    /// up to the throttle window.
+    #[cfg(target_arch = "wasm32")]
+    fn on_print_snapshot_frame(&mut self) {
+        const THROTTLE: std::time::Duration = std::time::Duration::from_secs(2);
+        if self
+            .print_snapshot_at
+            .is_some_and(|at| at.elapsed() < THROTTLE)
+        {
+            return;
+        }
+        if !crate::sys::page_visible() {
+            return;
+        }
+        self.print_snapshot_at = Some(Instant::now());
+        crate::sys::refresh_print_snapshot();
     }
 
     /// Install `cmd` as the active interactive command for tab `tab`.

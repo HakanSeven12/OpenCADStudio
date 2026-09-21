@@ -466,6 +466,18 @@ pub fn register_source(path: &str, bytes: Arc<Vec<u8>>) {
     }
 }
 
+/// Is a source registered under exactly this reference? The web paste path
+/// uses it to keep its generated `pasted-…` names unique: the registry is
+/// last-wins, so a reused name would silently re-point every earlier paste's
+/// entity at the newest pixels. Exact key match — generated names embed their
+/// own extension and are all lower-case digits.
+pub fn has_source(path: &str) -> bool {
+    source_cache()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .contains_key(path)
+}
+
 /// Every reference with bytes currently registered (picked or dropped).
 /// Used after a web open settles to catch images registered while the load —
 /// which builds the raster models — was already running.

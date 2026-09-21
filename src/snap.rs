@@ -2873,6 +2873,35 @@ fn line_endpoint_map(wire: &WireModel) -> HashMap<LineGeomKey, (DVec3, DVec3)> {
         let key = line_geom_key(a.as_vec3().to_array(), b.as_vec3().to_array());
         map.entry(key).or_insert((a, b));
     }
+    // A closed analytic polyline stores its vertices UNREPEATED — the closing
+    // segment runs from the last key vertex back to the first — so the pair
+    // its Line geom looks up is the one `windows(2)` never yields; without it
+    // the closing segment falls back to its f32-widened endpoints, which
+    // drift by centimetres at survey scale. The wire records closure nowhere
+    // else, so detect it by that very geom (matched on the same 1-ulp grid
+    // the lookup verifies with). Open vertex lists (block entries, center
+    // marks) carry no last→first geom and gain no entry, and a hit is still
+    // verified against the geom's own f32 endpoints at lookup.
+    if wire.key_vertices.len() >= 2 {
+        let (first, last) = (
+            DVec3::from_array(wire.key_vertices[0]),
+            DVec3::from_array(wire.key_vertices[wire.key_vertices.len() - 1]),
+        );
+        let near = |v: DVec3, p: [f32; 3]| {
+            let ulp = |x: f32, y: f32| (x - y).abs() <= y.abs().max(1.0) * f32::EPSILON;
+            ulp(v.x as f32, p[0]) && ulp(v.y as f32, p[1]) && ulp(v.z as f32, p[2])
+        };
+        let is_closing = |geom: &TangentGeom| match geom {
+            TangentGeom::Line { p1, p2 } => near(last, *p1) && near(first, *p2),
+            _ => false,
+        };
+        if (first.is_finite() && last.is_finite())
+            && wire.tangent_geoms.iter().any(is_closing)
+        {
+            let key = line_geom_key(last.as_vec3().to_array(), first.as_vec3().to_array());
+            map.entry(key).or_insert((last, first));
+        }
+    }
     map
 }
 
@@ -4937,6 +4966,71 @@ mod ext_tests {
         );
     }
 
+    /// The 2D solid edge wire is suppressed ONLY while the separate 3D
+    /// object-snap system can actually serve the solid. With feature edges
+    /// cached and the F4 master ON, the wire stays out (the 3D system owns
+    /// the corners and edge midpoints); switching the master OFF must bring
+    /// the wire back — otherwise NEITHER system serves the solid.
+    #[test]
+    fn solid_edge_wire_suppressed_only_while_3d_system_enabled() {
+        use crate::scene::Scene;
+        use acadrust::entities::Solid3D;
+
+        // The master mirror is process-global; hold the toggle guard and
+        // restore the default before releasing.
+        let _toggle = crate::scene::snap3d_toggle_guard();
+        crate::scene::set_snap3d_enabled(true);
+
+        let mut scene = Scene::new();
+        let handle = scene.add_entity(acadrust::EntityType::Solid3D(Solid3D::new()));
+        // Feature edges in the display cache: the case the F4 system covers
+        // when it is enabled.
+        let mut set = square_mesh_lod_set(&handle.value().to_string());
+        set.edge_verts = vec![
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [10.0, 10.0, 0.0],
+            [10.0, 10.0, 0.0],
+            [0.0, 10.0, 0.0],
+            [0.0, 10.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ];
+        scene.meshes.insert(handle, set);
+        let name = handle.value().to_string();
+        let has_edge_wire =
+            |wires: &[WireModel]| wires.iter().any(|w| w.name == name && !w.points.is_empty());
+
+        // 3D system enabled (the default): the 2D edge wire stays out.
+        assert!(
+            !has_edge_wire(&scene.hit_test_wires()),
+            "the 3D system covers this solid; the 2D edge wire must not duplicate it"
+        );
+
+        // F4 off — published and invalidated exactly as the app toggle does:
+        // the 3D system never fires, so the 2D fallback must return.
+        crate::scene::set_snap3d_enabled(false);
+        scene.bump_geometry_no_blocks();
+        let wires_off = scene.hit_test_wires();
+        crate::scene::set_snap3d_enabled(true);
+        assert!(
+            has_edge_wire(&wires_off),
+            "with the 3D system off neither system serves the solid; the 2D edge wire must come back"
+        );
+
+        // And it serves 2D Endpoint snap at a feature-edge vertex.
+        let owned = wires_off.as_ref().clone();
+        let mut snapper = Snapper::default();
+        snapper.enabled = [SnapType::Endpoint].into_iter().collect();
+        snap_one(
+            &mut snapper,
+            &owned,
+            DVec3::new(0.1, 0.2, 0.0),
+            SnapType::Endpoint,
+            DVec3::new(0.0, 0.0, 0.0),
+        );
+    }
+
     #[test]
     fn closest_point_on_triangle_2d_handles_inside_edge_and_vertex() {
         let (a, b, c) = ([0.0f32, 0.0], [10.0, 0.0], [0.0, 10.0]);
@@ -5300,12 +5394,20 @@ mod ext_tests {
             ..Default::default()
         };
 
-        // Centred on the closing edge x = ox, so both crossings sit on it.
-        let pts = exact_curve_intersections(&square, &xy_circle(ox, oy + 5.0, 1.0))
+        // Centred ON the closing edge y = oy (the last→first segment, which
+        // `windows(2)` never indexes), so BOTH crossings sit on it; the
+        // f32-widened fallback puts them ~10 cm off in y at this scale.
+        let pts = exact_curve_intersections(&square, &xy_circle(ox + 5.0, oy, 1.0))
             .expect("the circle crosses the closing edge");
         assert_eq!(pts.len(), 2, "{pts:?}");
-        for p in &pts {
-            assert!((p.x - ox).abs() < 1e-9, "closing edge fell back to f32 endpoints: {p:?}");
-        }
+        pts.iter().for_each(|p| {
+            assert!((p.y - oy).abs() < 1e-9, "closing edge fell back to f32 endpoints: {p:?}");
+        });
+        pts.iter().for_each(|p| {
+            assert!(
+                ((p.x - (ox + 4.0)).abs() < 1e-9 || (p.x - (ox + 6.0)).abs() < 1e-9),
+                "unexpected crossing: {p:?}"
+            );
+        });
     }
 }

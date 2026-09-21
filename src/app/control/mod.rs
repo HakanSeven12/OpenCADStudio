@@ -120,6 +120,14 @@ pub(super) struct State {
     /// screenshot, which cannot run on wasm.
     #[cfg(target_arch = "wasm32")]
     pub(super) pending_capture: Option<String>,
+    /// When the parked `capture` above gives up: `window::frames()` never
+    /// fires in a hidden tab (rAF is parked) or a visible one with nothing
+    /// to redraw, and `control_settle` refuses to finish while
+    /// `pending_capture` is set — so one stuck capture would block every
+    /// later op forever. The 50 ms `PollWebControl` tick checks this
+    /// deadline (see `expire_stale_web_capture`) and fails the op instead.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) capture_deadline: Option<iced::time::Instant>,
 }
 impl State {
     pub(super) fn new() -> Self {
@@ -956,7 +964,21 @@ impl OpenCADStudio {
                 // until ControlScreenshot lands from that frame.
                 #[cfg(target_arch = "wasm32")]
                 {
+                    // Fail fast when the tab cannot present frames at all:
+                    // rAF never fires while the document is hidden, so a
+                    // parked capture would just sit there until the
+                    // watchdog. Refusing without parking gives the caller
+                    // the same error immediately.
+                    if !crate::sys::page_visible() {
+                        return Err(failure(
+                            "capture_not_visible",
+                            "capture requires a visible/repainting tab",
+                        ));
+                    }
                     self.control.pending_capture = Some(path);
+                    self.control.capture_deadline = Some(
+                        iced::time::Instant::now() + std::time::Duration::from_secs(5),
+                    );
                     Task::none()
                 }
                 #[cfg(not(target_arch = "wasm32"))]
@@ -1176,12 +1198,37 @@ impl OpenCADStudio {
     /// canvas in — one frame after the request, before the buffer clears.
     #[cfg(target_arch = "wasm32")]
     pub(super) fn on_control_capture_frame(&mut self) -> Task<Message> {
+        self.control.capture_deadline = None;
         if let Some(path) = self.control.pending_capture.take() {
             let screenshot = crate::sys::capture_canvas();
             self.control_screenshot(path, screenshot);
             self.control_settle();
         }
         Task::none()
+    }
+
+    /// Web capture watchdog, run from every `PollWebControl` tick (50 ms): a
+    /// parked `capture` waits for a presented frame, which NEVER arrives in a
+    /// hidden tab (rAF parked) or a visible one with nothing redrawing — and
+    /// `control_settle` refuses to finish while `pending_capture` is set, so
+    /// one such capture would block every later automation op forever. Past
+    /// the 5 s deadline the op fails with a clear error instead. Background
+    /// tabs throttle the poll timer to ~1 s, still well inside the deadline.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn expire_stale_web_capture(&mut self) {
+        let Some(deadline) = self.control.capture_deadline else {
+            return;
+        };
+        if self.control.pending_capture.is_none() || iced::time::Instant::now() < deadline {
+            return;
+        }
+        self.control.pending_capture = None;
+        self.control.capture_deadline = None;
+        // push_error bumps `error_revision`, which `control_settle` reads as
+        // the failed verdict and reports as the op's `last_error`.
+        self.command_line
+            .push_error("capture requires a visible/repainting tab");
+        self.control_settle();
     }
 
     pub(super) fn control_screenshot(

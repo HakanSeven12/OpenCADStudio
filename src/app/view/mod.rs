@@ -2603,6 +2603,17 @@ impl OpenCADStudio {
         };
         #[cfg(not(target_arch = "wasm32"))]
         let control_capture = Subscription::none();
+        // Web print snapshot: keep the print-only `<img id="print-snapshot">`
+        // (web-app.html's print CSS shows it instead of the canvas) always
+        // warm — a `beforeprint` readback is either outside the frame (blank:
+        // wgpu clears the WebGL drawing buffer after composite) or too late
+        // (async, printing already started). Frames only arrive while the
+        // window is actually redrawing, so an idle app captures nothing; the
+        // handler throttles to one snapshot every 2 s while they do flow.
+        #[cfg(target_arch = "wasm32")]
+        let print_snapshot = window::frames().map(|_| Message::PrintSnapshotFrame);
+        #[cfg(not(target_arch = "wasm32"))]
+        let print_snapshot = Subscription::none();
         // Blink the MText preview caret while the editor is open.
         let caret_blink = if self.mtext_editor.is_some() {
             iced::time::every(std::time::Duration::from_millis(530))
@@ -2823,6 +2834,7 @@ impl OpenCADStudio {
             gpu_probe,
             thumbnail_capture,
             control_capture,
+            print_snapshot,
             caret_blink,
             web_fonts,
             autosave,

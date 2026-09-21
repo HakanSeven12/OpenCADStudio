@@ -82,6 +82,20 @@ fn exts_match(a: &str, b: &str) -> bool {
     strip(a) == strip(b)
 }
 
+/// Whether bytes serialized for `target_ext` may be written through a
+/// handle picked for `handle_ext` (`None` = no handle held; a `None`
+/// target = the intended format is unknown). This is the completion-half
+/// counterpart of `save_route`: routing happens at the confirm gesture,
+/// but the bytes arrive later — possibly serialized for a *different*
+/// format than the retained handle (a Save As whose re-pick failed falls
+/// back to the download while the old handle stays in the registry), and
+/// a `.dwg` handle must never receive DXF bytes (or vice versa) just
+/// because it is still held.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // unit-tested on native
+pub fn write_or_download(handle_ext: Option<&str>, target_ext: Option<&str>) -> bool {
+    matches!((handle_ext, target_ext), (Some(handle), Some(target)) if exts_match(handle, target))
+}
+
 /// `showSaveFilePicker` rejects with a `DOMException` named "AbortError"
 /// when the user dismisses the dialog. That name check is the whole cancel
 /// classification — kept pure so it compiles and tests on every target.
@@ -128,9 +142,24 @@ mod browser {
         /// not an App field or a Message payload — owns the handles because
         /// iced requires `Message: Send` even on wasm, and a JsValue-backed
         /// handle is not Send. (Same pattern as web_recent's OPEN_STORES.)
-        /// Closing a tab, and a failed write, drop its entry; Save As
-        /// replaces it.
+        /// Closing a tab, a failed write, a failed re-pick and a format
+        /// mismatch drop its entry; Save As replaces it.
         static SAVE_HANDLES: RefCell<HashMap<u64, SaveHandle>> =
+            RefCell::new(HashMap::new());
+
+        /// The web save currently between `web_save_capture` and its
+        /// completion (serialized → written/downloaded) — the web
+        /// counterpart of native's `active_save_jobs` guard, kept here for
+        /// the same Send reason as the handles. One slot: a second save
+        /// while one is in flight is refused, not queued (the window is
+        /// seconds).
+        static WEB_SAVE_IN_FLIGHT: RefCell<Option<u64>> = RefCell::new(None);
+
+        /// The format each tab's in-flight save is being serialized for —
+        /// the `target_ext` input of `write_or_download`, recorded at
+        /// capture time because the completion messages cannot carry it
+        /// (the bytes may outlive several rounds of tab state).
+        static PENDING_SAVE_EXTS: RefCell<HashMap<u64, String>> =
             RefCell::new(HashMap::new());
     }
 
@@ -159,6 +188,49 @@ mod browser {
         SAVE_HANDLES.with(|handles| {
             handles.borrow_mut().remove(&tab_id);
         });
+    }
+
+    /// Mark `tab_id`'s save as in flight and remember the format its bytes
+    /// will be serialized for. Called at `web_save_capture` — the moment a
+    /// save is committed to a tab and a format — so `on_save_file` can
+    /// refuse a second concurrent save and the completion half can check
+    /// the bytes against the retained handle (`write_or_download`).
+    pub fn begin_web_save(tab_id: u64, ext: &str) {
+        PENDING_SAVE_EXTS.with(|exts| {
+            exts.borrow_mut().insert(
+                tab_id,
+                ext.trim_start_matches('.').to_ascii_lowercase(),
+            );
+        });
+        WEB_SAVE_IN_FLIGHT.with(|in_flight| in_flight.borrow_mut().replace(tab_id));
+    }
+
+    /// End `tab_id`'s in-flight save — completion, error or cancel. The
+    /// single slot is only released when it still names this tab: a newer
+    /// save that took the slot over must not have its lifecycle cut short.
+    pub fn end_web_save(tab_id: u64) {
+        WEB_SAVE_IN_FLIGHT.with(|in_flight| {
+            let mut slot = in_flight.borrow_mut();
+            if *slot == Some(tab_id) {
+                *slot = None;
+            }
+        });
+        PENDING_SAVE_EXTS.with(|exts| {
+            exts.borrow_mut().remove(&tab_id);
+        });
+    }
+
+    /// The tab whose web save is between capture and completion, if any —
+    /// what the save entry points refuse against while it is set.
+    pub fn web_save_in_flight() -> Option<u64> {
+        WEB_SAVE_IN_FLIGHT.with(|in_flight| *in_flight.borrow())
+    }
+
+    /// Take the format `tab_id`'s serialized bytes were intended for —
+    /// consumed (once) by the completion handler to decide
+    /// write-through-handle vs download via `write_or_download`.
+    pub fn take_pending_save_ext(tab_id: u64) -> Option<String> {
+        PENDING_SAVE_EXTS.with(|exts| exts.borrow_mut().remove(&tab_id))
     }
 
     /// Feature-detect `showSaveFilePicker` — never assume it: Firefox and
@@ -314,12 +386,13 @@ mod browser {
 
 #[cfg(target_arch = "wasm32")]
 pub use browser::{
-    drop_handle, handle_ext, handle_name, pick_save_handle, supported, write_handle,
+    begin_web_save, drop_handle, end_web_save, handle_ext, handle_name, pick_save_handle,
+    supported, take_pending_save_ext, web_save_in_flight, write_handle,
 };
 
 #[cfg(test)]
 mod tests {
-    use super::{is_cancel_error_name, save_route, SaveRoute};
+    use super::{is_cancel_error_name, save_route, write_or_download, SaveRoute};
 
     /// Firefox/Safari: no showSaveFilePicker — every save stays a download,
     /// whatever handle state the tab happens to hold.
@@ -373,5 +446,40 @@ mod tests {
         assert!(!is_cancel_error_name("SecurityError"));
         assert!(!is_cancel_error_name("TypeError"));
         assert!(!is_cancel_error_name(""));
+    }
+
+    /// The completion-half decision: bytes serialized for the same format
+    /// the retained handle was picked for may be written through it.
+    #[test]
+    fn matching_serialized_ext_writes_in_place() {
+        assert!(write_or_download(Some("dwg"), Some("dwg")));
+        assert!(write_or_download(Some("dxf"), Some("dxf")));
+        assert!(write_or_download(Some(".DWG"), Some("dwg")));
+        assert!(write_or_download(Some("dxf"), Some(".DXF")));
+    }
+
+    /// The BLOCKER scenario: a Save As whose re-pick failed continues as a
+    /// download, but the OLD handle (picked for the other format) is still
+    /// in the registry — those bytes must not be written through it.
+    #[test]
+    fn stale_handle_of_other_format_downloads() {
+        assert!(!write_or_download(Some("dwg"), Some("dxf")));
+        assert!(!write_or_download(Some("dxf"), Some("dwg")));
+    }
+
+    /// No handle held (Firefox/Safari, first save, dropped handle) — the
+    /// legacy download carries the bytes.
+    #[test]
+    fn no_handle_downloads() {
+        assert!(!write_or_download(None, Some("dwg")));
+        assert!(!write_or_download(None, Some("dxf")));
+    }
+
+    /// Unknown intended format (no pending ext recorded for the save): an
+    /// unverifiable handle must not receive the bytes — download.
+    #[test]
+    fn unknown_target_ext_downloads() {
+        assert!(!write_or_download(Some("dwg"), None));
+        assert!(!write_or_download(None, None));
     }
 }

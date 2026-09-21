@@ -6943,18 +6943,26 @@ mod selection_preview_tests {
         );
     }
 
-    /// With the 3D master off, solid corners are invisible even when the
-    /// Vertex mode is configured — and the 2D system must not catch them.
+    /// With the 3D master off, the 3D system serves nothing — so the solid's
+    /// 2D edge-wire fallback must come back and 2D Endpoint finds the corner.
+    /// (Before the gate fix the wire stayed suppressed and NEITHER system
+    /// served the solid.)
     #[test]
-    fn box_corner_ignores_3d_master_off() {
+    fn box_corner_snaps_via_2d_edge_wire_when_3d_master_off() {
         use acadrust::{entities::Solid3D, EntityType};
         use crate::snap::SnapType;
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
+        // The master mirror is process-global; hold the toggle guard and
+        // restore the default before releasing.
+        let _toggle = crate::scene::snap3d_toggle_guard();
         app.snapper.snap_enabled = true;
         app.snapper.snap3d_enabled = false;
+        // Mirror the app toggle path: publish the master to the scene gate
+        // and drop wire caches baked with the old decision.
+        crate::scene::set_snap3d_enabled(false);
         app.snapper.enabled3d.insert(SnapType::Vertex);
         app.snapper.grid_snap_on = false;
         app.snapper.otrack_enabled = false;
@@ -7004,11 +7012,23 @@ mod selection_preview_tests {
             .unwrap();
         let _ = app.on_viewport_move(Point::new(cursor.x, cursor.y));
 
-        assert!(
-            app.tabs[i].snap_result.is_none(),
-            "3D master off must hide solid corners, got {:?}",
-            app.tabs[i].snap_result.map(|s| (s.snap_type, s.world))
+        let hit = app
+            .tabs[i]
+            .snap_result
+            .expect("2D edge wire must serve the corner with the 3D master off");
+        assert_eq!(
+            hit.snap_type,
+            SnapType::Endpoint,
+            "expected a 2D endpoint on the box corner, got {:?} at {:?}",
+            hit.snap_type,
+            hit.world
         );
+        assert!(
+            (hit.world - target).length() < 1e-6,
+            "snap missed the corner: {:?} vs {target:?}",
+            hit.world
+        );
+        crate::scene::set_snap3d_enabled(true);
     }
 
     /// Face centres snap as their own 3D type at the loop average (exact

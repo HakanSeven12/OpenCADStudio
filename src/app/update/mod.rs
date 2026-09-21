@@ -466,6 +466,11 @@ impl OpenCADStudio {
             }
             #[cfg(target_arch = "wasm32")]
             Message::PollWebControl => {
+                // Watchdog first: a parked web `capture` waits for a frame
+                // that never arrives in a hidden/idle tab, and while it
+                // waits `control_settle` blocks every later op — expire it
+                // past its deadline before taking new work.
+                self.expire_stale_web_capture();
                 let control = if let Some(request) = super::control::web_request() {
                     self.update(Message::ControlRequest(request))
                 } else {
@@ -574,6 +579,13 @@ impl OpenCADStudio {
             // control::on_control_capture_frame).
             #[cfg(target_arch = "wasm32")]
             Message::ControlCaptureFrame => self.on_control_capture_frame(),
+            // Web: a frame was presented; refresh the always-warm print
+            // snapshot if the throttle allows it (see on_print_snapshot_frame).
+            #[cfg(target_arch = "wasm32")]
+            Message::PrintSnapshotFrame => {
+                self.on_print_snapshot_frame();
+                Task::none()
+            }
             Message::ControlToggle => {
                 self.control.enabled = !self.control.enabled;
                 Task::none()
@@ -4327,6 +4339,14 @@ impl OpenCADStudio {
             }
             Message::ToggleSnap3dEnabled => {
                 self.snapper.toggle_snap3d();
+                // Publish to the scene's solid edge-wire gate: with the 3D
+                // system off, the 2D edge-wire fallback must come back, or
+                // solids would be served by NEITHER snap system. The gate
+                // bakes into cached wires, so re-tessellate every tab.
+                crate::scene::set_snap3d_enabled(self.snapper.snap3d_enabled);
+                for tab in &mut self.tabs {
+                    tab.scene.bump_geometry_no_blocks();
+                }
                 self.sync_vport_display(self.active_tab);
                 Task::none()
             }

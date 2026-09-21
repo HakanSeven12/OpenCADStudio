@@ -100,6 +100,14 @@ impl OpenCADStudio {
         self.snapper.enabled = state.snap_modes.clone();
         self.snapper.snap3d_enabled = state.osnap3d_on;
         self.snapper.enabled3d = state.snap3d_modes.clone();
+        // Publish the 3D master to the scene's solid edge-wire gate (same
+        // rationale as Message::ToggleSnap3dEnabled): with the 3D system
+        // off the 2D edge-wire fallback must come back, and cached wires
+        // baked with the old gate decision must re-tessellate.
+        crate::scene::set_snap3d_enabled(state.osnap3d_on);
+        for tab in &mut self.tabs {
+            tab.scene.bump_geometry_no_blocks();
+        }
         self.dyn_input = state.dyn_input_on;
         self.quick_properties = state.quick_props_on;
         self.selection_cycling = state.selection_cycling_on;

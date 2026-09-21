@@ -1180,10 +1180,23 @@ pub fn collect_entries_with_prev(
     /// The filesystem stat is desktop-only by `cfg` (not a runtime check): the
     /// wasm binary contains no `std::fs::metadata` call at all, so a web
     /// session can never block on — or fail from — a host-filesystem probe.
-    /// Path-based web references resolve through the file-handle loader and
-    /// simply stay `NotFound` when unresolvable.
+    /// Path-based web references resolve through the file-handle loader: a
+    /// source present in that registry reports Loaded here, and only truly
+    /// unregistered ones stay `NotFound`.
     fn stat_into(entry: &mut ReferenceEntry, raw: &str, base_dir: &Path) {
         if raw.is_empty() {
+            return;
+        }
+        // Web (and the native tests exercising it): `resolve_path` probes the
+        // filesystem, which the browser does not have — consult the source
+        // registry instead. A registered drawing IS loaded; its byte length
+        // comes free from the in-memory bytes (no read), and there is no
+        // mtime to report.
+        #[cfg(any(target_arch = "wasm32", test))]
+        if let Some(key) = find_registered_source(raw) {
+            entry.size_bytes = registered_bytes(&key).map(|b| b.len() as u64);
+            entry.found_at = Some(key);
+            entry.status = RefStatus::Loaded;
             return;
         }
         let Some(found) = resolve_path(raw, base_dir) else {
@@ -1672,6 +1685,8 @@ fn bind_dwg(
         .find(|b| b.handle == br_handle)
         .map(|b| b.xref_path.clone())
         .unwrap_or_default();
+    // Native-only path: `resolve_path` reads the real filesystem, so DWG
+    // bind stays desktop-only (the web has no fs to load a bind source from).
     let Some(found) = resolve_path(&saved, base_dir) else {
         return Err(bind_failed(name, "file not found"));
     };
@@ -1851,6 +1866,8 @@ fn collect_bind_images(
     let mut planned: HashMap<String, String> = HashMap::default();
     let mut ops: Vec<(Handle, PathBuf, String)> = Vec::new();
     for (handle, saved) in &defs {
+        // Native-only path: `resolve_path` stats the real filesystem (and
+        // the copy below reads it), so image COLLECT stays desktop-only.
         let Some(resolved) = resolve_path(saved, source_dir) else {
             return Err(bind_failed(ref_name, format!("image not found: {saved}")));
         };
@@ -2463,6 +2480,27 @@ mod tests {
         );
     }
 
+    /// Web XREF panel: a source registered through the file-handle loader is
+    /// loaded, but `resolve_path` cannot see it (no filesystem on wasm), so
+    /// the panel used to show NotFound. `stat_into` consults the registry
+    /// first; the foreign saved path matches by trailing name only.
+    #[test]
+    fn collect_reports_registered_source_as_loaded() {
+        let _registry = registry_guard();
+        let name = "Registry-Status-Plan.dwg";
+        register_source(name, Arc::new(vec![7; 42]));
+        let (doc, _) = xref_doc_with("PLAN", &format!(r"E:\gone\{name}"));
+        let entries = collect_entries_with_prev(
+            &doc,
+            std::path::Path::new("."),
+            &std::collections::HashSet::new(),
+            &std::collections::HashMap::new(),
+        );
+        assert_eq!(entries[0].status, RefStatus::Loaded);
+        assert_eq!(entries[0].found_at.as_deref(), Some(name));
+        assert_eq!(entries[0].size_bytes, Some(42));
+    }
+
     #[test]
     fn unresolved_xref_names_lists_not_found_entries_only() {
         let infos = vec![
@@ -2875,5 +2913,347 @@ mod tests {
             &prev,
         );
         assert_eq!(entries[0].status, RefStatus::NotFound);
+    }
+
+    // ── BIND (Task 9) ────────────────────────────────────────────────────
+    mod bind_tests {
+        use super::super::bind_reference;
+        use super::xref_doc_with;
+
+        fn bind_dir(tag: &str) -> std::path::PathBuf {
+            let dir = std::env::temp_dir().join(format!(
+                "ocs_xref_bind_{tag}_{}_{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            dir
+        }
+
+        fn write_xref_file(
+            dir: &std::path::Path,
+            name: &str,
+            build: impl FnOnce(&mut acadrust::CadDocument),
+        ) -> String {
+            let mut doc = acadrust::CadDocument::new();
+            build(&mut doc);
+            let bytes = crate::io::save_to_bytes(&doc, "dwg", doc.version).expect("save xref");
+            let path = dir.join(name);
+            std::fs::write(&path, &bytes).expect("write xref");
+            path.to_string_lossy().into_owned()
+        }
+
+        fn line_on(layer: &str) -> acadrust::EntityType {
+            let mut line = acadrust::entities::Line::new();
+            line.common.layer = layer.to_string();
+            acadrust::EntityType::Line(line)
+        }
+
+        fn add_layer(doc: &mut acadrust::CadDocument, name: &str) {
+            doc.layers
+                .add(acadrust::tables::Layer::new(name))
+                .expect("add layer");
+        }
+
+        #[test]
+        fn bind_rename_basic() {
+            let dir = bind_dir("basic");
+            let xref_path = write_xref_file(&dir, "plan.dwg", |doc| {
+                add_layer(doc, "WALLS");
+                doc.add_entity(line_on("WALLS")).unwrap();
+            });
+            let (mut host, key) = xref_doc_with("PLAN", &xref_path);
+            let outcome = bind_reference(&mut host, key, &dir, &dir).expect("bind");
+            assert_eq!(outcome.name, "PLAN");
+            assert_eq!(outcome.unremapped, 0);
+            let br = host.block_records.get("PLAN").unwrap();
+            assert!(!br.flags.is_xref && !br.flags.is_xref_overlay);
+            assert!(br.xref_path.is_empty());
+            assert!(host.layers.get("PLAN$0$WALLS").is_some());
+            let owned: Vec<_> = host
+                .entities()
+                .filter(|e| e.common().owner_handle == br.handle)
+                .collect();
+            assert_eq!(owned.len(), 1);
+            assert_eq!(owned[0].common().layer, "PLAN$0$WALLS");
+            assert!(!host.layers.names().any(|n| n.contains('|')));
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn bind_collision_increments() {
+            let dir = bind_dir("collision");
+            let xref_path = write_xref_file(&dir, "plan.dwg", |doc| {
+                add_layer(doc, "WALLS");
+                doc.add_entity(line_on("WALLS")).unwrap();
+            });
+            let (mut host, key) = xref_doc_with("PLAN", &xref_path);
+            add_layer(&mut host, "PLAN$0$WALLS");
+            let outcome = bind_reference(&mut host, key, &dir, &dir).expect("bind");
+            assert_eq!(outcome.name, "PLAN");
+            assert!(host.layers.get("PLAN$1$WALLS").is_some());
+            let br = host.block_records.get("PLAN").unwrap();
+            let owned: Vec<_> = host
+                .entities()
+                .filter(|e| e.common().owner_handle == br.handle)
+                .collect();
+            assert_eq!(owned.len(), 1);
+            assert_eq!(owned[0].common().layer, "PLAN$1$WALLS");
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn bind_transitive_chain() {
+            let dir = bind_dir("chain");
+            let detail_path = write_xref_file(&dir, "detail.dwg", |doc| {
+                add_layer(doc, "WALLS");
+                doc.add_entity(line_on("WALLS")).unwrap();
+            });
+            let plan_path = write_xref_file(&dir, "plan.dwg", |doc| {
+                add_layer(doc, "PLANLAYER");
+                doc.add_entity(line_on("PLANLAYER")).unwrap();
+                let mut br = acadrust::tables::BlockRecord::new("DETAIL");
+                br.flags.is_xref = true;
+                br.xref_path = detail_path.clone();
+                doc.block_records.add(br).expect("add nested xref");
+            });
+            let (mut host, key) = xref_doc_with("PLAN", &plan_path);
+            let outcome = bind_reference(&mut host, key, &dir, &dir).expect("bind");
+            assert_eq!(outcome.name, "PLAN");
+            assert!(host.layers.get("PLAN$0$DETAIL$0$WALLS").is_some());
+            assert!(host.layers.get("PLAN$0$PLANLAYER").is_some());
+            let child = host.block_records.get("PLAN$0$DETAIL").expect("bound child block");
+            assert!(!child.flags.is_xref && !child.flags.is_xref_overlay);
+            assert!(!host
+                .block_records
+                .iter()
+                .any(|b| b.flags.is_xref || b.flags.is_xref_overlay));
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn bind_remaps_hatch_dim_block_refs() {
+            let dir = bind_dir("refs");
+            let xref_path = write_xref_file(&dir, "plan.dwg", |doc| {
+                add_layer(doc, "WALLS");
+                // Nested block with content + a model-space INSERT of it.
+                let mut door = acadrust::tables::BlockRecord::new("DOOR");
+                door.handle = doc.allocate_handle();
+                let door_h = door.handle;
+                doc.block_records.add(door).expect("add door");
+                let mut inner = acadrust::entities::Line::new();
+                inner.common.layer = "WALLS".to_string();
+                inner.common.owner_handle = door_h;
+                doc.add_entity(acadrust::EntityType::Line(inner)).unwrap();
+                let ins = acadrust::entities::Insert::new(
+                    "DOOR",
+                    acadrust::types::Vector3::ZERO,
+                );
+                doc.add_entity(acadrust::EntityType::Insert(ins)).unwrap();
+                // Hatch (pattern names have no table — preserved verbatim).
+                let mut hatch = acadrust::entities::Hatch::new();
+                hatch.pattern.name = "ANSI31".to_string();
+                doc.add_entity(acadrust::EntityType::Hatch(hatch)).unwrap();
+                // Dim-style reference via a tolerance entity.
+                doc.dim_styles
+                    .add(acadrust::tables::DimStyle::new("ARCH"))
+                    .expect("add dimstyle");
+                let mut tol = acadrust::entities::Tolerance::new();
+                tol.dimension_style_name = "ARCH".to_string();
+                doc.add_entity(acadrust::EntityType::Tolerance(tol)).unwrap();
+            });
+            let (mut host, key) = xref_doc_with("PLAN", &xref_path);
+            bind_reference(&mut host, key, &dir, &dir).expect("bind");
+            let door = host.block_records.get("PLAN$0$DOOR").expect("bound block");
+            assert!(!door.flags.is_xref);
+            let inserts: Vec<_> = host
+                .entities()
+                .filter_map(|e| match e {
+                    acadrust::EntityType::Insert(i) => Some(i.block_name.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert!(inserts.iter().any(|n| n == "PLAN$0$DOOR"), "{inserts:?}");
+            let door_lines: Vec<_> = host
+                .entities()
+                .filter(|e| e.common().owner_handle == door.handle)
+                .collect();
+            assert_eq!(door_lines.len(), 1);
+            assert_eq!(door_lines[0].common().layer, "PLAN$0$WALLS");
+            let br = host.block_records.get("PLAN").unwrap();
+            let hatches: Vec<_> = host
+                .entities()
+                .filter(|e| {
+                    e.common().owner_handle == br.handle
+                        && matches!(e, acadrust::EntityType::Hatch(_))
+                })
+                .collect();
+            assert_eq!(hatches.len(), 1);
+            assert!(host.dim_styles.get("PLAN$0$ARCH").is_some());
+            let tols: Vec<_> = host
+                .entities()
+                .filter_map(|e| match e {
+                    acadrust::EntityType::Tolerance(t) => Some(t.dimension_style_name.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(tols, vec!["PLAN$0$ARCH".to_string()]);
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn bind_remaps_text_styles_and_counts_unmapped() {
+            let dir = bind_dir("styles");
+            let xref_path = write_xref_file(&dir, "plan.dwg", |doc| {
+                doc.text_styles
+                    .add(acadrust::tables::TextStyle::new("NOTE"))
+                    .expect("add text style");
+                let mut text = acadrust::entities::Text::new();
+                text.style = "NOTE".to_string();
+                doc.add_entity(acadrust::EntityType::Text(text)).unwrap();
+                // Two foreign handles that cannot be remapped (plotstyle_flags
+                // set as a real writer would — otherwise the round-trip
+                // drops the handle).
+                let mut line = acadrust::entities::Line::new();
+                line.common.plotstyle_flags = 0b11;
+                line.common.plotstyle_handle = Some(doc.allocate_handle());
+                doc.add_entity(acadrust::EntityType::Line(line)).unwrap();
+                let mut mline = acadrust::entities::MLine::new();
+                mline.style_name = "STD".to_string();
+                mline.style_handle = Some(doc.allocate_handle());
+                doc.add_entity(acadrust::EntityType::MLine(mline)).unwrap();
+            });
+            let (mut host, key) = xref_doc_with("PLAN", &xref_path);
+            let outcome = bind_reference(&mut host, key, &dir, &dir).expect("bind");
+            assert_eq!(outcome.unremapped, 2);
+            assert!(host.text_styles.get("PLAN$0$NOTE").is_some());
+            let styles: Vec<_> = host
+                .entities()
+                .filter_map(|e| match e {
+                    acadrust::EntityType::Text(t) => Some(t.style.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(styles, vec!["PLAN$0$NOTE".to_string()]);
+            let br = host.block_records.get("PLAN").unwrap();
+            let lines: Vec<_> = host
+                .entities()
+                .filter(|e| {
+                    e.common().owner_handle == br.handle
+                        && matches!(e, acadrust::EntityType::Line(_))
+                })
+                .collect();
+            assert_eq!(lines.len(), 1);
+            assert!(lines[0].common().plotstyle_handle.is_none());
+            let mlines: Vec<_> = host
+                .entities()
+                .filter_map(|e| match e {
+                    acadrust::EntityType::MLine(m) => Some(m.style_handle),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(mlines, vec![None]);
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn bind_image_collect_copies_file() {
+            use acadrust::objects::{ImageDefinition, ObjectType};
+            let src_dir = bind_dir("imgsrc");
+            let host_dir = bind_dir("imghost");
+            std::fs::write(src_dir.join("pixel.png"), b"fakepng").unwrap();
+            let xref_path = write_xref_file(&src_dir, "plan.dwg", |doc| {
+                let h = doc.allocate_handle();
+                let mut def = ImageDefinition::with_dimensions("pixel.png", 8, 8);
+                def.handle = h;
+                doc.objects.insert(h, ObjectType::ImageDefinition(def));
+                let mut img = acadrust::entities::RasterImage::new(
+                    "pixel.png",
+                    acadrust::types::Vector3::ZERO,
+                    8.0,
+                    8.0,
+                );
+                img.definition_handle = Some(h);
+                doc.add_entity(acadrust::EntityType::RasterImage(img)).unwrap();
+            });
+            let (mut host, key) = xref_doc_with("PLAN", &xref_path);
+            bind_reference(&mut host, key, &src_dir, &host_dir).expect("bind");
+            let copied = host_dir.join("pixel.png");
+            assert!(copied.exists());
+            assert_eq!(std::fs::read(&copied).unwrap(), b"fakepng");
+            let defs: Vec<_> = host
+                .objects
+                .values()
+                .filter_map(|o| match o {
+                    ObjectType::ImageDefinition(d) => Some(d.file_name.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(defs, vec!["pixel.png".to_string()]);
+            std::fs::remove_dir_all(&src_dir).ok();
+            std::fs::remove_dir_all(&host_dir).ok();
+        }
+
+        #[test]
+        fn bind_image_missing_errors_without_partial_state() {
+            use acadrust::objects::{ImageDefinition, ObjectType};
+            let dir = bind_dir("imgmissing");
+            let xref_path = write_xref_file(&dir, "plan.dwg", |doc| {
+                let h = doc.allocate_handle();
+                let mut def = ImageDefinition::with_dimensions("ghost.png", 8, 8);
+                def.handle = h;
+                doc.objects.insert(h, ObjectType::ImageDefinition(def));
+                let mut img = acadrust::entities::RasterImage::new(
+                    "ghost.png",
+                    acadrust::types::Vector3::ZERO,
+                    8.0,
+                    8.0,
+                );
+                img.definition_handle = Some(h);
+                doc.add_entity(acadrust::EntityType::RasterImage(img)).unwrap();
+            });
+            let (mut host, key) = xref_doc_with("PLAN", &xref_path);
+            let err = bind_reference(&mut host, key, &dir, &dir).unwrap_err();
+            assert!(err.contains("ghost.png"), "got: {err:?}");
+            // No partial state: the definition is untouched.
+            let br = host.block_records.get("PLAN").unwrap();
+            assert!(br.flags.is_xref);
+            assert_eq!(br.xref_path, xref_path);
+            assert!(!host.layers.names().any(|n| n.contains("PLAN$0")));
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn bind_pdf_errors() {
+            use acadrust::objects::{ObjectType, UnderlayDefinition};
+            let mut host = acadrust::CadDocument::new();
+            let h = host.allocate_handle();
+            let mut def = UnderlayDefinition::pdf("doc.pdf", "1");
+            def.handle = h;
+            host.objects.insert(h, ObjectType::UnderlayDefinition(def));
+            let err =
+                bind_reference(&mut host, h.value(), std::path::Path::new("."), std::path::Path::new("."))
+                    .unwrap_err();
+            assert_eq!(
+                err,
+                "XREF: PDF bind (vector import) is not available in this version."
+            );
+        }
+
+        #[test]
+        fn bind_unknown_key_errors() {
+            let (mut host, _) = xref_doc_with("PLAN", "missing.dwg");
+            let err = bind_reference(
+                &mut host,
+                0xDEAD_BEEF,
+                std::path::Path::new("."),
+                std::path::Path::new("."),
+            )
+            .unwrap_err();
+            assert_eq!(err, "XREF: no loaded reference with that key.");
+        }
     }
 }

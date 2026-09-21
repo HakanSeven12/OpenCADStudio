@@ -25,6 +25,8 @@ use std::borrow::Cow;
 use std::fmt;
 
 use crate::ui::properties::{lw_options, LwItem};
+use crate::ui::style::common::muted_style;
+use crate::ui::style::form::hdivider;
 
 const LABEL_W: f32 = 120.0;
 
@@ -139,12 +141,6 @@ pub fn color_from_label(label: &str) -> Option<AcadColor> {
     })
 }
 
-fn muted_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
-    }
-}
-
 fn field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
     let palette = theme.palette();
     let border = match status {
@@ -159,20 +155,6 @@ fn field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
         value: palette.background.base.text,
         selection: palette.primary.base.color.scale_alpha(0.5),
     }
-}
-
-/// Horizontal 1px divider in the shared border colour (matches style windows).
-fn hdivider<'a>(width: Length) -> Element<'a, Message> {
-    container(Space::new().width(width).height(1))
-        .width(width)
-        .height(1)
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.neutral.color
-            )),
-            ..Default::default()
-        })
-        .into()
 }
 
 /// One `label : widget` row with a fixed-width label column.

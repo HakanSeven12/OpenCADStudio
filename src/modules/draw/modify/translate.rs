@@ -2,8 +2,9 @@
 //
 // Command:  MOVE (M)
 //   Requires at least one entity selected before starting.
-//   Step 1: pick base point
-//   Step 2: pick destination → translates all selected entities by (dest - base)
+//   Step 1: pick base point, or D = type the displacement vector directly
+//   Step 2: pick destination → translates all selected entities by (dest - base);
+//           Enter uses the base point as the displacement (commercial solutions).
 
 use acadrust::Handle;
 use glam::DVec3;
@@ -28,6 +29,8 @@ pub fn tool() -> ToolDef {
 enum Step {
     Base,
     Target(DVec3),
+    /// Displacement option: the next point / typed coordinate is the vector.
+    Displacement,
 }
 
 pub struct MoveCommand {
@@ -62,6 +65,16 @@ impl CadCommand for MoveCommand {
                 x = format!("{:.3}", base.x),
                 y = format!("{:.3}", base.y),
             ),
+            Step::Displacement => crate::tr!("command-move", "displacement"),
+        }
+    }
+
+    fn options(&self) -> Vec<crate::command::CmdOption> {
+        use crate::command::CmdOption;
+        match self.step {
+            Step::Base => vec![CmdOption::new("Displacement", "D")],
+            Step::Target(_) => vec![CmdOption::enter("Use first point as displacement")],
+            Step::Displacement => Vec::new(),
         }
     }
 
@@ -78,11 +91,42 @@ impl CadCommand for MoveCommand {
                     EntityTransform::Translate(delta),
                 )
             }
+            // The point (typically typed as `dx,dy`) is the displacement itself.
+            Step::Displacement => CmdResult::TransformSelected(
+                self.handles.clone(),
+                EntityTransform::Translate(pt),
+            ),
+        }
+    }
+
+    fn wants_text_input(&self) -> bool {
+        matches!(self.step, Step::Base)
+    }
+
+    fn point_step_accepts_keywords(&self) -> bool {
+        matches!(self.step, Step::Base)
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        match (&self.step, text.trim().to_uppercase().as_str()) {
+            (Step::Base, "D" | "DISPLACEMENT") => {
+                self.step = Step::Displacement;
+                Some(CmdResult::NeedPoint)
+            }
+            _ => None,
         }
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        CmdResult::Cancel
+        match self.step {
+            // Commercial solutions: Enter at the second point uses the base point as the
+            // displacement from the origin.
+            Step::Target(base) => CmdResult::TransformSelected(
+                self.handles.clone(),
+                EntityTransform::Translate(base),
+            ),
+            _ => CmdResult::Cancel,
+        }
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
@@ -110,4 +154,41 @@ impl CadCommand for MoveCommand {
         ));
         out
     } 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn keywords(cmd: &MoveCommand) -> Vec<String> {
+        cmd.options().into_iter().map(|o| o.keyword).collect()
+    }
+
+    #[test]
+    fn displacement_option_translates_by_vector() {
+        let mut cmd = MoveCommand::new(vec![Handle::new(1)], vec![]);
+        assert_eq!(keywords(&cmd), ["D"]);
+        assert!(matches!(cmd.on_text_input("D"), Some(CmdResult::NeedPoint)));
+        assert!(keywords(&cmd).is_empty());
+        match cmd.on_point(DVec3::new(3.0, 4.0, 0.0)) {
+            CmdResult::TransformSelected(handles, EntityTransform::Translate(d)) => {
+                assert_eq!(handles, vec![Handle::new(1)]);
+                assert_eq!(d, DVec3::new(3.0, 4.0, 0.0));
+            }
+            _ => panic!("expected a translation"),
+        }
+    }
+
+    #[test]
+    fn enter_at_second_point_uses_base_as_displacement() {
+        let mut cmd = MoveCommand::new(vec![Handle::new(1)], vec![]);
+        cmd.on_point(DVec3::new(5.0, -2.0, 0.0));
+        assert_eq!(keywords(&cmd), [""], "Enter is the only option at the second point");
+        match cmd.on_enter() {
+            CmdResult::TransformSelected(_, EntityTransform::Translate(d)) => {
+                assert_eq!(d, DVec3::new(5.0, -2.0, 0.0));
+            }
+            _ => panic!("expected a translation by the base point"),
+        }
+    }
 }

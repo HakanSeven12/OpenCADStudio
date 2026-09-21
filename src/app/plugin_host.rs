@@ -257,6 +257,130 @@ impl<'a> HostSession<'a> {
     pub fn push_error(&mut self, msg: &str) {
         self.app.command_line.push_error(msg);
     }
+
+    pub fn add_layer(&mut self, config: ocs_plugin_api::host::LayerConfig) -> Option<Handle> {
+        let trimmed = config.name.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let doc = self.document_mut();
+        if doc.layers.contains(trimmed) {
+            return None;
+        }
+
+        let resolved_lt = match config.linetype {
+            // A name the drawing does not carry would leave the LAYER record
+            // pointing at no LTYPE, so it is refused rather than written.
+            Some(ref lt_name) => match resolve_linetype(doc, lt_name) {
+                Some(name) => name,
+                None => return None,
+            },
+            None => "Continuous".to_string(),
+        };
+
+        let mut layer = acadrust::tables::Layer::new(trimmed);
+        let handle = doc.allocate_handle();
+        layer.handle = handle;
+        layer.color = config.color.unwrap_or(acadrust::types::Color::Index(7));
+        layer.line_type = resolved_lt;
+        layer.line_weight = config.lineweight.unwrap_or(acadrust::types::LineWeight::ByLayer);
+        layer.flags.off = config.off.unwrap_or(false);
+        if let Some(frz) = config.frozen {
+            if frz {
+                layer.freeze();
+            } else {
+                layer.thaw();
+            }
+        }
+        layer.flags.locked = config.locked.unwrap_or(false);
+        layer.is_plottable = config.plottable.unwrap_or(true);
+        layer.transparency = config.transparency.unwrap_or(acadrust::types::Transparency::ByLayer);
+        layer.description = config.description.unwrap_or_default();
+
+        let _ = doc.layers.add(layer);
+
+        self.app.tabs[self.tab].dirty = true;
+        self.app.tabs[self.tab]
+            .scene
+            .invalidate_layer_dependencies(&[trimmed.to_string()]);
+        self.app.refresh_layer_panel();
+        self.publish_document_view();
+        Some(handle)
+    }
+
+    pub fn modify_layer(&mut self, config: ocs_plugin_api::host::LayerConfig) -> bool {
+        let trimmed = config.name.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+
+        let resolved_lt = match config.linetype {
+            Some(ref lt_name) => match resolve_linetype(self.document_mut(), lt_name) {
+                Some(name) => Some(name),
+                None => return false,
+            },
+            None => None,
+        };
+
+        let doc = self.document_mut();
+        let Some(existing) = doc.layers.get_mut(trimmed) else {
+            return false;
+        };
+
+        if let Some(c) = config.color {
+            existing.color = c;
+            existing.color_name = None;
+            existing.book_name = None;
+        }
+        if let Some(lt) = resolved_lt {
+            existing.line_type = lt;
+        }
+        if let Some(lw) = config.lineweight {
+            existing.line_weight = lw;
+        }
+        if let Some(off) = config.off {
+            existing.flags.off = off;
+        }
+        if let Some(frz) = config.frozen {
+            if frz {
+                existing.freeze();
+            } else {
+                existing.thaw();
+            }
+        }
+        if let Some(lck) = config.locked {
+            existing.flags.locked = lck;
+        }
+        if let Some(plt) = config.plottable {
+            existing.is_plottable = plt;
+        }
+        if let Some(tr) = config.transparency {
+            existing.transparency = tr;
+        }
+        if let Some(desc) = config.description {
+            existing.description = desc;
+        }
+
+        self.app.tabs[self.tab].dirty = true;
+        self.app.tabs[self.tab]
+            .scene
+            .invalidate_layer_dependencies(&[trimmed.to_string()]);
+        self.app.refresh_layer_panel();
+        self.publish_document_view();
+        true
+    }
+}
+
+/// The stored spelling of `name` in the drawing's linetype table, loading the
+/// standard linetypes first when it is not there yet. `None` when the drawing
+/// cannot supply it: a layer must not reference a linetype that does not exist.
+fn resolve_linetype(doc: &mut acadrust::CadDocument, name: &str) -> Option<String> {
+    let stored = |doc: &acadrust::CadDocument| doc.line_types.get(name).map(|lt| lt.name.clone());
+    stored(doc).or_else(|| {
+        crate::io::linetypes::populate_document(doc);
+        stored(doc)
+    })
 }
 
 /// The stable contract a plugin's `dispatch` sees. Each method forwards to the
@@ -359,6 +483,12 @@ impl HostApi for HostSession<'_> {
     #[cfg(not(target_arch = "wasm32"))]
     fn close_document_view_v4(&mut self, tab_id: u64) {
         self.close_document_view_v4(tab_id)
+    }
+    fn add_layer(&mut self, config: ocs_plugin_api::host::LayerConfig) -> Option<Handle> {
+        self.add_layer(config)
+    }
+    fn modify_layer(&mut self, config: ocs_plugin_api::host::LayerConfig) -> bool {
+        self.modify_layer(config)
     }
 }
 
@@ -859,5 +989,64 @@ mod tests {
             .expect("record missing");
         assert_eq!(got.values.len(), 1);
         assert!(matches!(got.values[0], XDataValue::Integer32(123)));
+    }
+
+    #[test]
+    fn test_plugin_add_layer_with_defaults_and_modify() {
+        use ocs_plugin_api::host::LayerConfig;
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let mut host = HostSession::new(&mut app, 0);
+
+        // 1. Add layer with minimal config (only name specified)
+        let config = LayerConfig {
+            name: "ELECTRICAL".to_string(),
+            ..Default::default()
+        };
+        let handle = host.add_layer(config).expect("should create layer");
+        assert_ne!(handle, acadrust::Handle::NULL);
+
+        // Verify defaults were applied
+        let layer = host.document().layers.get("ELECTRICAL").expect("layer should exist");
+        assert_eq!(layer.color, acadrust::types::Color::Index(7));
+        assert_eq!(layer.line_type, "Continuous");
+        assert_eq!(layer.line_weight, acadrust::types::LineWeight::ByLayer);
+        assert!(!layer.flags.off);
+        assert!(!layer.flags.frozen);
+        assert!(!layer.flags.locked);
+        assert!(layer.is_plottable);
+
+        // 2. Duplicate add_layer should be rejected (return None)
+        let dup_config = LayerConfig {
+            name: "ELECTRICAL".to_string(),
+            color: Some(acadrust::types::Color::Index(1)),
+            ..Default::default()
+        };
+        assert!(host.add_layer(dup_config).is_none(), "duplicate layer should return None");
+
+        // 3. Modify only color and locked; other properties should remain untouched
+        let mod_config = LayerConfig {
+            name: "ELECTRICAL".to_string(),
+            color: Some(acadrust::types::Color::Index(1)),
+            locked: Some(true),
+            ..Default::default()
+        };
+        assert!(host.modify_layer(mod_config));
+
+        let updated = host.document().layers.get("ELECTRICAL").expect("layer should exist");
+        assert_eq!(updated.color, acadrust::types::Color::Index(1)); // Modified to red
+        assert!(updated.flags.locked);                               // Modified to locked
+        assert_eq!(updated.line_type, "Continuous");                 // Kept as-is
+        assert_eq!(updated.line_weight, acadrust::types::LineWeight::ByLayer); // Kept as-is
+        assert!(!updated.flags.off);                                 // Kept as-is
+
+        // 4. Modify nonexistent layer returns false
+        let non_existent = LayerConfig {
+            name: "DOES_NOT_EXIST".to_string(),
+            color: Some(acadrust::types::Color::Index(2)),
+            ..Default::default()
+        };
+        assert!(!host.modify_layer(non_existent));
     }
 }

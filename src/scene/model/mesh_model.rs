@@ -543,3 +543,128 @@ impl MeshLodSet {
         edge_snap_wire(name, color, false, pairs)
     }
 }
+
+/// Max B-rep edge pairs read from one solid for snapping. Curved-edge
+/// tessellations fan out into thousands of joints; the cap keeps the
+/// interaction index and the per-move snap scan bounded.
+pub const MAX_SOLID_SNAP_EDGES: usize = 2048;
+
+/// Distinct B-rep edge segments from a high/low double-single line list
+/// (mesh `edge_verts` pairs + `edge_verts_low`), feeding solid vertex
+/// (endpoints) and edge-midpoint (centres) snaps.
+///
+/// Degenerate (zero-length) and non-finite pairs are dropped, and identical
+/// pairs collapse regardless of endpoint order. Past the cap the output is
+/// stride-sampled so coverage degrades gracefully instead of dropping every
+/// edge past some cutoff.
+pub fn solid_edge_segments(
+    edge_verts: &[[f32; 3]],
+    edge_verts_low: &[[f32; 3]],
+) -> Vec<(glam::DVec3, glam::DVec3)> {
+    fn point(high: [f32; 3], low: [f32; 3]) -> Option<glam::DVec3> {
+        let p = glam::DVec3::new(
+            high[0] as f64 + low[0] as f64,
+            high[1] as f64 + low[1] as f64,
+            high[2] as f64 + low[2] as f64,
+        );
+        p.is_finite().then_some(p)
+    }
+    fn key(p: &glam::DVec3) -> [u64; 3] {
+        [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for index in 0..edge_verts.len() / 2 {
+        let high = [edge_verts[2 * index], edge_verts[2 * index + 1]];
+        let low = [
+            edge_verts_low.get(2 * index).copied().unwrap_or([0.0; 3]),
+            edge_verts_low
+                .get(2 * index + 1)
+                .copied()
+                .unwrap_or([0.0; 3]),
+        ];
+        let (Some(a), Some(b)) = (point(high[0], low[0]), point(high[1], low[1])) else {
+            continue;
+        };
+        if a.distance_squared(b) <= 1e-12 {
+            continue;
+        }
+        let (ka, kb) = (key(&a), key(&b));
+        let ordered = if ka <= kb { (ka, kb) } else { (kb, ka) };
+        if !seen.insert(ordered) {
+            continue;
+        }
+        out.push((a, b));
+    }
+    if out.len() > MAX_SOLID_SNAP_EDGES {
+        let step = out.len().div_ceil(MAX_SOLID_SNAP_EDGES);
+        out = out.into_iter().step_by(step).collect();
+    }
+    out
+}
+
+#[cfg(test)]
+mod solid_snap_tests {
+    use super::solid_edge_segments;
+
+    fn pt(x: f32, y: f32, z: f32) -> [f32; 3] {
+        [x, y, z]
+    }
+
+    #[test]
+    fn shared_corners_keep_both_segments() {
+        // Two edges sharing the corner (1,0,0): both pairs survive, the
+        // corner itself dedups later at attach time, not here.
+        let edges = vec![
+            pt(0.0, 0.0, 0.0),
+            pt(1.0, 0.0, 0.0),
+            pt(1.0, 0.0, 0.0),
+            pt(1.0, 1.0, 0.0),
+        ];
+        let low = vec![[0.0f32; 3]; 4];
+        let segs = solid_edge_segments(&edges, &low);
+        assert_eq!(segs.len(), 2, "shared corner collapsed segments: {segs:?}");
+    }
+
+    #[test]
+    fn degenerate_and_non_finite_pairs_are_dropped() {
+        let edges = vec![
+            pt(0.0, 0.0, 0.0),
+            pt(f32::NAN, 0.0, 0.0),
+            pt(1.0, 0.0, 0.0),
+            pt(1.0, 0.0, 0.0), // degenerate: zero length
+            pt(2.0, 0.0, 0.0),
+            pt(3.0, 0.0, f32::INFINITY),
+            pt(4.0, 0.0, 0.0),
+            pt(5.0, 0.0, 0.0),
+        ];
+        let low = vec![[0.0f32; 3]; 8];
+        let segs = solid_edge_segments(&edges, &low);
+        assert_eq!(segs.len(), 1, "expected only the valid pair: {segs:?}");
+        assert!(segs[0].0.is_finite() && segs[0].1.is_finite());
+    }
+
+    #[test]
+    fn output_is_capped_with_coverage() {
+        let mut edges = Vec::new();
+        for k in 0..2200 {
+            let x = 100.0 + k as f32;
+            edges.push(pt(x, 0.0, 0.0));
+            edges.push(pt(x, 1.0, 0.0));
+        }
+        let low = vec![[0.0f32; 3]; 4400];
+        let segs = solid_edge_segments(&edges, &low);
+        assert!(
+            segs.len() <= super::MAX_SOLID_SNAP_EDGES,
+            "cap exceeded: {}",
+            segs.len()
+        );
+        assert!(
+            segs.len() >= super::MAX_SOLID_SNAP_EDGES / 2,
+            "stride sampling dropped too much coverage: {}",
+            segs.len()
+        );
+        // The first pair survives sampling (index 0 is kept).
+        assert_eq!(segs[0].0, glam::DVec3::new(100.0, 0.0, 0.0));
+    }
+}

@@ -100,6 +100,13 @@ pub struct Cli {
     #[arg(help = crate::t!("Log level (error|warn|info|debug|trace). Also reads RUST_LOG.").into_owned(), long_help = None)]
     pub log: Option<String>,
 
+    /// Internal: probe one GPU backend offscreen (`dx12|vulkan|gl|sw`), print
+    /// one JSON line on success, then exit 0/1. Spawned by the GPU backend
+    /// resolver so a legacy-driver abort kills only the probe child, never
+    /// the editor itself.
+    #[arg(long, value_name = "BACKEND", hide = true)]
+    pub gpu_probe: Option<String>,
+
     /// Internal: run as the plugin runner child process.
     #[arg(long, value_names = ["SOCKET", "CDYLIB"], num_args = 2, hide = true)]
     pub ocs_plugin_runner: Option<Vec<String>>,
@@ -124,6 +131,12 @@ pub struct GuiConfig {
     pub compat_renderer: bool,
     /// Command lines to run once the editor is up.
     pub script_lines: Vec<String>,
+    /// Why this launch switched graphics backend, if it did. Shown once
+    /// as a command-line warning so the switch is never silent.
+    pub gpu_fallback_notice: Option<String>,
+    /// The GPU probe found no shader storage buffers: the packed
+    /// compatibility renderer was enabled automatically for this session.
+    pub gpu_compat_auto: bool,
 }
 
 /// Set once by `main` before the GUI boots; read by `app::boot`.

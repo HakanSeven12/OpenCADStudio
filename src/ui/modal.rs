@@ -244,6 +244,60 @@ pub fn backdrop<'a>(
     stack![base.into(), opaque(shield)].into()
 }
 
+/// A dialog's "unsaved changes" guard: `main` dimmed behind a small panel
+/// that offers to discard the changes and close, or to keep editing. Clicking
+/// the dim area keeps editing. Callers show it in place of the plain dialog
+/// once the user asked to close with something to lose.
+pub fn discard_guard<'a>(
+    main: impl Into<Element<'a, Message>>,
+    on_discard: Message,
+    on_keep: Message,
+) -> Element<'a, Message> {
+    let shield = mouse_area(
+        container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(
+                    theme
+                        .palette()
+                        .background
+                        .strongest
+                        .color
+                        .scale_alpha(0.55),
+                )),
+                ..Default::default()
+            }),
+    )
+    .on_press(on_keep.clone());
+    let panel = container(
+        column![
+            iced::widget::text(crate::t!("Unsaved changes will be discarded.")).size(13.5),
+            Space::new().height(12),
+            row![
+                button(iced::widget::text(crate::t!("Discard && close")).size(12))
+                    .on_press(on_discard)
+                    .padding([5, 14])
+                    .style(button::danger),
+                button(iced::widget::text(crate::t!("Keep editing")).size(12))
+                    .on_press(on_keep)
+                    .padding([5, 14])
+                    .style(button::secondary),
+            ]
+            .spacing(10),
+        ]
+        .spacing(0),
+    )
+    .padding([18, 22])
+    .style(container::rounded_box);
+    stack![
+        main.into(),
+        shield,
+        container(panel).center_x(Length::Fill).center_y(Length::Fill)
+    ]
+    .into()
+}
+
 /// Stack `content` over `base` behind a dimmed backdrop, framed with a title bar
 /// (the ✕ close button at its right end). The backdrop only dims and blocks
 /// clicks from reaching the view beneath — it does **not** dismiss the dialog;

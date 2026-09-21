@@ -43,6 +43,7 @@ struct EntityNodes {
     geometry_node_id: i32,
     points: FxHashMap<i32, i32>,
     segments: FxHashMap<usize, i32>,
+    axes: FxHashMap<i32, i32>,
 }
 
 /// Builds one scope's `Assoc2dConstraintGroup` graph incrementally,
@@ -55,8 +56,6 @@ struct GroupBuilder<'a> {
     /// Real entity handles that ended up with a geometry node — what
     /// `AssocGeomDependency` objects get created for, in first-touch order.
     referenced_entities: Vec<Handle>,
-    horizontal_datum: Option<i32>,
-    vertical_datum: Option<i32>,
 }
 
 impl<'a> GroupBuilder<'a> {
@@ -67,8 +66,6 @@ impl<'a> GroupBuilder<'a> {
             next_node_id: FIRST_NODE_ID,
             entities: FxHashMap::default(),
             referenced_entities: Vec::new(),
-            horizontal_datum: None,
-            vertical_datum: None,
         }
     }
 
@@ -396,6 +393,52 @@ impl<'a> GroupBuilder<'a> {
         Some(node_id)
     }
 
+    /// Returns a derived line node for a text baseline or ellipse axis. These
+    /// are real native curve nodes tied to the source entity dependency, so
+    /// the selected direction survives save/reopen instead of collapsing to
+    /// the entity insertion/center point.
+    fn directional_axis_node(&mut self, reference: ParametricRef) -> Option<i32> {
+        let marker = reference.marker?;
+        reference.directional_axis()?;
+        if let Some(node_id) = self
+            .entities
+            .get(&reference.entity)
+            .and_then(|entity| entity.axes.get(&marker))
+        {
+            return Some(*node_id);
+        }
+        let entity = self.document.get_entity(reference.entity)?;
+        let [start, end] =
+            super::parametric_constraints::directional_axis_endpoints(entity, reference)?;
+        let delta = end - start;
+        if delta.length_squared() <= 1.0e-24 {
+            return None;
+        }
+        let node_id = self.alloc_node_id();
+        self.push_node(
+            node_id,
+            "AcConstrainedBoundedLine",
+            AssocConstraintNodeData::BoundedLine {
+                geometry_dependency: Handle::NULL,
+                geometry_node_id: node_id,
+                point: start,
+                direction: delta.normalize(),
+                is_ray: false,
+                start_point: start,
+                end_point: end,
+            },
+        );
+        self.entities
+            .entry(reference.entity)
+            .or_default()
+            .axes
+            .insert(marker, node_id);
+        if !self.referenced_entities.contains(&reference.entity) {
+            self.referenced_entities.push(reference.entity);
+        }
+        Some(node_id)
+    }
+
     /// Returns the point-node id for a line endpoint or curve center,
     /// creating it the first time the marker is referenced.
     fn point_node(&mut self, handle: Handle, marker: i32) -> Option<i32> {
@@ -407,11 +450,17 @@ impl<'a> GroupBuilder<'a> {
             return Some(*existing);
         }
         let segment_midpoint = ParametricRef::point(handle, marker).segment_midpoint_index();
+        let segment_center = ParametricRef::point(handle, marker).segment_center_index();
         let polyline = matches!(
             self.document.get_entity(handle),
             Some(EntityType::LwPolyline(_) | EntityType::Polyline2D(_))
         );
-        let (curve_id, point_type) = if let Some(segment) = segment_midpoint {
+        let (curve_id, point_type) = if let Some(segment) = segment_center {
+            (
+                self.segment_node(handle, segment)?,
+                implicit_point_type::CENTER,
+            )
+        } else if let Some(segment) = segment_midpoint {
             (
                 self.segment_node(handle, segment)?,
                 implicit_point_type::MID,
@@ -498,7 +547,13 @@ impl<'a> GroupBuilder<'a> {
     /// The node id `ParametricRef` resolves to: a point node for a marked
     /// reference, the whole geometry node otherwise.
     fn ref_node(&mut self, r: ParametricRef) -> Option<i32> {
+        if r.directional_axis().is_some() {
+            return self.directional_axis_node(r);
+        }
         if r.segment_midpoint_index().is_some() {
+            return self.point_node(r.entity, r.marker?);
+        }
+        if r.segment_center_index().is_some() {
             return self.point_node(r.entity, r.marker?);
         }
         if let Some(segment) = r.segment_index() {
@@ -603,15 +658,7 @@ impl<'a> GroupBuilder<'a> {
         Some(node_id)
     }
 
-    fn datum_line(&mut self, horizontal: bool) -> i32 {
-        let cached = if horizontal {
-            self.horizontal_datum
-        } else {
-            self.vertical_datum
-        };
-        if let Some(node_id) = cached {
-            return node_id;
-        }
+    fn datum_line(&mut self, direction: Vector3) -> i32 {
         let node_id = self.alloc_node_id();
         self.push_node(
             node_id,
@@ -620,18 +667,13 @@ impl<'a> GroupBuilder<'a> {
                 geometry_dependency: Handle::NULL,
                 geometry_node_id: node_id,
                 point: Vector3::ZERO,
-                direction: if horizontal {
-                    Vector3::UNIT_X
+                direction: if direction.length_squared() > 1.0e-24 {
+                    direction.normalize()
                 } else {
-                    Vector3::UNIT_Y
+                    Vector3::UNIT_X
                 },
             },
         );
-        if horizontal {
-            self.horizontal_datum = Some(node_id);
-        } else {
-            self.vertical_datum = Some(node_id);
-        }
         node_id
     }
 
@@ -721,7 +763,13 @@ fn constraint_node(
 ) -> Option<i32> {
     let refs: &[ParametricRef] = &constraint.refs;
     if constraint.kind == ConstraintKind::Smooth {
-        let [first, second] = refs else { return None };
+        let (first, second, second_curve_ref) = match refs {
+            [first, second] => (*first, *second, ParametricRef::whole(second.entity)),
+            [first, second, second_curve] if second.entity == second_curve.entity => {
+                (*first, *second, *second_curve)
+            }
+            _ => return None,
+        };
         let endpoint_parameter = |reference: ParametricRef| {
             let entity = document.get_entity(reference.entity)?;
             let EntityType::Spline(spline) = entity else {
@@ -741,15 +789,15 @@ fn constraint_node(
             }?;
             Some(Some(value))
         };
-        let first_parameter = endpoint_parameter(*first)?;
-        let second_parameter = endpoint_parameter(*second)?;
+        let first_parameter = endpoint_parameter(first)?;
+        let second_parameter = endpoint_parameter(second)?;
         if first_parameter.is_none() && second_parameter.is_none() {
             return None;
         }
         let first_curve = builder.geometry_node(first.entity)?;
-        let second_curve = builder.geometry_node(second.entity)?;
-        let first_point = builder.ref_node(*first)?;
-        let second_point = builder.ref_node(*second)?;
+        let second_curve = builder.ref_node(second_curve_ref)?;
+        let first_point = builder.ref_node(first)?;
+        let second_point = builder.ref_node(second)?;
 
         let coincidence = builder.alloc_node_id();
         builder.push_node(
@@ -867,7 +915,12 @@ fn constraint_node(
                 .map(|reference| builder.ref_node(*reference))
                 .collect::<Option<_>>()?;
             let horizontal = constraint.kind == ConstraintKind::Horizontal;
-            let datum = builder.datum_line(horizontal);
+            let fallback = if horizontal {
+                Vector3::UNIT_X
+            } else {
+                Vector3::UNIT_Y
+            };
+            let datum = builder.datum_line(constraint.axis_direction.unwrap_or(fallback));
             let node_id = builder.alloc_node_id();
             builder.push_node(
                 node_id,
@@ -1553,6 +1606,10 @@ fn dependency_entity(
             ),
             AssocConstraintNodeData::Point { .. },
         ) => true,
+        (
+            Some(EntityType::Text(_) | EntityType::MText(_) | EntityType::Ellipse(_)),
+            AssocConstraintNodeData::BoundedLine { .. },
+        ) => true,
         (Some(EntityType::Line(_)), AssocConstraintNodeData::BoundedLine { is_ray, .. }) => !is_ray,
         (
             Some(EntityType::LwPolyline(_) | EntityType::Polyline2D(_)),
@@ -1591,6 +1648,21 @@ fn group_requires_preservation(document: &CadDocument, group: &Assoc2dConstraint
                 "ACEQUALCURVATURECONSTRAINT" | "ACEQUALHELPPARAMETERCONSTRAINT"
             )
     })
+}
+
+fn work_plane_vector(work_plane: &[Vector3; 3], local: Vector3) -> Option<Vector3> {
+    let [origin, axis_x, axis_y] = *work_plane;
+    let plane = cadkernel::space::Plane::from_axes(
+        [origin.x, origin.y, origin.z],
+        [axis_x.x, axis_x.y, axis_x.z],
+        [axis_y.x, axis_y.y, axis_y.z],
+    );
+    let mut world = cadkernel::space::Vec3::from(plane.vector_at([local.x, local.y]));
+    if local.z != 0.0 {
+        world = world + cadkernel::space::Vec3::from(plane.normal()?) * local.z;
+    }
+    let world = world.normalize()?;
+    Some(Vector3::new(world.x, world.y, world.z))
 }
 
 fn polyline_segment_reference(
@@ -1641,6 +1713,52 @@ fn polyline_segment_reference(
             score(*first).total_cmp(&score(*second))
         })
         .map(|index| ParametricRef::segment(entity, index))
+}
+
+fn directional_axis_reference(
+    document: &CadDocument,
+    entity: Handle,
+    data: &AssocConstraintNodeData,
+    work_plane: &[Vector3; 3],
+) -> Option<ParametricRef> {
+    let AssocConstraintNodeData::BoundedLine {
+        start_point,
+        end_point,
+        ..
+    } = data
+    else {
+        return None;
+    };
+    match document.get_entity(entity)? {
+        EntityType::Text(_) | EntityType::MText(_) => {
+            Some(ParametricRef::text_baseline(entity))
+        }
+        EntityType::Ellipse(ellipse) => {
+            let [origin, axis_x, axis_y] = *work_plane;
+            let normal = Vector3::new(
+                axis_x.y * axis_y.z - axis_x.z * axis_y.y,
+                axis_x.z * axis_y.x - axis_x.x * axis_y.z,
+                axis_x.x * axis_y.y - axis_x.y * axis_y.x,
+            );
+            let to_world = |point: Vector3| {
+                origin + axis_x * point.x + axis_y * point.y + normal * point.z
+            };
+            let direction = (to_world(*end_point) - to_world(*start_point)).normalize();
+            let major = ellipse.major_axis.normalize();
+            let ellipse_normal = ellipse.normal.normalize();
+            let minor = Vector3::new(
+                ellipse_normal.y * major.z - ellipse_normal.z * major.y,
+                ellipse_normal.z * major.x - ellipse_normal.x * major.z,
+                ellipse_normal.x * major.y - ellipse_normal.y * major.x,
+            );
+            if direction.dot(&minor).abs() > direction.dot(&major).abs() {
+                Some(ParametricRef::ellipse_minor_axis(entity))
+            } else {
+                Some(ParametricRef::ellipse_major_axis(entity))
+            }
+        }
+        _ => None,
+    }
 }
 
 fn numeric_value(value: &AssocEvalVariant) -> Option<f64> {
@@ -1927,6 +2045,14 @@ pub(super) fn native_constraint_set(
             if let Some(entity) = dependency_entity(document, dependency, &node.data) {
                 let reference =
                     polyline_segment_reference(document, entity, &node.data, &group.work_plane)
+                        .or_else(|| {
+                            directional_axis_reference(
+                                document,
+                                entity,
+                                &node.data,
+                                &group.work_plane,
+                            )
+                        })
                         .unwrap_or_else(|| {
                             if matches!(node.data, AssocConstraintNodeData::Point { .. }) {
                                 ParametricRef::point(entity, 0)
@@ -1964,6 +2090,9 @@ pub(super) fn native_constraint_set(
                     }
                     implicit_point_type::MID => {
                         ParametricRef::segment_midpoint(curve.entity, segment)
+                    }
+                    implicit_point_type::CENTER => {
+                        ParametricRef::segment_center(curve.entity, segment)
                     }
                     _ => continue,
                 }
@@ -2022,7 +2151,7 @@ pub(super) fn native_constraint_set(
                     owned_constraint_ids,
                     ..
                 } if kind == ConstraintKind::Smooth => {
-                    let endpoints = owned_constraint_ids
+                    let mut endpoints: Vec<ParametricRef> = owned_constraint_ids
                         .iter()
                         .filter_map(|id| group.nodes.iter().find(|child| child.node_id == *id))
                         .find(|child| {
@@ -2038,6 +2167,23 @@ pub(super) fn native_constraint_set(
                                 .collect()
                         })
                         .unwrap_or_default();
+                    if let Some(target) = endpoints.get(1).copied() {
+                        let segment = owned_constraint_ids
+                            .iter()
+                            .filter_map(|id| group.nodes.iter().find(|child| child.node_id == *id))
+                            .filter(|child| {
+                                child.class_name.eq_ignore_ascii_case("AcTangentConstraint")
+                            })
+                            .flat_map(|child| child.connections.iter())
+                            .filter_map(|id| refs.get(id).copied())
+                            .find(|reference| {
+                                reference.entity == target.entity
+                                    && reference.segment_index().is_some()
+                            });
+                        if let Some(segment) = segment {
+                            endpoints.push(segment);
+                        }
+                    }
                     (endpoints, Vec::new())
                 }
                 _ => (
@@ -2084,6 +2230,7 @@ pub(super) fn native_constraint_set(
                 ConstraintKind::DistanceDirected => matches!(targets.len(), 2 | 3),
                 ConstraintKind::EqualDistance => targets.len() == 4,
                 ConstraintKind::RigidSet => !targets.is_empty() && rigid_points.len() >= 2,
+                ConstraintKind::Smooth => matches!(targets.len(), 2 | 3),
                 _ => targets.len() == 2,
             };
             if !valid_target_count {
@@ -2107,6 +2254,31 @@ pub(super) fn native_constraint_set(
             if let Some(constraint) = set.constraints.last_mut() {
                 constraint.enabled = enabled;
                 constraint.rigid_points = rigid_points;
+                if matches!(kind, ConstraintKind::Horizontal | ConstraintKind::Vertical) {
+                    let datum_id = match &node.data {
+                        AssocConstraintNodeData::Parallel {
+                            datum_line_index, ..
+                        } => *datum_line_index,
+                        _ => None,
+                    };
+                    let local_direction = datum_id.and_then(|datum_id| {
+                        group.nodes.iter().find_map(|datum| {
+                            (datum.node_id == datum_id).then_some(&datum.data).and_then(|data| {
+                                match data {
+                                    AssocConstraintNodeData::Line { direction, .. } => {
+                                        Some(*direction)
+                                    }
+                                    _ => None,
+                                }
+                            })
+                        })
+                    });
+                    if let Some(world) =
+                        local_direction.and_then(|local| work_plane_vector(&group.work_plane, local))
+                    {
+                        constraint.axis_direction = Some(world);
+                    }
+                }
                 if let AssocConstraintNodeData::Distance {
                     direction_type,
                     distance,
@@ -2337,7 +2509,7 @@ fn materialize_scope(
             continue;
         };
         if entity_nodes.geometry_node_id == 0 {
-            if entity_nodes.segments.is_empty() {
+            if entity_nodes.segments.is_empty() && entity_nodes.axes.is_empty() {
                 continue;
             }
         }
@@ -2346,6 +2518,7 @@ fn materialize_scope(
         for node_id in std::iter::once(entity_nodes.geometry_node_id)
             .filter(|node_id| *node_id != 0)
             .chain(entity_nodes.segments.values().copied())
+            .chain(entity_nodes.axes.values().copied())
         {
             if let Some(node) = nodes.iter_mut().find(|node| node.node_id == node_id) {
                 set_geometry_dependency(&mut node.data, dep_handle);
@@ -2736,14 +2909,15 @@ mod tests {
     fn horizontal_and_vertical_constraints_round_trip_through_dwg_and_dxf() {
         for ext in ["dwg", "dxf"] {
             let mut scene = Scene::new();
-            let a = line_entity(&mut scene, (0.0, 0.0), (10.0, 0.0));
+            let a = line_entity(&mut scene, (0.0, 0.0), (6.0, 8.0));
             let b = line_entity(&mut scene, (10.0, 0.0), (10.0, 5.0));
+            let horizontal_direction = Vector3::new(0.6, 0.8, 0.0);
             scene
                 .parametric_constraint_set_mut(ParametricScope::ModelSpace)
-                .add(
+                .add_axis_constraint(
                     ConstraintKind::Horizontal,
                     vec![ParametricRef::whole(a)],
-                    None,
+                    horizontal_direction,
                 );
             scene
                 .parametric_constraint_set_mut(ParametricScope::ModelSpace)
@@ -2809,6 +2983,20 @@ mod tests {
             assert!(datums.iter().all(|datum| group.nodes.iter().any(|node| {
                 node.node_id == *datum && node.class_name == "AcConstrainedDatumLine"
             })));
+
+            let mut restored = Scene::new();
+            restored.document = reloaded;
+            restored.load_parametric_constraints_from_document();
+            let horizontal = restored
+                .parametric_constraint_set(ParametricScope::ModelSpace)
+                .unwrap()
+                .constraints
+                .iter()
+                .find(|constraint| constraint.kind == ConstraintKind::Horizontal)
+                .unwrap();
+            assert!(
+                (horizontal.axis_direction.unwrap() - horizontal_direction).length() < 1.0e-12
+            );
         }
     }
 

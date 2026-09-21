@@ -1777,6 +1777,67 @@ mod tests {
     }
 
     #[test]
+    fn set_properties_expected_matches_whole_number_floats_end_to_end() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let insert = Insert::new("A_CPT", Vector3::new(12.0, 34.0, 5.0));
+        let entity = app.tabs[i].scene.add_entity(EntityType::Insert(insert));
+        let handle = format!("{:X}", entity.value());
+
+        // `12` is how every JSON client sends the stored `12.0`.
+        let scalar = execute(
+            &mut app,
+            json!({
+                "op":"set_properties",
+                "collection":"entities",
+                "handle":handle,
+                "updates":[{"path":"/insert_point/x","expected":12,"value":20.0}]
+            }),
+            "whole-number-scalar",
+        );
+        assert_eq!(scalar["status"], "completed", "{scalar}");
+
+        let nested = execute(
+            &mut app,
+            json!({
+                "op":"set_properties",
+                "collection":"entities",
+                "handle":handle,
+                "updates":[{
+                    "path":"/insert_point",
+                    "expected":{"x":20,"y":34,"z":5},
+                    "value":{"x":1.5,"y":2.0,"z":3.0}
+                }]
+            }),
+            "whole-number-nested",
+        );
+        assert_eq!(nested["status"], "completed", "{nested}");
+        let EntityType::Insert(insert) = app.tabs[i].scene.document.get_entity(entity).unwrap()
+        else {
+            panic!("expected insert")
+        };
+        assert_eq!(insert.insert_point.x, 1.5);
+
+        let stale = execute(
+            &mut app,
+            json!({
+                "op":"set_properties",
+                "collection":"entities",
+                "handle":handle,
+                "updates":[{"path":"/insert_point/x","expected":2,"value":9.0}]
+            }),
+            "stale-number",
+        );
+        assert_ne!(stale["status"], "completed", "{stale}");
+        let EntityType::Insert(insert) = app.tabs[i].scene.document.get_entity(entity).unwrap()
+        else {
+            panic!("expected insert")
+        };
+        assert_eq!(insert.insert_point.x, 1.5);
+    }
+
+    #[test]
     fn record_schema_describes_absent_types_fields_enums_units_and_write_rules() {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);

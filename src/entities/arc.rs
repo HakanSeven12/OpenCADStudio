@@ -3,8 +3,8 @@ use crate::t;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
-    center_grip, edit_angle_prop as edit_angle, edit_prop as edit, parse_f64, ro_prop as ro,
-    square_grip,
+    center_grip, edit_angle_prop as edit_angle, edit_prop as edit, format_angle, format_area,
+    format_length, parse_f64, ro_prop as ro, square_grip,
 };
 use crate::entities::traits::RenderConvertible;
 use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
@@ -197,24 +197,24 @@ fn properties(arc: &Arc) -> Vec<PropSection> {
     vec![PropSection {
         title: t!("Geometry").into_owned(),
         props: vec![
-            ro(t!("Start X").as_ref(), "start_x", format!("{sx:.4}")),
-            ro(t!("Start Y").as_ref(), "start_y", format!("{sy:.4}")),
-            ro(t!("Start Z").as_ref(), "start_z", format!("{sz:.4}")),
+            ro(t!("Start X").as_ref(), "start_x", format_length(sx)),
+            ro(t!("Start Y").as_ref(), "start_y", format_length(sy)),
+            ro(t!("Start Z").as_ref(), "start_z", format_length(sz)),
             edit(t!("Center X").as_ref(), "center_x", cwx),
             edit(t!("Center Y").as_ref(), "center_y", cwy),
             edit(t!("Center Z").as_ref(), "center_z", cwz),
-            ro(t!("End X").as_ref(), "end_x", format!("{ex:.4}")),
-            ro(t!("End Y").as_ref(), "end_y", format!("{ey:.4}")),
-            ro(t!("End Z").as_ref(), "end_z", format!("{ez:.4}")),
+            ro(t!("End X").as_ref(), "end_x", format_length(ex)),
+            ro(t!("End Y").as_ref(), "end_y", format_length(ey)),
+            ro(t!("End Z").as_ref(), "end_z", format_length(ez)),
             edit(t!("Radius").as_ref(), "radius", arc.radius),
             edit_angle(t!("Start angle").as_ref(), "start_angle", sa.to_degrees()),
             edit_angle(t!("End angle").as_ref(), "end_angle", ea.to_degrees()),
-            ro(t!("Total angle").as_ref(), "total_angle", format!("{total_angle:.2}")),
-            ro(t!("Arc length").as_ref(), "arc_length", format!("{arc_length:.4}")),
-            ro(t!("Area").as_ref(), "area", format!("{area:.4}")),
-            ro(t!("Normal X").as_ref(), "normal_x", format!("{:.4}", arc.normal.x)),
-            ro(t!("Normal Y").as_ref(), "normal_y", format!("{:.4}", arc.normal.y)),
-            ro(t!("Normal Z").as_ref(), "normal_z", format!("{:.4}", arc.normal.z)),
+            ro(t!("Total angle").as_ref(), "total_angle", format_angle(total_angle.to_radians())),
+            ro(t!("Arc length").as_ref(), "arc_length", format_length(arc_length)),
+            ro(t!("Area").as_ref(), "area", format_area(area)),
+            edit(t!("Normal X").as_ref(), "normal_x", arc.normal.x),
+            edit(t!("Normal Y").as_ref(), "normal_y", arc.normal.y),
+            edit(t!("Normal Z").as_ref(), "normal_z", arc.normal.z),
         ],
     }]
 }
@@ -244,6 +244,24 @@ fn apply_geom_prop(arc: &mut Arc, field: &str, value: &str) {
         "radius" if v > 0.0 => arc.radius = v,
         "start_angle" => arc.start_angle = v.to_radians(),
         "end_angle" => arc.end_angle = v.to_radians(),
+        "normal_x" | "normal_y" | "normal_z" => {
+            let center = arc.center_wcs();
+            let mut normal = cadkernel::space::Vec3::new(arc.normal.x, arc.normal.y, arc.normal.z);
+            match field {
+                "normal_x" => normal.x = v,
+                "normal_y" => normal.y = v,
+                "normal_z" => normal.z = v,
+                _ => {}
+            }
+            if let Some(normal) = normal.normalize() {
+                arc.normal = acadrust::types::Vector3::new(normal.x, normal.y, normal.z);
+                let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs(
+                    (center.x, center.y, center.z),
+                    (normal.x, normal.y, normal.z),
+                );
+                arc.center = acadrust::types::Vector3::new(x, y, z);
+            }
+        }
         _ => {}
     }
 }

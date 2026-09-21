@@ -113,7 +113,7 @@ pub fn create_pipelines(
 ) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("ellipse.wgsl"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/ellipse.wgsl").into()),
+        source: wgpu::ShaderSource::Wgsl(draw_order_shader!("ellipse.wgsl").into()),
     });
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("ellipse.pipeline.layout"),
@@ -145,7 +145,7 @@ pub fn create_pipelines(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: wgpu::TextureFormat::Depth24PlusStencil8,
-            depth_write_enabled: Some(false),
+            depth_write_enabled: Some(true),
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: content_stencil.clone(),
             bias: wgpu::DepthBiasState::default(),
@@ -305,7 +305,7 @@ mod tests {
 
     #[test]
     fn ellipse_shader_validates_with_naga() {
-        let source = include_str!("../../shaders/ellipse.wgsl");
+        let source = draw_order_shader!("ellipse.wgsl");
         let module = naga::front::wgsl::parse_str(source).expect("ellipse.wgsl parses cleanly");
         let mut validator = naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),

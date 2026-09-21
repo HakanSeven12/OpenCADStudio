@@ -1,8 +1,10 @@
 const STORAGE_SHADER: &str = include_str!("../src/shaders/hatch.wgsl");
 const TEXTURE_SHADER: &str = include_str!("../src/shaders/hatch_texture.wgsl");
+const DRAW_ORDER_SHADER: &str = include_str!("../src/shaders/draw_order.wgsl");
 
 fn assert_all_family_lod(source: &str, name: &str) {
-    let module = naga::front::wgsl::parse_str(source)
+    let composed = format!("{DRAW_ORDER_SHADER}\n{source}");
+    let module = naga::front::wgsl::parse_str(&composed)
         .unwrap_or_else(|error| panic!("{name} WGSL must parse: {error}"));
     naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),

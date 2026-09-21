@@ -1,0 +1,23 @@
+[plugin]
+id = "com.example.plugin-template-v2"
+name = "Plugin Template v2"
+version = "0.1.0"
+description = "Demonstrates read/write object round-trips with the host."
+author = "Your Name"
+license = "GPL-3.0-only"
+repository = "your-account/your-plugin-repo"
+
+[opencad]
+api_version = 5
+# Replace both placeholders in the packaging step. The v1 template's
+# release workflow contains a working example.
+rustc_version = "__RUSTC_VERSION__"
+acadrust_source = "__ACADRUST_SOURCE__"
+ribbon_order = 100
+command_prefixes = [
+    "COUNT_SURVEY_POINTS",
+    "ADD_SURVEY_POINT",
+    "MARK_FIRST_SURVEY_POINT",
+    "COUNT_MARKED_SURVEY_POINTS",
+]
+xdata_apps = ["SURVEYMARK"]

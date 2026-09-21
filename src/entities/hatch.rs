@@ -428,8 +428,8 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
                 title: t!("Geometry").into_owned(),
                 props: vec![
                     edit(t!("Elevation").as_ref(), "elevation", h.elevation),
-                    ro(t!("Area").as_ref(), "area", format!("{:.4}", area)),
-                    ro(t!("Cumulative area").as_ref(), "cumulative_area", format!("{:.4}", area)),
+                    ro(t!("Area").as_ref(), "area", crate::entities::common::format_area(area)),
+                    ro(t!("Cumulative area").as_ref(), "cumulative_area", crate::entities::common::format_area(area)),
                 ],
             },
             PropSection {
@@ -537,8 +537,8 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
             title: t!("Geometry").into_owned(),
             props: vec![
                 edit(t!("Elevation").as_ref(), "elevation", h.elevation),
-                ro(t!("Area").as_ref(), "area", format!("{:.4}", area)),
-                ro(t!("Cumulative area").as_ref(), "cumulative_area", format!("{:.4}", area)),
+                ro(t!("Area").as_ref(), "area", crate::entities::common::format_area(area)),
+                ro(t!("Cumulative area").as_ref(), "cumulative_area", crate::entities::common::format_area(area)),
             ],
         },
     ];

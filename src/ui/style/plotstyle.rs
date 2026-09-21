@@ -4,6 +4,7 @@ use crate::app::Message;
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Background, Border, Element, Theme};
 use crate::ui::style::common::muted_style;
+use crate::ui::style::form::{hdivider, vsep};
 use crate::t;
 use std::borrow::Cow;
 use std::fmt;
@@ -83,30 +84,33 @@ fn field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
     }
 }
 
-fn hdivider<'a>(width: iced::Length) -> Element<'a, Message> {
-    container(Space::new().width(width).height(1))
-        .width(width)
-        .height(1)
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.neutral.color
-            )),
-            ..Default::default()
-        })
-        .into()
-}
+/// Layer names bucketed by ACI (AutoCAD Color Index), index = ACI.
+///
+/// Pure function of `document.layers`: one entry per layer whose color is
+/// `Color::Index(aci)` with `1 <= aci < 256`, each bucket sorted
+/// case-insensitively. Extracted from `view_window` so the table can be
+/// unit-tested and benched without building widgets. `pub` (not
+/// `pub(crate)`) so the `cargo bench` harness (`benches/`, an external
+/// crate) can measure it as `ui_plotstyle_layer_usage`.
+pub fn build_layer_usage(document: &acadrust::CadDocument) -> Vec<Vec<String>> {
+    let mut layer_usage = vec![Vec::<String>::new(); 256];
 
-fn vsep<'a>(height: iced::Length) -> Element<'a, Message> {
-    container(Space::new().width(1).height(height))
-        .width(1)
-        .height(height)
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.neutral.color
-            )),
-            ..Default::default()
-        })
-        .into()
+    for layer in document.layers.iter() {
+        if let acadrust::types::Color::Index(aci) = &layer.color {
+            let index = *aci as usize;
+
+            if index > 0 && index < layer_usage.len() {
+                layer_usage[index].push(layer.name.clone());
+            }
+        }
+    }
+
+    for layers in &mut layer_usage {
+        if layers.len() > 1 {
+            layers.sort_by_cached_key(|name| name.to_ascii_lowercase());
+        }
+    }
+    layer_usage
 }
 
 pub fn view_window<'a>(
@@ -120,23 +124,11 @@ pub fn view_window<'a>(
 ) -> Element<'a, Message> {
     let show_layer_usage = !table.is_some_and(|table| table.is_stb);
 
-let mut layer_usage = vec![Vec::<String>::new(); 256];
-
-    if show_layer_usage {
-        for layer in document.layers.iter() {
-            if let acadrust::types::Color::Index(aci) = &layer.color {
-                let index = *aci as usize;
-
-                if index > 0 && index < layer_usage.len() {
-                    layer_usage[index].push(layer.name.clone());
-                }
-            }
-        }
-
-        for layers in &mut layer_usage {
-            layers.sort_by_key(|name| name.to_ascii_lowercase());
-        }
-    }
+    let layer_usage = if show_layer_usage {
+        build_layer_usage(document)
+    } else {
+        Vec::new()
+    };
     let table_name = table
         .map(|t| t.name.clone())
         .unwrap_or_else(|| t!("(no table loaded)").into_owned());
@@ -560,4 +552,59 @@ let mut layer_usage = vec![Vec::<String>::new(); 256];
         .width(sizing.width)
         .height(sizing.height)
         .into()
+}
+
+#[cfg(test)]
+mod layer_usage_tests {
+    use super::*;
+
+    fn indexed_layer(
+        doc: &mut acadrust::CadDocument,
+        name: &str,
+        aci: u8,
+    ) -> acadrust::tables::Layer {
+        let mut layer = acadrust::tables::Layer::new(name);
+        layer.handle = doc.allocate_handle();
+        layer.color = acadrust::types::Color::Index(aci);
+        layer
+    }
+
+    #[test]
+    fn build_layer_usage_buckets_index_colors() {
+        let mut doc = acadrust::CadDocument::new();
+        let a = indexed_layer(&mut doc, "WALLS", 1);
+        let b = indexed_layer(&mut doc, "doors", 1);
+        let c = indexed_layer(&mut doc, "ROOF", 3);
+        let _ = doc.layers.add(a);
+        let _ = doc.layers.add(b);
+        let _ = doc.layers.add(c);
+
+        let usage = build_layer_usage(&doc);
+
+        assert_eq!(usage.len(), 256);
+        assert_eq!(usage[1], vec!["doors".to_string(), "WALLS".to_string()]);
+        assert_eq!(usage[3], vec!["ROOF".to_string()]);
+        assert!(usage[2].is_empty());
+    }
+
+    #[test]
+    fn build_layer_usage_ignores_non_index_colors() {
+        let mut doc = acadrust::CadDocument::new();
+        let mut truecolor = acadrust::tables::Layer::new("TRUECOLOR");
+        truecolor.handle = doc.allocate_handle();
+        truecolor.color = acadrust::types::Color::Rgb {
+            r: 10,
+            g: 20,
+            b: 30,
+        };
+        let _ = doc.layers.add(truecolor);
+
+        let usage = build_layer_usage(&doc);
+
+        assert!(
+            usage.iter().all(|bucket| !bucket.iter().any(|n| n == "TRUECOLOR")),
+            "truecolor layer must not appear in any ACI bucket"
+        );
+    }
+
 }

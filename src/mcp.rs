@@ -54,6 +54,7 @@ const EXECUTE_OPS: &[&str] = &[
     "property",
     "set_properties",
     "action",
+    "embed_image",
     "save",
     "stop",
     "batch",
@@ -72,6 +73,7 @@ const BATCH_STEP_OPS: &[&str] = &[
     "property",
     "set_properties",
     "action",
+    "embed_image",
     "save",
     "stop",
 ];
@@ -717,6 +719,12 @@ fn validate_execute_request(request: &Value, op: &str) -> Result<(), String> {
             )),
             None => missing("name", r#"{"op":"action","name":"zoom_extents"}"#),
         },
+        "embed_image" if request["path"].as_str().is_none_or(str::is_empty) => {
+            missing(
+                "path",
+                r#"{"op":"embed_image","path":"/path/logo.png","at":[0,0,0],"width":100}"#,
+            )
+        }
         _ => Ok(()),
     }
 }
@@ -902,7 +910,9 @@ fn execute_request_schema() -> Value {
             "camera_revision":{"type":"integer","minimum":0,"description":"Expected camera revision when view state matters."},
             "selection":{"type":"array","items":handle.clone(),"description":"Expected selected handles from current state."},
             "cmd":{"type":"string","minLength":1,"description":"Command name followed by its prompt answers separated by spaces. Points use x,y or x,y,z; option answers use their token. Read command details first when unsure.","examples":["LINE 0,0 10,10","CIRCLE 5,5 3","PLINE 0,0 10,0 10,10 C"]},
-            "path":{"type":"string","minLength":1,"description":"Absolute drawing path for open or save."},
+            "path":{"type":"string","minLength":1,"description":"Absolute path: drawing for open or save, image file for embed_image."},
+            "at":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"World [x,y] or [x,y,z] placement corner for embed_image (picture grows up-right)."},
+            "width":{"type":"number","exclusiveMinimum":0,"description":"World width for embed_image; height follows the image aspect ratio. Defaults to pixel_width/100."},
             "kind":{"type":"string","enum":["text","token","point","entity","structure","selection","enter"],"description":"Input kind listed in state.command.accepts."},
             "text":{"type":"string","description":"Free text or one option/value token."},
             "point":point,
@@ -943,6 +953,7 @@ fn execute_request_schema() -> Value {
             {"properties":{"op":{"const":"property"}},"required":["field","value"]},
             {"properties":{"op":{"const":"set_properties"}},"required":["collection","updates"]},
             {"properties":{"op":{"const":"action"}},"required":["name"]},
+            {"properties":{"op":{"const":"embed_image"}},"required":["path"]},
             {"properties":{"op":{"const":"save"}}},
             {"properties":{"op":{"const":"stop"}}},
             {"properties":{"op":{"const":"batch"}},"required":["steps"]}

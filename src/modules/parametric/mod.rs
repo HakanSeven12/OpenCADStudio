@@ -3,20 +3,44 @@
 //! resulting constraints through the geometry kernel.
 
 mod coincident;
+mod concentric;
+mod constraint_bar;
 mod equal_distance;
+#[path = "equal.rs"]
+mod equal_command;
+#[path = "fixed.rs"]
+mod fixed_command;
 mod geom_constraint;
+#[path = "horizontal.rs"]
+mod horizontal_command;
+#[path = "perpendicular.rs"]
+mod perpendicular_command;
 mod point_on_entity;
+mod smooth;
+#[path = "symmetric.rs"]
+mod symmetric_command;
+#[path = "tangent.rs"]
+mod tangent_command;
 mod tools;
 mod value;
 pub use coincident::{coincident_tool, CoincidentConstraintCommand};
+pub use concentric::ConcentricConstraintCommand;
+pub use constraint_bar::ConstraintBarOptionCommand;
+pub use equal_command::EqualConstraintCommand;
 pub use equal_distance::{equal_distance_tool, EqualDistanceConstraintCommand};
+pub use fixed_command::FixConstraintCommand;
 pub use geom_constraint::GeomConstraintCommand;
+pub use horizontal_command::HorizontalConstraintCommand;
+pub use perpendicular_command::{PerpendicularConstraintCommand, PerpendicularPick};
 pub use point_on_entity::{
     center_point_tool, midpoint_tool, point_on_curve_tool, PointOnEntityConstraintCommand,
 };
+pub use smooth::SmoothConstraintCommand;
+pub use symmetric_command::SymmetricConstraintCommand;
+pub use tangent_command::TangentConstraintCommand;
 pub use tools::{
-    colinear, concentric, equal, fixed, horizontal, normal, parallel, perpendicular, symmetric,
-    tangent, vertical,
+    colinear, concentric as concentric_tool, equal, fixed, horizontal, normal, parallel,
+    perpendicular, symmetric, tangent, vertical,
 };
 pub use value::{
     angle_tool, dimensional_tools, distance_tool, AngleConstraintCommand,
@@ -56,10 +80,10 @@ impl CadModule for ParametricModule {
                         RibbonItem::LargeTool(colinear::tool()),
                         RibbonItem::LargeTool(perpendicular::tool()),
                         RibbonItem::LargeTool(command(
-                            "SMOOTHCONSTRAINT", "Smooth",
+                            "GCSMOOTH", "Smooth",
                             include_bytes!("../../../assets/icons/constrain/smooth.svg"),
                         )),
-                        RibbonItem::LargeTool(concentric::tool()),
+                        RibbonItem::LargeTool(concentric_tool::tool()),
                         RibbonItem::LargeTool(horizontal::tool()),
                         RibbonItem::LargeTool(symmetric::tool()),
                         RibbonItem::LargeTool(fixed::tool()),
@@ -130,7 +154,7 @@ impl CadModule for ParametricModule {
 
 inventory::submit!(crate::command::CommandRegistration {
     names: &[
-        "AUTOCONSTRAIN", "CONSTRAINTSETTINGS", "SMOOTHCONSTRAINT", "GCSHOW", "GCHIDE", "GCRESET",
+        "AUTOCONSTRAIN", "CONSTRAINTSETTINGS", "GCSMOOTH", "GCSHOW", "GCHIDE", "GCRESET",
         "GCSHOWALL", "GCHIDEALL", "DCSHOW", "DCHIDE", "DCSHOWALL", "DCHIDEALL",
         "DCCONVERT", "DELCONSTRAINT",
     ]
@@ -162,8 +186,8 @@ mod tests {
             groups[0].tools.iter().map(item_id).collect::<Vec<_>>(),
             [
                 "AUTOCONSTRAIN", "CCONSTRAINT", "PCONSTRAINT", "TCONSTRAINT",
-                "LCONSTRAINT", "QCONSTRAINT", "SMOOTHCONSTRAINT", "NCONSTRAINT",
-                "HCONSTRAINT", "SYCONSTRAINT", "FXCONSTRAINT", "VCONSTRAINT",
+                "LCONSTRAINT", "QCONSTRAINT", "GCSMOOTH", "GCCONCENTRIC",
+                "GCHORIZONTAL", "SYCONSTRAINT", "FXCONSTRAINT", "VCONSTRAINT",
                 "ECONSTRAINT", "GCVISIBILITY", "GCSHOWALL", "GCHIDEALL",
             ]
         );

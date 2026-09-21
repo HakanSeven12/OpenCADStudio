@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="350" viewBox="0 0 900 350">
+<style>text{font-family:Arial,sans-serif;fill:#263238} .title{font-size:22px;font-weight:600} .label{font-size:16px} .small{font-size:13px;fill:#54616a} .model{stroke:#1479b8;stroke-width:4;fill:none} .paper{stroke:#a94610;stroke-width:2;stroke-dasharray:9 5} .dim{stroke:#263238;stroke-width:1.5;fill:none}</style>
+<defs><marker id="arrow" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M8 0L0 4L8 8" fill="#263238"/></marker></defs>
+<rect width="900" height="350" rx="10" fill="white"/>
+<text class="title" x="30" y="38">The dimension follows its paper-space centerline</text>
+<rect x="30" y="65" width="400" height="220" fill="#f5f8fa" stroke="#c3ced5"/>
+<rect x="470" y="65" width="400" height="220" fill="#f5f8fa" stroke="#c3ced5"/>
+<text class="label" x="48" y="93">Before</text><text class="label" x="488" y="93">Centerline moved 1 paper unit right</text>
+<path class="model" d="M85 160H385M525 160H825"/>
+<circle cx="385" cy="160" r="5" fill="#1479b8"/><circle cx="825" cy="160" r="5" fill="#1479b8"/>
+<path class="paper" d="M235 113V257M705 113V257"/>
+<path class="dim" d="M385 171V244M825 171V244"/>
+<path class="dim" d="M235 232H385" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<path class="dim" d="M705 232H825" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<rect x="291" y="217" width="38" height="28" fill="#f5f8fa"/><rect x="746" y="217" width="38" height="28" fill="#f5f8fa"/>
+<text class="label" x="310" y="237" text-anchor="middle">50</text><text class="label" x="765" y="237" text-anchor="middle">40</text>
+<text class="label" x="30" y="316">The model endpoint stays fixed. The dimension updates from 50 to 40.</text>
+<text class="small" x="30" y="340">Association schematic; viewport 1:10, dimension style unit factor = 1, DIMASSOC = 2.</text>
+</svg>

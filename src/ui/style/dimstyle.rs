@@ -6,6 +6,7 @@ use iced::widget::{
 };
 use iced::{mouse, Background, Border, Element, Length, Point, Rectangle, Theme};
 use crate::ui::style::common::muted_style;
+use crate::ui::style::form::hdivider;
 use crate::t;
 use std::borrow::Cow;
 use std::fmt;
@@ -261,19 +262,6 @@ impl canvas::Program<Message> for DimensionPreview {
         });
         vec![frame.into_geometry()]
     }
-}
-
-fn hdivider<'a>(width: iced::Length) -> Element<'a, Message> {
-    container(Space::new().width(width).height(1))
-        .width(width)
-        .height(1)
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.neutral.color
-            )),
-            ..Default::default()
-        })
-        .into()
 }
 
 pub fn view_window<'a>(

@@ -4,7 +4,8 @@ use acadrust::EntityType;
 use glam::{DVec3, Vec3};
 
 use crate::command::{
-    CadCommand, CmdOption, CmdResult, DimensionAssociationInput, InputKind, WorkingPlane,
+    CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview, InputKind,
+    WorkingPlane,
 };
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
@@ -60,6 +61,26 @@ impl OrdinateDimCommand {
             Step::LeaderEndpoint { feature } => feature,
         }
     }
+
+    fn build_dimension(&self, feature: DVec3, point: DVec3) -> EntityType {
+        let feature = self.plane.to_local(feature);
+        let point = self.plane.to_local(point);
+        let is_x = match self.datum_mode {
+            DatumMode::Automatic => is_x_type(feature, point),
+            DatumMode::X => true,
+            DatumMode::Y => false,
+        };
+        let mut dim = DimensionOrdinate::new(v3(feature), v3(point), is_x);
+        crate::entities::dimension::set_dimension_text_override(
+            &mut dim.base,
+            self.text_override.clone(),
+        );
+        if let Some(angle) = self.text_angle {
+            dim.base.text_rotation = angle;
+        }
+        dim.refresh_measurement();
+        self.plane.place_entity(EntityType::Dimension(Dimension::Ordinate(dim)))
+    }
 }
 
 impl CadCommand for OrdinateDimCommand {
@@ -95,26 +116,8 @@ impl CadCommand for OrdinateDimCommand {
                 CmdResult::NeedPoint
             }
             Step::LeaderEndpoint { feature } => {
-                let feature = self.plane.to_local(feature);
-                let pt = self.plane.to_local(pt);
-                let is_x = match self.datum_mode {
-                    DatumMode::Automatic => is_x_type(feature, pt),
-                    DatumMode::X => true,
-                    DatumMode::Y => false,
-                };
-                let mut dim = DimensionOrdinate::new(v3(feature), v3(pt), is_x);
-                crate::entities::dimension::set_dimension_text_override(
-                    &mut dim.base,
-                    self.text_override.clone(),
-                );
-                if let Some(angle) = self.text_angle {
-                    dim.base.text_rotation = angle;
-                }
-                dim.refresh_measurement();
                 CmdResult::CommitDimension {
-                    entity: self.plane.place_entity(EntityType::Dimension(
-                        Dimension::Ordinate(dim),
-                    )),
+                    entity: self.build_dimension(feature, pt),
                     association: DimensionAssociationInput::Infer(None),
                     preserve_base_style: false,
                     continue_command: false,
@@ -257,6 +260,13 @@ impl CadCommand for OrdinateDimCommand {
                 })
                 .collect(),
         ))
+    }
+
+    fn dimension_preview(&self, cursor: DVec3) -> Option<Vec<DimensionPreview>> {
+        let Step::LeaderEndpoint { feature } = self.step else {
+            return None;
+        };
+        Some(vec![DimensionPreview::current_style(self.build_dimension(feature, cursor))])
     }
 }
 

@@ -869,6 +869,24 @@ impl OpenCADStudio {
             "PRINTALL" => {
                 return Some(Task::done(Message::PrintAllOpen));
             }
+            // PRINTERS — what the system reports about printing, on the
+            // command line: the default printer, every printer it lists (or
+            // why it could not), and how a plot will reach them. The report
+            // a user pastes into a bug report instead of a screenshot.
+            "PRINTERS" => {
+                for line in crate::io::print_to_printer::printer_report() {
+                    self.command_line.push_output(&line);
+                }
+            }
+            // PRINTERS <name> — what that printer reports about its sheets
+            // and printable area (asks the driver; may take a moment for an
+            // offline network queue).
+            cmd if cmd.starts_with("PRINTERS ") => {
+                let name = cmd["PRINTERS ".len()..].trim();
+                for line in crate::io::print_to_printer::printer_media_report(name) {
+                    self.command_line.push_output(&line);
+                }
+            }
             "EXPORT" | "EXPORTPDF" => {
                 return Some(Task::done(Message::PlotExport));
             }
@@ -1163,7 +1181,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
             cmd if cmd.starts_with("HYPERLINK ") => {
-                use acadrust::xdata::{ExtendedDataRecord, XDataValue};
+                use acadrust::xdata::XDataValue;
                 let url = cmd.strip_prefix("HYPERLINK").unwrap_or("").trim().to_string();
                 if url.is_empty() {
                     self.command_line.push_info(crate::t!("Usage: HYPERLINK <url>   (select objects first)").as_ref());
@@ -1183,15 +1201,19 @@ impl OpenCADStudio {
                 self.push_undo_snapshot(i, "HYPERLINK");
                 let mut n = 0usize;
                 for h in &handles {
-                    if let Some(e) = self.tabs[i].scene.document.get_entity_mut(*h) {
-                        let xd = &mut e.common_mut().extended_data;
-                        let mut rec = ExtendedDataRecord::new("PE_URL");
-                        rec.add_value(XDataValue::String(url.clone()));
-                        xd.add_record(rec);
+                    if self.tabs[i].scene.document.get_entity(*h).is_some() {
+                        crate::scene::view::dispatch::set_entity_xdata(
+                            &mut self.tabs[i].scene.document,
+                            *h,
+                            "PE_URL",
+                            Some(vec![XDataValue::String(url.clone())]),
+                        );
                         n += 1;
                     }
                 }
+                self.invalidate_property_targets(i, &handles);
                 self.tabs[i].dirty = true;
+                self.refresh_properties();
                 self.command_line
                     .push_output(crate::tf!("HYPERLINK: attached to {n} object(s).").as_ref());
                 return Some(Task::none());
@@ -2122,5 +2144,25 @@ mod tests {
             instance_color: None,
             instance_aabb: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod printers_command_tests {
+    use crate::app::OpenCADStudio;
+
+    #[test]
+    fn printers_reports_the_default_and_the_list() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let before = app.command_line.history.len();
+        let _ = app.run_command_line("PRINTERS");
+        let lines: Vec<String> = app.command_line.history[before..]
+            .iter()
+            .map(|line| line.text.clone())
+            .collect();
+        // One line for the default printer, at least one for the list (a
+        // count and names, "none", or the system's error).
+        assert!(lines.len() >= 2, "{lines:?}");
     }
 }

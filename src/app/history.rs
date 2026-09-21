@@ -1072,7 +1072,7 @@ impl OpenCADStudio {
                         // references visually stale after BEDIT closes.
                         scene.bump_geometry();
                     } else {
-                        scene.bump_entities(&final_changes);
+                        scene.bump_entities_after_parametric_solve(&final_changes);
                     }
                 }
             }

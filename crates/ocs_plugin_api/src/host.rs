@@ -552,6 +552,37 @@ pub trait HostApi {
         let _ = tab_id;
         None
     }
+
+    /// Add a layer to the active document with full initial properties.
+    /// If an optional property in `config` is `None`, standard CAD defaults are applied.
+    /// Returns `None` if the layer already exists or `config.name` is invalid.
+    fn add_layer(&mut self, config: LayerConfig) -> Option<Handle> {
+        let _ = config;
+        None
+    }
+
+    /// Modify specified properties of an existing layer in the active document.
+    /// Properties that are `None` in `config` are left untouched as-is.
+    /// Returns `false` if the layer does not exist or `config.name` is invalid.
+    fn modify_layer(&mut self, config: LayerConfig) -> bool {
+        let _ = config;
+        false
+    }
+}
+
+/// Configuration properties for creating or modifying a layer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct LayerConfig {
+    pub name: String,
+    pub color: Option<acadrust::types::Color>,
+    pub linetype: Option<String>,
+    pub lineweight: Option<acadrust::types::LineWeight>,
+    pub off: Option<bool>,
+    pub frozen: Option<bool>,
+    pub locked: Option<bool>,
+    pub plottable: Option<bool>,
+    pub transparency: Option<acadrust::types::Transparency>,
+    pub description: Option<String>,
 }
 
 /// Simplified, read-only entity kind exposed by [`DocumentReader`].

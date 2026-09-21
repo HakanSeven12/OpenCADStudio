@@ -29,6 +29,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # NOTE: @stable floats to whatever's current when this job runs, which
+      # is NOT the same thing as "matches the host's rustc exactly" — the API
+      # v4+ load check compares plugin.toml's rustc_version to the host's
+      # build-time compiler byte-for-byte (see plugin-architecture.md's
+      # "Build-time ABI metadata"). Pin this to the host's actual toolchain
+      # version (check crates/ocs_plugin_api/src/version_info.rs's embedded
+      # value, or the host's own CI config) before a real release, or your
+      # binary may be refused at load with a version-mismatch error.
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release
       - name: Stage release asset
@@ -36,7 +44,11 @@ jobs:
         run: |
           mkdir -p dist
           cp target/release/*.${{ matrix.ext }} "dist/${{ matrix.asset }}"
-          sed "s|__RUSTC_VERSION__|$(rustc --version)|" plugin.toml > dist/plugin.toml
+          acadrust_source=$(grep -A3 '^name = "acadrust"' Cargo.lock | grep '^source' | head -1 | sed 's/^source = "//;s/"$//')
+          sed \
+            -e "s|__RUSTC_VERSION__|$(rustc --version)|" \
+            -e "s|__ACADRUST_SOURCE__|$acadrust_source|" \
+            plugin.toml > dist/plugin.toml
       - uses: softprops/action-gh-release@v2
         with:
           files: |

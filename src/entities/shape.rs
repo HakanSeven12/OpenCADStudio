@@ -119,7 +119,7 @@ fn shx_polylines(
     //    glyph named like this shape.
     if !name.is_empty() {
         for style in document.text_styles.iter() {
-            if style.name.is_empty() && !style.font_file.trim().is_empty() {
+            if style.is_shape_file && !style.font_file.trim().is_empty() {
                 if let Some(p) = try_style(style) {
                     return Some(p);
                 }

@@ -227,6 +227,19 @@ impl CadCommand for MeasureGeomCommand {
         self.mode == Mode::Choose
     }
 
+    fn options(&self) -> Vec<crate::command::CmdOption> {
+        use crate::command::CmdOption;
+        if self.mode != Mode::Choose {
+            return Vec::new();
+        }
+        vec![
+            CmdOption::new("Distance", "D"),
+            CmdOption::new("Radius", "R"),
+            CmdOption::new("Angle", "A"),
+            CmdOption::new("ARea", "AR"),
+        ]
+    }
+
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if self.mode != Mode::Choose {
             return None;

@@ -696,6 +696,12 @@ impl OpenCADStudio {
                         self.show_block_palette = false;
                         self.block_palette.placing = None;
                     }
+                    PanelId::ExternalReferences => {
+                        self.show_external_references = false;
+                    }
+                    PanelId::Browser => {
+                        self.show_browser = false;
+                    }
                     PanelId::Properties => {
                         self.show_properties = false;
                         self.ribbon.set_properties(false);
@@ -732,6 +738,11 @@ impl OpenCADStudio {
                 iced::Task::none()
             }
             DockMsg::DragMove(point) => {
+                // NOTE: xref column drags intentionally do NOT ride this
+                // path: its points live in workspace space while the header
+                // tracker reports header-local points, and mixing the two
+                // produced a one-time jump plus a stuck drag. Column moves
+                // arrive via Message::XrefColMove only.
                 if self.dock_dragging.is_some() {
                     let avail = self.tabs[self.active_tab]
                         .scene
@@ -778,6 +789,9 @@ impl OpenCADStudio {
                 self.dock_resizing = None;
                 self.dock_drag_last = None;
                 self.dock_drag_target = None;
+                self.xref_col_drag = None;
+                self.xref_col_last = None;
+                self.xref_split_drag = false;
                 iced::Task::none()
             }
         }
@@ -794,6 +808,8 @@ impl OpenCADStudio {
         match id {
             PanelId::Properties => self.show_properties,
             PanelId::BlockPalette => self.show_block_palette,
+            PanelId::ExternalReferences => self.show_external_references,
+            PanelId::Browser => self.show_browser,
         }
     }
 
@@ -858,6 +874,493 @@ impl OpenCADStudio {
         {
             self.refresh_block_palette();
         }
+    }
+
+    /// Rebuild the Reference Manager's entry list from the active drawing.
+    /// Uses the tab's session sets (unloaded + stat baseline) so CLI and
+    /// palette agree; writes fresh load-time mtimes back into the tab's stat
+    /// cache (`Stale` detectable from the second refresh on). Records the
+    /// tab's `edit_revision` so the palette auto-rescans on doc changes.
+    pub(crate) fn refresh_xref_manager(&mut self) {
+        let i = self.active_tab;
+        let base_dir: std::path::PathBuf = self.tabs[i]
+            .current_path
+            .as_ref()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let tab_id = self.tabs[i].id;
+        let revision = self.tabs[i].edit_revision;
+        let (host_name, host_path) = match &self.tabs[i].current_path {
+            Some(p) => (
+                p.file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                p.to_string_lossy().into_owned(),
+            ),
+            None => (String::new(), String::new()),
+        };
+        let baselines = {
+            let tab = &self.tabs[i];
+            self.xref_manager.refresh(
+                &tab.scene.document,
+                &base_dir,
+                tab.xref_unloaded.as_set(),
+                &tab.xref_stat_cache.0,
+                &host_name,
+                &host_path,
+            )
+        };
+        let tab = &mut self.tabs[i];
+        for (key, mtime) in baselines {
+            tab.xref_stat_cache.insert(key, mtime);
+        }
+        // A clean rescan clears the open-time missing notice.
+        if !self
+            .xref_manager
+            .entries
+            .iter()
+            .any(|e| e.status == crate::io::xref_model::RefStatus::NotFound)
+        {
+            tab.xref_missing = 0;
+        }
+        self.xref_manager.source_tab_id = Some(tab_id);
+        self.xref_manager.source_edit_revision = revision;
+    }
+
+    /// Re-scan when the palette is open but showing another tab's drawing or
+    /// the active drawing changed since the last scan (CLI/palette mutation,
+    /// XOPEN-return edit, undo/redo — all bump `edit_revision`). Cheap:
+    /// `collect_entries` stats files without re-parsing the host.
+    pub(crate) fn refresh_xref_manager_if_stale(&mut self) {
+        if !self.dock_panel_visible(crate::ui::dock::PanelId::ExternalReferences) {
+            return;
+        }
+        let i = self.active_tab;
+        if self.xref_manager.source_tab_id != Some(self.tabs[i].id)
+            || self.xref_manager.source_edit_revision != self.tabs[i].edit_revision
+        {
+            self.refresh_xref_manager();
+        }
+    }
+
+    /// Shared post-mutation sequence for reference ops (CLI + palette):
+    /// repopulate scene caches, mirror xref layers into the Layers panel,
+    /// and mark the tab dirty. Both call sites use it so the 5-line
+    /// sequence cannot drift.
+    pub(crate) fn post_ref_op(&mut self, i: usize) {
+        self.tabs[i].scene.populate_hatches_from_document();
+        self.tabs[i].scene.populate_images_from_document();
+        // Image/PDF unload is intentionally session-only (the file formats do
+        // not persist an unloaded bit), so keep their source entities but
+        // remove their decoded render models.  A reload repopulates the cache
+        // after clearing the corresponding session key.
+        let hidden_images: Vec<acadrust::types::Handle> = self.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                acadrust::EntityType::RasterImage(image)
+                    if image.definition_handle.is_some_and(|key| self.tabs[i].xref_unloaded.is_unloaded(key.value())) =>
+                {
+                    Some(entity.common().handle)
+                }
+                acadrust::EntityType::Underlay(underlay)
+                    if matches!(underlay.underlay_type, acadrust::entities::UnderlayType::Pdf)
+                        && self.tabs[i].xref_unloaded.is_unloaded(underlay.definition_handle.value()) =>
+                {
+                    Some(entity.common().handle)
+                }
+                _ => None,
+            })
+            .collect();
+        for handle in hidden_images {
+            self.tabs[i].scene.images.remove(&handle);
+        }
+        self.tabs[i].scene.populate_meshes_from_document();
+        self.refresh_layer_panel();
+        self.tabs[i].dirty = true;
+    }
+
+    /// Execute a toolbar [`XrefPaletteOp`] on the palette's actionable
+    /// selection. Same engine fns as the CLI arms, batched with per-item
+    /// report lines in the CLI wording; finishes with [`post_ref_op`] plus
+    /// a palette rescan (mirror of the CLI post-op sequence).
+    pub(crate) fn xref_manager_op(
+        &mut self,
+        op: crate::ui::window::xref_manager::XrefPaletteOp,
+    ) {
+        if cfg!(target_arch = "wasm32") {
+            self.command_line.push_error(crate::t!("Reference changes are not available on web — the reference list is read-only.").as_ref());
+            return;
+        }
+        use crate::ui::window::xref_manager::XrefPaletteOp;
+        let i = self.active_tab;
+        // Full selection (nested rows included) with per-entry metadata, so
+        // nested rows report per-entry errors instead of being silently
+        // dropped by `actionable_selection` (mirrors the CLI arms).
+        let picked: Vec<(u64, String, crate::io::xref_model::RefKind, bool)> = {
+            let mut idx: Vec<usize> = self.xref_manager.selected.iter().copied().collect();
+            idx.sort_unstable();
+            idx.iter()
+                .filter_map(|idx| {
+                    self.xref_manager.entries.get(*idx).map(|e| {
+                        (
+                            e.key,
+                            e.name.clone(),
+                            e.kind,
+                            e.parent_key.is_some(),
+                        )
+                    })
+                })
+                .collect()
+        };
+        if picked.is_empty() {
+            self.command_line
+                .push_info(crate::t!("Select a reference first.").as_ref());
+            return;
+        }
+        let needs_host = matches!(
+            op,
+            XrefPaletteOp::Reload | XrefPaletteOp::Bind | XrefPaletteOp::Pathtype(_)
+        );
+        let host: Option<std::path::PathBuf> = self.tabs[i].current_path.clone();
+        if needs_host && host.is_none() {
+            self.command_line
+                .push_error(crate::t!("XREF  Save the drawing first to resolve relative XREF paths.").as_ref());
+            return;
+        }
+        let label = match op {
+            XrefPaletteOp::Open => "XREF-OPEN",
+            XrefPaletteOp::Detach => "XREF-DETACH",
+            XrefPaletteOp::Unload => "XREF-UNLOAD",
+            XrefPaletteOp::Reload => "XREF-RELOAD",
+            XrefPaletteOp::Bind => "XREF-BIND",
+            XrefPaletteOp::Overlay => "XREF-OVERLAY",
+            XrefPaletteOp::Attach => "XREF-ATTACH",
+            XrefPaletteOp::Pathtype(_) => "XREF-PATHTYPE",
+        };
+        self.push_undo_snapshot(i, label);
+        let mut done = 0usize;
+        match op {
+            XrefPaletteOp::Detach => {
+                for (key, name, _, is_nested) in &picked {
+                    if *is_nested {
+                        self.command_line.push_error(crate::tf!(
+                            "XREF: cannot detach nested reference '{}'. Detach it in its host drawing.",
+                            name
+                        ).as_ref());
+                        continue;
+                    }
+                    match crate::io::xref::detach_reference(
+                        &mut self.tabs[i].scene.document,
+                        *key,
+                    ) {
+                        Ok(name) => {
+                            self.command_line.push_output(crate::tf!(
+                                "XREF: detached \"{}\".",
+                                name
+                            ).as_ref());
+                            self.tabs[i].xref_unloaded.remove(key);
+                            self.tabs[i].xref_stat_cache.remove(key);
+                            done += 1;
+                        }
+                        Err(msg) => self.command_line.push_error(msg.as_str()),
+                    }
+                }
+            }
+            XrefPaletteOp::Unload => {
+                for (key, name, _, is_nested) in &picked {
+                    if *is_nested {
+                        self.command_line.push_error(crate::tf!(
+                            "XREF: cannot unload nested reference '{}'. Unload it in its host drawing.",
+                            name
+                        ).as_ref());
+                        continue;
+                    }
+                    match crate::io::xref::unload_reference(
+                        &mut self.tabs[i].scene.document,
+                        *key,
+                    ) {
+                        Ok(name) => {
+                            self.command_line.push_output(crate::tf!(
+                                "XREF: unloaded \"{}\".",
+                                name
+                            ).as_ref());
+                            self.tabs[i].xref_unloaded.add(*key);
+                            done += 1;
+                        }
+                        Err(msg) => self.command_line.push_error(msg.as_str()),
+                    }
+                }
+            }
+            XrefPaletteOp::Reload => {
+                let base_dir: std::path::PathBuf = host
+                    .as_ref()
+                    .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                // Drawing references only: image/PDF rows keep their flags
+                // untouched and report per-entry (their names never match the
+                // DWG-only `XrefInfo` list, so matching after the flag clear
+                // would spuriously report no-match).
+                let dwg_picked: Vec<(u64, String)> = picked
+                    .iter()
+                    .filter(|(_, _, kind, is_nested)| {
+                        if *is_nested {
+                            return false;
+                        }
+                        *kind == crate::io::xref_model::RefKind::DwgXref
+                    })
+                    .map(|(key, name, _, _)| (*key, name.clone()))
+                    .collect();
+                for (_, name, kind, is_nested) in &picked {
+                    if *is_nested {
+                        self.command_line.push_error(crate::tf!(
+                            "XREF: cannot reload nested reference '{}'. Reload it in its host drawing.",
+                            name
+                        ).as_ref());
+                    } else if *kind != crate::io::xref_model::RefKind::DwgXref {
+                        self.command_line.push_error(crate::tf!(
+                            "{}: reload applies to drawing references only.",
+                            name
+                        ).as_ref());
+                    }
+                }
+                for (key, _) in &dwg_picked {
+                    self.tabs[i].xref_unloaded.remove(key);
+                    self.tabs[i].xref_stat_cache.remove(key);
+                }
+                let handles: rustc_hash::FxHashSet<acadrust::types::Handle> = self.tabs[i]
+                    .scene
+                    .document
+                    .block_records
+                    .iter()
+                    .filter(|br| dwg_picked.iter().any(|(key, _)| *key == br.handle.value()))
+                    .map(|br| br.handle)
+                    .collect();
+                let (infos, _dropped) = crate::io::xref::resolve_xrefs_for_keys(
+                    &mut self.tabs[i].scene.document,
+                    &base_dir,
+                    &handles,
+                );
+                // Targeted reload updates baselines only for selected rows.
+                {
+                    let fresh = crate::io::xref::collect_entries_with_prev(
+                        &self.tabs[i].scene.document,
+                        &base_dir,
+                        self.tabs[i].xref_unloaded.as_set(),
+                        &self.tabs[i].xref_stat_cache.0,
+                    );
+                    for e in &fresh {
+                        if !dwg_picked.iter().any(|(key, _)| *key == e.key) {
+                            continue;
+                        }
+                        if e.status == crate::io::xref_model::RefStatus::Loaded {
+                            if let Some(m) = e.modified {
+                                self.tabs[i].xref_stat_cache.insert(e.key, m);
+                            }
+                        }
+                    }
+                }
+                for (_, name) in &dwg_picked {
+                    match infos
+                        .iter()
+                        .find(|n| n.name.eq_ignore_ascii_case(name))
+                    {
+                        Some(info) => {
+                            self.report_xref_status(info);
+                            done += 1;
+                        }
+                        None => self.command_line.push_error(crate::tf!(
+                            "XREF: no references match '{}'.",
+                            name
+                        ).as_ref()),
+                    }
+                }
+            }
+            XrefPaletteOp::Overlay => {
+                for (key, name, _, is_nested) in &picked {
+                    if *is_nested {
+                        self.command_line.push_error(crate::tf!(
+                            "XREF: cannot overlay nested reference '{}'. Overlay it in its host drawing.",
+                            name
+                        ).as_ref());
+                        continue;
+                    }
+                    match crate::io::xref::set_ref_type(
+                        &mut self.tabs[i].scene.document,
+                        *key,
+                        crate::io::xref_model::RefType::Overlay,
+                    ) {
+                        Ok(name) => {
+                            self.command_line.push_output(crate::tf!(
+                                "XREF: \"{}\" set to Overlay.",
+                                name
+                            ).as_ref());
+                            done += 1;
+                        }
+                        Err(msg) => self.command_line.push_error(msg.as_str()),
+                    }
+                }
+            }
+            XrefPaletteOp::Attach => {
+                for (key, name, _, is_nested) in &picked {
+                    if *is_nested {
+                        self.command_line.push_error(crate::tf!(
+                            "XREF: cannot attach nested reference '{}'. Attach it in its host drawing.",
+                            name
+                        ).as_ref());
+                        continue;
+                    }
+                    match crate::io::xref::set_ref_type(
+                        &mut self.tabs[i].scene.document,
+                        *key,
+                        crate::io::xref_model::RefType::Attach,
+                    ) {
+                        Ok(name) => {
+                            self.command_line.push_output(crate::tf!(
+                                "XREF: \"{}\" set to Attach.",
+                                name
+                            ).as_ref());
+                            done += 1;
+                        }
+                        Err(msg) => self.command_line.push_error(msg.as_str()),
+                    }
+                }
+            }
+            XrefPaletteOp::Bind => {
+                let base_dir: std::path::PathBuf = host
+                    .as_ref()
+                    .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let host_dir: std::path::PathBuf = host
+                    .as_ref()
+                    .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                for (key, name, _, is_nested) in &picked {
+                    if *is_nested {
+                        self.command_line.push_error(crate::tf!(
+                            "XREF: cannot bind nested reference '{}'. Bind it in its host drawing.",
+                            name
+                        ).as_ref());
+                        continue;
+                    }
+                    match crate::io::xref::bind_reference(
+                        &mut self.tabs[i].scene.document,
+                        *key,
+                        &base_dir,
+                        &host_dir,
+                    ) {
+                        Ok(outcome) => {
+                            if outcome.unremapped == 0 {
+                                self.command_line.push_output(crate::tf!(
+                                    "XREF: bound \"{}\".",
+                                    outcome.name
+                                ).as_ref());
+                            } else {
+                                self.command_line.push_output(crate::tf!(
+                                    "XREF: bound \"{}\" with {} unremapped style handles (see bind limitations).",
+                                    outcome.name, outcome.unremapped
+                                ).as_ref());
+                            }
+                            self.tabs[i].xref_unloaded.remove(key);
+                            self.tabs[i].xref_stat_cache.remove(key);
+                            done += 1;
+                        }
+                        Err(msg) => self.command_line.push_error(msg.as_str()),
+                    }
+                }
+            }
+            XrefPaletteOp::Pathtype(pathtype) => {
+                let host = host.unwrap_or_else(|| std::path::PathBuf::from("."));
+                for (key, name, _, is_nested) in &picked {
+                    if *is_nested {
+                        self.command_line.push_error(crate::tf!(
+                            "XREF: cannot set path type for nested reference '{}'. Set it in its host drawing.",
+                            name
+                        ).as_ref());
+                        continue;
+                    }
+                    match crate::io::xref::apply_pathtype(
+                        &mut self.tabs[i].scene.document,
+                        *key,
+                        pathtype,
+                        &host,
+                    ) {
+                        Ok(_) => {
+                            self.command_line.push_output(crate::tf!(
+                                "XREF: Path set for \"{}\" — Reload to apply.",
+                                name
+                            ).as_ref());
+                            done += 1;
+                        }
+                        Err(msg) => self.command_line.push_error(msg.as_str()),
+                    }
+                }
+            }
+            XrefPaletteOp::Open => {
+                // Handled in update/mod.rs XrefRowOp dispatch (navigation), not here.
+            }
+        }
+        if done > 0 {
+            self.post_ref_op(i);
+        }
+        self.refresh_xref_manager();
+    }
+
+    /// Reload every direct drawing reference (toolbar Reload All). Same
+    /// engine path as `XRELOAD`: undo snapshot, session flags cleared,
+    /// full resolve, per-ref report, stat baselines refreshed.
+    pub(crate) fn xref_manager_reload_all(&mut self) {
+        if cfg!(target_arch = "wasm32") {
+            self.command_line.push_error(crate::t!("Reference changes are not available on web — the reference list is read-only.").as_ref());
+            return;
+        }
+        let i = self.active_tab;
+        let Some(path) = self.tabs[i].current_path.clone() else {
+            self.command_line
+                .push_error(crate::t!("XREF  Save the drawing first to resolve relative XREF paths.").as_ref());
+            return;
+        };
+        let Some(base_dir) = path.parent().map(|p| p.to_path_buf()) else {
+            self.command_line
+                .push_error(crate::t!("XREF  Save the drawing first to resolve relative XREF paths.").as_ref());
+            return;
+        };
+        let reload_keys: Vec<u64> = crate::io::xref::collect_entries_with_prev(
+            &self.tabs[i].scene.document,
+            &base_dir,
+            self.tabs[i].xref_unloaded.as_set(),
+            &self.tabs[i].xref_stat_cache.0,
+        )
+        .iter()
+        .filter(|e| e.kind == crate::io::xref_model::RefKind::DwgXref && e.parent_key.is_none())
+        .map(|e| e.key)
+        .collect();
+        self.push_undo_snapshot(i, "XREF-RELOAD");
+        for key in &reload_keys {
+            self.tabs[i].xref_unloaded.remove(key);
+            self.tabs[i].xref_stat_cache.remove(key);
+        }
+        let (infos, _dropped) =
+            crate::io::xref::resolve_xrefs(&mut self.tabs[i].scene.document, &base_dir);
+        let fresh = crate::io::xref::collect_entries_with_prev(
+            &self.tabs[i].scene.document,
+            &base_dir,
+            self.tabs[i].xref_unloaded.as_set(),
+            &self.tabs[i].xref_stat_cache.0,
+        );
+        for e in &fresh {
+            if e.status == crate::io::xref_model::RefStatus::Loaded {
+                if let Some(m) = e.modified {
+                    self.tabs[i].xref_stat_cache.insert(e.key, m);
+                }
+            }
+        }
+        for info in &infos {
+            self.report_xref_status(info);
+        }
+        self.post_ref_op(i);
+        self.refresh_xref_manager();
     }
 }
 
@@ -1367,5 +1870,311 @@ mod tests {
             .unwrap();
         assert_eq!(app.block_name_from_file("Chair"), "Chair (2)");
         assert_eq!(app.block_name_from_file("Table"), "Table");
+    }
+
+    #[test]
+    fn save_as_rebases_live_doc_paths() {
+        // F4: on Save-As completion the live document's relative reference
+        // paths are rebased onto the new base dir (same helper the save
+        // snapshot used), so the session agrees with the file just written.
+        let mut app = fresh();
+        let i = app.active_tab;
+        let dir = std::env::temp_dir().join(format!(
+            "ocs_saveas_rebase_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let old_dir = dir.join("old");
+        let new_dir = dir.join("new");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        std::fs::create_dir_all(&new_dir).unwrap();
+        let mut br = acadrust::tables::BlockRecord::new("PLAN");
+        br.flags.is_xref = true;
+        br.xref_path = "refs/plan.dwg".to_string();
+        br.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .add(br)
+            .unwrap();
+        app.tabs[i].current_path = Some(old_dir.join("host.dwg"));
+        let tab_id = app.tabs[i].id;
+        let job_id = 4242u64;
+        app.active_save_jobs.insert(tab_id, job_id);
+        let outcome = crate::app::SaveOutcome {
+            job_id,
+            tab_id,
+            epoch: app.tabs[i].scene.geometry_epoch,
+            revision: app.tabs[i].edit_revision,
+            camera_generation: app.tabs[i].scene.camera_generation,
+            path: new_dir.join("host.dwg"),
+            version: app.tabs[i].scene.document.version,
+            previous_autosave: None,
+            set_current_path: true,
+            purpose: crate::app::SavePurpose::SaveAs,
+            continuation: crate::app::SaveContinuation::None,
+            refreshed_preview: None,
+            result: Ok(()),
+        };
+        let _ = app.on_save_finished(outcome);
+        assert_eq!(
+            app.tabs[i].current_path.as_deref(),
+            Some(new_dir.join("host.dwg").as_path())
+        );
+        let br = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PLAN")
+            .unwrap();
+        assert_eq!(br.xref_path, "../old/refs/plan.dwg");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn palette_tmpdir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ocs_palette_{tag}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn palette_output(app: &OpenCADStudio, start: usize) -> String {
+        app.command_line.history[start..]
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn palette_rowop_nested_reports_per_entry() {
+        // Behavioral matrix: every row op on a NESTED row via the GUI
+        // message path. Nested rows must report per-entry errors (CLI
+        // wording), never silently skip.
+        use acadrust::tables::BlockRecord;
+        use crate::app::Message;
+        use crate::ui::window::xref_manager::XrefPaletteOp;
+        let dir = palette_tmpdir("nestedmatrix");
+        let mut host_doc = acadrust::CadDocument::new();
+        let mut inner = BlockRecord::new("INNER");
+        inner.flags.is_xref = true;
+        inner.xref_path = "inner.dwg".to_string();
+        host_doc.block_records.add(inner).unwrap();
+        let bytes = crate::io::save_to_bytes(&host_doc, "dwg", host_doc.version).unwrap();
+        std::fs::write(dir.join("host.dwg"), &bytes).unwrap();
+        let mut app = fresh();
+        let i = app.active_tab;
+        let mut br = BlockRecord::new("HOST");
+        br.flags.is_xref = true;
+        br.xref_path = dir.join("host.dwg").to_string_lossy().into_owned();
+        br.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i].scene.document.block_records.add(br).unwrap();
+        app.tabs[i].current_path = Some(dir.join("app.dwg"));
+        app.refresh_xref_manager();
+        let idx = app.xref_manager.entries.iter().position(|e| e.name == "INNER").expect("nested INNER listed");
+        assert!(app.xref_manager.entries[idx].parent_key.is_some());
+        for op in [
+            XrefPaletteOp::Detach,
+            XrefPaletteOp::Unload,
+            XrefPaletteOp::Reload,
+            XrefPaletteOp::Bind,
+            XrefPaletteOp::Overlay,
+        ] {
+            let start = app.command_line.history.len();
+            let _ = app.update(Message::XrefRowOp(idx, op));
+            let out = palette_output(&app, start);
+            assert!(out.contains("INNER"), "op {op:?} on nested row gave: {out:?}");
+            assert!(
+                app.tabs[i].scene.document.block_records.get("HOST").is_some(),
+                "op {op:?} must not mutate the direct reference"
+            );
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn palette_detach_unload_rowop_gui_path() {
+        // Reproduction for "Detach/Unload from the palette do nothing":
+        // drive the exact GUI message path (row right-click menu item).
+        use acadrust::tables::BlockRecord;
+        use crate::app::Message;
+        use crate::ui::window::xref_manager::XrefPaletteOp;
+        let mut app = fresh();
+        let i = app.active_tab;
+        for name in ["PLAN", "SITE"] {
+            let mut br = BlockRecord::new(name);
+            br.flags.is_xref = true;
+            br.xref_path = format!("old/{}.dwg", name.to_lowercase());
+            br.handle = app.tabs[i].scene.document.allocate_handle();
+            app.tabs[i].scene.document.block_records.add(br).unwrap();
+        }
+        app.tabs[i].current_path = Some(std::env::temp_dir().join("ocs_repro_host.dwg"));
+        app.refresh_xref_manager();
+        let idx = app.xref_manager.entries.iter().position(|e| e.name == "PLAN").expect("PLAN listed");
+        let start = app.command_line.history.len();
+        let _ = app.update(Message::XrefRowOp(idx, XrefPaletteOp::Detach));
+        let out = palette_output(&app, start);
+        assert!(out.contains("PLAN"), "detach output missing, got: {out:?}");
+        assert!(app.tabs[i].scene.document.block_records.get("PLAN").is_none(), "PLAN definition must be gone");
+        let idx = app.xref_manager.entries.iter().position(|e| e.name == "SITE").expect("SITE listed");
+        let start = app.command_line.history.len();
+        let _ = app.update(Message::XrefRowOp(idx, XrefPaletteOp::Unload));
+        let out = palette_output(&app, start);
+        assert!(out.contains("SITE"), "unload output missing, got: {out:?}");
+        assert_eq!(
+            app.xref_manager.entries.iter().find(|e| e.name == "SITE").unwrap().status,
+            crate::io::xref_model::RefStatus::Unloaded
+        );
+    }
+
+    #[test]
+    fn palette_overlay_and_pathtype_rowop_gui_path() {
+        // Row-menu Overlay + Change-Path row ops on a direct row via the
+        // GUI message path: type flag flips, saved path clears.
+        use acadrust::tables::BlockRecord;
+        use crate::app::Message;
+        use crate::io::xref_model::{Pathtype, RefType};
+        use crate::ui::window::xref_manager::XrefPaletteOp;
+        let mut app = fresh();
+        let i = app.active_tab;
+        let mut br = BlockRecord::new("PLAN");
+        br.flags.is_xref = true;
+        br.xref_path = "old/plan.dwg".to_string();
+        br.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i].scene.document.block_records.add(br).unwrap();
+        app.tabs[i].current_path = Some(std::env::temp_dir().join("ocs_rowop_host.dwg"));
+        app.refresh_xref_manager();
+        let idx = app.xref_manager.entries.iter().position(|e| e.name == "PLAN").expect("PLAN listed");
+        let start = app.command_line.history.len();
+        let _ = app.update(Message::XrefRowOp(idx, XrefPaletteOp::Overlay));
+        let out = palette_output(&app, start);
+        assert!(out.contains("PLAN"), "got: {out:?}");
+        let br = app.tabs[i].scene.document.block_records.get("PLAN").unwrap();
+        assert!(br.flags.is_xref_overlay && !br.flags.is_xref);
+        assert_eq!(app.xref_manager.entries.iter().find(|e| e.name == "PLAN").unwrap().ref_type, RefType::Overlay);
+        let start = app.command_line.history.len();
+        let _ = app.update(Message::XrefRowOp(idx, XrefPaletteOp::Pathtype(Pathtype::None)));
+        let out = palette_output(&app, start);
+        assert!(out.contains("PLAN"), "got: {out:?}");
+        let br = app.tabs[i].scene.document.block_records.get("PLAN").unwrap();
+        assert_eq!(br.xref_path, "plan.dwg", "Remove Path strips to the bare filename");
+    }
+
+    #[test]
+    fn palette_reload_all_resolves_direct_refs() {
+        // Toolbar Reload All against a real on-disk reference: full
+        // resolve, per-ref report, entry back to Loaded.
+        use acadrust::tables::BlockRecord;
+        let dir = palette_tmpdir("reloadall");
+        let ref_doc = acadrust::CadDocument::new();
+        let bytes = crate::io::save_to_bytes(&ref_doc, "dwg", ref_doc.version).unwrap();
+        std::fs::write(dir.join("plan.dwg"), &bytes).unwrap();
+        let mut app = fresh();
+        let i = app.active_tab;
+        let mut br = BlockRecord::new("PLAN");
+        br.flags.is_xref = true;
+        br.xref_path = dir.join("plan.dwg").to_string_lossy().into_owned();
+        br.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i].scene.document.block_records.add(br).unwrap();
+        app.tabs[i].current_path = Some(dir.join("host.dwg"));
+        let start = app.command_line.history.len();
+        app.xref_manager_reload_all();
+        let out = palette_output(&app, start);
+        assert!(out.contains("PLAN"), "reload-all must report the reference, got: {out:?}");
+        let entry = app.xref_manager.entries.iter().find(|e| e.name == "PLAN").expect("PLAN listed");
+        assert_eq!(entry.status, crate::io::xref_model::RefStatus::Loaded, "PLAN must resolve Loaded");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn find_replace_prompt_prefills_command_line() {
+        // Toolbar Find and Replace hands the existing `XREF Path Find`
+        // parsing a prefilled command line.
+        use crate::app::Message;
+        let mut app = fresh();
+        let _ = app.update(Message::XrefFindReplacePrompt);
+        assert_eq!(app.command_line.input, "XREF Path Find ");
+    }
+
+    #[test]
+    fn palette_unload_nested_reports_per_entry() {
+        // F6: palette Unload on a nested row reports the per-entry nested
+        // error (CLI wording) instead of the confusing 'no loaded reference'.
+        use acadrust::tables::BlockRecord;
+        use crate::ui::window::xref_manager::XrefPaletteOp;
+        let dir = palette_tmpdir("nested");
+        let mut host_doc = acadrust::CadDocument::new();
+        let mut inner = BlockRecord::new("INNER");
+        inner.flags.is_xref = true;
+        inner.xref_path = "inner.dwg".to_string();
+        host_doc.block_records.add(inner).unwrap();
+        let bytes = crate::io::save_to_bytes(&host_doc, "dwg", host_doc.version).unwrap();
+        std::fs::write(dir.join("host.dwg"), &bytes).unwrap();
+        let mut app = fresh();
+        let i = app.active_tab;
+        let mut br = BlockRecord::new("HOST");
+        br.flags.is_xref = true;
+        br.xref_path = dir.join("host.dwg").to_string_lossy().into_owned();
+        br.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i].scene.document.block_records.add(br).unwrap();
+        app.tabs[i].current_path = Some(dir.join("app.dwg"));
+        app.refresh_xref_manager();
+        let idx = app.xref_manager.entries.iter().position(|e| e.name == "INNER").expect("nested INNER listed");
+        assert!(app.xref_manager.entries[idx].parent_key.is_some());
+        app.xref_manager.selected.insert(idx);
+        let start = app.command_line.history.len();
+        app.xref_manager_op(XrefPaletteOp::Unload);
+        let out = palette_output(&app, start);
+        assert!(out.contains("INNER"), "got: {out:?}");
+        assert_eq!(app.command_line.history.len(), start + 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn palette_reload_skips_images_without_clearing_flags() {
+        // F7: palette Reload on an image/PDF row reports the drawing-only
+        // error and leaves its unloaded flag untouched (no spurious
+        // no-match after a flag clear).
+        use acadrust::objects::{ImageDefinition, ObjectType};
+        use crate::io::xref_model::RefKind;
+        use crate::ui::window::xref_manager::XrefPaletteOp;
+        let dir = palette_tmpdir("imgreload");
+        let mut app = fresh();
+        let i = app.active_tab;
+        let h = app.tabs[i].scene.document.allocate_handle();
+        let mut def = ImageDefinition::with_dimensions("img.png", 8, 8);
+        def.handle = h;
+        app.tabs[i].scene.document.objects.insert(h, ObjectType::ImageDefinition(def));
+        let mut img = acadrust::entities::RasterImage::new(
+            "img.png",
+            acadrust::types::Vector3::ZERO,
+            8.0,
+            8.0,
+        );
+        img.definition_handle = Some(h);
+        app.tabs[i].scene.document.add_entity(acadrust::EntityType::RasterImage(img)).unwrap();
+        app.tabs[i].current_path = Some(dir.join("host.dwg"));
+        app.refresh_xref_manager();
+        let idx = app.xref_manager.entries.iter().position(|e| e.kind == RefKind::Image).expect("image listed");
+        let key = app.xref_manager.entries[idx].key;
+        app.xref_manager.selected.insert(idx);
+        app.tabs[i].xref_unloaded.add(key);
+        let start = app.command_line.history.len();
+        app.xref_manager_op(XrefPaletteOp::Reload);
+        let out = palette_output(&app, start);
+        assert!(out.contains("img.png"), "got: {out:?}");
+        assert_eq!(app.command_line.history.len(), start + 1);
+        assert!(app.tabs[i].xref_unloaded.is_unloaded(key), "image flag must stay untouched");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

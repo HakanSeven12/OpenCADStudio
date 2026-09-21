@@ -313,17 +313,25 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
         } else {
             "No matches"
         };
-        container(text(crate::t!(msg)).size(12).color(iced::Color {
-            r: 0.55,
-            g: 0.55,
-            b: 0.55,
-            a: 1.0,
-        }))
-        .center_x(Fill)
-        .center_y(Fill)
-        .width(Fill)
-        .height(Fill)
-        .into()
+        container(
+            text(crate::t!(msg))
+                .size(12)
+                .style(|theme: &Theme| iced::widget::text::Style {
+                    color: Some(
+                        theme
+                            .palette()
+                            .background
+                            .base
+                            .text
+                            .scale_alpha(0.72),
+                    ),
+                }),
+        )
+            .center_x(Fill)
+            .center_y(Fill)
+            .width(Fill)
+            .height(Fill)
+            .into()
     } else {
         let mut col = column![].spacing(6);
         for chunk in filtered.chunks(palette.preview_size.columns()) {
@@ -359,6 +367,56 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
         .into()
 }
 
+/// Theme-aware foreground/background pair for a block card.
+///
+/// Centralizes the card's text/background mapping so the contrast suite can
+/// exercise the exact colors the UI renders (instead of re-implementing the
+/// match). Normal cards use the `base` pair, hovered/pressed cards use the
+/// `strong` pair, and the actively-placing card uses the `primary.base` pair.
+pub(crate) fn block_card_colors(
+    theme: &Theme,
+    is_placing: bool,
+    status: button::Status,
+) -> (Color, Color) {
+    let palette = theme.palette();
+    if is_placing {
+        (palette.primary.base.color, palette.primary.base.text)
+    } else {
+        match status {
+            button::Status::Hovered | button::Status::Pressed => {
+                (palette.background.strong.color, palette.background.strong.text)
+            }
+            _ => (
+                palette.background.base.color,
+                palette.background.base.text,
+            ),
+        }
+    }
+}
+
+/// Border color for a block card in a given state (exposed for contrast tests).
+pub(crate) fn block_card_border(theme: &Theme, is_placing: bool) -> Color {
+    let palette = theme.palette();
+    if is_placing {
+        palette.primary.base.color
+    } else {
+        palette.background.neutral.color
+    }
+}
+
+/// Theme-aware foreground for the palette's header icon buttons.
+///
+/// Transparent resting state composites over the dock (`base`) background;
+/// hovered/pressed state sits on the `strong` surface, so each state pairs
+/// with its own background's text color to preserve contrast.
+pub(crate) fn block_icon_button_text_color(theme: &Theme, status: button::Status) -> Color {
+    let palette = theme.palette();
+    match status {
+        button::Status::Hovered | button::Status::Pressed => palette.background.strong.text,
+        _ => palette.background.base.text,
+    }
+}
+
 fn block_card<'a>(palette: &'a BlockPalette, block: &'a BlockEntry) -> Element<'a, Message> {
     let is_placing = palette.placing.as_deref() == Some(block.name.as_str());
     let preview = canvas(BlockPreviewCanvas {
@@ -369,9 +427,13 @@ fn block_card<'a>(palette: &'a BlockPalette, block: &'a BlockEntry) -> Element<'
     // Fixed height guarantees the label occupies exactly one line, so every
     // cell in a row keeps the same height even for long names (the elide budget
     // handles overflow, and this clips anything that still won't fit).
+    //
+    // NOTE: no explicit `.color(...)` here — the label inherits the button's
+    // `text_color` so normal/hover/placing states each get a theme-aware
+    // foreground with sufficient contrast on both light and dark themes.
+    // (A hardcoded `Color::WHITE` is unreadable on light themes.)
     let label = text(crate::ui::text_util::elide(&block.name, MAX_LABEL_CHARS))
         .size(11)
-        .color(Color::WHITE)
         .width(Fill)
         .height(Length::Fixed(LABEL_LINE_H))
         .center();
@@ -382,18 +444,8 @@ fn block_card<'a>(palette: &'a BlockPalette, block: &'a BlockEntry) -> Element<'
         )))
         .width(Fill)
         .style(move |theme: &Theme, status| {
-            let palette = theme.palette();
-            let neutral = palette.background.neutral.color;
-            let base = palette.background.base.color;
-            let strong = palette.background.strong.color;
-            let (bg, border) = if is_placing {
-                (palette.primary.base.color, palette.primary.base.color)
-            } else {
-                match status {
-                    button::Status::Hovered | button::Status::Pressed => (strong, neutral),
-                    _ => (base, neutral),
-                }
-            };
+            let (bg, fg) = block_card_colors(theme, is_placing, status);
+            let border = block_card_border(theme, is_placing);
             button::Style {
                 background: Some(Background::Color(bg)),
                 border: Border {
@@ -401,7 +453,7 @@ fn block_card<'a>(palette: &'a BlockPalette, block: &'a BlockEntry) -> Element<'
                     width: 1.0,
                     radius: 3.0.into(),
                 },
-                text_color: Color::WHITE,
+                text_color: fg,
                 ..Default::default()
             }
         })
@@ -410,7 +462,9 @@ fn block_card<'a>(palette: &'a BlockPalette, block: &'a BlockEntry) -> Element<'
 
 fn icon_button<'a>(icon: IconKind, msg: BlockPaletteMsg) -> Element<'a, Message> {
     let icon_el: Element<'_, Message> = match icon {
-        IconKind::Glyph(s) => text(s).size(15).color(Color::WHITE).into(),
+        // No explicit color — inherits the button's theme-aware `text_color`
+        // so glyphs stay legible on light themes.
+        IconKind::Glyph(s) => text(s).size(15).into(),
         IconKind::Svg(bytes) => crate::ui::icons::semantic(bytes, TOOL_H),
     };
     button(icon_el)
@@ -428,7 +482,7 @@ fn icon_button<'a>(icon: IconKind, msg: BlockPaletteMsg) -> Element<'a, Message>
                 radius: 3.0.into(),
                 ..Default::default()
             },
-            text_color: Color::WHITE,
+            text_color: block_icon_button_text_color(theme, status),
             ..Default::default()
         })
         .into()

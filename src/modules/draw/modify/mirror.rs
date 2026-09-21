@@ -125,6 +125,15 @@ impl CadCommand for MirrorCommand {
         matches!(self.step, Step::AskErase { .. })
     }
 
+    fn options(&self) -> Vec<crate::command::CmdOption> {
+        use crate::command::CmdOption;
+        if matches!(self.step, Step::AskErase { .. }) {
+            vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")]
+        } else {
+            Vec::new()
+        }
+    }
+
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let Step::AskErase { p1, p2 } = &self.step else {
             return None;

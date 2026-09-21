@@ -470,7 +470,7 @@ fn image_triangle_matrix(p: [[f32; 2]; 3], uv: [[f32; 2]; 3]) -> Option<[f32; 6]
 /// The parent comes from `iced::window::run`, keeping the portal request tied
 /// to the visible app window on Wayland instead of silently resolving to
 /// `None` on desktops that reject a parentless save dialog (#537).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
 pub fn pick_pdf_path_owned(
     stem: String,
     parent: &dyn iced::window::Window,
@@ -491,6 +491,25 @@ pub fn pick_pdf_path_owned(
 #[cfg(target_arch = "wasm32")]
 pub async fn pick_pdf_path_owned(stem: String) -> Option<std::path::PathBuf> {
     Some(std::path::PathBuf::from(format!("{stem}.pdf")))
+}
+
+/// Windows: pick the PDF destination with the async dialog on a worker
+/// thread. The parented blocking dialog ran `IFileDialog::Show` on the UI
+/// thread inside the window callback, and when the target name already
+/// existed the overwrite-confirmation popup is a second nested modal that
+/// never gets pumped there — the app froze instead of asking. The async
+/// backend runs the dialog off-thread; it is the same pattern the DWG
+/// Save As flow uses, whose confirm popup works.
+#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+pub async fn pick_pdf_path_async(stem: String) -> Option<std::path::PathBuf> {
+    let handle = crate::sys::file_dialog()
+        .set_title(crate::t!("Export as PDF").as_ref())
+        .set_file_name(format!("{stem}.pdf"))
+        .add_filter(crate::t!("PDF Files").as_ref(), &["pdf"])
+        .add_filter(crate::t!("All Files").as_ref(), &["*"])
+        .save_file()
+        .await?;
+    Some(crate::sys::handle_path(&handle))
 }
 
 // ── PDF builder ───────────────────────────────────────────────────────────
@@ -781,6 +800,10 @@ fn append_pdf_page(
                     emit_wire_fills(
                         &mut ops,
                         std::slice::from_ref(&wire.wire),
+                        // The host wire's composed draw depth: depth_override
+                        // alone is a per-block child label and would sort the
+                        // fill outside its block's band.
+                        wire.draw_depth,
                         ox,
                         oy,
                         plot_style,
@@ -1218,6 +1241,7 @@ fn plotted_color(rgb: [f32; 3], alpha: f32, screening: f32, options: PdfPlotOpti
 fn emit_wire_fills(
     ops: &mut Vec<Op>,
     wires: &[WireModel],
+    wire_depth: f32,
     ox: f64,
     oy: f64,
     plot_style: Option<&PlotStyleTable>,
@@ -1272,9 +1296,11 @@ fn emit_wire_fills(
                     line_weight_px: wire.line_weight_px,
                     angle_offset: 0.0,
                     scale: 1.0 / scale.max(1.0e-6),
-                    // Ordering was decided by the DrawItem sort outside; this
-                    // model only carries pattern/style data for emit_hatch.
-                    draw_depth: wire.depth_override.unwrap_or(0.0),
+                    // The host wire's composed draw depth (PlotWire carries
+                    // wire_draw_depth). depth_override alone is a per-block
+                    // child label and would sort the fill outside its block's
+                    // band; keep the pattern fill co-sorted with its wire.
+                    draw_depth: wire_depth,
                 };
                 emit_hatch(
                     ops,

@@ -9,8 +9,8 @@ use crate::t;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
-    center_grip, edit_prop as edit, oriented_triangle_grip, parse_f64, ro_prop as ro,
-    square_grip,
+    center_grip, edit_prop as edit, format_area, format_length, oriented_triangle_grip, parse_f64,
+    ro_prop as ro, square_grip,
 };
 use crate::entities::traits::RenderConvertible;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
@@ -163,33 +163,33 @@ fn properties(ell: &Ellipse) -> Vec<PropSection> {
     vec![PropSection {
         title: t!("Geometry").into_owned(),
         props: vec![
-            ro(t!("Start X").as_ref(), "start_x", format!("{:.4}", start.x)),
-            ro(t!("Start Y").as_ref(), "start_y", format!("{:.4}", start.y)),
-            ro(t!("Start Z").as_ref(), "start_z", format!("{:.4}", start.z)),
+            ro(t!("Start X").as_ref(), "start_x", format_length(start.x)),
+            ro(t!("Start Y").as_ref(), "start_y", format_length(start.y)),
+            ro(t!("Start Z").as_ref(), "start_z", format_length(start.z)),
             edit(t!("Center X").as_ref(), "center_x", ell.center.x),
             edit(t!("Center Y").as_ref(), "center_y", ell.center.y),
             edit(t!("Center Z").as_ref(), "center_z", ell.center.z),
-            ro(t!("End X").as_ref(), "end_x", format!("{:.4}", end.x)),
-            ro(t!("End Y").as_ref(), "end_y", format!("{:.4}", end.y)),
-            ro(t!("End Z").as_ref(), "end_z", format!("{:.4}", end.z)),
+            ro(t!("End X").as_ref(), "end_x", format_length(end.x)),
+            ro(t!("End Y").as_ref(), "end_y", format_length(end.y)),
+            ro(t!("End Z").as_ref(), "end_z", format_length(end.z)),
             edit(t!("Major radius").as_ref(), "major_r", r_major),
             edit(t!("Minor radius").as_ref(), "minor_r", r_minor),
             edit(t!("Radius ratio").as_ref(), "ratio", ell.minor_axis_ratio),
             edit(t!("Start angle").as_ref(), "start_angle", start_angle),
             edit(t!("End angle").as_ref(), "end_angle", end_angle),
-            ro(t!("Major axis vector X").as_ref(), "major_x", format!("{:.4}", major_vec.x)),
-            ro(t!("Major axis vector Y").as_ref(), "major_y", format!("{:.4}", major_vec.y)),
-            ro(t!("Major axis vector Z").as_ref(), "major_z", format!("{:.4}", major_vec.z)),
-            ro(t!("Minor axis vector X").as_ref(), "minor_x", format!("{:.4}", minor_vec.x)),
-            ro(t!("Minor axis vector Y").as_ref(), "minor_y", format!("{:.4}", minor_vec.y)),
-            ro(t!("Minor axis vector Z").as_ref(), "minor_z", format!("{:.4}", minor_vec.z)),
-            ro(t!("Area").as_ref(), "area", format!("{:.4}", props.area)),
+            ro(t!("Major axis vector X").as_ref(), "major_x", format_length(major_vec.x)),
+            ro(t!("Major axis vector Y").as_ref(), "major_y", format_length(major_vec.y)),
+            ro(t!("Major axis vector Z").as_ref(), "major_z", format_length(major_vec.z)),
+            ro(t!("Minor axis vector X").as_ref(), "minor_x", format_length(minor_vec.x)),
+            ro(t!("Minor axis vector Y").as_ref(), "minor_y", format_length(minor_vec.y)),
+            ro(t!("Minor axis vector Z").as_ref(), "minor_z", format_length(minor_vec.z)),
+            ro(t!("Area").as_ref(), "area", format_area(props.area)),
             ro(t!("Start parameter").as_ref(), "start_param", format!("{:.4}", ell.start_parameter)),
             ro(t!("End parameter").as_ref(), "end_param", format!("{:.4}", ell.end_parameter)),
-            ro(t!("Length").as_ref(), "length", format!("{:.4}", props.perimeter)),
-            ro(t!("Normal X").as_ref(), "normal_x", format!("{:.4}", ell.normal.x)),
-            ro(t!("Normal Y").as_ref(), "normal_y", format!("{:.4}", ell.normal.y)),
-            ro(t!("Normal Z").as_ref(), "normal_z", format!("{:.4}", ell.normal.z)),
+            ro(t!("Length").as_ref(), "length", format_length(props.perimeter)),
+            edit(t!("Normal X").as_ref(), "normal_x", ell.normal.x),
+            edit(t!("Normal Y").as_ref(), "normal_y", ell.normal.y),
+            edit(t!("Normal Z").as_ref(), "normal_z", ell.normal.z),
         ],
     }]
 }
@@ -220,6 +220,26 @@ fn apply_geom_prop(ell: &mut Ellipse, field: &str, value: &str) {
         "ratio" if v > 0.0 => ell.minor_axis_ratio = v,
         "start_angle" => ell.start_parameter = v.to_radians(),
         "end_angle" => ell.end_parameter = v.to_radians(),
+        "normal_x" | "normal_y" | "normal_z" => {
+            let mut normal = [ell.normal.x, ell.normal.y, ell.normal.z];
+            match field {
+                "normal_x" => normal[0] = v,
+                "normal_y" => normal[1] = v,
+                "normal_z" => normal[2] = v,
+                _ => {}
+            }
+            let Some(normal) = cadkernel::space::Vec3::from(normal).normalize() else {
+                return;
+            };
+            let Some(major) = cadkernel::space::reorient_axis_to_plane(
+                [ell.major_axis.x, ell.major_axis.y, ell.major_axis.z],
+                normal.to_array(),
+            ) else {
+                return;
+            };
+            ell.normal = acadrust::types::Vector3::new(normal.x, normal.y, normal.z);
+            ell.major_axis = acadrust::types::Vector3::new(major[0], major[1], major[2]);
+        }
         _ => {}
     }
 }
@@ -422,6 +442,19 @@ mod grip_tests {
     }
     fn xy_len(v: &acadrust::entities::Ellipse) -> f64 {
         (v.major_axis.x * v.major_axis.x + v.major_axis.y * v.major_axis.y).sqrt()
+    }
+
+    #[test]
+    fn editing_normal_reorients_major_axis_in_kernel() {
+        let mut e = ell(10.0, 0.5);
+
+        apply_geom_prop(&mut e, "normal_x", "1");
+
+        let normal = DVec3::new(e.normal.x, e.normal.y, e.normal.z);
+        let major = DVec3::new(e.major_axis.x, e.major_axis.y, e.major_axis.z);
+        assert!((normal.length() - 1.0).abs() < 1.0e-12);
+        assert!((major.length() - 10.0).abs() < 1.0e-9);
+        assert!(normal.dot(major).abs() < 1.0e-9);
     }
 
     #[test]

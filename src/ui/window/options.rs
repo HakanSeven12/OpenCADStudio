@@ -1,5 +1,6 @@
+pub(crate) mod spacemouse;
 use crate::app::config::UiThemeConfig;
-use crate::app::settings::CursorType;
+use crate::app::settings::{CursorType, RightClickMode};
 use crate::app::Message;
 use iced::widget::{
     button, column, container, row, scrollable, slider, text, text_input, Space,
@@ -72,6 +73,12 @@ pub struct AppPrefs {
     pub show_ucs_icon: bool,
     /// UCSICON ORigin: draw it at the origin rather than the corner.
     pub ucs_icon_at_origin: bool,
+    /// SHORTCUTMENU: what a right-click in the drawing area does.
+    pub right_click_mode: RightClickMode,
+    /// SHORTCUTMENUDURATION: time-sensitive hold threshold, ms.
+    pub right_click_hold_ms: i32,
+    /// Open the Plot / Page Setup dialog for every new layout.
+    pub page_setup_on_new_layout: bool,
 }
 
 /// The fixed locations the Files page lists.
@@ -141,6 +148,43 @@ impl<T> fmt::Display for Labelled<T> {
     }
 }
 
+/// A background swatch that opens the colour wheel when clicked.
+///
+/// The wheel sits alongside the hex field rather than replacing it: typing
+/// `#1E1E1E` stays the fastest way to reproduce an exact colour, while the
+/// wheel is for choosing one by eye.
+fn bg_swatch_picker<'a>(
+    target: crate::app::BgTarget,
+    rgb: [u8; 3],
+    open: Option<crate::app::BgTarget>,
+) -> Element<'a, Message> {
+    let colour = iced::Color::from_rgb8(rgb[0], rgb[1], rgb[2]);
+    let swatch = container(Space::new())
+        .width(28)
+        .height(22)
+        .style(move |theme: &Theme| container::Style {
+            background: Some(Background::Color(colour)),
+            border: Border {
+                color: theme.palette().background.strong.color,
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        });
+    let underlay = button(swatch)
+        .on_press(Message::BgPickerOpen(target))
+        .padding(0)
+        .style(button::text);
+    iced_aw::ColorPicker::new(
+        open == Some(target),
+        colour,
+        underlay,
+        Message::BgPickerCancel,
+        Message::BgPickerSubmit,
+    )
+    .into()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn view_window<'a>(
     default_save_format: &'a str,
@@ -153,6 +197,7 @@ pub fn view_window<'a>(
     cursor_size: i32,
     selection: SelectionPrefs,
     prefs: AppPrefs,
+    spacemouse: Element<'a, Message>,
     snap_angle_input: &'a str,
     drawing_prefs: DrawingPrefs,
     folders: Folders,
@@ -166,6 +211,9 @@ pub fn view_window<'a>(
     model_bg_input: &'a str,
     paper_bg_input: &'a str,
     desk_bg_input: &'a str,
+    bg_picker: Option<crate::app::BgTarget>,
+    dirty: bool,
+    close_confirm: bool,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
     let selected_format = crate::io::SAVE_FORMAT_OPTIONS
@@ -173,7 +221,7 @@ pub fn view_window<'a>(
         .copied()
         .find(|candidate| *candidate == default_save_format);
 
-    let theme_options = Theme::ALL
+    let theme_options = crate::app::config::all_themes()
         .iter()
         .map(ToString::to_string)
         .chain(std::iter::once("Custom".to_string()))
@@ -216,6 +264,18 @@ pub fn view_window<'a>(
         .find(|choice| choice.value == cursor_type)
         .cloned();
 
+    let right_click_options = RightClickMode::ALL
+        .into_iter()
+        .map(|value: RightClickMode| Labelled {
+            label: crate::t!(value.label()).into_owned(),
+            value,
+        })
+        .collect::<Vec<_>>();
+    let selected_right_click = right_click_options
+        .iter()
+        .find(|choice| choice.value == prefs.right_click_mode)
+        .cloned();
+
     let palette = ui_theme.palette.to_iced();
     let colors = [
         (crate::tr!("options", "color-background"), palette.background),
@@ -253,8 +313,18 @@ pub fn view_window<'a>(
         );
     }
 
+    // Changes show at once but are committed by OK / Apply; Close puts them
+    // back (asking first when there is something to lose).
+    let ok = button(text(crate::t!("OK")).size(12))
+        .on_press(Message::OptionsOk)
+        .padding([6, 18])
+        .style(button::primary);
+    let apply = button(text(crate::t!("Apply")).size(12))
+        .on_press_maybe(dirty.then_some(Message::OptionsApply))
+        .padding([6, 18])
+        .style(if dirty { button::secondary } else { button::text });
     let close = button(text(crate::tr!("action", "close")).size(12))
-        .on_press(Message::CloseModal)
+        .on_press(Message::OptionsClose)
         .padding([6, 18])
         .style(button::secondary);
 
@@ -304,6 +374,29 @@ pub fn view_window<'a>(
                 .style(button::secondary),
         ]
         .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(22),
+        text(crate::t!("Plotting")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Plot device, paper, scale and plot styles"))
+                .size(12)
+                .width(Fill),
+            button(text(crate::t!("Plot and Page Setup…")).size(11))
+                .on_press(Message::PlotDialogOpen)
+                .padding([4, 10])
+                .style(button::secondary),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(prefs.page_setup_on_new_layout)
+                .on_toggle(Message::PageSetupOnNewLayoutChanged)
+                .size(15),
+            text(crate::t!("Show the page setup for new layouts")).size(12),
+        ]
+        .spacing(8)
         .align_y(iced::Center),
     ]
     .spacing(0)
@@ -400,20 +493,6 @@ pub fn view_window<'a>(
         ]
         .spacing(8)
         .align_y(iced::Center),
-        Space::new().height(22),
-        text(crate::t!("Plotting")).size(15),
-        Space::new().height(10),
-        row![
-            text(crate::t!("Plot device, paper, scale and plot styles"))
-                .size(12)
-                .width(Fill),
-            button(text(crate::t!("Plot and Page Setup…")).size(11))
-                .on_press(Message::PlotDialogOpen)
-                .padding([4, 10])
-                .style(button::secondary),
-        ]
-        .spacing(10)
-        .align_y(iced::Center),
     ]
     .spacing(0)
     .width(sizing.width);
@@ -437,58 +516,10 @@ pub fn view_window<'a>(
         });
 
     let model_bg_rgb = model_space.custom_bg.unwrap_or(crate::app::config::CLASSIC_CAD_DARK_BG);
-    let model_bg_swatch = container(Space::new())
-        .width(28)
-        .height(22)
-        .style(move |theme: &Theme| container::Style {
-            background: Some(Background::Color(iced::Color::from_rgb8(
-                model_bg_rgb[0],
-                model_bg_rgb[1],
-                model_bg_rgb[2],
-            ))),
-            border: Border {
-                color: theme.palette().background.strong.color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        });
 
     let paper_bg_rgb = model_space.custom_paper_bg.unwrap_or(crate::app::config::DEFAULT_PAPER_BG);
-    let paper_bg_swatch = container(Space::new())
-        .width(28)
-        .height(22)
-        .style(move |theme: &Theme| container::Style {
-            background: Some(Background::Color(iced::Color::from_rgb8(
-                paper_bg_rgb[0],
-                paper_bg_rgb[1],
-                paper_bg_rgb[2],
-            ))),
-            border: Border {
-                color: theme.palette().background.strong.color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        });
 
     let desk_bg_rgb = model_space.custom_desk_bg.unwrap_or(crate::app::config::DEFAULT_DESK_BG);
-    let desk_bg_swatch = container(Space::new())
-        .width(28)
-        .height(22)
-        .style(move |theme: &Theme| container::Style {
-            background: Some(Background::Color(iced::Color::from_rgb8(
-                desk_bg_rgb[0],
-                desk_bg_rgb[1],
-                desk_bg_rgb[2],
-            ))),
-            border: Border {
-                color: theme.palette().background.strong.color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        });
 
     let mode_options = crate::app::config::ModelSpaceMode::ALL
         .into_iter()
@@ -623,7 +654,7 @@ pub fn view_window<'a>(
         display = display.push(Space::new().height(10)).push(
             row![
                 text(crate::t!("Model background")).size(12).width(140),
-                model_bg_swatch,
+                bg_swatch_picker(crate::app::BgTarget::Model, model_bg_rgb, bg_picker),
                 text_input("#RRGGBB", model_bg_input)
                     .on_input(Message::ModelSpaceBgChanged)
                     .width(150),
@@ -636,7 +667,7 @@ pub fn view_window<'a>(
     display = display.push(Space::new().height(10)).push(
         row![
             text(crate::t!("Paper background")).size(12).width(140),
-            paper_bg_swatch,
+            bg_swatch_picker(crate::app::BgTarget::Paper, paper_bg_rgb, bg_picker),
             text_input("#RRGGBB", paper_bg_input)
                 .on_input(Message::PaperSpaceBgChanged)
                 .width(150),
@@ -648,7 +679,7 @@ pub fn view_window<'a>(
     display = display.push(Space::new().height(10)).push(
         row![
             text(crate::t!("Desk surround")).size(12).width(140),
-            desk_bg_swatch,
+            bg_swatch_picker(crate::app::BgTarget::Desk, desk_bg_rgb, bg_picker),
             text_input("#RRGGBB", desk_bg_input)
                 .on_input(Message::DeskSpaceBgChanged)
                 .width(150),
@@ -1135,6 +1166,8 @@ pub fn view_window<'a>(
     let user_prefs = column![
         text(crate::t!("User Preferences")).size(15),
         Space::new().height(10),
+        spacemouse,
+        Space::new().height(12),
         text(crate::t!("Zoom")).size(15),
         Space::new().height(10),
         row![
@@ -1213,6 +1246,43 @@ pub fn view_window<'a>(
         Space::new().height(6),
         text(crate::t!(
             "Which annotative objects pick up a newly set annotation scale (ANNOAUTOSCALE)."
+        ))
+        .size(11)
+        .width(sizing.width),
+        Space::new().height(24),
+        text(crate::t!("Right-click Customization")).size(15),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Right-click in drawing area")).size(12).width(150),
+            iced::widget::pick_list(
+                selected_right_click,
+                right_click_options,
+                |choice| choice.label.clone(),
+            )
+            .on_select(|choice| Message::RightClickModeChanged(choice.value))
+            .width(Fill),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(12),
+        row![
+            text(crate::t!("Hold duration")).size(12).width(150),
+            slider(
+                100..=1000,
+                prefs.right_click_hold_ms.clamp(100, 1000),
+                Message::RightClickHoldMsChanged
+            )
+            .step(50)
+            .width(Fill),
+            text(format!("{} ms", prefs.right_click_hold_ms.clamp(100, 1000)))
+                .size(11)
+                .width(52),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "Shortcut menu: right-click always opens the menu. Time-sensitive: a quick click is Enter, holding longer opens the menu (SHORTCUTMENUDURATION)."
         ))
         .size(11)
         .width(sizing.width),
@@ -1610,7 +1680,7 @@ pub fn view_window<'a>(
         // controls at the trailing edge of the Options content.
         scrollable(content).spacing(8).height(Fill),
         Space::new().height(12),
-        row![Space::new().width(Fill), close],
+        row![Space::new().width(Fill), ok, apply, close].spacing(8),
     ]
     .width(Fill)
     .height(sizing.height);
@@ -1620,10 +1690,13 @@ pub fn view_window<'a>(
         .height(sizing.height);
 
     let intrinsic = sizing.width == crate::ui::modal::ModalSizing::INTRINSIC.width;
-    container(body)
+    let main = container(body)
         .style(container::rounded_box)
         .padding([16, 18])
         .width(if intrinsic { iced::Length::Fixed(DIALOG_WIDTH) } else { sizing.width })
-        .height(if intrinsic { iced::Length::Fixed(DIALOG_HEIGHT) } else { sizing.height })
-        .into()
+        .height(if intrinsic { iced::Length::Fixed(DIALOG_HEIGHT) } else { sizing.height });
+    if !close_confirm {
+        return main.into();
+    }
+    crate::ui::modal::discard_guard(main, Message::OptionsCloseDiscard, Message::OptionsCloseKeep)
 }

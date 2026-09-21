@@ -1460,7 +1460,7 @@ mod block_wire_storage_tests {
     /// real device, so the stride is checked against the Rust record instead.
     #[test]
     fn segment_struct_matches_the_rust_record() {
-        let module = module(include_str!("../../shaders/block_wire_storage.wgsl"));
+        let module = module(draw_order_shader!("block_wire_storage.wgsl"));
         validate(&module);
         let mut layouter = naga::proc::Layouter::default();
         layouter
@@ -1484,8 +1484,8 @@ mod block_wire_storage_tests {
     /// fragment behaviour. Only the geometry source differs.
     #[test]
     fn both_block_wire_shaders_expose_the_same_entry_points() {
-        let packed = module(include_str!("../../shaders/block_wire.wgsl"));
-        let storage = module(include_str!("../../shaders/block_wire_storage.wgsl"));
+        let packed = module(draw_order_shader!("block_wire.wgsl"));
+        let storage = module(draw_order_shader!("block_wire_storage.wgsl"));
         validate(&packed);
         let names = |m: &naga::Module| {
             let mut n: Vec<String> = m.entry_points.iter().map(|e| e.name.clone()).collect();
@@ -1498,8 +1498,8 @@ mod block_wire_storage_tests {
     #[test]
     fn both_block_wire_shaders_honor_fixed_screen_width() {
         for source in [
-            include_str!("../../shaders/block_wire.wgsl"),
-            include_str!("../../shaders/block_wire_storage.wgsl"),
+            draw_order_shader!("block_wire.wgsl"),
+            draw_order_shader!("block_wire_storage.wgsl"),
         ] {
             assert!(source.contains("if world_hw < 0.0"));
             assert!(source.contains(
@@ -1510,7 +1510,7 @@ mod block_wire_storage_tests {
 
     #[test]
     fn wire_shader_validates_with_naga() {
-        let source = include_str!("../../shaders/wire.wgsl");
+        let source = draw_order_shader!("wire.wgsl");
         let module = naga::front::wgsl::parse_str(source).expect("wire.wgsl parses cleanly");
         let mut validator = naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
@@ -1523,7 +1523,7 @@ mod block_wire_storage_tests {
 
     #[test]
     fn wire_indexed_shader_validates_with_naga() {
-        let source = include_str!("../../shaders/wire_indexed.wgsl");
+        let source = draw_order_shader!("wire_indexed.wgsl");
         let module = naga::front::wgsl::parse_str(source).expect("wire_indexed.wgsl parses cleanly");
         let mut validator = naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),

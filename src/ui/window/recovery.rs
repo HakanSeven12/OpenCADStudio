@@ -1,13 +1,8 @@
 use crate::app::Message;
 use crate::io::recovery::{RecoveryReport, RecoveryStatus};
+use crate::ui::style::common::muted_style;
 use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Background, Border, Element, Fill, Length, Shrink, Theme};
-
-fn muted_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
-    }
-}
 
 fn status_style(
     status: RecoveryStatus,

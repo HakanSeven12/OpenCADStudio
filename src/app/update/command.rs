@@ -584,6 +584,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                         .scene
                                         .apply_grip(handle, grip_id, apply);
                                 }
+                                self.solve_grip_constraints(i, &grip);
 
                                 // Keep GripEdit synchronized so the normal commit
                                 // path records the exact final position.
@@ -737,6 +738,16 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         crate::app::expr_eval::eval_to_string(&raw)
                     };
                     self.command_line.input.clear();
+                    // Remember the token for the context menu's Recent Input
+                    // list (prose steps excluded: a table cell or text body
+                    // is not a reusable value).
+                    let is_prose = self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .is_some_and(|c| c.input_kind().is_free_text());
+                    if !is_prose {
+                        self.command_line.record_recent_input(&text);
+                    }
 
                     // Offer the typed text to the command's option handler
                     // first (keywords like PLINE's A/L/C, a radius, …). If it
@@ -941,6 +952,12 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
 
                 if grip_dyn_locked {
                     return self.update(Message::CommandSubmit);
+                }
+                // Enter while a grip is hot places it where it is (or keeps
+                // it hot when it has not moved) — it must not fall through to
+                // "repeat the last command", which would discard the edit.
+                if self.tabs[i].active_grip.is_some() && self.tabs[i].active_cmd.is_none() {
+                    return self.commit_active_grip_edit();
                 }
 
                 // Normal command Dynamic Input commit.
@@ -1733,15 +1750,13 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         .get_entity(popup.handle)
                         .is_some_and(|entity| match (item.action, entity) {
                             (GripMenuAction::ShowFit, acadrust::EntityType::Spline(spline)) => {
-                                !spline.cv_frame_visible
-                                    && crate::entities::spline::uses_fit_method(spline)
+                                crate::entities::spline::shows_fit_points(spline)
                             }
                             (
                                 GripMenuAction::ShowControlVertices,
                                 acadrust::EntityType::Spline(spline),
                             ) => {
-                                spline.cv_frame_visible
-                                    || !crate::entities::spline::uses_fit_method(spline)
+                                crate::entities::spline::shows_control_vertices(spline)
                             }
                             _ => false,
                         });
@@ -3321,15 +3336,17 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 self.tabs[i].properties.active_field = None;
                 let handles = self.property_target_handles(i);
                 if !handles.is_empty() {
-                    let driven_marker = match field {
-                        "start_x" | "start_y" | "start_z" => Some(0),
-                        "end_x" | "end_y" | "end_z" => Some(1),
-                        "center_x" | "center_y" | "center_z" => Some(-3),
+                    let driven_reference = match field {
+                        "start_x" | "start_y" | "start_z" => Some(Some(0)),
+                        "end_x" | "end_y" | "end_z" => Some(Some(1)),
+                        "center_x" | "center_y" | "center_z" => Some(Some(-3)),
+                        "radius" | "diameter" | "circumference" | "area"
+                        | "major_r" | "minor_r" | "ratio" => Some(None),
                         _ => None,
                     };
-                    let retained_originals: Vec<_> = if self.constraint_solve_mode
-                        && driven_marker.is_some()
-                    {
+                    let retain_size = self.constraint_solve_mode
+                        && driven_reference.is_some_and(|marker| marker.is_some());
+                    let retained_originals: Vec<_> = if retain_size {
                         handles
                             .iter()
                             .filter_map(|handle| {
@@ -3660,13 +3677,20 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 }
                             }
                         }
-                        let driven_refs: Vec<_> = driven_marker
+                        let driven_refs: Vec<_> = driven_reference
                             .into_iter()
                             .flat_map(|marker| {
-                                handles.iter().copied().map(move |handle| {
-                                    crate::scene::parametric_constraints::ParametricRef::point(
-                                        handle, marker,
-                                    )
+                                handles.iter().copied().map(move |handle| match marker {
+                                    Some(marker) => {
+                                        crate::scene::parametric_constraints::ParametricRef::point(
+                                            handle, marker,
+                                        )
+                                    }
+                                    None => {
+                                        crate::scene::parametric_constraints::ParametricRef::whole(
+                                            handle,
+                                        )
+                                    }
                                 })
                             })
                             .collect();
@@ -3674,6 +3698,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             i,
                             &handles,
                             &driven_refs,
+                            retain_size,
                             &retained_originals,
                         );
                         self.tabs[i].dirty = true;

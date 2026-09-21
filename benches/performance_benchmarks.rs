@@ -13,6 +13,7 @@
 //! 10. UI Ribbon View Widget Tree Construction
 //! 11. UI Viewport Grid Geometry Projection & Overlay Cache Key Evaluation
 //! 12. UI Themed SVG Icon Lookup Caching vs Uncached Parse
+//! 12b. Plot Style Layer-Usage Table Rebuild (256-bucket ACI table)
 //! 13. Wide & Tapered Arc + Donut Tessellation (7.5k offset polyline curves)
 //! 14. Model Space Extents & Bounding Box Calculation (ZOOM EXTENTS)
 //! 15. Batch Entity Transformation & Incremental Dirty-Tracking
@@ -64,6 +65,7 @@ use OpenCADStudio::ui::overlay::{
 };
 use OpenCADStudio::ui::properties::LinetypeItem;
 use OpenCADStudio::ui::ribbon::{LayerInfo, Ribbon};
+use OpenCADStudio::ui::style::plotstyle::build_layer_usage;
 
 // ── Metric Structures ───────────────────────────────────────────────────────
 
@@ -1180,15 +1182,18 @@ fn bench_ui_grid_geometry(runner: &mut BenchmarkRunner) {
     let origin2 = glam::DVec3::new(0.0, 0.0, 0.0);
     let axes2 = (Vec3::X, Vec3::Y, Vec3::Z);
     let limits2: Option<(glam::DVec2, glam::DVec2)> = None;
+    // Both panes use a square grid, so one step per pane plus a shared
+    // major-line interval covers the new step_x / step_y / major_every args.
+    let major_every = 5u32;
 
     // ── 1. Uncached grid geometry generation ──
     if runner.should_run("ui_grid_geometry_uncached") {
         for _ in 0..10 {
             let _ = black_box(grid_segments(
-                view_rot1, eye1, bounds1, step1, origin1, axes1, limits1,
+                view_rot1, eye1, bounds1, step1, step1, major_every, origin1, axes1, limits1,
             ));
             let _ = black_box(grid_segments(
-                view_rot2, eye2, bounds2, step2, origin2, axes2, limits2,
+                view_rot2, eye2, bounds2, step2, step2, major_every, origin2, axes2, limits2,
             ));
         }
 
@@ -1199,8 +1204,8 @@ fn bench_ui_grid_geometry(runner: &mut BenchmarkRunner) {
         for _ in 0..runs {
             let t0 = Instant::now();
             for _ in 0..n {
-                let g1 = grid_segments(view_rot1, eye1, bounds1, step1, origin1, axes1, limits1);
-                let g2 = grid_segments(view_rot2, eye2, bounds2, step2, origin2, axes2, limits2);
+                let g1 = grid_segments(view_rot1, eye1, bounds1, step1, step1, major_every, origin1, axes1, limits1);
+                let g2 = grid_segments(view_rot2, eye2, bounds2, step2, step2, major_every, origin2, axes2, limits2);
                 black_box(g1);
                 black_box(g2);
             }
@@ -1225,7 +1230,9 @@ fn bench_ui_grid_geometry(runner: &mut BenchmarkRunner) {
             view_rot: view_rot1,
             eye: eye1,
             bounds: bounds1,
-            step: step1,
+            step_x: step1,
+            step_y: step1,
+            major_every,
             origin: origin1,
             axes: axes1,
             limits: limits1,
@@ -1234,7 +1241,9 @@ fn bench_ui_grid_geometry(runner: &mut BenchmarkRunner) {
             view_rot: view_rot2,
             eye: eye2,
             bounds: bounds2,
-            step: step2,
+            step_x: step2,
+            step_y: step2,
+            major_every,
             origin: origin2,
             axes: axes2,
             limits: limits2,
@@ -1350,6 +1359,53 @@ fn bench_ui_icon_caching(runner: &mut BenchmarkRunner) {
             None, // Reference comparison
         );
     }
+}
+
+// ── 12b. Plot Style Layer-Usage Table Rebuild ───────────────────────────────
+// Covers Mission #19 `build_layer_usage`: layer names bucketed by ACI into a
+// 256-bucket table, rebuilt per Plot Style modal view.
+
+fn bench_ui_plotstyle_layer_usage(runner: &mut BenchmarkRunner) {
+    if !runner.should_run("ui_plotstyle_layer_usage") {
+        return;
+    }
+
+    let mut doc = CadDocument::new();
+    for i in 0..200 {
+        let mut layer = acadrust::tables::Layer::new(&format!("LAYER_{i:03}"));
+        layer.handle = doc.allocate_handle();
+        layer.color = acadrust::types::Color::Index((i % 8 + 1) as u8);
+        let _ = doc.layers.add(layer);
+    }
+
+    // Warm-up for allocator settling
+    for _ in 0..10 {
+        let _ = black_box(build_layer_usage(&doc));
+    }
+
+    let n = if runner.quick_mode { 20 } else { 100 };
+    let runs = 5;
+    let mut samples = Vec::with_capacity(runs);
+
+    for _ in 0..runs {
+        let t0 = Instant::now();
+        for _ in 0..n {
+            let usage = build_layer_usage(black_box(&doc));
+            black_box(usage);
+        }
+        let per_us = (t0.elapsed().as_micros() as f64) / (n as f64);
+        samples.push(per_us);
+    }
+
+    let median_us = samples[samples.len() / 2];
+    runner.record(
+        "ui_plotstyle_layer_usage",
+        "Plot Style 256-bucket ACI layer-usage table rebuild (200 layers, 8 buckets x25)",
+        "µs",
+        samples,
+        Some((1_000_000.0 / median_us, "rebuilds/s")),
+        Some(50.0), // Target threshold < 50 µs
+    );
 }
 
 // ── 13. Wide & Tapered Arc + Donut Tessellation ─────────────────────────────
@@ -1754,6 +1810,7 @@ fn main() {
     bench_ui_ribbon_view_construction(&mut runner);
     bench_ui_grid_geometry(&mut runner);
     bench_ui_icon_caching(&mut runner);
+    bench_ui_plotstyle_layer_usage(&mut runner);
     bench_wide_and_tapered_arc_tessellation(&mut runner);
     bench_zoom_extents_calculation(&mut runner);
     bench_batch_entity_mutation(&mut runner);

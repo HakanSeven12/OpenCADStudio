@@ -1,15 +1,11 @@
 //! Layout Manager window — fills the entire OS window.
 
 use crate::app::Message;
+use crate::ui::style::common::muted_style;
+use crate::ui::style::form::{hdivider, vsep};
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Background, Element, Theme};
 use crate::t;
-
-fn muted_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
-    }
-}
 
 fn primary_style(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {
@@ -35,32 +31,6 @@ fn list_item(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
             button::subtle(theme, status)
         }
     }
-}
-
-fn hdivider<'a>(width: iced::Length) -> Element<'a, Message> {
-    container(Space::new().width(width).height(1))
-        .width(width)
-        .height(1)
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.neutral.color,
-            )),
-            ..Default::default()
-        })
-        .into()
-}
-
-fn vsep<'a>(height: iced::Length) -> Element<'a, Message> {
-    container(Space::new().width(1).height(height))
-        .width(1)
-        .height(height)
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.neutral.color,
-            )),
-            ..Default::default()
-        })
-        .into()
 }
 
 pub fn view_window<'a>(

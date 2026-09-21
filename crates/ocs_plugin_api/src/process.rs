@@ -193,7 +193,7 @@ fn call_timeout() -> Duration {
 
 /// Per-request-kind timeout floors. The user-configured default is raised to
 /// these minima so that no request kind can be configured into an unsafe value.
-fn request_timeout(kind: &'static str) -> Duration {
+pub(crate) fn request_timeout(kind: &'static str) -> Duration {
     base_max_floor(call_timeout(), kind)
 }
 
@@ -228,7 +228,7 @@ fn base_max_floor(base: Duration, kind: &'static str) -> Duration {
     base.max(floor)
 }
 
-fn request_kind(req: &HostRequest) -> &'static str {
+pub(crate) fn request_kind(req: &HostRequest) -> &'static str {
     match req {
         HostRequest::GetManifest => "GetManifest",
         HostRequest::GetRibbon => "GetRibbon",
@@ -553,6 +553,43 @@ impl PluginProcess {
         }
     }
 
+    /// Legacy (non-V4) round trip for simple interactive calls: send `req`,
+    /// then loop until the matching response arrives, answering any nested
+    /// plugin request with an error. `kind` drives the timeout floor;
+    /// `nested_what` names the operation in that error; `extract` pulls the
+    /// expected payload out of the response.
+    fn call_simple<T>(
+        &self,
+        req: HostRequest,
+        kind: &'static str,
+        nested_what: &'static str,
+        extract: impl Fn(HostResponse) -> Result<T, Box<HostResponse>>,
+    ) -> Result<T, PluginError> {
+        self.send_request(req)?;
+        let timeout = request_timeout(kind);
+        let deadline = Instant::now() + timeout;
+        loop {
+            match recv_with_deadline::<PluginToHost>(
+                &self.stream,
+                &self.child,
+                deadline,
+                timeout,
+                kind,
+            )? {
+                PluginToHost::Response(resp) => match extract(resp) {
+                    Ok(v) => return Ok(v),
+                    Err(other) => return Err(PluginError::UnexpectedResponse(other)),
+                },
+                PluginToHost::Request(req) => {
+                    let resp = crate::ipc::protocol::PluginResponse::Error(format!(
+                        "unexpected nested request during {nested_what}: {req:?}"
+                    ));
+                    self.send_response(resp)?;
+                }
+            }
+        }
+    }
+
     /// Send an interactive event for `command_id` and return the step the
     /// plugin command produces. Interactive events are not expected to trigger
     /// nested host API calls, so this path does not supply a `HostApi`.
@@ -572,30 +609,15 @@ impl PluginProcess {
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),
             }
         } else {
-            self.send_request(HostRequest::InteractiveEvent { command_id, event })?;
-            let kind = "InteractiveEvent";
-            let timeout = request_timeout(kind);
-            let deadline = Instant::now() + timeout;
-            loop {
-                match recv_with_deadline::<PluginToHost>(
-                    &self.stream,
-                    &self.child,
-                    deadline,
-                    timeout,
-                    kind,
-                )? {
-                    PluginToHost::Response(HostResponse::CommandStep(s)) => return Ok(*s),
-                    PluginToHost::Response(other) => {
-                        return Err(PluginError::UnexpectedResponse(Box::new(other)))
-                    }
-                    PluginToHost::Request(req) => {
-                        let resp = crate::ipc::protocol::PluginResponse::Error(format!(
-                            "unexpected nested request during interactive event: {req:?}"
-                        ));
-                        self.send_response(resp)?;
-                    }
-                }
-            }
+            self.call_simple(
+                HostRequest::InteractiveEvent { command_id, event },
+                "InteractiveEvent",
+                "interactive event",
+                |resp| match resp {
+                    HostResponse::CommandStep(s) => Ok(*s),
+                    other => Err(Box::new(other)),
+                },
+            )
         }
     }
 
@@ -612,30 +634,15 @@ impl PluginProcess {
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),
             }
         } else {
-            self.send_request(HostRequest::GetPrompt { command_id })?;
-            let kind = "GetPrompt";
-            let timeout = request_timeout(kind);
-            let deadline = Instant::now() + timeout;
-            loop {
-                match recv_with_deadline::<PluginToHost>(
-                    &self.stream,
-                    &self.child,
-                    deadline,
-                    timeout,
-                    kind,
-                )? {
-                    PluginToHost::Response(HostResponse::Text(s)) => return Ok(s),
-                    PluginToHost::Response(other) => {
-                        return Err(PluginError::UnexpectedResponse(Box::new(other)))
-                    }
-                    PluginToHost::Request(req) => {
-                        let resp = crate::ipc::protocol::PluginResponse::Error(format!(
-                            "unexpected nested request during get_prompt: {req:?}"
-                        ));
-                        self.send_response(resp)?;
-                    }
-                }
-            }
+            self.call_simple(
+                HostRequest::GetPrompt { command_id },
+                "GetPrompt",
+                "get_prompt",
+                |resp| match resp {
+                    HostResponse::Text(s) => Ok(s),
+                    other => Err(Box::new(other)),
+                },
+            )
         }
     }
 
@@ -652,30 +659,15 @@ impl PluginProcess {
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),
             }
         } else {
-            self.send_request(HostRequest::NeedsEntityPick { command_id })?;
-            let kind = "NeedsEntityPick";
-            let timeout = request_timeout(kind);
-            let deadline = Instant::now() + timeout;
-            loop {
-                match recv_with_deadline::<PluginToHost>(
-                    &self.stream,
-                    &self.child,
-                    deadline,
-                    timeout,
-                    kind,
-                )? {
-                    PluginToHost::Response(HostResponse::Bool(b)) => return Ok(b),
-                    PluginToHost::Response(other) => {
-                        return Err(PluginError::UnexpectedResponse(Box::new(other)))
-                    }
-                    PluginToHost::Request(req) => {
-                        let resp = crate::ipc::protocol::PluginResponse::Error(format!(
-                            "unexpected nested request during needs_entity_pick: {req:?}"
-                        ));
-                        self.send_response(resp)?;
-                    }
-                }
-            }
+            self.call_simple(
+                HostRequest::NeedsEntityPick { command_id },
+                "NeedsEntityPick",
+                "needs_entity_pick",
+                |resp| match resp {
+                    HostResponse::Bool(b) => Ok(b),
+                    other => Err(Box::new(other)),
+                },
+            )
         }
     }
 

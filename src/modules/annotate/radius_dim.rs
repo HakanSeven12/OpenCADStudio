@@ -3,7 +3,8 @@ use acadrust::types::{Handle, Vector3};
 use acadrust::EntityType;
 
 use crate::command::{
-    CadCommand, CmdOption, CmdResult, DimensionAssociationInput, InputKind, WorkingPlane,
+    CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview, InputKind,
+    WorkingPlane,
 };
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
@@ -55,6 +56,36 @@ impl RadiusDimensionCommand {
             Step::DimLine(source) => dvec(source.point_at_angle(source.start_angle)),
         }
     }
+
+    fn build_dimension(
+        &self,
+        source: crate::scene::dimension_assoc::RadialSourceGeometry,
+        world: DVec3,
+    ) -> EntityType {
+        let plane = WorkingPlane::new(
+            DVec3::from_array(source.plane.origin),
+            DVec3::from_array(source.plane.x_axis),
+            DVec3::from_array(source.plane.y_axis),
+        );
+        let center = plane.to_local(dvec(source.center_world()));
+        let chord = plane.to_local(dvec(source.chord_at(world.to_array())));
+        let point = plane.to_local(world);
+        let mut dim = DimensionRadius::new(v3(center), v3(chord));
+        dim.base.definition_point = v3(chord);
+        dim.base.text_middle_point = v3(point);
+        dim.base.insertion_point = v3(point);
+        dim.base.text_user_positioned = true;
+        dim.leader_length = chord.distance(point);
+        dim.base.actual_measurement = dim.measurement();
+        crate::entities::dimension::set_dimension_text_override(
+            &mut dim.base,
+            self.text_override.clone(),
+        );
+        if let Some(angle) = self.text_angle {
+            dim.base.text_rotation = angle;
+        }
+        plane.place_entity(EntityType::Dimension(Dimension::Radius(dim)))
+    }
 }
 
 impl CadCommand for RadiusDimensionCommand {
@@ -84,32 +115,8 @@ impl CadCommand for RadiusDimensionCommand {
         match self.step {
             Step::SelectObject => CmdResult::NeedPoint,
             Step::DimLine(source) => {
-                let source_plane = WorkingPlane::new(
-                    DVec3::from_array(source.plane.origin),
-                    DVec3::from_array(source.plane.x_axis),
-                    DVec3::from_array(source.plane.y_axis),
-                );
-                let center_world = dvec(source.center_world());
-                let point_world = dvec(source.chord_at(pt.to_array()));
-                let center = source_plane.to_local(center_world);
-                let point = source_plane.to_local(point_world);
-                let pt = source_plane.to_local(pt);
-                let mut dim = DimensionRadius::new(v3(center), v3(point));
-                dim.base.definition_point = v3(point);
-                dim.base.text_middle_point = v3(pt);
-                dim.base.insertion_point = v3(pt);
-                dim.base.text_user_positioned = true;
-                dim.leader_length = point.distance(pt);
-                dim.base.actual_measurement = dim.measurement();
-                crate::entities::dimension::set_dimension_text_override(
-                    &mut dim.base,
-                    self.text_override.clone(),
-                );
-                if let Some(a) = self.text_angle {
-                    dim.base.text_rotation = a;
-                }
                 CmdResult::CommitDimension {
-                    entity: source_plane.place_entity(EntityType::Dimension(Dimension::Radius(dim))),
+                    entity: self.build_dimension(source, pt),
                     association: DimensionAssociationInput::Infer(self.source_handle),
                     preserve_base_style: false,
                     continue_command: false,
@@ -128,6 +135,23 @@ impl CadCommand for RadiusDimensionCommand {
             return CmdResult::NeedPoint;
         }
         CmdResult::Cancel
+    }
+
+    /// Points and object picks may come through a paper-space viewport;
+    /// the committed dimension then reports the model measurement.
+    fn measures_through_viewports(&self) -> bool {
+        true
+    }
+
+    fn dimension_acquired_points(&self) -> Vec<DVec3> {
+        match self.step {
+            Step::SelectObject => vec![],
+            Step::DimLine(source) => vec![dvec(source.point_at_angle(source.start_angle))],
+        }
+    }
+
+    fn dimension_placement_pending(&self) -> bool {
+        matches!(self.step, Step::DimLine(_))
     }
 
     fn on_escape(&mut self) -> CmdResult {
@@ -266,6 +290,13 @@ impl CadCommand for RadiusDimensionCommand {
                 ]))
             }
         }
+    }
+
+    fn dimension_preview(&self, cursor: DVec3) -> Option<Vec<DimensionPreview>> {
+        let Step::DimLine(source) = self.step else {
+            return None;
+        };
+        Some(vec![DimensionPreview::current_style(self.build_dimension(source, cursor))])
     }
 }
 

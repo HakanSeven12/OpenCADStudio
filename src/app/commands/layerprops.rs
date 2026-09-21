@@ -314,6 +314,135 @@ impl OpenCADStudio {
                         self.command_line
                             .push_output(crate::t!("UCS aligned to the current view.").as_ref());
                     }
+                    // UCS FACE <handle> <x,y,z> — adopt a solid's planar face
+                    // as the drawing plane. This is the move Fusion calls
+                    // "create sketch on a face": pick the face, draw flat on
+                    // it, extrude. The pick comes from a surface pick, so it
+                    // already lies on the face and serves as the origin.
+                    "FACE" | "F" => {
+                        let target = parts
+                            .get(2)
+                            .and_then(|token| {
+                                u64::from_str_radix(token.trim().trim_start_matches("0x"), 16).ok()
+                            })
+                            .map(acadrust::Handle::new)
+                            .zip(
+                                parts
+                                    .get(3)
+                                    .and_then(|value| super::super::helpers::parse_coord(value))
+                                    .map(|(point, _)| point),
+                            );
+                        match target {
+                            // Bare `UCS FACE` starts the pick. The click comes
+                            // back through this same arm with a handle and a
+                            // surface point, so both entry points share the
+                            // plane construction below.
+                            None => {
+                                let picker = crate::command::UcsPickCommand { face: true };
+                                self.command_line.push_info(&picker.prompt());
+                                self.tabs[i].active_cmd = Some(Box::new(picker));
+                            }
+                            Some((handle, pick)) => {
+                                let built = self.tabs[i]
+                                    .scene
+                                    .solid_models
+                                    .get(&handle)
+                                    .and_then(|body| {
+                                        use crate::scene::model::solid_model;
+                                        let face =
+                                            solid_model::nearest_planar_face(body, pick.to_array())?;
+                                        solid_model::planar_face_normal(body, face)
+                                    })
+                                    .and_then(|normal| {
+                                        super::super::helpers::ucs_from_normal(
+                                            pick,
+                                            glam::DVec3::from_array(normal),
+                                        )
+                                    });
+                                match built {
+                                    Some(ucs) => {
+                                        self.tabs[i].active_ucs = Some(ucs);
+                                        active_changed = true;
+                                        self.command_line.push_output(
+                                            crate::t!("UCS aligned to the selected face.").as_ref(),
+                                        );
+                                    }
+                                    None => self.command_line.push_error(
+                                        crate::t!("UCS FACE: no planar face at that point.")
+                                            .as_ref(),
+                                    ),
+                                }
+                            }
+                        }
+                    }
+                    // UCS OBJECT <handle> — adopt the plane of a planar
+                    // entity. Reuses the profile extraction EXTRUDE already
+                    // runs, so anything extrudable can also be sketched on.
+                    "OBJECT" | "OB" => {
+                        let target = parts
+                            .get(2)
+                            .and_then(|token| {
+                                u64::from_str_radix(token.trim().trim_start_matches("0x"), 16).ok()
+                            })
+                            .map(acadrust::Handle::new);
+                        match target {
+                            // Bare `UCS OBJECT` starts the pick; the click
+                            // comes back through this arm with the handle.
+                            None => {
+                                let picker = crate::command::UcsPickCommand { face: false };
+                                self.command_line.push_info(&picker.prompt());
+                                self.tabs[i].active_cmd = Some(Box::new(picker));
+                            }
+                            Some(handle) => {
+                                let built = self.tabs[i]
+                                    .scene
+                                    .document
+                                    .get_entity(handle)
+                                    .and_then(crate::scene::model::sweep_model::extrusion_profile_of)
+                                    .and_then(|(profile, _)| {
+                                        // The profile plane already carries the
+                                        // entity's own in-plane axes, so adopt
+                                        // them rather than re-deriving X from
+                                        // the normal: a sketch started on a
+                                        // circle then lines up with how that
+                                        // circle is stored, not with an
+                                        // arbitrary reference direction.
+                                        let plane = profile.plane;
+                                        let x = glam::DVec3::from_array(plane.x_axis);
+                                        let y = glam::DVec3::from_array(plane.y_axis);
+                                        if x.length_squared() < 1e-12
+                                            || y.length_squared() < 1e-12
+                                        {
+                                            return None;
+                                        }
+                                        let mut ucs = Ucs::new("*ACTIVE*");
+                                        ucs.origin = Vector3::new(
+                                            plane.origin[0],
+                                            plane.origin[1],
+                                            plane.origin[2],
+                                        );
+                                        ucs.x_axis =
+                                            Vector3::new(x.x, x.y, x.z);
+                                        ucs.y_axis =
+                                            Vector3::new(y.x, y.y, y.z);
+                                        Some(ucs)
+                                    });
+                                match built {
+                                    Some(ucs) => {
+                                        self.tabs[i].active_ucs = Some(ucs);
+                                        active_changed = true;
+                                        self.command_line.push_output(
+                                            crate::t!("UCS aligned to the selected object.")
+                                                .as_ref(),
+                                        );
+                                    }
+                                    None => self.command_line.push_error(
+                                        crate::t!("UCS OBJECT: entity defines no plane.").as_ref(),
+                                    ),
+                                }
+                            }
+                        }
+                    }
                     "3POINTW" => {
                         let raw = parts.get(2).copied().unwrap_or("");
                         let points: Vec<glam::DVec3> = raw
@@ -506,6 +635,72 @@ impl OpenCADStudio {
             // PLAN — plan view of a UCS (#326). Shows its options right on
             // activation instead of flipping the view like a cube click; the
             // view only changes once an option (or the Current default) runs.
+            // ── Sketch mode ──────────────────────────────────────────────
+            // Fusion's sketch loop, assembled from pieces that already exist:
+            // a UCS for the plane, PLAN for the square-on view, the snapper
+            // for the drafting aids. A sketch is a mode, not a document
+            // object, so what it produces is ordinary model-space geometry
+            // and the file stays a DWG every other program can still open.
+            cmd if cmd == "CREATESKETCH" || cmd.starts_with("CREATESKETCH ") => {
+                if self.tabs[i].sketch_session.is_some() {
+                    self.command_line.push_error(
+                        crate::t!("A sketch is already open — FINISHSKETCH closes it.")
+                            .as_ref(),
+                    );
+                    return Some(Task::none());
+                }
+                let arg = cmd["CREATESKETCH".len()..].trim().to_uppercase();
+                // The three origin planes. Without them the first sketch in
+                // an empty drawing would have no face to land on.
+                let origin_plane = match arg.as_str() {
+                    "XY" => Some(glam::DVec3::Z),
+                    "XZ" => Some(glam::DVec3::NEG_Y),
+                    "YZ" => Some(glam::DVec3::X),
+                    _ => None,
+                };
+                if let Some(normal) = origin_plane {
+                    self.tabs[i].active_ucs =
+                        super::super::helpers::ucs_from_normal(glam::DVec3::ZERO, normal);
+                    self.commit_active_ucs_change(i, "CREATESKETCH");
+                } else if !arg.is_empty() {
+                    self.command_line.push_error(
+                        crate::t!(
+                            "Usage: CREATESKETCH [XY|XZ|YZ]; bare uses the current UCS."
+                        )
+                        .as_ref(),
+                    );
+                    return Some(Task::none());
+                }
+                self.open_sketch(i);
+            }
+            // BROWSER — toggle the docked outline of planes, sketch and bodies.
+            "BROWSER" => {
+                self.show_browser ^= true;
+                if self.show_browser {
+                    // Dock it on first use rather than shipping it in the
+                    // default layout: an existing user's edges should not
+                    // rearrange themselves on upgrade for a panel they have
+                    // not asked for.
+                    let id = crate::ui::dock::PanelId::Browser;
+                    if self.dock.location(id).is_none() {
+                        // dock() clamps an out-of-range index to the end of
+                        // the edge, so this appends below whatever is there.
+                        self.dock
+                            .dock(id, crate::app::config::DockSide::Right, usize::MAX);
+                    }
+                    // Open expanded so it is usable straight away; the pin
+                    // button still collapses it.
+                    self.dock_expanded = Some(id);
+                    self.command_line
+                        .push_output(crate::t!("Browser opened.").as_ref());
+                } else {
+                    self.command_line
+                        .push_output(crate::t!("Browser closed.").as_ref());
+                }
+            }
+            "FINISHSKETCH" => {
+                self.finish_sketch(i);
+            }
             "PLAN" => {
                 use crate::command::KeywordCommand;
                 let c = KeywordCommand::new(
@@ -1366,6 +1561,74 @@ impl OpenCADStudio {
 
     /// Snap to the plan view of the UCS whose rotation is `r_ucs`, straight —
     /// no "already there → flip to the opposite face" cube behaviour (#326).
+    /// Enter sketch mode on the current UCS.
+    ///
+    /// Squaring the view up is not cosmetic: drawing on a plane seen nearly
+    /// edge-on is the main way geometry ends up somewhere the user did not
+    /// mean, because a few pixels of cursor travel cover a long way in
+    /// world space.
+    fn open_sketch(&mut self, i: usize) {
+        let opened_with: std::collections::HashSet<acadrust::Handle> = self.tabs[i]
+            .scene
+            .document
+            .entities()
+            .map(|entity| entity.common().handle)
+            .collect();
+        self.tabs[i].sketch_count += 1;
+        let name = format!("Sketch{}", self.tabs[i].sketch_count);
+        self.tabs[i].sketch_session = Some(crate::app::document::SketchSession {
+            name: name.clone(),
+            previous_ucs: self.tabs[i].active_ucs.clone(),
+            previous_snap_enabled: self.snapper.snap_enabled,
+            opened_with,
+        });
+        let rotation = self.tabs[i].scene.viewcube_ucs_mat();
+        self.plan_snap(i, rotation);
+        self.snapper.snap_enabled = true;
+        self.command_line.push_output(
+            crate::tf!("{} open. Draw on the plane, then FINISHSKETCH.", name).as_ref(),
+        );
+    }
+
+    /// Leave sketch mode, restoring what the sketch borrowed.
+    ///
+    /// Whatever was drawn becomes the "Previous" selection set, so the next
+    /// EXTRUDE can take it with the Previous keyword instead of making the
+    /// user reselect a profile they just finished drawing.
+    fn finish_sketch(&mut self, i: usize) {
+        let Some(session) = self.tabs[i].sketch_session.take() else {
+            self.command_line
+                .push_error(crate::t!("No sketch is open.").as_ref());
+            return;
+        };
+        let created: Vec<acadrust::Handle> = self.tabs[i]
+            .scene
+            .document
+            .entities()
+            .map(|entity| entity.common().handle)
+            .filter(|handle| !session.opened_with.contains(handle))
+            .collect();
+        self.tabs[i].active_ucs = session.previous_ucs;
+        self.snapper.snap_enabled = session.previous_snap_enabled;
+        self.commit_active_ucs_change(i, "FINISHSKETCH");
+        if created.is_empty() {
+            self.command_line.push_output(
+                crate::tf!("{} closed; nothing was drawn.", session.name).as_ref(),
+            );
+        } else {
+            let count = created.len();
+            self.tabs[i].prev_selection = created;
+            self.command_line.push_output(
+                crate::tf!(
+                    "{} closed with {} object(s). EXTRUDE then Previous uses them.",
+                    session.name,
+                    count
+                )
+                .as_ref(),
+            );
+        }
+    }
+
     fn plan_snap(&mut self, i: usize, r_ucs: glam::Mat4) {
         let eye_dir = r_ucs.transform_vector3(
             crate::scene::CubeRegion::Face(crate::scene::pipeline::viewcube::FACE_TOP)

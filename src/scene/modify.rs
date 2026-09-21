@@ -161,6 +161,80 @@ impl Scene {
             .filter(|&h| !self.is_layer_locked(h))
             .collect();
         let handles = &handles[..];
+        let retained_originals: Vec<(Handle, EntityType)> = handles
+            .iter()
+            .filter_map(|handle| {
+                self.document
+                    .get_entity(*handle)
+                    .cloned()
+                    .map(|entity| (*handle, entity))
+            })
+            .collect();
+        let transformed_refs: Vec<_> = handles
+            .iter()
+            .copied()
+            .map(parametric_constraints::ParametricRef::whole)
+            .collect();
+        let mut driven_refs = Vec::new();
+        if !matches!(t, EntityTransform::Translate(_)) {
+            for set in &self.parametric_constraints {
+                for constraint in &set.constraints {
+                    if !constraint.enabled
+                        || !matches!(
+                            constraint.kind,
+                            parametric_constraints::ConstraintKind::Parallel
+                                | parametric_constraints::ConstraintKind::Perpendicular
+                                | parametric_constraints::ConstraintKind::Colinear
+                        )
+                    {
+                        continue;
+                    }
+                    let selected_refs = constraint
+                        .refs
+                        .iter()
+                        .filter(|reference| handles.contains(&reference.entity))
+                        .count();
+                    if selected_refs == 0 || selected_refs == constraint.refs.len() {
+                        continue;
+                    }
+                    for reference in constraint
+                        .refs
+                        .iter()
+                        .copied()
+                        .filter(|reference| !handles.contains(&reference.entity))
+                    {
+                        let anchor = if let Some(index) = reference.segment_index() {
+                            parametric_constraints::ParametricRef::point(
+                                reference.entity,
+                                index as i32,
+                            )
+                        } else if reference.directional_axis().is_some()
+                            && matches!(
+                                self.document.get_entity(reference.entity),
+                                Some(EntityType::Ellipse(_))
+                            )
+                        {
+                            parametric_constraints::ParametricRef::center(reference.entity)
+                        } else {
+                            parametric_constraints::ParametricRef::point(reference.entity, 0)
+                        };
+                        let follows_selected_point = set.constraints.iter().any(|link| {
+                            link.enabled
+                                && link.kind
+                                    == parametric_constraints::ConstraintKind::Coincident
+                                && link.refs.contains(&anchor)
+                                && link
+                                    .refs
+                                    .iter()
+                                    .any(|item| handles.contains(&item.entity))
+                        });
+                        if !follows_selected_point && !driven_refs.contains(&anchor) {
+                            driven_refs.push(anchor);
+                        }
+                    }
+                }
+            }
+        }
         // Preserve readable text orientation when MIRRTEXT is disabled.
         let preserve_text_orientation =
             matches!(t, EntityTransform::Mirror { .. }) && !self.document.header.mirror_text;
@@ -290,7 +364,12 @@ impl Scene {
         // per-handle, keeping the block cache + all other memoized wires.
         let changes: Vec<(Handle, ChangeKind)> =
             handles.iter().map(|&h| (h, ChangeKind::Modified)).collect();
-        self.bump_entities(&changes);
+        self.bump_entities_with_parametric_transform_policy(
+            &changes,
+            &driven_refs,
+            &transformed_refs,
+            &retained_originals,
+        );
         self.refresh_meshes_for_handles(&refresh_solid_handles);
     }
 
@@ -730,6 +809,7 @@ impl Scene {
         // Complete group copies record their new Group objects and dictionary
         // entry as targeted object deltas inside copy_complete_groups.
         self.copy_complete_groups(&handle_map);
+        self.copy_dimension_associations(&handle_map);
         // The copies are new handles (natural memo misses, tessellated fresh)
         // and reference only already-cached blocks — no block defn changes.
         // Report them as additions so derived caches patch in exactly the copies.
@@ -1363,6 +1443,17 @@ impl Scene {
         if self.is_layer_locked(handle) {
             return;
         }
+        // An attribute grip sits on the displayed (annotation-scaled)
+        // attribute; the stored one is unscaled.
+        let apply = match self.document.get_entity(handle) {
+            Some(EntityType::Insert(insert)) => crate::entities::insert::unscale_attribute_grip(
+                insert,
+                self.annotation_scale,
+                grip_id,
+                apply,
+            ),
+            _ => apply,
+        };
         if self.apply_solid_history_grip(handle, grip_id, apply.clone()) {
             return;
         }
@@ -1398,6 +1489,7 @@ impl Scene {
         if let Some(entity) = self.document.get_entity_mut(handle) {
             view::dispatch::apply_grip(entity, grip_id, apply);
         }
+        self.sync_diameter_association_angle(handle);
         if let Some((annotation_handle, old_landing)) = leader_landing_before {
             let new_landing = self.document.get_entity(handle).and_then(|entity| {
                 let EntityType::Leader(leader) = entity else {

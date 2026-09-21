@@ -29,6 +29,11 @@ use crate::scene::model::wire_model::{
 };
 
 const MAX_NESTING_DEPTH: usize = 32;
+/// Small line-only nested definitions cost more as separate instance records
+/// than as part of their parent's existing style batches. Folding these tiny
+/// subtrees at expansion time keeps exact geometry while avoiding one
+/// heavyweight `WireModel` per leaf occurrence.
+const INLINE_NESTED_POINT_BUDGET: usize = 128;
 /// Skip wires whose world-AABB projects to fewer than this many pixels in
 /// the active view. Picks up tiny detail at zoom-out so the tessellator
 /// doesn't waste time on geometry that contributes a few sub-pixel marks
@@ -150,6 +155,9 @@ pub struct BlockMetrics {
 pub struct BlockDefn {
     pub subs: Vec<LocalSub>,
     pub metrics: BlockMetrics,
+    /// Point cost when this whole subtree is safe and cheap to fold into its
+    /// parent's batches. `None` keeps the regular instanced expansion path.
+    inline_point_cost: Option<usize>,
     /// Raw entity count of the source block record (`entity_handles.len()`).
     /// Divisor for nested depth composition: a nested insert's children get a
     /// sub-range of `parent_scale / (child_count + 1)`, shared with the scene
@@ -317,20 +325,58 @@ impl BlockCache {
         use crate::par::prelude::*;
         // Definitions are complete, so each recursive read can run independently.
         let this: &Self = self;
-        let resolved: Vec<(&String, BlockMetrics)> = names
+        let resolved: Vec<(&String, BlockMetrics, Option<usize>)> = names
             .par_iter()
             .map(|name| {
                 let mut visited: Vec<String> = Vec::new();
-                (name, this.defn_metrics_recursive(name, &mut visited))
+                let metrics = this.defn_metrics_recursive(name, &mut visited);
+                let inline_point_cost =
+                    this.defn_inline_point_cost_recursive(name, &mut Vec::new());
+                (name, metrics, inline_point_cost)
             })
             .collect();
-        for (name, metrics) in resolved {
+        for (name, metrics, inline_point_cost) in resolved {
             if let Some(defn_arc) = self.defns.get_mut(name) {
                 let mut defn = (**defn_arc).clone();
                 defn.metrics = metrics;
+                defn.inline_point_cost = inline_point_cost;
                 *defn_arc = Arc::new(defn);
             }
         }
+    }
+
+    fn defn_inline_point_cost_recursive(
+        &self,
+        block_name: &str,
+        visited: &mut Vec<String>,
+    ) -> Option<usize> {
+        if visited.iter().any(|name| name == block_name) {
+            return None;
+        }
+        let defn = self.defns.get(block_name)?;
+        visited.push(block_name.to_string());
+        let result = (|| {
+            let mut cost = 0usize;
+            for sub in &defn.subs {
+                let sub_cost = match sub {
+                    LocalSub::Wire(wire) => inline_wire_point_cost(wire)?,
+                    LocalSub::Nested(nested)
+                        if nested.clip_poly.is_none() && nested.attachments.is_empty() =>
+                    {
+                        self.defn_inline_point_cost_recursive(&nested.block_name, visited)?
+                            .checked_mul(nested.instance_offsets.len())?
+                    }
+                    LocalSub::Nested(_) => return None,
+                };
+                cost = cost.checked_add(sub_cost)?;
+                if cost > INLINE_NESTED_POINT_BUDGET {
+                    return None;
+                }
+            }
+            Some(cost)
+        })();
+        visited.pop();
+        result
     }
 
     fn defn_metrics_recursive(
@@ -585,8 +631,25 @@ fn build_defn(
     BlockDefn {
         subs,
         metrics: BlockMetrics::default(),
+        inline_point_cost: None,
         child_count: br.entity_handles.len(),
     }
+}
+
+fn inline_wire_point_cost(wire: &LocalWire) -> Option<usize> {
+    let line_tangents_only = wire
+        .tangent_geoms
+        .iter()
+        .all(|tangent| matches!(tangent, TangentGeom::Line { .. }));
+    (line_tangents_only
+        && !wire.is_point
+        && wire.point_marker.is_none()
+        && wire.text_verts.is_empty()
+        && wire.fill_tris.is_empty()
+        && wire.pick_tris.is_empty()
+        && wire.pattern_stations.is_empty()
+        && wire.world_width == 0.0)
+        .then_some(wire.points.len())
 }
 
 fn build_nested_ref(
@@ -1640,6 +1703,14 @@ impl Batches {
                         );
                     }
                 }
+                // Glyph quads stay at neutral depth on purpose: the per-wire
+                // depth_override (b.local_depth) is composed with the insert's
+                // scene-graph level at upload time (wire_draw_depth:
+                // depths[insert] + override * half), the same place the
+                // wipeout/hatch fills get theirs. Baking the raw child rank
+                // into the vertices here would double-count it in per-block
+                // label units — for a negative rank that sinks the text below
+                // its own block's wipes instead of ahead of them.
                 if !b.pattern_stations.is_empty() {
                     b.pattern_stations = encode_pattern_stations(
                         std::mem::take(&mut b.pattern_stations),
@@ -1898,7 +1969,20 @@ fn expand_defn(
                 let composed_for = |offset: &[f64; 3]| {
                     nested_instance_transform(nref, *offset).then(accum_xform)
                 };
-                if let Some(cp) = &nref.clip_poly {
+                if nested_defn.inline_point_cost.is_some() && nref.clip_poly.is_none() {
+                    for offset in &nref.instance_offsets {
+                        expand_defn(
+                            nested_defn,
+                            &composed_for(offset),
+                            &inner_ctx,
+                            out,
+                            visited,
+                            depth + 1,
+                            nref.suppress_root_points,
+                            nested_range,
+                        );
+                    }
+                } else if let Some(cp) = &nref.clip_poly {
                     let base_composed = nref.xform.then(accum_xform);
                     let base_translation = transform_translation(&base_composed);
                     let base_poly: Vec<[f64; 2]> = cp
@@ -2495,11 +2579,17 @@ fn emit_wire(
         .map(|marker| transformed_point_marker(marker, accum_xform));
     let point_marker = marker_transform.map(|(marker, _)| marker);
 
-    // Only band wires take a per-child composed depth: their solid area is
-    // what covers siblings, and their width already splits them into their own
-    // batches — thin wires keep the shared whole-insert depth so same-style
-    // batches stay merged.
-    let local_depth = (lw.world_width > 0.0)
+    // Band wires take a per-child composed depth: their solid area is what
+    // covers siblings, and their width already splits them into their own
+    // batches. Text-bearing wires need it too — but as `depth_override`, not
+    // baked into vertices: the upload resolves it against the insert's
+    // scene-graph entry (depths[insert] + override * half), which is what
+    // keeps text interleaved with its sibling wipeout/hatch fills. Without a
+    // composed rank the text sits at the bare insert level, an exact tie with
+    // every sibling fill, and the later wipeout pass erases it (unselected
+    // block text vanished under its wipeout; selecting won only because the
+    // xray pass ignores depth).
+    let local_depth = (lw.world_width > 0.0 || !lw.text_verts.is_empty())
         .then(|| d_range.0 + lw.local_rank * d_range.1);
     let plot_visible = ctx.plot_visible
         && lw.plot_visible
@@ -3034,5 +3124,118 @@ mod bg_resolution_tests {
             adapt_to_bg(NEAR_WHITE, DARK),
             "re-adapting the resolved colour must not equal adapting the raw one",
         );
+    }
+}
+
+#[cfg(test)]
+mod compact_nested_tests {
+    use super::*;
+    use crate::scene::view::render::InheritStyle;
+    use acadrust::entities::{Insert, Line};
+    use acadrust::tables::BlockRecord;
+
+    fn add_block(document: &mut CadDocument, name: &str) -> Handle {
+        let mut block = BlockRecord::new(name);
+        block.handle = document.allocate_handle();
+        let handle = block.handle;
+        document.block_records.add(block).unwrap();
+        handle
+    }
+
+    fn add_owned(document: &mut CadDocument, owner: Handle, mut entity: EntityType) {
+        entity.common_mut().owner_handle = owner;
+        document.add_entity(entity).unwrap();
+    }
+
+    #[test]
+    fn repeated_small_nested_lines_fold_into_parent_batches() {
+        let mut document = CadDocument::new();
+        let leaf = add_block(&mut document, "LEAF");
+        for y in 0..6 {
+            add_owned(
+                &mut document,
+                leaf,
+                EntityType::Line(Line::from_points(
+                    Vector3::new(0.0, y as f64, 0.0),
+                    Vector3::new(1.0, y as f64, 0.0),
+                )),
+            );
+        }
+
+        let twig = add_block(&mut document, "TWIG");
+        for x in 0..5 {
+            add_owned(
+                &mut document,
+                twig,
+                EntityType::Insert(Insert::new(
+                    "LEAF",
+                    Vector3::new(x as f64 * 2.0, 0.0, 0.0),
+                )),
+            );
+        }
+
+        let root = add_block(&mut document, "ROOT");
+        for x in 0..100 {
+            add_owned(
+                &mut document,
+                root,
+                EntityType::Insert(Insert::new(
+                    "TWIG",
+                    Vector3::new(x as f64 * 20.0, 0.0, 0.0),
+                )),
+            );
+        }
+
+        let root_insert = Insert::new("ROOT", Vector3::ZERO);
+        let root_handle = document
+            .add_entity(EntityType::Insert(root_insert.clone()))
+            .unwrap();
+        let cache = BlockCache::build(
+            &document,
+            1.0,
+            None,
+            true,
+            [0.0, 0.0, 0.0, 1.0],
+            None,
+            &HashMap::default(),
+        );
+        let wires = expand_insert(
+            &document,
+            &cache,
+            &root_insert,
+            root_handle,
+            [1.0; 4],
+            0,
+            0.0,
+            [0.0; 8],
+            1.0,
+            InheritStyle {
+                color: [1.0; 4],
+                pat_len: 0.0,
+                pat: [0.0; 8],
+                lw_px: 1.0,
+            },
+            0,
+            true,
+            false,
+            1.0,
+            None,
+            None,
+            false,
+            [0.0, 0.0, 0.0, 1.0],
+            1.0,
+            crate::scene::BlockScalePolicy::FromInsert,
+            false,
+        )
+        .unwrap();
+
+        let finite_points = wires
+            .iter()
+            .flat_map(|wire| &wire.points)
+            .filter(|point| point[0].is_finite())
+            .count();
+        assert_eq!(finite_points, 6_000);
+        assert_eq!(wires.len(), 1);
+        assert!(wires[0].render_instance.is_none());
     }
 }

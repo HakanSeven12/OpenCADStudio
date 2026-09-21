@@ -213,6 +213,12 @@ impl OpenCADStudio {
 
         let i = self.active_tab;
         let tab = &self.tabs[i];
+        // Dynamic input is built before the status bar and properties panel,
+        // so seed its shared formatter here rather than relying on either of
+        // those later views to have done it for this drawing/thread.
+        crate::entities::common::set_unit_context(
+            crate::entities::common::UnitContext::from_header(&tab.scene.document.header),
+        );
         let thumbnail_capture_clean = self.thumbnail_capture_clean;
         let theme_text = self.active_theme.palette().background.base.text;
         let viewcube_text_color = [theme_text.r, theme_text.g, theme_text.b, theme_text.a];
@@ -437,18 +443,32 @@ impl OpenCADStudio {
                         );
                         axes = (ux.as_vec3(), uy.as_vec3(), uz.as_vec3());
                     }
+                    // BUG FIX: the display step used to ignore GRIDUNIT entirely
+                    // (hardcoded 1.0 base). It now resizes from the DSettings
+                    // grid spacing, and honors "Display grid beyond Limits".
+                    let (step_x, step_y) = crate::ui::overlay::compute_grid_steps(
+                        self.grid_spacing_x,
+                        self.grid_spacing_y,
+                        cam.distance,
+                        cam.fov_y,
+                        bounds,
+                        self.grid_adaptive,
+                    );
+                    let limits = if self.grid_beyond_limits {
+                        None
+                    } else {
+                        tab.scene.grid_limits_for_viewport(handle)
+                    };
                     crate::ui::overlay::GridParams {
                         view_rot: cam.view_proj_rte(bounds),
                         eye: cam.eye(),
                         bounds,
-                        step: crate::ui::overlay::compute_grid_step(
-                            cam.distance,
-                            cam.fov_y,
-                            bounds,
-                        ),
+                        step_x,
+                        step_y,
+                        major_every: self.grid_major_every,
                         origin,
                         axes,
-                        limits: tab.scene.grid_limits_for_viewport(handle),
+                        limits,
                     }
                 })
                 .collect();
@@ -591,7 +611,8 @@ bg={bg_ms:.1}ms n={view_count}"
             };
             let control_polygon = tab.selected_handle.and_then(|handle| {
                 let spline = match tab.scene.document.get_entity(handle) {
-                    Some(acadrust::EntityType::Spline(spline)) if spline.cv_frame_visible => spline,
+                    Some(acadrust::EntityType::Spline(spline))
+                        if crate::entities::spline::shows_control_vertices(spline) => spline,
                     _ => return None,
                 };
                 if tab
@@ -752,7 +773,7 @@ bg={bg_ms:.1}ms n={view_count}"
             // direction best matches the cursor. At a crossing lock those are
             // exactly the two vectors intersecting at the cursor, which
             // previously went undrawn (#1313).
-            let otrack_lines: Vec<crate::ui::overlay::OtrackLine> =
+            let mut otrack_lines: Vec<crate::ui::overlay::OtrackLine> =
                 match (otrack_proj, self.otrack_active) {
                     (Some((view_rot, eye, ob)), Some((base, _dir))) => {
                         let b = ost_project(base, view_rot, eye, ob);
@@ -826,6 +847,23 @@ bg={bg_ms:.1}ms n={view_count}"
                     }
                     _ => vec![],
                 };
+            // The crossing lock's second vector (#1313): the intersection
+            // lock is the meeting of two tracking vectors, so both are drawn
+            // — one guide alone hides what the point is. The ray loop above
+            // usually covers it; this guarantees the pair's second member.
+            if let (Some((view_rot, eye, ob)), Some((cross_base, _))) =
+                (otrack_proj, self.otrack_cross)
+            {
+                let b = ost_project(cross_base, view_rot, eye, ob);
+                let a = ost_project(tab.last_cursor_world, view_rot, eye, ob);
+                if b.x.is_finite() && b.y.is_finite() && a.x.is_finite() && a.y.is_finite() {
+                    otrack_lines.push(crate::ui::overlay::OtrackLine {
+                        base: b,
+                        tip: a,
+                        active: false,
+                    });
+                }
+            }
             // The acquired Parallel-snap reference, marked on its line (#277).
             let parallel_ref_marker: Option<iced::Point> =
                 match (otrack_proj, self.snapper.parallel_ref) {
@@ -881,6 +919,23 @@ bg={bg_ms:.1}ms n={view_count}"
                 .active_cmd
                 .as_ref()
                 .is_some_and(|cmd| !cmd.needs_entity_pick() && !cmd.is_selection_gathering());
+            let constraint_cursor_badge = if is_paper {
+                None
+            } else {
+                tab.scene.hover_highlight.and_then(|handle| {
+                    tab.scene
+                        .parametric_constraint_set(tab.current_parametric_scope())
+                        .and_then(|set| {
+                            set.constraints_touching(handle)
+                                .find(|constraint| {
+                                    constraint.kind
+                                        == crate::scene::parametric_constraints::ConstraintKind::Concentric
+                                })
+                                .or_else(|| set.constraints_touching(handle).next())
+                        })
+                        .map(|constraint| constraint.kind.glyph_symbol().to_string())
+                })
+            };
             let constraint_glyphs: Vec<(
                 iced::Point,
                 [f32; 2],
@@ -898,6 +953,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         sel_ref.vp_size,
                         self.show_constraint_values,
                         self.constraint_bar_display,
+                        self.constraint_bar_mode,
                     )
                     .into_iter()
                     .map(
@@ -958,6 +1014,9 @@ bg={bg_ms:.1}ms n={view_count}"
                     grip_hover: self.model_space.grip_hover,
                 },
                 constraint_glyphs,
+                self.constraint_glyph_tooltip
+                    .map(|kind| crate::t!(kind.label()).into_owned()),
+                constraint_cursor_badge,
             )
         };
 
@@ -1136,15 +1195,15 @@ bg={bg_ms:.1}ms n={view_count}"
                         (None, _) if rectangle_values.is_some() => {
                             let (width, height) = rectangle_values.unwrap();
                             match f.role {
-                                crate::command::DynRole::Width => format!("{width:.4}"),
-                                crate::command::DynRole::Height => format!("{height:.4}"),
+                                crate::command::DynRole::Width => crate::entities::common::format_length(width),
+                                crate::command::DynRole::Height => crate::entities::common::format_length(height),
                                 _ => String::new(),
                             }
                         }
                         // An angle step with a command-supplied live value
                         // (ARC span / direction) shows it in degrees.
                         (None, Some(lv)) if f.component == DynComponent::Angle => {
-                            format!("{lv:.1}")
+                            crate::entities::common::format_angle(lv.to_radians())
                         }
                         (None, Some(lv))
                             if matches!(
@@ -1152,7 +1211,11 @@ bg={bg_ms:.1}ms n={view_count}"
                                 DynComponent::Scalar | DynComponent::Distance
                             ) =>
                         {
-                            format!("{lv:.4}")
+                            if f.component == DynComponent::Distance {
+                                crate::entities::common::format_length(lv)
+                            } else {
+                                format!("{lv:.4}")
+                            }
                         }
                         _ => dyn_component_value(
                             f,
@@ -1270,6 +1333,9 @@ bg={bg_ms:.1}ms n={view_count}"
         };
 
         if !thumbnail_capture_clean && !self.layout_settling {
+            if let Some(pivot) = self.spacemouse_pivot_overlay() {
+                viewport_stack = viewport_stack.push(pivot);
+            }
             // Per-pane input pane_grid goes ABOVE the crosshair overlay so it
             // receives mouse events (the overlay's `Hidden` cursor would otherwise
             // starve any layer beneath it). The controls bar is pushed on top of it.
@@ -1658,7 +1724,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     crate::ui::command_line::history_max_height(self.win_size.1),
                 ) + 72.0
             } else {
-                34.0
+                34.0 + self.command_line.overlay_lines_height()
             };
             // Quick Properties: stay near the selection cursor, flipping around
             // it as needed to remain inside the visible drawing area.
@@ -1807,37 +1873,17 @@ bg={bg_ms:.1}ms n={view_count}"
             // the cursor position (canvas-relative) anchors the menu under
             // the cursor instead of drifting into window-relative space.
             if !tab.is_start {
-                let (ctx_pos, draworder_open) = {
+                let (ctx_pos, highlighted) = {
                     let sel = tab.scene.selection.borrow();
-                    (sel.context_menu, sel.draworder_submenu)
+                    (sel.context_menu, sel.context_menu_ui.highlighted)
                 };
                 if let Some(p) = ctx_pos {
-                    let has_cmd = tab.active_cmd.is_some();
-                    // Same guard as typed MTP/M2P and SnapOverrideMtp.
-                    let has_point_step = tab.active_cmd.as_ref().is_some_and(|c| {
-                        (!c.input_kind().wants_text() || c.point_step_accepts_keywords())
-                            && !c.needs_entity_pick()
-                    });
-                    let has_selection = !tab.scene.selected.is_empty();
-                    let isolation_active = tab.scene.is_isolation_active();
-                    let last_cmds: Vec<String> = self
-                        .command_line
-                        .recent_commands
-                        .iter()
-                        .rev()
-                        .take(3)
-                        .cloned()
-                        .collect();
+                    let menu = self.current_context_menu();
                     viewport_stack = viewport_stack.push(viewport_context_menu_overlay(
                         p,
                         command_line_inset,
-                        has_cmd,
-                        has_selection,
-                        tab.scene.selected_constraint,
-                        isolation_active,
-                        last_cmds,
-                        draworder_open,
-                        has_point_step,
+                        &menu,
+                        highlighted,
                     ));
                 }
             }
@@ -1880,6 +1926,8 @@ bg={bg_ms:.1}ms n={view_count}"
             match id {
                 crate::ui::dock::PanelId::Properties => self.show_properties,
                 crate::ui::dock::PanelId::BlockPalette => self.show_block_palette,
+                crate::ui::dock::PanelId::ExternalReferences => self.show_external_references,
+                crate::ui::dock::PanelId::Browser => self.show_browser,
             }
         };
         let edge_stack = |side: crate::app::config::DockSide| -> Option<Element<'_, Message>> {
@@ -1942,7 +1990,8 @@ bg={bg_ms:.1}ms n={view_count}"
         let workspace: Element<'_, Message> = row(parts).width(Fill).height(Fill).into();
 
         let any_dragging = self.dock_dragging.is_some();
-        let any_resizing = self.dock_resizing.is_some();
+        let any_resizing =
+            self.dock_resizing.is_some() || self.xref_col_drag.is_some() || self.xref_split_drag;
         let workspace = if any_dragging {
             let id = self.dock_dragging.expect("guarded by any_dragging");
             let side = self.dock_drag_target.map(|(s, _)| s).unwrap_or(
@@ -2269,6 +2318,18 @@ bg={bg_ms:.1}ms n={view_count}"
                             .map(|s| s.conflicts.len())
                             .unwrap_or(0),
                         &self.gpu_status,
+                        (self.spacemouse.visible()
+                            || self.spacemouse_preferences.mode
+                                != crate::input::spacemouse::NavigationMode::Auto)
+                            .then(|| {
+                                crate::ui::statusbar::spacemouse::view(
+                                    self.spacemouse_preferences,
+                                    self.spacemouse.status(),
+                                    self.spacemouse_paused,
+                                    self.spacemouse_label(),
+                                    self.spacemouse_sheet(),
+                                )
+                            }),
                     )
                 })
                 .width(Fill)
@@ -2737,6 +2798,21 @@ impl OpenCADStudio {
         let control = iced::time::every(std::time::Duration::from_millis(50))
             .map(|_| Message::PollWebControl);
         iced::Subscription::batch([
+            if self.spacemouse.moving() && self.spacemouse_focused && !self.spacemouse_paused {
+                window::frames().map(Message::SpaceMouseFrame)
+            } else {
+                Subscription::none()
+            },
+            self.spacemouse.subscription().map(|_| Message::SpaceMouseWake),
+            event::listen_with(|event, _, id| match event {
+                iced::Event::Window(window::Event::Focused) => {
+                    Some(Message::SpaceMouseFocus(id, true))
+                }
+                iced::Event::Window(window::Event::Unfocused) => {
+                    Some(Message::SpaceMouseFocus(id, false))
+                }
+                _ => None,
+            }),
             control,
             frames,
             history_tick,
@@ -2917,6 +2993,18 @@ impl OpenCADStudio {
             crate::ui::dock::PanelId::BlockPalette => {
                 crate::ui::window::block_palette::view(&self.block_palette, width, auto_collapse)
             }
+            crate::ui::dock::PanelId::ExternalReferences => self.xref_manager.view(
+                width,
+                auto_collapse,
+                tab.xref_missing,
+                &tab.scene.document,
+            ),
+            crate::ui::dock::PanelId::Browser => crate::ui::window::browser::view(
+                &tab.scene.document,
+                tab.sketch_session.as_ref().map(|session| session.name.as_str()),
+                width,
+                auto_collapse,
+            ),
         };
         let divider = dock_divider(id);
         match side {

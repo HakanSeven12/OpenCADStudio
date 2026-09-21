@@ -2,6 +2,7 @@
 
 use crate::app::Message;
 use crate::t;
+use crate::ui::style::common::muted_style;
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Background, Element, Length, Theme};
 
@@ -12,12 +13,6 @@ pub enum ShortcutField {
 }
 
 const GUTTER: f32 = 16.0;
-
-fn muted_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
-    }
-}
 
 fn danger_text_style(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {

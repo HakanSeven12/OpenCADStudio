@@ -3,25 +3,30 @@
 // All file reading/writing goes through acadrust.
 // Default save format: DWG (AC1032 / R2018+).
 
+pub mod file_association;
+pub mod font_repo;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod edit_lock;
 // Same split as web_session/web_autosave: the save-routing decision (and
 // its tests) is pure and compiles everywhere; the showSaveFilePicker half
 // inside is wasm-only.
 pub(crate) mod fs_access;
-pub mod file_association;
 pub mod linetypes;
 pub mod obj;
-pub mod paper_sizes;
+pub mod ole_embed;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod single_instance;
+pub mod paper_catalog;
 pub mod patterns;
+pub mod plot_device;
+pub mod windows_media;
 pub mod pdf_export;
 pub mod plot_style;
 pub mod print_to_printer;
 pub mod recovery;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod single_instance;
 pub mod step;
 pub mod stl;
+pub mod xref_model;
 pub mod thumbnail;
 pub mod update_check;
 #[cfg(target_arch = "wasm32")]
@@ -399,10 +404,24 @@ async fn open_path_with_phase_attempt(
                         });
                         callback
                     };
-                    std::fs::File::open(&path2).map_err(|error| OpenAttemptFailure {
-                        message: format!("failed to open drawing: {error}"),
-                        read_stats: None,
-                        recoverable: false,
+                    std::fs::File::open(&path2).map_err(|error| {
+                        // 32 = ERROR_SHARING_VIOLATION, 33 = ERROR_LOCK_VIOLATION:
+                        // another program holds the drawing without read sharing,
+                        // so nothing on the machine can read the bytes until it
+                        // closes the file — not even read-only.
+                        let message = match error.raw_os_error() {
+                            Some(32) | Some(33) => format!(
+                                "\"{}\" is in use by another program. Close the file there and \
+                                 reopen it here, or open a copy of the file.",
+                                path2.display()
+                            ),
+                            _ => format!("failed to open drawing: {error}"),
+                        };
+                        OpenAttemptFailure {
+                            message,
+                            read_stats: None,
+                            recoverable: false,
+                        }
                     })?;
                     let outcome = load_file_for_open(&path2, Some(parser_progress), &attempt)?;
                     let read_stats = outcome.stats;
@@ -604,6 +623,18 @@ pub async fn pick_and_load_web(progress: Arc<OpenProgressState>) -> WebOpenOutco
     // open drawing may reference it by name, and the registry — not the
     // absent filesystem — is what re-resolves that reference in-session.
     crate::io::xref::register_source(&name, Arc::new(bytes.to_vec()));
+    open_bytes_web(name, bytes, progress).await
+}
+
+/// Web file open from bytes the caller already holds (the control channel's
+/// `open` with `data_base64`). Same parse, caching and recovery handling as a
+/// file chosen in the browser picker.
+#[cfg(target_arch = "wasm32")]
+pub async fn open_bytes_web(
+    name: String,
+    bytes: Arc<[u8]>,
+    progress: Arc<OpenProgressState>,
+) -> WebOpenOutcome {
     let size_bytes = bytes.len() as u64;
     let result = load_web_bytes(&name, &bytes, progress.clone(), false, "", None).await;
     let keep_for_recovery = result
@@ -1196,6 +1227,7 @@ fn finalize_loaded_outcome(
 ) -> Result<acadrust::ReadOutcome, String> {
     let doc = &mut outcome.document;
     normalize_block_origins(doc);
+    normalize_knotless_splines(doc);
     if outcome.stats.source_format == Some(acadrust::SourceFormat::Dxf) {
         fix_dxf_dimension_rotations(doc);
         fix_dxf_layout_plot_settings(doc);
@@ -1218,15 +1250,104 @@ fn read_dwg_path(
     } else {
         DwgReadOptions::default()
     };
-    let mut reader = {
-        let mut reader = DwgReader::from_mmap(path).map_err(ReaderFailure::from_reader)?;
-        reader.options = options;
-        reader
-    };
+    // The memory-mapped read is the fast path, but a mapped file is read
+    // through the page-fault handler: a file that shrinks while mapped
+    // (a writer saving over it) or a cloud placeholder that cannot page
+    // in raises an in-page exception the process cannot catch. Both are
+    // ordinary I/O errors through plain reads, so anything that can
+    // fault — or refuses to open under a third-party lock — falls back
+    // to one in-memory snapshot read below.
+    if !cloud_placeholder(path) {
+        match DwgReader::from_mmap(path) {
+            Ok(mut reader) => {
+                reader.options = options.clone();
+                if let Some(progress) = &progress {
+                    reader.set_progress_callback(progress.clone());
+                }
+                match reader.read_with_stats() {
+                    Ok(outcome) => return Ok(outcome),
+                    // The file shrank or became unreadable mid-parse;
+                    // retry from a snapshot instead of reporting a bare
+                    // I/O error.
+                    Err(acadrust::DxfError::Io(_)) => {}
+                    Err(error) => return Err(ReaderFailure::from_reader(error)),
+                }
+            }
+            // Locked or unmappable: the snapshot read surfaces the real
+            // error when the file genuinely cannot be read.
+            Err(_) => {}
+        }
+    }
+    let bytes = read_drawing_snapshot(path).map_err(|error| {
+        ReaderFailure::terminal(format!(
+            "failed to open drawing (is it in use by another program?): {error}"
+        ))
+    })?;
+    let mut reader = DwgReader::from_stream_with_options(std::io::Cursor::new(bytes), options);
     if let Some(progress) = progress {
         reader.set_progress_callback(progress);
     }
-    reader.read_with_stats().map_err(ReaderFailure::from_reader)
+    reader
+        .read_with_stats()
+        .map_err(ReaderFailure::from_reader)
+}
+
+/// Windows cloud-placeholder files (OneDrive "Files On Demand" and similar)
+/// page their bytes in on demand; faulting a placeholder through a memory map
+/// can raise an in-page exception that kills the process. Plain reads hydrate
+/// the file instead. Checks `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`,
+/// `FILE_ATTRIBUTE_RECALL_ON_OPEN` and `FILE_ATTRIBUTE_OFFLINE`.
+#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+fn cloud_placeholder(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_OFFLINE: u32 = 0x1000;
+    const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x0004_0000;
+    const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
+    std::fs::metadata(path)
+        .map(|meta| {
+            let attrs = meta.file_attributes();
+            attrs
+                & (FILE_ATTRIBUTE_OFFLINE
+                    | FILE_ATTRIBUTE_RECALL_ON_OPEN
+                    | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)
+                != 0
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
+fn cloud_placeholder(_path: &Path) -> bool {
+    false
+}
+
+/// Read the whole drawing through the most permissive share mode the platform
+/// offers. On Windows `std::fs::read` opens without `FILE_SHARE_DELETE`, so a
+/// concurrent atomic-save replace makes the read fail even though every byte
+/// was readable. A snapshot can never fault: a writer shrinking the file
+/// mid-read just ends the read early.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_drawing_snapshot(path: &Path) -> std::io::Result<Vec<u8>> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::io::Read;
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        };
+
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .open(path)?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::fs::read(path)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1719,7 +1840,10 @@ mod save_failure_tests {
 /// legacy-CTB complaint in #1261d was partly that a file which failed to
 /// parse produced no feedback at all). The table is paired with an optional
 /// non-fatal note for the command line — currently the registration
-/// collision message below.
+/// collision message below. A table picked from outside the plot styles
+/// folder is copied into it (unless a file of that name is already there),
+/// so the dialog lists it from now on and page setups naming it resolve
+/// after a restart.
 pub async fn pick_plot_style(
 ) -> Result<Option<(plot_style::PlotStyleTable, Option<String>)>, String> {
     let dialog = crate::sys::file_dialog()
@@ -1806,6 +1930,9 @@ fn register_picked_plot_style(path: &Path) -> Option<String> {
 fn register_plot_style_into(dir: &Path, path: &Path) -> Option<String> {
     let file_name = path.file_name()?;
     let registered = dir.join(file_name);
+    // A pick from the plot-styles folder itself always collides with the
+    // registered file (it IS that file), so this returns the kept-table note
+    // and never reaches the copy below — a self-copy cannot happen.
     if registered.exists() {
         return Some(
             crate::tf!(
@@ -1944,6 +2071,23 @@ pub async fn pick_image_file() -> Result<(PathBuf, u32, u32), String> {
     // display-capped buffer's, so a downsampled aerial still places at its
     // true aspect and default size (the cap is a rendering detail).
     Ok((path, decoded.source_width, decoded.source_height))
+}
+
+/// Pick an image file and prepare it for embedding (IMAGEEMBED). The bytes
+/// are read before returning so the OLE2FRAME payload is ready to place.
+pub async fn pick_embedded_image_file() -> Result<ole_embed::EmbeddedImage, String> {
+    let handle = crate::sys::file_dialog()
+        .set_title(crate::t!("Select Image File").as_ref())
+        .add_filter(crate::t!("Images").as_ref(), &["png", "jpg", "jpeg", "bmp", "tiff", "tif"])
+        .add_filter(crate::t!("PNG").as_ref(), &["png"])
+        .add_filter(crate::t!("JPEG").as_ref(), &["jpg", "jpeg"])
+        .add_filter(crate::t!("All Files").as_ref(), &["*"])
+        .pick_file()
+        .await
+        .ok_or_else(|| "Cancelled".to_string())?;
+    let name = handle.file_name();
+    let bytes = handle.read().await;
+    ole_embed::EmbeddedImage::from_bytes(name, bytes)
 }
 
 /// Save `doc` to `path` with the given DXF version, overriding `doc.version`.
@@ -2465,6 +2609,8 @@ fn sync_current_styles_on_save(doc: &mut CadDocument) {
 // `purge_corrupt_entities` scans the document and removes any entity that
 // fails a cheap sanity check, returning the number dropped so the caller can
 // surface it to the UI / log.
+//
+// Keep valid degenerate geometry: dropping it would trigger strict-open recovery.
 
 fn finite_unit_normal(n: &acadrust::types::Vector3) -> bool {
     let (x, y, z) = (n.x, n.y, n.z);
@@ -2520,20 +2666,15 @@ pub(crate) fn is_entity_corrupt(e: &EntityType) -> bool {
             p.vertices.len() >= MAX_VERTS || p.vertices.iter().any(|v| !finite_vec3(&v.location))
         }
         E::Line(l) => !finite_vec3(&l.start) || !finite_vec3(&l.end),
+        // Zero-radius curves are valid and have bounded kernel tessellation.
         E::Circle(c) => {
-            !finite_vec3(&c.center)
-                || !finite_coord(c.radius)
-                // Reject zero- or near-zero circles: they tessellate into a
-                // degenerate curve the tessellator cannot sample.
-                || c.radius.abs() < 1.0e-10
-                || c.radius.abs() > 1.0e10
+            !finite_vec3(&c.center) || !finite_coord(c.radius) || c.radius.abs() > 1.0e10
         }
         E::Arc(a) => {
             !finite_vec3(&a.center)
                 || !finite_coord(a.radius)
                 || !a.start_angle.is_finite()
                 || !a.end_angle.is_finite()
-                || a.radius.abs() < 1.0e-10
                 || a.radius.abs() > 1.0e10
                 || !finite_unit_normal(&a.normal)
         }
@@ -2569,8 +2710,12 @@ pub(crate) fn is_entity_corrupt(e: &EntityType) -> bool {
                 && (s.knots.iter().any(|k| !k.is_finite())
                     || s.knots.windows(2).any(|w| w[1] < w[0])
                     || (!compact_periodic_knots && s.knots.len() != n + deg + 1));
+            // A single control point with no knots and no fit points cannot
+            // form a curve, and no knot vector exists for it.
+            let lone_point = n == 1 && s.knots.is_empty() && s.fit_points.is_empty();
             n >= MAX_VERTS
                 || degree_bad
+                || lone_point
                 || s.control_points.iter().any(|p| !finite_vec3(p))
                 || knots_bad
         }
@@ -2578,8 +2723,32 @@ pub(crate) fn is_entity_corrupt(e: &EntityType) -> bool {
     }
 }
 
+/// Give control-point splines stored without knots a degree their control
+/// points can carry, and the matching clamped knot vector.
+///
+/// A degree-p curve needs at least p + 1 control points. Knot generation
+/// (here, and in the DWG writer for knot-less splines) subtracts in `usize`
+/// and underflows when there are fewer; in release builds the wrapped count
+/// drives an unbounded allocation. Lowering the degree keeps the geometry the
+/// points describe: two points are a straight segment at any degree.
+fn normalize_knotless_splines(doc: &mut CadDocument) {
+    for entity in doc.entities_mut() {
+        let EntityType::Spline(spline) = entity else {
+            continue;
+        };
+        let n = spline.control_points.len();
+        if !spline.knots.is_empty() || n < 2 || spline.degree < 1 {
+            continue;
+        }
+        let degree = (spline.degree as usize).min(n - 1);
+        spline.degree = degree as i32;
+        spline.knots = acadrust::entities::Spline::generate_clamped_knots(degree, n);
+    }
+}
+
 pub fn purge_corrupt_entities(doc: &mut CadDocument) -> usize {
     use crate::par::prelude::*;
+    normalize_knotless_splines(doc);
     // Detection is pure and read-only; the per-vertex finite/extent checks on
     // large polylines dominate, so fan the scan out across cores. Gather
     // entity references in one pass, test in parallel, then remove serially
@@ -2615,21 +2784,13 @@ fn fix_viewport_status_flags(doc: &mut CadDocument) {
     }
 }
 
-/// The acadrust DXF reader stores several rotation fields directly from DXF
-/// group code 50 in degrees, while DWG and our own creation code store radians.
-/// Apply to_radians() on load so tessellation can call cos/sin uniformly.
+/// The acadrust DXF reader still stores Shape rotation directly from group
+/// code 50 in degrees, while DWG and our own creation code store radians.
+/// Dimension angles and ATTRIB/ATTDEF rotation are converted inside the
+/// reader, so arms for them here would convert twice.
 fn fix_dxf_dimension_rotations(doc: &mut CadDocument) {
     for entity in doc.entities_mut() {
         match entity {
-            // Dimension angles (rotation / text / oblique) are converted
-            // degrees->radians inside the acadrust DXF reader now, so a
-            // dimension arm here would double-convert.
-            EntityType::AttributeDefinition(a) => {
-                a.rotation = a.rotation.to_radians();
-            }
-            EntityType::AttributeEntity(a) => {
-                a.rotation = a.rotation.to_radians();
-            }
             EntityType::Shape(s) => {
                 s.rotation = s.rotation.to_radians();
             }
@@ -2793,8 +2954,69 @@ mod layer_roundtrip_tests {
 #[cfg(test)]
 mod corrupt_guard_tests {
     use super::*;
-    use acadrust::entities::{Arc, EntityType, Spline};
+    use acadrust::entities::{Arc, Circle, EntityType, Spline};
     use acadrust::types::Vector3;
+
+    fn knotless_spline(degree: i32, points: usize) -> Spline {
+        let mut spline = Spline::new();
+        spline.degree = degree;
+        spline.control_points = (0..points)
+            .map(|index| Vector3::new(index as f64, index as f64, 0.0))
+            .collect();
+        spline
+    }
+
+    // Degree 3 over two control points with no knot vector: generating knots
+    // for it underflows, and writing it to DWG used to panic (debug) or
+    // allocate without bound (release).
+    #[test]
+    fn knotless_spline_with_too_few_points_is_lowered_and_saves_as_dwg() {
+        let mut doc = CadDocument::new();
+        doc.add_entity(EntityType::Spline(knotless_spline(3, 2))).unwrap();
+        doc.add_entity(EntityType::Spline(knotless_spline(3, 1))).unwrap();
+        assert_eq!(purge_corrupt_entities(&mut doc), 1, "the lone point is dropped");
+        let spline = doc
+            .entities()
+            .find_map(|entity| match entity {
+                EntityType::Spline(spline) => Some(spline.clone()),
+                _ => None,
+            })
+            .expect("the two-point spline is kept");
+        assert_eq!(spline.degree, 1);
+        assert_eq!(spline.knots, vec![0.0, 0.0, 1.0, 1.0]);
+
+        let path = std::env::temp_dir().join(format!(
+            "ocs_knotless_spline_{}.dwg",
+            std::process::id()
+        ));
+        save_as_version(&doc, &path, acadrust::DxfVersion::AC1032).expect("save");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // `load_file` (headless export, xrefs, block import) does not purge, so
+    // the spline repair has to happen when any load is finalized.
+    #[test]
+    fn knotless_spline_is_repaired_by_every_load_path() {
+        const DXF: &str = "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n8\n0\n70\n0\n71\n3\n72\n0\n73\n2\n74\n0\n\
+10\n0\n20\n0\n30\n0\n10\n1\n20\n1\n30\n0\n0\nENDSEC\n0\nEOF\n";
+        let dir = std::env::temp_dir();
+        let source = dir.join(format!("ocs_knotless_load_{}.dxf", std::process::id()));
+        let target = dir.join(format!("ocs_knotless_load_{}.dwg", std::process::id()));
+        std::fs::write(&source, DXF).unwrap();
+        let doc = load_file(&source).expect("load");
+        let _ = std::fs::remove_file(&source);
+        let spline = doc
+            .entities()
+            .find_map(|entity| match entity {
+                EntityType::Spline(spline) => Some(spline),
+                _ => None,
+            })
+            .expect("spline");
+        assert_eq!(spline.degree, 1);
+        assert_eq!(spline.knots.len(), 4);
+        save_as_version(&doc, &target, acadrust::DxfVersion::AC1032).expect("save");
+        let _ = std::fs::remove_file(&target);
+    }
 
     // Small but finite arcs are valid records. Kernel tessellation is bounded,
     // so opening must retain them instead of treating their size as corruption.
@@ -2831,6 +3053,32 @@ mod corrupt_guard_tests {
         a.end_angle = 1.0e-4;
         a.normal = Vector3::new(0.0, 0.0, 1.0);
         assert!(!is_entity_corrupt(&EntityType::Arc(a)));
+    }
+
+    #[test]
+    fn keeps_zero_radius_circle_and_arc() {
+        let mut c = Circle::new();
+        c.center = Vector3::new(206.2, 150.7, 0.0);
+        c.radius = 0.0;
+        assert!(!is_entity_corrupt(&EntityType::Circle(c)));
+
+        let mut a = Arc::new();
+        a.center = Vector3::new(223.5, 174.5, 0.0);
+        a.radius = 0.0;
+        a.start_angle = 0.0;
+        a.end_angle = 0.0;
+        a.normal = Vector3::new(0.0, 0.0, 1.0);
+        assert!(!is_entity_corrupt(&EntityType::Arc(a)));
+    }
+
+    #[test]
+    fn drops_absurd_radius_circle() {
+        let mut c = Circle::new();
+        c.radius = 1.0e11;
+        assert!(is_entity_corrupt(&EntityType::Circle(c)));
+        let mut c = Circle::new();
+        c.radius = f64::NAN;
+        assert!(is_entity_corrupt(&EntityType::Circle(c)));
     }
 
     // Parser desync emits 100_000-control-point splines; building a kernel

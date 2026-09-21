@@ -17,63 +17,7 @@ use crate::ipc::v4::server::{
     default_notify_rate_limit, run_host_reader_thread, HostIncoming, RateLimiter, V4HostShared,
 };
 use crate::process::PluginError;
-
-/// Default maximum time to wait for a plugin call to respond.
-const CALL_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
-
-fn call_timeout() -> Duration {
-    std::env::var("OCS_PLUGIN_CALL_TIMEOUT_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .map(Duration::from_secs)
-        .unwrap_or(CALL_TIMEOUT_DEFAULT)
-}
-
-/// Per-request-kind timeout floors.
-fn request_timeout(kind: &'static str) -> Duration {
-    base_max_floor(call_timeout(), kind)
-}
-
-fn execute_code_timeout() -> Duration {
-    const DEFAULT: Duration = Duration::from_secs(60);
-    std::env::var("OCS_PLUGIN_EXECUTE_TIMEOUT_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .map(Duration::from_secs)
-        .unwrap_or(DEFAULT)
-        .max(DEFAULT)
-}
-
-fn base_max_floor(base: Duration, kind: &'static str) -> Duration {
-    #[cfg(test)]
-    if let Some(secs) = std::env::var("OCS_PLUGIN_TEST_FLOOR_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-    {
-        return base.max(Duration::from_secs(secs));
-    }
-    let floor = match kind {
-        "GetManifest" | "GetRibbon" => Duration::from_secs(5),
-        "Dispatch" => Duration::from_secs(10),
-        "InteractiveEvent" | "GetPrompt" | "NeedsEntityPick" => Duration::from_secs(2),
-        "ExecuteCode" => execute_code_timeout(),
-        _ => Duration::from_secs(1),
-    };
-    base.max(floor)
-}
-
-fn request_kind(req: &HostRequest) -> &'static str {
-    match req {
-        HostRequest::GetManifest => "GetManifest",
-        HostRequest::GetRibbon => "GetRibbon",
-        HostRequest::Dispatch { .. } => "Dispatch",
-        HostRequest::InteractiveEvent { .. } => "InteractiveEvent",
-        HostRequest::GetPrompt { .. } => "GetPrompt",
-        HostRequest::NeedsEntityPick { .. } => "NeedsEntityPick",
-        HostRequest::ExecuteCode { .. } => "ExecuteCode",
-        HostRequest::Shutdown => "Shutdown",
-    }
-}
+use crate::process::{request_kind, request_timeout};
 
 type DeferredRequest = (u64, Option<u64>, Box<PluginRequest>);
 

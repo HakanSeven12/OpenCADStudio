@@ -44,6 +44,8 @@ static OSNAP_APPARENT: &[u8] = include_bytes!("../../assets/icons/osnap/apparent
 static OSNAP_PARALLEL: &[u8] = include_bytes!("../../assets/icons/osnap/parallel.svg");
 static OSNAP_GRID: &[u8] = include_bytes!("../../assets/icons/osnap/grid.svg");
 static OSNAP_MTP: &[u8] = include_bytes!("../../assets/icons/osnap/mtp.svg");
+static NAV_PAN: &[u8] = include_bytes!("../../assets/icons/pan.svg");
+static NAV_ZOOM: &[u8] = include_bytes!("../../assets/icons/zoom_in.svg");
 
 static LAY_ON: &[u8] = include_bytes!("../../assets/icons/layers/layon.svg");
 static LAY_OFF: &[u8] = include_bytes!("../../assets/icons/layers/layoff.svg");
@@ -69,6 +71,7 @@ pub static SPLIT_H: &[u8] = include_bytes!("../../assets/icons/ui/split_h.svg");
 pub static GRID: &[u8] = include_bytes!("../../assets/icons/ui/grid.svg");
 pub static SNAP: &[u8] = include_bytes!("../../assets/icons/ui/snap.svg");
 pub static DOC_NEW: &[u8] = include_bytes!("../../assets/icons/ui/doc_new.svg");
+pub static DOC: &[u8] = include_bytes!("../../assets/icons/ui/doc.svg");
 pub static FOLDER_OPEN: &[u8] = include_bytes!("../../assets/icons/ui/folder_open.svg");
 pub static SAVE: &[u8] = include_bytes!("../../assets/icons/ui/save.svg");
 pub static FILE_EXPORT: &[u8] = include_bytes!("../../assets/icons/ui/file_export.svg");
@@ -626,12 +629,29 @@ pub fn osnap(snap: crate::snap::SnapType) -> &'static [u8] {
         S::Grid => OSNAP_GRID,
         // Not shown in the snap menu; fall back to a neutral marker.
         S::ObjectPick => OSNAP_NEAREST,
+        // 3D modes have no dedicated menu glyphs yet; reuse the closest 2D
+        // shapes (hollow diamond ≈ vertex, hollow triangle ≈ edge midpoint).
+        S::Vertex => OSNAP_NODE,
+        S::EdgeMidpoint => OSNAP_MIDPOINT,
+        S::FaceCenter => OSNAP_CENTER,
+        S::Knot => OSNAP_NODE,
+        S::FacePerpendicular => OSNAP_PERPENDICULAR,
+        S::NearestFace => OSNAP_NEAREST,
     }
 }
 
 /// MTP menu icon: modal 2-pick modifier, not a persistent `SnapType` mode.
 pub fn mtp_icon() -> &'static [u8] {
     OSNAP_MTP
+}
+
+/// Context-menu glyphs for the transparent navigation rows.
+pub fn pan_icon() -> &'static [u8] {
+    NAV_PAN
+}
+
+pub fn zoom_icon() -> &'static [u8] {
+    NAV_ZOOM
 }
 
 /// Layer visibility icon bytes (on / off).

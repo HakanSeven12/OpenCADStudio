@@ -338,8 +338,9 @@ impl CadCommand for XLineCommand {
                     if self.value_origin.is_some() { return None; }
                     self.mode = XLineMode::AngleReference;
                 } else {
-                    let angle: f64 = key.parse().ok().filter(|v: &f64| v.is_finite())?;
-                    let (sin, cos) = angle.to_radians().sin_cos();
+                    let angle = crate::entities::common::parse_typed_angle(&key)
+                        .filter(|angle| angle.is_finite())?;
+                    let (sin, cos) = angle.sin_cos();
                     let axis = self.reference.map_or(self.plane.x, |(_, dir)| dir);
                     self.mode = XLineMode::Direction(axis * cos + self.plane.z.cross(axis) * sin);
                 }

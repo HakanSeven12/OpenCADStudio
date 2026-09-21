@@ -393,6 +393,45 @@ pub fn planar_face_normal(body: &Body, face: FaceKey) -> Option<[f64; 3]> {
     Some(if face.forward { normal } else { -normal }.to_array())
 }
 
+/// Centre of every B-rep face: the average of its boundary-loop vertices.
+/// Exact for planar faces; for curved faces the loop average floats slightly
+/// inside the surface — a documented approximation the snap path must not pay
+/// a surface evaluation for on every wire build. Capped like the edge snaps.
+pub fn face_centers(body: &Body) -> Vec<[f64; 3]> {
+    const MAX_FACE_CENTERS: usize = 2048;
+    let mut out = Vec::new();
+    for face in body.face_keys() {
+        let mut sum = [0.0; 3];
+        let mut count = 0usize;
+        for coedge in body.face_coedges(face) {
+            let Some((va, vb)) = body.coedge_vertices(coedge) else {
+                continue;
+            };
+            for vk in [va, vb] {
+                let Some(v) = body.vertices.get(vk) else {
+                    continue;
+                };
+                if !v.point.iter().all(|c| c.is_finite()) {
+                    continue;
+                }
+                sum[0] += v.point[0];
+                sum[1] += v.point[1];
+                sum[2] += v.point[2];
+                count += 1;
+            }
+        }
+        if count >= 3 {
+            let n = count as f64;
+            out.push([sum[0] / n, sum[1] / n, sum[2] / n]);
+        }
+    }
+    if out.len() > MAX_FACE_CENTERS {
+        let step = out.len().div_ceil(MAX_FACE_CENTERS);
+        out = out.into_iter().step_by(step).collect();
+    }
+    out
+}
+
 // ── Boolean operations ──────────────────────────────────────────────────────
 
 /// Which CSG to apply. Mirrors `model::boolean_cmd::BoolOp` but kept local so
@@ -621,6 +660,30 @@ mod tests {
         assert_eq!(display([1, 0], true) - boundaries, 12);
         assert_eq!(display([0, 2], true) - boundaries, 24);
         assert_eq!(display([2, 2], false), boundaries);
+    }
+
+    #[test]
+    fn box_face_centers_are_six() {
+        let body = box_solid([0.0, 0.0, 0.0], 10.0, 10.0, 10.0).unwrap();
+        let centers = face_centers(&body);
+        assert_eq!(centers.len(), 6, "a box has six faces: {centers:?}");
+        for expected in [
+            [5.0, 0.0, 0.0],
+            [-5.0, 0.0, 0.0],
+            [0.0, 5.0, 0.0],
+            [0.0, -5.0, 0.0],
+            [0.0, 0.0, 5.0],
+            [0.0, 0.0, -5.0],
+        ] {
+            assert!(
+                centers.iter().any(|c| {
+                    (c[0] - expected[0]).abs() < 1e-9
+                        && (c[1] - expected[1]).abs() < 1e-9
+                        && (c[2] - expected[2]).abs() < 1e-9
+                }),
+                "missing face center {expected:?} in {centers:?}"
+            );
+        }
     }
 
     #[test]

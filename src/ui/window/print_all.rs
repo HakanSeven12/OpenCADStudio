@@ -1,5 +1,6 @@
 use crate::app::Message;
 use crate::t;
+use crate::ui::style::common::muted_style as muted;
 use iced::widget::{button, checkbox, column, container, row, scrollable, text, Space};
 use iced::{Background, Border, Element, Length, Theme};
 
@@ -10,12 +11,6 @@ fn button_style(primary: bool) -> impl Fn(&Theme, button::Status) -> button::Sty
         } else {
             button::secondary(theme, status)
         }
-    }
-}
-
-fn muted(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
     }
 }
 

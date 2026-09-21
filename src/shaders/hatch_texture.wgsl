@@ -110,7 +110,7 @@ struct VOut {
                        v.pos.y + h.origin_low.y + v.translation_low.y - u.eye_low.y,
                        v.pos.z - u.eye_low.z);
     o.clip = u.view_rot * vec4<f32>(hi + lo, 1.0);
-    o.clip.z = o.clip.z - v.draw_depth * 0.001 * o.clip.w;
+    o.clip = apply_draw_order(o.clip, v.draw_depth);
     o.xz   = vec2<f32>(v.pos.x, v.pos.y);
     return o;
 }

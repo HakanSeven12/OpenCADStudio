@@ -101,12 +101,15 @@ affect whether a prebuilt plugin can safely be loaded:
 
 A plugin's `plugin.toml` declares the same values under `[opencad]`. For API v4
 and later, `rustc_version` is required and the host refuses to load the plugin
-unless it matches exactly. This turns the current silent runner crash into a
-one-line diagnosis such as:
+unless it matches exactly — omitting it is treated as a mismatch, not skipped.
+This turns the current silent runner crash into a one-line diagnosis such as:
 
 ```
 Plugin built with rustc 1.96.0, host requires 1.98.0 - rebuild required
 ```
+
+`acadrust_source` is also required for API v4 and later. Missing, empty, or
+mismatched metadata makes the package incompatible.
 
 ### `PluginManifest`
 
@@ -202,11 +205,14 @@ struct ExampleModule;
 impl CadModule for ExampleModule {
     fn id(&self) -> &'static str { "example" }
     fn title(&self) -> &'static str { "Example" }
-    fn ribbon_groups(&self) -> Vec<RibbonGroup> {
-        vec![RibbonGroup { title: "Demo", tools: vec![RibbonItem::LargeTool(ToolDef {
+    // Returns a slice, not an owned Vec — build once into a static and hand
+    // back a reference, rather than rebuilding (and dropping) it every call.
+    fn ribbon_groups(&self) -> &[RibbonGroup] {
+        static GROUPS: std::sync::OnceLock<Vec<RibbonGroup>> = std::sync::OnceLock::new();
+        GROUPS.get_or_init(|| vec![RibbonGroup { title: "Demo", tools: vec![RibbonItem::LargeTool(ToolDef {
             id: "EX_HELLO", label: "Hello", icon: IconKind::Glyph("◆"),
             event: ModuleEvent::Command("EX_HELLO".to_string()),
-        })]}]
+        })]}]})
     }
 }
 
@@ -235,8 +241,9 @@ api_version = 5
 ribbon_order = 50
 command_prefixes = ["EX_"]
 xdata_apps = []
-# Filled with the exact compiler output while staging the release asset.
+# Both are filled at release-build time; see the CI step below.
 rustc_version = "rustc 1.98.0 (hash date)"
+acadrust_source = "git+https://github.com/HakanSeven12/cadcodec.git?rev=<short>#<full-40-char-commit>"
 ```
 
 The full, buildable scaffold is in [`docs/plugin-template/`](plugin-template);
@@ -254,6 +261,10 @@ tool fires `ModuleEvent::Command("EX_FOO")`, which round-trips to
 `ModuleEvent::PluginFileDialog { command, title, filter_name, extensions }` lets a
 tool request a native file picker; on selection the host dispatches
 `"<command> <path>"` back with the path's original case preserved.
+
+A leading `>` or the persistent literal-input toggle preserves both spaces
+and case. Automation and `ModuleEvent::PluginFileDialog` already preserve
+case without this prefix.
 
 ### Interactive (click-to-place) commands
 
@@ -306,7 +317,18 @@ plugin.toml
 ```
 
 A GitHub Actions matrix workflow (see the example repo / template) cross-builds
-and uploads these on a `v*` tag.
+and uploads these on a `v*` tag. It also fills `plugin.toml`'s `rustc_version`
+and `acadrust_source` placeholders from the CI run's actual toolchain and
+resolved dependency, rather than hand-editing them per release — see
+`docs/plugin-template/.github/workflows/release.yml` for the exact `sed`
+substitutions, including reading `acadrust_source` out of `Cargo.lock`'s
+resolved `acadrust` package entry (`source = "git+...#<hash>"`) since that's
+the same value the host embeds at its own build time. The template's CI pins
+`rust-toolchain@stable`, which is a floating target — a real release pipeline
+should pin the exact toolchain version the host was built with (check
+`crates/ocs_plugin_api/src/version_info.rs`'s embedded value, or the host's
+own CI config) rather than trusting "whatever's current stable today" to
+keep matching it.
 
 ---
 
@@ -383,6 +405,9 @@ dynamic libraries:
 - **Enable/disable** — toggles a loaded plugin's ribbon tab + dispatch without
   uninstalling.
 
+One linked repository is one marketplace entry. Publish separate plugins from
+separate repositories so release and update histories stay unambiguous.
+
 ---
 
 ## Compatibility & ABI
@@ -391,9 +416,9 @@ Plugins are loaded as `cdylib`s by a plugin-runner child process. The host spawn
 this child from its own executable (`--ocs-plugin-runner` mode), so the runner
 and host always share the same `ocs_plugin_api` build. The runner checks
 `ocs_plugin_api_version` before any plugin code runs. Each plugin runs in its
-own OS process, so the host is protected from plugin crashes and memory
-corruption. Process isolation removes the need for the host and plugin to share
-a Rust toolchain ABI beyond the stable `ocs_plugin_api` contract.
+own OS process, so a plugin crash or memory-corruption bug cannot take down the
+host process itself. The runner loads the plugin library in-process, however,
+so API v4+ requires matching `rustc_version` and `acadrust_source` metadata.
 
 A future hardening step is a `#[repr(C)]` vtable (a true C ABI) so binaries built
 by any toolchain interoperate — required before trusting prebuilt binaries from
@@ -414,6 +439,12 @@ Done:
       reinstall / uninstall, enable/disable.
 - [x] Interactive command round-trip over IPC (prompt, point/enter/object-pick).
 - [x] Spawn and per-call IPC timeouts so a stuck runner cannot freeze the host.
+- [x] External automation (`--mcp` — local stdio MCP/JSON-RPC server for AI
+      clients; `--serve` — headless JSON automation server; both drive OCS
+      from a separate process without the GUI, per `src/cli.rs`/`src/mcp.rs`/
+      `app::serve`). This closes the "drive OCS headless from a process" goal
+      of issue #29; this line previously and incorrectly listed it as not yet
+      started.
 
 Next:
 
@@ -421,7 +452,6 @@ Next:
 - [ ] `#[repr(C)]` vtable / strict handshake for cross-toolchain binaries.
 - [ ] Trust: checksums / signatures before spawning plugin processes.
 - [ ] Interchange (LandXML / SWMM) and live `on_entity_committed` hooks.
-- [ ] External automation API (drive OCS headless from a process) — issue #29.
 
 ---
 

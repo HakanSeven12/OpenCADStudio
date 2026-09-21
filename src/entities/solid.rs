@@ -80,7 +80,14 @@ fn boundary_edges(points: &[[f64; 3]]) -> Vec<Edge> {
 }
 
 fn kernel_tolerance(points: &[[f64; 3]]) -> f64 {
-    cadkernel::space::coplanarity_tolerance(points).max(1.0e-12)
+    let tolerance = cadkernel::space::coplanarity_tolerance(points);
+    // Corners whose extent overflows f64 give an infinite tolerance, which
+    // `Tolerance::new` rejects by panicking.
+    if tolerance.is_finite() {
+        tolerance.max(1.0e-12)
+    } else {
+        1.0e-12
+    }
 }
 
 fn extrusion_body(
@@ -364,5 +371,25 @@ impl Transformable for Solid {
                 }
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod overflow_tests {
+    use super::*;
+    use acadrust::types::Vector3;
+
+    /// Corners 1e308 apart overflow the coplanarity tolerance to infinity,
+    /// which the kernel's `Tolerance::new` rejects by panicking.
+    #[test]
+    fn corners_with_overflowing_extent_do_not_panic() {
+        let solid = Solid::new(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(1e308, 0.0, 0.0),
+            Vector3::new(0.0, 1e308, 0.0),
+            Vector3::new(1e308, 1e308, 0.0),
+        );
+        let _ = wcs_bounds(&solid);
+        let _ = solid_geometry(&solid);
     }
 }

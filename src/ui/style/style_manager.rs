@@ -327,28 +327,4 @@ pub(crate) fn muted_text_style(theme: &Theme) -> iced::widget::text::Style {
     crate::ui::style::common::muted_style(theme)
 }
 
-pub(crate) fn hdivider<'a>(width: iced::Length) -> Element<'a, Message> {
-    container(Space::new().width(width).height(1))
-        .width(width)
-        .height(1)
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.neutral.color
-            )),
-            ..Default::default()
-        })
-        .into()
-}
-
-pub(crate) fn vsep<'a>(height: iced::Length) -> Element<'a, Message> {
-    container(Space::new().width(1).height(height))
-        .width(1)
-        .height(height)
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.neutral.color
-            )),
-            ..Default::default()
-        })
-        .into()
-}
+pub(crate) use crate::ui::style::form::{hdivider, vsep};

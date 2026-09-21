@@ -11,6 +11,7 @@ use iced::widget::{
 };
 use iced::{Background, Border, Color, Element, Event, Fill, Length, Rectangle, Size, Theme, Vector};
 use crate::t;
+use crate::ui::popup::context_menu::{ContextMenu, MenuIcon, MenuItem, MenuRow, MENU_PAD_TOP, MENU_ROW_H};
 
 pub(super) fn position_canvas_overlay<'a>(
     anchor: iced::Point,
@@ -912,9 +913,15 @@ fn mtext_editor_content<'a>(
 /// panel is laid out first, so edge flipping uses its actual translated size
 /// instead of estimates. `bottom_inset` reserves overlaid controls such as the
 /// command line.
+///
+/// `offset` shifts the preferred placement from the anchor before the fit /
+/// flip logic runs (e.g. to put a specific row of a menu under the pointer).
+/// When the shifted panel does not fit it flips to the other side of the
+/// *original* anchor, so the pointer never ends up over an unintended row.
 fn position_canvas_overlay_clamped<'a>(
     anchor: iced::Point,
     bottom_inset: f32,
+    offset: Vector,
     panel: Element<'a, Message>,
 ) -> Element<'a, Message> {
     Element::new(ClampedPin {
@@ -922,6 +929,7 @@ fn position_canvas_overlay_clamped<'a>(
         anchor,
         bottom_inset: bottom_inset.max(0.0),
         gap: 0.0,
+        offset,
     })
 }
 
@@ -937,6 +945,7 @@ pub(super) fn position_canvas_overlay_near_cursor<'a>(
         anchor: cursor,
         bottom_inset: bottom_inset.max(0.0),
         gap: 12.0,
+        offset: Vector::ZERO,
     })
 }
 
@@ -945,6 +954,8 @@ struct ClampedPin<'a> {
     anchor: iced::Point,
     bottom_inset: f32,
     gap: f32,
+    /// Preferred placement shift from the anchor (applied before fitting).
+    offset: Vector,
 }
 
 impl Widget<Message, Theme, iced::Renderer> for ClampedPin<'_> {
@@ -983,9 +994,10 @@ impl Widget<Message, Theme, iced::Renderer> for ClampedPin<'_> {
             &layout::Limits::new(Size::ZERO, safe),
         );
         let content = node.size();
+        let bottom_inset = self.bottom_inset;
 
         let max_x = (max.width - MARGIN - content.width).max(MARGIN);
-        let right = self.anchor.x + self.gap;
+        let right = self.anchor.x + self.gap + self.offset.x;
         let left = self.anchor.x - self.gap - content.width;
         let x = if right <= max_x {
             right.max(MARGIN)
@@ -995,9 +1007,8 @@ impl Widget<Message, Theme, iced::Renderer> for ClampedPin<'_> {
             max_x
         };
 
-        let max_y =
-            (max.height - self.bottom_inset - MARGIN - content.height).max(MARGIN);
-        let below = self.anchor.y + self.gap;
+        let max_y = (max.height - bottom_inset - MARGIN - content.height).max(MARGIN);
+        let below = self.anchor.y + self.gap + self.offset.y;
         let above = self.anchor.y - self.gap - content.height;
         let y = if below <= max_y {
             below.max(MARGIN)
@@ -1109,26 +1120,44 @@ impl Widget<Message, Theme, iced::Renderer> for ClampedPin<'_> {
 
 // ── Viewport right-click context menu ──────────────────────────────────────
 
+/// Horizontal inset so the pointer rests inside the default row, not on the
+/// panel's border, when the menu opens.
+const MENU_CURSOR_INSET_X: f32 = 24.0;
+/// Width of the icon gutter every row reserves so labels line up whether or
+/// not the row carries a glyph (object snaps, Pan / Zoom).
+const MENU_GUTTER_W: f32 = 18.0;
+const MENU_ICON_SIZE: f32 = 14.0;
+
+/// The gutter cell: the row's glyph, or empty space of the same width.
+fn context_menu_gutter(icon: Option<MenuIcon>) -> Element<'static, Message> {
+    let bytes = icon.map(|icon| match icon {
+        MenuIcon::Snap(t) => crate::ui::icons::osnap(t),
+        MenuIcon::Mtp => crate::ui::icons::mtp_icon(),
+        MenuIcon::Pan => crate::ui::icons::pan_icon(),
+        MenuIcon::Zoom => crate::ui::icons::zoom_icon(),
+    });
+    let cell: Element<'static, Message> = match bytes {
+        Some(bytes) => crate::ui::icons::themed::<Message>(bytes, MENU_ICON_SIZE),
+        None => iced::widget::Space::new().width(MENU_ICON_SIZE).height(MENU_ICON_SIZE).into(),
+    };
+    container(cell)
+        .width(Length::Fixed(MENU_GUTTER_W))
+        .align_x(iced::Center)
+        .align_y(iced::Center)
+        .into()
+}
+
+/// Render the right-click context menu (rows from
+/// `ui::popup::context_menu::build_context_menu`). The panel is placed so the
+/// default row sits under the pointer: right-click then left-click in place
+/// completes the step without moving the mouse (commercial solutions anchor their shortcut
+/// menu the same way). `highlighted` is the keyboard highlight, if any.
 pub(super) fn viewport_context_menu_overlay(
     pos: iced::Point,
     bottom_inset: f32,
-    has_cmd: bool,
-    has_selection: bool,
-    selected_constraint: Option<crate::scene::parametric_constraints::ConstraintId>,
-    isolation_active: bool,
-    last_cmds: Vec<String>,
-    draworder_open: bool,
-    has_point_step: bool,
+    menu: &ContextMenu,
+    highlighted: Option<usize>,
 ) -> Element<'static, Message> {
-    let item = |label: String, msg: Message| -> Element<'static, Message> {
-        button(text(label).size(12))
-            .on_press(msg)
-            .style(button::subtle)
-            .padding([4, 12])
-            .width(Fill)
-            .into()
-    };
-
     let sep = || -> Element<'static, Message> {
         container(iced::widget::Space::new().width(Fill).height(1))
             .style(|theme: &Theme| container::Style {
@@ -1143,142 +1172,67 @@ pub(super) fn viewport_context_menu_overlay(
             .into()
     };
 
-    // Indented variant for sub-menu rows (e.g. Draw Order children).
-    let subitem = |label: String, msg: Message| -> Element<'static, Message> {
-        button(text(label).size(12))
-            .on_press(msg)
-            .style(button::subtle)
-            .padding(iced::Padding {
-                top: 4.0,
-                right: 12.0,
-                bottom: 4.0,
-                left: 26.0,
-            })
-            .width(Fill)
-            .into()
-    };
-
+    // Index into `menu.selectable()` of the row being rendered, so the
+    // keyboard highlight lands on the same row the model counts.
+    let mut sel_idx = 0usize;
     let mut items: Vec<Element<'static, Message>> = Vec::new();
 
-    if has_cmd {
-        items.push(item(t!("Cancel").into_owned(), Message::CommandEscape));
-        items.push(item(t!("Enter").into_owned(), Message::CommandFinalize));
-        // MTP (`_M2P`) goes last, after Parallel: two picks, so not a
-        // `SnapType`, but same icon-only cell with hover tooltip.
-        if has_point_step {
-            items.push(sep());
-            items.push(item(
-                t!("Mid Between 2 Points (M2P)").into_owned(),
-                Message::SnapOverrideMtp,
-            ));
-        }
-    } else {
-        if !last_cmds.is_empty() {
-            let last = last_cmds[0].clone();
-            items.push(item(
-                t!("Repeat %{last}", last = last).into_owned(),
-                Message::Command(last.to_uppercase()),
-            ));
-            if last_cmds.len() > 1 {
-                for cmd in last_cmds.iter().skip(1) {
-                    let c = cmd.clone();
-                    items.push(item(c.clone(), Message::Command(c.to_uppercase())));
+    for row in &menu.rows {
+        match row {
+            MenuRow::Item(item) => {
+                let is_hl = highlighted == Some(sel_idx);
+                items.push(context_menu_row(item, 0.0, is_hl));
+                sel_idx += 1;
+            }
+            MenuRow::Separator => items.push(sep()),
+            MenuRow::Submenu {
+                id,
+                label,
+                items: children,
+                open,
+            } => {
+                let is_hl = highlighted == Some(sel_idx);
+                let caret = if *open {
+                    crate::ui::icons::themed_arrow_down(9.0)
+                } else {
+                    crate::ui::icons::themed_arrow_right(9.0)
+                };
+                let content = row![
+                    context_menu_gutter(None),
+                    text(label.clone()).size(12),
+                    iced::widget::Space::new().width(Fill),
+                    caret,
+                ]
+                .spacing(4)
+                .align_y(iced::Center);
+                let enabled = !children.is_empty();
+                let mut btn = button(content)
+                    .padding(iced::Padding {
+                        top: 3.0,
+                        right: 12.0,
+                        bottom: 3.0,
+                        left: 6.0,
+                    })
+                    .width(Fill)
+                    .height(Length::Fixed(MENU_ROW_H))
+                    .style(move |theme: &Theme, status| context_menu_row_style(theme, status, is_hl));
+                if enabled {
+                    btn = btn.on_press(Message::ContextMenuSubmenuToggle(*id));
+                }
+                items.push(btn.into());
+                sel_idx += 1;
+                if *open {
+                    for child in children {
+                        let is_hl = highlighted == Some(sel_idx);
+                        items.push(context_menu_row(child, 14.0, is_hl));
+                        sel_idx += 1;
+                    }
                 }
             }
-            items.push(sep());
         }
-        if has_selection {
-            items.push(item(t!("Delete").into_owned(), Message::DeleteSelected));
-            items.push(item(
-                t!("Move").into_owned(),
-                Message::Command("MOVE".to_string()),
-            ));
-            items.push(item(
-                t!("Copy").into_owned(),
-                Message::Command("COPY".to_string()),
-            ));
-            items.push(sep());
-            let do_caret = if draworder_open {
-                crate::ui::icons::themed_arrow_down(9.0)
-            } else {
-                crate::ui::icons::themed_arrow_right(9.0)
-            };
-            items.push(
-                button(
-                    row![
-                        text(t!("Draw Order").into_owned()).size(12),
-                        iced::widget::Space::new().width(Fill),
-                        do_caret,
-                    ]
-                    .align_y(iced::Center),
-                )
-                .on_press(Message::DrawOrderSubmenuToggle)
-                .style(button::subtle)
-                .padding([4, 12])
-                .width(Fill)
-                .into(),
-            );
-            if draworder_open {
-                items.push(subitem(
-                    t!("Bring to Front").into_owned(),
-                    Message::Command("DRAWORDER F".to_string()),
-                ));
-                items.push(subitem(
-                    t!("Send to Back").into_owned(),
-                    Message::Command("DRAWORDER B".to_string()),
-                ));
-                items.push(subitem(
-                    t!("Bring Above Object").into_owned(),
-                    Message::DrawOrderPickRef(true),
-                ));
-                items.push(subitem(
-                    t!("Send Under Object").into_owned(),
-                    Message::DrawOrderPickRef(false),
-                ));
-            }
-            items.push(sep());
-            items.push(item(
-                t!("Isolate Objects").into_owned(),
-                Message::Command("ISOLATEOBJECTS".to_string()),
-            ));
-            items.push(item(
-                t!("Hide Objects").into_owned(),
-                Message::Command("HIDEOBJECTS".to_string()),
-            ));
-            items.push(sep());
-            items.push(item(t!("Select Similar").into_owned(), Message::SelectSimilar));
-            items.push(item(
-                t!("Invert Selection").into_owned(),
-                Message::InvertSelection,
-            ));
-        } else if let Some(id) = selected_constraint {
-            // A selected constraint-glyph pill gets its own minimal menu —
-            // none of the entity-selection actions above (Move/Copy/Isolate/
-            // Select Similar) apply to it.
-            items.push(item(
-                t!("Delete").into_owned(),
-                Message::PropConstraintDelete(id),
-            ));
-            items.push(sep());
-        }
-        if isolation_active {
-            items.push(item(
-                t!("End Object Isolation").into_owned(),
-                Message::Command("UNISOLATEOBJECTS".to_string()),
-            ));
-        }
-        items.push(item(
-            t!("Select All").into_owned(),
-            Message::Command("SELECTALL".to_string()),
-        ));
-        items.push(item(t!("Quick Select...").into_owned(), Message::QSelectOpen));
-        items.push(item(
-            t!("Zoom Extents").into_owned(),
-            Message::Command("ZOOM EXTENTS".to_string()),
-        ));
     }
 
-    let menu_col = column(items).spacing(0).width(Length::Fixed(180.0));
+    let menu_col = column(items).spacing(0).width(Length::Fixed(menu.width));
     let menu_col = scrollable(menu_col)
         .height(Length::Shrink)
         .direction(scrollable::Direction::Vertical(
@@ -1287,12 +1241,103 @@ pub(super) fn viewport_context_menu_overlay(
                 .scroller_width(6),
         ));
 
-    let menu = container(menu_col)
+    let panel = container(menu_col)
         .style(container::bordered_box)
-        .padding([4, 0])
-        .width(Length::Fixed(180.0));
+        .padding([MENU_PAD_TOP as u16, 0])
+        .width(Length::Fixed(menu.width));
 
-    position_canvas_overlay_clamped(pos, bottom_inset, menu.into())
+    // Shift the panel so the default row's centre line is under the pointer.
+    let offset = Vector::new(
+        -MENU_CURSOR_INSET_X,
+        -(menu.default_row_y() + MENU_ROW_H * 0.5),
+    );
+    position_canvas_overlay_clamped(pos, bottom_inset, offset, panel.into())
+}
+
+/// One menu row: label (bold for the default row, "✓ "-prefixed when
+/// checked), and the keyword hint right-aligned and dimmed. Disabled rows
+/// render without a press handler and with faded text.
+fn context_menu_row(item: &MenuItem, indent: f32, highlighted: bool) -> Element<'static, Message> {
+    let label = if item.checked {
+        format!("✓ {}", item.label)
+    } else {
+        item.label.clone()
+    };
+    let mut label_text = text(label).size(12);
+    if item.default {
+        label_text = label_text.font(iced::Font {
+            weight: iced::font::Weight::Bold,
+            ..iced::Font::DEFAULT
+        });
+    }
+    let enabled = item.enabled;
+    let mut content = row![context_menu_gutter(item.icon), label_text]
+        .spacing(4)
+        .align_y(iced::Center);
+    if let Some(hint) = item.hint.as_ref() {
+        content = content
+            .push(iced::widget::Space::new().width(Fill))
+            .push(
+                text(hint.clone())
+                    .size(11)
+                    .style(move |theme: &Theme| {
+                        let palette = theme.palette();
+                        let base = if highlighted {
+                            palette.primary.strong.text
+                        } else {
+                            palette.background.base.text
+                        };
+                        iced::widget::text::Style {
+                            color: Some(base.scale_alpha(if enabled { 0.6 } else { 0.35 })),
+                        }
+                    }),
+            );
+    }
+    let mut btn = button(content)
+        .padding(iced::Padding {
+            top: 3.0,
+            right: 12.0,
+            bottom: 3.0,
+            left: 6.0 + indent,
+        })
+        .width(Fill)
+        .height(Length::Fixed(MENU_ROW_H))
+        .style(move |theme: &Theme, status| context_menu_row_style(theme, status, highlighted));
+    if enabled {
+        btn = btn.on_press(Message::ContextMenuPick(item.action.clone()));
+    }
+    btn.into()
+}
+
+/// Row colours: keyboard highlight uses the accent (as the grip popup does),
+/// hover the subtle background tint, disabled rows faded text.
+fn context_menu_row_style(theme: &Theme, status: button::Status, highlighted: bool) -> button::Style {
+    let palette = theme.palette();
+    let (background, text_color) = if highlighted {
+        (
+            Some(Background::Color(palette.primary.strong.color)),
+            palette.primary.strong.text,
+        )
+    } else {
+        match status {
+            button::Status::Hovered | button::Status::Pressed => (
+                Some(Background::Color(palette.background.weak.color)),
+                palette.background.weak.text,
+            ),
+            button::Status::Disabled => (None, palette.background.base.text.scale_alpha(0.42)),
+            button::Status::Active => (None, palette.background.base.text),
+        }
+    };
+    button::Style {
+        background,
+        text_color,
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
 }
 
 /// One-shot snap override menu (Shift+RMB, #337): a cursor-anchored grid of

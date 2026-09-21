@@ -2,6 +2,7 @@
 
 use crate::app::Message;
 use crate::ui::properties::{lw_options, LinetypeItem, LwItem};
+use crate::ui::style::common::muted_style;
 use crate::ui::ROW_H;
 use acadrust::tables::layer::Layer as DocLayer;
 use acadrust::tables::Table;
@@ -50,12 +51,6 @@ const LINETYPE_MENU_W: f32 = 220.0;
 /// Widget id for the layer-table scrollable, so a freshly created layer can be
 /// scrolled into view after it is added (#271).
 pub const LAYER_TABLE_SCROLL_ID: &str = "layer-manager-table-scroll";
-
-fn muted_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
-    }
-}
 
 fn table_input_style(
     theme: &Theme,

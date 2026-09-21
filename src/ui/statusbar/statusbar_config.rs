@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 /// Identifies a toggleable status-bar pill.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum StatusPill {
+    SpaceMouse,
     Coords,
     Ortho,
     Lwt,
@@ -37,6 +38,7 @@ impl StatusPill {
     /// Every pill, in status-bar display order. Drives both the bar layout and
     /// the customization menu.
     pub const ALL: &'static [StatusPill] = &[
+        StatusPill::SpaceMouse,
         StatusPill::Coords,
         StatusPill::Ortho,
         StatusPill::Lwt,
@@ -62,6 +64,7 @@ impl StatusPill {
     /// Stable identifier used for persistence.
     pub fn id(self) -> &'static str {
         match self {
+            StatusPill::SpaceMouse => "spacemouse",
             StatusPill::Coords => "coords",
             StatusPill::Ortho => "ortho",
             StatusPill::Lwt => "lwt",
@@ -88,6 +91,7 @@ impl StatusPill {
     /// Label shown in the customization menu.
     pub fn label(self) -> &'static str {
         match self {
+            StatusPill::SpaceMouse => "SpaceMouse",
             StatusPill::Coords => "Coordinates",
             StatusPill::Ortho => "Ortho Mode",
             StatusPill::Lwt => "Show Lineweight",

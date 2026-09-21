@@ -62,27 +62,6 @@ pub(super) fn layout_entry_name(s: &str) -> &str {
     s.trim_start_matches('*').trim_end_matches('*')
 }
 
-/// Infer an A-series label when dimensions match; otherwise retain the size.
-pub(super) fn paper_label_from_dims(w: f64, h: f64) -> (String, String) {
-    use crate::io::paper_sizes::PaperSize;
-    let orient = if w >= h { "Landscape" } else { "Portrait" };
-    let (short, long) = if w <= h { (w, h) } else { (h, w) };
-    let mut best = ("A4".to_string(), f64::INFINITY);
-    for p in PaperSize::ALL {
-        let (pw, ph) = p.dimensions_mm(); // portrait: pw < ph
-        let err = (pw - short).abs() + (ph - long).abs();
-        if err < best.1 {
-            best = (p.label().to_string(), err);
-        }
-    }
-    let label = if best.1 <= 2.0 {
-        best.0
-    } else {
-        format!("{w:.2} × {h:.2} mm")
-    };
-    (label, orient.to_string())
-}
-
 pub(super) fn parse_plot_scale(s: &str) -> (f64, f64) {
     if s == "Fit" {
         return (1.0, 1.0);

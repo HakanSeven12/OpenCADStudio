@@ -24,9 +24,13 @@ impl UcsCommand {
         Self::default()
     }
 
-    /// Options that take no further argument and execute immediately.
+    /// Options that take no further typed argument: they execute immediately
+    /// or, for Face / OBject, start their own entity pick.
     fn is_zero_arg(opt: &str) -> bool {
-        matches!(opt, "W" | "WORLD" | "VIEW" | "V" | "LIST" | "?")
+        matches!(
+            opt,
+            "W" | "WORLD" | "VIEW" | "V" | "LIST" | "?" | "FACE" | "F" | "OBJECT" | "OB"
+        )
     }
 
     /// Options whose argument is a coordinate (so a click is accepted too).
@@ -50,7 +54,10 @@ impl CadCommand for UcsCommand {
 
     fn prompt(&self) -> String {
         match self.option.as_deref() {
-            None => t!("UCS  option [World/View/3Point/Z/X/Y/Origin/Save/Delete] or name:").into_owned(),
+            None => t!(
+                "UCS  option [Face/OBject/World/View/3Point/Z/X/Y/Origin/Save/Delete] or name:"
+            )
+            .into_owned(),
             Some("Z") => t!("UCS  rotation angle about Z (degrees):").into_owned(),
             Some("X") => t!("UCS  rotation angle about X (degrees):").into_owned(),
             Some("Y") => t!("UCS  rotation angle about Y (degrees):").into_owned(),

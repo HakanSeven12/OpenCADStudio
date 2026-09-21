@@ -527,7 +527,15 @@ impl CadCommand for EllipseArcCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let val = parse_num(text)?;
+        let angle_step = matches!(
+            &self.step,
+            ArcStep::StartAngle { .. } | ArcStep::EndAngle { .. }
+        );
+        let val = if angle_step {
+            crate::entities::common::parse_typed_angle(text)?
+        } else {
+            parse_num(text)?
+        };
         match &self.step {
             ArcStep::MinorRatio { center, major } => {
                 if val > 0.0 {
@@ -546,7 +554,7 @@ impl CadCommand for EllipseArcCommand {
                 major,
                 ratio,
             } => {
-                let t_start = val.to_radians();
+                let t_start = val;
                 let (c, m, r) = (*center, *major, *ratio);
                 self.prev_pt = None;
                 self.step = ArcStep::EndAngle {
@@ -563,8 +571,8 @@ impl CadCommand for EllipseArcCommand {
                 ratio,
                 t_start,
             } => {
-                // Typed degrees: positive = CCW, negative = CW.
-                let t_end = val.to_radians();
+                // Positive is CCW; negative is CW.
+                let t_end = val;
                 return Some(CmdResult::CommitAndExit(EntityType::Ellipse(make_ellipse(
                     *center, *major, *ratio, *t_start, t_end, self.plane,
                 ))));

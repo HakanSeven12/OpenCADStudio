@@ -33,9 +33,6 @@ struct ImageParams {
 };
 @group(1) @binding(2) var<uniform> img_params: ImageParams;
 
-// Draw-order depth bias (see wire.wgsl).
-const DRAW_ORDER_BIAS: f32 = 0.001;
-
 // ── Vertex stage ──────────────────────────────────────────────────────────────
 struct VertIn {
     @location(0) pos:     vec3<f32>,
@@ -57,8 +54,7 @@ fn vs_main(in: VertIn) -> VertOut {
     let rel = (in.pos + in.translation - u.eye_high)
         + (in.pos_low + in.translation_low - u.eye_low);
     out.clip_pos = u.view_rot * vec4<f32>(rel, 1.0);
-    out.clip_pos.z = out.clip_pos.z
-        - (img_params.draw_depth + in.draw_depth) * DRAW_ORDER_BIAS * out.clip_pos.w;
+    out.clip_pos = apply_draw_order(out.clip_pos, img_params.draw_depth + in.draw_depth);
     out.uv = in.uv;
     return out;
 }

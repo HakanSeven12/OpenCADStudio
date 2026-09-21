@@ -203,17 +203,44 @@ pub(crate) fn ring_source_handles(
 }
 
 fn curve_forward(curve: &Curve, start: [f64; 2], next: [f64; 2]) -> bool {
-    let a = curve.parameter_at(start);
-    let b = curve.parameter_at(next);
-    let mut delta = b - a;
-    if curve.is_closed() {
-        if delta > 0.5 {
-            delta -= 1.0;
-        } else if delta < -0.5 {
-            delta += 1.0;
+    // For circular geometry, determine direction directly from the
+    // geometric traversal of the detected boundary. This avoids parameter
+    // wrap-around choosing the major arc instead of the minor arc.
+    match curve {
+        Curve::Circle(circle) => {
+            let ax = start[0] - circle.centre[0];
+            let ay = start[1] - circle.centre[1];
+            let bx = next[0] - circle.centre[0];
+            let by = next[1] - circle.centre[1];
+
+            ax * by - ay * bx >= 0.0
+        }
+
+        Curve::Arc(arc) => {
+            let ax = start[0] - arc.centre[0];
+            let ay = start[1] - arc.centre[1];
+            let bx = next[0] - arc.centre[0];
+            let by = next[1] - arc.centre[1];
+
+            ax * by - ay * bx >= 0.0
+        }
+
+        _ => {
+            let a = curve.parameter_at(start);
+            let b = curve.parameter_at(next);
+            let mut delta = b - a;
+
+            if curve.is_closed() {
+                if delta > 0.5 {
+                    delta -= 1.0;
+                } else if delta < -0.5 {
+                    delta += 1.0;
+                }
+            }
+
+            delta >= 0.0
         }
     }
-    delta >= 0.0
 }
 
 fn stored_arc_angles(start: f64, end: f64, counter_clockwise: bool, whole: bool) -> (f64, f64) {
@@ -350,7 +377,7 @@ pub(crate) fn exact_hatch_paths(
         .iter()
         .enumerate()
         .filter_map(|(ring_index, ring)| {
-            let (points, curves) = refined_boundary_ring(ring, sources, tolerance);
+            let (points, curves) = refined_boundary_ring(ring, sources, tolerance); 
             let count = points.len();
             if count < 3 {
                 return None;

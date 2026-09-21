@@ -237,22 +237,22 @@ impl CadCommand for RotateCommand {
                 }
                 // The value already carries the correct sign when it comes
                 // from dynamic input.
-                let deg: f64 = t.replace(',', ".").parse().ok()?;
-                Some(self.commit(center, deg.to_radians()))
+                let angle = crate::entities::common::parse_typed_angle(t)?;
+                Some(self.commit(center, angle))
             }
             Step::RefFirst { center } => {
                 let center = *center;
-                let ref_deg: f64 = t.replace(',', ".").parse().ok()?;
+                let ref_angle = crate::entities::common::parse_typed_angle(t)?;
                 self.step = Step::RefNew {
                     center,
-                    ref_angle: ref_deg.to_radians(),
+                    ref_angle,
                 };
                 Some(CmdResult::NeedPoint)
             }
             Step::RefNew { center, ref_angle } => {
                 let (center, ref_angle) = (*center, *ref_angle);
-                let new_deg: f64 = t.replace(',', ".").parse().ok()?;
-                Some(self.commit(center, new_deg.to_radians() - ref_angle))
+                let new_angle = crate::entities::common::parse_typed_angle(t)?;
+                Some(self.commit(center, new_angle - ref_angle))
             }
             Step::Center | Step::RefSecond { .. } => None,
         }

@@ -5,8 +5,8 @@ use cadkernel::geom2d::tessellate::{arc, DEFAULT_SEGMENTS_PER_RADIAN};
 use glam::DVec3;
 
 use crate::command::{
-    CadCommand, CmdOption, CmdResult, DimensionAssociationInput,
-    DimensionAssociationSource, InputKind, WorkingPlane,
+    CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionAssociationSource,
+    DimensionPreview, InputKind, WorkingPlane,
 };
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::dimension_assoc::{
@@ -514,6 +514,18 @@ impl CadCommand for ArcLengthDimensionCommand {
                 let partial = selection.with_partial(first_angle, second_angle)?;
                 Some(partial_preview(partial))
             }
+        }
+    }
+
+    fn dimension_preview(&self, cursor: DVec3) -> Option<Vec<DimensionPreview>> {
+        let Step::DimLine(selection) = self.step else {
+            return None;
+        };
+        match self.commit_dimension(selection, cursor) {
+            CmdResult::CommitDimension { entity, .. } => {
+                Some(vec![DimensionPreview::current_style(entity)])
+            }
+            _ => Some(Vec::new()),
         }
     }
 }

@@ -235,6 +235,65 @@ pub fn set(doc: &mut CadDocument, handle: Handle, code: i16, value: Option<XData
     write_pairs(doc, handle, kept);
 }
 
+/// Set — or, with `value: None`, clear — a single override on an entity that
+/// is **not yet in the document** (a command's pending commit), leaving the
+/// other overrides intact.
+///
+/// The document-backed [`set`] additionally registers the `ACAD` APPID; that
+/// APPID is present in every drawing OCS writes, and committing the entity
+/// goes through the normal add path, so an uncommitted write needs no
+/// document. Keeping the override on the entity means it is part of the single
+/// committed object and rides the ordinary undo/redo history.
+pub fn set_on_entity(entity: &mut EntityType, code: i16, value: Option<XDataValue>) {
+    let common = entity.common_mut();
+    let mut kept: Vec<(i16, XDataValue)> = pairs(&common.extended_data)
+        .into_iter()
+        .filter(|(c, _)| *c != code)
+        .collect();
+    if let Some(v) = value {
+        kept.push((code, v));
+    }
+
+    let legacy = common.extended_data.get_record("ACAD_DSTYLE").is_some()
+        && common.extended_data.get_record("ACAD").is_some_and(
+            |rec| !matches!(rec.values.first(), Some(XDataValue::String(n)) if n == "DSTYLE"),
+        );
+    let app = if legacy { "ACAD_DSTYLE" } else { "ACAD" };
+
+    let values = if kept.is_empty() {
+        None
+    } else {
+        let mut vals = Vec::new();
+        if !legacy {
+            vals.push(XDataValue::String("DSTYLE".to_string()));
+        }
+        vals.push(XDataValue::ControlString("{".to_string()));
+        for (code, value) in kept {
+            vals.push(XDataValue::Integer16(code));
+            vals.push(value);
+        }
+        vals.push(XDataValue::ControlString("}".to_string()));
+        Some(vals)
+    };
+
+    let mut rebuilt = ExtendedData::new();
+    for record in common.extended_data.records() {
+        if record.application_name != app && !(!legacy && record.application_name == "ACAD_DSTYLE")
+        {
+            rebuilt.add_record(record.clone());
+        }
+    }
+    if let Some(vals) = values {
+        let mut record = acadrust::xdata::ExtendedDataRecord::new(app);
+        for v in vals {
+            record.add_value(v);
+        }
+        rebuilt.add_record(record);
+    }
+    rebuilt.raw_dwg_eed = common.extended_data.raw_dwg_eed.clone();
+    common.extended_data = rebuilt;
+}
+
 pub fn property_real_code(field: &str) -> Option<i16> {
     Some(match field {
         "dim_arrow_size" => DIMASZ,

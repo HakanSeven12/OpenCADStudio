@@ -6,7 +6,8 @@ use acadrust::EntityType;
 use glam::DVec3;
 
 use crate::command::{
-    CadCommand, CmdOption, CmdResult, DimensionAssociationInput, InputKind, WorkingPlane,
+    CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview, InputKind,
+    WorkingPlane,
 };
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
@@ -60,6 +61,29 @@ impl AlignedDimensionCommand {
             source_handle: None,
             mtext_override: false,
         }
+    }
+
+    fn build_dimension(&self, first: DVec3, second: DVec3, point: DVec3) -> EntityType {
+        let first = self.plane.to_local(first);
+        let second = self.plane.to_local(second);
+        let point = self.plane.to_local(point);
+        let mut dim = DimensionAligned::new(v3(first), v3(second));
+        // The placement point is stored so commit matches the preview.
+        dim.definition_point = v3(point);
+        dim.base.definition_point = v3(point);
+        let (d1, d2) = dim_line_endpoints(first, second, point);
+        dim.base.text_middle_point = v3((d1 + d2) * 0.5);
+        dim.base.insertion_point = dim.base.text_middle_point;
+        dim.base.actual_measurement = dim.measurement();
+        crate::entities::dimension::set_dimension_text_override(
+            &mut dim.base,
+            self.text_override.clone(),
+        );
+        // An explicit text angle overrides the default rotation.
+        if let Some(angle) = self.text_angle {
+            dim.base.text_rotation = angle;
+        }
+        self.plane.place_entity(EntityType::Dimension(Dimension::Aligned(dim)))
     }
 }
 
@@ -115,27 +139,8 @@ impl CadCommand for AlignedDimensionCommand {
                 CmdResult::NeedPoint
             }
             Step::DimLine { p1, p2 } => {
-                let p1 = self.plane.to_local(p1);
-                let p2 = self.plane.to_local(p2);
-                let pt = self.plane.to_local(pt);
-                let mut dim = DimensionAligned::new(v3(p1), v3(p2));
-                // Store the cursor position so commit matches the preview.
-                dim.definition_point = v3(pt);
-                dim.base.definition_point = v3(pt);
-                let (d1, d2) = dim_line_endpoints(p1, p2, pt);
-                dim.base.text_middle_point = v3((d1 + d2) * 0.5);
-                dim.base.insertion_point = dim.base.text_middle_point;
-                dim.base.actual_measurement = dim.measurement();
-                crate::entities::dimension::set_dimension_text_override(
-                    &mut dim.base,
-                    self.text_override.clone(),
-                );
-                // An explicit text angle overrides the default rotation.
-                if let Some(a) = self.text_angle {
-                    dim.base.text_rotation = a;
-                }
                 CmdResult::CommitDimension {
-                    entity: self.plane.place_entity(EntityType::Dimension(Dimension::Aligned(dim))),
+                    entity: self.build_dimension(p1, p2, pt),
                     association: DimensionAssociationInput::Infer(self.source_handle),
                     preserve_base_style: false,
                     continue_command: false,
@@ -159,6 +164,24 @@ impl CadCommand for AlignedDimensionCommand {
             return CmdResult::NeedPoint;
         }
         CmdResult::Cancel
+    }
+
+    /// Points and object picks may come through a paper-space viewport;
+    /// the committed dimension then reports the model measurement.
+    fn measures_through_viewports(&self) -> bool {
+        true
+    }
+
+    fn dimension_acquired_points(&self) -> Vec<DVec3> {
+        match self.step {
+            Step::First => vec![],
+            Step::Second(p) => vec![p],
+            Step::DimLine { p1, p2 } => vec![p1, p2],
+        }
+    }
+
+    fn dimension_placement_pending(&self) -> bool {
+        matches!(self.step, Step::DimLine { .. })
     }
 
     fn input_kind(&self) -> InputKind {
@@ -332,6 +355,35 @@ impl CadCommand for AlignedDimensionCommand {
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
         })
+    }
+
+    fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
+        if !matches!(self.step, Step::DimLine { .. }) || self.awaiting_text || self.awaiting_angle {
+            return None;
+        }
+        Some(crate::command::DynSpec {
+            anchor: crate::command::DynAnchor::LastPoint,
+            fields: Vec::new(),
+            guide: crate::command::DynGuide::None,
+            ref_point: None,
+        })
+    }
+
+    fn dimension_preview(&self, cursor: DVec3) -> Option<Vec<DimensionPreview>> {
+        if self.selecting_object {
+            return None;
+        }
+        let (first, second) = match self.step {
+            Step::First => return None,
+            Step::Second(first) => (first, cursor),
+            Step::DimLine { p1, p2 } => (p1, p2),
+        };
+        if first.distance_squared(second) <= 1e-24 {
+            return Some(Vec::new());
+        }
+        Some(vec![DimensionPreview::current_style(
+            self.build_dimension(first, second, cursor),
+        )])
     }
 }
 

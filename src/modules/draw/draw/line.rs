@@ -71,6 +71,21 @@ impl CadCommand for LineCommand {
         }
     }
 
+    fn options(&self) -> Vec<crate::command::CmdOption> {
+        use crate::command::CmdOption;
+        // Covers the LINE prompt of commercial solutions: Undo once a point is placed, Close
+        // once a closing segment is possible, eXit always.
+        match self.points.len() {
+            0 => Vec::new(),
+            1 => vec![CmdOption::new("Undo", "U"), CmdOption::new("eXit", "X")],
+            _ => vec![
+                CmdOption::new("Close", "C"),
+                CmdOption::new("Undo", "U"),
+                CmdOption::new("eXit", "X"),
+            ],
+        }
+    }
+
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         if let Some(&last) = self.points.last() {
             let line = Self::line_between(last, pt);
@@ -185,6 +200,9 @@ impl CadCommand for LineCommand {
                     Some(CmdResult::NeedPoint)
                 }
             }
+            // eXit: end the command keeping every segment drawn so far
+            // (the third LINE keyword of commercial solutions).
+            "X" | "EXIT" => Some(CmdResult::Cancel),
             "U" | "UNDO" => {
                 if self.points.len() >= 2 {
                     // Drop the last vertex and revert its committed segment.

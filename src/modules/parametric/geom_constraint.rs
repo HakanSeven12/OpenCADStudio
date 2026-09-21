@@ -14,14 +14,14 @@ impl GeomConstraintCommand {
 
     fn dispatch(keyword: &str) -> Option<&'static str> {
         Some(match keyword {
-            "H" | "HORIZONTAL" => "HCONSTRAINT",
+            "H" | "HORIZONTAL" => "GCHORIZONTAL",
             "V" | "VERTICAL" => "VCONSTRAINT",
-            "P" | "PERPENDICULAR" => "QCONSTRAINT",
+            "P" | "PERPENDICULAR" => "GCPERPENDICULAR",
             "PA" | "PARALLEL" => "PCONSTRAINT",
             "T" | "TANGENT" => "TCONSTRAINT",
-            "SM" | "SMOOTH" => "SMOOTHCONSTRAINT",
+            "SM" | "SMOOTH" => "GCSMOOTH",
             "C" | "COINCIDENT" => "GCCOINCIDENT",
-            "CON" | "CONCENTRIC" => "NCONSTRAINT",
+            "CON" | "CONCENTRIC" => "GCCONCENTRIC",
             "COL" | "COLLINEAR" | "COLINEAR" => "LCONSTRAINT",
             "SY" | "SYMMETRIC" => "SYCONSTRAINT",
             "E" | "EQUAL" => "ECONSTRAINT",

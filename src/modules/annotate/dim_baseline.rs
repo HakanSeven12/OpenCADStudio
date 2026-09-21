@@ -13,7 +13,9 @@ use cadkernel::geom2d::{
 use cadkernel::space::Plane;
 use glam::DVec3;
 
-use crate::command::{CadCommand, CmdOption, CmdResult, DimensionAssociationInput};
+use crate::command::{
+    CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview,
+};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 
@@ -481,6 +483,16 @@ impl CadCommand for DimBaselineCommand {
     fn on_mouse_move(&mut self, point: DVec3) -> Option<WireModel> {
         self.build_dimension(point)
             .map(|dimension| preview_for_dimension(&dimension))
+    }
+
+    fn dimension_preview(&self, cursor: DVec3) -> Option<Vec<DimensionPreview>> {
+        self.build_dimension(cursor)
+            .map(|dimension| {
+                vec![DimensionPreview {
+                    entity: EntityType::Dimension(dimension),
+                    preserve_base_style: self.preserve_base_style,
+                }]
+            })
     }
 }
 

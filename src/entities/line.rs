@@ -3,8 +3,8 @@ use crate::t;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
-    center_grip, edit_prop as edit, oriented_triangle_grip, parse_f64, ro_prop as ro,
-    square_grip,
+    center_grip, edit_prop as edit, format_direction, format_length, oriented_triangle_grip,
+    parse_f64, ro_prop as ro, square_grip,
 };
 use crate::entities::traits::RenderConvertible;
 use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
@@ -187,7 +187,7 @@ fn properties(line: &Line) -> Vec<PropSection> {
                     "centerline_end_extension",
                     association.end_extension,
                 ),
-                ro(t!("Length").as_ref(), "length", format!("{:.4}", line.length())),
+                ro(t!("Length").as_ref(), "length", format_length(line.length())),
                 ro(
                     "Associative",
                     "centerline_associative",
@@ -199,7 +199,7 @@ fn properties(line: &Line) -> Vec<PropSection> {
     let dx = line.end.x - line.start.x;
     let dy = line.end.y - line.start.y;
     let dz = line.end.z - line.start.z;
-    let angle = dy.atan2(dx).to_degrees().rem_euclid(360.0);
+    let angle = dy.atan2(dx);
     vec![PropSection {
         title: t!("Geometry").into_owned(),
         props: vec![
@@ -209,11 +209,11 @@ fn properties(line: &Line) -> Vec<PropSection> {
             edit(t!("End X").as_ref(), "end_x", line.end.x),
             edit(t!("End Y").as_ref(), "end_y", line.end.y),
             edit(t!("End Z").as_ref(), "end_z", line.end.z),
-            ro(t!("Delta X").as_ref(), "delta_x", format!("{dx:.4}")),
-            ro(t!("Delta Y").as_ref(), "delta_y", format!("{dy:.4}")),
-            ro(t!("Delta Z").as_ref(), "delta_z", format!("{dz:.4}")),
-            ro(t!("Length").as_ref(), "length", format!("{:.4}", line.length())),
-            ro(t!("Angle").as_ref(), "angle", format!("{angle:.2}")),
+            ro(t!("Delta X").as_ref(), "delta_x", format_length(dx)),
+            ro(t!("Delta Y").as_ref(), "delta_y", format_length(dy)),
+            ro(t!("Delta Z").as_ref(), "delta_z", format_length(dz)),
+            ro(t!("Length").as_ref(), "length", format_length(line.length())),
+            ro(t!("Angle").as_ref(), "angle", format_direction(angle)),
             edit(t!("Normal X").as_ref(), "normal_x", line.normal.x),
             edit(t!("Normal Y").as_ref(), "normal_y", line.normal.y),
             edit(t!("Normal Z").as_ref(), "normal_z", line.normal.z),

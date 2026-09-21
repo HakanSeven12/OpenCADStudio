@@ -39,6 +39,12 @@ pub fn resolve_text_style(style_name: &str, document: &CadDocument) -> ResolvedT
                         .map(std::path::Path::new)
                         .and_then(|p| p.parent());
                     crate::io::resolve_image_file(file, base)
+                        // Fonts fetched from the community repository live in
+                        // the per-user fonts folder — search it last.
+                        .or_else(|| {
+                        crate::io::font_repo::local_font_file(file)
+                            .map(|path| path.to_string_lossy().into_owned())
+                    })
                 })
                 .flatten();
             if let Some(p) = shx_path {
@@ -191,7 +197,7 @@ pub fn text_local_bounds(
 /// Expand DXF `%%x` special-character sequences that appear in both TEXT and MTEXT values:
 /// - `%%d` / `%%D` → `°`
 /// - `%%p` / `%%P` → `±`
-/// - `%%c` / `%%C` → `⌀`
+/// - `%%c` / `%%C` → `∅` (U+2205, the native diameter sign)
 /// - `%%u` / `%%U` → underline toggle (stripped — not renderable with stroke fonts)
 /// - `%%o` / `%%O` → overline toggle (stripped)
 /// - `%%%%` → `%`
@@ -218,7 +224,7 @@ pub fn resolve_dxf_special_chars(s: &str) -> String {
             }
             Some('c') => {
                 chars.next();
-                out.push('⌀');
+                out.push('∅');
             }
             Some('u') | Some('o') => {
                 chars.next();
@@ -792,9 +798,11 @@ pub fn reorder_line_atoms(atoms: Vec<LayoutAtom>, is_rtl: bool) -> Vec<LayoutAto
         .iter()
         .map(|r| {
             let mut lvl = None;
-            for i in r.clone() {
+            // `bidi.levels` is indexed by byte, so walk characters rather than
+            // bytes to avoid slicing inside a multi-byte character.
+            for (offset, c) in line_text[r.clone()].char_indices() {
+                let i = r.start + offset;
                 if i < bidi.levels.len() {
-                    let c = line_text[i..].chars().next().unwrap_or(' ');
                     match unicode_bidi::bidi_class(c) {
                         unicode_bidi::BidiClass::L
                         | unicode_bidi::BidiClass::R
@@ -2960,6 +2968,12 @@ mod v_anchor_tests {
             reordered_b,
             vec!["2026 ", "is ", "here!", "שנה ", "שלום ", "مرحبا! ", "ہے۔ ", "اردو ", "یہ "]
         );
+
+        // Case 6: a word starting with multi-byte neutral punctuation must
+        // not be sliced inside that character.
+        let words6 = ["שלום", " ", "«x"];
+        let reordered6 = reorder_atoms(&words6, false);
+        assert_eq!(reordered6, vec!["שלום", " ", "«x"]);
     }
 
     #[test]

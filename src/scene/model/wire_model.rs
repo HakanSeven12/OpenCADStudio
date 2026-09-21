@@ -22,6 +22,18 @@ pub enum SnapHint {
     /// arc's two ends would also produce a midpoint snap out on the chord,
     /// which is not on the geometry.
     Endpoint,
+    /// B-rep corner of a 3D solid. Maps to the separate 3D snap system
+    /// (`SnapType::Vertex`), never to the 2D modes.
+    Vertex,
+    /// Centre of a 3D solid B-rep edge. Maps to the separate 3D snap system
+    /// (`SnapType::EdgeMidpoint`), never to the 2D modes.
+    EdgeMidpoint,
+    /// Centre of a 3D solid B-rep face. Maps to the separate 3D snap system
+    /// (`SnapType::FaceCenter`), never to the 2D modes.
+    FaceCenter,
+    /// NURBS knot location on a spline entity. Maps to the separate 3D snap
+    /// system (`SnapType::Knot`), never to the 2D modes.
+    Knot,
 }
 
 /// Geometric primitive used by the tangent-snap engine.

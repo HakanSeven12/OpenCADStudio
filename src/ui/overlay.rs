@@ -28,12 +28,54 @@ const CONSTRAINT_GLYPH_PAD_Y: f32 = 4.0;
 const CONSTRAINT_GLYPH_GAP: f32 = 6.0;
 const CONSTRAINT_GLYPH_ROW_GAP: f32 = 4.0;
 const CONSTRAINT_HOVER_MARKER_RADIUS: f32 = 7.0;
+const COINCIDENT_GLYPH_SIZE: f32 = 9.0;
+
+fn is_compact_coincident_glyph(label: &str) -> bool {
+    matches!(label, "≡" | "∈")
+}
+
+/// Fixed's two padlock labels (`parametric_constraints::fixed_glyph_label`).
+fn is_fixed_glyph(label: &str) -> bool {
+    label == "F" || label == crate::scene::parametric_constraints::FIXED_POINT_GLYPH
+}
+
+/// Vertical's two axis-mark labels (`parametric_constraints::vertical_glyph_label`).
+fn is_vertical_glyph(label: &str) -> bool {
+    label == "│" || label == crate::scene::parametric_constraints::VERTICAL_POINTS_GLYPH
+}
 
 fn constraint_glyph_size(label: &str) -> Size {
+    if is_compact_coincident_glyph(label) {
+        return Size::new(COINCIDENT_GLYPH_SIZE, COINCIDENT_GLYPH_SIZE);
+    }
+    if label == "G²" || is_fixed_glyph(label) || is_vertical_glyph(label) {
+        let side = CONSTRAINT_GLYPH_SIZE + CONSTRAINT_GLYPH_PAD_Y * 2.0;
+        return Size::new(side, side);
+    }
     let w = label.chars().count() as f32 * CONSTRAINT_GLYPH_SIZE * 0.62
         + CONSTRAINT_GLYPH_PAD_X * 2.0;
     let h = CONSTRAINT_GLYPH_SIZE + CONSTRAINT_GLYPH_PAD_Y * 2.0;
     Size::new(w, h)
+}
+
+fn draw_smooth_constraint_glyph(frame: &mut canvas::Frame, center: Point, color: Color) {
+    let curve = canvas::Path::new(|builder| {
+        for step in 0..=16 {
+            let x = -7.0 + step as f32 * 0.875;
+            let y = 0.012 * x * x * x;
+            let point = Point::new(center.x + x, center.y - y);
+            if step == 0 {
+                builder.move_to(point);
+            } else {
+                builder.line_to(point);
+            }
+        }
+    });
+    frame.stroke(
+        &curve,
+        canvas::Stroke::default().with_color(color).with_width(1.45),
+    );
+    frame.fill(&canvas::Path::circle(center, 1.35), color);
 }
 
 fn draw_tangent_constraint_glyph(
@@ -52,6 +94,117 @@ fn draw_tangent_constraint_glyph(
     frame.stroke(&canvas::Path::line(contact, tangent_end), stroke);
 }
 
+fn draw_concentric_constraint_glyph(
+    frame: &mut canvas::Frame,
+    center: Point,
+    color: Color,
+) {
+    let stroke = canvas::Stroke::default().with_color(color).with_width(1.25);
+    frame.stroke(&canvas::Path::circle(center, 4.7), stroke.clone());
+    frame.stroke(&canvas::Path::circle(center, 2.15), stroke);
+}
+
+/// The reference bar's padlock: white with a small orange point marker
+/// when one point is held, red when a whole curve or segment is.
+fn draw_fixed_constraint_glyph(
+    frame: &mut canvas::Frame,
+    center: Point,
+    text: Color,
+    badge: Color,
+    point_marker: bool,
+) {
+    let lock = if point_marker {
+        text
+    } else {
+        Color::from_rgb8(214, 76, 76)
+    };
+    let shackle = canvas::Path::new(|builder| {
+        let shackle_center = Point::new(center.x, center.y - 1.6);
+        for step in 0..=12 {
+            let angle = std::f32::consts::PI * (1.0 - step as f32 / 12.0);
+            let point = Point::new(
+                shackle_center.x + angle.cos() * 3.1,
+                shackle_center.y - angle.sin() * 3.1,
+            );
+            if step == 0 {
+                builder.move_to(Point::new(point.x, center.y - 0.6));
+                builder.line_to(point);
+            } else {
+                builder.line_to(point);
+            }
+        }
+        builder.line_to(Point::new(center.x + 3.1, center.y - 0.6));
+    });
+    frame.stroke(
+        &shackle,
+        canvas::Stroke::default().with_color(lock).with_width(1.5),
+    );
+    let body = canvas::Path::rounded_rectangle(
+        Point::new(center.x - 5.0, center.y - 0.8),
+        Size::new(10.0, 7.6),
+        1.4.into(),
+    );
+    frame.fill(&body, lock);
+    frame.stroke(
+        &canvas::Path::line(
+            Point::new(center.x, center.y + 1.4),
+            Point::new(center.x, center.y + 4.6),
+        ),
+        canvas::Stroke::default().with_color(badge).with_width(1.3),
+    );
+    if point_marker {
+        frame.stroke(
+            &canvas::Path::rectangle(Point::new(center.x + 4.0, center.y + 3.6), Size::new(4.6, 4.6)),
+            canvas::Stroke::default()
+                .with_color(Color::from_rgb8(224, 130, 62))
+                .with_width(1.2),
+        );
+    }
+}
+
+/// The reference bar's Vertical mark: a red datum line hatched on its left,
+/// the constrained direction beside it, plus the orange point marker for a
+/// two-point relation.
+fn draw_vertical_constraint_glyph(
+    frame: &mut canvas::Frame,
+    center: Point,
+    text: Color,
+    point_marker: bool,
+) {
+    let datum = Color::from_rgb8(214, 76, 76);
+    let datum_x = center.x - 2.5;
+    let stroke = canvas::Stroke::default().with_color(datum).with_width(1.5);
+    frame.stroke(
+        &canvas::Path::line(
+            Point::new(datum_x, center.y - 6.5),
+            Point::new(datum_x, center.y + 6.5),
+        ),
+        stroke.clone(),
+    );
+    for step in 0..3 {
+        let y = center.y - 4.5 + step as f32 * 4.0;
+        frame.stroke(
+            &canvas::Path::line(Point::new(datum_x, y), Point::new(datum_x - 4.0, y + 3.5)),
+            stroke.clone(),
+        );
+    }
+    frame.stroke(
+        &canvas::Path::line(
+            Point::new(center.x + 2.5, center.y - 6.0),
+            Point::new(center.x + 2.5, center.y + 6.0),
+        ),
+        canvas::Stroke::default().with_color(text).with_width(1.4),
+    );
+    if point_marker {
+        frame.stroke(
+            &canvas::Path::rectangle(Point::new(center.x + 4.5, center.y - 2.3), Size::new(4.6, 4.6)),
+            canvas::Stroke::default()
+                .with_color(Color::from_rgb8(224, 130, 62))
+                .with_width(1.2),
+        );
+    }
+}
+
 fn constraint_glyph_box(
     anchor: Point,
     outward: [f32; 2],
@@ -59,9 +212,14 @@ fn constraint_glyph_box(
     tangent_offset: f32,
 ) -> (Point, Size) {
     let size = constraint_glyph_size(label);
+    let gap = if is_compact_coincident_glyph(label) {
+        1.0
+    } else {
+        CONSTRAINT_GLYPH_GAP
+    };
     let distance = outward[0].abs() * size.width * 0.5
         + outward[1].abs() * size.height * 0.5
-        + CONSTRAINT_GLYPH_GAP;
+        + gap;
     let tangent = [-outward[1], outward[0]];
     (
         Point::new(
@@ -477,9 +635,13 @@ pub struct GridParams {
     /// Camera eye in absolute world f64 — subtracted from each grid point.
     pub eye: glam::DVec3,
     pub bounds: iced::Rectangle,
-    /// Adaptive world-space spacing derived from camera zoom at its pivot.
+    /// World-space X spacing (GRIDUNIT X, after adaptive scaling).
     /// Rotation does not affect this value, so orbiting cannot rescale the grid.
-    pub step: f32,
+    pub step_x: f32,
+    /// World-space Y spacing (GRIDUNIT Y, after adaptive scaling).
+    pub step_y: f32,
+    /// Draw every Nth line as a brighter major line. < 2 disables majors.
+    pub major_every: u32,
     /// Grid origin in absolute world f64 and the active UCS axis directions.
     /// The grid always lies on the active UCS XY plane. Plain WCS passes
     /// `(ZERO, X, Y, Z)`.
@@ -498,6 +660,8 @@ pub struct GridParams {
 #[doc(hidden)]
 pub struct GridGeometry {
     pub segments: Vec<(Point, Point)>,
+    /// Brighter every-Nth lines (major grid). Stroked separately in `draw_grid`.
+    pub major_segments: Vec<(Point, Point)>,
     pub axis_extent: f32,
 }
 
@@ -508,7 +672,7 @@ impl GridGeometry {
     /// the `None` path.
     #[doc(hidden)]
     pub fn empty() -> Self {
-        Self { segments: Vec::new(), axis_extent: 0.0 }
+        Self { segments: Vec::new(), major_segments: Vec::new(), axis_extent: 0.0 }
     }
 }
 
@@ -633,19 +797,61 @@ fn clip_seg(p0: Point, p1: Point, bounds: iced::Rectangle) -> Option<(Point, Poi
 /// perspective cameras have the same vertical scale there. Camera rotation is
 /// intentionally absent so orbiting cannot rescale the visible grid or snap.
 pub fn compute_grid_step(distance: f32, fov_y: f32, bounds: iced::Rectangle) -> f32 {
+    compute_grid_steps(1.0, 1.0, distance, fov_y, bounds, true).0
+}
+
+/// Adaptive world-space grid spacing for non-uniform GRIDUNIT X/Y.
+///
+/// BUG FIX: the old `compute_grid_step` hardcoded a 1.0 base, so the
+/// Drafting Settings grid spacing had no effect on the display. The base now
+/// comes from the user's GRIDUNIT setting. With `adaptive == true`, each axis
+/// is scaled up by powers of 5 until neighbouring lines are at least
+/// `MIN_GRID_PX` apart; with `adaptive == false` the raw base is returned so
+/// the grid resizes exactly as typed.
+pub fn compute_grid_steps(
+    base_x: f32,
+    base_y: f32,
+    distance: f32,
+    fov_y: f32,
+    bounds: iced::Rectangle,
+    adaptive: bool,
+) -> (f32, f32) {
+    let sanitize = |b: f32| {
+        if b.is_finite() && b > 0.0 && b <= 1e9 {
+            b
+        } else {
+            1.0
+        }
+    };
+    let bx = sanitize(base_x);
+    let by = sanitize(base_y);
+    if !adaptive {
+        return (bx, by);
+    }
     let half_height = distance * (fov_y * 0.5).tan();
     if !half_height.is_finite() || half_height <= 1e-9 || bounds.height <= 0.0 {
-        return 1.0;
+        return (bx, by);
     }
     let px_per_unit = bounds.height / (2.0 * half_height);
-    let mut s = 1.0_f32;
-    while s * px_per_unit < MIN_GRID_PX {
-        s *= 5.0;
-        if s > 1e9 {
-            return 1.0;
-        }
+    if !px_per_unit.is_finite() || px_per_unit <= 0.0 {
+        return (bx, by);
     }
-    s
+    let adapt = |mut s: f32, base: f32| {
+        // Grow-only: shrinking below the user's base would silently change the
+        // requested GRIDUNIT when zoomed in. Guard the loop so a degenerate
+        // px_per_unit can never spin forever. The overflow fallback returns
+        // this axis's own base (returning the other axis's base mixed X/Y).
+        let mut guard = 0;
+        while s * px_per_unit < MIN_GRID_PX && guard < 32 {
+            s *= 5.0;
+            guard += 1;
+            if !s.is_finite() || s > 1e9 {
+                return base;
+            }
+        }
+        s
+    };
+    (adapt(bx, bx), adapt(by, by))
 }
 
 /// Parameters for the screen-space UCS icon drawn in the viewport corner.
@@ -751,7 +957,9 @@ impl canvas::Program<Message> for GridCanvas {
                             g.view_rot,
                             g.eye,
                             gb,
-                            g.step,
+                            g.step_x,
+                            g.step_y,
+                            g.major_every,
                             g.origin,
                             g.axes,
                             g.limits,
@@ -792,6 +1000,8 @@ pub fn selection_overlay<'a>(
     crosshair: CrosshairOptions,
     selection_visual: SelectionVisualOptions,
     constraint_glyphs: Vec<(Point, [f32; 2], String, bool, bool, Vec<Point>)>,
+    constraint_glyph_tooltip: Option<String>,
+    constraint_cursor_badge: Option<String>,
 ) -> Element<'a, Message> {
     canvas(SelectionCanvas {
         selection,
@@ -816,6 +1026,8 @@ pub fn selection_overlay<'a>(
         crosshair,
         selection_visual,
         constraint_glyphs,
+        constraint_glyph_tooltip,
+        constraint_cursor_badge,
     })
     .width(Length::Fill)
     .height(Length::Fill)
@@ -879,6 +1091,11 @@ struct SelectionCanvas {
     /// state, whether the pill itself is the current click-to-select target,
     /// and the points to mark while the pill is hovered.
     constraint_glyphs: Vec<(Point, [f32; 2], String, bool, bool, Vec<Point>)>,
+    /// Localized kind name made visible after the app-level hover dwell.
+    constraint_glyph_tooltip: Option<String>,
+    /// Symbol shown beside the cursor while it targets an entity that already
+    /// participates in an enabled geometric constraint.
+    constraint_cursor_badge: Option<String>,
 }
 
 fn draw_grip_marker(
@@ -1589,6 +1806,68 @@ impl canvas::Program<Message> for SelectionCanvas {
                     frame.stroke(&h, stroke.clone());
                     frame.stroke(&v, stroke);
                 }
+                SnapType::Vertex => {
+                    // Filled square: the solid rhyme of Endpoint's hollow box.
+                    let h = 5.0_f32;
+                    frame.fill(
+                        &canvas::Path::rectangle(
+                            Point::new(sp.x - h, sp.y - h),
+                            Size::new(h * 2.0, h * 2.0),
+                        ),
+                        marker,
+                    );
+                }
+                SnapType::EdgeMidpoint => {
+                    // Filled triangle: the solid rhyme of Midpoint's outline.
+                    let r = 6.0_f32;
+                    let path = canvas::Path::new(|b| {
+                        b.move_to(Point::new(sp.x, sp.y - r));
+                        b.line_to(Point::new(sp.x + r * 0.866, sp.y + r * 0.5));
+                        b.line_to(Point::new(sp.x - r * 0.866, sp.y + r * 0.5));
+                        b.close();
+                    });
+                    frame.fill(&path, marker);
+                }
+                SnapType::FaceCenter => {
+                    // Filled disc: the solid rhyme of Center's outline.
+                    frame.fill(&canvas::Path::circle(sp, 5.5_f32), marker);
+                }
+                SnapType::Knot => {
+                    // Filled diamond: distinct from Quadrant's outline.
+                    let r = 5.5_f32;
+                    let path = canvas::Path::new(|b| {
+                        b.move_to(Point::new(sp.x, sp.y - r));
+                        b.line_to(Point::new(sp.x + r, sp.y));
+                        b.line_to(Point::new(sp.x, sp.y + r));
+                        b.line_to(Point::new(sp.x - r, sp.y));
+                        b.close();
+                    });
+                    frame.fill(&path, marker);
+                }
+                SnapType::FacePerpendicular => {
+                    // Right-angle hook like the 2D marker, plus a filled foot
+                    // dot marking the face contact.
+                    let r = 6.0_f32;
+                    let p = canvas::Path::new(|b| {
+                        b.move_to(Point::new(sp.x - r, sp.y - r));
+                        b.line_to(Point::new(sp.x - r, sp.y + r));
+                        b.line_to(Point::new(sp.x + r, sp.y + r));
+                    });
+                    frame.stroke(&p, stroke.clone());
+                    frame.fill(&canvas::Path::circle(sp, 2.0_f32), marker);
+                }
+                SnapType::NearestFace => {
+                    // Filled bowtie: the solid rhyme of Nearest's outline.
+                    let r = 5.5_f32;
+                    let path = canvas::Path::new(|b| {
+                        b.move_to(Point::new(sp.x - r, sp.y - r));
+                        b.line_to(Point::new(sp.x + r, sp.y - r));
+                        b.line_to(Point::new(sp.x - r, sp.y + r));
+                        b.line_to(Point::new(sp.x + r, sp.y + r));
+                        b.close();
+                    });
+                    frame.fill(&path, marker);
+                }
             }
         }
 
@@ -1715,6 +1994,28 @@ impl canvas::Program<Message> for SelectionCanvas {
                     let hole = canvas::Path::circle(Point::new(bx + 6.0, by + 10.5), 1.4);
                     frame.fill(&hole, dark);
                 }
+                if let Some(label) = &self.constraint_cursor_badge {
+                    let center = Point::new(cp.x + sq + if self.hover_locked { 30.0 } else { 12.0 }, cp.y - sq - 7.0);
+                    let blue = Color::from_rgb8(35, 145, 230);
+                    let badge = canvas::Path::circle(center, 8.5);
+                    frame.fill(&badge, blue);
+                    if label == "◎" {
+                        draw_concentric_constraint_glyph(&mut frame, center, Color::WHITE);
+                    } else if label == "T" {
+                        draw_tangent_constraint_glyph(&mut frame, center, Color::WHITE);
+                    } else {
+                        frame.fill_text(canvas::Text {
+                            content: label.clone(),
+                            position: center,
+                            color: Color::WHITE,
+                            size: iced::Pixels(11.0),
+                            align_x: iced::alignment::Horizontal::Center.into(),
+                            align_y: iced::alignment::Vertical::Center,
+                            shaping: iced::advanced::text::Shaping::Advanced,
+                            ..Default::default()
+                        });
+                    }
+                }
             }
         } // end !over_viewcube
 
@@ -1840,8 +2141,8 @@ impl canvas::Program<Message> for SelectionCanvas {
             let hovered = cursor
                 .position_in(bounds)
                 .and_then(|point| constraint_glyph_hit_test(&glyphs_for_offsets, point));
-            let normal_bg = theme.palette().primary.base.color;
-            let normal_fg = theme.palette().primary.base.text;
+            let normal_bg = Color::from_rgb8(103, 109, 118);
+            let normal_fg = Color::WHITE;
             // A redundant or conflicting constraint gets the danger palette
             // instead of the
             // ordinary primary one — same information a resolver panel
@@ -1849,19 +2150,32 @@ impl canvas::Program<Message> for SelectionCanvas {
             let conflict_bg = theme.palette().danger.base.color;
             let conflict_fg = theme.palette().danger.base.text;
             let selected_ring = theme.palette().primary.strong.color;
+            let coincident_bg = Color::from_rgb8(35, 145, 230);
             for ((anchor, outward, label, is_conflicting, is_selected, _), tangent_offset) in
-                self.constraint_glyphs.iter().zip(offsets)
+                self.constraint_glyphs.iter().zip(offsets.iter().copied())
             {
                 if !anchor.x.is_finite() || !anchor.y.is_finite() {
                     continue;
                 }
-                let (bg, fg) = if *is_conflicting { (conflict_bg, conflict_fg) } else { (normal_bg, normal_fg) };
+                let compact_coincident = is_compact_coincident_glyph(label);
+                let (bg, fg) = if *is_conflicting {
+                    (conflict_bg, conflict_fg)
+                } else if compact_coincident {
+                    (coincident_bg, normal_fg)
+                } else {
+                    (normal_bg, normal_fg)
+                };
                 let (top_left, size) =
                     constraint_glyph_box(*anchor, *outward, label, tangent_offset);
                 let pill = canvas::Path::rounded_rectangle(
                     top_left,
                     size,
-                    (size.height * 0.5).into(),
+                    (if compact_coincident {
+                        1.0
+                    } else {
+                        size.height * 0.5
+                    })
+                    .into(),
                 );
                 frame.fill(&pill, bg);
                 if *is_selected {
@@ -1870,23 +2184,50 @@ impl canvas::Program<Message> for SelectionCanvas {
                         canvas::Stroke::default().with_color(selected_ring).with_width(2.0),
                     );
                 }
-                let glyph_center = Point::new(
-                    top_left.x + size.width * 0.5,
-                    top_left.y + size.height * 0.5,
-                );
-                if label == "T" {
-                    draw_tangent_constraint_glyph(&mut frame, glyph_center, fg);
-                } else {
-                    frame.fill_text(canvas::Text {
-                        content: label.clone(),
-                        position: glyph_center,
-                        color: fg,
-                        size: iced::Pixels(CONSTRAINT_GLYPH_SIZE),
-                        align_x: iced::alignment::Horizontal::Center.into(),
-                        align_y: iced::alignment::Vertical::Center,
-                        shaping: iced::advanced::text::Shaping::Advanced,
-                        ..Default::default()
-                    });
+                if !compact_coincident {
+                    let glyph_center = Point::new(
+                        top_left.x + size.width * 0.5,
+                        top_left.y + size.height * 0.5,
+                    );
+                    if label == "T" {
+                        draw_tangent_constraint_glyph(&mut frame, glyph_center, fg);
+                    } else if label == "G²" {
+                        draw_smooth_constraint_glyph(&mut frame, glyph_center, fg);
+                    } else if label == "◎" {
+                        draw_concentric_constraint_glyph(&mut frame, glyph_center, fg);
+                    } else if is_fixed_glyph(label) {
+                        draw_fixed_constraint_glyph(
+                            &mut frame,
+                            glyph_center,
+                            fg,
+                            bg,
+                            label == crate::scene::parametric_constraints::FIXED_POINT_GLYPH,
+                        );
+                    } else if is_vertical_glyph(label) {
+                        draw_vertical_constraint_glyph(
+                            &mut frame,
+                            glyph_center,
+                            fg,
+                            label == crate::scene::parametric_constraints::VERTICAL_POINTS_GLYPH,
+                        );
+                    } else {
+                        // The Equal symbol reads green on its badge, as asked.
+                        let color = if label == "=" {
+                            Color::from_rgb8(72, 199, 116)
+                        } else {
+                            fg
+                        };
+                        frame.fill_text(canvas::Text {
+                            content: label.clone(),
+                            position: glyph_center,
+                            color,
+                            size: iced::Pixels(CONSTRAINT_GLYPH_SIZE),
+                            align_x: iced::alignment::Horizontal::Center.into(),
+                            align_y: iced::alignment::Vertical::Center,
+                            shaping: iced::advanced::text::Shaping::Advanced,
+                            ..Default::default()
+                        });
+                    }
                 }
             }
             if let Some(index) = hovered {
@@ -1915,6 +2256,41 @@ impl canvas::Program<Message> for SelectionCanvas {
                     );
                     frame.stroke(&first, stroke.clone());
                     frame.stroke(&second, stroke.clone());
+                }
+                if let Some(label) = &self.constraint_glyph_tooltip {
+                    let (glyph_top_left, glyph_size) = constraint_glyph_box(
+                        self.constraint_glyphs[index].0,
+                        self.constraint_glyphs[index].1,
+                        &self.constraint_glyphs[index].2,
+                        offsets[index],
+                    );
+                    let width = (label.chars().count() as f32 * 7.0 + 14.0).max(54.0);
+                    let height = 24.0;
+                    let left = glyph_top_left.x.clamp(2.0, (bounds.width - width - 2.0).max(2.0));
+                    let top = (glyph_top_left.y + glyph_size.height + 4.0)
+                        .clamp(2.0, (bounds.height - height - 2.0).max(2.0));
+                    let tooltip = canvas::Path::rounded_rectangle(
+                        Point::new(left, top),
+                        Size::new(width, height),
+                        4.0.into(),
+                    );
+                    frame.fill(&tooltip, theme.palette().background.strong.color);
+                    frame.stroke(
+                        &tooltip,
+                        canvas::Stroke::default()
+                            .with_color(theme.palette().background.strong.text)
+                            .with_width(1.0),
+                    );
+                    frame.fill_text(canvas::Text {
+                        content: label.clone(),
+                        position: Point::new(left + width * 0.5, top + height * 0.5),
+                        color: theme.palette().background.strong.text,
+                        size: iced::Pixels(12.0),
+                        align_x: iced::alignment::Horizontal::Center.into(),
+                        align_y: iced::alignment::Vertical::Center,
+                        shaping: iced::advanced::text::Shaping::Advanced,
+                        ..Default::default()
+                    });
                 }
             }
         }
@@ -1966,36 +2342,35 @@ fn draw_grid(
     view_rot: Mat4,
     eye: glam::DVec3,
     bounds: iced::Rectangle,
-    step: f32,
+    step_x: f32,
+    step_y: f32,
+    major_every: u32,
     grid_origin: glam::DVec3,
     grid_axes: (Vec3, Vec3, Vec3),
     limits: Option<(glam::DVec2, glam::DVec2)>,
     style: GridStyle,
 ) {
     let alpha = (style.opacity as f32 / 100.0).clamp(0.02, 1.0);
-    let gc = if style.bg_luminance > 0.5 {
-        // Light background: subtle dark grid lines
-        Color {
-            r: 0.10,
-            g: 0.10,
-            b: 0.10,
-            a: alpha,
-        }
+    // Major lines stay subtle: ~1.5x the minor alpha with a slightly heavier
+    // stroke, matching the reference hierarchy without glaring.
+    let major_alpha = (alpha * 1.5).clamp(0.03, 1.0);
+    let (r, g, b) = if style.bg_luminance > 0.5 {
+        (0.10, 0.10, 0.10)
     } else {
-        // Dark background: subtle light grid lines
-        Color {
-            r: 0.80,
-            g: 0.80,
-            b: 0.80,
-            a: alpha,
-        }
+        (0.80, 0.80, 0.80)
     };
-    let st = canvas::Stroke {
+    let minor_stroke = canvas::Stroke {
         width: 0.5,
-        style: canvas::Style::Solid(gc),
+        style: canvas::Style::Solid(Color { r, g, b, a: alpha }),
         ..Default::default()
     };
-    let geometry = grid_segments(view_rot, eye, bounds, step, grid_origin, grid_axes, limits);
+    let major_stroke = canvas::Stroke {
+        width: 0.75,
+        style: canvas::Style::Solid(Color { r, g, b, a: major_alpha }),
+        ..Default::default()
+    };
+    let geometry =
+        grid_segments(view_rot, eye, bounds, step_x, step_y, major_every, grid_origin, grid_axes, limits);
     if !geometry.segments.is_empty() {
         let path = canvas::Path::new(|builder| {
             for (p0, p1) in &geometry.segments {
@@ -2003,11 +2378,20 @@ fn draw_grid(
                 builder.line_to(*p1);
             }
         });
-        frame.stroke(&path, st);
+        frame.stroke(&path, minor_stroke);
+    }
+    if !geometry.major_segments.is_empty() {
+        let path = canvas::Path::new(|builder| {
+            for (p0, p1) in &geometry.major_segments {
+                builder.move_to(*p0);
+                builder.line_to(*p1);
+            }
+        });
+        frame.stroke(&path, major_stroke);
     }
     if geometry.axis_extent > 0.0 {
         let (gx, gy, gz) = grid_axes;
-        let extent = (geometry.axis_extent + step) * 1.5;
+        let extent = (geometry.axis_extent + step_x.max(step_y)) * 1.5;
         draw_axes(frame, view_rot, eye, bounds, extent.max(10.0), grid_origin, (gx, gy, gz), style.bg_luminance);
     }
 }
@@ -2025,7 +2409,9 @@ pub fn grid_segments(
     view_rot: Mat4,
     eye: glam::DVec3,
     bounds: iced::Rectangle,
-    step: f32,
+    step_x: f32,
+    step_y: f32,
+    major_every: u32,
     grid_origin: glam::DVec3,
     grid_axes: (Vec3, Vec3, Vec3),
     limits: Option<(glam::DVec2, glam::DVec2)>,
@@ -2097,7 +2483,7 @@ pub fn grid_segments(
     // family at a point on the grid. Measuring the perpendicular component,
     // rather than point-to-point distance, remains correct for a skewed
     // perspective grid.
-    let grid_gaps = |world: glam::DVec3, step: f32| -> Option<(f32, f32)> {
+    let grid_gaps = |world: glam::DVec3, sx: f32, sy: f32| -> Option<(f32, f32)> {
         let p = project(world)?;
         let projected_deltas = |axis: Vec3, amount: f32| {
             [amount, -amount].map(|signed_step| {
@@ -2105,14 +2491,16 @@ pub fn grid_segments(
                     .map(|next| glam::Vec2::new(next.x - p.x, next.y - p.y))
             })
         };
-        let neighbours1 = projected_deltas(axis1, step);
-        let neighbours2 = projected_deltas(axis2, step);
+        let neighbours1 = projected_deltas(axis1, sx);
+        let neighbours2 = projected_deltas(axis2, sy);
         // A full grid step is needed to measure adjacent-line distance, but it
         // is too large for the line's local tangent near the eye. A small
         // derivative keeps the tangent measurable without crossing the eye.
-        let tangent_step = (step * 0.01).max(1e-4);
-        let tangents1 = projected_deltas(axis1, tangent_step);
-        let tangents2 = projected_deltas(axis2, tangent_step);
+        // BUG FIX: the tangent used a single shared step for both families, so
+        // a non-square GRIDUNIT (sx != sy) measured the wrong local direction.
+        // Each family now uses its own derivative.
+        let tangents1 = projected_deltas(axis1, (sx * 0.01).max(1e-4));
+        let tangents2 = projected_deltas(axis2, (sy * 0.01).max(1e-4));
 
         // At the near side of a perspective plane a large +step neighbour may
         // cross behind the eye while the -step neighbour remains perfectly
@@ -2162,10 +2550,15 @@ pub fn grid_segments(
 
     // Step follows camera zoom only. The previous visible-sample calculation
     // changed depth while orbiting and made the grid jump 1 → 5 → 25.
-    if !step.is_finite() || step <= 0.0 {
+    // BUG FIX: a single shared step forced square grids; X and Y are now
+    // validated independently so GRIDUNIT X/Y resize each family.
+    if !step_x.is_finite() || step_x <= 0.0 || !step_y.is_finite() || step_y <= 0.0 {
         return GridGeometry::empty();
     }
-    let s = step;
+    let (sx, sy) = (step_x, step_y);
+    let is_major = |index: i32| {
+        major_every >= 2 && (index.rem_euclid(major_every as i32) == 0)
+    };
 
     // Trace a family-specific visible region around the viewport perimeter.
     // When a boundary ray points through the horizon, binary-search back toward
@@ -2177,7 +2570,7 @@ pub fn grid_segments(
     | -> Vec<glam::DVec3> {
         let visible_at = |screen: glam::Vec2| -> Option<glam::DVec3> {
             let world = unproject(screen.x, screen.y)?;
-            let gaps = grid_gaps(world, s)?;
+            let gaps = grid_gaps(world, sx, sy)?;
             let gap = if family == 0 { gaps.0 } else { gaps.1 };
             (gap >= MIN_HORIZON_GRID_PX).then_some(world)
         };
@@ -2219,7 +2612,7 @@ pub fn grid_segments(
     let best_anchor = |family: usize| -> Option<(glam::Vec2, glam::DVec3, f32)> {
         let mut best = None;
         for (screen, world) in &samples {
-            let Some(gaps) = grid_gaps(*world, s) else {
+            let Some(gaps) = grid_gaps(*world, sx, sy) else {
                 continue;
             };
             let gap = if family == 0 { gaps.0 } else { gaps.1 };
@@ -2241,13 +2634,13 @@ pub fn grid_segments(
         }
         (min <= max).then_some((min, max))
     };
-    let line_range = |min: f32, max: f32, anchor: f32| -> (i32, i32) {
-        let mut start = (min / s).floor() as i32;
-        let mut end = (max / s).ceil() as i32;
+    let line_range = |min: f32, max: f32, anchor: f32, step: f32| -> (i32, i32) {
+        let mut start = (min / step).floor() as i32;
+        let mut end = (max / step).ceil() as i32;
         // The pixel-gap cut-off naturally bounds this by viewport resolution. Keep
         // malformed projection data from creating an unbounded CPU loop.
         let limit = ((bounds.width + bounds.height).ceil() as i32 + 64).max(128);
-        let center = (anchor / s).round() as i32;
+        let center = (anchor / step).round() as i32;
         start = start.max(center.saturating_sub(limit));
         end = end.min(center.saturating_add(limit));
         (start, end)
@@ -2348,7 +2741,7 @@ pub fn grid_segments(
             let Some(world) = unproject(screen.x, screen.y) else {
                 return false;
             };
-            let Some(gaps) = grid_gaps(world, s) else {
+            let Some(gaps) = grid_gaps(world, sx, sy) else {
                 return false;
             };
             let gap = if family == 0 { gaps.0 } else { gaps.1 };
@@ -2464,14 +2857,15 @@ pub fn grid_segments(
 
         let (min1, max1) = coordinate_range(axis1);
         let (min2, max2) = coordinate_range(axis2);
-        let mut segments = Vec::new();
+        let mut minor = Vec::new();
+        let mut major = Vec::new();
         if let Some((_, anchor_world, gap)) = best_anchor(0) {
             if gap >= MIN_HORIZON_GRID_PX {
                 let anchor = (anchor_world - grid_origin).as_vec3().dot(axis1);
-                let (start, end) = line_range(min1, max1, anchor);
+                let (start, end) = line_range(min1, max1, anchor, sx);
                 for index in start..=end {
-                    if let Some(segment) = clip_world_line(0, index as f32 * s) {
-                        segments.push(segment);
+                    if let Some(segment) = clip_world_line(0, index as f32 * sx) {
+                        if is_major(index) { major.push(segment); } else { minor.push(segment); }
                     }
                 }
             }
@@ -2479,15 +2873,16 @@ pub fn grid_segments(
         if let Some((_, anchor_world, gap)) = best_anchor(1) {
             if gap >= MIN_HORIZON_GRID_PX {
                 let anchor = (anchor_world - grid_origin).as_vec3().dot(axis2);
-                let (start, end) = line_range(min2, max2, anchor);
+                let (start, end) = line_range(min2, max2, anchor, sy);
                 for index in start..=end {
-                    if let Some(segment) = clip_world_line(1, index as f32 * s) {
-                        segments.push(segment);
+                    if let Some(segment) = clip_world_line(1, index as f32 * sy) {
+                        if is_major(index) { major.push(segment); } else { minor.push(segment); }
                     }
                 }
             }
         }
-        all_segments.extend(segments);
+        all_segments.extend(minor);
+        let all_major: Vec<(Point, Point)> = major;
 
         // LIMITS bounds the grid, not the UCS axes. Size the axes from the
         // visible grid plane so X/Y/Z still span the viewport even when the
@@ -2501,9 +2896,10 @@ pub fn grid_segments(
         if limits_extent > 0.0 {
             axis_extent = limits_extent;
         }
-        return GridGeometry { segments: all_segments, axis_extent };
+        return GridGeometry { segments: all_segments, major_segments: all_major, axis_extent };
     }
 
+    let mut all_major: Vec<(Point, Point)> = Vec::new();
     // Lines parallel to axis2 (varying axis1 position).
     if let Some((anchor_screen, anchor_world, gap)) = best_anchor(0) {
         if gap >= MIN_HORIZON_GRID_PX {
@@ -2512,15 +2908,14 @@ pub fn grid_segments(
                 (axis_range(&hits, axis1), axis_range(&hits, axis2))
             {
                 let anchor1 = (anchor_world - grid_origin).as_vec3().dot(axis1);
-                let (start, end) = line_range(min1, max1, anchor1);
-                let mut segments = Vec::with_capacity((end - start + 1).max(0) as usize);
+                let (start, end) = line_range(min1, max1, anchor1, sx);
                 for i in start..=end {
-                    let value = i as f32 * s;
+                    let value = i as f32 * sx;
                     if let Some((p0, p1)) = project_line(0, value) {
-                        segments.extend(trim_line(0, p0, p1));
+                        let segs = trim_line(0, p0, p1);
+                        if is_major(i) { all_major.extend(segs); } else { all_segments.extend(segs); }
                     }
                 }
-                all_segments.extend(segments);
                 axis_extent =
                     axis_extent.max(min1.abs().max(max1.abs()).max(min2.abs()).max(max2.abs()));
             }
@@ -2535,15 +2930,14 @@ pub fn grid_segments(
                 (axis_range(&hits, axis1), axis_range(&hits, axis2))
             {
                 let anchor2 = (anchor_world - grid_origin).as_vec3().dot(axis2);
-                let (start, end) = line_range(min2, max2, anchor2);
-                let mut segments = Vec::with_capacity((end - start + 1).max(0) as usize);
+                let (start, end) = line_range(min2, max2, anchor2, sy);
                 for i in start..=end {
-                    let value = i as f32 * s;
+                    let value = i as f32 * sy;
                     if let Some((p0, p1)) = project_line(1, value) {
-                        segments.extend(trim_line(1, p0, p1));
+                        let segs = trim_line(1, p0, p1);
+                        if is_major(i) { all_major.extend(segs); } else { all_segments.extend(segs); }
                     }
                 }
-                all_segments.extend(segments);
                 axis_extent =
                     axis_extent.max(min1.abs().max(max1.abs()).max(min2.abs()).max(max2.abs()));
             }
@@ -2551,7 +2945,7 @@ pub fn grid_segments(
     }
 
     let _ = gz; // gz unused after move; retained for symmetry with `draw_axes` call sites.
-    GridGeometry { segments: all_segments, axis_extent }
+    GridGeometry { segments: all_segments, major_segments: all_major, axis_extent }
 }
 
 // ── Coloured UCS axes ──────────────────────────────────────────────────────
@@ -3004,7 +3398,9 @@ impl DynInputCanvas {
 
     fn box_content(b: &DynBox) -> String {
         match b.role {
-            DynRole::Angle => format!("{}\u{00B0}", b.value),
+            // Formatted live values already carry their unit marker; typed
+            // buffers stay unadorned while they are being edited.
+            DynRole::Angle => b.value.clone(),
             _ if b.label.is_empty() => b.value.clone(),
             _ => format!("{}{}", b.label, b.value),
         }
@@ -3645,7 +4041,9 @@ mod grid_key_tests {
                 width: 1280.0,
                 height: 720.0,
             },
-            step: 80.0,
+            step_x: 80.0,
+            step_y: 80.0,
+            major_every: 5,
             origin: glam::DVec3::new(0.0, 0.0, 0.0),
             axes: (Vec3::X, Vec3::Y, Vec3::Z),
             limits: None,
@@ -3695,13 +4093,31 @@ mod grid_key_tests {
             "eye change must invalidate"
         );
 
-        // step: zoom in
+        // step_x: zoom in
         let mut p = baseline_params();
-        p.step = 40.0;
+        p.step_x = 40.0;
         assert_ne!(
             GridKey::from_grids(&[p], baseline_bounds, GridStyle::default()),
             baseline_key,
-            "step change must invalidate"
+            "step_x change must invalidate"
+        );
+
+        // step_y: non-square grid resize
+        let mut p = baseline_params();
+        p.step_y = 40.0;
+        assert_ne!(
+            GridKey::from_grids(&[p], baseline_bounds, GridStyle::default()),
+            baseline_key,
+            "step_y change must invalidate"
+        );
+
+        // major_every: major-line frequency change
+        let mut p = baseline_params();
+        p.major_every = 10;
+        assert_ne!(
+            GridKey::from_grids(&[p], baseline_bounds, GridStyle::default()),
+            baseline_key,
+            "major_every change must invalidate"
         );
 
         // origin: translate the UCS origin off-zero
@@ -3775,7 +4191,7 @@ mod grid_key_tests {
         let baseline = GridKey::from_grids(&both, bounds, GridStyle::default());
 
         let mut pane2_changed = pane2;
-        pane2_changed.step = 160.0;
+        pane2_changed.step_x = 160.0;
         let dirty = vec![pane1, pane2_changed];
         assert_ne!(
             GridKey::from_grids(&dirty, bounds, GridStyle::default()),
@@ -3808,12 +4224,89 @@ mod grid_key_tests {
     fn should_reuse_changed() {
         let grids_a = vec![baseline_params()];
         let mut pane2 = baseline_params();
-        pane2.step = 160.0;
+        pane2.step_x = 160.0;
         let grids_b = vec![pane2];
         let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 1920.0, height: 720.0 };
         let old = GridKey::from_grids(&grids_a, bounds, GridStyle::default());
         let new = GridKey::from_grids(&grids_b, bounds, GridStyle::default());
         assert!(!should_reuse(Some(&old), &new));
+    }
+
+    /// Adaptive steps grow from the GRIDUNIT base (the old hardcoded 1.0 base
+    /// ignored the DSettings grid spacing). Fixed mode returns the base verbatim.
+    #[test]
+    fn grid_steps_follow_base_and_adaptive_flag() {
+        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 1280.0, height: 720.0 };
+        // Far zoom: 10-unit base must scale up to stay readable.
+        let (sx, sy) = compute_grid_steps(10.0, 10.0, 5000.0, 0.6, bounds, true);
+        assert!(sx >= 10.0 && sy >= 10.0);
+        assert_eq!((sx, sy), (sx.max(10.0), sy.max(10.0)));
+        // Non-uniform bases stay non-uniform.
+        let (nx, ny) = compute_grid_steps(10.0, 2.0, 5000.0, 0.6, bounds, true);
+        assert!(nx >= 10.0 && ny >= 2.0);
+        // Fixed mode returns exactly what was typed.
+        assert_eq!(compute_grid_steps(7.5, 2.5, 5000.0, 0.6, bounds, false), (7.5, 2.5));
+        // Degenerate input sanitizes to 1.0 instead of emptying the grid.
+        assert_eq!(compute_grid_steps(0.0, -3.0, 5000.0, 0.6, bounds, false), (1.0, 1.0));
+    }
+
+    /// Overflow fallback keeps each axis on its own base: an extreme zoom-out
+    /// that pushes the 5x growth past 1e9 must return (bx, by), never (bx, bx).
+    #[test]
+    fn grid_steps_overflow_falls_back_per_axis() {
+        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 1280.0, height: 720.0 };
+        assert_eq!(
+            compute_grid_steps(10.0, 2.0, 1e15, 0.6, bounds, true),
+            (10.0, 2.0)
+        );
+    }
+
+    /// Non-uniform steps still produce grid geometry on both families.
+    #[test]
+    fn grid_segments_support_non_square_spacing() {
+        // Top-down orthographic-ish view over the origin: deterministic lines.
+        let view_rot = glam::camera::rh::proj::directx::orthographic(
+            -400.0, 400.0, -300.0, 300.0, 0.1, 2000.0,
+        ) * glam::camera::rh::view::look_at_mat4(
+            Vec3::new(0.0, 0.0, 500.0),
+            Vec3::ZERO,
+            Vec3::Y,
+        );
+        let eye = glam::DVec3::new(0.0, 0.0, 500.0);
+        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        let g = grid_segments(
+            view_rot, eye, bounds, 10.0, 2.0, 5,
+            glam::DVec3::ZERO, (Vec3::X, Vec3::Y, Vec3::Z), None,
+        );
+        assert!(!g.segments.is_empty(), "grid lines expected");
+    }
+
+    /// Every-Nth line lands in `major_segments`, the rest in `segments`.
+    #[test]
+    fn grid_segments_partition_major_lines() {
+        // Top-down orthographic-ish view over the origin: deterministic lines.
+        let view_rot = glam::camera::rh::proj::directx::orthographic(
+            -400.0, 400.0, -300.0, 300.0, 0.1, 2000.0,
+        ) * glam::camera::rh::view::look_at_mat4(
+            Vec3::new(0.0, 0.0, 500.0),
+            Vec3::ZERO,
+            Vec3::Y,
+        );
+        let eye = glam::DVec3::new(0.0, 0.0, 500.0);
+        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        let g = grid_segments(
+            view_rot, eye, bounds, 10.0, 10.0, 5,
+            glam::DVec3::ZERO, (Vec3::X, Vec3::Y, Vec3::Z), None,
+        );
+        assert!(!g.segments.is_empty(), "minor lines expected");
+        assert!(!g.major_segments.is_empty(), "major lines expected");
+        // major_every = 1 disables the split: everything is minor.
+        let flat = grid_segments(
+            view_rot, eye, bounds, 10.0, 10.0, 1,
+            glam::DVec3::ZERO, (Vec3::X, Vec3::Y, Vec3::Z), None,
+        );
+        assert!(flat.major_segments.is_empty());
+        assert!(!flat.segments.is_empty());
     }
 }
 
@@ -3839,7 +4332,6 @@ mod grid_canvas_state_tests {
         let view_rot = Mat4::from_rotation_x(0.15) * Mat4::from_rotation_y(0.05);
         let eye = glam::DVec3::new(4.0, 3.5, 9.0);
         let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: 1280.0, height: 720.0 };
-        let step = 80.0_f32;
         let grid_origin = glam::DVec3::new(0.0, 0.0, 0.0);
         let grid_axes = (Vec3::X, Vec3::Y, Vec3::Z);
         let limits: Option<(glam::DVec2, glam::DVec2)> = None;
@@ -3848,7 +4340,9 @@ mod grid_canvas_state_tests {
             view_rot,
             eye,
             bounds,
-            step,
+            step_x: 80.0,
+            step_y: 80.0,
+            major_every: 5,
             origin: grid_origin,
             axes: grid_axes,
             limits,

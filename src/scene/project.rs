@@ -674,10 +674,7 @@ pub(crate) fn clip_boundary_polygon_for_document(
     z: f32,
 ) -> Vec<[f32; 3]> {
     use std::f64::consts::TAU;
-    let Some(entity) = document
-        .entities()
-        .find(|e| e.common().handle == handle)
-    else {
+    let Some(entity) = document.get_entity(handle) else {
         return vec![];
     };
     // Circles and ellipses tessellate directly — their `to_render` returns a

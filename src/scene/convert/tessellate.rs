@@ -3111,6 +3111,75 @@ mod tests {
     }
 
     #[test]
+    fn split_mixed_polyline_keeps_exact_line_intersections() {
+        let tangents = vec![
+            TangentGeom::Line {
+                p1: [-10.0, 0.0, 0.0],
+                p2: [0.0, 0.0, 0.0],
+            },
+            TangentGeom::Arc {
+                center: [0.0, 4.0, 0.0],
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, 1.0, 0.0],
+                radius: 4.0,
+                start_angle: -std::f64::consts::FRAC_PI_2,
+                end_angle: std::f64::consts::FRAC_PI_2,
+            },
+            TangentGeom::Line {
+                p1: [0.0, 8.0, 0.0],
+                p2: [10.0, 8.0, 0.0],
+            },
+        ];
+        let vertices = vec![
+            [-10.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 8.0, 0.0],
+            [10.0, 8.0, 0.0],
+        ];
+        let wires = split_mixed_polyline(
+            &tangents,
+            &vertices,
+            "mixed",
+            [1.0; 4],
+            false,
+            0.0,
+            [0.0; 8],
+            1.0,
+            Vec::new(),
+            None,
+            true,
+            &[(0.0, 0.0); 3],
+            0.0,
+            Vec::new(),
+            Vec::new(),
+        );
+        let line_wire = wires
+            .iter()
+            .find(|wire| {
+                wire.tangent_geoms
+                    .iter()
+                    .all(|geom| matches!(geom, TangentGeom::Line { .. }))
+            })
+            .expect("straight-segment wire");
+        let circle = WireModel {
+            tangent_geoms: vec![TangentGeom::PlanarCircle {
+                center: [5.0, 4.0, 0.0],
+                axis_x: [1.0, 0.0, 0.0],
+                axis_y: [0.0, 1.0, 0.0],
+                radius: 5.0,
+            }],
+            ..Default::default()
+        };
+
+        let mut points = crate::snap::exact_curve_intersections(line_wire, &circle)
+            .expect("analytical intersections");
+        points.sort_by(|left, right| left.x.total_cmp(&right.x));
+        assert_eq!(points.len(), 2, "unexpected intersections: {points:?}");
+        assert!((points[0] - glam::DVec3::new(2.0, 8.0, 0.0)).length() < 1.0e-9);
+        assert!((points[1] - glam::DVec3::new(8.0, 8.0, 0.0)).length() < 1.0e-9);
+    }
+
+    #[test]
     fn test_split_mixed_polyline_zero_width_segments_after_tapered_segment() {
         let tg_line = TangentGeom::Line {
             p1: [0.0, 0.0, 0.0],

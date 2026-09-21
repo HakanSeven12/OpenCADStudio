@@ -1302,8 +1302,9 @@ impl OpenCADStudio {
                 let all_mode = cmd.starts_with("FINDALL");
                 let rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
 
-                // Split at " REPLACE " keyword (case-insensitive)
-                let (search, replacement) = if let Some(pos) = rest.to_uppercase().find(" REPLACE ")
+                // Split at " REPLACE " keyword (case-insensitive). ASCII case
+                // mapping keeps byte offsets valid for slicing `rest`.
+                let (search, replacement) = if let Some(pos) = rest.to_ascii_uppercase().find(" REPLACE ")
                 {
                     (&rest[..pos], Some(rest[pos + 9..].trim()))
                 } else {
@@ -2384,5 +2385,22 @@ mod align_selected_bounds_tests {
         // onto `a`.
         assert_eq!(line_start_x(&app, a), 0.0);
         assert_eq!(line_start_x(&app, b), 2.0, "b must keep its offset from a, not collapse onto it");
+    }
+}
+
+#[cfg(test)]
+mod find_replace_command_tests {
+    use super::*;
+
+    /// Unicode case mapping can change a string's byte length (`ı` uppercases
+    /// to `I`), so the REPLACE keyword split must not slice with offsets
+    /// taken from a case-mapped copy.
+    #[test]
+    fn find_replace_accepts_search_text_whose_case_mapping_changes_length() {
+        for cmd in ["FIND ı REPLACE x", "FINDALL ﬁ REPLACE fi", "FIND ŉ replace n"] {
+            let mut app = OpenCADStudio::new_for_test();
+            let i = app.active_tab;
+            let _ = app.dispatch_inquiry(cmd, i);
+        }
     }
 }

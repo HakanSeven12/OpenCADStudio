@@ -5,7 +5,7 @@ use glam::{DVec3, Vec3};
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionAssociationSource,
-    InputKind, WorkingPlane,
+    DimensionPreview, InputKind, WorkingPlane,
 };
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::creation_style::DimensionCreationDefaults;
@@ -388,6 +388,35 @@ impl CadCommand for JoggedRadiusDimensionCommand {
                         .collect(),
                 ))
             }
+        }
+    }
+
+    fn dimension_preview(&self, cursor: DVec3) -> Option<Vec<DimensionPreview>> {
+        let result = match self.step {
+            Step::DimLine {
+                source,
+                override_center,
+            } => {
+                // The jog is not chosen yet; preview it midway along the
+                // dimension line so the styled value is visible while the
+                // text position is placed.
+                let chord = dvec(source.chord_at(cursor.to_array()));
+                let jog = (override_center + chord) * 0.5;
+                self.commit_dimension(source, override_center, chord, cursor, jog)
+            }
+            Step::Jog {
+                source,
+                override_center,
+                chord,
+                text_position,
+            } => self.commit_dimension(source, override_center, chord, text_position, cursor),
+            _ => return None,
+        };
+        match result {
+            CmdResult::CommitDimension { entity, .. } => {
+                Some(vec![DimensionPreview::current_style(entity)])
+            }
+            _ => Some(Vec::new()),
         }
     }
 }

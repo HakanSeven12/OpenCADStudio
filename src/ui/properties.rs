@@ -854,6 +854,7 @@ impl PropertiesPanel {
             PropValue::EditText(val) | PropValue::PlainText(val) => {
                 self.render_edit_row(label, prop.field, val)
             }
+            PropValue::Hyperlink(val) => render_hyperlink_row(label, val),
             PropValue::ReadOnly(val) if prop.field == "annotative_scale" => {
                 render_annotative_scale_row(label, val)
             }
@@ -1890,6 +1891,18 @@ fn render_annotative_scale_row<'a>(
     .align_y(iced::Center)
     .width(Length::Fill);
 
+    prop_row_widget(label, controls.into())
+}
+fn render_hyperlink_row<'a>(label: &'a str, value: &'a str) -> Element<'a, Message> {
+    let field = crate::ui::read_only::field(value, FONT_SZ, Length::Fill);
+    let manage = button(text("...").size(FONT_SZ))
+        .on_press(Message::PropHyperlinkOpen)
+        .style(button::secondary)
+        .padding([2, 7]);
+    let controls = row![field, manage, iced::widget::space().width(10)]
+        .spacing(2)
+        .align_y(iced::Center)
+        .width(Length::Fill);
     prop_row_widget(label, controls.into())
 }
 fn render_ro_row<'a>(label: &'a str, value: &'a str) -> Element<'a, Message> {

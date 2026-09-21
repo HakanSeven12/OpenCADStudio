@@ -143,6 +143,7 @@ pub fn dxf_name(e: &EntityType) -> &'static str {
         EntityType::MLine(_) => "MLINE",
         EntityType::RasterImage(_) => "RASTERIMAGE",
         EntityType::Wipeout(_) => "WIPEOUT",
+        EntityType::Ole2Frame(_) => "OLE2FRAME",
         EntityType::Underlay(_) => "UNDERLAY",
         EntityType::AttributeDefinition(_) => "ATTDEF",
         EntityType::AttributeEntity(_) => "ATTRIB",

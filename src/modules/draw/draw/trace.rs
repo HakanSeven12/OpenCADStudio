@@ -144,6 +144,15 @@ impl CadCommand for TraceCommand {
         self.width_set && !self.points.is_empty()
     }
 
+    fn options(&self) -> Vec<crate::command::CmdOption> {
+        use crate::command::CmdOption;
+        if self.width_set && !self.points.is_empty() {
+            vec![CmdOption::new("Undo", "U")]
+        } else {
+            Vec::new()
+        }
+    }
+
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let t = text.trim();
         if !self.width_set {

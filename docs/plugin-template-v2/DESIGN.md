@@ -64,8 +64,10 @@ From the workspace root:
 cargo build -p plugin-template-v2
 ```
 
-The resulting cdylib plus `plugin.toml` can be installed into the host's
-plugins folder (see `docs/plugin-architecture.md`).
+The resulting cdylib plus `plugin.toml` (checked in alongside this file) can
+be installed into the host's plugins folder (see `docs/plugin-architecture.md`).
+Replace `plugin.toml`'s `rustc_version` and `acadrust_source` placeholders in
+your packaging step. The release workflow in `docs/plugin-template` shows how.
 
 ---
 

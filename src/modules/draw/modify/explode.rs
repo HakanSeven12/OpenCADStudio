@@ -88,6 +88,16 @@ pub fn explode_entity(entity: &EntityType, document: &CadDocument) -> Vec<Entity
         EntityType::Polyline2D(p) => explode_polyline2d(p),
         EntityType::Polyline(p) => explode_polyline(p),
         EntityType::Polyline3D(p) => explode_polyline3d(p),
+        // A MINSERT expands to one copy of the block per cell; leave arrays
+        // too large to materialize intact instead of exhausting memory.
+        EntityType::Insert(ins)
+            if !super::array::array_items_within_limit(&[
+                ins.row_count as u64,
+                ins.column_count as u64,
+            ]) =>
+        {
+            vec![]
+        }
         EntityType::Insert(ins) => ins
             .explode_from_document(document)
             .into_iter()
@@ -1477,6 +1487,18 @@ impl CadCommand for ExplodeCommand {
 mod tests {
     use super::*;
     use acadrust::entities::DimensionLinear;
+
+    #[test]
+    fn minsert_too_large_to_materialize_is_left_intact() {
+        let mut doc = CadDocument::new();
+        let mut block = acadrust::tables::BlockRecord::new("B1");
+        block.handle = doc.allocate_handle();
+        doc.block_records.add(block).unwrap();
+        let mut insert = acadrust::entities::Insert::new("B1", Vector3::new(0.0, 0.0, 0.0));
+        insert.row_count = u16::MAX;
+        insert.column_count = u16::MAX;
+        assert!(explode_entity(&EntityType::Insert(insert), &doc).is_empty());
+    }
 
     /// A dimension created without a geometry block gets a real `*D` block on
     /// bake, its `block_name` resolves to that block, and a second bake is a

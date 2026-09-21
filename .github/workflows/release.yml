@@ -194,6 +194,11 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+    # Step-level `if:` cannot read the `secrets` context, so the signing
+    # waterfall is driven by these boolean mirrors of the credential secrets.
+    env:
+      AZURE_SIGNING_CONFIGURED: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME != '' }}
+      PFX_CONFIGURED: ${{ secrets.WINDOWS_PFX_BASE64 != '' }}
 
     steps:
       - name: Checkout
@@ -237,7 +242,11 @@ jobs:
           cargo build --locked --release
           cargo build --locked --release -p dwg-thumbnailer-win
 
+      # Forks do not inherit repository secrets, so every signing step is
+      # gated on its credentials being present and the pipeline falls through:
+      # Azure Trusted Signing (upstream setup) -> PFX certificate -> unsigned.
       - name: Sign executable (Azure Trusted Signing)
+        if: env.AZURE_SIGNING_CONFIGURED == 'true'
         uses: azure/artifact-signing-action@v2
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -250,6 +259,37 @@ jobs:
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
+
+      - name: Import signing certificate (PFX fallback)
+        if: env.AZURE_SIGNING_CONFIGURED != 'true' && env.PFX_CONFIGURED == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP "signing.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_PFX_BASE64))
+          "Imported signing certificate to $pfxPath"
+
+      - name: Sign executable (certificate)
+        if: env.AZURE_SIGNING_CONFIGURED != 'true' && env.PFX_CONFIGURED == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: |
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.DirectoryName -match 'x64' } |
+            Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signtool) { throw "signtool.exe not found in the Windows SDK" }
+          & $signtool sign /fd SHA256 /tr https://timestamp.digicert.com /td SHA256 `
+            /f (Join-Path $env:RUNNER_TEMP "signing.pfx") /p $env:WINDOWS_PFX_PASSWORD `
+            (Resolve-Path target\release\OpenCADStudio.exe).Path
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed for the executable" }
+
+      - name: Note unsigned executable
+        if: env.AZURE_SIGNING_CONFIGURED != 'true' && env.PFX_CONFIGURED != 'true'
+        shell: pwsh
+        run: |
+          "No signing credentials configured - add the Azure Trusted Signing secrets or WINDOWS_PFX_BASE64/WINDOWS_PFX_PASSWORD to sign. Building UNSIGNED." >> $env:GITHUB_STEP_SUMMARY
 
       - name: Build MSI installer
         shell: pwsh
@@ -283,8 +323,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "light failed" }
 
       - name: Sign MSI installer (Azure Trusted Signing)
-        # The installer itself must be signed separately — light produces a
+        # The installer itself must be signed separately - light produces a
         # fresh, unsigned .msi even though the .exe inside is already signed.
+        if: env.AZURE_SIGNING_CONFIGURED == 'true'
         uses: azure/artifact-signing-action@v2
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -297,6 +338,27 @@ jobs:
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
+
+      - name: Sign MSI installer (certificate)
+        if: env.AZURE_SIGNING_CONFIGURED != 'true' && env.PFX_CONFIGURED == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: |
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.DirectoryName -match 'x64' } |
+            Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signtool) { throw "signtool.exe not found in the Windows SDK" }
+          & $signtool sign /fd SHA256 /tr https://timestamp.digicert.com /td SHA256 `
+            /f (Join-Path $env:RUNNER_TEMP "signing.pfx") /p $env:WINDOWS_PFX_PASSWORD `
+            (Resolve-Path OpenCADStudio.msi).Path
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed for the MSI" }
+
+      - name: Note unsigned MSI
+        if: env.AZURE_SIGNING_CONFIGURED != 'true' && env.PFX_CONFIGURED != 'true'
+        shell: pwsh
+        run: |
+          "MSI left unsigned - no signing credentials configured." >> $env:GITHUB_STEP_SUMMARY
 
       - name: Upload artifacts to release
         if: env.RELEASE_TAG != ''
@@ -424,8 +486,16 @@ jobs:
 
       - name: Ad-hoc code-sign the bundle
         run: |
-          codesign --force --deep --sign - --timestamp=none OpenCADStudio.app
-          codesign --verify --strict --verbose=2 OpenCADStudio.app
+          codesign --force --sign - --timestamp=none OpenCADStudio.app/Contents/MacOS/OpenCADStudio-App
+          codesign --force --sign - --timestamp=none \
+            --entitlements crates/dwg-thumbnailer/macos/entitlements.plist \
+            OpenCADStudio.app/Contents/PlugIns/DWGThumbnail.appex
+          codesign --force --sign - --timestamp=none OpenCADStudio.app
+          codesign --verify --deep --strict --verbose=2 OpenCADStudio.app
+          # --xml keeps newer codesign builds from prefixing text headers,
+          # which made the entitlements parse fail with InvalidFileException.
+          codesign -d --entitlements - --xml OpenCADStudio.app/Contents/PlugIns/DWGThumbnail.appex \
+            | python3 -c 'import io, plistlib, sys; ent = plistlib.load(io.BytesIO(sys.stdin.buffer.read())); print("entitlements:", ent); assert ent.get("com.apple.security.app-sandbox") is True'
 
       - name: Create .dmg
         run: |

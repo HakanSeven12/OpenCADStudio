@@ -20,6 +20,10 @@ use acadrust::{EntityType as AcadEntityType, Handle};
 use iced::time::Instant;
 use iced::{mouse, Point, Task};
 
+fn eval_dynamic_angle(text: &str) -> Option<f64> {
+    let value = crate::app::expr_eval::eval_number(&text.trim().replace(',', "."))?;
+    crate::entities::common::parse_angle(&value.to_string())
+}
 
 impl OpenCADStudio {
     pub(in crate::app) fn active_distance_ray(
@@ -402,9 +406,9 @@ impl OpenCADStudio {
             let explicit_sign = raw
                 .as_deref()
                 .is_some_and(|s| s.starts_with('-') || s.starts_with('+'));
-            match raw.and_then(|s| crate::app::expr_eval::eval_number(&s)) {
-                Some(v) if explicit_sign => v.to_radians(),
-                Some(mag) => mag.abs().to_radians().copysign(dy),
+            match raw.as_deref().and_then(eval_dynamic_angle) {
+                Some(v) if explicit_sign => v,
+                Some(mag) => mag.abs().copysign(dy),
                 None => live_a,
             }
         };
@@ -474,7 +478,11 @@ impl OpenCADStudio {
                 // absolute CCW angle in the UCS plane, not a cursor-signed
                 // magnitude — keep it literal. Only the polar Distance+Angle
                 // pair uses the cursor-signed `angle_rad`.
-                let a = val(0, live_a.to_degrees()).to_radians();
+                let a = fields[0]
+                    .buffer
+                    .as_deref()
+                    .and_then(eval_dynamic_angle)
+                    .unwrap_or(live_a);
                 Some(rel(glam::DVec3::new(live_d * a.cos(), live_d * a.sin(), 0.0)))
             }
             _ => None,
@@ -792,5 +800,35 @@ impl OpenCADStudio {
             .scene
             .set_command_preview_hidden(&preview_hidden);
         self.tabs[i].scene.set_preview_wires(previews);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::eval_dynamic_angle;
+    use crate::entities::common::{set_unit_context, unit_context};
+
+    #[test]
+    fn dynamic_angle_expressions_follow_drawing_units() {
+        let previous = unit_context();
+        let mut context = previous;
+
+        context.aunits = 2;
+        set_unit_context(context);
+        assert!(
+            (eval_dynamic_angle("2 * 50").unwrap() - std::f64::consts::FRAC_PI_2).abs()
+                < 1e-12
+        );
+
+        context.aunits = 3;
+        set_unit_context(context);
+        assert!(
+            (eval_dynamic_angle("1.5707963267948966").unwrap()
+                - std::f64::consts::FRAC_PI_2)
+                .abs()
+                < 1e-12
+        );
+
+        set_unit_context(previous);
     }
 }

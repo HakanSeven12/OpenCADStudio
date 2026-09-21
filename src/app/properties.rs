@@ -1277,6 +1277,35 @@ impl OpenCADStudio {
                                     &self.tabs[i].scene.document,
                                     d.base().common.handle,
                                 );
+                            let statuses = self.tabs[i]
+                                .scene
+                                .dimension_association_status(d.base().common.handle);
+                            let slots = self.tabs[i]
+                                .scene
+                                .dimension_association_slot_points(d.base().common.handle)
+                                .len();
+                            let status = if statuses.is_empty() {
+                                t!("Nonassociative")
+                            } else if statuses.iter().any(|(_, status)| {
+                                matches!(status, crate::scene::ReferenceStatus::Broken(_))
+                            }) {
+                                t!("Broken reference")
+                            } else if statuses.iter().any(|(_, status)| {
+                                matches!(status, crate::scene::ReferenceStatus::Unresolved)
+                            }) {
+                                t!("Unresolved reference")
+                            } else if statuses.len() < slots {
+                                t!("Partially associated")
+                            } else {
+                                t!("Associated")
+                            };
+                            general.props.push(crate::scene::model::object::Property {
+                                label: t!("Association status").into_owned(),
+                                field: "association_status",
+                                value: crate::scene::model::object::PropValue::ReadOnly(
+                                    status.into_owned(),
+                                ),
+                            });
                             general.props.push(crate::scene::model::object::Property {
                                 label: t!("Associative").into_owned(),
                                 field: "associative",
@@ -2654,6 +2683,13 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                     annotation_scale_handle,
                 );
                 let mut entity_grips = dispatch::grips(contextual.as_ref());
+                if let acadrust::EntityType::Insert(insert) = contextual.as_ref() {
+                    entity_grips = crate::entities::insert::visible_attribute_grips(
+                        &self.tabs[i].scene.document,
+                        insert,
+                        self.tabs[i].scene.annotation_scale,
+                    );
+                }
                 if crate::scene::model::solid_history::has_specialized_primitive_properties(
                     &self.tabs[i].scene.document,
                     handle,
@@ -2762,7 +2798,16 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         handles: &[Handle],
         driven_refs: &[crate::scene::parametric_constraints::ParametricRef],
     ) {
-        self.invalidate_property_targets_with_originals(i, handles, driven_refs, &[]);
+        let retain_size = self.constraint_solve_mode
+            && !driven_refs.is_empty()
+            && driven_refs.iter().all(|reference| reference.marker.is_some());
+        self.invalidate_property_targets_with_originals(
+            i,
+            handles,
+            driven_refs,
+            retain_size,
+            &[],
+        );
     }
 
     pub(super) fn invalidate_property_targets_with_originals(
@@ -2770,6 +2815,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         i: usize,
         handles: &[Handle],
         driven_refs: &[crate::scene::parametric_constraints::ParametricRef],
+        retain_size: bool,
         retained_originals: &[(Handle, acadrust::EntityType)],
     ) {
         let mut context_object_changed = false;
@@ -2806,7 +2852,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             .bump_entities_with_parametric_originals(
                 &changes,
                 driven_refs,
-                self.constraint_solve_mode && !driven_refs.is_empty(),
+                retain_size,
                 retained_originals,
             );
     }
@@ -3205,6 +3251,7 @@ fn make_sections_read_only(sections: &mut [crate::scene::model::object::PropSect
             | PropValue::ReadOnlyWithTooltip { value, .. }
             | PropValue::EditText(value)
             | PropValue::PlainText(value)
+            | PropValue::Hyperlink(value)
             | PropValue::LayerChoice(value)
             | PropValue::LinetypeChoice(value)
             | PropValue::HatchPatternChoice(value) => value.clone(),
@@ -3479,6 +3526,9 @@ fn merge_prop_value(
         (PropValue::PlainText(_), PropValue::PlainText(_)) => {
             PropValue::PlainText(VARIES_LABEL.into())
         }
+        (PropValue::Hyperlink(_), PropValue::Hyperlink(_)) => {
+            PropValue::Hyperlink(VARIES_LABEL.into())
+        }
         (PropValue::ReadOnly(_), PropValue::ReadOnly(_)) => {
             PropValue::ReadOnly(VARIES_LABEL.into())
         }
@@ -3552,7 +3602,8 @@ fn update_row_text(
         match &mut row.value {
             PropValue::ReadOnly(current)
             | PropValue::EditText(current)
-            | PropValue::PlainText(current) => *current = value,
+            | PropValue::PlainText(current)
+            | PropValue::Hyperlink(current) => *current = value,
             PropValue::ReadOnlyWithTooltip { value: current, .. } => *current = value,
             PropValue::Choice { selected, .. } => *selected = value,
             _ => {}
@@ -3806,7 +3857,7 @@ fn format_unit_factor(factor: f64) -> String {
 }
 
 /// Convert INSUNITS (DXF group 70) to millimetres.
-fn insunits_to_mm(code: i16) -> Option<f64> {
+pub(super) fn insunits_to_mm(code: i16) -> Option<f64> {
     Some(match code {
         1 => 25.4,                        // Inches
         2 => 304.8,                       // Feet

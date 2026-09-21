@@ -221,21 +221,11 @@ pub fn fetch_release_info(repo: &str) -> Result<Vec<ReleaseInfo>, String> {
                 .ok_or_else(|| format!("release {} plugin.toml is missing an id", release.tag))?;
             let acadrust_source = manifest.acadrust_source.clone();
             let acadrust_declared = manifest.acadrust_declared;
-            let acadrust_compatible = if !ocs_plugin_api::version_info::uses_acadrust_gate(
+            let acadrust_compatible = external::acadrust_source_compatible(
                 manifest.api_version,
-            ) {
-                true
-            } else if !acadrust_declared {
-                true
-            } else {
-                match acadrust_source.as_deref() {
-                    None | Some("") => false,
-                    Some(source) => ocs_plugin_api::version_info::acadrust_sources_compatible(
-                        source,
-                        ocs_plugin_api::version_info::host_acadrust_source(),
-                    ),
-                }
-            };
+                acadrust_declared,
+                acadrust_source.as_deref(),
+            );
             let rustc_version = manifest.rustc_version.clone();
             let rustc_declared = manifest.rustc_declared;
             let rustc_compatible = if !ocs_plugin_api::version_info::uses_acadrust_gate(
@@ -268,17 +258,6 @@ pub fn fetch_release_info(repo: &str) -> Result<Vec<ReleaseInfo>, String> {
         }
     }
 
-    // Once a repo declares a fingerprint, require it on later API versions.
-    let any_acadrust_declared = info.iter().any(|r| r.acadrust_declared);
-    if any_acadrust_declared {
-        for r in &mut info {
-            if !r.acadrust_declared
-                && ocs_plugin_api::version_info::uses_acadrust_gate(r.api_version)
-            {
-                r.acadrust_compatible = false;
-            }
-        }
-    }
     if info.is_empty() {
         Err(last_error.unwrap_or_else(|| "no installable releases found".to_string()))
     } else {
@@ -350,18 +329,12 @@ pub fn install(release: &Release, repository: &str) -> Result<String, String> {
         ));
     }
 
-    if ocs_plugin_api::version_info::uses_acadrust_gate(manifest.api_version)
-        && manifest.acadrust_declared
-    {
+    if ocs_plugin_api::version_info::uses_acadrust_gate(manifest.api_version) {
         let Some(source) = manifest.acadrust_source.as_deref() else {
-            return Err(
-                "Release declares acadrust metadata but has no source; cannot verify ABI compatibility".to_string(),
-            );
+            return Err("Release has no acadrust source; cannot verify ABI compatibility".to_string());
         };
         if source.is_empty() {
-            return Err(
-                "Release declares acadrust metadata but has no source; cannot verify ABI compatibility".to_string(),
-            );
+            return Err("Release has no acadrust source; cannot verify ABI compatibility".to_string());
         }
         if !ocs_plugin_api::version_info::acadrust_sources_compatible(
             source,

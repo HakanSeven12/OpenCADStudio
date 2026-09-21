@@ -18,7 +18,7 @@ pub struct PdfPage {
 
 const RASTER_DPI: f32 = 150.0;
 
-type PageKey = (String, String);
+type PageKey = (String, String, u32);
 
 fn page_cache() -> &'static Mutex<HashMap<PageKey, Option<Arc<PdfPage>>>> {
     static CACHE: OnceLock<Mutex<HashMap<PageKey, Option<Arc<PdfPage>>>>> = OnceLock::new();
@@ -52,12 +52,18 @@ pub fn register_source(path: &str, bytes: Arc<Vec<u8>>) {
     page_cache()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
-        .retain(|(cached_path, _), _| cached_path != path);
+        .retain(|(cached_path, _, _), _| cached_path != path);
 }
 
 /// Rasterise a 1-based PDF page, memoised by source path and page name.
 pub fn rasterize_page(path: &str, page: &str) -> Option<Arc<PdfPage>> {
-    let key = (path.to_string(), page.to_string());
+    rasterize_page_at_dpi(path, page, RASTER_DPI)
+}
+
+/// Rasterise a 1-based PDF page at a caller-chosen DPI, memoised per source
+/// path, page and DPI (print quality differs from the on-screen 150 DPI).
+pub fn rasterize_page_at_dpi(path: &str, page: &str, dpi: f32) -> Option<Arc<PdfPage>> {
+    let key = (path.to_string(), page.to_string(), dpi.to_bits());
     if let Some(hit) = page_cache()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
@@ -67,7 +73,7 @@ pub fn rasterize_page(path: &str, page: &str) -> Option<Arc<PdfPage>> {
         return hit;
     }
 
-    let built = rasterize_uncached(path, page);
+    let built = rasterize_uncached(path, page, dpi);
     page_cache()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
@@ -75,11 +81,18 @@ pub fn rasterize_page(path: &str, page: &str) -> Option<Arc<PdfPage>> {
     built
 }
 
-fn rasterize_uncached(path: &str, page: &str) -> Option<Arc<PdfPage>> {
+/// Rasterise without touching the memo: for one-off consumers such as a
+/// print job, whose 300 DPI page would otherwise stay cached for the whole
+/// session (tens of megabytes per sheet).
+pub fn rasterize_page_at_dpi_uncached(path: &str, page: &str, dpi: f32) -> Option<Arc<PdfPage>> {
+    rasterize_uncached(path, page, dpi)
+}
+
+fn rasterize_uncached(path: &str, page: &str, dpi: f32) -> Option<Arc<PdfPage>> {
     let bytes = source_bytes(path)?;
     let pdf = Pdf::new(bytes).ok()?;
     let page_no = page.trim().parse::<usize>().unwrap_or(1).max(1);
-    let pixmap = raster_page(&pdf, page_no - 1, RASTER_DPI)?;
+    let pixmap = raster_page(&pdf, page_no - 1, dpi)?;
     let RasterizedPage {
         pixels,
         width,
@@ -89,7 +102,7 @@ fn rasterize_uncached(path: &str, page: &str) -> Option<Arc<PdfPage>> {
         pixels,
         width,
         height,
-        dpi: RASTER_DPI,
+        dpi,
     }))
 }
 

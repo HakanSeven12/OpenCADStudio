@@ -93,8 +93,14 @@ sed "s/__VERSION__/$VERSION/g" packaging/Info.plist > "$APP/Contents/Info.plist"
 
 echo "==> codesign"
 if [ "$DEVELOPER_ID" = "-" ]; then
-    # CI-parity ad-hoc signature; cannot be notarized.
-    codesign --force --deep --sign - --timestamp=none "$APP"
+    # Sign inside out so the extension retains its sandbox entitlement.
+    # Ad-hoc signing cannot be notarized.
+    codesign --force --sign - --timestamp=none \
+        "$APP/Contents/MacOS/OpenCADStudio-App"
+    codesign --force --sign - --timestamp=none \
+        --entitlements crates/dwg-thumbnailer/macos/entitlements.plist \
+        "$APP/Contents/PlugIns/DWGThumbnail.appex"
+    codesign --force --sign - --timestamp=none "$APP"
 else
     # Sign nested code before the outer bundle. The sandbox entitlement is
     # required for the QuickLook extension. Use hardened runtime
@@ -107,7 +113,9 @@ else
     codesign --force --timestamp --options runtime \
         -s "$DEVELOPER_ID" "$APP"
 fi
-codesign --verify --strict --verbose=2 "$APP"
+codesign --verify --deep --strict --verbose=2 "$APP"
+codesign -d --entitlements - "$APP/Contents/PlugIns/DWGThumbnail.appex" \
+    | python3 -c 'import plistlib, sys; assert plistlib.load(sys.stdin.buffer).get("com.apple.security.app-sandbox") is True'
 
 echo "==> dmg"
 DMG="$DIST/OpenCADStudio-v$VERSION-macos-arm64.dmg"

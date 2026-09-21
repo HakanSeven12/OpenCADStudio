@@ -1,0 +1,34 @@
+name: Web build check
+
+# The web bundle is only built when a release is published (pages.yml), so a
+# desktop-only call in shared code can sit on main unnoticed until the next
+# release fails at the wasm step. Type-check the web target on every change
+# instead; this is a check, not a bundle build, so it stays fast.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wasm32:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The app and the parse worker that trunk's post-build hook compiles.
+      - name: cargo check (wasm32)
+        run: cargo check --locked --target wasm32-unknown-unknown -p OpenCADStudio -p ocs_web_worker

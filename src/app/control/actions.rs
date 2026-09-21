@@ -67,7 +67,54 @@ pub(super) const NAMES: &[&str] = &[
     "undo",
     "redo",
 ];
+
+/// Parse the `at` placement point for `embed_image`: `[x,y]` or `[x,y,z]`.
+fn embed_point(req: &Value) -> Result<acadrust::types::Vector3, Value> {
+    let values = req["at"]
+        .as_array()
+        .filter(|v| (2..=3).contains(&v.len()))
+        .ok_or_else(|| failure("invalid_point", "Expected at:[x,y] or [x,y,z]"))?;
+    let mut p = [0.0_f64; 3];
+    for (i, v) in values.iter().enumerate() {
+        p[i] = v
+            .as_f64()
+            .filter(|v| v.is_finite())
+            .ok_or_else(|| failure("invalid_point", "Expected finite coordinates"))?;
+    }
+    Ok(acadrust::types::Vector3::new(p[0], p[1], p[2]))
+}
 impl OpenCADStudio {
+    /// `embed_image` — pack the picture at `path` into an OLE2FRAME placed
+    /// with its lower-left corner at `at` (default width ≈ pixel_width/100,
+    /// like the interactive command's Enter answer) and commit it as one
+    /// undo step. The drawing stays self-contained: no external file to lose.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn control_embed_image(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let i = self.active_tab;
+        let path = string(req, "path")?;
+        let image = crate::io::ole_embed::EmbeddedImage::from_file(std::path::Path::new(&path))
+            .map_err(|e| failure("embed_failed", e))?;
+        let at = embed_point(req)?;
+        let default_width = (image.pixel_width as f64 / 100.0).max(1.0);
+        let width = req["width"].as_f64().filter(|w| *w > 0.0).unwrap_or(default_width);
+        self.push_undo_snapshot(i, "IMAGEEMBED");
+        let handle = crate::io::ole_embed::add_embedded_image(
+            &mut self.tabs[i].scene.document,
+            &image,
+            at,
+            width,
+        )
+        .map_err(|e| failure("embed_failed", e))?;
+        self.post_ref_op(i);
+        self.set_control_result(json!({
+            "handle": format!("{:X}", handle.value()),
+            "kind": "Ole2Frame",
+            "path": path,
+            "width": width,
+        }));
+        Ok(Task::none())
+    }
+
     pub(super) fn control_properties(&mut self) -> Value {
         self.refresh_properties();
         json!({"ok":true,"sections":self.tabs[self.active_tab].properties.sections.iter().map(|s|json!({"title":s.title,"properties":s.props.iter().map(|p|{
@@ -75,6 +122,7 @@ impl OpenCADStudio {
                 PropValue::ReadOnly(v)|PropValue::ReadOnlyWithTooltip{value:v,..}=>("readonly",json!(v),Value::Null),
                 PropValue::EditText(v)=>("number",json!(v),Value::Null),
                 PropValue::PlainText(v)=>("text",json!(v),Value::Null),
+                PropValue::Hyperlink(v)=>("hyperlink",json!(v),Value::Null),
                 PropValue::Choice{selected,options}=>("choice",json!(selected),json!(options)),
                 PropValue::EditChoice{value,options}=>("editable_choice",json!(value),json!(options)),
                 PropValue::LayerChoice(v)=>("layer",json!(v),Value::Null),
@@ -110,7 +158,10 @@ impl OpenCADStudio {
             .map(str::to_owned)
             .unwrap_or_else(|| req["value"].to_string());
         Ok(match p.value {
-            PropValue::EditText(_) | PropValue::PlainText(_) | PropValue::EditChoice { .. } => {
+            PropValue::EditText(_)
+            | PropValue::PlainText(_)
+            | PropValue::Hyperlink(_)
+            | PropValue::EditChoice { .. } => {
                 let input = self.update(Message::PropGeomInput {
                     field: p.field,
                     value,
@@ -220,7 +271,8 @@ impl OpenCADStudio {
             "mtext_cancel" => Message::MTextCancel,
             "text_input" => Message::TextInlineInput(string(req, "value")?.into()),
             "text_commit" => Message::TextInlineOk,
-            "pointer_move" | "pointer_press" | "pointer_release" => {
+            "pointer_move" | "pointer_press" | "pointer_release" | "pointer_right_press"
+            | "pointer_right_release" => {
                 let x = req["x"]
                     .as_f64()
                     .filter(|v| v.is_finite())
@@ -242,6 +294,10 @@ impl OpenCADStudio {
                 let event = match name {
                     "pointer_press" => self.update(Message::ViewportLeftPress),
                     "pointer_release" => self.update(Message::ViewportLeftRelease),
+                    // Right button: the context menu / Enter behaviour chosen in
+                    // Options (see `Message::ViewportRightRelease`).
+                    "pointer_right_press" => self.update(Message::ViewportRightPress),
+                    "pointer_right_release" => self.update(Message::ViewportRightRelease),
                     _ => Task::none(),
                 };
                 return Ok(Task::batch([move_task, event]));

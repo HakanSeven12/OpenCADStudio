@@ -8,6 +8,7 @@
 
 use crate::app::Message;
 use crate::plugin::external::{ExternalPlugin, RegistryEntry, ReleaseInfo};
+use crate::ui::style::common::muted_style;
 use iced::widget::{
     button, column, container, markdown, row, rule, scrollable, text, text_input, Space,
 };
@@ -47,12 +48,6 @@ pub const DESKTOP_DOWNLOAD_URL: &str =
 inventory::submit!(crate::command::CommandRegistration {
     names: &["PLUGINS", "PLUGINMANAGER"]
 });
-
-fn muted_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
-    }
-}
 
 fn primary_style(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {

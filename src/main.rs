@@ -29,6 +29,14 @@ fn main() -> iced::Result {
         use clap::Parser;
         let args = cli::Cli::parse();
 
+        // GPU probe child: exercise one backend offscreen, print one JSON
+        // line on success and exit 0/1. This must run before any logging/GUI
+        // setup; the parent interprets any non-zero exit (including a driver
+        // abort) as "this backend is unusable".
+        if let Some(which) = &args.gpu_probe {
+            OpenCADStudio::gpu_backend::run_probe_child(which);
+        }
+
         // Plugin runner mode: the host spawns itself with this hidden flag to
         // load a plugin cdylib in an isolated process. Hand off immediately so
         // the child never touches GUI state.
@@ -77,19 +85,20 @@ fn main() -> iced::Result {
         }
 
         // GPU backend selection. Explicit `--backend` wins; `--safe-mode`
-        // forces GL for flaky drivers. On Windows, fall back to DX12/Vulkan so
-        // the AMD OpenGL ICD (atio6axx.dll) is never touched at startup — it
-        // access-violates on some hybrid-GPU laptops before any window appears
-        // (#55). An already-set WGPU_BACKEND always wins.
-        if let Some(backend) = &args.backend {
-            std::env::set_var("WGPU_BACKEND", backend);
-        } else if args.safe_mode {
-            std::env::set_var("WGPU_BACKEND", "gl");
-        }
-        #[cfg(target_os = "windows")]
-        if std::env::var_os("WGPU_BACKEND").is_none() {
-            std::env::set_var("WGPU_BACKEND", "dx12,vulkan");
-        }
+        // forces GL for flaky drivers. On Windows the preference order starts
+        // with DX12/Vulkan so the AMD OpenGL ICD (atio6axx.dll) is never
+        // touched at startup — it access-violates on some hybrid-GPU laptops
+        // before any window appears (#55). An already-set WGPU_BACKEND always
+        // wins.
+        //
+        // Older GPUs without usable DirectX 12 Feature Level 12_0 or working
+        // Vulkan (e.g. legacy Intel iGPUs), and old GLES drivers whose shader
+        // compiler rejects iced's own shaders, crash at startup or on the
+        // first drawing viewport instead. `resolve_gpu` probes each candidate
+        // backend in an isolated child process and selects the first one that
+        // survives a real offscreen render; a crash sentinel skips backends
+        // that died with the previous run.
+        let gpu = OpenCADStudio::gpu_backend::resolve_gpu(args.backend.as_deref(), args.safe_mode);
 
         // Headless modes exit without ever creating a window.
         if args.serve {
@@ -145,12 +154,22 @@ fn main() -> iced::Result {
                 }
             })
             .unwrap_or_default();
+        let gpu_fallback_notice = gpu
+            .reason
+            .map(|reason| OpenCADStudio::gpu_backend::fallback_notice(&reason));
+        // The probe enables the packed renderer automatically on GPUs without
+        // shader storage buffers; an explicit `--compat-renderer` does the
+        // same without the notice.
+        let compat_renderer = args.compat_renderer || gpu.compat_renderer;
+        let gpu_compat_auto = !args.compat_renderer && gpu.compat_renderer;
         let _ = cli::GUI_CONFIG.set(cli::GuiConfig {
             files: if args.new { Vec::new() } else { args.files },
             new: args.new,
             read_only: args.read_only,
-            compat_renderer: args.compat_renderer,
+            compat_renderer,
             script_lines,
+            gpu_fallback_notice,
+            gpu_compat_auto,
         });
 
         // Register (or refresh) the freedesktop DWG thumbnailer so file managers
@@ -159,6 +178,19 @@ fn main() -> iced::Result {
         // mode. Silently ignored on failure or non-Linux.
         io::file_association::install_thumbnailer();
 
-        app::run()
+        // Crash sentinel: armed while the GPU is live, naming the attempted
+        // backend. A stale file at the next launch means this run aborted, so
+        // the resolver skips those backends instead of crashing again.
+        // Inactive on macOS/wasm, where the resolver leaves the env alone.
+        if OpenCADStudio::gpu_backend::gpu_guard_active() {
+            OpenCADStudio::gpu_backend::arm_sentinel(
+                gpu.backend_value.as_deref().unwrap_or("auto"),
+            );
+            let result = app::run();
+            OpenCADStudio::gpu_backend::disarm_sentinel();
+            result
+        } else {
+            app::run()
+        }
     }
 }

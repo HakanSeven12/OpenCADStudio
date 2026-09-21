@@ -31,6 +31,9 @@ mod camera_ops;
 pub(crate) mod centerline;
 pub(crate) mod centermark;
 pub(crate) mod dimension_assoc;
+pub(crate) mod dimension_assoc_chain;
+pub use dimension_assoc::{ReferenceStatus, ResolvedReference};
+pub use page_setup::{apply_default_page_setup, document_page_setups, rotated_margins};
 mod dwg_native_constraints;
 mod entity;
 #[cfg(test)]
@@ -40,6 +43,8 @@ mod layout;
 mod limits;
 mod modify;
 mod mspace;
+pub mod viewport_ref;
+pub mod viewport_dimension_pick;
 pub mod named_parameters;
 mod page_setup;
 mod paper;
@@ -47,7 +52,7 @@ mod preview;
 mod project;
 mod scene_markers;
 mod selection;
-pub(crate) use selection::pe_url_of;
+pub(crate) use selection::{pe_url_description_of, pe_url_of};
 pub mod parametric_constraints;
 mod parametric_solve;
 
@@ -126,21 +131,48 @@ pub(crate) fn tessellate_entity(
             .first()
             .map(|wire| wire.color)
             .unwrap_or([0.8, 0.8, 0.85, 1.0]);
-        let stored = match entity {
-            EntityType::Solid3D(solid) => solid.wires.as_slice(),
-            EntityType::Surface(surface) => surface.wires.as_slice(),
-            EntityType::Region(region) => region.wires.as_slice(),
-            EntityType::Body(body) => body.wires.as_slice(),
-            _ => &[],
-        };
-        let edge_wire = if stored.is_empty() {
-            volume_meshes
-                .and_then(|meshes| meshes.get(&handle))
-                .and_then(|set| set.snap_edge_wire(name))
-        } else {
-            model::solid_model::entity_edge_snap_wire(stored, name, color)
-        };
-        wires.extend(edge_wire);
+        // Volume entities render through the mesh pipeline, so their wire
+        // path is empty — which left little for the SNAPPER to hold onto
+        // (no Endpoint/Midpoint on solids, no Nearest/Perpendicular/
+        // Intersection on any 3D object, #1030). Complete that path with one
+        // interaction-only edge wire per entity:
+        //   * the entity's stored B-rep edge `Wire`s when present, then
+        //   * the scene's `MeshLodSet` display cache (`edge_verts` feature
+        //     edges; LOD-0 triangle edges for plain meshes).
+        // `display_visible: false` keeps rendering single-sourced in the
+        // mesh pipeline; the wire rides the normal wire set so the snap
+        // engine, the interaction index and the incremental resident patch
+        // treat it exactly like any 2-D entity's geometry.
+        //
+        // EXCEPT kernel B-rep solids: when the mesh cache carries real
+        // `geometry_edges`, the separate 3D object-snap system (F4 master +
+        // `enabled3d`, via `attach_solid_snaps`) already provides the
+        // corners and edge midpoints, and those must stay invisible to the
+        // 2D modes. The 2D edge wire is the FALLBACK for solids the 3D
+        // system cannot serve (e.g. an OBJ import's triangle-only cache).
+        let three_d_covered = matches!(
+            entity,
+            EntityType::Solid3D(_) | EntityType::Region(_) | EntityType::Body(_) | EntityType::Surface(_)
+        ) && volume_meshes
+            .and_then(|meshes| meshes.get(&handle))
+            .is_some_and(|set| !set.geometry_edges().0.is_empty());
+        if !three_d_covered {
+            let stored = match entity {
+                EntityType::Solid3D(solid) => solid.wires.as_slice(),
+                EntityType::Surface(surface) => surface.wires.as_slice(),
+                EntityType::Region(region) => region.wires.as_slice(),
+                EntityType::Body(body) => body.wires.as_slice(),
+                _ => &[],
+            };
+            let edge_wire = if stored.is_empty() {
+                volume_meshes
+                    .and_then(|meshes| meshes.get(&handle))
+                    .and_then(|set| set.snap_edge_wire(name))
+            } else {
+                model::solid_model::entity_edge_snap_wire(stored, name, color)
+            };
+            wires.extend(edge_wire);
+        }
     }
     if matches!(entity, EntityType::Solid3D(_) | EntityType::Surface(_)) {
         let handle = entity.common().handle;
@@ -206,6 +238,333 @@ pub(crate) fn tessellate_entity(
         }
     }
     wires
+}
+
+impl Scene {
+    /// True for the modeler solid families whose wire path is an empty shell
+    /// (their geometry lives in the mesh pipeline): B-rep corners for those
+    /// come from the mesh edge list instead of wire points.
+    fn is_solid_shell_entity(entity: &EntityType) -> bool {
+        matches!(
+            entity,
+            EntityType::Solid3D(_)
+                | EntityType::Region(_)
+                | EntityType::Body(_)
+                | EntityType::Surface(_)
+        )
+    }
+
+    /// B-rep snap points for a solid: edge endpoints as `Vertex` hints and
+    /// edge centres as `EdgeMidpoint` hints (both from the tessellated edge
+    /// list), plus face centres as `FaceCenter` hints (from the kernel B-rep
+    /// faces). Empty for non-solids and for solids with no usable data.
+    pub(crate) fn solid_snap_points(
+        &self,
+        handle: Handle,
+    ) -> Vec<(glam::DVec3, crate::scene::model::wire_model::SnapHint)> {
+        use crate::scene::model::wire_model::SnapHint;
+        let Some(entity) = self.document.get_entity(handle) else {
+            return Vec::new();
+        };
+        if !Self::is_solid_shell_entity(entity) {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        if let Some(set) = self
+            .meshes
+            .get(&handle)
+            .or_else(|| self.block_meshes.get(&handle))
+        {
+            let (edges, lows) = set.geometry_edges();
+            let mut seen = HashSet::default();
+            for (a, b) in
+                crate::scene::model::mesh_model::solid_edge_segments(edges, lows)
+            {
+                for (point, hint) in [(a, SnapHint::Vertex), (b, SnapHint::Vertex)] {
+                    let key = [point.x.to_bits(), point.y.to_bits(), point.z.to_bits()];
+                    if seen.insert(key) {
+                        out.push((point, hint));
+                    }
+                }
+                out.push(((a + b) * 0.5, SnapHint::EdgeMidpoint));
+            }
+        }
+        out.extend(
+            Self::solid_face_centers(entity, self.solid_models.get(&handle))
+                .into_iter()
+                .map(|p| (p, SnapHint::FaceCenter)),
+        );
+        out
+    }
+
+    /// Face centres for a solid entity: kernel B-rep faces averaged over
+    /// their boundary loops. Prefers the cached kernel body (no re-parse);
+    /// falls back to parsing the entity's ACIS data, which shares the cost
+    /// profile of the mesh build at the same epoch. No body ⇒ no centres.
+    fn solid_face_centers(
+        entity: &EntityType,
+        cached: Option<&cadkernel::brep::Body>,
+    ) -> Vec<glam::DVec3> {
+        use crate::scene::convert::solid3d_tess::{kernel_body, kernel_region_body};
+        use crate::scene::model::solid_model::face_centers;
+        if let Some(body) = cached {
+            return face_centers(body)
+                .into_iter()
+                .map(glam::DVec3::from_array)
+                .collect();
+        }
+        match entity {
+            EntityType::Solid3D(s) => kernel_body(s),
+            EntityType::Region(r) => kernel_region_body(r),
+            _ => None,
+        }
+        .map(|body| face_centers(&body))
+        .unwrap_or_default()
+        .into_iter()
+        .map(glam::DVec3::from_array)
+        .collect()
+    }
+
+    /// Attach solid B-rep snaps to the entity's shell wire (the empty wire
+    /// carrying only the insertion snap). History/construction wires keep
+    /// their own points and are left alone; non-solids are untouched.
+    /// Idempotent: a wire already carrying 3D snaps is skipped, so shared
+    /// memo entries can pass through every assembly path safely.
+    pub(crate) fn attach_solid_snaps(&self, handle: Handle, wires: &mut Vec<WireModel>) {
+        use crate::scene::model::wire_model::SnapHint;
+        let points = self.solid_snap_points(handle);
+        if points.is_empty() {
+            return;
+        }
+        for wire in wires.iter_mut() {
+            if !wire.points.is_empty() {
+                continue;
+            }
+            if wire.snap_pts.iter().any(|(_, hint)| {
+                matches!(
+                    hint,
+                    SnapHint::Vertex
+                        | SnapHint::EdgeMidpoint
+                        | SnapHint::FaceCenter
+                        | SnapHint::Knot
+                )
+            }) {
+                continue;
+            }
+            wire.snap_pts.extend(points.iter().copied());
+        }
+    }
+
+    /// Live solid-face snaps for a command point: Nearest-to-face (screen
+    /// nearest point on a mesh triangle) and Perpendicular-to-face (foot from
+    /// `base` onto a triangle). Mesh triangles carry no B-rep face grouping,
+    /// so faces are individual triangles here — the pre-baked `FaceCenter`
+    /// hints (true B-rep faces) are the separate discrete counterpart.
+    ///
+    /// Top-level model meshes only: block-local sets live in a different
+    /// space, and xclipped views are not honored (the wire channel the
+    /// pre-baked 3D hints ride is clipped; this direct mesh read is not).
+    /// Worst case in those views is a snap with no geometry behind it —
+    /// never a corrupt point.
+    pub(crate) fn solid_face_snaps(
+        &self,
+        cursor_screen: iced::Point,
+        view_rot: glam::Mat4,
+        eye: glam::DVec3,
+        bounds: iced::Rectangle,
+        aperture_px: f32,
+        base: Option<glam::DVec3>,
+        want_perp: bool,
+        want_nearest: bool,
+    ) -> Option<crate::snap::SnapResult> {
+        use crate::snap::{
+            closest_point_on_tri_2d, foot_on_triangle, snap_better, snap_priority,
+            snap_tier, SnapType,
+        };
+        if !want_perp && !want_nearest {
+            return None;
+        }
+        if !(aperture_px.is_finite() && aperture_px > 0.0) {
+            return None;
+        }
+        let perp_base = want_perp.then(|| base).flatten();
+        let project = |world: glam::DVec3| {
+            let ndc = view_rot.project_point3((world - eye).as_vec3());
+            [
+                (ndc.x + 1.0) * 0.5 * bounds.width,
+                (1.0 - ndc.y) * 0.5 * bounds.height,
+            ]
+        };
+        let finite_screen = |s: [f32; 2]| s[0].is_finite() && s[1].is_finite();
+        let in_bounds = |s: [f32; 2]| {
+            s[0] >= 0.0 && s[0] <= bounds.width && s[1] >= 0.0 && s[1] <= bounds.height
+        };
+        let radius2 = aperture_px * aperture_px;
+        let cursor = [cursor_screen.x, cursor_screen.y];
+        // (tier, d2, sub, eye-depth², handle, hit): engine ordering, then
+        // nearer-to-eye (coincident faces share pixels — the top face must
+        // beat the bottom one), then the handle as a final deterministic
+        // tie-break (mesh iteration order is not stable).
+        let mut best: Option<(u8, f32, u8, f64, u64, crate::snap::SnapResult)> = None;
+        let mut consider = |snap_type: SnapType,
+                            world: glam::DVec3,
+                            screen: [f32; 2],
+                            d2: f32,
+                            handle: Handle| {
+            if !(d2 < radius2) || !in_bounds(screen) {
+                return;
+            }
+            let (tier, sub) = (snap_tier(snap_type), snap_priority(snap_type));
+            let depth2 = (world - eye).length_squared();
+            let better = match &best {
+                None => true,
+                Some((bt, bd2, bs, bdepth2, bh, _)) => {
+                    snap_better(tier, d2, sub, (*bt, *bd2, *bs))
+                        || (tier == *bt
+                            && (d2 - *bd2).abs() <= 1e-4
+                            && sub == *bs
+                            && (depth2 < *bdepth2
+                                || (depth2 == *bdepth2 && handle.value() < *bh)))
+                }
+            };
+            if better {
+                best = Some((
+                    tier,
+                    d2,
+                    sub,
+                    depth2,
+                    handle.value(),
+                    crate::snap::SnapResult {
+                        world,
+                        screen: iced::Point::new(screen[0], screen[1]),
+                        snap_type,
+                        tangent_obj: None,
+                        extension_base: None,
+                        extension_base2: None,
+                        extension_origin: None,
+                        extension_dir: None,
+                        viewport: None,
+                        source: Some(
+                            crate::command::DimensionAssociationSource::inferred(handle),
+                        ),
+                        secondary_source: None,
+                        model_point: None,
+                    },
+                ));
+            }
+        };
+        for (handle, set) in self.meshes.iter() {
+            let Some(lod) = set.geometry_lods().first() else {
+                continue;
+            };
+            if lod.indices.len() < 3 {
+                continue;
+            }
+            // Screen-space cull from the mesh bounds before touching triangles.
+            let (mut x0, mut y0) = (f32::INFINITY, f32::INFINITY);
+            let (mut x1, mut y1) = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+            for corner in [
+                [set.world_aabb[0], set.world_aabb[1], set.z_aabb[0]],
+                [set.world_aabb[2], set.world_aabb[1], set.z_aabb[0]],
+                [set.world_aabb[0], set.world_aabb[3], set.z_aabb[0]],
+                [set.world_aabb[2], set.world_aabb[3], set.z_aabb[0]],
+                [set.world_aabb[0], set.world_aabb[1], set.z_aabb[1]],
+                [set.world_aabb[2], set.world_aabb[1], set.z_aabb[1]],
+                [set.world_aabb[0], set.world_aabb[3], set.z_aabb[1]],
+                [set.world_aabb[2], set.world_aabb[3], set.z_aabb[1]],
+            ] {
+                let s = project(glam::DVec3::new(
+                    corner[0] as f64,
+                    corner[1] as f64,
+                    corner[2] as f64,
+                ));
+                if !finite_screen(s) {
+                    continue;
+                }
+                x0 = x0.min(s[0]);
+                y0 = y0.min(s[1]);
+                x1 = x1.max(s[0]);
+                y1 = y1.max(s[1]);
+            }
+            if cursor[0] < x0 - aperture_px
+                || cursor[0] > x1 + aperture_px
+                || cursor[1] < y0 - aperture_px
+                || cursor[1] > y1 + aperture_px
+            {
+                continue;
+            }
+            for tri in lod.indices.chunks_exact(3) {
+                let mut v = [glam::DVec3::ZERO; 3];
+                let mut ok = true;
+                for (slot, index) in v.iter_mut().zip(tri.iter()) {
+                    let (Some(high), low) = (
+                        lod.verts.get(*index as usize),
+                        lod.verts_low.get(*index as usize).copied().unwrap_or([0.0; 3]),
+                    ) else {
+                        ok = false;
+                        break;
+                    };
+                    *slot = glam::DVec3::new(
+                        high[0] as f64 + low[0] as f64,
+                        high[1] as f64 + low[1] as f64,
+                        high[2] as f64 + low[2] as f64,
+                    );
+                    if !slot.is_finite() {
+                        ok = false;
+                        break;
+                    }
+                }
+                if !ok {
+                    continue;
+                }
+                let [a, b, c] = v;
+                let (sa, sb, sc) = (project(a), project(b), project(c));
+                if !(finite_screen(sa) && finite_screen(sb) && finite_screen(sc)) {
+                    continue;
+                }
+                // Per-triangle screen reject before any 3D work.
+                let (tx0, ty0) = (
+                    sa[0].min(sb[0]).min(sc[0]),
+                    sa[1].min(sb[1]).min(sc[1]),
+                );
+                let (tx1, ty1) = (
+                    sa[0].max(sb[0]).max(sc[0]),
+                    sa[1].max(sb[1]).max(sc[1]),
+                );
+                if cursor[0] < tx0 - aperture_px
+                    || cursor[0] > tx1 + aperture_px
+                    || cursor[1] < ty0 - aperture_px
+                    || cursor[1] > ty1 + aperture_px
+                {
+                    continue;
+                }
+                if want_nearest {
+                    let (q, d2, w) = closest_point_on_tri_2d(cursor, sa, sb, sc);
+                    if d2 < radius2 {
+                        let world = a * w[0] as f64 + b * w[1] as f64 + c * w[2] as f64;
+                        consider(SnapType::NearestFace, world, q, d2, *handle);
+                    }
+                }
+                if let Some(base3d) = perp_base {
+                    if let Some(foot) = foot_on_triangle(base3d, a, b, c) {
+                        let sf = project(foot);
+                        if finite_screen(sf) {
+                            let dx = sf[0] - cursor[0];
+                            let dy = sf[1] - cursor[1];
+                            consider(
+                                SnapType::FacePerpendicular,
+                                foot,
+                                sf,
+                                dx * dx + dy * dy,
+                                *handle,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        best.map(|(_, _, _, _, _, hit)| hit)
+    }
 }
 
 /// Result of `Scene::entity_index()`. The wire path queries `tree` for
@@ -1732,6 +2091,10 @@ pub struct Scene {
     pub hover_highlight: Option<Handle>,
     /// All entities related to the constraint indicator currently under the cursor.
     constraint_hover_highlights: HashSet<Handle>,
+    /// Sub-entity references related to that indicator. Polyline segments are
+    /// drawn separately so hovering one constraint does not light the whole chain.
+    constraint_hover_refs: Vec<crate::scene::parametric_constraints::ParametricRef>,
+    constraint_hover_wires: Vec<WireModel>,
     /// Color used to draw the selection highlight overlay wires (SELECTIONEFFECTCOLOR).
     pub selection_color: [f32; 4],
     /// Whether selection visual effect (glow/highlight) is enabled (SELECTIONEFFECT).
@@ -1917,7 +2280,8 @@ pub struct Scene {
         RefCell<HashMap<(String, String), Option<Arc<crate::io::plot_style::PlotStyleTable>>>>,
     styled_wire_cache: RefCell<HashMap<(u64, String), (u64, Arc<Vec<WireModel>>)>>,
     styled_hatch_cache: RefCell<HashMap<(u64, usize, usize, String, u32), Arc<Vec<HatchModel>>>>,
-    styled_wire_fill_cache: RefCell<HashMap<(u64, String, u32), Arc<Vec<HatchModel>>>>,
+    styled_wire_fill_cache:
+        RefCell<HashMap<(u64, String, u32, u64), Arc<Vec<HatchModel>>>>,
     /// Per-viewport projected wire cache for paper-space content viewports.
     /// Stores projected + clipped wires in paper-space coordinates.
     /// Maps vp_handle → (geometry_epoch, Vec<WireModel>).
@@ -2262,6 +2626,8 @@ impl Scene {
             refedit_keep: None,
             hover_highlight: None,
             constraint_hover_highlights: HashSet::default(),
+            constraint_hover_refs: Vec::new(),
+            constraint_hover_wires: Vec::new(),
             selection_color: crate::scene::model::wire_model::WireModel::SELECTED,
             selection_effect: true,
             transparency_display: true,
@@ -2923,6 +3289,66 @@ impl Scene {
         retain_size: bool,
         retained_originals: &[(Handle, EntityType)],
     ) {
+        self.bump_entities_with_solve_policy(
+            changes,
+            driven_refs,
+            retain_size,
+            retained_originals,
+            &[],
+            true,
+        );
+    }
+
+    /// Refresh display and associations after a solved grip or exact history restore.
+    pub(crate) fn bump_entities_after_parametric_solve(&mut self, changes: &[(Handle, ChangeKind)]) {
+        self.bump_entities_with_solve_policy(changes, &[], false, &[], &[], false);
+    }
+
+    /// Apply a newly-created ordered relation while temporarily anchoring
+    /// its reference side. The anchors guide only this first solve and are
+    /// never added to the persistent constraint graph.
+    pub fn bump_entities_with_initial_parametric_policy(
+        &mut self,
+        changes: &[(Handle, ChangeKind)],
+        fixed_refs: &[parametric_constraints::ParametricRef],
+        retain_size: bool,
+    ) {
+        self.bump_entities_with_solve_policy(
+            changes,
+            &[],
+            retain_size,
+            &[],
+            fixed_refs,
+            true,
+        );
+    }
+
+    pub fn bump_entities_with_parametric_transform_policy(
+        &mut self,
+        changes: &[(Handle, ChangeKind)],
+        driven_refs: &[parametric_constraints::ParametricRef],
+        transformed_refs: &[parametric_constraints::ParametricRef],
+        retained_originals: &[(Handle, EntityType)],
+    ) {
+        self.bump_entities_with_solve_policy(
+            changes,
+            driven_refs,
+            true,
+            retained_originals,
+            transformed_refs,
+            true,
+        );
+    }
+
+    fn bump_entities_with_solve_policy(
+        &mut self,
+        changes: &[(Handle, ChangeKind)],
+        driven_refs: &[parametric_constraints::ParametricRef],
+        retain_size: bool,
+        retained_originals: &[(Handle, EntityType)],
+        fixed_refs: &[parametric_constraints::ParametricRef],
+        solve_parametric: bool,
+    ) {
         if changes.iter().any(|(handle, kind)| {
             matches!(kind, ChangeKind::Removed)
                 || self
@@ -2955,12 +3381,13 @@ impl Scene {
                 changes.push(change);
             }
         }
-        if !self.parametric_constraints.is_empty() {
-            for change in self.refresh_parametric_constraints_with_originals(
+        if solve_parametric && !self.parametric_constraints.is_empty() {
+            for change in self.refresh_parametric_constraints_with_initial_policy(
                 &changes,
                 driven_refs,
                 retain_size,
                 retained_originals,
+                fixed_refs,
             ) {
                 if !changes.iter().any(|(handle, _)| *handle == change.0) {
                     changes.push(change);
@@ -4029,13 +4456,8 @@ impl Scene {
             None
         })?;
         // `paper_limits()` already swaps the sheet for a 90°/270° rotation, so the
-        // margins must rotate to the same edges: a margin on a physical side moves
-        // to the displayed side that side rotates onto.
-        let (ml, mb, mr, mt) = match rot {
-            1 | 3 => (bottom, left, top, right),
-            2 => (right, top, left, bottom),
-            _ => (left, bottom, right, top),
-        };
+        // margins must rotate to the same edges.
+        let (ml, mb, mr, mt) = page_setup::rotated_margins((left, bottom, right, top), rot);
         // Plot margins are millimetres like the paper size; scale them into the
         // layout's paper-space units so the inset matches the (already scaled)
         // sheet rect. Without this an inch paper space insets an ~8-inch sheet
@@ -4621,6 +5043,78 @@ impl Scene {
         .then_some(owner)
     }
 
+    /// Millimetres in one unit of the paper side of this drawing's scale
+    /// family: 25.4 for an imperial drawing (whose `1/8" = 1'-0"` style scales
+    /// measure paper in inches), 1 for a metric one. Plot-scale factors built
+    /// from [`Scene::scale_list`] are expressed per this unit; page setups
+    /// store theirs per the layout's own paper unit, so the two are converted
+    /// through this value.
+    pub(crate) fn scale_family_unit_mm(&self) -> f64 {
+        if self.prefers_imperial_scales() == Some(true) {
+            25.4
+        } else {
+            1.0
+        }
+    }
+
+    /// The `paper : drawing` ratio behind a scale-list name, from the
+    /// drawing's own `Scale` object when it has one, otherwise from the
+    /// built-in family. A ratio keeps the plot scale readable in a page setup
+    /// (`1 : 250` rather than `0.004 : 1`).
+    pub(crate) fn scale_ratio(&self, name: &str) -> Option<(f64, f64)> {
+        use acadrust::objects::ObjectType;
+        let stored = self.document.objects.values().find_map(|o| match o {
+            ObjectType::Scale(s) if !s.is_temporary && s.name.eq_ignore_ascii_case(name) => {
+                Some((s.paper_units, s.drawing_units))
+            }
+            _ => None,
+        });
+        stored
+            .or_else(|| Self::parse_scale_name_ratio(name))
+            .filter(|(paper, drawing)| *paper > 0.0 && *drawing > 0.0)
+    }
+
+    /// The `paper : drawing` ratio spelled by a scale name: `1:250` gives
+    /// `(1, 250)`, an architectural `1/8" = 1'-0"` gives `(0.125, 12)` in
+    /// inches. Anything else is not a scale name.
+    pub(crate) fn parse_scale_name_ratio(name: &str) -> Option<(f64, f64)> {
+        if let Some((paper, drawing)) = name.split_once(':') {
+            let paper: f64 = paper.trim().parse().ok()?;
+            let drawing: f64 = drawing.trim().parse().ok()?;
+            return (paper > 0.0 && drawing > 0.0).then_some((paper, drawing));
+        }
+        let (paper, drawing) = name.split_once('=')?;
+        let paper = Self::parse_feet_inches(paper)?;
+        let drawing = Self::parse_feet_inches(drawing)?;
+        (paper > 0.0 && drawing > 0.0).then_some((paper, drawing))
+    }
+
+    /// Inches in a `F'-I"` / `I"` / `F'` length, where the inch part may be a
+    /// fraction (`3/32"`).
+    fn parse_feet_inches(text: &str) -> Option<f64> {
+        let text = text.trim();
+        let (feet, inches) = match text.split_once('\'') {
+            Some((feet, rest)) => (
+                feet.trim().parse::<f64>().ok()?,
+                rest.trim_start_matches('-').trim(),
+            ),
+            None => (0.0, text),
+        };
+        let inches = inches.trim_end_matches('"').trim();
+        let inches = if inches.is_empty() {
+            0.0
+        } else if let Some((num, den)) = inches.split_once('/') {
+            let den: f64 = den.trim().parse().ok()?;
+            if den <= 0.0 {
+                return None;
+            }
+            num.trim().parse::<f64>().ok()? / den
+        } else {
+            inches.parse::<f64>().ok()?
+        };
+        Some(feet * 12.0 + inches)
+    }
+
     /// Handle of the real (non-temporary) `Scale` object with this display name.
     /// Scales are matched by their `name` field, not the dictionary key — some
     /// files key the entries by an internal identifier (`*A1`, `A0`, …) that
@@ -5173,12 +5667,48 @@ impl Scene {
         handles
     }
 
-    pub fn set_constraint_hover_highlights(&mut self, handles: &[Handle]) {
-        let desired: HashSet<_> = handles.iter().copied().collect();
-        if desired != self.constraint_hover_highlights {
-            self.constraint_hover_highlights = desired;
-            self.bump_selection();
+    pub fn set_constraint_hover_highlights(
+        &mut self,
+        references: &[crate::scene::parametric_constraints::ParametricRef],
+    ) {
+        let mut references = references.to_vec();
+        references.dedup();
+        if references == self.constraint_hover_refs {
+            return;
         }
+
+        let mut handles = HashSet::default();
+        let mut wires = Vec::new();
+        for reference in &references {
+            let Some(segment) = reference.segment_index() else {
+                handles.insert(reference.entity);
+                continue;
+            };
+            let Some(entity) = self.document.get_entity(reference.entity) else {
+                continue;
+            };
+            let Some(mut curve) = crate::entities::curve::entity_curve(entity) else {
+                handles.insert(reference.entity);
+                continue;
+            };
+            let Some(segment_curve) = curve.curve.segments().into_iter().nth(segment) else {
+                continue;
+            };
+            curve.curve = segment_curve;
+            let mut wire = WireModel::solid_f64(
+                format!("constraint-segment:{}:{segment}", reference.entity.value()),
+                curve.tessellate(8.0),
+                WireModel::HOVER,
+                false,
+            );
+            wire.set_fixed_screen_width(2.0);
+            wires.push(wire);
+        }
+
+        self.constraint_hover_refs = references;
+        self.constraint_hover_highlights = handles;
+        self.constraint_hover_wires = wires;
+        self.bump_selection();
     }
 
     /// Keep the current selection visible and temporarily filter every other
@@ -5429,6 +5959,10 @@ impl Scene {
         self.document
             .set_viewport_annotation_scale(viewport, scale_handle);
 
+        // Viewport scale changed: the dimensions drawn on the sheet
+        // through it measure the same model geometry at a new paper
+        // size and have to be re-placed.
+        self.notify_viewport_changed(viewport);
         self.resident_wire_sets.borrow_mut().clear();
         self.bump_geometry();
 
@@ -5475,6 +6009,10 @@ impl Scene {
         vp.view_height = vp.height / factor;
         self.document
             .set_viewport_annotation_scale(viewport, scale_handle);
+        // Viewport scale changed: the dimensions drawn on the sheet
+        // through it measure the same model geometry at a new paper
+        // size and have to be re-placed.
+        self.notify_viewport_changed(viewport);
         self.resident_wire_sets.borrow_mut().clear();
         self.bump_geometry();
         true
@@ -5933,7 +6471,7 @@ impl Scene {
                 continue;
             }
             visible_changed.insert(*h);
-            let raw = tessellate_entity(
+            let mut raw = tessellate_entity(
                 &self.document,
                 &empty_sel,
                 style_viewport.or(self.active_viewport),
@@ -5947,6 +6485,10 @@ impl Scene {
                 anno_scale_override.is_some(),
                 Some(&self.meshes),
             );
+            // Solid B-rep corners snap via the mesh edge list (their wire
+            // path is an empty shell). Enrich before the memo/assembly split
+            // so both share the same snap-bearing wires.
+            self.attach_solid_snaps(*h, &mut raw);
             memo_updates.push((*h, Arc::new(raw.clone())));
             let mut faded = raw;
             self.apply_refedit_fade(&mut faded, bg);
@@ -9887,9 +10429,15 @@ impl Scene {
             let mut out = hit_wires;
             {
                 let mut memo = memo_cell.borrow_mut();
-                for (h, a) in &miss_pairs {
+                for (h, a) in miss_pairs {
+                    // Uniquely owned (just built above): enrich solid shells
+                    // with B-rep vertex snaps before the memo/assembly split.
+                    let mut wires =
+                        Arc::try_unwrap(a).unwrap_or_else(|a| a.as_ref().clone());
+                    self.attach_solid_snaps(h, &mut wires);
+                    let a = Arc::new(wires);
                     out.extend(a.iter().cloned());
-                    memo.insert(*h, Arc::clone(a));
+                    memo.insert(h, Arc::clone(&a));
                 }
             }
             materialize_ms = crate::perf::elapsed_ms(t_materialize);
@@ -10303,7 +10851,7 @@ vis_index={:.1} visible_probe={:.1}",
     }
 
     fn rebuild_dependency_index(&self) -> SceneDependencyIndex {
-        let layout_blocks: HashSet<Handle> = self
+        let mut layout_blocks: HashSet<Handle> = self
             .document
             .objects
             .values()
@@ -10314,6 +10862,14 @@ vis_index={:.1} visible_probe={:.1}",
                 _ => None,
             })
             .collect();
+        // DWG imports may have model/paper block records without matching
+        // Layout objects. They still own directly rendered entities, so their
+        // layer dependencies must resolve to those entity handles.
+        layout_blocks.extend(self.document.block_records.iter().filter_map(|record| {
+            let name = normalize_name(&record.name);
+            (name.starts_with("*MODEL_SPACE") || name.starts_with("*PAPER_SPACE"))
+                .then_some(record.handle)
+        }));
         let block_names: HashMap<Handle, String> = self
             .document
             .block_records
@@ -10854,7 +11410,7 @@ vis_index={:.1} visible_probe={:.1}",
         let (bg, anno, annotation_scale_handle, blk_cache, paper) = self.tessellation_context();
         // tessellate_one is used for one-off lookups (hit test, properties).
         // Skip culling here so the caller always gets the full geometry.
-        tessellate_entity(
+        let mut wires = tessellate_entity(
             &self.document,
             &self.selected,
             self.active_viewport,
@@ -10867,7 +11423,11 @@ vis_index={:.1} visible_probe={:.1}",
             None,
             paper,
             Some(&self.meshes),
-        )
+        );
+        // Same solid-corner snaps as the resident paths, so one-off consumers
+        // (overlay changed-wires, edit previews) agree with hit-test/snap.
+        self.attach_solid_snaps(e.common().handle, &mut wires);
+        wires
     }
 
     fn model_space_block_handle(&self) -> Handle {
@@ -10914,11 +11474,21 @@ vis_index={:.1} visible_probe={:.1}",
     /// when something is selected. `None` keeps the current camera target as
     /// the orbit centre. (#229)
     pub fn orbit_pivot(&self) -> Option<glam::DVec3> {
+        self.navigation_selection_bounds()
+            .map(|(min, max)| (min + max) * 0.5)
+    }
+
+    pub(crate) fn navigation_selection_bounds(&self) -> Option<(glam::DVec3, glam::DVec3)> {
         if self.selected.is_empty() {
             return None;
         }
-        let block = self.current_layout_block_handle();
-        let scale = if self.current_layout == "Model" {
+        let model_view = self.current_layout == "Model" || self.active_viewport.is_some();
+        let block = if self.active_viewport.is_some() {
+            self.model_space_block_handle()
+        } else {
+            self.current_layout_block_handle()
+        };
+        let scale = if model_view {
             crate::scene::annotative::scale_handle_by_name(
                 &self.document,
                 &self.document.header.current_annotation_scale,
@@ -10975,7 +11545,7 @@ vis_index={:.1} visible_probe={:.1}",
             }
         }
         if any {
-            Some((min + max) * 0.5)
+            Some((min, max))
         } else {
             None
         }
@@ -11688,6 +12258,33 @@ mod journal_tests {
             "the table is case-insensitive, which is what lets the memo key on \
              the raw name",
         );
+    }
+
+    #[test]
+    fn imported_model_space_hatch_without_layout_object_is_a_layer_target() {
+        use acadrust::entities::Hatch;
+        use acadrust::objects::ObjectType;
+        use acadrust::tables::layer::Layer;
+
+        let mut scene = Scene::new();
+        scene.document.layers.add_or_replace(Layer::new("Shadows"));
+        let mut hatch = Hatch::new();
+        hatch.common.layer = "Shadows".to_string();
+        let handle = scene.add_entity(EntityType::Hatch(hatch));
+        let model = scene.model_space_block_handle();
+        assert_eq!(scene.document.get_entity(handle).unwrap().common().owner_handle, model);
+        scene.document.objects.retain(|_, object| !matches!(object, ObjectType::Layout(_)));
+        scene.invalidate_dependency_index();
+
+        let targets = scene.dependency_targets(DependencyKind::Layer, &["Shadows".to_string()]);
+        assert!(targets.render_handles.contains(&handle));
+        assert!(targets.source_handles.contains(&handle));
+        assert!(!targets.touches_block_definition);
+
+        scene.document.layers.get_mut("Shadows").unwrap().flags.off = true;
+        let epoch = scene.geometry_epoch;
+        scene.invalidate_layer_dependencies(&["Shadows".to_string()]);
+        assert_ne!(scene.geometry_epoch, epoch, "the cached hatch needs an entity delta");
     }
 
     /// The loader's handed-over draw depths must equal a local rebuild.

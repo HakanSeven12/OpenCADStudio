@@ -39,9 +39,15 @@ final class ThumbnailProvider: QLThumbnailProvider {
             return
         }
 
-        let size = CGSize(width: cg.width, height: cg.height)
-        let reply = QLThumbnailReply(contextSize: size) { (ctx: CGContext) -> Bool in
-            ctx.draw(cg, in: CGRect(origin: .zero, size: size))
+        // Fit and center the embedded bitmap in the requested thumbnail.
+        let maxSize = request.maximumSize
+        let nativeSize = CGSize(width: cg.width, height: cg.height)
+        let scale = min(maxSize.width / nativeSize.width, maxSize.height / nativeSize.height)
+        let drawSize = CGSize(width: nativeSize.width * scale, height: nativeSize.height * scale)
+        let origin = CGPoint(x: (maxSize.width - drawSize.width) / 2, y: (maxSize.height - drawSize.height) / 2)
+
+        let reply = QLThumbnailReply(contextSize: maxSize) { (ctx: CGContext) -> Bool in
+            ctx.draw(cg, in: CGRect(origin: origin, size: drawSize))
             return true
         }
         handler(reply, nil)

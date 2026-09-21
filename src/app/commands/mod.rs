@@ -12,6 +12,7 @@ mod fileops;
 mod inquiry;
 mod layerprops;
 mod layers;
+mod plotvars;
 mod styleprops;
 mod view;
 
@@ -63,17 +64,37 @@ impl OpenCADStudio {
         // routing, so every path below (Start-tab gate, plugins, all dispatch
         // families, the Repeat menu) sees the canonical command. Arguments after
         // the first space are left untouched. A non-alias passes through as-is.
+        // The transparent prefix of commercial solutions: `'PAN` / `'ZOOM` run in the middle
+        // of another command and hand control back to it afterwards.
+        let (cmd, quoted) = match cmd.trim().strip_prefix('\'') {
+            Some(rest) => (rest.trim(), true),
+            None => (cmd, false),
+        };
         let resolved = self.resolve_alias(cmd);
         let cmd = resolved.as_deref().unwrap_or(cmd);
+        if is_spacemouse_command(cmd) {
+            return self.run_action(cmd);
+        }
         // A drafting aid only flips a flag, so it must not disturb whatever is
         // already running: pressing F8 partway through a LINE means "constrain
         // the rest of this line", not "abandon it". Everything below tears the
         // running command down, so a transparent one skips straight past it.
-        // (#677)
-        if is_transparent(cmd) {
-            return self
-                .dispatch_families(cmd, i)
-                .unwrap_or_else(Task::none);
+        // (#677) A quoted navigation command does the same; an interactive
+        // one (ZOOM Window) parks the running command and resumes it when the
+        // zoom ends, as does a ZOOM the zoom prompt itself hands off to.
+        let transparent = is_transparent(cmd)
+            || (quoted && is_transparent_capable(cmd))
+            || (self.tabs[i].transparent_resume && cmd.starts_with("ZOOM"));
+        if transparent {
+            if zoom_prompts(cmd) && self.tabs[i].active_cmd.is_some() {
+                self.tabs[i].suspended_cmd = self.tabs[i].active_cmd.take();
+                self.tabs[i].transparent_resume = true;
+                self.tabs[i].scene.clear_preview_wire();
+            }
+            let task = self.dispatch_families(cmd, i).unwrap_or_else(Task::none);
+            // A one-shot zoom is over already — resume straight away.
+            self.resume_transparent_parent(i);
+            return task;
         }
         // A new command abandons any grip edit and its numeric input.
         let had_pending_grip_input = self.grip_pending.take().is_some();
@@ -112,6 +133,9 @@ impl OpenCADStudio {
             // template-property override too (#239).
             self.restore_add_selected_defaults();
         }
+        // A command parked behind a transparent zoom / MTP goes with it.
+        self.tabs[i].suspended_cmd = None;
+        self.tabs[i].transparent_resume = false;
         // Starting any command leaves interactive navigation modes (their own
         // command arms below re-enable the selected one).
         self.tabs[i].pan_mode = false;
@@ -120,6 +144,9 @@ impl OpenCADStudio {
         // Reset the last committed point so the first click of the new command
         // is not constrained by ortho/polar relative to a previous command's endpoint.
         self.last_point = None;
+        // A new command collects its own points, so the previous command's
+        // accepted snaps must not leak into it.
+        self.clear_accepted_snaps();
         // Starting a command restarts the right-click cycle, so its first
         // right-click acts as Enter rather than opening the context menu.
         self.tabs[i]
@@ -237,6 +264,9 @@ impl OpenCADStudio {
         if let Some(t) = self.dispatch_layerprops(cmd, i) {
             return Some(t);
         }
+        if let Some(t) = self.dispatch_plotvars(cmd, i) {
+            return Some(t);
+        }
         if let Some(t) = self.dispatch_styleprops(cmd, i) {
             return Some(t);
         }
@@ -269,10 +299,38 @@ impl OpenCADStudio {
 /// point, so F8 during a MOVE both ended the move and made the dragged ghost
 /// vanish. Nothing here starts a command, opens a document or reads geometry,
 /// so there is nothing for the teardown to protect. (#677)
-pub fn is_transparent(cmd: &str) -> bool {
+/// Commands that may run transparently (`'PAN`, `'ZOOM …`): the navigation
+/// set, which never edits the drawing.
+fn is_transparent_capable(cmd: &str) -> bool {
+    cmd == "PAN" || cmd == "ZOOM" || cmd.starts_with("ZOOM ") || matches!(cmd, "ZW" | "ZE" | "ZA" | "ZP" | "ZI" | "ZO" | "ZD" | "ZEA" | "ZOBJ")
+}
+
+/// ZOOM forms that install an interactive prompt (window corners, object
+/// pick) and so need the running command parked while they last.
+fn zoom_prompts(cmd: &str) -> bool {
     matches!(
         cmd,
-        "ORTHO" | "GRID" | "SNAP" | "POLAR" | "OSNAP" | "DSETTINGS"
+        "ZOOM" | "ZOOM WINDOW" | "ZOOM W" | "ZW" | "ZOOM OBJECT" | "ZOOM O" | "ZOBJ"
+    )
+}
+
+pub fn is_transparent(cmd: &str) -> bool {
+    is_spacemouse_command(cmd)
+        || matches!(
+            cmd,
+            "ORTHO" | "GRID" | "SNAP" | "POLAR" | "OSNAP" | "DSETTINGS"
+        )
+}
+
+fn is_spacemouse_command(cmd: &str) -> bool {
+    matches!(
+        cmd,
+        "SPACEMOUSE"
+            | "SPACEMOUSEPAUSE"
+            | "SPACEMOUSEPAN"
+            | "SPACEMOUSEPANZOOM"
+            | "SPACEMOUSEAUTO"
+            | "SPACEMOUSE3D"
     )
 }
 
@@ -281,7 +339,7 @@ pub fn is_transparent(cmd: &str) -> bool {
 /// source of truth: the dispatch gate refuses everything else, and the ribbon
 /// dims the tools this rejects.
 pub fn start_allowed(cmd: &str) -> bool {
-    matches!(
+    is_spacemouse_command(cmd) || matches!(
         cmd,
         "NEW"
             | "OPEN"
@@ -484,6 +542,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "MIRRTEXT",
         "ZOOMWHEEL",
         "ZOOMFACTOR",
+        "SHORTCUTMENU",
+        "SHORTCUTMENUDURATION",
         "CURSORSIZE",
         "PICKBOX",
         "CURSORTYPE",
@@ -499,6 +559,16 @@ inventory::submit!(crate::command::CommandRegistration {
         "DELOBJ",
         "PLINEGEN",
         "PSLTSCALE",
+        // Plot preferences and the current-layout variables (commands/plotvars.rs).
+        "PLOTOFFSET",
+        "PAPERUPDATE",
+        "PLOTROTMODE",
+        "PLOTTRANSPARENCYOVERRIDE",
+        "BACKGROUNDPLOT",
+        "CTAB",
+        "TILEMODE",
+        "PSETUPIN",
+        "-PSETUPIN",
         "DISPSILH",
         "WORLDVIEW",
         "LIMCHECK",
@@ -612,6 +682,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "EXPORT",
         "EXPORTSTEP",
         "EXPORTSTL",
+        "EXTERNALREFERENCES",
         "EXTRIM",
         "FILETAB",
         "FIND",
@@ -621,6 +692,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "IM",
         "IMAGE",
         "IMAGEATTACH",
+        "IMAGEEMBED",
         "IMPORTOBJ",
         "ISOLATEOBJECTS",
         "LA",
@@ -654,6 +726,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "PERF",
         "PERSP",
         "PLOT",
+        "PRINTERS",
         "PLOTSTYLE",
         "PLOTSTYLEEDITOR",
         "PLOTSTYLEPANEL",
@@ -681,6 +754,12 @@ inventory::submit!(crate::command::CommandRegistration {
         "SELSIM",
         // Draw a new object of the same type as the selected one. (#239)
         "ADDSELECTED",
+        // Outline of origin planes, open sketch and solid bodies.
+        "BROWSER",
+        // Open and close a sketch: a drawing plane, a square-on view and
+        // snapping, held together until the profile is done.
+        "CREATESKETCH",
+        "FINISHSKETCH",
         "SHEETSET",
         "SHORTCUTS",
         "SSM",
@@ -713,6 +792,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "XDATA",
         "XR",
         "XREF",
+        "-XREF",
         "XRELOAD",
         "ZOOM",
         "ZS",

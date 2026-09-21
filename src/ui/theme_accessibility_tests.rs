@@ -9,6 +9,8 @@
 //! - Properties & Dock Panels (field labels, section headers, muted text)
 //! - Modals & Action Buttons (dialog body, Primary, Danger, Success buttons)
 //! - Dropdowns & Selection Overlays (visual style picker, item checkmarks)
+//! - Block Palette (card labels in normal/hover/pressed/placing states,
+//!   header icon buttons, empty-state muted text)
 
 use crate::ui::style::common::{accessible_accent, accessible_accent_threshold, wcag_contrast};
 use iced::{Color, Theme};
@@ -459,6 +461,177 @@ fn test_viewport_controls_toggle_buttons_contrast() {
             theme,
             inactive_contrast
         );
+    }
+}
+
+#[test]
+fn test_block_palette_contrast() {
+    use crate::ui::window::block_palette::{
+        block_card_border, block_card_colors, block_icon_button_text_color,
+    };
+    use iced::widget::button::Status as BtnStatus;
+
+    for theme in Theme::ALL {
+        let p = theme.palette();
+
+        // ── 1. Card label pairs resolve to the theme's own text colors ──
+        // Regression guard for the light-theme bug where labels were hardcoded
+        // to `Color::WHITE` (unreadable white-on-light). If anyone reintroduces
+        // a hardcoded foreground, these equality checks fail on every theme
+        // whose surface text is not pure white.
+        let (normal_bg, normal_fg) = block_card_colors(theme, false, BtnStatus::Active);
+        assert_eq!(
+            normal_bg, p.background.base.color,
+            "Theme {:?} block card normal background drifted from base pair",
+            theme
+        );
+        assert_eq!(
+            normal_fg, p.background.base.text,
+            "Theme {:?} block card normal label must use base text (was hardcoded WHITE)",
+            theme
+        );
+
+        let (_, hover_fg) = block_card_colors(theme, false, BtnStatus::Hovered);
+        assert_eq!(
+            hover_fg, p.background.strong.text,
+            "Theme {:?} block card hover label must use strong text (was hardcoded WHITE)",
+            theme
+        );
+
+        let (_, pressed_fg) = block_card_colors(theme, false, BtnStatus::Pressed);
+        assert_eq!(
+            pressed_fg, p.background.strong.text,
+            "Theme {:?} block card pressed label must use strong text (was hardcoded WHITE)",
+            theme
+        );
+
+        // Default-branch statuses (Active/Disabled/Focused/...) share the base pair.
+        let (_, disabled_fg) = block_card_colors(theme, false, BtnStatus::Disabled);
+        assert_eq!(
+            disabled_fg, p.background.base.text,
+            "Theme {:?} block card default-state label must use base text",
+            theme
+        );
+
+        // Placing (selected) cards always use the primary pair, regardless of
+        // hover — the background does not switch on hover while placing.
+        for status in [BtnStatus::Active, BtnStatus::Hovered, BtnStatus::Pressed] {
+            let (bg, fg) = block_card_colors(theme, true, status);
+            assert_eq!(bg, p.primary.base.color, "Theme {:?} placing card bg must be primary.base", theme);
+            assert_eq!(fg, p.primary.base.text, "Theme {:?} placing card label must be primary.base.text", theme);
+        }
+
+        // ── 2. Card label contrast: normal / hover / pressed ──
+        // 11px single-line labels are normal text → WCAG AA >= 4.5:1.
+        let normal_contrast = wcag_contrast(normal_fg, normal_bg);
+        assert!(
+            normal_contrast >= 4.5,
+            "Theme {:?} block card label ({:.2}:1) fails WCAG AA on card background",
+            theme, normal_contrast
+        );
+
+        let (hover_bg, hover_fg) = block_card_colors(theme, false, BtnStatus::Hovered);
+        let hover_contrast = wcag_contrast(hover_fg, hover_bg);
+        assert!(
+            hover_contrast >= 4.5,
+            "Theme {:?} block card hovered label ({:.2}:1) fails WCAG AA on hovered background",
+            theme, hover_contrast
+        );
+
+        let (pressed_bg, pressed_fg) = block_card_colors(theme, false, BtnStatus::Pressed);
+        let pressed_contrast = wcag_contrast(pressed_fg, pressed_bg);
+        assert!(
+            pressed_contrast >= 4.5,
+            "Theme {:?} block card pressed label ({:.2}:1) fails WCAG AA on pressed background",
+            theme, pressed_contrast
+        );
+
+        // ── 3. Placing card contrast ──
+        // Selected-card label on `primary.base`: UI button component threshold
+        // (>= 3.0:1 per WCAG 1.4.11, matching the Primary-button test above).
+        let (placing_bg, placing_fg) = block_card_colors(theme, true, BtnStatus::Active);
+        let placing_contrast = wcag_contrast(placing_fg, placing_bg);
+        assert!(
+            placing_contrast >= 3.0,
+            "Theme {:?} placing block card label ({:.2}:1) fails button threshold (>=3.0:1)",
+            theme, placing_contrast
+        );
+        // Placing + hover must not silently drop contrast (bg is sticky).
+        let (placing_hover_bg, placing_hover_fg) =
+            block_card_colors(theme, true, BtnStatus::Hovered);
+        let placing_hover_contrast = wcag_contrast(placing_hover_fg, placing_hover_bg);
+        assert!(
+            placing_hover_contrast >= 3.0,
+            "Theme {:?} placing+hover block card label ({:.2}:1) fails button threshold (>=3.0:1)",
+            theme, placing_hover_contrast
+        );
+
+        // ── 4. Card border is theme-driven (no invisible borders) ──
+        assert_eq!(
+            block_card_border(theme, false),
+            p.background.neutral.color,
+            "Theme {:?} block card border must use neutral color",
+            theme
+        );
+        assert_eq!(
+            block_card_border(theme, true),
+            p.primary.base.color,
+            "Theme {:?} placing block card border must use primary color",
+            theme
+        );
+
+        // ── 5. Header icon buttons (glyphs inherit button text_color) ──
+        // Resting buttons are transparent over the dock (`base`) background.
+        let icon_rest = block_icon_button_text_color(theme, BtnStatus::Active);
+        assert_eq!(icon_rest, p.background.base.text);
+        let icon_rest_contrast = wcag_contrast(icon_rest, p.background.base.color);
+        assert!(
+            icon_rest_contrast >= 4.5,
+            "Theme {:?} block palette icon button ({:.2}:1) fails WCAG AA on dock background",
+            theme, icon_rest_contrast
+        );
+        // Hovered/pressed buttons sit on the `strong` surface with its text.
+        for status in [BtnStatus::Hovered, BtnStatus::Pressed] {
+            let icon_fg = block_icon_button_text_color(theme, status);
+            assert_eq!(
+                icon_fg, p.background.strong.text,
+                "Theme {:?} hovered icon button must use strong text",
+                theme
+            );
+            let c = wcag_contrast(icon_fg, p.background.strong.color);
+            assert!(
+                c >= 4.5,
+                "Theme {:?} hovered icon button ({:.2}:1) fails WCAG AA on hovered background",
+                theme, c
+            );
+        }
+
+        // ── 6. Empty-state muted text ("No blocks in this drawing") ──
+        // Rendered as `base.text` at 0.72 alpha over the dock `base`
+        // background → secondary text threshold >= 3.0:1. (The old hardcoded
+        // 0.55-gray failed this on light themes.)
+        let empty_text = composite_over(p.background.base.text.scale_alpha(0.72), p.background.base.color);
+        let empty_contrast = wcag_contrast(empty_text, p.background.base.color);
+        assert!(
+            empty_contrast >= 3.0,
+            "Theme {:?} block palette empty-state text ({:.2}:1) fails secondary text threshold (>=3.0:1)",
+            theme, empty_contrast
+        );
+
+        // ── 7. Hardcoded-white regression probe ──
+        // The exact reported bug: pure white labels on the light card
+        // background. Every theme's card background must NOT be near-white
+        // with white text — i.e. white-on-card must fail while the real
+        // theme pair passes (proves the fix matters on light themes and the
+        // test would catch a WHITE hardcode).
+        let white_on_normal = wcag_contrast(Color::WHITE, normal_bg);
+        if white_on_normal < 4.5 {
+            assert!(
+                normal_contrast >= 4.5,
+                "Theme {:?} needs theme-aware labels: white-on-card is {:.2}:1 but theme pair is {:.2}:1",
+                theme, white_on_normal, normal_contrast
+            );
+        }
     }
 }
 

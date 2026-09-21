@@ -443,6 +443,24 @@ pub struct OffsetCommand {
     /// Pre-selected offsettable objects (pick-first, #422); consumed when the
     /// distance step resolves.
     preselected: Vec<EntityType>,
+    /// A Yes/No or Current/Source answer is being collected for this option.
+    awaiting: Option<Await>,
+    /// Erase option: replace the source object with its offset.
+    erase_source: bool,
+    /// Layer option: put offsets on the current layer instead of the source's.
+    layer_current: bool,
+    /// The side step's targets are document objects (not chained offsets), so
+    /// Erase can replace them.
+    targets_are_sources: bool,
+    /// Offsets committed by this command that Undo can still take back.
+    made: usize,
+}
+
+/// Which option prompt is waiting for an answer.
+#[derive(Clone, Copy, PartialEq)]
+enum Await {
+    Erase,
+    Layer,
 }
 
 /// The entity types `compute_offsets` can offset.
@@ -468,6 +486,11 @@ impl OffsetCommand {
             entity_index,
             picked: None,
             preselected: Vec::new(),
+            awaiting: None,
+            erase_source: false,
+            layer_current: false,
+            targets_are_sources: false,
+            made: 0,
         }
     }
 
@@ -481,6 +504,11 @@ impl OffsetCommand {
             entity_index,
             picked: None,
             preselected: targets,
+            awaiting: None,
+            erase_source: false,
+            layer_current: false,
+            targets_are_sources: false,
+            made: 0,
         }
     }
 
@@ -496,8 +524,23 @@ impl OffsetCommand {
                 locked,
                 multiple: false,
             };
+            self.targets_are_sources = true;
         }
         CmdResult::NeedPoint
+    }
+
+    /// Undo option: take back the last offset and return to the object pick.
+    fn undo_last(&mut self) -> Option<CmdResult> {
+        if self.made == 0 {
+            return None;
+        }
+        self.made -= 1;
+        let locked = match &self.step {
+            Step::SelectObject { locked } | Step::PickSide { locked, .. } => *locked,
+            _ => return None,
+        };
+        self.step = Step::SelectObject { locked };
+        Some(CmdResult::UndoDocument)
     }
     fn accept_distance(&mut self, distance: f64) -> CmdResult {
         let distance = distance.abs().max(1e-9);
@@ -515,13 +558,23 @@ impl OffsetCommand {
 
 impl CadCommand for OffsetCommand {
     fn preserve_commit_layer(&self) -> bool {
-        true
+        !self.layer_current
     }
     fn name(&self) -> &'static str {
         "OFFSET"
     }
 
     fn prompt(&self) -> String {
+        match self.awaiting {
+            Some(Await::Erase) => {
+                return t!("OFFSET  Erase source object after offsetting? [Yes/No] <No>:").into_owned()
+            }
+            Some(Await::Layer) => {
+                return t!("OFFSET  Enter layer option for offset objects [Current/Source] <Source>:")
+                    .into_owned()
+            }
+            None => {}
+        }
         match &self.step {
             Step::Distance => {
                 let d = format!("{:.4}", defaults::get_offset_dist());
@@ -580,19 +633,48 @@ impl CadCommand for OffsetCommand {
     }
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
+        use crate::command::CmdOption;
+        match self.awaiting {
+            Some(Await::Erase) => {
+                return vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")]
+            }
+            Some(Await::Layer) => {
+                return vec![CmdOption::new("Current", "C"), CmdOption::new("Source", "S")]
+            }
+            None => {}
+        }
         match &self.step {
             Step::Distance => vec![
-                crate::command::CmdOption::new(t!("Through").as_ref(), "T"),
-                crate::command::CmdOption::enter(&format!(
-                    "{:.4}",
-                    defaults::get_offset_dist()
-                )),
+                CmdOption::new("Through", "T"),
+                CmdOption::new("Erase", "E"),
+                CmdOption::new("Layer", "L"),
+                CmdOption::enter(&format!("{:.4}", defaults::get_offset_dist())),
             ],
-            Step::PickSide {
-                multiple: false, ..
-            } => vec![crate::command::CmdOption::new(t!("Multiple").as_ref(), "M")],
-            _ => Vec::new(),
+            Step::SelectObject { .. } => {
+                let mut opts = Vec::new();
+                if self.made > 0 {
+                    opts.push(CmdOption::new("Undo", "U"));
+                }
+                opts.push(CmdOption::enter("Exit"));
+                opts
+            }
+            Step::PickSide { multiple, .. } => {
+                let mut opts = Vec::new();
+                if !multiple {
+                    opts.push(CmdOption::new("Multiple", "M"));
+                }
+                if self.made > 0 {
+                    opts.push(CmdOption::new("Undo", "U"));
+                }
+                opts.push(CmdOption::enter("Exit"));
+                opts
+            }
+            Step::ReferenceSecond { .. } => Vec::new(),
         }
+    }
+
+    fn on_undo_step(&mut self) -> Option<CmdResult> {
+        self.undo_last()
     }
 
     fn needs_entity_pick(&self) -> bool {
@@ -631,6 +713,7 @@ impl CadCommand for OffsetCommand {
                     locked,
                     multiple: false,
                 };
+                self.targets_are_sources = true;
                 CmdResult::NeedPoint
             }
             _ => CmdResult::NeedPoint,
@@ -638,7 +721,7 @@ impl CadCommand for OffsetCommand {
     }
 
     // The distance step takes a typed magnitude; the side step accepts one
-    // too, re-locking the distance mid-command.
+    // too, re-locking the distance mid-command. The object pick takes Undo.
     fn wants_text_input(&self) -> bool {
         matches!(self.step, Step::Distance | Step::PickSide { .. })
     }
@@ -667,10 +750,45 @@ impl CadCommand for OffsetCommand {
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let t = text.trim().replace(',', ".");
+        let upper = t.to_uppercase();
+        match self.awaiting {
+            Some(Await::Erase) => {
+                match upper.as_str() {
+                    "Y" | "YES" => self.erase_source = true,
+                    "N" | "NO" | "" => self.erase_source = false,
+                    _ => return Some(CmdResult::NeedPoint),
+                }
+                self.awaiting = None;
+                return Some(CmdResult::NeedPoint);
+            }
+            Some(Await::Layer) => {
+                match upper.as_str() {
+                    "C" | "CURRENT" => self.layer_current = true,
+                    "S" | "SOURCE" | "" => self.layer_current = false,
+                    _ => return Some(CmdResult::NeedPoint),
+                }
+                self.awaiting = None;
+                return Some(CmdResult::NeedPoint);
+            }
+            None => {}
+        }
+        if matches!(upper.as_str(), "U" | "UNDO")
+            && matches!(self.step, Step::SelectObject { .. } | Step::PickSide { .. })
+        {
+            return self.undo_last();
+        }
         match &mut self.step {
             Step::Distance => {
                 if t.eq_ignore_ascii_case("t") || t.eq_ignore_ascii_case("through") {
                     return Some(self.advance_from_distance(None));
+                }
+                if upper == "E" || upper == "ERASE" {
+                    self.awaiting = Some(Await::Erase);
+                    return Some(CmdResult::NeedPoint);
+                }
+                if upper == "L" || upper == "LAYER" {
+                    self.awaiting = Some(Await::Layer);
+                    return Some(CmdResult::NeedPoint);
                 }
                 if let Some(d) = crate::entities::common::parse_typed_length(&t) {
                     return Some(self.accept_distance(d));
@@ -751,17 +869,30 @@ impl CadCommand for OffsetCommand {
         };
         // Each target offsets by its own through-distance (or the locked
         // magnitude), toward the clicked side.
-        let mut news: Vec<EntityType> = Vec::new();
-        for entity in &targets {
-            let mag = locked.unwrap_or_else(|| perp_distance(entity, pt.as_vec3()));
-            if mag < 1e-9 {
-                continue;
-            }
-            news.extend(compute_offsets(entity, mag, pt.as_vec3()));
-        }
+        let per_target: Vec<(Handle, Vec<EntityType>)> = targets
+            .iter()
+            .filter_map(|entity| {
+                let mag = locked.unwrap_or_else(|| perp_distance(entity, pt.as_vec3()));
+                if mag < 1e-9 {
+                    return None;
+                }
+                let offsets = compute_offsets(entity, mag, pt.as_vec3());
+                (!offsets.is_empty()).then(|| (entity.common().handle, offsets))
+            })
+            .collect();
+        let mut news: Vec<EntityType> = per_target
+            .iter()
+            .flat_map(|(_, offsets)| offsets.iter().cloned())
+            .collect();
         if news.is_empty() {
             return CmdResult::NeedPoint;
         }
+        self.made += 1;
+        // Erase option: the offset replaces its source object. Only the
+        // objects picked from the drawing qualify — a Multiple chain's
+        // targets are the offsets just made, which are not replaced again.
+        let erase = self.erase_source && self.targets_are_sources;
+        self.targets_are_sources = false;
         if multiple {
             // Multiple mode chains from the result just created, matching
             // OFFSET's repeated fixed-distance behavior (parallel/concentric
@@ -771,15 +902,14 @@ impl CadCommand for OffsetCommand {
                 locked,
                 multiple: true,
             };
-            return if news.len() == 1 {
-                CmdResult::CommitEntity(news.pop().unwrap())
-            } else {
-                CmdResult::CommitEntities(news)
-            };
+        } else {
+            // Classic loop (#418): commit this offset and go back to the object
+            // pick at the same distance, until Enter / Esc finishes.
+            self.step = Step::SelectObject { locked };
         }
-        // Classic loop (#418): commit this offset and go back to the object
-        // pick at the same distance, until Enter / Esc finishes.
-        self.step = Step::SelectObject { locked };
+        if erase {
+            return CmdResult::ReplaceManyContinue(per_target);
+        }
         if news.len() == 1 {
             CmdResult::CommitEntity(news.pop().unwrap())
         } else {
@@ -911,5 +1041,57 @@ mod offset_tests {
         assert!(approx(offset_bbox(&cw, Vec3::new(50.0, 30.0, 0.0)), inn));
         // Pick clearly outside below → outward (the case that worked before).
         assert!(approx(offset_bbox(&ccw, Vec3::new(50.0, -10.0, 0.0)), out));
+    }
+}
+
+#[cfg(test)]
+mod option_tests {
+    use super::*;
+
+    fn line(x1: f64, y1: f64, x2: f64, y2: f64, handle: u64) -> EntityType {
+        let mut line = acadrust::entities::Line::from_coords(x1, y1, 0.0, x2, y2, 0.0);
+        line.common.handle = Handle::new(handle);
+        EntityType::Line(line)
+    }
+
+    fn keywords(cmd: &OffsetCommand) -> Vec<String> {
+        cmd.options().into_iter().map(|o| o.keyword).collect()
+    }
+
+    #[test]
+    fn erase_replaces_the_source_object() {
+        let mut cmd = OffsetCommand::new(vec![line(0.0, 0.0, 10.0, 0.0, 1)]);
+        assert_eq!(keywords(&cmd), ["T", "E", "L", ""]);
+        assert!(matches!(cmd.on_text_input("E"), Some(CmdResult::NeedPoint)));
+        assert_eq!(keywords(&cmd), ["Y", "N"]);
+        assert!(matches!(cmd.on_text_input("Y"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(cmd.on_text_input("2"), Some(CmdResult::ReportMeasurement(_))));
+        assert!(matches!(cmd.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0)), CmdResult::NeedPoint));
+        match cmd.on_point(DVec3::new(5.0, 5.0, 0.0)) {
+            CmdResult::ReplaceManyContinue(replacements) => {
+                assert_eq!(replacements.len(), 1);
+                assert_eq!(replacements[0].0, Handle::new(1));
+                assert_eq!(replacements[0].1.len(), 1);
+            }
+            _ => panic!("erase should replace the source with its offset"),
+        }
+        // Back at the object pick, with Undo now available.
+        assert_eq!(keywords(&cmd), ["U", ""]);
+        assert!(matches!(cmd.on_text_input("U"), Some(CmdResult::UndoDocument)));
+        assert_eq!(keywords(&cmd), [""]);
+    }
+
+    #[test]
+    fn layer_current_drops_source_layer_preservation() {
+        let mut cmd = OffsetCommand::new(vec![line(0.0, 0.0, 10.0, 0.0, 1)]);
+        assert!(cmd.preserve_commit_layer());
+        cmd.on_text_input("L");
+        assert_eq!(keywords(&cmd), ["C", "S"]);
+        cmd.on_text_input("C");
+        assert!(!cmd.preserve_commit_layer());
+        assert!(matches!(cmd.step, Step::Distance));
+        cmd.on_text_input("2");
+        cmd.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
+        assert!(matches!(cmd.on_point(DVec3::new(5.0, 5.0, 0.0)), CmdResult::CommitEntity(_)));
     }
 }

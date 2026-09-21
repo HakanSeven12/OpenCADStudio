@@ -89,6 +89,18 @@ impl CadCommand for Poly3dCommand {
         !self.points.is_empty()
     }
 
+    fn options(&self) -> Vec<crate::command::CmdOption> {
+        use crate::command::CmdOption;
+        let mut opts = Vec::new();
+        if self.points.len() >= 3 {
+            opts.push(CmdOption::new("Close", "C"));
+        }
+        if !self.points.is_empty() {
+            opts.push(CmdOption::new("Undo", "U"));
+        }
+        opts
+    }
+
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         match text.trim().to_uppercase().as_str() {
             "C" | "CLOSE" if self.points.len() >= 3 => self

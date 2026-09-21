@@ -68,6 +68,21 @@ impl SelectObjectsCommand {
         }
     }
 
+    /// Standard selection behavior routed to a private apply command while
+    /// retaining the public command name in the visible prompt.
+    pub fn routed(prompt_cmd: &str, pending_cmd: &str) -> Self {
+        Self {
+            prompt_cmd: prompt_cmd.to_string(),
+            pending_cmd: pending_cmd.to_string(),
+            handles: Vec::new(),
+            commit_on_enter: true,
+            show_options: true,
+            pick: None,
+            pick_crossing: true,
+            auto_constrain_settings: false,
+        }
+    }
+
     /// Single-object variant: the first completed selection action applies
     /// immediately, with no Enter (used by commands that act on one object).
     pub fn instant(pending_cmd: &str) -> Self {

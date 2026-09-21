@@ -3,7 +3,7 @@ use crate::t;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
-    edit_prop as edit, format_length, parse_f64, ro_prop as ro, square_grip,
+    edit_prop as edit, format_area, format_length, parse_f64, ro_prop as ro, square_grip,
     stepper_prop as stepper, VARIES_LABEL,
 };
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
@@ -705,8 +705,8 @@ impl PropertyEditable for Polyline2D {
                     edit(t!("End segment width").as_ref(), "pl2_seg_end_w", seg_end_w),
                     global_width_prop,
                     edit(t!("Elevation").as_ref(), "pl2_elevation", self.elevation),
-                    ro(t!("Area").as_ref(), "pl2_area", format!("{area:.4}")),
-                    ro(t!("Length").as_ref(), "pl2_length", format!("{length:.4}")),
+                    ro(t!("Area").as_ref(), "pl2_area", format_area(area)),
+                    ro(t!("Length").as_ref(), "pl2_length", format_length(length)),
                 ],
             },
             PropSection {

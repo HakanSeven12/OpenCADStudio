@@ -21,6 +21,7 @@ thread_local! {
     static RECT_ELEVATION:  Cell<f64> = Cell::new(0.0);
     static RECT_THICKNESS:  Cell<f64> = Cell::new(0.0);
     static RECT_WIDTH:      Cell<f64> = Cell::new(0.0);
+    static PLINE_WIDTH:     Cell<f64> = Cell::new(0.0);   // PLINEWID
     static RECT_ROTATION:   Cell<f64> = Cell::new(0.0);   // degrees
     static RECT_CHAMFER1:   Cell<f64> = Cell::new(0.0);
     static RECT_CHAMFER2:   Cell<f64> = Cell::new(0.0);
@@ -69,6 +70,7 @@ accessors!(get_polygon_sides, set_polygon_sides, POLYGON_SIDES);
 accessors!(get_rect_elevation, set_rect_elevation, RECT_ELEVATION);
 accessors!(get_rect_thickness, set_rect_thickness, RECT_THICKNESS);
 accessors!(get_rect_width, set_rect_width, RECT_WIDTH);
+accessors!(get_pline_width, set_pline_width, PLINE_WIDTH);
 accessors!(get_rect_rotation, set_rect_rotation, RECT_ROTATION);
 accessors!(get_rect_chamfer1, set_rect_chamfer1, RECT_CHAMFER1);
 accessors!(get_rect_chamfer2, set_rect_chamfer2, RECT_CHAMFER2);

@@ -164,6 +164,13 @@ fn default_map() -> FxHashMap<String, String> {
     parse_pgp(DEFAULT_ALIASES_PGP)
 }
 
+/// Sorted factory-default rows for the ALIASEDIT reset action.
+pub(super) fn default_alias_rows() -> Vec<(String, String)> {
+    let mut rows: Vec<(String, String)> = default_map().into_iter().collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows
+}
+
 /// Load the alias table at boot. Native reads `ocad.pgp`; web reads the same
 /// text from `localStorage`. Missing or unavailable storage falls back to the
 /// embedded defaults.
@@ -315,9 +322,87 @@ impl OpenCADStudio {
             .alias_editor_rows
             .iter()
             .filter(|(a, c)| !a.trim().is_empty() && !c.trim().is_empty())
-            .map(|(a, c)| (a.trim().to_string(), c.trim().to_string()))
+            .map(|(a, c)| {
+                (
+                    a.trim().to_uppercase(),
+                    c.trim().to_uppercase(),
+                )
+            })
             .collect();
         self.set_command_aliases(map);
+    }
+
+    /// Commit the working rows, discarding an unfinished draft and reporting
+    /// duplicates. Shared by Apply and Apply-and-Exit. Mirrors
+    /// `finish_shortcut_editor`.
+    pub(super) fn finish_alias_editor(&mut self) {
+        if self.alias_pending_add && !self.alias_editor_rows.is_empty() {
+            self.alias_editor_rows.remove(0);
+            self.alias_pending_add = false;
+            self.command_line
+                .push_error(crate::tf!("Incomplete alias row discarded.").as_ref());
+        }
+        let mut seen = rustc_hash::FxHashSet::default();
+        let mut duplicates = Vec::new();
+        for (alias, _) in &self.alias_editor_rows {
+            let alias = alias.trim().to_uppercase();
+            if alias.is_empty() {
+                continue;
+            }
+            if !seen.insert(alias.clone()) {
+                duplicates.push(alias);
+            }
+        }
+        if !duplicates.is_empty() {
+            self.command_line.push_error(
+                crate::tf!(
+                    "Duplicate alias(es) ignored on Apply: {}",
+                    duplicates.join(", ")
+                )
+                .as_ref(),
+            );
+        }
+        self.apply_alias_editor_rows();
+        self.command_line.push_info(
+            crate::tf!("{} alias(es) applied.", self.command_aliases.len()).as_ref(),
+        );
+    }
+
+    /// Reset the working rows and live table to the shipped defaults.
+    pub(super) fn reset_aliases_to_defaults(&mut self) {
+        self.alias_editor_rows = default_alias_rows();
+        self.alias_pending_add = false;
+        self.alias_reset_confirm = false;
+        self.apply_alias_editor_rows();
+    }
+
+    /// True when the working rows differ from the live table — the editor
+    /// has un-applied changes a close would discard.
+    pub(super) fn alias_editor_dirty(&self) -> bool {
+        let rows: FxHashMap<String, String> = self
+            .alias_editor_rows
+            .iter()
+            .filter_map(|(alias, command)| {
+                let alias = alias.trim().to_uppercase();
+                let command = command.trim().to_uppercase();
+                (!alias.is_empty() && !command.is_empty()).then_some((alias, command))
+            })
+            .collect();
+        rows != self.command_aliases
+    }
+
+    /// A pending add finishes once its draft row (row 0) has both an alias
+    /// and a command; it then becomes a regular row. Called by the draft
+    /// row's check button — typing alone never finishes it.
+    pub(super) fn finish_pending_alias_add(&mut self) {
+        if !self.alias_pending_add {
+            return;
+        }
+        if let Some((alias, command)) = self.alias_editor_rows.first() {
+            if !alias.trim().is_empty() && !command.trim().is_empty() {
+                self.alias_pending_add = false;
+            }
+        }
     }
 }
 

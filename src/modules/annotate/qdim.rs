@@ -8,7 +8,7 @@ use glam::DVec3;
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionAssociationSource,
-    EntityTransform, SelectionEntity, WorkingPlane,
+    DimensionPreview, EntityTransform, SelectionEntity, WorkingPlane,
 };
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
@@ -363,6 +363,15 @@ impl CadCommand for QdimCommand {
             }).collect();
         }
         Vec::new()
+    }
+
+    fn dimension_preview(&self, cursor: DVec3) -> Option<Vec<DimensionPreview>> {
+        (self.step == Step::Place).then(|| {
+            self.build_dimensions(cursor)
+                .into_iter()
+                .map(|(entity, _)| DimensionPreview::current_style(entity))
+                .collect()
+        })
     }
 }
 

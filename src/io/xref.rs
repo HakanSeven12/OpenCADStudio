@@ -281,7 +281,20 @@ fn read_outcome_from_bytes(
 /// just like the host doc, so it gets the same corrupt-entity guard. Folding
 /// it in here avoids a second full-document `entities()` walk after resolve.
 pub fn resolve_xrefs(doc: &mut CadDocument, base_dir: &Path) -> (Vec<XrefInfo>, usize) {
-    resolve_xrefs_with_progress(doc, base_dir, None)
+    resolve_xrefs_with_filter(doc, base_dir, None, None)
+}
+
+/// Reload only the direct xref block records identified by `keys`.
+///
+/// Unlike [`resolve_xrefs`], this never touches unmatched references.  This is
+/// the operation behind `XREF Reload <name>`: a targeted reload must not
+/// silently reload (or alter the stale baseline of) every other reference.
+pub fn resolve_xrefs_for_keys(
+    doc: &mut CadDocument,
+    base_dir: &Path,
+    keys: &HashSet<Handle>,
+) -> (Vec<XrefInfo>, usize) {
+    resolve_xrefs_with_filter(doc, base_dir, None, Some(keys))
 }
 
 /// Resolve XREFs while reporting completed work units.
@@ -294,6 +307,15 @@ pub fn resolve_xrefs_with_progress(
     base_dir: &Path,
     progress: Option<std::sync::Arc<dyn Fn(usize, usize) + Send + Sync>>,
 ) -> (Vec<XrefInfo>, usize) {
+    resolve_xrefs_with_filter(doc, base_dir, progress, None)
+}
+
+fn resolve_xrefs_with_filter(
+    doc: &mut CadDocument,
+    base_dir: &Path,
+    progress: Option<std::sync::Arc<dyn Fn(usize, usize) + Send + Sync>>,
+    only: Option<&HashSet<Handle>>,
+) -> (Vec<XrefInfo>, usize) {
     // Web: resolution is registry-by-name, so the caller's folder is only a
     // native concept; reference it so the parameter stays meaningful.
     #[cfg(target_arch = "wasm32")]
@@ -303,6 +325,7 @@ pub fn resolve_xrefs_with_progress(
         .block_records
         .iter()
         .filter(|br| (br.flags.is_xref || br.flags.is_xref_overlay) && !br.xref_path.is_empty())
+        .filter(|br| only.is_none_or(|keys| keys.contains(&br.handle)))
         .map(|br| (br.name.clone(), br.xref_path.clone(), br.handle))
         .collect();
     let xref_count = xref_entries.len();
@@ -467,6 +490,24 @@ pub fn resolve_xrefs_with_progress(
                 if recovered || invalid > 0 {
                     (XrefStatus::Failed, diagnostics, Some(outcome.stats))
                 } else {
+                // Reload is replacement, never append. Keep the prior merge
+                // intact until parsing succeeded, then discard its generated
+                // entities, sortents, and dependent symbols immediately before
+                // importing the replacement content.
+                //
+                // VISRETAIN=1 (`header.retain_xref_visibility`): host-side
+                // layer overrides survive the purge — snapshot them first and
+                // re-apply onto the freshly merged layers below. Without this
+                // every reload silently reset frozen/off/color tweaks the
+                // user made on `name|*` layers back to file defaults.
+                let visretain = doc.header.retain_xref_visibility;
+                let kept_layers = if visretain {
+                    snapshot_dependent_layers(doc, &block_name)
+                } else {
+                    HashMap::default()
+                };
+                let _ = unload_reference(doc, br_handle.value());
+                remove_pipe_symbols(doc, &block_name);
                 ensure_block_entities(doc, &block_name);
                 dropped += merge_xref_into_block(
                     doc,
@@ -474,6 +515,9 @@ pub fn resolve_xrefs_with_progress(
                     br_handle,
                     outcome.document,
                 );
+                if visretain {
+                    restore_dependent_layers(doc, &block_name, kept_layers);
+                }
                     (XrefStatus::Loaded, diagnostics, Some(outcome.stats))
                 }
             }
@@ -506,9 +550,9 @@ pub fn resolve_xrefs_with_progress(
 
 /// Try to build an absolute path from a raw xref path string.
 /// Handles absolute paths, relative paths, and Windows-style separators.
-/// Web builds never get here — `resolve_xrefs_with_progress` matches the
-/// bytes registry by name instead (there is no filesystem to probe).
-#[cfg(not(target_arch = "wasm32"))]
+/// Web builds never get here through `resolve_xrefs_with_progress` (it matches
+/// the bytes registry by name instead — there is no filesystem to probe), but
+/// the reference-management helpers below compile everywhere and share it.
 fn resolve_path(raw: &str, base_dir: &Path) -> Option<PathBuf> {
     let normalised = raw.replace('\\', "/");
     let p = PathBuf::from(&normalised);
@@ -558,6 +602,415 @@ fn ensure_block_entities(doc: &mut CadDocument, block_name: &str) {
     let _ = doc.add_entity(EntityType::BlockEnd(BlockEnd::new()));
 }
 
+/// Shared symbol-remap core for XREF load-merge and BIND (SPIKE3 REFACTOR
+/// verdict: extract, don't duplicate).
+///
+/// Both paths import the source doc's symbol tables into the host and rewrite
+/// every entity reference to the imported copies. They differ only in naming:
+/// the load path prefixes `{xref}|{sym}` (collisions overwrite), BIND renames
+/// `{parent}$N${sym}` (N bumped past collisions).
+///
+/// `bind_limitations` — symbol references this helper can NOT remap (counted
+/// as unremapped; BIND reports the count per bind, the load path ignores it):
+/// - MLINE `style_name`/`style_handle`: no host MLineStyle-table import —
+///   the handle is nulled, the name kept verbatim.
+/// - Material / plotstyle / full-face-edge visual-style / color-book handles
+///   (`EntityCommon` + ACIS `material_handle` bindings on `Solid3D`): the
+///   target objects are never imported — handles nulled.
+/// - Tolerance `dimension_style_handle`, Shape `style_handle`, MultiLeader
+///   `style_handle`/`text_style_handle`, Table `table_style_handle` and an
+///   unmapped `block_record_handle`: nulled.
+/// - Kept verbatim (audited, benign): linetype handles (the name carries the
+///   lookup), Leader `annotation_handle`, Hatch `boundary_handles`,
+///   `attdef_handle`, reactors, xdata, extension dictionaries, graphic data,
+///   Dimension anonymous-block names (`*D…` — geometry regenerates from the
+///   style), Hatch pattern names (no pattern table exists), Shape style
+///   names, MultiLeader line-type/arrowhead handles, Table cell internals
+///   (rows/cells keep xref text-style names), Viewport visual-style handles,
+///   SectionSymbol style handles, `Extended` entities.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum SymbolKind {
+    Layer,
+    Linetype,
+    TextStyle,
+    DimStyle,
+    Block,
+}
+
+/// Per-kind collision sets for BIND naming, preloaded from the host doc
+/// (uppercased — table lookup is case-insensitive).
+#[derive(Debug, Default)]
+struct BindTaken {
+    layers: HashSet<String>,
+    linetypes: HashSet<String>,
+    text_styles: HashSet<String>,
+    dim_styles: HashSet<String>,
+    blocks: HashSet<String>,
+}
+
+impl BindTaken {
+    fn capture(doc: &CadDocument) -> Self {
+        let upper_names =
+            |names: Vec<String>| names.into_iter().map(|n| n.to_uppercase()).collect();
+        Self {
+            layers: upper_names(doc.layers.names().map(|s| s.to_string()).collect()),
+            linetypes: upper_names(doc.line_types.names().map(|s| s.to_string()).collect()),
+            text_styles: upper_names(
+                doc.text_styles.names().map(|s| s.to_string()).collect(),
+            ),
+            dim_styles: upper_names(doc.dim_styles.names().map(|s| s.to_string()).collect()),
+            blocks: upper_names(
+                doc.block_records
+                    .iter()
+                    .map(|b| b.name.clone())
+                    .collect(),
+            ),
+        }
+    }
+
+    fn set(&mut self, kind: SymbolKind) -> &mut HashSet<String> {
+        match kind {
+            SymbolKind::Layer => &mut self.layers,
+            SymbolKind::Linetype => &mut self.linetypes,
+            SymbolKind::TextStyle => &mut self.text_styles,
+            SymbolKind::DimStyle => &mut self.dim_styles,
+            SymbolKind::Block => &mut self.blocks,
+        }
+    }
+
+    /// Claim `{parent}$N${sym}`, bumping N past every taken name, and record
+    /// the winner so sequential imports compose transitive chains like
+    /// `PLAN$0$DETAIL$0$WALLS`.
+    fn claim(&mut self, kind: SymbolKind, parent: &str, sym: &str) -> String {
+        let mut n = 0u32;
+        loop {
+            let candidate = format!("{parent}${n}${sym}");
+            if self.set(kind).insert(candidate.to_uppercase()) {
+                return candidate;
+            }
+            n += 1;
+        }
+    }
+}
+
+/// How imported symbol names are formed.
+enum SymbolNaming {
+    /// Load path: `{prefix}|{sym}` (collisions overwrite via add_or_replace).
+    MergePipe { prefix: String },
+    /// BIND path: `{parent}$N${sym}` with per-kind collision dedup.
+    BindDollar { parent: String, taken: BindTaken },
+}
+
+impl SymbolNaming {
+    fn name_for(&mut self, kind: SymbolKind, sym: &str) -> String {
+        match self {
+            SymbolNaming::MergePipe { prefix } => format!("{prefix}|{sym}"),
+            SymbolNaming::BindDollar { parent, taken } => taken.claim(kind, parent, sym),
+        }
+    }
+}
+
+/// Imported-name maps for one source document (old UPPER name → new name,
+/// old handle → new handle).
+#[derive(Default)]
+struct XrefSymbolMaps {
+    layers: HashMap<String, String>,
+    linetypes: HashMap<String, String>,
+    text_styles: HashMap<String, String>,
+    dim_styles: HashMap<String, String>,
+    blocks: HashMap<String, String>,
+    br_handles: HashMap<Handle, Handle>,
+    image_defs: HashMap<Handle, Handle>,
+    underlay_defs: HashMap<Handle, Handle>,
+}
+
+/// Import a source doc's symbol tables + IMAGE/UNDERLAY definitions into the
+/// host doc under `naming`, returning the old→new maps for entity remap.
+///
+/// Covers layers (incl. "0"), linetypes (minus sentinels), text styles,
+/// dim styles, nested block records (layout `*` records and nested xrefs
+/// skipped — BIND resolves those before merging), and every image/underlay
+/// definition (fresh handle, detached owner, verbatim path — BIND retargets
+/// image paths via COLLECT before merging).
+fn import_xref_symbols(
+    doc: &mut CadDocument,
+    xref_doc: &CadDocument,
+    naming: &mut SymbolNaming,
+) -> XrefSymbolMaps {
+    let mut maps = XrefSymbolMaps::default();
+
+    for layer in xref_doc.layers.iter() {
+        let old = layer.name.clone();
+        let new = naming.name_for(SymbolKind::Layer, &old);
+        let mut cloned = layer.clone();
+        cloned.name = new.clone();
+        cloned.set_handle(doc.allocate_handle());
+        doc.layers.add_or_replace(cloned);
+        maps.layers.insert(old.to_uppercase(), new);
+    }
+
+    for lt in xref_doc.line_types.iter() {
+        let old = lt.name.clone();
+        if is_sentinel_linetype(&old) {
+            continue;
+        }
+        let new = naming.name_for(SymbolKind::Linetype, &old);
+        let mut cloned = lt.clone();
+        cloned.name = new.clone();
+        cloned.set_handle(doc.allocate_handle());
+        doc.line_types.add_or_replace(cloned);
+        maps.linetypes.insert(old.to_uppercase(), new);
+    }
+
+    for ts in xref_doc.text_styles.iter() {
+        let old = ts.name.clone();
+        let new = naming.name_for(SymbolKind::TextStyle, &old);
+        let mut cloned = ts.clone();
+        cloned.name = new.clone();
+        cloned.set_handle(doc.allocate_handle());
+        cloned.xref_dependent = false;
+        doc.text_styles.add_or_replace(cloned);
+        maps.text_styles.insert(old.to_uppercase(), new);
+    }
+
+    for ds in xref_doc.dim_styles.iter() {
+        let old = ds.name.clone();
+        let new = naming.name_for(SymbolKind::DimStyle, &old);
+        let mut cloned = ds.clone();
+        cloned.name = new.clone();
+        cloned.set_handle(doc.allocate_handle());
+        cloned.xref_reference = false;
+        cloned.xref_resolved = false;
+        cloned.xref_dependent = false;
+        cloned.xref_handle = Handle::NULL;
+        doc.dim_styles.add_or_replace(cloned);
+        maps.dim_styles.insert(old.to_uppercase(), new);
+    }
+
+    // Nested block records: prefixed clones with cleared membership, detached
+    // layout pointer, fresh handles (same shape as the load path always made).
+    for br in xref_doc.block_records.iter() {
+        if br.name.starts_with('*') || br.flags.is_xref || br.flags.is_xref_overlay {
+            continue;
+        }
+        let old = br.name.clone();
+        let new = naming.name_for(SymbolKind::Block, &old);
+        let mut cloned = br.clone();
+        cloned.name = new.clone();
+        cloned.entity_handles.clear();
+        cloned.insert_handles.clear();
+        cloned.layout = Handle::NULL;
+        let new_h = doc.allocate_handle();
+        cloned.set_handle(new_h);
+        cloned.block_entity_handle = doc.allocate_handle();
+        cloned.block_end_handle = doc.allocate_handle();
+        maps.br_handles.insert(br.handle, new_h);
+        maps.blocks.insert(old.to_uppercase(), new);
+        doc.block_records.add_or_replace(cloned);
+    }
+
+    // IMAGE / UNDERLAY definitions: the entities reference these by handle,
+    // so without an import every bound image loses its file link. Fresh
+    // handle, detached owner; the path stays verbatim here.
+    {
+        use acadrust::objects::ObjectType;
+        for (handle, obj) in xref_doc.objects.iter() {
+            match obj {
+                ObjectType::ImageDefinition(def) => {
+                    let mut cloned = def.clone();
+                    let new_h = doc.allocate_handle();
+                    cloned.handle = new_h;
+                    cloned.owner = Handle::NULL;
+                    doc.objects
+                        .insert(new_h, ObjectType::ImageDefinition(cloned));
+                    maps.image_defs.insert(*handle, new_h);
+                }
+                ObjectType::UnderlayDefinition(def) => {
+                    let mut cloned = def.clone();
+                    let new_h = doc.allocate_handle();
+                    cloned.handle = new_h;
+                    cloned.owner_handle = Handle::NULL;
+                    cloned.reactors.clear();
+                    doc.objects
+                        .insert(new_h, ObjectType::UnderlayDefinition(cloned));
+                    maps.underlay_defs.insert(*handle, new_h);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    maps
+}
+
+/// Null one optional foreign handle, counting it as unremapped when set.
+/// Returns 1 when a handle was cleared, 0 otherwise.
+fn null_handle(handle: &mut Option<Handle>) -> usize {
+    if handle.is_some() {
+        *handle = None;
+        1
+    } else {
+        0
+    }
+}
+
+/// Rewrite one entity's symbol references to the imported copies in place.
+/// Returns the count of unremappable foreign handles (see
+/// `bind_limitations` above) — ignored on the load path, reported per BIND.
+fn remap_xref_entity(
+    host: &CadDocument,
+    entity: &mut EntityType,
+    maps: &XrefSymbolMaps,
+) -> usize {
+    let mut unremapped = 0usize;
+    let rename = |map: &HashMap<String, String>, name: &mut String| {
+        if let Some(new) = map.get(&name.to_uppercase()) {
+            *name = new.clone();
+        }
+    };
+
+    // ── Common layer / linetype + material-style handles ──
+    {
+        let c = entity.common_mut();
+        rename(&maps.layers, &mut c.layer);
+        if !is_sentinel_linetype(&c.linetype) {
+            rename(&maps.linetypes, &mut c.linetype);
+        }
+        unremapped += null_handle(&mut c.material_handle);
+        unremapped += null_handle(&mut c.plotstyle_handle);
+        unremapped += null_handle(&mut c.full_visual_style_handle);
+        unremapped += null_handle(&mut c.face_visual_style_handle);
+        unremapped += null_handle(&mut c.edge_visual_style_handle);
+        unremapped += null_handle(&mut c.color_book_handle);
+    }
+
+    // ── Text-style names (incl. embedded MText in attributes) ──
+    let remap_mtext_style = |mtext: &mut acadrust::entities::MText, maps: &XrefSymbolMaps| {
+        rename(&maps.text_styles, &mut mtext.style);
+    };
+    match entity {
+        EntityType::Text(t) => rename(&maps.text_styles, &mut t.style),
+        EntityType::MText(m) => remap_mtext_style(m, maps),
+        EntityType::AttributeDefinition(a) => {
+            rename(&maps.text_styles, &mut a.text_style);
+            if let Some(m) = a.embedded_mtext.as_mut() {
+                remap_mtext_style(m, maps);
+            }
+        }
+        EntityType::AttributeEntity(a) => {
+            rename(&maps.text_styles, &mut a.text_style);
+            if let Some(m) = a.embedded_mtext.as_mut() {
+                remap_mtext_style(m, maps);
+            }
+        }
+        // ── Dim-style names (+ anonymous-block refs stay verbatim) ──
+        EntityType::Dimension(d) => rename(&maps.dim_styles, &mut d.base_mut().style_name),
+        EntityType::Leader(l) => rename(&maps.dim_styles, &mut l.dimension_style),
+        EntityType::Tolerance(t) => {
+            rename(&maps.dim_styles, &mut t.dimension_style_name);
+            unremapped += null_handle(&mut t.dimension_style_handle);
+        }
+        // ── Block refs by name ──
+        EntityType::Insert(ins) => rename(&maps.blocks, &mut ins.block_name),
+        // ── Table: style handles nulled, legacy block refs remapped ──
+        EntityType::Table(t) => {
+            unremapped += null_handle(&mut t.table_style_handle);
+            if let Some(br) = t.block_record_handle {
+                match maps.br_handles.get(&br) {
+                    Some(&new_br) => t.block_record_handle = Some(new_br),
+                    None => {
+                        t.block_record_handle = None;
+                        unremapped += 1;
+                    }
+                }
+            }
+            rename(&maps.blocks, &mut t.block_name);
+        }
+        // ── MultiLeader / MLine / Shape style handles (names verbatim) ──
+        EntityType::MultiLeader(m) => {
+            unremapped += null_handle(&mut m.style_handle);
+            unremapped += null_handle(&mut m.text_style_handle);
+        }
+        EntityType::MLine(m) => {
+            unremapped += null_handle(&mut m.style_handle);
+        }
+        EntityType::Shape(s) => {
+            unremapped += null_handle(&mut s.style_handle);
+        }
+        EntityType::Solid3D(s) => {
+            for m in &mut s.acis_data.materials {
+                unremapped += null_handle(&mut m.material_handle);
+            }
+        }
+        // ── IMAGE / UNDERLAY definition links ──
+        EntityType::RasterImage(img) => {
+            if let Some(old) = img.definition_handle {
+                if let Some(&new) = maps.image_defs.get(&old) {
+                    img.definition_handle = Some(new);
+                    // Keep the entity path in sync with its definition (bind
+                    // COLLECT retargets the definition before merging).
+                    use acadrust::objects::ObjectType;
+                    if let Some(ObjectType::ImageDefinition(def)) = host.objects.get(&new) {
+                        img.file_path = def.file_name.clone();
+                    }
+                }
+            }
+            img.definition_reactor_handle = None;
+        }
+        EntityType::Underlay(ul) => {
+            if let Some(&new) = maps.underlay_defs.get(&ul.definition_handle) {
+                ul.definition_handle = new;
+            }
+        }
+        _ => {}
+    }
+    unremapped
+}
+
+/// Re-point a source doc's draw-order tables at the merged blocks/handles, so
+/// an explicit DRAWORDER inside the source survives the merge.
+fn copy_xref_sortents(
+    doc: &mut CadDocument,
+    xref_doc: &CadDocument,
+    target_owner: Handle,
+    br_handle_map: &HashMap<Handle, Handle>,
+    entity_handle_map: &HashMap<Handle, Handle>,
+) {
+    use acadrust::objects::{ObjectType, SortEntitiesTable};
+    let xref_ms_handle = xref_doc.header.model_space_block_handle;
+    for obj in xref_doc.objects.values() {
+        let ObjectType::SortEntitiesTable(t) = obj else {
+            continue;
+        };
+        if t.is_empty() {
+            continue;
+        }
+        let new_block = if t.block_owner_handle == xref_ms_handle {
+            target_owner
+        } else if let Some(&h) = br_handle_map.get(&t.block_owner_handle) {
+            h
+        } else {
+            continue;
+        };
+        let mut nt = SortEntitiesTable::new();
+        nt.handle = doc.allocate_handle();
+        nt.block_owner_handle = new_block;
+        for e in t.entries() {
+            let Some(&ne) = entity_handle_map.get(&e.entity_handle) else {
+                continue;
+            };
+            let ns = entity_handle_map
+                .get(&e.sort_handle)
+                .copied()
+                .unwrap_or(e.sort_handle);
+            nt.add_entry(ne, ns);
+        }
+        if !nt.is_empty() {
+            doc.objects.insert(nt.handle, ObjectType::SortEntitiesTable(nt));
+        }
+    }
+}
+
 /// Merge an external-reference document into `doc`'s xref block.
 ///
 /// Copies the xref's model-space entities into the host xref block, AND
@@ -584,108 +1037,69 @@ fn merge_xref_into_block(
         br.units = src_insunits;
     }
 
-    // ── Layers ──────────────────────────────────────────────────────────
-    // Prefix every xref layer (including "0"). Entity layer references are
-    // remapped below so the resolver finds the merged copy. Host layers
-    // (incl. its own "0") are untouched — no collisions.
-    let mut layer_map: HashMap<String, String> = HashMap::default();
-    for layer in xref_doc.layers.iter() {
-        let old = layer.name.clone();
-        let new = format!("{}|{}", prefix, old);
-        let mut cloned = layer.clone();
-        xref_doc.normalize_imported_layer_defaults(&mut cloned);
-        cloned.name = new.clone();
-        cloned.set_handle(doc.allocate_handle());
-        doc.layers.add_or_replace(cloned);
-        layer_map.insert(old.to_uppercase(), new);
-    }
+    // ── Symbol tables + definitions (shared helper) ─────────────────────
+    // Same prefixed scheme as before ("{xref}|{sym}"); the helper additionally
+    // imports text styles, dim styles, and IMAGE/UNDERLAY definitions.
+    let mut naming = SymbolNaming::MergePipe {
+        prefix: prefix.to_string(),
+    };
+    let maps = import_xref_symbols(doc, &xref_doc, &mut naming);
 
-    // ── Linetypes ───────────────────────────────────────────────────────
-    // Skip the three sentinel names — "ByLayer" / "ByBlock" / "Continuous"
-    // are magic strings the resolver matches verbatim in both docs.
-    let mut linetype_map: HashMap<String, String> = HashMap::default();
-    for lt in xref_doc.line_types.iter() {
-        let old = lt.name.clone();
-        if is_sentinel_linetype(&old) {
-            continue;
-        }
-        let new = format!("{}|{}", prefix, old);
-        let mut cloned = lt.clone();
-        cloned.name = new.clone();
-        cloned.set_handle(doc.allocate_handle());
-        doc.line_types.add_or_replace(cloned);
-        linetype_map.insert(old.to_uppercase(), new);
-    }
+    // ── Entities (shared helper) ────────────────────────────────────────
+    // The unremapped-handle count is ignored on the load path (BIND reports
+    // it per bind).
+    let (dropped, _, entity_handle_map) =
+        merge_source_entities(doc, &xref_doc, br_handle, &maps);
 
-    // ── Block records (nested blocks inside the xref) ───────────────────
-    // First pass: create each prefixed BR with its host handle + empty
-    // entity_handles. Second pass (in the entity loop below) populates
-    // them by inserting entities with `owner_handle` set.
-    //
-    // Tracks (xref-doc BR handle → host BR handle) so entities owned by
-    // a nested xref block can be routed to the right host block_record.
-    let mut br_handle_map: HashMap<Handle, Handle> = HashMap::default();
-    let mut block_name_map: HashMap<String, String> = HashMap::default();
+    // ── Draw-order overrides (shared helper) ──────────────────────────────
+    copy_xref_sortents(doc, &xref_doc, br_handle, &maps.br_handles, &entity_handle_map);
+    dropped
+}
+
+/// Source entities in display order: each block record's `entity_handles`
+/// chain is the draw order inside that block, while the flat entity list is
+/// stream order — merging in stream order scrambles the source's own stacking
+/// (fills over outlines etc.), since the host ranks draw order by the
+/// freshly-allocated handles. Entities missing from every chain keep their
+/// stream order at the end. BLOCK/BlockEnd markers are excluded.
+fn ordered_source_entities(xref_doc: &CadDocument) -> Vec<(Handle, EntityType)> {
+    let mut ordered: Vec<Handle> = Vec::new();
+    let mut seen: HashSet<Handle> = HashSet::default();
     for br in xref_doc.block_records.iter() {
-        // Skip layout block records (*Model_Space, *Paper_Space, *Paper_Space0…)
-        // and any further-nested xrefs (we don't recurse into xref-of-xref).
-        if br.name.starts_with('*') || br.flags.is_xref || br.flags.is_xref_overlay {
-            continue;
-        }
-        let old = br.name.clone();
-        let new = format!("{}|{}", prefix, old);
-        let mut cloned = br.clone();
-        cloned.name = new.clone();
-        cloned.entity_handles.clear();
-        cloned.insert_handles.clear();
-        // Detach foreign layout pointer — it refers to a Layout in xref_doc
-        // we don't import.
-        cloned.layout = Handle::NULL;
-        let new_h = doc.allocate_handle();
-        cloned.set_handle(new_h);
-        cloned.block_entity_handle = doc.allocate_handle();
-        cloned.block_end_handle = doc.allocate_handle();
-        br_handle_map.insert(br.handle, new_h);
-        block_name_map.insert(old.to_uppercase(), new);
-        doc.block_records.add_or_replace(cloned);
-    }
-
-    // ── Entities ────────────────────────────────────────────────────────
-    let xref_ms_handle = xref_doc.header.model_space_block_handle;
-    // Merge in each block's DISPLAY order: a block record's entity_handles
-    // chain is the draw order inside that block, while the flat entity list
-    // is stream order — merging in stream order scrambled the xref's own
-    // stacking (fills over outlines etc.), since the host ranks draw order
-    // by the freshly-allocated handles. Entities missing from every chain
-    // keep their stream order at the end.
-    let ordered: Vec<Handle> = {
-        let mut ordered: Vec<Handle> = Vec::new();
-        let mut seen: HashSet<Handle> = HashSet::default();
-        for br in xref_doc.block_records.iter() {
-            for &h in &br.entity_handles {
-                if seen.insert(h) {
-                    ordered.push(h);
-                }
-            }
-        }
-        for e in xref_doc.entities() {
-            let h = e.common().handle;
+        for &h in &br.entity_handles {
             if seen.insert(h) {
                 ordered.push(h);
             }
         }
-        ordered
-    };
-    let entities: Vec<(Handle, EntityType)> = ordered
+    }
+    for e in xref_doc.entities() {
+        let h = e.common().handle;
+        if seen.insert(h) {
+            ordered.push(h);
+        }
+    }
+    ordered
         .into_iter()
         .filter_map(|h| xref_doc.get_entity(h).map(|e| (h, e.clone())))
         .filter(|(_, e)| !matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_)))
-        .collect();
+        .collect()
+}
 
-    // old xref-doc entity handle → merged host handle, for the sortents copy.
+/// Merge one source doc's entities into `target`, routing model-space content
+/// into `target_br` and nested-block content into its imported counterpart
+/// (`maps.br_handles`). Returns corrupt-drop count, unremapped-handle count,
+/// and the old→new entity handle map for the sortents copy.
+fn merge_source_entities(
+    target: &mut CadDocument,
+    source: &CadDocument,
+    target_br: Handle,
+    maps: &XrefSymbolMaps,
+) -> (usize, usize, HashMap<Handle, Handle>) {
+    let source_ms_handle = source.header.model_space_block_handle;
     let mut entity_handle_map: HashMap<Handle, Handle> = HashMap::default();
     let mut dropped = 0usize;
-    for (old_h, mut entity) in entities {
+    let mut unremapped = 0usize;
+    for (old_h, mut entity) in ordered_source_entities(source) {
         // Drop parser-garbage entities (bad normals / vertex counts / inf
         // coords) before they enter the host doc — they trigger huge
         // allocations and unbounded recursion in the wire pipeline.
@@ -693,35 +1107,18 @@ fn merge_xref_into_block(
             dropped += 1;
             continue;
         }
-        // Remap layer / linetype names so the host's resolver hits the
-        // copies we just inserted.
-        {
-            let c = entity.common_mut();
-            if let Some(new_layer) = layer_map.get(&c.layer.to_uppercase()) {
-                c.layer = new_layer.clone();
-            }
-            if !is_sentinel_linetype(&c.linetype) {
-                if let Some(new_lt) = linetype_map.get(&c.linetype.to_uppercase()) {
-                    c.linetype = new_lt.clone();
-                }
-            }
-        }
-
-        // INSERTs reference blocks by name, not handle — remap.
-        if let EntityType::Insert(ins) = &mut entity {
-            if let Some(new_name) = block_name_map.get(&ins.block_name.to_uppercase()) {
-                ins.block_name = new_name.clone();
-            }
-        }
-
+        // Remap every symbol reference so the host's resolver hits the copies
+        // just imported (load path ignores the unremapped count; BIND reports
+        // it per bind).
+        unremapped += remap_xref_entity(target, &mut entity, maps);
         // Route entity to the correct host block record. Entities owned by
-        // the xref's model_space land in the host xref block (br_handle);
-        // entities owned by one of the nested BRs land in its prefixed
-        // counterpart. Paper-space / unknown owners are skipped.
+        // the source model_space land in the target block; entities owned by
+        // one of the nested BRs land in its imported counterpart.
+        // Paper-space / unknown owners are skipped.
         let old_owner = entity.common().owner_handle;
-        let new_owner = if old_owner == xref_ms_handle {
-            br_handle
-        } else if let Some(&h) = br_handle_map.get(&old_owner) {
+        let new_owner = if old_owner == source_ms_handle {
+            target_br
+        } else if let Some(&h) = maps.br_handles.get(&old_owner) {
             h
         } else {
             continue;
@@ -729,50 +1126,11 @@ fn merge_xref_into_block(
         entity.common_mut().owner_handle = new_owner;
         // Clear the foreign handle so acadrust assigns a new one.
         set_handle(&mut entity, Handle::NULL);
-        if let Ok(new_h) = doc.add_entity(entity) {
+        if let Ok(new_h) = target.add_entity(entity) {
             entity_handle_map.insert(old_h, new_h);
         }
     }
-
-    // ── Draw-order overrides ────────────────────────────────────────────
-    // Re-point the xref's SortEntitiesTables at the merged blocks with the
-    // merged entity handles, so an explicit DRAWORDER inside the xref
-    // survives the merge.
-    {
-        use acadrust::objects::{ObjectType, SortEntitiesTable};
-        for obj in xref_doc.objects.values() {
-            let ObjectType::SortEntitiesTable(t) = obj else {
-                continue;
-            };
-            if t.is_empty() {
-                continue;
-            }
-            let new_block = if t.block_owner_handle == xref_ms_handle {
-                br_handle
-            } else if let Some(&h) = br_handle_map.get(&t.block_owner_handle) {
-                h
-            } else {
-                continue;
-            };
-            let mut nt = SortEntitiesTable::new();
-            nt.handle = doc.allocate_handle();
-            nt.block_owner_handle = new_block;
-            for e in t.entries() {
-                let Some(&ne) = entity_handle_map.get(&e.entity_handle) else {
-                    continue;
-                };
-                let ns = entity_handle_map
-                    .get(&e.sort_handle)
-                    .copied()
-                    .unwrap_or(e.sort_handle);
-                nt.add_entry(ne, ns);
-            }
-            if !nt.is_empty() {
-                doc.objects.insert(nt.handle, ObjectType::SortEntitiesTable(nt));
-            }
-        }
-    }
-    dropped
+    (dropped, unremapped, entity_handle_map)
 }
 
 fn is_sentinel_linetype(name: &str) -> bool {
@@ -786,9 +1144,1208 @@ fn set_handle(entity: &mut EntityType, h: Handle) {
     entity.common_mut().handle = h;
 }
 
+/// Re-exported so CLI + tests share one derivation with the model.
+pub use crate::io::xref_model::child_key;
+
+/// Unified reference list for the XREF manager (see the model module for the
+/// entry contract): DWG xref block-records, RasterImage-linked image
+/// definitions and PDF underlay definitions, with nested child entries keyed
+/// through [`child_key`].
+pub fn collect_entries(
+    doc: &acadrust::CadDocument,
+    base_dir: &Path,
+    unloaded: &std::collections::HashSet<crate::io::xref_model::UnloadKey>,
+) -> Vec<crate::io::xref_model::ReferenceEntry> {
+    collect_entries_with_prev(doc, base_dir, unloaded, &std::collections::HashMap::new())
+}
+
+/// [`collect_entries`] with a load-time mtime baseline for `Stale` detection.
+/// See [`collect_entries`] for the full contract.
+pub fn collect_entries_with_prev(
+    doc: &acadrust::CadDocument,
+    base_dir: &Path,
+    unloaded: &std::collections::HashSet<crate::io::xref_model::UnloadKey>,
+    prev: &std::collections::HashMap<u64, std::time::SystemTime>,
+) -> Vec<crate::io::xref_model::ReferenceEntry> {
+    use acadrust::entities::UnderlayType;
+    use acadrust::objects::ObjectType;
+    use crate::io::xref_model::{
+        child_key, decide_status, normalize_lexical, RefKind, RefStatus, RefType,
+        ReferenceEntry, UnloadKey,
+    };
+
+    /// Resolve `raw` via `base_dir`; on success record `found_at`, stat
+    /// size/mtime, and flip the entry to Loaded. Missing/empty stays NotFound.
+    ///
+    /// The filesystem stat is desktop-only by `cfg` (not a runtime check): the
+    /// wasm binary contains no `std::fs::metadata` call at all, so a web
+    /// session can never block on — or fail from — a host-filesystem probe.
+    /// Path-based web references resolve through the file-handle loader and
+    /// simply stay `NotFound` when unresolvable.
+    fn stat_into(entry: &mut ReferenceEntry, raw: &str, base_dir: &Path) {
+        if raw.is_empty() {
+            return;
+        }
+        let Some(found) = resolve_path(raw, base_dir) else {
+            return;
+        };
+        entry.found_at = Some(found.to_string_lossy().into_owned());
+        entry.status = RefStatus::Loaded;
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Ok(meta) = std::fs::metadata(&found) {
+            entry.size_bytes = Some(meta.len());
+            entry.modified = meta.modified().ok();
+        }
+    }
+
+    /// Resolve `raw` into `found_at` without statting: unloaded rows keep no
+    /// size/date (spec) but still know where their file lives, so previews
+    /// and path operations work without loading.
+    fn resolve_only(entry: &mut ReferenceEntry, raw: &str, base_dir: &Path) {
+        if raw.is_empty() {
+            return;
+        }
+        if let Some(found) = resolve_path(raw, base_dir) {
+            entry.found_at = Some(found.to_string_lossy().into_owned());
+        }
+    }
+
+    fn file_name_only(raw: &str) -> &str {
+        raw.rsplit(['/', '\\']).next().unwrap_or(raw)
+    }
+
+    let mut entries: Vec<ReferenceEntry> = Vec::new();
+
+    // ── DWG xrefs ──
+    for br in doc.block_records.iter() {
+        if !(br.flags.is_xref || br.flags.is_xref_overlay) {
+            continue;
+        }
+        let key = br.handle.value();
+        let mut entry = ReferenceEntry::new(key, br.name.clone(), RefKind::DwgXref);
+        entry.ref_type = if br.flags.is_xref_overlay {
+            RefType::Overlay
+        } else {
+            RefType::Attach
+        };
+        entry.saved_path = br.xref_path.clone();
+        if unloaded.contains(&UnloadKey::Direct(key)) {
+            entry.status = RefStatus::Unloaded;
+            resolve_only(&mut entry, &br.xref_path, base_dir);
+        } else {
+            stat_into(&mut entry, &br.xref_path, base_dir);
+            entry.status = decide_status(
+                entry.status,
+                entry.modified,
+                prev.get(&key).copied(),
+                false,
+            );
+        }
+        entries.push(entry);
+    }
+
+    // ── Raster images ────────────────────────────────────────────────────
+    // Include unreferenced definitions too. They are actionable file
+    // references (and standard reference managers expose them) rather than
+    // silently disappearing from the palette.
+    let mut referenced_images: HashSet<Handle> = HashSet::default();
+    for e in doc.entities() {
+        if let EntityType::RasterImage(img) = e {
+            if let Some(h) = img.definition_handle {
+                referenced_images.insert(h);
+            }
+        }
+    }
+    for (handle, obj) in doc.objects.iter() {
+        let ObjectType::ImageDefinition(def) = obj else {
+            continue;
+        };
+        let is_unreferenced = !referenced_images.contains(handle);
+        let key = handle.value();
+        let mut entry = ReferenceEntry::new(key, file_name_only(&def.file_name), RefKind::Image);
+        entry.saved_path = def.file_name.clone();
+        if unloaded.contains(&UnloadKey::Direct(key)) {
+            entry.status = RefStatus::Unloaded;
+            resolve_only(&mut entry, &def.file_name, base_dir);
+        } else {
+            stat_into(&mut entry, &def.file_name, base_dir);
+            entry.status = decide_status(
+                entry.status,
+                entry.modified,
+                prev.get(&key).copied(),
+                false,
+            );
+            if is_unreferenced {
+                entry.status = RefStatus::Unreferenced;
+            }
+        }
+        entries.push(entry);
+    }
+
+    // ── PDF underlays ──
+    // Same referenced/unreferenced split as raster images: an underlay
+    // definition no entity points at lists as Unreferenced (manageable, never
+    // merged) rather than vanishing from the palette.
+    let mut referenced_underlays: HashSet<Handle> = HashSet::default();
+    for e in doc.entities() {
+        if let EntityType::Underlay(u) = e {
+            if u.definition_handle.is_valid() {
+                referenced_underlays.insert(u.definition_handle);
+            }
+        }
+    }
+    for (handle, obj) in doc.objects.iter() {
+        let ObjectType::UnderlayDefinition(def) = obj else {
+            continue;
+        };
+        if def.underlay_type != UnderlayType::Pdf {
+            continue;
+        }
+        let key = handle.value();
+        let name = if def.name.trim().is_empty() {
+            file_name_only(&def.file_path).to_owned()
+        } else {
+            def.name.clone()
+        };
+        let mut entry = ReferenceEntry::new(key, name, RefKind::Pdf);
+        entry.saved_path = def.file_path.clone();
+        if unloaded.contains(&UnloadKey::Direct(key)) {
+            entry.status = RefStatus::Unloaded;
+            resolve_only(&mut entry, &def.file_path, base_dir);
+        } else {
+            stat_into(&mut entry, &def.file_path, base_dir);
+            entry.status = decide_status(
+                entry.status,
+                entry.modified,
+                prev.get(&key).copied(),
+                false,
+            );
+            if !referenced_underlays.contains(handle) {
+                entry.status = RefStatus::Unreferenced;
+            }
+        }
+        entries.push(entry);
+    }
+
+    // ── Nested enumeration: full transitive closure, read-only, no merge ──
+    // Paths stored in a nested drawing are relative to *that drawing*, not to
+    // the host.  The work queue carries each parent's resolved file so every
+    // level gets the correct base directory.  `seen` is keyed by resolved
+    // absolute identity and breaks A→B→A cycles as well as shared closures.
+    let mut seen: HashSet<String> = HashSet::default();
+    let mut work: Vec<(u64, PathBuf)> = Vec::new();
+    for e in &entries {
+        if e.kind == RefKind::DwgXref && matches!(e.status, RefStatus::Loaded | RefStatus::Stale) {
+            if let Some(found) = &e.found_at {
+                let path = PathBuf::from(found);
+                seen.insert(normalize_lexical(&path.to_string_lossy()));
+                work.push((e.key, path));
+            }
+        }
+    }
+    let mut nested_cache: HashMap<String, CadDocument> = HashMap::default();
+    while let Some((parent_key, parent_path)) = work.pop() {
+        let cache_key = normalize_lexical(&parent_path.to_string_lossy());
+        let nested_doc = if let Some(cached) = nested_cache.get(&cache_key) {
+            cached.clone()
+        } else {
+            match super::load_file(&parent_path) {
+                Ok(nested) => {
+                    nested_cache.insert(cache_key, nested.clone());
+                    nested
+                }
+                Err(_) => continue,
+            }
+        };
+        let parent_dir = parent_path.parent().unwrap_or(base_dir);
+        for br in nested_doc.block_records.iter() {
+            if !(br.flags.is_xref || br.flags.is_xref_overlay) {
+                continue;
+            }
+            let key = child_key(parent_key, &br.name, &br.xref_path);
+            let mut child = ReferenceEntry::new(key, br.name.clone(), RefKind::DwgXref);
+            child.parent_key = Some(parent_key);
+            child.ref_type = if br.flags.is_xref_overlay { RefType::Overlay } else { RefType::Attach };
+            child.saved_path = br.xref_path.clone();
+            if unloaded.contains(&UnloadKey::Nested(key)) {
+                child.status = RefStatus::Unloaded;
+            } else {
+                stat_into(&mut child, &br.xref_path, parent_dir);
+                // Nested baselines live in the same stat cache under the
+                // child's high-bit-tagged key, which can never alias a host
+                // handle (see `child_key`) — so the lookup below is safe.
+                child.status = decide_status(child.status, child.modified, prev.get(&key).copied(), false);
+            }
+            if let Some(found) = &child.found_at {
+                let resolved_id = normalize_lexical(found);
+                if seen.insert(resolved_id) {
+                    work.push((key, PathBuf::from(found)));
+                }
+            }
+            entries.push(child);
+        }
+    }
+
+    // Stale propagation (plan §3.1): a Loaded parent with a Stale descendant
+    // shows Stale. Roots append before their children, so one reverse pass
+    // carries staleness transitively up any depth: by the time the iteration
+    // reaches a parent, the parent already reflects its own subtree.
+    // Unloaded/NotFound/Failed rows are never overridden.
+    {
+        let index: HashMap<u64, usize> =
+            entries.iter().enumerate().map(|(i, e)| (e.key, i)).collect();
+        for rev in (0..entries.len()).rev() {
+            if entries[rev].status != RefStatus::Stale {
+                continue;
+            }
+            if let Some(pk) = entries[rev].parent_key {
+                if let Some(&pi) = index.get(&pk) {
+                    if entries[pi].status == RefStatus::Loaded {
+                        entries[pi].status = RefStatus::Stale;
+                    }
+                }
+            }
+        }
+    }
+
+    entries
+}
+
+/// Direct (host-owned) reference target for a top-level key.
+///
+/// Nested child keys are stable hashes, never handle values, so they resolve
+/// to `None` here — callers treat that as "not directly actionable".
+enum RefTarget {
+    DwgXref { handle: Handle, name: String },
+    Image { handle: Handle, name: String },
+    Pdf { handle: Handle, name: String },
+}
+
+fn find_target(doc: &CadDocument, key: u64) -> Option<RefTarget> {
+    for br in doc.block_records.iter() {
+        if (br.flags.is_xref || br.flags.is_xref_overlay) && br.handle.value() == key {
+            return Some(RefTarget::DwgXref {
+                handle: br.handle,
+                name: br.name.clone(),
+            });
+        }
+    }
+    for (handle, obj) in doc.objects.iter() {
+        use acadrust::objects::ObjectType;
+        match obj {
+            ObjectType::ImageDefinition(def) if handle.value() == key => {
+                return Some(RefTarget::Image {
+                    handle: *handle,
+                    name: def.file_name.clone(),
+                });
+            }
+            ObjectType::UnderlayDefinition(def) if handle.value() == key => {
+                return Some(RefTarget::Pdf {
+                    handle: *handle,
+                    name: if def.name.trim().is_empty() {
+                        def.file_path.clone()
+                    } else {
+                        def.name.clone()
+                    },
+                });
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Drop merged content for one xref without removing its definition.
+///
+/// Deletes every entity whose `owner_handle` is the xref BlockRecord handle
+/// plus that block's draw-order tables; the BlockRecord (flags, path) stays.
+/// Image/PDF keys need no doc mutation (session-unloaded covers them) and
+/// return `Ok`. Unknown (nested-hash) keys error — nested rows are never
+/// directly unloadable.
+pub fn unload_reference(doc: &mut CadDocument, key: u64) -> Result<String, String> {
+    let Some(target) = find_target(doc, key) else {
+        return Err(crate::t!("XREF: no loaded reference with that key.").to_string());
+    };
+    match target {
+        RefTarget::DwgXref { handle, name } => {
+            let owned: Vec<Handle> = doc
+                .entities()
+                .filter(|e| e.common().owner_handle == handle)
+                .map(|e| e.common().handle)
+                .collect();
+            let owned_set: HashSet<Handle> = owned.iter().copied().collect();
+            for h in owned {
+                doc.remove_entity(h);
+            }
+            // Prune the membership chain so the block reads back empty.
+            if let Some(br) = doc.block_records.iter_mut().find(|b| b.handle == handle) {
+                br.entity_handles.retain(|h| !owned_set.contains(h));
+            }
+            // Drop draw-order overrides owned by the unloaded block.
+            {
+                use acadrust::objects::ObjectType;
+                let dead: Vec<Handle> = doc
+                    .objects
+                    .iter()
+                    .filter_map(|(h, o)| match o {
+                        ObjectType::SortEntitiesTable(t)
+                            if t.block_owner_handle == handle =>
+                        {
+                            Some(*h)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                for h in dead {
+                    doc.objects.remove(&h);
+                }
+            }
+            Ok(name)
+        }
+        RefTarget::Image { name, .. } | RefTarget::Pdf { name, .. } => Ok(name),
+    }
+}
+
+/// Detach one direct reference: erase all its instances, delete the
+/// BlockRecord/definition and this xref's `name|*` dependent symbols.
+///
+/// - Nested keys (stable hashes, no direct definition) have no `find_target`
+///   hit → `Err`. The CLI maps entries with `parent_key.is_some()` to the
+///   "cannot detach nested" message with the entry name.
+/// - INSERT erase walks the flat store, which holds block-owned entities too
+///   (SPIKE2 item 6), so instances inside other block definitions are covered.
+/// - Images/PDFs: remove the definition object plus every entity referencing
+///   it by handle.
+pub fn detach_reference(doc: &mut CadDocument, key: u64) -> Result<String, String> {
+    let Some(target) = find_target(doc, key) else {
+        return Err(crate::t!("XREF: no loaded reference with that key.").to_string());
+    };
+    match target {
+        RefTarget::DwgXref { handle, name } => {
+            // (b) erase ALL INSERT instances (flat store includes block-owned).
+            let inserts: Vec<Handle> = doc
+                .entities()
+                .filter_map(|e| match e {
+                    EntityType::Insert(ins)
+                        if ins.block_name.eq_ignore_ascii_case(&name) =>
+                    {
+                        Some(e.common().handle)
+                    }
+                    _ => None,
+                })
+                .collect();
+            for h in inserts {
+                doc.remove_entity(h);
+            }
+            // Merged content owned by the xref block.
+            let owned: Vec<Handle> = doc
+                .entities()
+                .filter(|e| e.common().owner_handle == handle)
+                .map(|e| e.common().handle)
+                .collect();
+            for h in owned {
+                doc.remove_entity(h);
+            }
+            // (c) `name|*` dependents for THIS xref only (case-insensitive).
+            remove_pipe_symbols(doc, &name);
+            // Draw-order tables owned by the detached block.
+            {
+                use acadrust::objects::ObjectType;
+                let dead: Vec<Handle> = doc
+                    .objects
+                    .iter()
+                    .filter_map(|(h, o)| match o {
+                        ObjectType::SortEntitiesTable(t)
+                            if t.block_owner_handle == handle =>
+                        {
+                            Some(*h)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                for h in dead {
+                    doc.objects.remove(&h);
+                }
+            }
+            doc.block_records.remove(&name);
+            Ok(name)
+        }
+        RefTarget::Image { handle, name } => {
+            let refs: Vec<Handle> = doc
+                .entities()
+                .filter_map(|e| match e {
+                    EntityType::RasterImage(img)
+                        if img.definition_handle == Some(handle) =>
+                    {
+                        Some(e.common().handle)
+                    }
+                    _ => None,
+                })
+                .collect();
+            for h in refs {
+                doc.remove_entity(h);
+            }
+            doc.objects.remove(&handle);
+            Ok(name)
+        }
+        RefTarget::Pdf { handle, name } => {
+            let refs: Vec<Handle> = doc
+                .entities()
+                .filter_map(|e| match e {
+                    EntityType::Underlay(ul) if ul.definition_handle == handle => {
+                        Some(e.common().handle)
+                    }
+                    _ => None,
+                })
+                .collect();
+            for h in refs {
+                doc.remove_entity(h);
+            }
+            doc.objects.remove(&handle);
+            Ok(name)
+        }
+    }
+}
+
+// ── BIND (Task 9) ─────────────────────────────────────────────────────────
+
+/// Outcome of binding one reference.
+#[derive(Debug)]
+pub struct BindOutcome {
+    /// Bound block / definition name.
+    pub name: String,
+    /// Foreign style handles that could not be remapped (see
+    /// `bind_limitations` on the shared remap helper).
+    pub unremapped: usize,
+}
+
+/// Bind one direct reference: fold the external file into the host drawing.
+///
+/// - DWG xrefs become plain local blocks (same name, so existing INSERTs keep
+///   resolving). Dependent symbols `name|sym` become `name$0$sym` (N bumped
+///   past collisions); nested children bind first so chains compose
+///   transitively (`PLAN$0$DETAIL$0$WALLS`); the whole bind-closure is
+///   merged — nested geometry is never dropped.
+/// - Images are COLLECTed: the file is copied next to the host drawing and
+///   the definition retargeted to the relative filename. A copy failure
+///   errors before the host doc is touched (no partial state).
+/// - PDFs error explicitly — vector import is unavailable, and silently
+///   dropping them would lose data.
+/// - Nested keys have no host definition and never reach here (callers map
+///   them to the "bind it in its host drawing" message, mirroring Detach).
+pub fn bind_reference(
+    doc: &mut CadDocument,
+    key: u64,
+    base_dir: &Path,
+    host_dir: &Path,
+) -> Result<BindOutcome, String> {
+    let Some(target) = find_target(doc, key) else {
+        return Err(crate::t!("XREF: no loaded reference with that key.").to_string());
+    };
+    match target {
+        RefTarget::DwgXref { handle, name } => bind_dwg(doc, handle, &name, base_dir, host_dir),
+        RefTarget::Image { handle, name } => {
+            collect_bind_images(doc, &name, base_dir, host_dir, Some(handle))?;
+            Ok(BindOutcome { name, unremapped: 0 })
+        }
+        RefTarget::Pdf { .. } => Err(crate::t!(
+            "XREF: PDF bind (vector import) is not available in this version."
+        )
+        .to_string()),
+    }
+}
+
+fn bind_failed(name: &str, reason: impl std::fmt::Display) -> String {
+    crate::tf!("XREF: cannot bind \"{}\": {}.", name, reason.to_string()).to_string()
+}
+
+fn bind_dwg(
+    doc: &mut CadDocument,
+    br_handle: Handle,
+    name: &str,
+    base_dir: &Path,
+    host_dir: &Path,
+) -> Result<BindOutcome, String> {
+    let saved = doc
+        .block_records
+        .iter()
+        .find(|b| b.handle == br_handle)
+        .map(|b| b.xref_path.clone())
+        .unwrap_or_default();
+    let Some(found) = resolve_path(&saved, base_dir) else {
+        return Err(bind_failed(name, "file not found"));
+    };
+    let source_dir = found
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    // Load the closure (this file + every nested xref, children first). All
+    // file copies happen below, before the host doc is touched — a copy or
+    // parse failure leaves no partial document state.
+    let mut source = load_bind_source(name, &found)?;
+    check_no_pdf_underlays(&source)?;
+    let mut stack = vec![crate::io::xref_model::normalize_lexical(
+        &found.to_string_lossy(),
+    )];
+    let mut unremapped = bind_nested_closure(&mut source, &source_dir, host_dir, &mut stack)?;
+    collect_bind_images(&mut source, name, &source_dir, host_dir, None)?;
+    // Drop the previous merge + `name|*` symbols. INSERTs of the xref stay —
+    // they now reference the bound block.
+    unload_reference(doc, br_handle.value())?;
+    remove_pipe_symbols(doc, name);
+    let taken = BindTaken::capture(doc);
+    let (u, _) = merge_bound_doc(doc, name, br_handle, &source, taken);
+    unremapped += u;
+    // Convert the xref BlockRecord into a plain local block (same name, so
+    // existing INSERTs keep resolving).
+    if let Some(br) = doc.block_records.iter_mut().find(|b| b.handle == br_handle) {
+        br.flags.is_xref = false;
+        br.flags.is_xref_overlay = false;
+        br.xref_path.clear();
+    }
+    Ok(BindOutcome {
+        name: name.to_string(),
+        unremapped,
+    })
+}
+
+fn load_bind_source(ref_name: &str, found: &Path) -> Result<CadDocument, String> {
+    match super::load_file(found) {
+        Ok(doc) => Ok(doc),
+        Err(e) => Err(bind_failed(ref_name, e)),
+    }
+}
+
+/// Reject PDF underlays anywhere in a bind closure: vector import is
+/// unavailable, and silently dropping them would lose data.
+fn check_no_pdf_underlays(source: &CadDocument) -> Result<(), String> {
+    use acadrust::entities::UnderlayType;
+    use acadrust::objects::ObjectType;
+    let has_pdf = source.objects.values().any(|o| {
+        matches!(o, ObjectType::UnderlayDefinition(d) if d.underlay_type == UnderlayType::Pdf)
+    });
+    if has_pdf {
+        return Err(crate::t!(
+            "XREF: PDF bind (vector import) is not available in this version."
+        )
+        .to_string());
+    }
+    Ok(())
+}
+
+/// Recursively bind every nested xref inside `source`, children first, so the
+/// parent merge composes transitive chains (`PLAN$0$DETAIL$0$WALLS`).
+/// Unresolvable nested files error the whole bind; cyclic closures enumerate
+/// once (mirroring `collect_entries`). Returns the nested unremapped count.
+fn bind_nested_closure(
+    source: &mut CadDocument,
+    source_dir: &Path,
+    host_dir: &Path,
+    stack: &mut Vec<String>,
+) -> Result<usize, String> {
+    let children: Vec<(String, Handle, String)> = source
+        .block_records
+        .iter()
+        .filter(|br| (br.flags.is_xref || br.flags.is_xref_overlay) && !br.xref_path.is_empty())
+        .map(|br| (br.name.clone(), br.handle, br.xref_path.clone()))
+        .collect();
+    let mut taken = BindTaken::capture(source);
+    let mut unremapped = 0usize;
+    for (child_name, child_br, child_saved) in children {
+        let Some(child_found) = resolve_path(&child_saved, source_dir) else {
+            return Err(bind_failed(&child_name, "file not found"));
+        };
+        let norm =
+            crate::io::xref_model::normalize_lexical(&child_found.to_string_lossy());
+        if stack.contains(&norm) {
+            continue;
+        }
+        stack.push(norm);
+        let mut child_doc = load_bind_source(&child_name, &child_found)?;
+        let child_dir = child_found
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+        unremapped += bind_nested_closure(&mut child_doc, &child_dir, host_dir, stack)?;
+        stack.pop();
+        check_no_pdf_underlays(&child_doc)?;
+        collect_bind_images(&mut child_doc, &child_name, &child_dir, host_dir, None)?;
+        let (u, taken_back) = merge_bound_doc(source, &child_name, child_br, &child_doc, taken);
+        unremapped += u;
+        taken = taken_back;
+        if let Some(br) = source
+            .block_records
+            .iter_mut()
+            .find(|b| b.handle == child_br)
+        {
+            br.flags.is_xref = false;
+            br.flags.is_xref_overlay = false;
+            br.xref_path.clear();
+        }
+    }
+    Ok(unremapped)
+}
+
+/// Merge one fully child-bound source doc into `target` under BIND names
+/// (`{parent}$N${sym}`), threading `taken` through for collision dedup.
+/// Returns the merge's unremapped count plus the updated taken sets.
+fn merge_bound_doc(
+    target: &mut CadDocument,
+    parent: &str,
+    target_br: Handle,
+    source: &CadDocument,
+    taken: BindTaken,
+) -> (usize, BindTaken) {
+    ensure_block_entities(target, parent);
+    let mut naming = SymbolNaming::BindDollar {
+        parent: parent.to_string(),
+        taken,
+    };
+    let maps = import_xref_symbols(target, source, &mut naming);
+    let (_, unremapped, entity_handle_map) =
+        merge_source_entities(target, source, target_br, &maps);
+    copy_xref_sortents(
+        target,
+        source,
+        target_br,
+        &maps.br_handles,
+        &entity_handle_map,
+    );
+    let taken = match naming {
+        SymbolNaming::BindDollar { taken, .. } => taken,
+        SymbolNaming::MergePipe { .. } => unreachable!("bind merge always uses BindDollar"),
+    };
+    (unremapped, taken)
+}
+
+/// COLLECT every raster image in `source`: copy the file next to the host
+/// drawing (first claimant keeps the filename, later same-name collisions get
+/// `stem$N.ext`) and retarget definitions + entity paths to the relative
+/// filename. Copies run before any host mutation — a failure errors with no
+/// partial document state. `only` restricts the pass to one definition
+/// (direct image bind); `None` collects the whole closure.
+fn collect_bind_images(
+    source: &mut CadDocument,
+    ref_name: &str,
+    source_dir: &Path,
+    host_dir: &Path,
+    only: Option<Handle>,
+) -> Result<(), String> {
+    use acadrust::objects::ObjectType;
+    let defs: Vec<(Handle, String)> = source
+        .objects
+        .iter()
+        .filter_map(|(h, o)| match o {
+            ObjectType::ImageDefinition(d)
+                if only.is_none_or(|want| want == *h) =>
+            {
+                Some((*h, d.file_name.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    if defs.is_empty() {
+        return Ok(());
+    }
+    // Plan every copy first (dedupe repeat references to one source file).
+    let mut planned: HashMap<String, String> = HashMap::default();
+    let mut ops: Vec<(Handle, PathBuf, String)> = Vec::new();
+    for (handle, saved) in &defs {
+        let Some(resolved) = resolve_path(saved, source_dir) else {
+            return Err(bind_failed(ref_name, format!("image not found: {saved}")));
+        };
+        let norm = crate::io::xref_model::normalize_lexical(&resolved.to_string_lossy());
+        let dest_name = if let Some(prior) = planned.get(&norm) {
+            prior.clone()
+        } else {
+            let base = file_name_only(saved);
+            let mut candidate = base.clone();
+            let mut n = 0u32;
+            while host_dir.join(&candidate).exists()
+                && !same_file(&resolved, &host_dir.join(&candidate))
+            {
+                n += 1;
+                candidate = unique_file_name(&base, n);
+            }
+            planned.insert(norm, candidate.clone());
+            candidate
+        };
+        ops.push((*handle, resolved, dest_name));
+    }
+    for (_, src, dest_name) in &ops {
+        let dest = host_dir.join(dest_name);
+        if same_file(src, &dest) {
+            continue;
+        }
+        if let Err(e) = std::fs::copy(src, &dest) {
+            return Err(bind_failed(ref_name, format!("cannot collect image: {e}")));
+        }
+    }
+    // Retarget definitions + entity paths to the collected relative names.
+    for (handle, _, dest_name) in ops {
+        if let Some(ObjectType::ImageDefinition(def)) = source.objects.get_mut(&handle) {
+            def.file_name = dest_name.clone();
+        }
+        let owned: Vec<Handle> = source
+            .entities()
+            .filter_map(|e| match e {
+                EntityType::RasterImage(img) if img.definition_handle == Some(handle) => {
+                    Some(e.common().handle)
+                }
+                _ => None,
+            })
+            .collect();
+        for eh in owned {
+            if let Some(EntityType::RasterImage(img)) = source.get_entity_mut(eh) {
+                img.file_path = dest_name.clone();
+            }
+        }
+    }
+    Ok(())
+}
+
+fn file_name_only(raw: &str) -> String {
+    raw.rsplit(['/', '\\']).next().unwrap_or(raw).to_string()
+}
+
+fn unique_file_name(base: &str, n: u32) -> String {
+    match base.rfind('.') {
+        Some(i) if i > 0 => format!("{}${n}.{}", &base[..i], &base[i + 1..]),
+        _ => format!("{base}${n}"),
+    }
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => a == b,
+    }
+}
+
+/// Remove one xref's `name|*` dependent symbols (case-insensitive): layers,
+/// linetypes, text styles, dim styles, and nested block records — plus every
+/// entity and draw-order table owned by those dependent blocks.
+///
+/// Shared by Detach (which then also erases the BlockRecord itself) and BIND
+/// (which drops the previous merge before re-merging under `$N$` names). The
+/// xref BlockRecord itself, its INSERTs, and non-prefixed symbols stay.
+fn remove_pipe_symbols(doc: &mut CadDocument, name: &str) {
+    let prefix = format!("{}|", name.to_uppercase());
+    let is_dep = |n: &str| n.to_uppercase().starts_with(&prefix);
+    // Dependent blocks first — their handles route the owned-entity cleanup.
+    let dep_brs: HashSet<Handle> = doc
+        .block_records
+        .iter()
+        .filter(|b| is_dep(&b.name))
+        .map(|b| b.handle)
+        .collect();
+    let owned: Vec<Handle> = doc
+        .entities()
+        .filter(|e| dep_brs.contains(&e.common().owner_handle))
+        .map(|e| e.common().handle)
+        .collect();
+    for h in owned {
+        doc.remove_entity(h);
+    }
+    {
+        use acadrust::objects::ObjectType;
+        let dead: Vec<Handle> = doc
+            .objects
+            .iter()
+            .filter_map(|(h, o)| match o {
+                ObjectType::SortEntitiesTable(t) if dep_brs.contains(&t.block_owner_handle) => {
+                    Some(*h)
+                }
+                _ => None,
+            })
+            .collect();
+        for h in dead {
+            doc.objects.remove(&h);
+        }
+    }
+    let layers: Vec<String> = doc
+        .layers
+        .names()
+        .filter(|n| is_dep(n))
+        .map(|s| s.to_string())
+        .collect();
+    for n in layers {
+        doc.layers.remove(&n);
+    }
+    let lts: Vec<String> = doc
+        .line_types
+        .names()
+        .filter(|n| is_dep(n))
+        .map(|s| s.to_string())
+        .collect();
+    for n in lts {
+        doc.line_types.remove(&n);
+    }
+    let styles: Vec<String> = doc
+        .text_styles
+        .names()
+        .filter(|n| is_dep(n))
+        .map(|s| s.to_string())
+        .collect();
+    for n in styles {
+        doc.text_styles.remove(&n);
+    }
+    let dims: Vec<String> = doc
+        .dim_styles
+        .names()
+        .filter(|n| is_dep(n))
+        .map(|s| s.to_string())
+        .collect();
+    for n in dims {
+        doc.dim_styles.remove(&n);
+    }
+    let brs: Vec<String> = doc
+        .block_records
+        .iter()
+        .map(|b| b.name.clone())
+        .filter(|n| is_dep(n))
+        .collect();
+    for n in brs {
+        doc.block_records.remove(&n);
+    }
+}
+
+/// Snapshot one xref's dependent-layer overrides for VISRETAIN=1 reloads.
+///
+/// Returns `name|*` layers keyed by uppercased name. The reload path purges
+/// these entries and re-merges file defaults; without the snapshot the
+/// user's frozen/off/color tweaks would be silently lost on every reload.
+fn snapshot_dependent_layers(
+    doc: &CadDocument,
+    name: &str,
+) -> HashMap<String, acadrust::tables::Layer> {
+    let prefix = format!("{}|", name.to_uppercase());
+    doc.layers
+        .names()
+        .filter(|n| n.to_uppercase().starts_with(&prefix))
+        .filter_map(|n| {
+            doc.layers
+                .get(n)
+                .cloned()
+                .map(|l| (l.name.to_uppercase(), l))
+        })
+        .collect()
+}
+
+/// Re-apply a [`snapshot_dependent_layers`] snapshot onto freshly merged
+/// layers. Only layers present post-merge are touched (deleted-in-file layers
+/// stay deleted); handles and file-structural links (material, plotstyle,
+/// xref block-record pointer) stay on the fresh entries — everything a user
+/// can tweak in a layer UI is restored.
+fn restore_dependent_layers(
+    doc: &mut CadDocument,
+    name: &str,
+    kept: HashMap<String, acadrust::tables::Layer>,
+) {
+    if kept.is_empty() {
+        return;
+    }
+    let prefix = format!("{}|", name.to_uppercase());
+    let targets: Vec<String> = doc
+        .layers
+        .names()
+        .filter(|n| n.to_uppercase().starts_with(&prefix))
+        .map(|s| s.to_string())
+        .collect();
+    for n in targets {
+        let (Some(cur), Some(old)) = (
+            doc.layers.get_mut(&n),
+            kept.get(&n.to_uppercase()),
+        ) else {
+            continue;
+        };
+        cur.flags = old.flags.clone();
+        cur.color = old.color.clone();
+        cur.color_name = old.color_name.clone();
+        cur.book_name = old.book_name.clone();
+        cur.line_type = old.line_type.clone();
+        cur.line_weight = old.line_weight.clone();
+        cur.plot_style = old.plot_style.clone();
+        cur.is_plottable = old.is_plottable;
+        cur.transparency = old.transparency.clone();
+    }
+}
+
+/// Store `new_raw` verbatim on the definition (no synthesis).
+pub fn set_ref_path(
+    doc: &mut CadDocument,
+    key: u64,
+    new_raw: &str,
+) -> Result<String, String> {
+    let Some(target) = find_target(doc, key) else {
+        return Err(crate::t!("XREF: no loaded reference with that key.").to_string());
+    };
+    match target {
+        RefTarget::DwgXref { name, .. } => {
+            if let Some(br) = doc.block_records.get_mut(&name) {
+                br.xref_path = new_raw.to_string();
+                return Ok(name);
+            }
+            Err(crate::t!("XREF: no loaded reference with that key.").to_string())
+        }
+        RefTarget::Image { handle, name } => {
+            use acadrust::objects::ObjectType;
+            match doc.objects.get_mut(&handle) {
+                Some(ObjectType::ImageDefinition(def)) => {
+                    def.file_name = new_raw.to_string();
+                    Ok(name)
+                }
+                _ => Err(crate::t!("XREF: no loaded reference with that key.").to_string()),
+            }
+        }
+        RefTarget::Pdf { handle, name } => {
+            use acadrust::objects::ObjectType;
+            match doc.objects.get_mut(&handle) {
+                Some(ObjectType::UnderlayDefinition(def)) => {
+                    def.file_path = new_raw.to_string();
+                    Ok(name)
+                }
+                _ => Err(crate::t!("XREF: no loaded reference with that key.").to_string()),
+            }
+        }
+    }
+}
+
+/// Convert one reference's stored path to `pathtype` against `host_path`.
+/// Verbatim store on success; neutral errors otherwise.
+pub fn apply_pathtype(
+    doc: &mut CadDocument,
+    key: u64,
+    pathtype: crate::io::xref_model::Pathtype,
+    host_path: &Path,
+) -> Result<String, String> {
+    let saved = match find_target(doc, key) {
+        Some(RefTarget::DwgXref { name, .. }) => doc
+            .block_records
+            .get(&name)
+            .map(|b| b.xref_path.clone())
+            .unwrap_or_default(),
+        Some(RefTarget::Image { handle, .. }) => {
+            use acadrust::objects::ObjectType;
+            match doc.objects.get(&handle) {
+                Some(ObjectType::ImageDefinition(def)) => def.file_name.clone(),
+                _ => String::new(),
+            }
+        }
+        Some(RefTarget::Pdf { handle, .. }) => {
+            use acadrust::objects::ObjectType;
+            match doc.objects.get(&handle) {
+                Some(ObjectType::UnderlayDefinition(def)) => def.file_path.clone(),
+                _ => String::new(),
+            }
+        }
+        None => return Err(crate::t!("XREF: no loaded reference with that key.").to_string()),
+    };
+    // A stored relative path first has to be resolved against its current host
+    // folder.  Passing it straight to `to_pathtype_result` made `Full` a
+    // no-op (`refs/a.dwg` stayed relative instead of becoming C:/…/refs/a).
+    let normalized = crate::io::xref_model::normalize_lexical(&saved);
+    let bytes = normalized.as_bytes();
+    let looks_absolute = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+        || normalized.starts_with("//")
+        || normalized.starts_with('/');
+    let stored_relative = !looks_absolute;
+    let effective = if stored_relative {
+        host_path
+            .parent()
+            .map(|dir| dir.join(&saved).to_string_lossy().into_owned())
+            .unwrap_or(saved.clone())
+    } else {
+        saved
+    };
+    match crate::io::xref_model::to_pathtype_result(&effective, host_path, pathtype) {
+        Ok(next) => {
+            set_ref_path(doc, key, &next)?;
+            Ok(next)
+        }
+        Err(crate::io::xref_model::PathtypeError::AcrossDrives) => {
+            Err(crate::t!("XREF: cannot make path relative across drives.").to_string())
+        }
+        Err(crate::io::xref_model::PathtypeError::UnsavedHost) => Err(
+            crate::t!("XREF  Save the drawing first to resolve relative XREF paths.").to_string(),
+        ),
+    }
+}
+
+/// Find & Replace: rewrite `old` → `new` as a component-wise prefix replace
+/// wherever the normalized saved path has the normalized `old` path as its
+/// leading run of `/`-components. Returns rewrites.
+///
+/// Component-wise (never a raw byte splice): matching happens on normalized
+/// forms and the result is rejoined from normalized components, so `..`-laden
+/// or case-folded saved paths rewrite correctly and multibyte paths can never
+/// panic on a mid-char cut.
+pub fn replace_path_prefix(doc: &mut CadDocument, old: &str, new: &str) -> usize {
+    use crate::io::xref_model::normalize_lexical;
+    let old_n = normalize_lexical(old);
+    if old_n.is_empty() {
+        return 0;
+    }
+    let old_comps: Vec<&str> = old_n.split('/').collect();
+    let new_n = normalize_lexical(new);
+    let splice = |saved: &mut String| -> bool {
+        let saved_n = normalize_lexical(saved);
+        let saved_comps: Vec<&str> = saved_n.split('/').collect();
+        if saved_comps.len() < old_comps.len() {
+            return false;
+        }
+        if saved_comps[..old_comps.len()] != old_comps[..] {
+            return false;
+        }
+        let rest = &saved_comps[old_comps.len()..];
+        let mut out = new_n.clone();
+        if !rest.is_empty() {
+            if !out.is_empty() {
+                out.push('/');
+            }
+            out.push_str(&rest.join("/"));
+        }
+        *saved = out;
+        true
+    };
+    let mut n = 0usize;
+    for br in doc.block_records.iter_mut() {
+        if !(br.flags.is_xref || br.flags.is_xref_overlay) || br.xref_path.is_empty() {
+            continue;
+        }
+        if splice(&mut br.xref_path) {
+            n += 1;
+        }
+    }
+    {
+        use acadrust::objects::ObjectType;
+        for obj in doc.objects.values_mut() {
+            match obj {
+                ObjectType::ImageDefinition(def) if !def.file_name.is_empty() => {
+                    if splice(&mut def.file_name) {
+                        n += 1;
+                    }
+                }
+                ObjectType::UnderlayDefinition(def) if !def.file_path.is_empty() => {
+                    if splice(&mut def.file_path) {
+                        n += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    n
+}
+
+/// Flip Attach ↔ Overlay for one DWG xref. DWG only; images/PDFs error.
+///
+/// The flip affects future nesting propagation (overlays do not re-export
+/// through the host); current geometry is untouched.
+pub fn set_ref_type(
+    doc: &mut CadDocument,
+    key: u64,
+    ref_type: crate::io::xref_model::RefType,
+) -> Result<String, String> {
+    let Some(target) = find_target(doc, key) else {
+        return Err(crate::t!("XREF: no loaded reference with that key.").to_string());
+    };
+    match target {
+        RefTarget::DwgXref { name, .. } => {
+            if let Some(br) = doc.block_records.get_mut(&name) {
+                match ref_type {
+                    crate::io::xref_model::RefType::Attach => {
+                        br.flags.is_xref = true;
+                        br.flags.is_xref_overlay = false;
+                    }
+                    crate::io::xref_model::RefType::Overlay => {
+                        br.flags.is_xref = false;
+                        br.flags.is_xref_overlay = true;
+                    }
+                }
+                return Ok(name);
+            }
+            Err(crate::t!("XREF: no loaded reference with that key.").to_string())
+        }
+        RefTarget::Image { .. } | RefTarget::Pdf { .. } => {
+            Err(crate::t!("XREF: overlays apply to drawing references only.").to_string())
+        }
+    }
+}
+
+/// Save-As rebase helper, wired in `queue_native_save` (Task 8b).
+///
+/// Call with the old/new parent dirs before serializing: every relative
+/// saved path is made absolute via `old_base` then re-expressed relative to
+/// `new_base` (absolute paths and cross-drive targets are left absolute).
+/// Returns rewrite count.
+///
+/// Both the save snapshot and, on Save-As completion (`on_save_finished`),
+/// the live document are rebased so the running session agrees with the file
+/// just written.
+pub fn rebase_relative_paths_for_save_as(
+    doc: &mut CadDocument,
+    old_base: &Path,
+    new_base: &Path,
+) -> usize {
+    use crate::io::xref_model::{normalize_lexical, to_pathtype_result, Pathtype};
+    let is_relative = |s: &str| {
+        let n = normalize_lexical(s);
+        if n.is_empty() {
+            return false;
+        }
+        let b = n.as_bytes();
+        if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+            return false;
+        }
+        if n.starts_with("//") || n.starts_with('/') {
+            return false;
+        }
+        true
+    };
+    // Fake host file inside the new base so `to_pathtype_result` has a parent.
+    let new_host = new_base.join("__host__.dwg");
+    let mut n = 0usize;
+    let mut rebase = |saved: &mut String| {
+        if !is_relative(saved) {
+            return;
+        }
+        let abs = old_base.join(saved.clone());
+        let abs_s = abs.to_string_lossy().into_owned();
+        if let Ok(rel) = to_pathtype_result(&abs_s, &new_host, Pathtype::Relative) {
+            *saved = rel;
+            n += 1;
+        }
+    };
+    for br in doc.block_records.iter_mut() {
+        if !(br.flags.is_xref || br.flags.is_xref_overlay) || br.xref_path.is_empty() {
+            continue;
+        }
+        rebase(&mut br.xref_path);
+    }
+    {
+        use acadrust::objects::ObjectType;
+        for obj in doc.objects.values_mut() {
+            match obj {
+                ObjectType::ImageDefinition(def) if !def.file_name.is_empty() => {
+                    rebase(&mut def.file_name)
+                }
+                ObjectType::UnderlayDefinition(def) if !def.file_path.is_empty() => {
+                    rebase(&mut def.file_path)
+                }
+                _ => {}
+            }
+        }
+    }
+    n
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::xref_model::{Pathtype, RefKind, RefStatus, RefType};
+    type SystemTimeAlias = std::time::SystemTime;
 
     /// The registries are process-global and the default harness runs tests
     /// in parallel; the eviction test's inserts can evict a sibling test's
@@ -947,5 +2504,376 @@ mod tests {
             vec!["Missing A.dwg".to_string(), "Missing B.dxf".to_string()]
         );
         assert!(unresolved_xref_names(&[]).is_empty());
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn collect_single_xref_loaded_with_verbatim_path() {
+        let tmp = std::env::temp_dir().join(format!(
+            "ocs_xref_collect_{}_{}.dwg",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&tmp, b"").unwrap();
+        let saved = tmp.to_string_lossy().into_owned();
+
+        let mut doc = acadrust::CadDocument::new();
+        let mut br = acadrust::tables::BlockRecord::new("PLAN");
+        br.flags.is_xref = true;
+        br.xref_path = saved.clone();
+        br.handle = doc.allocate_handle();
+        doc.block_records.add(br).expect("add xref block record");
+
+        let base = tmp.parent().unwrap();
+        let entries = collect_entries(&doc, base, &std::collections::HashSet::new());
+
+        std::fs::remove_file(&tmp).ok();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].status, RefStatus::Loaded);
+        assert_eq!(entries[0].saved_path, saved);
+        assert_eq!(entries[0].kind, RefKind::DwgXref);
+    }
+
+    fn xref_doc_with(name: &str, saved: &str) -> (acadrust::CadDocument, u64) {
+        let mut doc = acadrust::CadDocument::new();
+        let mut br = acadrust::tables::BlockRecord::new(name);
+        br.flags.is_xref = true;
+        br.xref_path = saved.to_string();
+        br.handle = doc.allocate_handle();
+        let key = br.handle.value();
+        doc.block_records.add(br).expect("add xref");
+        (doc, key)
+    }
+
+    fn xref_tmpdir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ocs_xref_{tag}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_nested_fixture(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+        // mid.dwgxrefs inner.dwg; both must parse (enumeration reads the
+        // mid file's block-record table). Returns (mid, inner) abs paths.
+        std::fs::write(dir.join("inner.dwg"), b"inner-bytes").unwrap();
+        let mut mid = acadrust::CadDocument::new();
+        let mut br = acadrust::tables::BlockRecord::new("INNER");
+        br.flags.is_xref = true;
+        br.xref_path = dir.join("inner.dwg").to_string_lossy().into_owned();
+        mid.block_records.add(br).unwrap();
+        let bytes = crate::io::save_to_bytes(&mid, "dwg", mid.version).unwrap();
+        std::fs::write(dir.join("mid.dwg"), &bytes).unwrap();
+        (dir.join("mid.dwg"), dir.join("inner.dwg"))
+    }
+
+    #[test]
+    fn nested_stale_propagates_to_parent() {
+        // Plan §3.1: a Loaded parent with a Stale nested descendant shows
+        // Stale. The nested baseline predates the live mtime (epoch), so the
+        // child is Stale and the reverse pass carries it to the parent —
+        // without touching Unloaded/Failed rows.
+        use std::time::UNIX_EPOCH;
+        let dir = xref_tmpdir("staleprop");
+        let (mid_path, inner_path) = write_nested_fixture(&dir);
+        let (doc, mid_key) = xref_doc_with(
+            "MID",
+            &mid_path.to_string_lossy(),
+        );
+        let inner_key = child_key(
+            mid_key,
+            "INNER",
+            &inner_path.to_string_lossy(),
+        );
+        let mut prev = std::collections::HashMap::new();
+        prev.insert(inner_key, UNIX_EPOCH);
+        let entries = collect_entries_with_prev(
+            &doc,
+            &dir,
+            &std::collections::HashSet::new(),
+            &prev,
+        );
+        let inner = entries.iter().find(|e| e.key == inner_key).expect("nested INNER listed");
+        assert_eq!(inner.status, RefStatus::Stale);
+        let mid = entries.iter().find(|e| e.key == mid_key).expect("MID listed");
+        assert_eq!(mid.status, RefStatus::Stale, "parent reflects stale child");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn xref_end_to_end_engine_lifecycle() {
+        // One true integration pass over a real DWG fixture (nested xref +
+        // referenced image + unreferenced PDF): attach-equivalent list →
+        // unload → targeted reload → detach. Catches integration skew that
+        // unit tests on single ops cannot.
+        use acadrust::objects::{ImageDefinition, ObjectType, UnderlayDefinition};
+        let dir = xref_tmpdir("e2e");
+        let (mid_path, _) = write_nested_fixture(&dir);
+        std::fs::write(dir.join("img.png"), b"fake-png").unwrap();
+        let (mut doc, mid_key) =
+            xref_doc_with("MID", &mid_path.to_string_lossy());
+        // Referenced image → Loaded entry.
+        let img_h = doc.allocate_handle();
+        let mut img_def = ImageDefinition::with_dimensions("img.png", 8, 8);
+        img_def.handle = img_h;
+        doc.objects.insert(img_h, ObjectType::ImageDefinition(img_def));
+        let mut img = acadrust::entities::RasterImage::new(
+            "img.png",
+            acadrust::types::Vector3::ZERO,
+            8.0,
+            8.0,
+        );
+        img.definition_handle = Some(img_h);
+        doc.add_entity(acadrust::EntityType::RasterImage(img)).unwrap();
+        // Unreferenced PDF definition → listed, never merged.
+        let pdf_h = doc.allocate_handle();
+        let mut pdf_def = UnderlayDefinition::pdf("doc.pdf", "1");
+        pdf_def.handle = pdf_h;
+        doc.objects.insert(pdf_h, ObjectType::UnderlayDefinition(pdf_def));
+
+        let empty = std::collections::HashSet::new();
+        let no_prev = std::collections::HashMap::new();
+        // 1. List: everything visible with the right statuses.
+        let listed = collect_entries_with_prev(&doc, &dir, &empty, &no_prev);
+        assert!(listed.iter().any(|e| e.name == "MID" && e.status == RefStatus::Loaded));
+        assert!(listed.iter().any(|e| e.name == "INNER" && e.parent_key.is_some()));
+        assert!(listed.iter().any(|e| e.name == "img.png" && e.status == RefStatus::Loaded));
+        assert!(listed.iter().any(|e| e.name == "doc.pdf" && e.status == RefStatus::Unreferenced));
+        // 2. Unload: definition retained, content marked.
+        unload_reference(&mut doc, mid_key).expect("unload");
+        let mut unloaded = std::collections::HashSet::new();
+        unloaded.insert(crate::io::xref_model::UnloadKey::Direct(mid_key));
+        let listed = collect_entries_with_prev(&doc, &dir, &unloaded, &no_prev);
+        assert!(listed.iter().any(|e| e.name == "MID" && e.status == RefStatus::Unloaded));
+        assert!(doc.block_records.get("MID").is_some(), "definition retained");
+        // 3. Targeted reload: back to Loaded.
+        let mut handles = HashSet::default();
+        handles.insert(doc.block_records.get("MID").unwrap().handle);
+        let (infos, _) = resolve_xrefs_for_keys(&mut doc, &dir, &handles);
+        assert!(infos.iter().any(|i| i.name == "MID"));
+        let listed = collect_entries_with_prev(&doc, &dir, &empty, &no_prev);
+        assert!(listed.iter().any(|e| e.name == "MID" && e.status == RefStatus::Loaded));
+        // 4. Detach: instances, definition, and nested rows all gone.
+        detach_reference(&mut doc, mid_key).expect("detach");
+        let listed = collect_entries_with_prev(&doc, &dir, &empty, &no_prev);
+        assert!(!listed.iter().any(|e| e.name == "MID" || e.name == "INNER"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn nested_child_key_never_aliases_host() {
+        let host_key = 42u64;
+        let nested = child_key(100, "DETAIL", "refs/detail.dwg");
+        assert_ne!(nested, host_key);
+    }
+
+    #[test]
+    fn set_ref_path_stores_verbatim() {
+        let (mut doc, key) = xref_doc_with("PLAN", "old/path.dwg");
+        set_ref_path(&mut doc, key, "new\\raw path.dwg").expect("set path");
+        let br = doc.block_records.get("PLAN").unwrap();
+        assert_eq!(br.xref_path, "new\\raw path.dwg");
+    }
+
+    #[test]
+    fn apply_pathtype_across_drives_errors() {
+        let (mut doc, key) = xref_doc_with("PLAN", "D:/Lib/plan.dwg");
+        let host = std::path::Path::new("C:/Drawings/host.dwg");
+        let err = apply_pathtype(&mut doc, key, Pathtype::Relative, host).unwrap_err();
+        assert_eq!(err, "XREF: cannot make path relative across drives.");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn apply_pathtype_full_resolves_existing_relative_path() {
+        let (mut doc, key) = xref_doc_with("PLAN", "refs/plan.dwg");
+        let host = std::path::Path::new("C:/Drawings/host.dwg");
+        apply_pathtype(&mut doc, key, Pathtype::Full, host).expect("full path");
+        assert_eq!(
+            doc.block_records.get("PLAN").unwrap().xref_path,
+            "C:/Drawings/refs/plan.dwg"
+        );
+    }
+
+    #[test]
+    fn overlay_on_image_errors() {
+        use acadrust::objects::{ImageDefinition, ObjectType};
+        let mut doc = acadrust::CadDocument::new();
+        let h = doc.allocate_handle();
+        let mut def = ImageDefinition::with_dimensions("img.png", 8, 8);
+        def.handle = h;
+        doc.objects.insert(h, ObjectType::ImageDefinition(def));
+        let err = set_ref_type(&mut doc, h.value(), RefType::Overlay).unwrap_err();
+        assert_eq!(err, "XREF: overlays apply to drawing references only.");
+    }
+
+    #[test]
+    fn ref_type_attach_reachable_roundtrip() {
+        // F10: `set_ref_type(Attach)` (palette Type control, Attach
+        // direction) flips an overlay back to a full attach.
+        let (mut doc, key) = xref_doc_with("PLAN", "plan.dwg");
+        set_ref_type(&mut doc, key, RefType::Overlay).expect("to overlay");
+        assert!(doc.block_records.get("PLAN").unwrap().flags.is_xref_overlay);
+        let name = set_ref_type(&mut doc, key, RefType::Attach).expect("to attach");
+        assert_eq!(name, "PLAN");
+        let br = doc.block_records.get("PLAN").unwrap();
+        assert!(br.flags.is_xref && !br.flags.is_xref_overlay);
+    }
+
+    #[test]
+    fn unload_drops_merged_entities_keeps_definition() {
+        let (mut doc, key) = xref_doc_with("PLAN", "missing.dwg");
+        let br_h = doc.block_records.get("PLAN").unwrap().handle;
+        let mut line = acadrust::entities::Line::new();
+        line.common.handle = acadrust::types::Handle::NULL;
+        line.common.owner_handle = br_h;
+        doc.add_entity(acadrust::EntityType::Line(line)).unwrap();
+        assert_eq!(doc.block_records.get("PLAN").unwrap().entity_handles.len(), 1);
+        unload_reference(&mut doc, key).expect("unload");
+        assert!(doc.block_records.get("PLAN").is_some());
+        let owned: Vec<_> = doc
+            .entities()
+            .filter(|e| e.common().owner_handle == br_h)
+            .collect();
+        assert!(owned.is_empty());
+    }
+
+    #[test]
+    fn detach_erases_inserts_and_definition() {
+        let (mut doc, key) = xref_doc_with("PLAN", "missing.dwg");
+        let ins = acadrust::entities::Insert::new("PLAN", acadrust::types::Vector3::ZERO);
+        doc.add_entity(acadrust::EntityType::Insert(ins)).unwrap();
+        detach_reference(&mut doc, key).expect("detach");
+        assert!(doc.block_records.get("PLAN").is_none());
+        assert!(!doc.entities().any(|e| matches!(
+            e,
+            acadrust::EntityType::Insert(i) if i.block_name.eq_ignore_ascii_case("PLAN")
+        )));
+    }
+
+    #[test]
+    fn visretain_snapshot_restore_roundtrip() {
+        // VISRETAIN=1 reload path: host-side overrides on `name|*` layers
+        // must survive purge + re-merge. Exercises the mechanism directly:
+        // snapshot → mutate to defaults → restore → overrides back.
+        let (mut doc, _) = xref_doc_with("PLAN", "plan.dwg");
+        let mut layer = acadrust::tables::Layer::new("PLAN|WALLS");
+        layer.flags.off = true;
+        layer.flags.frozen = true;
+        layer.color = acadrust::types::Color::from_index(1);
+        doc.layers.add_or_replace(layer);
+        let kept = snapshot_dependent_layers(&doc, "PLAN");
+        assert!(kept.contains_key("PLAN|WALLS"));
+        // Simulate the purge + file-default re-merge.
+        doc.layers.remove("PLAN|WALLS");
+        doc.layers.add_or_replace(acadrust::tables::Layer::new("PLAN|WALLS"));
+        assert!(!doc.layers.get("PLAN|WALLS").unwrap().flags.off);
+        restore_dependent_layers(&mut doc, "PLAN", kept);
+        let back = doc.layers.get("PLAN|WALLS").unwrap();
+        assert!(back.flags.off, "off override restored");
+        assert!(back.flags.frozen, "frozen override restored");
+        assert_eq!(back.color, acadrust::types::Color::from_index(1));
+    }
+
+    #[test]
+    fn visretain_restore_ignores_deleted_layers() {
+        // Layers gone from the new file version stay gone — restore only
+        // touches entries present post-merge, never resurrects.
+        let (mut doc, _) = xref_doc_with("PLAN", "plan.dwg");
+        let mut layer = acadrust::tables::Layer::new("PLAN|GONE");
+        layer.flags.off = true;
+        doc.layers.add_or_replace(layer);
+        let kept = snapshot_dependent_layers(&doc, "PLAN");
+        doc.layers.remove("PLAN|GONE");
+        restore_dependent_layers(&mut doc, "PLAN", kept);
+        assert!(doc.layers.get("PLAN|GONE").is_none());
+    }
+
+    #[test]
+    fn replace_prefix_rewrites_all() {
+        let (mut doc, _) = xref_doc_with("PLAN", "refs/old/plan.dwg");
+        let n = replace_path_prefix(&mut doc, "refs/old", "refs/new");
+        assert_eq!(n, 1);
+        assert_eq!(
+            doc.block_records.get("PLAN").unwrap().xref_path,
+            "refs/new/plan.dwg"
+        );
+    }
+
+    #[test]
+    fn replace_prefix_dotdot_saved_path() {
+        // `..`-laden saved path normalizes to the old prefix; the splice must
+        // follow normalized components, not raw bytes.
+        let (mut doc, _) = xref_doc_with("PLAN", "refs/a/../old/plan.dwg");
+        let n = replace_path_prefix(&mut doc, "refs/old", "refs/new");
+        assert_eq!(n, 1);
+        assert_eq!(
+            doc.block_records.get("PLAN").unwrap().xref_path,
+            "refs/new/plan.dwg"
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn replace_prefix_case_folded_match() {
+        let (mut doc, _) = xref_doc_with("PLAN", "REFS/OLD/plan.dwg");
+        let n = replace_path_prefix(&mut doc, "refs/old", "refs/new");
+        assert_eq!(n, 1);
+        assert_eq!(
+            doc.block_records.get("PLAN").unwrap().xref_path,
+            "refs/new/plan.dwg"
+        );
+    }
+
+    #[test]
+    fn replace_prefix_multibyte_no_panic() {
+        // Old code cut the RAW string by `old.len()` bytes after matching on
+        // normalized forms — a normalized match with a shorter raw prefix
+        // panics on a mid-char cut. Component-wise rejoin never slices raw.
+        // Here old `a/` normalizes to `a`, which prefixes normalized
+        // `aé/x.dwg`; raw cut at 2 lands inside `é` → old code panicked.
+        let (mut doc, _) = xref_doc_with("PLAN", "aé/x.dwg");
+        let n = replace_path_prefix(&mut doc, "a/", "q/");
+        assert_eq!(n, 0);
+        assert_eq!(
+            doc.block_records.get("PLAN").unwrap().xref_path,
+            "aé/x.dwg"
+        );
+        let (mut doc2, _) = xref_doc_with("PLAN", "répértoire/old/plan.dwg");
+        let n2 = replace_path_prefix(&mut doc2, "répértoire/old", "répértoire/new");
+        assert_eq!(n2, 1);
+        assert_eq!(
+            doc2.block_records.get("PLAN").unwrap().xref_path,
+            "répértoire/new/plan.dwg"
+        );
+    }
+
+    #[test]
+    fn stale_only_after_cached_baseline() {
+        use std::collections::{HashMap, HashSet};
+        use std::time::{Duration, UNIX_EPOCH};
+        // No fs: drive decide_status directly via fabricated times is covered
+        // in xref_model; here assert the collect wrapper threads `prev`
+        // through without touching the filesystem (missing file → NotFound,
+        // never Stale even with a prev entry).
+        let (doc, key) = xref_doc_with("PLAN", "definitely-missing-xyz.dwg");
+        let mut prev: HashMap<u64, SystemTimeAlias> = HashMap::new();
+        prev.insert(key, UNIX_EPOCH + Duration::from_secs(1));
+        let entries = super::collect_entries_with_prev(
+            &doc,
+            std::path::Path::new("."),
+            &HashSet::new(),
+            &prev,
+        );
+        assert_eq!(entries[0].status, RefStatus::NotFound);
     }
 }

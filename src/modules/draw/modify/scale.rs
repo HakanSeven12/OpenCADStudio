@@ -179,12 +179,12 @@ impl CadCommand for ScaleCommand {
                     return Some(CmdResult::NeedPoint);
                 }
                 let factor: f64 = t.replace(',', ".").parse().ok()?;
-                (factor > 0.0).then(|| self.commit(base, factor))
+                (factor.is_finite() && factor > 0.0).then(|| self.commit(base, factor))
             }
             Step::RefFirst { base } => {
                 let base = *base;
                 let ref_dist: f64 = t.replace(',', ".").parse().ok()?;
-                if ref_dist > 0.0 {
+                if ref_dist.is_finite() && ref_dist > 0.0 {
                     self.step = Step::RefNew { base, ref_dist };
                     return Some(CmdResult::NeedPoint);
                 }
@@ -194,7 +194,8 @@ impl CadCommand for ScaleCommand {
             Step::RefNew { base, ref_dist } => {
                 let (base, ref_dist) = (*base, *ref_dist);
                 let new_len: f64 = t.replace(',', ".").parse().ok()?;
-                (new_len > 0.0).then(|| self.commit(base, new_len / ref_dist))
+                let factor = new_len / ref_dist;
+                (factor.is_finite() && factor > 0.0).then(|| self.commit(base, factor))
             }
             Step::Base => None,
         }

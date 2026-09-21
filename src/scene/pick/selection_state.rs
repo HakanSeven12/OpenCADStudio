@@ -30,9 +30,13 @@ pub struct SelectionState {
     pub poly_points: Vec<Point>,
     pub poly_crossing: bool,
     pub poly_last_crossing: bool,
+    /// Canvas position the right-click context menu is anchored at while it
+    /// is open. `None` = closed. Its rows are rebuilt from app state every
+    /// frame (`ui::popup::context_menu::build_context_menu`).
     pub context_menu: Option<Point>,
-    /// True while the context menu's Draw Order sub-items are expanded.
-    pub draworder_submenu: bool,
+    /// Transient UI state of the open context menu (expanded submenu,
+    /// keyboard highlight). Reset every time the menu opens.
+    pub context_menu_ui: ContextMenuUi,
     pub last_move_pos: Option<Point>,
     pub left_down: bool,
     pub left_press_pos: Option<Point>,
@@ -57,7 +61,31 @@ pub struct SelectionState {
     pub middle_last_press_time: Option<Instant>,
 }
 
+/// Transient state of the open right-click context menu.
+#[derive(Clone, Default)]
+pub struct ContextMenuUi {
+    /// The accordion submenu currently expanded (at most one).
+    pub open_submenu: Option<crate::ui::popup::context_menu::SubmenuId>,
+    /// Keyboard highlight as an index into `ContextMenu::selectable()`.
+    /// `None` until an arrow key / mnemonic is pressed, so a mouse user is
+    /// never shown a highlighted row that is not under the pointer.
+    pub highlighted: Option<usize>,
+}
+
 impl SelectionState {
+    /// Open the context menu at `at`, discarding the previous menu's
+    /// expanded-submenu / highlight state.
+    pub fn open_context_menu(&mut self, at: Point) {
+        self.context_menu = Some(at);
+        self.context_menu_ui = ContextMenuUi::default();
+    }
+
+    /// Close the context menu (no-op when it is not open).
+    pub fn close_context_menu(&mut self) {
+        self.context_menu = None;
+        self.context_menu_ui = ContextMenuUi::default();
+    }
+
     /// End every left-button selection gesture without disturbing the previous
     /// completed-window record or command-owned preview marquee. Grip editing
     /// owns the left button while engaged and calls this before/after placement

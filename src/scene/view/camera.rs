@@ -84,13 +84,6 @@ impl Default for Camera {
     }
 }
 
-pub const OPENGL_TO_WGPU: Mat4 = glam::mat4(
-    glam::vec4(1.0, 0.0, 0.0, 0.0),
-    glam::vec4(0.0, 1.0, 0.0, 0.0),
-    glam::vec4(0.0, 0.0, 0.5, 0.0),
-    glam::vec4(0.0, 0.0, 0.5, 1.0),
-);
-
 impl Camera {
     // ── Eye position ───────────────────────────────────────────────────────
 
@@ -238,13 +231,9 @@ impl Camera {
 
     /// Orthographic near/far that CENTRE the target plane at ndc-z ≈ 0.5.
     ///
-    /// The draw-order depth bias shifts clip-z by ±`DRAW_ORDER_BIAS` (0.001).
-    /// The old range (`near = distance*0.001`, `far = distance*1000`) parked the
-    /// geometry at ndc-z ≈ 0.001 — right on the near plane — so a front-biased
-    /// entity landed exactly at z = 0 and got clipped the moment f32 rounding
-    /// (worse at high zoom) tipped it past the plane, making the drawing vanish.
-    /// A symmetric range gives the bias half the depth buffer of headroom on
-    /// each side; ortho permits a negative near.
+    /// A symmetric range gives draw-order offsets headroom on each side and
+    /// keeps the target away from both clipping planes. The shared shader
+    /// bounds those offsets near either plane; ortho permits a negative near.
     fn ortho_depth_range(&self) -> (f32, f32) {
         // Generous headroom based on the current screen size so that rotating any
         // geometry visible on screen in 3D never penetrates the near/far planes.
@@ -296,7 +285,9 @@ impl Camera {
                 orthographic(-w, w, -h, h, near, far)
             }
         };
-        OPENGL_TO_WGPU * proj * view
+        // The DirectX projection functions already produce WebGPU's [0, 1]
+        // depth range. An OpenGL remap here would compress it to [0.5, 1].
+        proj * view
     }
 
     /// Project a world point to screen pixels with full f64 precision: the
@@ -654,44 +645,29 @@ impl Camera {
     /// Snap to a canonical view direction (called by ViewCubeSnap).
     /// `eye_dir` is the unit vector from the target toward the camera.
     ///
-    /// Up vector resolution:
-    ///  1. Take the current up.
-    ///  2. Pick the world axis (±X, ±Y, ±Z) whose dot product with the
-    ///     current up is highest — skipping any axis (anti-)parallel to
-    ///     the new gaze direction.
-    ///  3. Project that axis onto the plane ⊥ `new_eye` and use that as
-    ///     the new up.
-    ///
-    /// Result: small tilts collapse onto the nearest world axis (so the
-    /// view always lands cleanly aligned), while genuine flips of the
-    /// up-sense (e.g. orbited upside-down) are preserved.
+    /// Deterministic horizon: when looking close to ±Z (top/bottom) the
+    /// up is north (+Y), otherwise world up (+Z), projected onto the
+    /// plane ⊥ `new_eye`. This matches the turntable `orbit` (which never
+    /// banks) so a cube corner always lands with the same roll and the
+    /// base never appears rotated. The sign is flipped only if the
+    /// current view is intentionally upside-down, preserving that sense.
     pub fn snap_to_direction(&mut self, eye_dir: Vec3, ucs: glam::Mat4) {
         let new_eye = eye_dir.normalize_or(Vec3::Z);
-        let cur_up = self.rotation * Vec3::Y;
-        // Candidate up axes are the UCS axes, not world X/Y/Z, so a face snap
-        // lands the view square to the user's coordinate system (in-plane roll
-        // included). Identity `ucs` reproduces the world-aligned snap.
-        let ux = ucs.transform_vector3(Vec3::X).normalize_or(Vec3::X);
         let uy = ucs.transform_vector3(Vec3::Y).normalize_or(Vec3::Y);
         let uz = ucs.transform_vector3(Vec3::Z).normalize_or(Vec3::Z);
-        let cardinals = [ux, -ux, uy, -uy, uz, -uz];
-        let mut best_score = f32::NEG_INFINITY;
-        let mut best_up = uz;
-        for axis in cardinals {
-            // Skip axes (nearly) collinear with the new gaze — they can't
-            // serve as up because the projection onto the plane would
-            // vanish.
-            if axis.dot(new_eye).abs() > 0.999 {
-                continue;
-            }
-            let score = axis.dot(cur_up);
-            if score > best_score {
-                best_score = score;
-                best_up = axis;
-            }
-        }
-        // Project the chosen axis onto the plane ⊥ new_eye and normalize.
-        let projected = best_up - new_eye * best_up.dot(new_eye);
+        // Deterministic horizon: top/bottom views (eye ≈ ±Z) use north (+Y)
+        // as up; every other direction uses world up (+Z). This keeps the
+        // cube's "Top Front Right" etc. repeatable and aligned with the
+        // turntable orbit (which never banks), and avoids the previous
+        // adaptive choice that picked the nearest cardinal to the current
+        // up — from a top view that was +Y, so an oblique top corner kept
+        // Y as up and tilted the base (roll) instead of keeping the horizon
+        // level. Preserve the sign only to keep an intentionally inverted
+        // (upside-down) view inverted.
+        let cur_up = self.rotation * Vec3::Y;
+        let raw_ref = if new_eye.dot(uz).abs() > 0.9 { uy } else { uz };
+        let up_ref = if cur_up.dot(raw_ref) < 0.0 { -raw_ref } else { raw_ref };
+        let projected = up_ref - new_eye * up_ref.dot(new_eye);
         let new_up = projected.normalize_or(if new_eye.dot(uz).abs() < 0.99 {
             (uz - new_eye * uz.dot(new_eye)).normalize()
         } else {
@@ -761,7 +737,7 @@ impl Camera {
     // ── Internal helpers ───────────────────────────────────────────────────
 
     /// Derive yaw and pitch from the current quaternion.
-    fn sync_yaw_pitch(&mut self) {
+    pub(crate) fn sync_yaw_pitch(&mut self) {
         let eye_dir = self.rotation * Vec3::Z;
         self.pitch = eye_dir.z.clamp(-1.0, 1.0).asin();
         self.yaw = if eye_dir.x.abs() < 1e-6 && eye_dir.y.abs() < 1e-6 {
@@ -797,6 +773,40 @@ pub fn yaw_pitch_to_quat(yaw: f32, pitch: f32, roll: f32) -> Quat {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn projection_uses_the_webgpu_depth_range_once() {
+        let bounds = Rectangle::with_size(iced::Size::new(800., 600.));
+        for projection in [Projection::Orthographic, Projection::Perspective] {
+            let camera = Camera {
+                projection,
+                rotation: Quat::IDENTITY,
+                ..Camera::default()
+            };
+            let (near, far) = match projection {
+                Projection::Perspective => (camera.distance * 0.001, camera.distance * 1000.),
+                Projection::Orthographic => camera.ortho_depth_range(),
+            };
+            let matrix = camera.view_proj_rte(bounds);
+            let depth = |distance: f32| {
+                let clip = matrix * glam::vec4(0., 0., -distance, 1.);
+                clip.z / clip.w
+            };
+            assert!(depth(near).abs() < 1e-5, "{projection:?}: near must map to 0");
+            assert!(
+                (depth(far) - 1.).abs() < 1e-5,
+                "{projection:?}: far must map to 1"
+            );
+            assert!(
+                depth(near - (far - near) * 1e-7) < 0.,
+                "near clipping boundary moved"
+            );
+            assert!(depth(far * 2.) > 1., "far clipping boundary moved");
+            if projection == Projection::Orthographic {
+                assert!((depth(camera.distance) - 0.5).abs() < 1e-5);
+            }
+        }
+    }
 
     /// A drawing 140 units wide carrying one entity 800 km below its plane must
     /// still zoom to the 140 units — the outlier belongs to the depth range, not

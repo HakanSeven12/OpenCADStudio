@@ -80,19 +80,11 @@ impl ExternalPlugin {
 
     /// Returns whether the package's dependency fingerprint matches the host.
     pub fn acadrust_compatible(&self) -> bool {
-        if !ocs_plugin_api::version_info::uses_acadrust_gate(self.api_version) {
-            return true;
-        }
-        if !self.acadrust_declared {
-            return true;
-        }
-        match self.acadrust_source.as_deref() {
-            None | Some("") => false,
-            Some(source) => ocs_plugin_api::version_info::acadrust_sources_compatible(
-                source,
-                ocs_plugin_api::version_info::host_acadrust_source(),
-            ),
-        }
+        acadrust_source_compatible(
+            self.api_version,
+            self.acadrust_declared,
+            self.acadrust_source.as_deref(),
+        )
     }
 
     /// Returns whether the package's rustc matches the host.
@@ -117,6 +109,22 @@ impl ExternalPlugin {
             && self.rustc_compatible()
             && self.lib_present
     }
+}
+
+pub(crate) fn acadrust_source_compatible(
+    api_version: u32,
+    declared: bool,
+    source: Option<&str>,
+) -> bool {
+    !ocs_plugin_api::version_info::uses_acadrust_gate(api_version)
+        || declared
+            && source.is_some_and(|source| {
+                !source.is_empty()
+                    && ocs_plugin_api::version_info::acadrust_sources_compatible(
+                        source,
+                        ocs_plugin_api::version_info::host_acadrust_source(),
+                    )
+            })
 }
 
 /// `<config>/OpenCADStudio/plugins`, matching the settings/recent-files store.
@@ -643,7 +651,7 @@ rustc_version = "rustc 0.0.0-fake"
     }
 
     #[test]
-    fn undeclared_acadrust_falls_back_to_api_gate() {
+    fn undeclared_acadrust_is_incompatible_for_gated_api() {
         let toml = r#"
 [plugin]
 id = "opencad.test"
@@ -654,7 +662,8 @@ api_version = 4
         let p = parse_plugin_toml(toml).expect("parsed");
         assert!(!p.acadrust_declared);
         assert!(p.acadrust_source.is_none());
-        assert!(p.acadrust_compatible(), "undeclared acadrust is treated as compatible");
+        assert!(!p.acadrust_compatible());
+        assert!(!p.loadable());
     }
 
     #[test]

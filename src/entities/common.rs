@@ -283,6 +283,20 @@ fn surveyor(value_rad: f64, prec: usize) -> String {
 /// A leading `-` is a sign, but the `-` inside `5'-9"` is a separator — after
 /// feet there is nothing left to subtract from.
 pub fn parse_length(text: &str) -> Option<f64> {
+    parse_length_unbounded(text).filter(|value| typed_value_in_range(*value))
+}
+
+/// Largest magnitude a typed length or angle may have. Rust's float parser
+/// accepts `inf`, `nan` and overflowing exponents; geometry built from those,
+/// or from values whose differences overflow, breaks downstream tolerance and
+/// intersection math.
+pub const MAX_TYPED_MAGNITUDE: f64 = 1e15;
+
+pub fn typed_value_in_range(value: f64) -> bool {
+    value.is_finite() && value.abs() <= MAX_TYPED_MAGNITUDE
+}
+
+fn parse_length_unbounded(text: &str) -> Option<f64> {
     let text = text.trim();
     let (sign, rest) = match text.strip_prefix('-') {
         Some(rest) => (-1.0, rest.trim_start()),
@@ -339,6 +353,10 @@ fn parse_inches(text: &str) -> Option<f64> {
 /// number is read in whatever convention the drawing is set to, so what the
 /// readout shows can be typed straight back.
 pub fn parse_angle(text: &str) -> Option<f64> {
+    parse_angle_unbounded(text).filter(|value| typed_value_in_range(*value))
+}
+
+fn parse_angle_unbounded(text: &str) -> Option<f64> {
     let text = text.trim();
     if text.is_empty() {
         return None;
@@ -679,11 +697,16 @@ pub fn parse_f64(value: &str) -> Option<f64> {
         .ok()
         .or_else(|| parse_length(t))
         .or_else(|| parse_angle_deg(t))
+        .filter(|value| typed_value_in_range(*value))
 }
 
 /// Parse an angle string the panel displayed via AUNITS back to DEGREES:
 /// "30", "30°"/"30d", DMS "30°15'20.5\"", grads "33.33g", radians "0.52r".
 pub fn parse_angle_deg(value: &str) -> Option<f64> {
+    parse_angle_deg_unbounded(value).filter(|value| typed_value_in_range(*value))
+}
+
+fn parse_angle_deg_unbounded(value: &str) -> Option<f64> {
     let s = value.trim();
     if s.is_empty() {
         return None;
@@ -1158,6 +1181,24 @@ pub(crate) fn polyline_segment_fill(
             boundary[2 * segs_u + 1 - j] = [cx + ri * cos, cy + ri * sin];
         }
         Some(boundary)
+    }
+}
+
+#[cfg(test)]
+mod typed_range_tests {
+    use super::*;
+
+    #[test]
+    fn non_finite_and_huge_typed_values_are_rejected() {
+        for text in ["inf", "-inf", "nan", "1e400", "1e308"] {
+            assert_eq!(parse_length(text), None, "length {text}");
+            assert_eq!(parse_angle(text), None, "angle {text}");
+            assert_eq!(parse_f64(text), None, "property {text}");
+            assert_eq!(parse_angle_deg(text), None, "angle degrees {text}");
+        }
+        assert_eq!(parse_length("1e16"), None);
+        assert_eq!(parse_length("1e15"), Some(1e15));
+        assert_eq!(parse_length("-5'-6\""), Some(-66.0));
     }
 }
 

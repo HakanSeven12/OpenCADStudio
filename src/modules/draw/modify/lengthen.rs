@@ -61,8 +61,18 @@ impl CadCommand for LengthenCommand {
             LenState::Value(ValueMode::Delta) => format!("LENGTHEN  Enter delta length <{}>:", LENGTHEN_DEFAULTS.lock().unwrap().delta),
             LenState::Value(ValueMode::Total) => format!("LENGTHEN  Enter total length <{}>:", LENGTHEN_DEFAULTS.lock().unwrap().total),
             LenState::Value(ValueMode::Percent) => format!("LENGTHEN  Enter percentage length <{}>:", LENGTHEN_DEFAULTS.lock().unwrap().percent),
-            LenState::Value(ValueMode::DeltaAngle) => format!("LENGTHEN  Enter delta angle <{}>:", LENGTHEN_DEFAULTS.lock().unwrap().delta_angle),
-            LenState::Value(ValueMode::TotalAngle) => format!("LENGTHEN  Enter total angle <{}>:", LENGTHEN_DEFAULTS.lock().unwrap().total_angle),
+            LenState::Value(ValueMode::DeltaAngle) => format!(
+                "LENGTHEN  Enter delta angle <{}>:",
+                crate::entities::common::format_angle(
+                    LENGTHEN_DEFAULTS.lock().unwrap().delta_angle.to_radians(),
+                )
+            ),
+            LenState::Value(ValueMode::TotalAngle) => format!(
+                "LENGTHEN  Enter total angle <{}>:",
+                crate::entities::common::format_angle(
+                    LENGTHEN_DEFAULTS.lock().unwrap().total_angle.to_radians(),
+                )
+            ),
             LenState::DynamicPoint { .. } => "LENGTHEN  Specify new end point:".into(),
             LenState::Apply(_) | LenState::DynamicPick | LenState::Value(ValueMode::Dynamic) => t!("LENGTHEN  Select an object to change or [Undo]:").into_owned(),
         }
@@ -146,7 +156,13 @@ impl CadCommand for LengthenCommand {
             };
             return Some(CmdResult::NeedPoint);
         }
-        let Some(value) = upper.replace(',', ".").parse::<f64>().ok().filter(|v| v.is_finite()) else {
+        let angle_mode = matches!(mode, ValueMode::DeltaAngle | ValueMode::TotalAngle);
+        let parsed = if angle_mode {
+            crate::entities::common::parse_typed_angle(&upper).map(f64::to_degrees)
+        } else {
+            upper.replace(',', ".").parse::<f64>().ok()
+        };
+        let Some(value) = parsed.filter(|v| v.is_finite()) else {
             return Some(CmdResult::NeedPoint);
         };
         if !matches!(mode, ValueMode::Delta | ValueMode::DeltaAngle) && value <= 0.0 { return Some(CmdResult::NeedPoint); }
@@ -201,7 +217,12 @@ impl CadCommand for LengthenCommand {
                     match mode { ValueMode::Delta => defaults.delta, ValueMode::Total => defaults.total, ValueMode::Percent => defaults.percent,
                         ValueMode::DeltaAngle => defaults.delta_angle, ValueMode::TotalAngle => defaults.total_angle, ValueMode::Dynamic => 0.0 }
                 };
-                self.on_text_input(&value.to_string()).unwrap_or(CmdResult::NeedPoint)
+                let text = if matches!(mode, ValueMode::DeltaAngle | ValueMode::TotalAngle) {
+                    format!("{value}d")
+                } else {
+                    value.to_string()
+                };
+                self.on_text_input(&text).unwrap_or(CmdResult::NeedPoint)
             }
             _ => CmdResult::Cancel,
         }

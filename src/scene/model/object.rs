@@ -14,6 +14,9 @@ pub enum PropValue {
     EditText(String),
     /// Editable text that must not be expression-evaluated.
     PlainText(String),
+    /// Hyperlink collection summary. The value is display-only in the row;
+    /// the adjacent collection button opens the URL/description editor.
+    Hyperlink(String),
     /// Layer name — rendered as a combo_box.
     LayerChoice(String),
     /// Generic string choice rendered as a combo_box.

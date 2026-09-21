@@ -151,8 +151,8 @@ impl CadCommand for TorientCommand {
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if let Step::AngleOrFirstPoint = self.step {
-            let deg: f64 = text.trim().replace(',', ".").parse().ok()?;
-            Some(self.commit_angle(Some(deg.to_radians())))
+            let angle = crate::entities::common::parse_typed_angle(text)?;
+            Some(self.commit_angle(Some(angle)))
         } else {
             None
         }

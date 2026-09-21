@@ -1,6 +1,10 @@
-// IMAGE / IMAGEATTACH command — place a raster image in the drawing.
+// IMAGE / IMAGEEMBED commands — place a raster image in the drawing.
 //
-// Workflow:
+// IMAGE references the picture by path (RasterImage + ImageDefinition);
+// IMAGEEMBED packs the encoded raster inside the
+// drawing as an OLE2FRAME so the .dwg travels alone.
+//
+// Workflow (both commands):
 //   1. File dialog opens (async, handled in update.rs).
 //   2. User picks insertion point (first click).
 //   3. User drags to pick width; height is computed from the image's aspect ratio.
@@ -13,10 +17,22 @@ use glam::DVec3;
 use crate::t;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
+use crate::io::ole_embed::{build_embedded_ole, corners_from_placement, EmbeddedImage};
 use crate::scene::model::wire_model::WireModel;
 
+/// Where the picture's pixels come from.
+#[derive(Clone)]
+pub enum ImageSource {
+    /// Reference by path — the drawing stores the file location.
+    File(String),
+    /// Embedded — the encoded raster travels inside the drawing.
+    Embedded(EmbeddedImage),
+}
+
 pub struct ImageCommand {
-    file_path: String,
+    source: ImageSource,
+    /// CLI name: "IMAGE" for a path reference, "IMAGEEMBED" when embedded.
+    name: &'static str,
     pixel_width: u32,
     pixel_height: u32,
     origin: Option<DVec3>,
@@ -26,11 +42,31 @@ pub struct ImageCommand {
 impl ImageCommand {
     pub fn new(file_path: String, pixel_width: u32, pixel_height: u32) -> Self {
         Self {
-            file_path,
+            source: ImageSource::File(file_path),
+            name: "IMAGE",
             pixel_width,
             pixel_height,
             origin: None,
             plane: WorkingPlane::default(),
+        }
+    }
+
+    pub fn new_embedded(image: EmbeddedImage) -> Self {
+        let (pixel_width, pixel_height) = (image.pixel_width, image.pixel_height);
+        Self {
+            source: ImageSource::Embedded(image),
+            name: "IMAGEEMBED",
+            pixel_width,
+            pixel_height,
+            origin: None,
+            plane: WorkingPlane::default(),
+        }
+    }
+
+    fn source_name(&self) -> std::borrow::Cow<'_, str> {
+        match &self.source {
+            ImageSource::File(path) => std::borrow::Cow::Borrowed(short_name(path)),
+            ImageSource::Embedded(image) => std::borrow::Cow::Owned(image.name.clone()),
         }
     }
 
@@ -46,21 +82,30 @@ impl ImageCommand {
         let origin = self.plane.to_local(origin);
         let width_pt = self.plane.to_local(width_pt);
         let world_width = (width_pt.x - origin.x).abs().max(0.001);
-        let world_height = world_width / self.aspect();
-
         let ins = Vector3::new(origin.x, origin.y, origin.z);
 
-        let mut img = RasterImage::with_size(
-            &self.file_path,
-            ins,
-            self.pixel_width as f64,
-            self.pixel_height as f64,
-            world_width,
-            world_height,
-        );
-        img.flags = acadrust::entities::ImageDisplayFlags::SHOW_IMAGE
-            | acadrust::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
-        self.plane.place_entity(EntityType::RasterImage(img))
+        match &self.source {
+            ImageSource::File(path) => {
+                let world_height = world_width / self.aspect();
+                let mut img = RasterImage::with_size(
+                    path,
+                    ins,
+                    self.pixel_width as f64,
+                    self.pixel_height as f64,
+                    world_width,
+                    world_height,
+                );
+                img.flags = acadrust::entities::ImageDisplayFlags::SHOW_IMAGE
+                    | acadrust::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
+                self.plane.place_entity(EntityType::RasterImage(img))
+            }
+            ImageSource::Embedded(image) => {
+                let (upper_left, lower_right) =
+                    corners_from_placement(ins, world_width, self.aspect());
+                let ole = build_embedded_ole(image, upper_left, lower_right);
+                self.plane.place_entity(EntityType::Ole2Frame(ole))
+            }
+        }
     }
 }
 
@@ -70,14 +115,14 @@ impl CadCommand for ImageCommand {
     }
 
     fn name(&self) -> &'static str {
-        "IMAGE"
+        self.name
     }
 
     fn prompt(&self) -> String {
         if self.origin.is_none() {
             t!(
                 "IMAGE  Specify insertion point (%{name}):  ",
-                name = short_name(&self.file_path)
+                name = self.source_name()
             )
             .into_owned()
         } else {

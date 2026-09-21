@@ -274,7 +274,7 @@ fn end_angle_from_chord_len(start_angle: f64, chord: f64, r: f64) -> Option<f64>
 
 // ── Command 1: Center, Start, End ─────────────────────────────────────────
 
-pub struct ArcCommand {
+pub struct ArcCSECommand {
     step: u8,
     c: DVec3,
     r: f64,
@@ -283,7 +283,7 @@ pub struct ArcCommand {
     plane: WorkingPlane,
 }
 
-impl ArcCommand {
+impl ArcCSECommand {
     pub fn new() -> Self {
         Self {
             step: 0,
@@ -296,7 +296,7 @@ impl ArcCommand {
     }
 }
 
-impl CadCommand for ArcCommand {
+impl CadCommand for ArcCSECommand {
     fn set_working_plane(&mut self, plane: WorkingPlane) {
         self.plane = plane;
     }
@@ -407,6 +407,443 @@ impl CadCommand for ArcCommand {
                 }
             }
             _ => None,
+        }
+    }
+}
+
+// ── ARC: compatible prompt flow ───────────────────────────────────────────
+//
+// The plain ARC command follows the prompts of commercial solutions, so every keyword a user
+// knows is there at the same step:
+//   Specify start point of arc or [Center]
+//   Specify second point of arc or [Center/End]
+//   Specify end point of arc
+//   … after Center: Specify end point of arc or [Angle/chord Length]
+//   … after End:    Specify center point of arc or [Angle/Direction/Radius]
+// Enter at the start prompt continues tangent from the last line/arc.
+// Holding Ctrl flips the sweep direction where it is not fixed by the picks.
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ArcStep {
+    Start,
+    Second { s: DVec3 },
+    End3 { s: DVec3, m: DVec3 },
+    CenterFirst,
+    StartAfterCenter { c: DVec3 },
+    CenterAfterStart { s: DVec3 },
+    /// Start and centre known: end point [Angle / chord Length].
+    EndSC { s: DVec3, c: DVec3 },
+    AngleSC { s: DVec3, c: DVec3 },
+    LengthSC { s: DVec3, c: DVec3 },
+    EndAfterStart { s: DVec3 },
+    /// Start and end known: centre point [Angle / Direction / Radius].
+    CenterSE { s: DVec3, e: DVec3 },
+    AngleSE { s: DVec3, e: DVec3 },
+    DirectionSE { s: DVec3, e: DVec3 },
+    RadiusSE { s: DVec3, e: DVec3 },
+}
+
+pub struct ArcCommand {
+    step: ArcStep,
+    cw: bool,
+    plane: WorkingPlane,
+}
+
+impl ArcCommand {
+    pub fn new() -> Self {
+        Self {
+            step: ArcStep::Start,
+            cw: false,
+            plane: WorkingPlane::default(),
+        }
+    }
+
+    /// Arc about `c` from `s` towards the direction of `e` (Ctrl flips).
+    fn sc_end(&self, s: DVec3, c: DVec3, e: DVec3) -> Option<(DVec3, f64, f64, f64)> {
+        let r = c.distance(s);
+        if r < 1e-9 {
+            return None;
+        }
+        let sa = angle_xy(c, s, self.plane);
+        let ea = angle_xy(c, e, self.plane);
+        Some(if self.cw { (c, r, ea, sa) } else { (c, r, sa, ea) })
+    }
+
+    /// Arc about `c` from `s` sweeping the signed `span` (radians, CCW > 0).
+    fn sc_angle(&self, s: DVec3, c: DVec3, span: f64) -> Option<(DVec3, f64, f64, f64)> {
+        let r = c.distance(s);
+        if r < 1e-9 || span.abs() < 1e-9 {
+            return None;
+        }
+        let sa = angle_xy(c, s, self.plane);
+        let ea = sa + span;
+        Some(if span < 0.0 { (c, r, ea, sa) } else { (c, r, sa, ea) })
+    }
+
+    /// Arc about `c` from `s` with chord `len` (Ctrl flips).
+    fn sc_length(&self, s: DVec3, c: DVec3, len: f64) -> Option<(DVec3, f64, f64, f64)> {
+        let r = c.distance(s);
+        if r < 1e-9 || len == 0.0 {
+            return None;
+        }
+        let sa = angle_xy(c, s, self.plane);
+        let ea = end_angle_from_chord_len(sa, len, r)?;
+        Some(if self.cw { (c, r, ea, sa) } else { (c, r, sa, ea) })
+    }
+
+    /// Sweep from `s` to the cursor about `c`, going the way Ctrl says.
+    fn cursor_span(&self, s: DVec3, c: DVec3, cursor: DVec3) -> f64 {
+        let span = (angle_xy(c, cursor, self.plane) - angle_xy(c, s, self.plane)).rem_euclid(TAU);
+        if self.cw {
+            span - TAU
+        } else {
+            span
+        }
+    }
+
+    fn typed_number(text: &str) -> Option<f64> {
+        crate::entities::common::parse_typed_length(text.trim())
+    }
+
+    fn typed_angle(text: &str) -> Option<f64> {
+        crate::entities::common::parse_typed_angle(text.trim())
+    }
+
+    fn commit(&self, arc: Option<(DVec3, f64, f64, f64)>) -> CmdResult {
+        match arc {
+            Some((c, r, sa, ea)) => arc_result(c, r, sa, ea, self.plane),
+            None => CmdResult::NeedPoint,
+        }
+    }
+
+    fn preview(&self, arc: Option<(DVec3, f64, f64, f64)>, fallback: WireModel) -> Option<WireModel> {
+        match arc {
+            Some((c, r, sa, ea)) => arc_preview(c, r, sa, ea, self.plane).or(Some(fallback)),
+            None => Some(fallback),
+        }
+    }
+}
+
+impl CadCommand for ArcCommand {
+    fn set_working_plane(&mut self, plane: WorkingPlane) {
+        self.plane = plane;
+    }
+    fn set_ctrl(&mut self, ctrl: bool) {
+        self.cw = ctrl;
+    }
+
+    fn name(&self) -> &'static str {
+        "ARC"
+    }
+
+    fn prompt(&self) -> String {
+        match self.step {
+            ArcStep::Start => t!("ARC  Specify start point of arc:"),
+            ArcStep::Second { .. } => t!("ARC  Specify second point of arc:"),
+            ArcStep::End3 { .. } | ArcStep::EndSC { .. } | ArcStep::EndAfterStart { .. } => {
+                t!("ARC  Specify end point of arc:")
+            }
+            ArcStep::CenterFirst | ArcStep::CenterAfterStart { .. } | ArcStep::CenterSE { .. } => {
+                t!("ARC  Specify center point of arc:")
+            }
+            ArcStep::StartAfterCenter { .. } => t!("ARC  Specify start point of arc:"),
+            ArcStep::AngleSC { .. } | ArcStep::AngleSE { .. } => t!("ARC  Specify included angle:"),
+            ArcStep::LengthSC { .. } => t!("ARC  Specify length of chord:"),
+            ArcStep::DirectionSE { .. } => {
+                t!("ARC  Specify tangent direction for the start point of arc:")
+            }
+            ArcStep::RadiusSE { .. } => t!("ARC  Specify radius of arc:"),
+        }
+        .into_owned()
+    }
+
+    fn options(&self) -> Vec<crate::command::CmdOption> {
+        use crate::command::CmdOption;
+        match self.step {
+            ArcStep::Start => vec![CmdOption::new("Center", "C")],
+            ArcStep::Second { .. } => vec![CmdOption::new("Center", "C"), CmdOption::new("End", "E")],
+            ArcStep::EndSC { .. } => vec![
+                CmdOption::new("Angle", "A"),
+                CmdOption::new("chord Length", "L"),
+            ],
+            ArcStep::CenterSE { .. } => vec![
+                CmdOption::new("Angle", "A"),
+                CmdOption::new("Direction", "D"),
+                CmdOption::new("Radius", "R"),
+            ],
+            _ => Vec::new(),
+        }
+    }
+
+    fn wants_text_input(&self) -> bool {
+        !matches!(
+            self.step,
+            ArcStep::End3 { .. }
+                | ArcStep::CenterFirst
+                | ArcStep::StartAfterCenter { .. }
+                | ArcStep::CenterAfterStart { .. }
+                | ArcStep::EndAfterStart { .. }
+        )
+    }
+
+    fn point_step_accepts_keywords(&self) -> bool {
+        matches!(
+            self.step,
+            ArcStep::Start | ArcStep::Second { .. } | ArcStep::EndSC { .. } | ArcStep::CenterSE { .. }
+        )
+    }
+
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        match self.step {
+            ArcStep::Start => {
+                self.step = ArcStep::Second { s: pt };
+                CmdResult::NeedPoint
+            }
+            ArcStep::Second { s } => {
+                self.step = ArcStep::End3 { s, m: pt };
+                CmdResult::NeedPoint
+            }
+            ArcStep::End3 { s, m } => match arc_through_points(s, m, pt, self.plane) {
+                Some((c, r, sa, ea)) => arc_result(c, r, sa, ea, self.plane),
+                None => CmdResult::NeedPoint,
+            },
+            ArcStep::CenterFirst => {
+                self.step = ArcStep::StartAfterCenter { c: pt };
+                CmdResult::NeedPoint
+            }
+            ArcStep::StartAfterCenter { c } => {
+                self.step = ArcStep::EndSC { s: pt, c };
+                CmdResult::NeedPoint
+            }
+            ArcStep::CenterAfterStart { s } => {
+                self.step = ArcStep::EndSC { s, c: pt };
+                CmdResult::NeedPoint
+            }
+            ArcStep::EndSC { s, c } => self.commit(self.sc_end(s, c, pt)),
+            // At a typed prompt a pick reads as commercial solutions do: the cursor's
+            // direction from the centre (angle) or its distance (length,
+            // radius), the cursor itself for a direction / sagitta.
+            ArcStep::AngleSC { s, c } => {
+                let span = self.cursor_span(s, c, pt);
+                self.commit(self.sc_angle(s, c, span))
+            }
+            ArcStep::LengthSC { s, c } => self.commit(self.sc_length(s, c, s.distance(pt))),
+            ArcStep::EndAfterStart { s } => {
+                self.step = ArcStep::CenterSE { s, e: pt };
+                CmdResult::NeedPoint
+            }
+            ArcStep::CenterSE { s, e } => self.commit(self.sc_end(s, pt, e)),
+            ArcStep::AngleSE { s, e } => {
+                self.commit(arc_from_sagitta(s, e, pt, self.cw, self.plane))
+            }
+            ArcStep::DirectionSE { s, e } => {
+                self.commit(arc_continue(s, pt - s, e, self.cw, self.plane))
+            }
+            ArcStep::RadiusSE { s, e } => {
+                self.commit(arc_from_se_radius(s, e, pt, self.cw, self.plane))
+            }
+        }
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        let upper = text.trim().to_uppercase();
+        match self.step {
+            ArcStep::Start => match upper.as_str() {
+                "C" | "CE" | "CENTER" | "CENTRE" => {
+                    self.step = ArcStep::CenterFirst;
+                    Some(CmdResult::NeedPoint)
+                }
+                _ => None,
+            },
+            ArcStep::Second { s } => match upper.as_str() {
+                "C" | "CE" | "CENTER" | "CENTRE" => {
+                    self.step = ArcStep::CenterAfterStart { s };
+                    Some(CmdResult::NeedPoint)
+                }
+                "E" | "END" => {
+                    self.step = ArcStep::EndAfterStart { s };
+                    Some(CmdResult::NeedPoint)
+                }
+                _ => None,
+            },
+            ArcStep::EndSC { s, c } => match upper.as_str() {
+                "A" | "ANGLE" => {
+                    self.step = ArcStep::AngleSC { s, c };
+                    Some(CmdResult::NeedPoint)
+                }
+                "L" | "LENGTH" => {
+                    self.step = ArcStep::LengthSC { s, c };
+                    Some(CmdResult::NeedPoint)
+                }
+                _ => None,
+            },
+            ArcStep::CenterSE { s, e } => match upper.as_str() {
+                "A" | "ANGLE" => {
+                    self.step = ArcStep::AngleSE { s, e };
+                    Some(CmdResult::NeedPoint)
+                }
+                "D" | "DIRECTION" => {
+                    self.step = ArcStep::DirectionSE { s, e };
+                    Some(CmdResult::NeedPoint)
+                }
+                "R" | "RADIUS" => {
+                    self.step = ArcStep::RadiusSE { s, e };
+                    Some(CmdResult::NeedPoint)
+                }
+                _ => None,
+            },
+            ArcStep::AngleSC { s, c } => {
+                let mut span = Self::typed_angle(text)?;
+                if self.cw {
+                    span = -span;
+                }
+                Some(self.commit(self.sc_angle(s, c, span)))
+            }
+            ArcStep::LengthSC { s, c } => {
+                let len = Self::typed_number(text)?;
+                Some(self.commit(self.sc_length(s, c, len)))
+            }
+            ArcStep::AngleSE { s, e } => {
+                let mut included = Self::typed_angle(text)?;
+                if self.cw {
+                    included = -included;
+                }
+                Some(self.commit(arc_from_endpoints_angle(s, e, included, self.plane)))
+            }
+            ArcStep::DirectionSE { s, e } => {
+                let angle = Self::typed_angle(text)?;
+                let tangent = self.plane.x * angle.cos() + self.plane.y * angle.sin();
+                Some(self.commit(arc_continue(s, tangent, e, self.cw, self.plane)))
+            }
+            ArcStep::RadiusSE { s, e } => {
+                let r = Self::typed_number(text)?;
+                Some(self.commit(arc_from_endpoints_radius(s, e, r, self.cw, self.plane)))
+            }
+            _ => None,
+        }
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        match self.step {
+            // Enter at the start prompt: continue tangent from the last
+            // line or arc, as commercial solutions do.
+            ArcStep::Start => CmdResult::Dispatch("ARC_CONT".into()),
+            _ => CmdResult::Cancel,
+        }
+    }
+    fn enter_accepts_default_start(&self) -> bool {
+        false
+    }
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+
+    fn dyn_field(&self) -> crate::command::DynField {
+        use crate::command::DynField;
+        match self.step {
+            ArcStep::AngleSC { .. } | ArcStep::AngleSE { .. } | ArcStep::DirectionSE { .. } => {
+                DynField::Angle
+            }
+            ArcStep::LengthSC { .. } | ArcStep::RadiusSE { .. } => DynField::Distance,
+            _ => DynField::Point,
+        }
+    }
+
+    fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
+        use crate::command::{DynAnchor, DynFieldSpec, DynGuide, DynRole, DynSpec};
+        match self.step {
+            ArcStep::AngleSC { s, c } => Some(DynSpec {
+                anchor: DynAnchor::Point(c),
+                fields: vec![DynFieldSpec::new(DynRole::Angle)],
+                guide: DynGuide::Polar,
+                ref_point: Some(s),
+            }),
+            ArcStep::LengthSC { s, .. } => Some(DynSpec {
+                anchor: DynAnchor::Point(s),
+                fields: vec![DynFieldSpec::new(DynRole::Distance)],
+                guide: DynGuide::Radius,
+                ref_point: None,
+            }),
+            ArcStep::AngleSE { s, e } => Some(DynSpec {
+                anchor: DynAnchor::Point((s + e) * 0.5),
+                fields: vec![DynFieldSpec::new(DynRole::Angle)],
+                guide: DynGuide::None,
+                ref_point: Some(s),
+            }),
+            ArcStep::DirectionSE { s, .. } => Some(DynSpec {
+                anchor: DynAnchor::Point(s),
+                fields: vec![DynFieldSpec::new(DynRole::Angle)],
+                guide: DynGuide::Polar,
+                ref_point: Some(s + self.plane.x),
+            }),
+            ArcStep::RadiusSE { s, .. } => Some(DynSpec {
+                anchor: DynAnchor::Point(s),
+                fields: vec![DynFieldSpec::new(DynRole::Radius)],
+                guide: DynGuide::None,
+                ref_point: None,
+            }),
+            _ => None,
+        }
+    }
+
+    fn dyn_commit_as_text(&self) -> bool {
+        matches!(
+            self.step,
+            ArcStep::AngleSC { .. }
+                | ArcStep::LengthSC { .. }
+                | ArcStep::AngleSE { .. }
+                | ArcStep::DirectionSE { .. }
+                | ArcStep::RadiusSE { .. }
+        )
+    }
+
+    fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
+        match self.step {
+            ArcStep::AngleSC { s, c } => Some(crate::command::dyn_display_angle_deg(
+                (angle_xy(c, cursor, self.plane) - angle_xy(c, s, self.plane)) as f32,
+            ) as f64),
+            ArcStep::LengthSC { s, .. } => Some(s.distance(cursor)),
+            ArcStep::RadiusSE { s, e } => {
+                arc_from_se_radius(s, e, cursor, self.cw, self.plane).map(|(_, r, _, _)| r)
+            }
+            _ => None,
+        }
+    }
+
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
+        match self.step {
+            ArcStep::Start | ArcStep::CenterFirst => None,
+            ArcStep::Second { s } | ArcStep::EndAfterStart { s } | ArcStep::CenterAfterStart { s } => {
+                Some(line_wire(s, pt))
+            }
+            ArcStep::StartAfterCenter { c } => Some(line_wire(c, pt)),
+            ArcStep::End3 { s, m } => {
+                let fallback = WireModel::solid_f64(
+                    "rubber_band".into(),
+                    vec![[s.x, s.y, s.z], [m.x, m.y, m.z], [pt.x, pt.y, pt.z]],
+                    WireModel::CYAN,
+                    false,
+                );
+                self.preview(arc_through_points(s, m, pt, self.plane), fallback)
+            }
+            ArcStep::EndSC { s, c } => self.preview(self.sc_end(s, c, pt), line_wire(c, pt)),
+            ArcStep::AngleSC { s, c } => {
+                let span = self.cursor_span(s, c, pt);
+                self.preview(self.sc_angle(s, c, span), line_wire(c, pt))
+            }
+            ArcStep::LengthSC { s, c } => {
+                self.preview(self.sc_length(s, c, s.distance(pt)), line_wire(s, pt))
+            }
+            ArcStep::CenterSE { s, e } => self.preview(self.sc_end(s, pt, e), line_wire(s, e)),
+            ArcStep::AngleSE { s, e } => {
+                self.preview(arc_from_sagitta(s, e, pt, self.cw, self.plane), line_wire(s, e))
+            }
+            ArcStep::DirectionSE { s, e } => {
+                self.preview(arc_continue(s, pt - s, e, self.cw, self.plane), line_wire(s, e))
+            }
+            ArcStep::RadiusSE { s, e } => {
+                self.preview(arc_from_se_radius(s, e, pt, self.cw, self.plane), line_wire(s, e))
+            }
         }
     }
 }
@@ -677,11 +1114,11 @@ impl CadCommand for ArcSCACommand {
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if self.step == 2 {
-            let mut span: f64 = text.trim().replace(',', ".").parse().ok()?;
+            let mut span = crate::entities::common::parse_typed_angle(text)?;
             if self.cw {
                 span = -span;
             }
-            let ea = self.sa + span.to_radians();
+            let ea = self.sa + span;
             return Some(if span < 0.0 {
                 arc_result(self.c, self.r, ea, self.sa, self.plane)
             } else {
@@ -939,7 +1376,7 @@ impl CadCommand for ArcSEACommand {
         if self.step != 2 {
             return None;
         }
-        let mut included = text.trim().replace(',', ".").parse::<f64>().ok()?.to_radians();
+        let mut included = crate::entities::common::parse_typed_angle(text)?;
         if self.ctrl {
             included = -included;
         }
@@ -1166,7 +1603,7 @@ impl CadCommand for ArcSEDCommand {
         if self.step != 2 {
             return None;
         }
-        let angle = text.trim().replace(',', ".").parse::<f64>().ok()?.to_radians();
+        let angle = crate::entities::common::parse_typed_angle(text)?;
         let tangent = self.plane.x * angle.cos() + self.plane.y * angle.sin();
         let (center, radius, sa, ea) =
             arc_continue(self.s, tangent, self.e, self.ctrl, self.plane)?;
@@ -1285,11 +1722,11 @@ impl CadCommand for ArcCSACommand {
     }
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if self.step == 2 {
-            let mut span: f64 = text.trim().replace(',', ".").parse().ok()?;
+            let mut span = crate::entities::common::parse_typed_angle(text)?;
             if self.cw {
                 span = -span;
             }
-            let ea = self.sa + span.to_radians();
+            let ea = self.sa + span;
             return Some(if span < 0.0 {
                 arc_result(self.c, self.r, ea, self.sa, self.plane)
             } else {
@@ -1531,7 +1968,7 @@ impl CadCommand for ArcContCommand {
 inventory::submit!(crate::command::CommandRegistration { names: &["ARC", "ARC_3P"] });  // Arc3PCommand
 inventory::submit!(crate::command::CommandRegistration { names: &["ARC_CSA"] });  // ArcCSACommand
 inventory::submit!(crate::command::CommandRegistration { names: &["ARC_CSL"] });  // ArcCSLCommand
-inventory::submit!(crate::command::CommandRegistration { names: &["ARC_CSE"] });  // ArcCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["ARC_CSE"] });  // ArcCSECommand
 inventory::submit!(crate::command::CommandRegistration { names: &["ARC_SCA"] });  // ArcSCACommand
 inventory::submit!(crate::command::CommandRegistration { names: &["ARC_SCE"] });  // ArcSCECommand
 inventory::submit!(crate::command::CommandRegistration { names: &["ARC_SCL"] });  // ArcSCLCommand
@@ -1539,3 +1976,126 @@ inventory::submit!(crate::command::CommandRegistration { names: &["ARC_SEA"] });
 inventory::submit!(crate::command::CommandRegistration { names: &["ARC_SED"] });  // ArcSEDCommand
 inventory::submit!(crate::command::CommandRegistration { names: &["ARC_SER"] });  // ArcSERCommand
 inventory::submit!(crate::command::CommandRegistration { names: &["ARC_CONT"] });  // ArcContCommand
+
+#[cfg(test)]
+mod acad_flow_tests {
+    use super::*;
+
+    fn keywords(cmd: &ArcCommand) -> Vec<String> {
+        cmd.options().into_iter().map(|o| o.keyword).collect()
+    }
+
+    fn p(x: f64, y: f64) -> DVec3 {
+        DVec3::new(x, y, 0.0)
+    }
+
+    fn committed_arc(res: CmdResult) -> CadArc {
+        match res {
+            CmdResult::CommitAndExit(EntityType::Arc(a)) => a,
+            _ => panic!("expected a committed arc"),
+        }
+    }
+
+    #[test]
+    fn prompts_follow_compatible_keywords() {
+        let mut cmd = ArcCommand::new();
+        assert_eq!(keywords(&cmd), ["C"]);
+        cmd.on_point(p(0.0, 0.0));
+        assert_eq!(keywords(&cmd), ["C", "E"]);
+        assert!(matches!(cmd.on_text_input("C"), Some(CmdResult::NeedPoint)));
+        assert!(keywords(&cmd).is_empty(), "centre pick has no keywords");
+        cmd.on_point(p(5.0, 0.0));
+        assert_eq!(keywords(&cmd), ["A", "L"]);
+
+        let mut cmd = ArcCommand::new();
+        cmd.on_point(p(0.0, 0.0));
+        cmd.on_text_input("E");
+        cmd.on_point(p(10.0, 0.0));
+        assert_eq!(keywords(&cmd), ["A", "D", "R"]);
+    }
+
+    #[test]
+    fn three_points_make_an_arc() {
+        let mut cmd = ArcCommand::new();
+        cmd.on_point(p(0.0, 0.0));
+        cmd.on_point(p(5.0, 5.0));
+        let arc = committed_arc(cmd.on_point(p(10.0, 0.0)));
+        assert!((arc.radius - 5.0).abs() < 1e-9);
+        assert!((arc.center.x - 5.0).abs() < 1e-9 && arc.center.y.abs() < 1e-9);
+    }
+
+    #[test]
+    fn center_first_then_start_and_end() {
+        let mut cmd = ArcCommand::new();
+        cmd.on_text_input("C");
+        cmd.on_point(p(5.0, 0.0));
+        cmd.on_point(p(10.0, 0.0));
+        assert_eq!(keywords(&cmd), ["A", "L"]);
+        let arc = committed_arc(cmd.on_point(p(5.0, 10.0)));
+        assert!((arc.radius - 5.0).abs() < 1e-9);
+        assert!(arc.start_angle.abs() < 1e-9);
+        assert!((arc.end_angle - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn start_center_angle_and_chord_length_typed() {
+        let mut cmd = ArcCommand::new();
+        cmd.on_point(p(10.0, 0.0));
+        cmd.on_text_input("C");
+        cmd.on_point(p(5.0, 0.0));
+        cmd.on_text_input("A");
+        let arc = committed_arc(cmd.on_text_input("90").expect("angle consumed"));
+        assert!((arc.end_angle - arc.start_angle - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+
+        let mut cmd = ArcCommand::new();
+        cmd.on_point(p(10.0, 0.0));
+        cmd.on_text_input("C");
+        cmd.on_point(p(5.0, 0.0));
+        cmd.on_text_input("L");
+        // Chord 10 on radius 5: a semicircle.
+        let arc = committed_arc(cmd.on_text_input("10").expect("length consumed"));
+        assert!((arc.end_angle - arc.start_angle - std::f64::consts::PI).abs() < 1e-9);
+    }
+
+    #[test]
+    fn start_end_then_radius_direction_and_angle() {
+        let mut cmd = ArcCommand::new();
+        cmd.on_point(p(0.0, 0.0));
+        cmd.on_text_input("E");
+        cmd.on_point(p(10.0, 0.0));
+        cmd.on_text_input("R");
+        let arc = committed_arc(cmd.on_text_input("5").expect("radius consumed"));
+        assert!((arc.radius - 5.0).abs() < 1e-9);
+
+        let mut cmd = ArcCommand::new();
+        cmd.on_point(p(0.0, 0.0));
+        cmd.on_text_input("E");
+        cmd.on_point(p(10.0, 0.0));
+        cmd.on_text_input("D");
+        // Tangent straight up at the start: a semicircle over the chord.
+        let arc = committed_arc(cmd.on_text_input("90").expect("direction consumed"));
+        assert!((arc.radius - 5.0).abs() < 1e-6);
+
+        let mut cmd = ArcCommand::new();
+        cmd.on_point(p(0.0, 0.0));
+        cmd.on_text_input("E");
+        cmd.on_point(p(10.0, 0.0));
+        cmd.on_text_input("A");
+        let arc = committed_arc(cmd.on_text_input("180").expect("angle consumed"));
+        assert!((arc.radius - 5.0).abs() < 1e-6);
+
+        // Centre pick after start / end.
+        let mut cmd = ArcCommand::new();
+        cmd.on_point(p(0.0, 0.0));
+        cmd.on_text_input("E");
+        cmd.on_point(p(10.0, 0.0));
+        let arc = committed_arc(cmd.on_point(p(5.0, 0.0)));
+        assert!((arc.radius - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn enter_at_start_continues_from_last_entity() {
+        let mut cmd = ArcCommand::new();
+        assert!(matches!(cmd.on_enter(), CmdResult::Dispatch(c) if c == "ARC_CONT"));
+    }
+}

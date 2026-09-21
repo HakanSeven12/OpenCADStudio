@@ -17,6 +17,7 @@ use crate::app::Message;
 use crate::scene::named_parameters::ParameterTable;
 use crate::scene::Scene;
 use crate::t;
+use crate::ui::style::common::muted_style;
 use acadrust::types::Handle;
 use acadrust::EntityType;
 use iced::widget::tooltip::Position as TipPos;
@@ -112,12 +113,6 @@ pub struct ParamEditorRow {
 /// Right-hand lane reserved for the scrollbar so it never overlaps the ✕
 /// column — same convention and value as `alias_editor::GUTTER`.
 const GUTTER: f32 = 16.0;
-
-fn muted_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
-    }
-}
 
 fn danger_style(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {

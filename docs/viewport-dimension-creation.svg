@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="350" viewBox="0 0 900 350">
+<style>text{font-family:Arial,sans-serif;fill:#263238} .title{font-size:22px;font-weight:600} .label{font-size:16px} .small{font-size:13px;fill:#54616a} .model{stroke:#1479b8;stroke-width:4;fill:none} .paper{stroke:#a94610;stroke-width:2;stroke-dasharray:9 5} .dim{stroke:#263238;stroke-width:1.5;fill:none}</style>
+<defs><marker id="arrow" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M8 0L0 4L8 8" fill="#263238"/></marker></defs>
+<rect width="900" height="350" rx="10" fill="white"/>
+<text class="title" x="30" y="38">Dimension from a paper centerline to a model endpoint</text>
+<rect x="30" y="65" width="430" height="245" fill="#f5f8fa" stroke="#c3ced5"/>
+<text class="small" x="45" y="89">Viewport 1:10</text>
+<path class="model" d="M100 160H400"/>
+<circle cx="400" cy="160" r="5" fill="#1479b8"/>
+<path class="paper" d="M250 110V260"/>
+<text class="small" x="100" y="144">Model geometry</text>
+<path class="dim" d="M400 171V244"/>
+<path class="dim" d="M250 232H400" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<rect x="306" y="217" width="38" height="28" fill="#f5f8fa"/>
+<text class="label" x="325" y="237" text-anchor="middle">50</text>
+<text class="small" x="45" y="290">Brown dashed line: paper-space centerline</text>
+<text class="label" x="500" y="116">5 paper units between the picked points</text>
+<text class="label" x="500" y="155">5 × 10 = 50 model units</text>
+<text class="label" x="500" y="206">The viewport supplies the length scale.</text>
+<text class="label" x="500" y="240">Either pick order gives the same value.</text>
+<text class="small" x="30" y="336">Measurement schematic; dimension style unit factor = 1.</text>
+</svg>

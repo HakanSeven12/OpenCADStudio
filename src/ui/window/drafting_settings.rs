@@ -1,8 +1,8 @@
 use crate::app::settings::IsoPlane;
 use crate::app::Message;
-use crate::snap::{SnapType, ALL_SNAP_MODES};
-use iced::widget::{button, checkbox, column, container, row, scrollable, text, Space};
-use iced::{Background, Border, Element, Fill, Length, Theme};
+use crate::snap::{SnapType, ALL_3D_SNAP_MODES, ALL_SNAP_MODES};
+use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input, Space};
+use iced::{Background, Border, Element, Fill, Theme};
 use std::borrow::Cow;
 
 /// Active tab in the Drafting Settings dialog.
@@ -28,6 +28,14 @@ pub struct DraftingSettingsState {
     // Snap and Grid
     pub snap_on: bool,
     pub grid_on: bool,
+    pub snap_x_input: String,
+    pub snap_y_input: String,
+    pub snap_equal: bool,
+    pub grid_x_input: String,
+    pub grid_y_input: String,
+    pub grid_major_input: String,
+    pub grid_adaptive: bool,
+    pub grid_beyond_limits: bool,
     pub isometric: bool,
     pub iso_plane: IsoPlane,
     pub snap_angle_deg: f32,
@@ -41,6 +49,7 @@ pub struct DraftingSettingsState {
     pub snap_modes: rustc_hash::FxHashSet<SnapType>,
     // 3D Object Snap
     pub osnap3d_on: bool,
+    pub snap3d_modes: rustc_hash::FxHashSet<SnapType>,
     // Dynamic Input
     pub dyn_input_on: bool,
     // Quick Properties
@@ -55,6 +64,14 @@ impl DraftingSettingsState {
     pub fn is_dirty(&self, saved: &Self) -> bool {
         self.snap_on != saved.snap_on
             || self.grid_on != saved.grid_on
+            || self.snap_x_input != saved.snap_x_input
+            || self.snap_y_input != saved.snap_y_input
+            || self.snap_equal != saved.snap_equal
+            || self.grid_x_input != saved.grid_x_input
+            || self.grid_y_input != saved.grid_y_input
+            || self.grid_major_input != saved.grid_major_input
+            || self.grid_adaptive != saved.grid_adaptive
+            || self.grid_beyond_limits != saved.grid_beyond_limits
             || self.isometric != saved.isometric
             || self.iso_plane != saved.iso_plane
             || (self.snap_angle_deg - saved.snap_angle_deg).abs() > 0.001
@@ -65,10 +82,36 @@ impl DraftingSettingsState {
             || self.otrack_on != saved.otrack_on
             || self.snap_modes != saved.snap_modes
             || self.osnap3d_on != saved.osnap3d_on
+            || self.snap3d_modes != saved.snap3d_modes
             || self.dyn_input_on != saved.dyn_input_on
             || self.quick_props_on != saved.quick_props_on
             || self.selection_cycling_on != saved.selection_cycling_on
     }
+}
+
+/// Format a snap spacing value for the dialog's text inputs.
+pub fn format_snap_spacing(v: f32) -> String {
+    if (v - v.round()).abs() < 1e-4 {
+        format!("{}", v.round() as i32)
+    } else {
+        format!("{v}")
+    }
+}
+
+/// Parse a snap spacing input. Spacings must be positive and finite.
+pub fn parse_snap_spacing(s: &str) -> Option<f32> {
+    let v: f32 = s.trim().parse().ok()?;
+    if v.is_finite() && v > 0.0 && v <= 1e9 {
+        Some(v)
+    } else {
+        None
+    }
+}
+
+/// Parse a major-line interval. Must be an integer in 2..=100.
+pub fn parse_grid_major(s: &str) -> Option<u32> {
+    let v: u32 = s.trim().parse().ok()?;
+    (2..=100).contains(&v).then_some(v)
 }
 
 /// Helper for grouped sub-panels with a light border and header title.
@@ -187,18 +230,28 @@ pub fn view_window<'a>(
             column![
                 row![
                     text(crate::t!("Snap X spacing:")).size(11).width(120),
-                    text("10.00").size(11),
+                    text_input("10", &state.snap_x_input)
+                        .on_input(Message::DraftingSettingsSnapXChanged)
+                        .size(11)
+                        .padding([4, 7])
+                        .width(100),
                 ]
                 .spacing(8)
                 .align_y(iced::Center),
                 row![
                     text(crate::t!("Snap Y spacing:")).size(11).width(120),
-                    text("10.00").size(11),
+                    text_input("10", &state.snap_y_input)
+                        .on_input(Message::DraftingSettingsSnapYChanged)
+                        .size(11)
+                        .padding([4, 7])
+                        .width(100),
                 ]
                 .spacing(8)
                 .align_y(iced::Center),
                 row![
-                    checkbox(true).size(14),
+                    checkbox(state.snap_equal)
+                        .on_toggle(|_| Message::DraftingSettingsToggleEqualSnap)
+                        .size(14),
                     text(crate::t!("Equal X and Y spacing")).size(11),
                 ]
                 .spacing(6)
@@ -261,19 +314,31 @@ pub fn view_window<'a>(
             column![
                 row![
                     text(crate::t!("Grid X spacing:")).size(11).width(120),
-                    text("10.00").size(11),
+                    text_input("10", &state.grid_x_input)
+                        .on_input(Message::DraftingSettingsGridXChanged)
+                        .size(11)
+                        .padding([4, 7])
+                        .width(100),
                 ]
                 .spacing(8)
                 .align_y(iced::Center),
                 row![
                     text(crate::t!("Grid Y spacing:")).size(11).width(120),
-                    text("10.00").size(11),
+                    text_input("10", &state.grid_y_input)
+                        .on_input(Message::DraftingSettingsGridYChanged)
+                        .size(11)
+                        .padding([4, 7])
+                        .width(100),
                 ]
                 .spacing(8)
                 .align_y(iced::Center),
                 row![
                     text(crate::t!("Major line every:")).size(11).width(120),
-                    text("5").size(11),
+                    text_input("5", &state.grid_major_input)
+                        .on_input(Message::DraftingSettingsGridMajorChanged)
+                        .size(11)
+                        .padding([4, 7])
+                        .width(100),
                 ]
                 .spacing(8)
                 .align_y(iced::Center),
@@ -285,13 +350,17 @@ pub fn view_window<'a>(
             crate::t!("Grid behavior"),
             column![
                 row![
-                    checkbox(true).size(14),
+                    checkbox(state.grid_adaptive)
+                        .on_toggle(|_| Message::DraftingSettingsToggleAdaptiveGrid)
+                        .size(14),
                     text(crate::t!("Adaptive grid")).size(11),
                 ]
                 .spacing(6)
                 .align_y(iced::Center),
                 row![
-                    checkbox(true).size(14),
+                    checkbox(state.grid_beyond_limits)
+                        .on_toggle(|_| Message::DraftingSettingsToggleBeyondLimits)
+                        .size(14),
                     text(crate::t!("Display grid beyond Limits")).size(11),
                 ]
                 .spacing(6)
@@ -436,44 +505,26 @@ pub fn view_window<'a>(
             Message::DraftingSettingsToggle3dOsnap,
         );
 
-        let placeholder_group = group(
-            crate::t!("3D Object Snap modes"),
-            column![
-                row![checkbox(false).size(14), text(crate::t!("Vertex")).size(11)]
-                    .spacing(7)
-                    .align_y(iced::Center),
+        // Implemented 3D modes follow the same checkbox pattern as the
+        // Object Snap tab, driven by ALL_3D_SNAP_MODES.
+        let mut modes_col = column![].spacing(6);
+        for &(snap_type, _, label) in ALL_3D_SNAP_MODES {
+            let is_checked = state.snap3d_modes.contains(&snap_type);
+            modes_col = modes_col.push(
                 row![
-                    checkbox(false).size(14),
-                    text(crate::t!("Midpoint on edge")).size(11),
+                    checkbox(is_checked)
+                        .on_toggle(move |_| Message::DraftingSettingsToggleSnapMode3d(snap_type))
+                        .size(14),
+                    text(crate::t!(label)).size(11),
                 ]
                 .spacing(7)
                 .align_y(iced::Center),
-                row![
-                    checkbox(false).size(14),
-                    text(crate::t!("Center of face")).size(11),
-                ]
-                .spacing(7)
-                .align_y(iced::Center),
-                row![checkbox(false).size(14), text(crate::t!("Knot")).size(11)]
-                    .spacing(7)
-                    .align_y(iced::Center),
-                row![
-                    checkbox(false).size(14),
-                    text(crate::t!("Perpendicular to face")).size(11),
-                ]
-                .spacing(7)
-                .align_y(iced::Center),
-                row![
-                    checkbox(false).size(14),
-                    text(crate::t!("Nearest to face")).size(11),
-                ]
-                .spacing(7)
-                .align_y(iced::Center),
-            ]
-            .spacing(6),
-        );
+            );
+        }
 
-        column![osnap3d_toggle, Space::new().height(4), placeholder_group]
+        let modes_group = group(crate::t!("3D Object Snap modes"), modes_col);
+
+        column![osnap3d_toggle, Space::new().height(4), modes_group]
             .spacing(10)
             .width(Fill)
     };
@@ -666,51 +717,10 @@ pub fn view_window<'a>(
     if !close_confirm {
         return main_content.into();
     }
-
-    let shield = iced::widget::mouse_area(
-        container(Space::new())
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(
-                    theme
-                        .palette()
-                        .background
-                        .strongest
-                        .color
-                        .scale_alpha(0.55),
-                )),
-                ..Default::default()
-            }),
-    )
-    .on_press(Message::DraftingSettingsCloseKeep);
-
-    let warning_panel = container(
-        column![
-            text(crate::t!("Unsaved changes will be discarded.")).size(13.5),
-            Space::new().height(12),
-            row![
-                button(text(crate::t!("Discard && close")).size(12))
-                    .on_press(Message::DraftingSettingsCloseDiscard)
-                    .padding([5, 14])
-                    .style(button::danger),
-                button(text(crate::t!("Keep editing")).size(12))
-                    .on_press(Message::DraftingSettingsCloseKeep)
-                    .padding([5, 14])
-                    .style(button::secondary),
-            ]
-            .spacing(10),
-        ]
-        .spacing(0),
-    )
-    .padding([18, 22])
-    .style(container::rounded_box);
-
-    iced::widget::stack![
+    crate::ui::modal::discard_guard(
         main_content,
-        shield,
-        container(warning_panel).center_x(Fill).center_y(Fill)
-    ]
-    .into()
+        Message::DraftingSettingsCloseDiscard,
+        Message::DraftingSettingsCloseKeep,
+    )
 }
 

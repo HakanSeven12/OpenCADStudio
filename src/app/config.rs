@@ -241,11 +241,20 @@ impl UiThemePalette {
     }
 }
 
-pub fn builtin_theme(name: &str) -> Option<iced::Theme> {
+/// Every theme the user may pick: iced's built-ins followed by the Fusion
+/// pair. The Fusion themes are `Theme::Custom`, so they are not in
+/// `iced::Theme::ALL`; anything enumerating themes for display or for test
+/// coverage must use this instead, or they silently vanish from the list.
+pub fn all_themes() -> Vec<iced::Theme> {
     iced::Theme::ALL
         .iter()
-        .find(|theme| theme.to_string() == name)
         .cloned()
+        .chain(crate::ui::style::fusion_theme::fusion_themes())
+        .collect()
+}
+
+pub fn builtin_theme(name: &str) -> Option<iced::Theme> {
+    all_themes().into_iter().find(|theme| theme.to_string() == name)
 }
 
 fn color_to_rgb(color: iced::Color) -> [u8; 3] {
@@ -441,7 +450,14 @@ pub fn theme_canvas_background(theme: &iced::Theme) -> [u8; 3] {
         iced::Theme::Nightfly => [1, 22, 39],
         iced::Theme::Oxocarbon => [22, 22, 22],
         iced::Theme::Ferra => [43, 41, 46],
-        _ => color_to_rgb(theme.palette().background.base.color),
+        // The Fusion pair deliberately breaks the "canvas follows chrome"
+        // rule: black chrome is paired with a white canvas, so falling
+        // through to the palette below would paint model space black and
+        // undo the whole point of the theme.
+        other => match crate::ui::style::fusion_theme::fusion_canvas(other) {
+            Some(rgb) => rgb,
+            None => color_to_rgb(other.palette().background.base.color),
+        },
     }
 }
 
@@ -472,6 +488,8 @@ pub fn parse_theme_name(s: &str) -> Option<iced::Theme> {
         "NIGHTFLY" => Some(iced::Theme::Nightfly),
         "OXOCARBON" => Some(iced::Theme::Oxocarbon),
         "FERRA" => Some(iced::Theme::Ferra),
+        "FUSIONBLACK" => Some(crate::ui::style::fusion_theme::fusion_black()),
+        "FUSIONWHITE" => Some(crate::ui::style::fusion_theme::fusion_white()),
         _ => None,
     }
 }

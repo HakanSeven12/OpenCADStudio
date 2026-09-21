@@ -196,15 +196,6 @@
         <ComponentRef Id='DesktopShortcutComp' />
       </Feature>
     </Feature>
-    <CustomAction
-      Id='RefreshShellIcons'
-      Directory='APPLICATIONROOTDIRECTORY'
-      ExeCommand='"[SystemFolder]ie4uinit.exe" -show'
-      Execute='immediate'
-      Return='ignore' />
-    <InstallExecuteSequence>
-      <Custom Action='RefreshShellIcons' After='InstallFinalize'>NOT REMOVE</Custom>
-    </InstallExecuteSequence>
     <UIRef Id='OpenCADStudioUI' />
 
   </Product>

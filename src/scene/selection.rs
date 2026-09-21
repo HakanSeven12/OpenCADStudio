@@ -12,6 +12,20 @@ pub(crate) fn pe_url_of(entity: &EntityType) -> Option<&str> {
         .filter(|text| !text.is_empty())
 }
 
+/// Optional description stored after the URL in the standard PE_URL record.
+pub(crate) fn pe_url_description_of(entity: &EntityType) -> Option<&str> {
+    let record = entity.common().extended_data.get_record("PE_URL")?;
+    record
+        .values
+        .iter()
+        .filter_map(|value| match value {
+            acadrust::xdata::XDataValue::String(text) => Some(text.trim()),
+            _ => None,
+        })
+        .nth(1)
+        .filter(|text| !text.is_empty())
+}
+
 impl Scene {
     // ── Selection ─────────────────────────────────────────────────────────
     /// Treat a classic LEADER and its attached annotation as one logical object.
@@ -670,7 +684,9 @@ impl Scene {
                             ])
                         } else {
                             match prop.value {
-                                PropValue::PlainText(_) => QSelectValueEditor::Text,
+                                PropValue::PlainText(_) | PropValue::Hyperlink(_) => {
+                                    QSelectValueEditor::Text
+                                }
                                 PropValue::ReadOnly(ref value)
                                 | PropValue::ReadOnlyWithTooltip { ref value, .. }
                                 | PropValue::EditText(ref value) => {
@@ -872,7 +888,8 @@ impl Scene {
                     PropValue::ReadOnly(s)
                     | PropValue::ReadOnlyWithTooltip { value: s, .. }
                     | PropValue::EditText(s)
-                    | PropValue::PlainText(s) => s,
+                    | PropValue::PlainText(s)
+                    | PropValue::Hyperlink(s) => s,
                     PropValue::LayerChoice(s) => s,
                     PropValue::Choice { selected, .. } => selected,
                     PropValue::EditChoice { value, .. } => value,
@@ -1008,6 +1025,16 @@ impl Scene {
                 hover_changed = true;
             }
             hover_changed |= self.constraint_hover_highlights.remove(&h);
+            if self
+                .constraint_hover_refs
+                .iter()
+                .any(|reference| reference.entity == h)
+            {
+                self.constraint_hover_refs.clear();
+                self.constraint_hover_wires.clear();
+                self.constraint_hover_highlights.clear();
+                hover_changed = true;
+            }
             self.hatches.remove(&h);
             self.images.remove(&h);
             self.meshes.remove(&h);

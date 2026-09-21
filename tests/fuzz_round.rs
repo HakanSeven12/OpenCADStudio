@@ -634,6 +634,18 @@ fn note_image_model_tier_fns_are_private_and_skipped() {
 
 // Verbatim copy of src/app/record_api.rs:1112-1152 (`json_values_match`),
 // private fn in a private module, invisible to integration tests.
+/// A whole f64 equals an i64 under the same round-trip rule as the u64
+/// side (see [`whole_float_equals_u64`]); the bounds are strict because
+/// `i64::MIN as f64` and `i64::MAX as f64` land exactly ON the boundary
+/// powers of two, where the cast back saturates.
+fn whole_float_equals_i64(float: f64, int: i64) -> bool {
+    if float.fract() != 0.0 || float < -9_223_372_036_854_775_808.0 || float >= 9_223_372_036_854_775_808.0
+    {
+        return false;
+    }
+    float as i64 == int
+}
+
 fn json_values_match(stored: &Value, expected: &Value) -> bool {
     match (stored, expected) {
         (Value::Number(stored), Value::Number(expected)) => {
@@ -643,37 +655,38 @@ fn json_values_match(stored: &Value, expected: &Value) -> bool {
             match (stored.as_u64(), expected.as_u64()) {
                 (Some(stored), Some(expected)) => stored == expected,
                 (Some(stored), None) => match expected.as_f64() {
-                    Some(expected) => expected.fract() == 0.0 && expected >= 0.0 && stored as f64 == expected,
+                    Some(expected) => whole_float_equals_u64(expected, stored),
                     None => false,
                 },
                 (None, Some(expected)) => match stored.as_f64() {
-                    Some(stored) => stored.fract() == 0.0 && stored >= 0.0 && expected as f64 == stored,
+                    Some(stored) => whole_float_equals_u64(stored, expected),
                     None => false,
                 },
-                _ => match (stored.as_i64(), expected.as_i64(), stored.as_f64(), expected.as_f64()) {
-                    (Some(stored), Some(expected), _, _) => stored == expected,
-                    (_, _, Some(stored), Some(expected)) => stored == expected,
+                _ => match (stored.as_i64(), expected.as_i64()) {
+                    (Some(stored), Some(expected)) => stored == expected,
+                    (Some(stored), None) => match expected.as_f64() {
+                        Some(expected) => whole_float_equals_i64(expected, stored),
+                        None => false,
+                    },
+                    (None, Some(expected)) => match stored.as_f64() {
+                        Some(stored) => whole_float_equals_i64(stored, expected),
+                        None => false,
+                    },
+                    // Both floats (or out-of-range): plain f64 equality —
+                    // the only remaining representation.
                     _ => stored == expected,
                 },
             }
         }
-        (Value::Object(stored), Value::Object(expected)) => {
-            stored.len() == expected.len()
-                && stored.iter().all(|(key, value)| {
-                    expected
-                        .get(key)
-                        .is_some_and(|expected| json_values_match(value, expected))
-                })
-        }
-        (Value::Array(stored), Value::Array(expected)) => {
-            stored.len() == expected.len()
-                && stored
-                    .iter()
-                    .zip(expected)
-                    .all(|(stored, expected)| json_values_match(stored, expected))
-        }
         _ => stored == expected,
     }
+}
+
+fn whole_float_equals_u64(float: f64, int: u64) -> bool {
+    if float.fract() != 0.0 || float < 0.0 || float >= 18_446_744_073_709_551_616.0 {
+        return false;
+    }
+    float as u64 == int
 }
 
 const U64_BOUNDARIES: &[u64] = &[
@@ -1296,18 +1309,12 @@ fn cap_evictions(
 const RECOVERED_MARKER: &str = " (recovered)";
 
 fn recovered_name(drawing: &str) -> String {
-    let (head, ext) = match drawing.rsplit_once('.') {
+    let name = drawing.rsplit(['/', '\\']).next().unwrap_or_default();
+    let (head, ext) = match name.rsplit_once('.') {
         Some((head, ext)) if !ext.is_empty() => (head, ext.to_string()),
-        // No dot (or a trailing one): the whole name is the stem.
-        _ => (drawing, "dxf".to_string()),
+        _ => (name, "dxf".to_string()),
     };
-    // A hostile stored name must not smuggle path separators into the tab
-    // title / download name: keep only the final component of the head.
-    let head = head.rsplit(['/', '\\']).next().unwrap_or_default();
-    // When the split consumed everything (".dxf") fall back to the whole
-    // stored name, like `Path::file_stem`'s empty-stem fallback did.
-    let mut stem = if head.is_empty() { drawing } else { head };
-    // Idempotent: strip every trailing marker, then append exactly one.
+    let mut stem = if head.is_empty() { name } else { head };
     while let Some(stripped) = stem.strip_suffix(RECOVERED_MARKER) {
         stem = stripped;
     }

@@ -1109,15 +1109,31 @@ fn requested_handle(request: &Value) -> Result<acadrust::Handle, String> {
 /// send `10.0` (`JSON.stringify(10.0) === "10"`), so plain `Value` equality
 /// never matches a whole-number float. Numbers compare by value; strings,
 /// bools and null stay exact; objects and arrays recurse.
-/// A whole non-negative f64 equals a u64 only when the integer is exactly
-/// representable in f64 (≤ 2^53) and the round-trip is lossless —
-/// beyond that, every integer collapses onto a neighbouring float and the
-/// compare-and-set would match against a DIFFERENT value.
+/// A whole non-negative f64 equals a u64 only when the cast round-trips
+/// exactly: `float as u64 == int` IS the exactness test — an f64 whose
+/// mathematical value differs from the integer (e.g. 2^53+1 collapsed onto
+/// 2^53) casts to a different u64, while large integers that ARE exactly
+/// representable (≤ 53 significant bits, so divisible by a power of two)
+/// still match. The cap is u64's own range.
 fn whole_float_equals_u64(float: f64, int: u64) -> bool {
-    if float.fract() != 0.0 || float < 0.0 {
+    // Strict < 2^64: `u64::MAX as f64` itself rounds UP to 2^64, and
+    // casting 2^64 back to u64 saturates to u64::MAX — a false match.
+    if float.fract() != 0.0 || float < 0.0 || float >= 18_446_744_073_709_551_616.0 {
         return false;
     }
-    float <= 9_007_199_254_740_992.0 && float as u64 == int
+    float as u64 == int
+}
+
+/// A whole f64 equals an i64 under the same round-trip rule as the u64
+/// side (see [`whole_float_equals_u64`]); the bounds are strict because
+/// `i64::MIN as f64` and `i64::MAX as f64` land exactly ON the boundary
+/// powers of two, where the cast back saturates.
+fn whole_float_equals_i64(float: f64, int: i64) -> bool {
+    if float.fract() != 0.0 || float < -9_223_372_036_854_775_808.0 || float >= 9_223_372_036_854_775_808.0
+    {
+        return false;
+    }
+    float as i64 == int
 }
 
 fn json_values_match(stored: &Value, expected: &Value) -> bool {
@@ -1136,9 +1152,18 @@ fn json_values_match(stored: &Value, expected: &Value) -> bool {
                     Some(stored) => whole_float_equals_u64(stored, expected),
                     None => false,
                 },
-                _ => match (stored.as_i64(), expected.as_i64(), stored.as_f64(), expected.as_f64()) {
-                    (Some(stored), Some(expected), _, _) => stored == expected,
-                    (_, _, Some(stored), Some(expected)) => stored == expected,
+                _ => match (stored.as_i64(), expected.as_i64()) {
+                    (Some(stored), Some(expected)) => stored == expected,
+                    (Some(stored), None) => match expected.as_f64() {
+                        Some(expected) => whole_float_equals_i64(expected, stored),
+                        None => false,
+                    },
+                    (None, Some(expected)) => match stored.as_f64() {
+                        Some(stored) => whole_float_equals_i64(stored, expected),
+                        None => false,
+                    },
+                    // Both floats (or out-of-range): plain f64 equality —
+                    // the only remaining representation.
                     _ => stored == expected,
                 },
             }

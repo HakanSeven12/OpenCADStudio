@@ -1109,6 +1109,17 @@ fn requested_handle(request: &Value) -> Result<acadrust::Handle, String> {
 /// send `10.0` (`JSON.stringify(10.0) === "10"`), so plain `Value` equality
 /// never matches a whole-number float. Numbers compare by value; strings,
 /// bools and null stay exact; objects and arrays recurse.
+/// A whole non-negative f64 equals a u64 only when the integer is exactly
+/// representable in f64 (≤ 2^53) and the round-trip is lossless —
+/// beyond that, every integer collapses onto a neighbouring float and the
+/// compare-and-set would match against a DIFFERENT value.
+fn whole_float_equals_u64(float: f64, int: u64) -> bool {
+    if float.fract() != 0.0 || float < 0.0 {
+        return false;
+    }
+    float <= 9_007_199_254_740_992.0 && float as u64 == int
+}
+
 fn json_values_match(stored: &Value, expected: &Value) -> bool {
     match (stored, expected) {
         (Value::Number(stored), Value::Number(expected)) => {
@@ -1118,11 +1129,11 @@ fn json_values_match(stored: &Value, expected: &Value) -> bool {
             match (stored.as_u64(), expected.as_u64()) {
                 (Some(stored), Some(expected)) => stored == expected,
                 (Some(stored), None) => match expected.as_f64() {
-                    Some(expected) => expected.fract() == 0.0 && expected >= 0.0 && stored as f64 == expected,
+                    Some(expected) => whole_float_equals_u64(expected, stored),
                     None => false,
                 },
                 (None, Some(expected)) => match stored.as_f64() {
-                    Some(stored) => stored.fract() == 0.0 && stored >= 0.0 && expected as f64 == stored,
+                    Some(stored) => whole_float_equals_u64(stored, expected),
                     None => false,
                 },
                 _ => match (stored.as_i64(), expected.as_i64(), stored.as_f64(), expected.as_f64()) {
@@ -1641,7 +1652,7 @@ mod tests {
     use acadrust::types::{Handle, Vector3};
     use serde_json::{Value, json};
 
-    use super::OpenCADStudio;
+    use super::{OpenCADStudio, json_values_match};
 
     fn execute(app: &mut OpenCADStudio, mut request: Value, id: &str) -> Value {
         let state = app.automation_op(r#"{"protocol":1,"op":"state"}"#);
@@ -2043,5 +2054,21 @@ mod tests {
             "stale",
         );
         assert_eq!(stale["code"], "invalid_update", "{stale}");
+    }
+
+    #[test]
+    fn set_properties_beyond_f64_precision_integers_do_not_round_trip() {
+        // 2^53+1 vs 2^53: equal as f64, distinct as integers — a CAS must
+        // NOT match them (the mutation round showed this was untested).
+        assert!(!json_values_match(
+            &serde_json::json!(9_007_199_254_740_993u64),
+            &serde_json::json!(9_007_199_254_740_992u64)
+        ));
+        assert!(!json_values_match(
+            &serde_json::json!(9_223_372_036_854_775_809u64),
+            &serde_json::json!(9.223372036854776e18)
+        ));
+        // Within f64 precision, whole floats still match their integer.
+        assert!(json_values_match(&serde_json::json!(42u64), &serde_json::json!(42.0)));
     }
 }

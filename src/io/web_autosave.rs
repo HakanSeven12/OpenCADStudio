@@ -101,21 +101,21 @@ const RECOVERED_MARKER: &str = " (recovered)";
 /// recovered name.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // unit-tested on native
 pub(crate) fn recovered_name(drawing: &str) -> String {
-    let (head, ext) = match drawing.rsplit_once('.') {
-        Some((head, ext)) if !ext.is_empty() => (head, ext.to_string()),
-        // No dot (or a trailing one): the whole name is the stem.
-        _ => (drawing, "dxf".to_string()),
-    };
     // A hostile stored name must not smuggle path separators into the tab
-    // title / download name: keep only the final component of the head.
-    let head = head.rsplit(['/', '\\']).next().unwrap_or_default();
-    // When the split consumed everything (".dxf") fall back to the whole
-    // stored name, like `Path::file_stem`'s empty-stem fallback did.
-    let mut stem = if head.is_empty() {
-        drawing
-    } else {
-        head
+    // title / download name — through the head OR the extension ("a.b/c"
+    // keeps "/c" after the last dot): reduce the WHOLE input to its final
+    // path component first, then split stem/extension.
+    let name = drawing.rsplit(['/', '\\']).next().unwrap_or_default();
+    let (head, ext) = match name.rsplit_once('.') {
+        Some((head, ext)) if !ext.is_empty() => (head, ext.to_string()),
+        // No dot (or a trailing one): the whole component is the stem.
+        _ => (name, "dxf".to_string()),
     };
+    // An empty stem (".dxf" — a DXF name under the worker's rsplit
+    // convention) keeps the whole component as the stem so the extension
+    // does not flip, and the result stays idempotent because the marker
+    // lives in the stem.
+    let mut stem = if head.is_empty() { name } else { head };
     // Idempotent: strip every trailing marker, then append exactly one.
     while let Some(stripped) = stem.strip_suffix(RECOVERED_MARKER) {
         stem = stripped;
@@ -309,6 +309,19 @@ mod tests {
         assert!(!newer_than_saved(500.0, Some(1000.0)));
         // No saved copy at all: the snapshot is the only survivor.
         assert!(newer_than_saved(1.0, None));
+    }
+
+    #[test]
+    fn recovered_names_never_smuggle_separators_or_drift() {
+        // Fuzz round: the extension could smuggle a path ("a.b/c") and the
+        // empty-stem fallback reinstated the unsanitized input, breaking
+        // idempotence across crash cycles.
+        let once = recovered_name("a.b/c");
+        assert_eq!(once, "c (recovered).dxf", "final path component, no separator survives");
+        assert_eq!(recovered_name(&once), once, "idempotent");
+        let dotfile = recovered_name("/.dwg");
+        assert_eq!(dotfile, ".dwg (recovered).dwg");
+        assert_eq!(recovered_name(&dotfile), dotfile, "idempotent");
     }
 
     #[test]

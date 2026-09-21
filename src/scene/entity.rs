@@ -1402,6 +1402,9 @@ impl Scene {
                 }
                 if self.object_isolation.hides(common.handle)
                     || (!include_preview_hidden && self.preview_hidden.contains(&common.handle))
+                    || self.hidden_dynamic_dimensions.contains(&common.handle)
+                    // A dynamic dimension never plots.
+                    || (plot_only && self.is_dynamic_dimension(common.handle))
                 {
                     return false;
                 }
@@ -2743,7 +2746,10 @@ impl Scene {
         // and named parameters into the fresh one.
         self.parametric_constraints.clear();
         self.named_parameters = crate::scene::named_parameters::ParameterTable::new();
+        self.bump_constraints_epoch();
         self.bump_geometry();
+        self.bump_layout_epoch();
+        self.bump_scale_epoch();
     }
 
     /// Reset to the drawing File → New produces. Every path that starts a

@@ -2396,6 +2396,13 @@ pub struct Scene {
             std::sync::Arc<Vec<String>>,
         )>,
     >,
+    /// Bump on any Layout object insert/remove/rename/reorder.
+    layout_epoch: u64,
+    layout_names_cache: RefCell<Option<(u64, std::sync::Arc<Vec<String>>)>>,
+    /// Bump on any annotation-scale list mutation.
+    scale_epoch: u64,
+    scale_picker_cache:
+        RefCell<Option<(u64, f64, Option<bool>, String, std::sync::Arc<Vec<(String, f32, f64)>>)>>,
     /// Reverse dependencies from layer/style/block definitions to the top-level
     /// entities whose resident wire runs actually change. Kept independent from
     /// `geometry_epoch`: a layer colour toggle can reuse the index, invalidate
@@ -2409,6 +2416,15 @@ pub struct Scene {
     has_associative_centers: std::cell::Cell<Option<bool>>,
     /// Runtime parametric constraint sets decoded from standard graph scopes.
     pub(crate) parametric_constraints: Vec<parametric_constraints::ParametricConstraintSet>,
+    /// CONSTRAINTNAMEFORMAT: what a dynamic dimension's text shows —
+    /// 0 the parameter name, 1 the value, 2 `name=value`.
+    pub constraint_name_format: u8,
+    /// DYNCONSTRAINTDISPLAY: whether dynamic dimensions draw at all.
+    pub dynamic_constraint_display: bool,
+    /// Dynamic dimensions DCHIDE or DYNCONSTRAINTDISPLAY 0 keep off screen.
+    hidden_dynamic_dimensions: HashSet<Handle>,
+    /// The camera generation the dynamic dimensions were last scaled for.
+    dynamic_dimension_camera_gen: Option<u64>,
     /// Session-only visibility overrides for constraint glyphs.
     hidden_parametric_constraints: HashSet<(
         parametric_constraints::ParametricScope,
@@ -2419,6 +2435,25 @@ pub struct Scene {
         parametric_constraints::ParametricScope,
         parametric_constraints::ConstraintId,
     )>,
+    /// Bumped on every parametric-constraint-set mutation (add / remove /
+    /// metadata edit / visibility override / whole-set restore). The
+    /// constraint-glyph memoization keys on this so a stale cache can never
+    /// outlive the edit that invalidated it — a missed bump is a
+    /// correctness bug (stale glyphs), not just a perf miss.
+    constraints_epoch: u64,
+    /// Memoised constraint-glyph placements for the latest [`GlyphKey`](parametric_constraints::GlyphKey)
+    /// (Task 3; overlay/hit consumers adopt it in Task 4). Single-slot memo:
+    /// within one frame view + hit-test + dwell + click share the key (hits),
+    /// camera motion misses once per frame by design, and edits just miss on
+    /// the stale entry — no leak possible. `RefCell` + `Arc` shape mirrors
+    /// `layout_names_cache`; a missed constraint bump serves stale glyphs, so
+    /// every set mutation must bump `constraints_epoch`.
+    glyph_cache: RefCell<
+        Option<(
+            parametric_constraints::GlyphKey,
+            Arc<[parametric_constraints::GlyphEntry]>,
+        )>,
+    >,
     /// Document-wide named-parameter and expression table decoded from
     /// standard associative variables.
     pub(crate) named_parameters: named_parameters::ParameterTable,
@@ -2462,6 +2497,11 @@ pub struct Scene {
     /// (re)built, otherwise the held value. `build_primitive` reads it right
     /// after the call to gate GPU wire re-upload. 0 = none yet.
     pub(crate) last_model_wire_gen: std::cell::Cell<u64>,
+    /// SDF glyph-atlas generation this scene's caches were built against.
+    /// When the atlas grows or re-bakes, every cached glyph quad (resident
+    /// sets, block caches, projected viewport copies) addresses the wrong
+    /// tile; `update` compares against the live generation and rebuilds.
+    pub(crate) last_atlas_generation: std::cell::Cell<u64>,
     /// Interaction-LOD state: `camera_generation` seen on the previous frame and
     /// the wall time it last changed. Used to detect "the view is actively being
     /// panned / zoomed / orbited" so the expensive per-pixel hatch pass can be
@@ -2736,11 +2776,21 @@ impl Scene {
             leaders_by_annotation_cache: RefCell::new(None),
             unindexable_cache: RefCell::new(None),
             layout_type_names_cache: RefCell::new(None),
+            layout_epoch: 0,
+            layout_names_cache: RefCell::new(None),
+            scale_epoch: 0,
+            scale_picker_cache: RefCell::new(None),
             dependency_index_cache: RefCell::new(None),
             associative_hatch_source_cache: RefCell::new(None),
             parametric_constraints: Vec::new(),
+            constraint_name_format: 2,
+            dynamic_constraint_display: true,
+            hidden_dynamic_dimensions: HashSet::default(),
+            dynamic_dimension_camera_gen: None,
             hidden_parametric_constraints: HashSet::default(),
             shown_parametric_constraints: HashSet::default(),
+            constraints_epoch: 0,
+            glyph_cache: RefCell::new(None),
             named_parameters: named_parameters::ParameterTable::new(),
             has_associative_centers: std::cell::Cell::new(None),
             block_defn_cache: RefCell::new(HashMap::default()),
@@ -2752,6 +2802,7 @@ impl Scene {
             last_tess_ms: std::cell::Cell::new(0.0),
             last_tess_wires: std::cell::Cell::new(0),
             last_model_wire_gen: std::cell::Cell::new(0),
+            last_atlas_generation: std::cell::Cell::new(crate::scene::text::sdf_atlas::generation()),
             nav_last_gen: std::cell::Cell::new(0),
             nav_changed_at: std::cell::Cell::new(None),
             nav_perf_pending: std::cell::Cell::new(None),
@@ -3433,6 +3484,7 @@ impl Scene {
             }
         }
         if !self.parametric_constraints.is_empty() || !self.named_parameters.is_empty() {
+            self.refresh_dynamic_dimension_texts();
             self.sync_native_parametric_graph();
         }
         if !changes.is_empty() {
@@ -4949,6 +5001,7 @@ impl Scene {
                 .unwrap_or((1.0, 1.0 / factor));
             self.add_scale(label, paper, drawing);
         }
+        self.bump_scale_epoch();
         true
     }
 
@@ -5427,6 +5480,7 @@ impl Scene {
                 (drawing > 0.0).then_some((1.0, drawing))
             })?;
         let (paper, drawing) = self.scale_paper_drawing(name).unwrap_or(fallback);
+        // `add_scale` already bumps `scale_epoch`; no extra bump here.
         self.add_scale(name, paper, drawing);
         self.scale_object_handle(name)
     }
@@ -5469,6 +5523,7 @@ impl Scene {
         if let Some(ObjectType::Dictionary(sl)) = self.document.objects.get_mut(&scalelist_h) {
             sl.add_entry(name, sh);
         }
+        self.bump_scale_epoch();
         true
     }
 
@@ -5546,6 +5601,7 @@ impl Scene {
             }
         }
         self.invalidate_annotation_dependencies();
+        self.bump_scale_epoch();
         true
     }
 
@@ -5578,6 +5634,7 @@ impl Scene {
                 }
             }
         }
+        self.bump_scale_epoch();
         true
     }
 
@@ -5647,6 +5704,7 @@ impl Scene {
         self.object_isolation.hides(handle)
             || self.preview_hidden.contains(&handle)
             || self.command_preview_hidden.contains(&handle)
+            || self.hidden_dynamic_dimensions.contains(&handle)
     }
 
     /// Replace the command-owned source hide set and refresh only handles whose
@@ -5780,6 +5838,9 @@ impl Scene {
             .collect();
         self.object_isolation.hidden.extend(hide);
         self.object_isolation.keep = Some(keep);
+        // Isolation hides entities the memoised glyph placements read
+        // (`entity_temporarily_hidden`), so invalidate them too.
+        self.bump_constraints_epoch();
         if !changes.is_empty() {
             self.bump_entities(&changes);
         }
@@ -5803,6 +5864,9 @@ impl Scene {
         self.selected.clear();
         self.selected_order.clear();
         self.bump_selection_set();
+        // Newly hidden entities change `entity_temporarily_hidden`, which the
+        // memoised glyph placements read — invalidate them too.
+        self.bump_constraints_epoch();
         self.bump_entities(&changes);
     }
 
@@ -5819,6 +5883,12 @@ impl Scene {
             .map(|handle| (handle, ChangeKind::Modified))
             .collect();
         self.object_isolation = ObjectIsolationState::default();
+        // Restoring isolated entities changes `entity_temporarily_hidden`,
+        // which the memoised glyph placements read — invalidate them too.
+        // (`reset_transient_visibility` needs no bump: it only runs on
+        // doc-replace, where `load_parametric_constraints_from_document`
+        // already bumps the epoch for the whole-set replace.)
+        self.bump_constraints_epoch();
         if !changes.is_empty() {
             self.bump_entities(&changes);
         }
@@ -6085,6 +6155,65 @@ impl Scene {
         names
     }
 
+    pub fn bump_layout_epoch(&mut self) {
+        self.layout_epoch += 1;
+    }
+
+    pub fn cached_layout_names(&self) -> std::sync::Arc<Vec<String>> {
+        if let Some((epoch, names)) = self.layout_names_cache.borrow().as_ref() {
+            if *epoch == self.layout_epoch {
+                return std::sync::Arc::clone(names);
+            }
+        }
+        let names = std::sync::Arc::new(self.layout_names());
+        *self.layout_names_cache.borrow_mut() = Some((self.layout_epoch, std::sync::Arc::clone(&names)));
+        names
+    }
+
+    pub fn bump_scale_epoch(&mut self) {
+        self.scale_epoch += 1;
+    }
+
+    /// Current parametric-constraint-set epoch (cache key input for the
+    /// memoised `cached_glyph_placements` accessor).
+    #[allow(dead_code)]
+    pub(crate) fn constraints_epoch(&self) -> u64 {
+        self.constraints_epoch
+    }
+
+    /// Invalidate constraint-glyph consumers. Call on EVERY mutation of the
+    /// constraint set or its visibility overrides — a missed bump serves
+    /// stale glyphs.
+    pub(crate) fn bump_constraints_epoch(&mut self) {
+        self.constraints_epoch += 1;
+    }
+
+    pub fn cached_scale_picker_list(&self) -> std::sync::Arc<Vec<(String, f32, f64)>> {
+        let factor = self.annotation_scale_unit_factor();
+        let imperial = self.prefers_imperial_scales();
+        let current = self.document.header.current_annotation_scale.clone();
+        if let Some((epoch, cached_factor, cached_imperial, cached_current, list)) =
+            self.scale_picker_cache.borrow().as_ref()
+        {
+            if *epoch == self.scale_epoch
+                && *cached_factor == factor
+                && *cached_imperial == imperial
+                && *cached_current == current
+            {
+                return std::sync::Arc::clone(list);
+            }
+        }
+        let list = std::sync::Arc::new(self.scale_picker_list());
+        *self.scale_picker_cache.borrow_mut() = Some((
+            self.scale_epoch,
+            factor,
+            imperial,
+            current,
+            std::sync::Arc::clone(&list),
+        ));
+        list
+    }
+
     /// Wire set for the Model layout, shared by every tile.
     ///
     /// The model wire geometry is **camera-independent**, so it is tessellated
@@ -6219,6 +6348,7 @@ impl Scene {
         // Build once: full tessellation, no cull, no zoom LOD — the resident
         // set is zoom-independent (GPU analytical circles/arcs/ellipses).
         let t_tess = iced::time::Instant::now();
+        let mut atlas_gen = crate::scene::text::sdf_atlas::generation();
         let mut wires = self.wires_for_block_culled(
             block,
             None,
@@ -6229,6 +6359,34 @@ impl Scene {
             all_visible,
             style_viewport,
         );
+        // Baking a drawing's glyphs for the first time can grow the SDF atlas
+        // part-way through this pass (a CJK sheet set bakes thousands of
+        // tiles). Text tessellated before the growth carries UVs that now
+        // address the wrong tiles — visible as scrambled glyphs — and this
+        // set is cached by geometry epoch, so nothing would ever re-lay it
+        // out. The memo guard already folds the generation in, so rebuilding
+        // once the atlas has settled re-tessellates only the stale text.
+        for _ in 0..3 {
+            let now = crate::scene::text::sdf_atlas::generation();
+            if now == atlas_gen {
+                break;
+            }
+            atlas_gen = now;
+            // Block definitions tessellated earlier in this pass hold the
+            // stale quads too, and their cache is keyed by block epoch (which
+            // has not moved), so drop them or the rebuild would reuse them.
+            self.block_defn_cache.borrow_mut().clear();
+            wires = self.wires_for_block_culled(
+                block,
+                None,
+                None,
+                frozen_layers,
+                anno_scale_override,
+                annotation_scale_handle,
+                all_visible,
+                style_viewport,
+            );
+        }
         let perf = crate::perf::enabled();
         let t_post = perf.then(iced::time::Instant::now);
         // Synthesized nonprint markers (geo-location daisy) live in model space
@@ -13500,5 +13658,80 @@ mod layout_cache_tests {
             2,
             "Mixed polyline should have its 2 bulge arcs routed to analytical CircleGpu"
         );
+    }
+
+    #[test]
+    fn cached_layout_names_returns_same_arc_until_bump() {
+        let mut scene = Scene::new();
+        let first = scene.cached_layout_names();
+        let second = scene.cached_layout_names();
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+        // Fresh `CadDocument::new()` ships a default "Layout1" paper layout.
+        assert_eq!(&first[..], &["Model".to_string(), "Layout1".to_string()]);
+    }
+
+    #[test]
+    fn cached_layout_names_invalidated_by_add_layout() {
+        let mut scene = Scene::new();
+        let before = scene.cached_layout_names();
+        scene.add_layout("EXTRA").unwrap();
+        let after = scene.cached_layout_names();
+        assert!(
+            !std::sync::Arc::ptr_eq(&before, &after),
+            "add_layout must bump the epoch so the cached Arc is replaced"
+        );
+        assert!(after.iter().any(|n| n == "EXTRA"));
+    }
+
+    #[test]
+    fn cached_scale_picker_returns_same_arc_until_bump() {
+        let scene = Scene::new();
+        let first = scene.cached_scale_picker_list();
+        let second = scene.cached_scale_picker_list();
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn cached_scale_picker_invalidated_by_add_scale() {
+        let mut scene = Scene::new();
+        let before = scene.cached_scale_picker_list();
+        assert!(scene.add_scale("TEST_CACHED_SCALE", 1.0, 100.0));
+        let after = scene.cached_scale_picker_list();
+        assert!(
+            !std::sync::Arc::ptr_eq(&before, &after),
+            "add_scale must bump the epoch so the cached Arc is replaced"
+        );
+        assert!(after.iter().any(|(n, _, _)| n == "TEST_CACHED_SCALE"));
+    }
+
+    #[test]
+    fn cached_scale_picker_invalidated_by_current_scale_change() {
+        let mut scene = Scene::new();
+        // Force the metric family so the architectural entry is filtered out
+        // unless it is the kept-active current scale.
+        scene.document.header.insertion_units = 4;
+        assert!(scene.add_scale("1:50", 1.0, 50.0));
+        assert!(scene.add_scale("1/2\" = 1'-0\"", 0.5, 12.0));
+        // Current = opposite-family entry with no metric equivalent factor, so
+        // the keep-active path appends it to the visible list.
+        assert!(scene.set_annotation_scale_named("1/2\" = 1'-0\"").is_some());
+        let before = scene.cached_scale_picker_list();
+        assert!(
+            before.iter().any(|(n, _, _)| n == "1/2\" = 1'-0\""),
+            "warm cache must contain the active opposite-family entry"
+        );
+        // Production setter: changes `current_annotation_scale` without
+        // bumping `scale_epoch` — the old (epoch, factor) key stayed hit here.
+        assert!(scene.set_annotation_scale_named("1:50").is_some());
+        let after = scene.cached_scale_picker_list();
+        assert!(
+            !std::sync::Arc::ptr_eq(&before, &after),
+            "current-scale change must miss the cache (new Arc)"
+        );
+        assert!(
+            !after.iter().any(|(n, _, _)| n == "1/2\" = 1'-0\""),
+            "after switching to 1:50 the architectural entry must drop out"
+        );
+        assert!(after.iter().any(|(n, _, _)| n == "1:50"));
     }
 }

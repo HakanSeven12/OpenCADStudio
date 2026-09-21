@@ -158,6 +158,13 @@ impl std::fmt::Display for Language {
 }
 
 fn system_languages() -> Vec<i18n_embed::unic_langid::LanguageIdentifier> {
+    // The unit tests compare English prompts and messages through one
+    // process-wide loader, and every `apply_config` of a default config asks
+    // for the system language, so the machine's locale must never reach
+    // them — not even from a test that runs in parallel.
+    #[cfg(test)]
+    return vec!["en-US".parse().expect("en-US is a valid language identifier")];
+
     #[cfg(target_arch = "wasm32")]
     let mut requested = WebLanguageRequester::requested_languages();
     #[cfg(not(target_arch = "wasm32"))]

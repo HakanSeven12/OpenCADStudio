@@ -7176,7 +7176,7 @@ impl OpenCADStudio {
                     .unwrap_or(1);
                 let name = format!("Layout{n}");
                 self.push_undo_snapshot(i, "LAYOUT NEW");
-                match self.tabs[i].scene.document.add_layout(&name) {
+                match self.tabs[i].scene.add_layout(&name) {
                     Ok(_) => {
                         self.tabs[i].dirty = true;
                         self.layout_manager_selected = name.clone();

@@ -67,24 +67,34 @@ impl AlignedDimensionCommand {
         let first = self.plane.to_local(first);
         let second = self.plane.to_local(second);
         let point = self.plane.to_local(point);
-        let mut dim = DimensionAligned::new(v3(first), v3(second));
-        // The placement point is stored so commit matches the preview.
-        dim.definition_point = v3(point);
-        dim.base.definition_point = v3(point);
-        let (d1, d2) = dim_line_endpoints(first, second, point);
-        dim.base.text_middle_point = v3((d1 + d2) * 0.5);
-        dim.base.insertion_point = dim.base.text_middle_point;
-        dim.base.actual_measurement = dim.measurement();
-        crate::entities::dimension::set_dimension_text_override(
-            &mut dim.base,
-            self.text_override.clone(),
-        );
+        let mut entity = aligned_dimension_entity(first, second, point, self.text_override.clone());
         // An explicit text angle overrides the default rotation.
-        if let Some(angle) = self.text_angle {
-            dim.base.text_rotation = angle;
+        if let (Some(angle), EntityType::Dimension(dimension)) = (self.text_angle, &mut entity) {
+            dimension.base_mut().text_rotation = angle;
         }
-        self.plane.place_entity(EntityType::Dimension(Dimension::Aligned(dim)))
+        self.plane.place_entity(entity)
     }
+}
+
+/// An aligned dimension between two points of the working plane, its
+/// dimension line through `point` — what DIMALIGNED places and what an
+/// aligned dimensional constraint draws.
+pub(crate) fn aligned_dimension_entity(
+    first: DVec3,
+    second: DVec3,
+    point: DVec3,
+    text_override: Option<String>,
+) -> EntityType {
+    let mut dim = DimensionAligned::new(v3(first), v3(second));
+    // The placement point is stored so commit matches the preview.
+    dim.definition_point = v3(point);
+    dim.base.definition_point = v3(point);
+    let (d1, d2) = dim_line_endpoints(first, second, point);
+    dim.base.text_middle_point = v3((d1 + d2) * 0.5);
+    dim.base.insertion_point = dim.base.text_middle_point;
+    dim.base.actual_measurement = dim.measurement();
+    crate::entities::dimension::set_dimension_text_override(&mut dim.base, text_override);
+    EntityType::Dimension(Dimension::Aligned(dim))
 }
 
 impl CadCommand for AlignedDimensionCommand {

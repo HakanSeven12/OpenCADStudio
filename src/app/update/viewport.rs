@@ -785,6 +785,8 @@ impl OpenCADStudio {
     pub(super) fn on_tick(&mut self, t: Instant) -> Task<Message> {
         let i = self.active_tab;
         self.tabs[i].scene.update(t - self.start);
+        // Dynamic dimensions keep their screen size across zoom bands.
+        self.tabs[i].scene.refresh_dynamic_dimension_scales(false);
 
         // If the camera moved since we last synced, write it back to
         // the document and mark the file dirty.
@@ -5058,6 +5060,15 @@ properties={:.1}ms picked={}",
                     {
                         return Task::none();
                     }
+                    // A constraint dimension edits its parameter from the
+                    // command line, standing in for the reference's in-place
+                    // value editor.
+                    if let Some(prompt) = self.dynamic_dimension_value_command(i, handle) {
+                        use crate::command::CadCommand;
+                        self.command_line.push_info(&prompt.prompt());
+                        self.tabs[i].active_cmd = Some(Box::new(prompt));
+                        return Task::none();
+                    }
                     // Any text-bearing entity opens its in-place editor
                     // (plain box or rich MText editor, per type). A
                     // Leader resolves to the entity it annotates.
@@ -6017,7 +6028,7 @@ properties={:.1}ms picked={}",
             idx += 1;
         };
         self.push_undo_snapshot(i, "LAYOUT");
-        match self.tabs[i].scene.document.add_layout(&new_name) {
+        match self.tabs[i].scene.add_layout(&new_name) {
             Ok(_) => {
                 let layout_flags = i16::from(
                     self.tabs[i]

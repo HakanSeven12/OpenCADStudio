@@ -176,6 +176,42 @@ pub fn glyph(family: &str, ch: char) -> Option<Arc<Glyph>> {
     built
 }
 
+/// Font-unit → 9-unit-em-box factor: the whole em square maps onto the text
+/// height. This is how an SHX big font (`chineset.shx`, `hztxt.shx`, …)
+/// sizes its ideographs — a CJK glyph is as tall as the text height and one
+/// text height wide — so a TrueType glyph standing in for a missing big-font
+/// glyph must use the same box, not the Latin cap height. Cap-height scaling
+/// makes ideographs ~1.3–1.5× too big (1 em ≈ 1.3–1.5 cap heights in CJK
+/// fonts), so every line of substituted Chinese text ran past its frame.
+fn em_scale(face: &ttf_parser::Face) -> f32 {
+    CAP_UNITS / face.units_per_em().max(1) as f32
+}
+
+/// Ideographic / full-width characters: the ones a big font would supply and
+/// that sit on an em box rather than the Latin cap height.
+pub(crate) fn is_full_width(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x1100..=0x11FF       // Hangul Jamo
+        | 0x2E80..=0x2FDF     // CJK / Kangxi radicals
+        | 0x2FF0..=0x303F     // ideographic description, CJK symbols & punctuation
+        | 0x3040..=0x30FF     // Hiragana, Katakana
+        | 0x3100..=0x312F     // Bopomofo
+        | 0x3130..=0x318F     // Hangul compatibility Jamo
+        | 0x3190..=0x31FF     // Kanbun, Bopomofo ext., CJK strokes, Katakana ext.
+        | 0x3200..=0x33FF     // enclosed CJK, CJK compatibility
+        | 0x3400..=0x4DBF     // CJK ext. A
+        | 0x4E00..=0x9FFF     // CJK unified ideographs
+        | 0xA960..=0xA97F     // Hangul Jamo ext. A
+        | 0xAC00..=0xD7FF     // Hangul syllables, Jamo ext. B
+        | 0xF900..=0xFAFF     // CJK compatibility ideographs
+        | 0xFE30..=0xFE4F     // CJK compatibility forms
+        | 0xFF01..=0xFF60     // full-width ASCII variants
+        | 0xFFE0..=0xFFE6     // full-width symbols
+        | 0x20000..=0x3FFFF   // CJK ext. B–H
+    )
+}
+
 /// Font-unit → 9-unit-cap-height factor for a parsed face. Cap height comes
 /// from the OS/2 table; absent, we approximate it as 0.7 × units-per-em.
 fn cap_scale(face: &ttf_parser::Face) -> f32 {
@@ -385,7 +421,16 @@ fn build_fallback(ch: char) -> Option<Arc<Glyph>> {
             let face_index = fs.db_mut().face(g.font_id).map(|f| f.index).unwrap_or(0);
             let font = fs.get_font(g.font_id, g.font_weight)?;
             let face = ttf_parser::Face::parse(font.data(), face_index).ok()?;
-            let k = cap_scale(&face);
+            // A fallback glyph stands in for a stroke / SHX font that lacks
+            // the character. For an ideograph that font would have been a
+            // big font, whose glyphs fill the text height — so size the
+            // substitute by its em box. Everything else keeps the cap-height
+            // normalisation that lines it up with the Latin stroke glyphs.
+            let k = if is_full_width(ch) {
+                em_scale(&face)
+            } else {
+                cap_scale(&face)
+            };
             let gid = ttf_parser::GlyphId(g.glyph_id);
             let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * k;
             let mut fl = OutlineFlattener::new(k);
@@ -607,6 +652,39 @@ mod tests {
         let run = shape_run(fam, "A中").expect("shaped");
         eprintln!("fallback run glyphs={}", run.glyphs.len());
         assert!(!run.glyphs.is_empty());
+    }
+
+    #[test]
+    fn fallback_ideograph_fills_the_text_height_like_a_big_font() {
+        // An SHX big font draws an ideograph one text height tall and one
+        // text height wide. The TrueType stand-in must match that box (9
+        // units), not the ~12–14 units the Latin cap-height normalisation
+        // gives a CJK em square — that overrun pushed every substituted
+        // Chinese line past its frame. Tolerated when the machine has no
+        // CJK font at all.
+        let Some(g) = fallback_glyph('中') else {
+            eprintln!("no CJK system font; skipping");
+            return;
+        };
+        assert!(
+            (g.advance - CAP_UNITS).abs() < 0.6,
+            "ideograph advance must be about one text height: got {}",
+            g.advance
+        );
+        let ink_h = g
+            .strokes
+            .iter()
+            .flatten()
+            .map(|p| p[1])
+            .fold((f32::MAX, f32::MIN), |(lo, hi), y| (lo.min(y), hi.max(y)));
+        assert!(
+            ink_h.1 - ink_h.0 <= CAP_UNITS * 1.05,
+            "ideograph ink must fit the text height: {:?}",
+            ink_h
+        );
+        // Latin fallback keeps the cap-height convention (shares a baseline
+        // with the stroke glyphs around it).
+        assert!(!is_full_width('A') && is_full_width('中') && is_full_width('，'));
     }
 
     #[test]

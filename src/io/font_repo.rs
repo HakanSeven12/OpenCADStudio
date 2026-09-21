@@ -70,18 +70,21 @@ pub fn missing_shx_fonts(doc: &CadDocument) -> Vec<String> {
         .map(Path::new)
         .and_then(|p| p.parent());
     for style in doc.text_styles.iter() {
-        let file = style.font_file.trim();
-        if file.is_empty() || !file.to_ascii_lowercase().ends_with(".shx") {
-            continue;
-        }
-        let resolved = crate::io::resolve_image_file(file, base).is_some()
-            || local_font_file(file).is_some();
-        if resolved {
-            continue;
-        }
-        let name = file.rsplit(['/', '\\']).next().unwrap_or(file).to_string();
-        if !missing.iter().any(|m| m.eq_ignore_ascii_case(&name)) {
-            missing.push(name);
+        // The primary font and the big font (Asian double-byte glyphs) are
+        // both plain .shx files the style depends on.
+        for file in [style.font_file.trim(), style.big_font_file.trim()] {
+            if file.is_empty() || !file.to_ascii_lowercase().ends_with(".shx") {
+                continue;
+            }
+            let resolved = crate::io::resolve_image_file(file, base).is_some()
+                || local_font_file(file).is_some();
+            if resolved {
+                continue;
+            }
+            let name = file.rsplit(['/', '\\']).next().unwrap_or(file).to_string();
+            if !missing.iter().any(|m| m.eq_ignore_ascii_case(&name)) {
+                missing.push(name);
+            }
         }
     }
     missing.sort_by_key(|name| name.to_ascii_lowercase());

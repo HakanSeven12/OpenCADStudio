@@ -77,6 +77,27 @@ pub fn resolve_text_style(style_name: &str, document: &CadDocument) -> ResolvedT
         }
     }
 
+    // A style's "Big Font" (`chineset.shx`, `hztxt.shx`, …) supplies the
+    // double-byte characters. Resolve it like the primary font (next to the
+    // drawing, then the per-user fonts folder) and pair it with the face; an
+    // unresolvable big font just leaves those characters to the fallback.
+    if let Some(big) = style
+        .map(|s| s.big_font_file.trim())
+        .filter(|big| !big.is_empty() && big.to_ascii_lowercase().ends_with(".shx"))
+    {
+        let base = document
+            .source_path
+            .as_deref()
+            .map(std::path::Path::new)
+            .and_then(|p| p.parent());
+        let big_path = crate::io::resolve_image_file(big, base).or_else(|| {
+            crate::io::font_repo::local_font_file(big).map(|p| p.to_string_lossy().into_owned())
+        });
+        if let Some(big_path) = big_path {
+            font_name = Face::with_big_font(&font_name, &big_path);
+        }
+    }
+
     ResolvedTextStyle {
         font_name,
         width_factor: style.map(|s| s.width_factor as f32).unwrap_or(1.0),
@@ -539,11 +560,18 @@ pub fn adapt_mtext_paragraphs(
         }
         let (align, indent_first, indent_left, indent_right, tab_stops) =
             if has_own_props(props) || carried.is_none() {
+                // `\pxi…,l…,r…,t…;` values are multiples of the text height,
+                // not drawing units, and the first-line indent is relative to
+                // the left indent (a numbered list's hanging indent is
+                // `i-1.5,l1.5`: number at the margin, wrapped lines 1.5 h in).
+                // Taken raw they were a fraction of a unit — no indent at all —
+                // so every wrapped list line snapped back to the margin.
+                let left = props.left_margin.unwrap_or(0.0) as f32 * entity_height;
                 let v = (
                     props.alignment.and_then(map_align),
-                    props.first_line_indent.unwrap_or(0.0) as f32,
-                    props.left_margin.unwrap_or(0.0) as f32,
-                    props.right_margin.unwrap_or(0.0) as f32,
+                    left + props.first_line_indent.unwrap_or(0.0) as f32 * entity_height,
+                    left,
+                    props.right_margin.unwrap_or(0.0) as f32 * entity_height,
                     props
                         .tab_stops
                         .iter()
@@ -556,7 +584,7 @@ pub fn adapt_mtext_paragraphs(
                                 ATab::Decimal(_) => TabKind::Decimal,
                             };
                             TabStop {
-                                position: ts.position() as f32,
+                                position: ts.position() as f32 * entity_height,
                                 kind,
                             }
                         })
@@ -877,6 +905,20 @@ pub fn resolve_font<'a>(state: &'a RunState, base: &'a str) -> std::borrow::Cow<
     } else {
         std::borrow::Cow::Borrowed(base)
     }
+}
+
+/// Whether a line may break between `prev` and `next`. Ideographic text has
+/// no spaces, so a break is allowed on either side of a full-width character,
+/// except before a closing mark (`，。、）」…`) or after an opening one
+/// (`（「《…`) — the basic kinsoku rule.
+pub(crate) fn cjk_break_between(prev: char, next: char) -> bool {
+    use crate::scene::text::ttf_glyph::is_full_width;
+    const CLOSING: &str = "，。、；：？！）」』】〕》〉』﹚﹞．～…‥、〞”’,.;:!?)]}%";
+    const OPENING: &str = "（「『【〔《〈﹙﹝“‘([{";
+    if !(is_full_width(prev) || is_full_width(next)) {
+        return false;
+    }
+    !CLOSING.contains(next) && !OPENING.contains(prev)
 }
 
 pub fn measure_word(
@@ -1383,6 +1425,21 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             doc_char_offset += 1;
                             word_start = doc_char_offset;
                         } else {
+                            // CJK text carries no spaces: every ideograph is a
+                            // wrap opportunity (bar the usual "no line starts
+                            // with a closing mark / ends with an opening one"
+                            // rule), so a long Chinese sentence must not stay
+                            // one unbreakable word that overshoots its column.
+                            if let Some(prev) = word.chars().last() {
+                                if cjk_break_between(prev, ch) {
+                                    atoms.push(LayoutAtom {
+                                        kind: AtomKind::Word(std::mem::take(&mut word)),
+                                        state: run.state.clone(),
+                                        char_offset: word_start,
+                                    });
+                                    word_start = doc_char_offset;
+                                }
+                            }
                             word.push(ch);
                             doc_char_offset += 1;
                         }
@@ -2974,6 +3031,58 @@ mod v_anchor_tests {
         let words6 = ["שלום", " ", "«x"];
         let reordered6 = reorder_atoms(&words6, false);
         assert_eq!(reordered6, vec!["שלום", " ", "«x"]);
+    }
+
+
+    #[test]
+    fn cjk_paragraph_wraps_between_ideographs() {
+        use crate::entities::text_support::{layout_mtext, MTextRenderOpts, MTextVAnchor, ResolvedTextStyle};
+        // Breaks are allowed between ideographs but not before a closing mark
+        // or after an opening one.
+        assert!(cjk_break_between('工', '程'));
+        assert!(cjk_break_between('程', 'A'));
+        assert!(!cjk_break_between('工', '，'));
+        assert!(!cjk_break_between('（', '工'));
+        assert!(!cjk_break_between('a', 'b'));
+
+        let style = ResolvedTextStyle {
+            font_name: "Standard".to_string(),
+            width_factor: 1.0,
+            oblique_angle: 0.0,
+            is_backward: false,
+            is_upside_down: false,
+            is_vertical: false,
+        };
+        // 40 ideographs with no spaces in a column ~12 characters wide used
+        // to stay one unbreakable word: a single line overshooting the box.
+        let value = "本工程之各種平面圖均須相互配合如有不符或須更正處均按工程慣例施工至完整並請於估價前提出";
+        let opts = MTextRenderOpts {
+            columns: Default::default(),
+            value,
+            insertion: [0.0, 0.0, 0.0],
+            height: 2.5,
+            rect_w: 30.0,
+            rotation: 0.0,
+            style: &style,
+            attach_h_anchor: 0.0,
+            v_anchor: MTextVAnchor::Top,
+            line_spacing_factor: 1.0,
+            exact_line_spacing: false,
+            rectangle_height: 0.0,
+            vertical_text: false,
+            want_glyph_boxes: true,
+        };
+        let layout = layout_mtext(&opts);
+        assert!(
+            layout.line_count >= 3,
+            "a 40-ideograph paragraph in a 30-unit column must wrap (got {} line(s))",
+            layout.line_count
+        );
+        assert!(
+            layout.line_widths.iter().all(|w| *w <= 30.0 + 1e-3),
+            "no wrapped line may overshoot the column: {:?}",
+            layout.line_widths
+        );
     }
 
     #[test]

@@ -17,11 +17,12 @@ pub fn menu_entries(
     is_model: bool,
     current_scale_name: &str,
     viewport_scale: Option<f64>,
-    file_scales: Vec<(String, f32, f64)>,
+    file_scales: &[(String, f32, f64)],
 ) -> Vec<Entry<'static>> {
     let mut entries: Vec<Entry<'static>> = file_scales
-        .into_iter()
+        .iter()
         .map(|(label, _anno_scale, vp_scale)| {
+            let vp_scale = *vp_scale;
             let active = if is_model {
                 label.eq_ignore_ascii_case(current_scale_name)
             } else {
@@ -38,7 +39,7 @@ pub fn menu_entries(
             } else {
                 Message::SetViewportScale(label.clone())
             };
-            Entry::close(scale_row(label, active, msg))
+            Entry::close(scale_row(label.clone(), active, msg))
         })
         .collect();
 

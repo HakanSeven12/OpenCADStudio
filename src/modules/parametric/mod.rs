@@ -4,6 +4,8 @@
 
 mod coincident;
 mod concentric;
+mod dim_constraint;
+mod parameters_cli;
 mod constraint_bar;
 mod equal_distance;
 #[path = "equal.rs"]
@@ -25,6 +27,11 @@ mod tools;
 mod value;
 pub use coincident::{coincident_tool, CoincidentConstraintCommand};
 pub use concentric::ConcentricConstraintCommand;
+pub use dim_constraint::{
+    ConstraintFormCommand, DimConstraintAxis, DimConstraintCommand, DimConstraintMenuCommand,
+    DimensionValueCommand,
+};
+pub use parameters_cli::ParametersCliCommand;
 pub use constraint_bar::ConstraintBarOptionCommand;
 pub use equal_command::EqualConstraintCommand;
 pub use equal_distance::{equal_distance_tool, EqualDistanceConstraintCommand};
@@ -156,7 +163,7 @@ inventory::submit!(crate::command::CommandRegistration {
     names: &[
         "AUTOCONSTRAIN", "CONSTRAINTSETTINGS", "GCSMOOTH", "GCSHOW", "GCHIDE", "GCRESET",
         "GCSHOWALL", "GCHIDEALL", "DCSHOW", "DCHIDE", "DCSHOWALL", "DCHIDEALL",
-        "DCCONVERT", "DELCONSTRAINT",
+        "DCCONVERT", "DELCONSTRAINT", "DIMCONSTRAINT", "DCFORM", "-PARAMETERS",
     ]
 });
 

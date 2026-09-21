@@ -104,6 +104,10 @@ impl CadCommand for FixConstraintCommand {
         true
     }
 
+    fn typed_point_picks_entity(&self) -> bool {
+        matches!(self.step, Step::Object)
+    }
+
     fn entity_pick_highlights_hover(&self) -> bool {
         true
     }

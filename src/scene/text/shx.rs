@@ -50,7 +50,20 @@ const DIRS: [[f64; 2]; 16] = [
     [1.0, -0.5],
 ];
 
+/// Which `AutoCAD-86` container a file is; decides how glyphs are keyed and
+/// how a `7` (subshape) opcode is encoded.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ShxKind {
+    /// `shapes 1.0/1.1`: keyed by 8-bit code (or shape number).
+    Shapes,
+    /// `unifont 1.0`: keyed by Unicode code point.
+    Unifont,
+    /// `bigfont 1.0`: keyed by a double-byte legacy code (Big5, GBK, …).
+    Bigfont,
+}
+
 struct ShxFile {
+    kind: ShxKind,
     /// shape number → (name, spec bytes)
     shapes: HashMap<u16, (String, Vec<u8>)>,
 }
@@ -81,39 +94,160 @@ fn load_file(path: &str) -> Option<Arc<ShxFile>> {
 
 fn parse_file(path: &str) -> Option<ShxFile> {
     let bytes = std::fs::read(path).ok()?;
-    // Header line: `AutoCAD-86 shapes 1.0`/`1.1` + CR LF SUB. Reject fonts.
+    // Header line: `AutoCAD-86 <kind> 1.x` + CR LF SUB.
     let head_end = bytes.iter().position(|&b| b == 0x1A)?;
     let header = String::from_utf8_lossy(&bytes[..head_end]);
-    if !header.contains("shapes") {
+    let kind = if header.contains("shapes") {
+        ShxKind::Shapes
+    } else if header.contains("unifont") {
+        ShxKind::Unifont
+    } else if header.contains("bigfont") {
+        ShxKind::Bigfont
+    } else {
         return None;
-    }
+    };
     let mut p = head_end + 1;
     let rd_u16 = |p: &mut usize| -> Option<u16> {
         let v = u16::from_le_bytes([*bytes.get(*p)?, *bytes.get(*p + 1)?]);
         *p += 2;
         Some(v)
     };
-    let _first = rd_u16(&mut p)?;
-    let _last = rd_u16(&mut p)?;
-    let count = rd_u16(&mut p)? as usize;
-    let mut dir: Vec<(u16, usize)> = Vec::with_capacity(count);
-    for _ in 0..count {
-        let num = rd_u16(&mut p)?;
-        let len = rd_u16(&mut p)? as usize;
-        dir.push((num, len));
-    }
-    let mut shapes = HashMap::new();
-    for (num, len) in dir {
-        let end = p.checked_add(len)?.min(bytes.len());
-        let blob = &bytes[p..end];
-        p = end;
-        // Name = leading NUL-terminated ASCII, spec follows.
+    let rd_u32 = |p: &mut usize| -> Option<u32> {
+        let v = u32::from_le_bytes([
+            *bytes.get(*p)?,
+            *bytes.get(*p + 1)?,
+            *bytes.get(*p + 2)?,
+            *bytes.get(*p + 3)?,
+        ]);
+        *p += 4;
+        Some(v)
+    };
+    // Glyph data = leading NUL-terminated ASCII name, spec follows.
+    let split_named = |blob: &[u8]| -> (String, Vec<u8>) {
         let name_end = blob.iter().position(|&b| b == 0).unwrap_or(0);
         let name = String::from_utf8_lossy(&blob[..name_end]).into_owned();
         let spec = blob.get(name_end + 1..).unwrap_or(&[]).to_vec();
-        shapes.insert(num, (name, spec));
+        (name, spec)
+    };
+    let mut shapes = HashMap::new();
+    match kind {
+        ShxKind::Shapes => {
+            let _first = rd_u16(&mut p)?;
+            let _last = rd_u16(&mut p)?;
+            let count = rd_u16(&mut p)? as usize;
+            let mut dir: Vec<(u16, usize)> = Vec::with_capacity(count);
+            for _ in 0..count {
+                let num = rd_u16(&mut p)?;
+                let len = rd_u16(&mut p)? as usize;
+                dir.push((num, len));
+            }
+            for (num, len) in dir {
+                let end = p.checked_add(len)?.min(bytes.len());
+                let blob = &bytes[p..end];
+                p = end;
+                shapes.insert(num, split_named(blob));
+            }
+        }
+        ShxKind::Unifont => {
+            // u32 glyph count (including the font header), then the header
+            // entry (u16 length + name NUL above below modes encoding
+            // embedded 0), then `count - 1` × (u16 code, u16 length, data).
+            let count = rd_u32(&mut p)? as usize;
+            let head_len = rd_u16(&mut p)? as usize;
+            let end = p.checked_add(head_len)?.min(bytes.len());
+            shapes.insert(0, split_named(&bytes[p..end]));
+            p = end;
+            for _ in 1..count {
+                let Some(code) = rd_u16(&mut p) else { break };
+                let Some(len) = rd_u16(&mut p) else { break };
+                let end = p.checked_add(len as usize)?.min(bytes.len());
+                shapes.insert(code, split_named(&bytes[p..end]));
+                p = end;
+            }
+        }
+        ShxKind::Bigfont => {
+            // u16 bytes per table entry (8), u16 table entries, u16 range
+            // count, ranges × (u16 lo, u16 hi) of lead bytes, then the entry
+            // table — a sparse hash table of (u16 code, u16 length, u32 file
+            // offset); empty slots are all zero. Shape 0 (name NUL above
+            // below modes) is the font header.
+            let entry_size = rd_u16(&mut p)? as usize;
+            let entries = rd_u16(&mut p)? as usize;
+            let ranges = rd_u16(&mut p)? as usize;
+            p = p.checked_add(ranges * 4)?;
+            if entry_size < 8 {
+                return None;
+            }
+            for i in 0..entries {
+                let mut q = p.checked_add(i * entry_size)?;
+                let Some(code) = rd_u16(&mut q) else { break };
+                let Some(len) = rd_u16(&mut q) else { break };
+                let Some(off) = rd_u32(&mut q) else { break };
+                if off == 0 && len == 0 {
+                    continue;
+                }
+                let start = off as usize;
+                let end = start.saturating_add(len as usize).min(bytes.len());
+                if start >= end {
+                    continue;
+                }
+                shapes.insert(code, split_named(&bytes[start..end]));
+            }
+        }
     }
-    Some(ShxFile { shapes })
+    Some(ShxFile { kind, shapes })
+}
+
+/// True when the file is an Asian big font (`AutoCAD-86 bigfont 1.0`).
+pub fn is_bigfont(path: &str) -> bool {
+    load_file(path).is_some_and(|f| f.kind == ShxKind::Bigfont)
+}
+
+/// The code pages a big font's double-byte codes may be in, most likely
+/// first, guessed from the file name. The codec maps a name to its encoding
+/// (`ansi_950` Big5, `ansi_936` GBK, `ansi_932` Shift_JIS, `ansi_949` EUC-KR).
+fn bigfont_code_pages(path: &str) -> [&'static str; 4] {
+    let name = path
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(path)
+        .to_ascii_lowercase();
+    if name.contains("gb") || name.contains("hz") || name.contains("china") {
+        ["ansi_936", "ansi_950", "ansi_932", "ansi_949"]
+    } else if name.contains("bigfont") || name.contains("extfont") || name.contains("jp") {
+        ["ansi_932", "ansi_950", "ansi_936", "ansi_949"]
+    } else if name.contains("whg") || name.contains("kor") || name.contains("han") {
+        ["ansi_949", "ansi_950", "ansi_936", "ansi_932"]
+    } else {
+        // `chineset.shx` and most Taiwanese fonts.
+        ["ansi_950", "ansi_936", "ansi_932", "ansi_949"]
+    }
+}
+
+/// Look up `ch` in a big font: encode it to the font's double-byte code and
+/// fetch that shape, normalised like [`font_glyph`]. `None` when the file is
+/// not a big font or has no glyph for the character.
+pub fn bigfont_glyph(path: &str, ch: char) -> Option<Arc<crate::scene::text::lff::Glyph>> {
+    let file = load_file(path)?;
+    if file.kind != ShxKind::Bigfont {
+        return None;
+    }
+    let mut buf = [0u8; 4];
+    let s = ch.encode_utf8(&mut buf);
+    for page in bigfont_code_pages(path) {
+        let Some(enc) = acadrust::io::dxf::code_page::encoding_from_code_page(page) else {
+            continue;
+        };
+        let (bytes, _, unmappable) = enc.encode(s);
+        if unmappable || bytes.len() != 2 {
+            continue;
+        }
+        let code = u16::from_be_bytes([bytes[0], bytes[1]]);
+        if file.shapes.contains_key(&code) {
+            return font_glyph(path, code);
+        }
+    }
+    None
 }
 
 /// Tessellate the shape named `name` (case-insensitive) from the SHX at
@@ -410,8 +544,16 @@ fn interpret(
                 }
             }
             7 => {
-                let sub = *b.get(i).unwrap_or(&0) as u16;
+                let mut sub = *b.get(i).unwrap_or(&0) as u16;
                 i += 1;
+                // A big font references subshapes by a two-byte code:
+                // `7, 0, hi, lo`.
+                if file.kind == ShxKind::Bigfont && sub == 0 {
+                    let hi = *b.get(i).unwrap_or(&0) as u16;
+                    let lo = *b.get(i + 1).unwrap_or(&0) as u16;
+                    i += 2;
+                    sub = (hi << 8) | lo;
+                }
                 if !skipping && sub != 0 && sub != shape_number {
                     interpret(file, sub, st, cur, out, depth + 1);
                 }
@@ -508,5 +650,93 @@ fn interpret(
                 }
             }
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Shape bytecode for a glyph: a horizontal 6-unit stroke, then end.
+    /// (`0x60` = length 6, direction 0.)
+    const BAR: [u8; 2] = [0x60, 0x00];
+
+    fn tmp(name: &str, bytes: &[u8]) -> String {
+        let dir = std::env::temp_dir().join(format!("ocs-shx-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    /// A one-glyph `bigfont 1.0` keyed by the Big5 code of `中` (0xA4A4),
+    /// laid out like `chineset.shx`: header, 8-byte entries in a sparse
+    /// table, font header shape 0 (`name NUL above below modes`).
+    fn synthetic_bigfont() -> Vec<u8> {
+        let mut b = b"AutoCAD-86 bigfont 1.0\r\n\x1a".to_vec();
+        let entries: u16 = 4;
+        b.extend_from_slice(&8u16.to_le_bytes());
+        b.extend_from_slice(&entries.to_le_bytes());
+        b.extend_from_slice(&1u16.to_le_bytes()); // one lead-byte range
+        b.extend_from_slice(&0x80u16.to_le_bytes());
+        b.extend_from_slice(&0xFFu16.to_le_bytes());
+        let table_at = b.len();
+        b.resize(table_at + 8 * entries as usize, 0);
+        let head_data: Vec<u8> = [b"BIG\x00".as_slice(), &[48u8, 0, 2]].concat();
+        let glyph_data: Vec<u8> = [b"\x00".as_slice(), &BAR].concat();
+        let head_off = b.len() as u32;
+        b.extend_from_slice(&head_data);
+        let glyph_off = b.len() as u32;
+        b.extend_from_slice(&glyph_data);
+        // Slot 0 = shape 0; slot 2 = the glyph (slots 1 and 3 stay empty).
+        let mut entry = |slot: usize, code: u16, len: u16, off: u32| {
+            let at = table_at + slot * 8;
+            b[at..at + 2].copy_from_slice(&code.to_le_bytes());
+            b[at + 2..at + 4].copy_from_slice(&len.to_le_bytes());
+            b[at + 4..at + 8].copy_from_slice(&off.to_le_bytes());
+        };
+        entry(0, 0, head_data.len() as u16, head_off);
+        entry(2, 0xA4A4, glyph_data.len() as u16, glyph_off);
+        b
+    }
+
+    /// A `unifont 1.0` with the font header and one glyph for `A` (U+0041).
+    fn synthetic_unifont() -> Vec<u8> {
+        let mut b = b"AutoCAD-86 unifont 1.0\r\n\x1a".to_vec();
+        b.extend_from_slice(&2u32.to_le_bytes()); // header + 1 glyph
+        let head: Vec<u8> = [b"UNI\x00".as_slice(), &[6u8, 2, 2, 0, 0, 0]].concat();
+        b.extend_from_slice(&(head.len() as u16).to_le_bytes());
+        b.extend_from_slice(&head);
+        let glyph: Vec<u8> = [b"\x00".as_slice(), &BAR].concat();
+        b.extend_from_slice(&0x41u16.to_le_bytes());
+        b.extend_from_slice(&(glyph.len() as u16).to_le_bytes());
+        b.extend_from_slice(&glyph);
+        b
+    }
+
+    #[test]
+    fn bigfont_glyph_is_found_by_big5_code_and_scaled_to_cap_height() {
+        let path = tmp("cjk.shx", &synthetic_bigfont());
+        assert!(is_bigfont(&path));
+        let (above, below) = font_metrics(&path).expect("font header");
+        assert_eq!((above, below), (48.0, 0.0));
+        // `中` → Big5 A4A4 → the glyph; `A` is not in a big font.
+        let g = bigfont_glyph(&path, '中').expect("glyph for 中");
+        // 6 font units at above = 48 → 6 * 9 / 48 = 1.125 text units.
+        assert!((g.advance - 1.125).abs() < 1e-4, "advance {}", g.advance);
+        assert_eq!(g.strokes.len(), 1);
+        assert!(bigfont_glyph(&path, 'A').is_none());
+        assert!(bigfont_glyph(&path, '國').is_none(), "unknown code must miss, not alias");
+    }
+
+    #[test]
+    fn unifont_glyph_is_keyed_by_unicode() {
+        let path = tmp("uni.shx", &synthetic_unifont());
+        assert!(!is_bigfont(&path));
+        assert_eq!(font_metrics(&path), Some((6.0, 2.0)));
+        let g = font_glyph(&path, 'A' as u16).expect("glyph for A");
+        assert!((g.advance - 9.0).abs() < 1e-4, "6 units at above 6 → 9: {}", g.advance);
+        assert!(font_glyph(&path, 'B' as u16).is_none());
     }
 }

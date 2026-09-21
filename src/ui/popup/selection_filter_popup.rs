@@ -14,7 +14,7 @@ use crate::ui::statusbar::status_menu::Entry;
 /// - `types`: entity-type names present in the current layout.
 /// - `excluded`: types currently filtered out (unchecked).
 pub fn menu_entries(
-    types: Vec<String>,
+    types: &[String],
     excluded: &HashSet<String>,
 ) -> Vec<Entry<'static>> {
     // "Select All / Clear All" header, mirroring the OSNAP popup: Select All
@@ -51,10 +51,10 @@ pub fn menu_entries(
         vec![Entry::stay(empty_row())]
     } else {
         types
-            .into_iter()
+            .iter()
             .map(|name| {
-                let included = !excluded.contains(&name);
-                Entry::stay(type_row(name, included))
+                let included = !excluded.contains(name);
+                Entry::stay(type_row(name.clone(), included))
             })
             .collect()
     };

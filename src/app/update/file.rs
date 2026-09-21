@@ -1496,7 +1496,7 @@ impl OpenCADStudio {
 
         self.prepare_native_save(i);
         let version = self.tabs[i].scene.document.version;
-        let snapshot = self.tabs[i].scene.document.clone();
+        let snapshot = self.tabs[i].scene.document_for_save();
         crate::io::save_owned_as_version_atomic(
             snapshot,
             &path,
@@ -1777,6 +1777,8 @@ impl OpenCADStudio {
         self.install_native_edit_guard(i, &path, opened_fingerprint);
         self.tabs[i].scene.material_base_dir = path.parent().map(std::path::Path::to_path_buf);
         self.tabs[i].scene.document = doc;
+        self.tabs[i].scene.bump_layout_epoch();
+        self.tabs[i].scene.bump_scale_epoch();
         // Load parameters first so imported dimensional constraints
         // can resolve their named driving values.
         self.tabs[i].scene.load_named_parameters_from_document();
@@ -1977,7 +1979,7 @@ impl OpenCADStudio {
         path: std::path::PathBuf,
     ) -> Task<Message> {
         let i = self.active_tab;
-        let document = self.tabs[i].scene.document.clone();
+        let document = self.tabs[i].scene.document_for_save();
         let handles: Vec<_> = self.tabs[i].scene.selected.iter().copied().collect();
         // Native: extraction and the file write both run on a background
         // thread, unchanged.
@@ -2856,7 +2858,7 @@ impl OpenCADStudio {
             crate::ui::wrap_bar::dropdown_bounds(crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID)
         });
         let clone_started = iced::time::Instant::now();
-        let mut snapshot = self.tabs[i].scene.document.clone();
+        let mut snapshot = self.tabs[i].scene.document_for_save();
         // Save-As across folders: rebase relative reference paths onto the
         // new base dir inside the snapshot only (live strings are untouched).
         if purpose == crate::app::SavePurpose::SaveAs {

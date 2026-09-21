@@ -31,8 +31,12 @@ impl EqualConstraintCommand {
     pub const NO_OBJECT: &'static str = "No object found.";
     pub const INVALID_OBJECT: &'static str =
         "Invalid selection for Equal. Select a line, polyline segment, circle or arc.";
+    pub const INVALID_LENGTH_OBJECT: &'static str =
+        "Invalid selection for Equal. Select a line segment, polyline segment, text, MText, major or minor axis of ellipse or elliptical arc.";
+    pub const INVALID_RADIUS_OBJECT: &'static str =
+        "Invalid selection for Equal. Select a circle or arc.";
     pub const SAME_OBJECT: &'static str =
-        "The object or point is already selected. Select a different object or constraint point.";
+        "The object or point is already selected.  Select a different object or constraint point.";
 
     pub fn new() -> Self {
         Self {

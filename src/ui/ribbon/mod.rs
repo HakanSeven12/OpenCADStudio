@@ -25,6 +25,7 @@ mod draw_panel;
 mod modify_panel;
 mod color_dropdown;
 use widgets::{StyleContext, *};
+pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
 mod collapse;
 use collapse::{CollapsePanels, Panel};
 pub use collapse::CollapseMode;

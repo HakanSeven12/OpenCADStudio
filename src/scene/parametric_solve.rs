@@ -993,9 +993,15 @@ fn resolved_target(params: &ParameterTable, constraint: &ParametricConstraint) -
     if !value.is_finite() {
         return None;
     }
+    // A dimensional distance keeps its sign in the parameter but measures
+    // its magnitude, as the reference does (`d1=-50` shortens the line to
+    // 50; `0` folds the points together).
+    if constraint.kind == ConstraintKind::Distance {
+        return Some(value.abs());
+    }
     let must_be_positive = matches!(
         constraint.kind,
-        ConstraintKind::Distance | ConstraintKind::Radius | ConstraintKind::Diameter
+        ConstraintKind::Radius | ConstraintKind::Diameter
     );
     (!must_be_positive || value > 0.0).then_some(value)
 }
@@ -1466,13 +1472,23 @@ fn build_constraint(
             let Some(mirror) = whole_line(sys, cache, *m) else {
                 return Vec::new();
             };
+            // The connecting direction is held perpendicular to the axis as a
+            // projection onto the axis direction being zero: a polynomial
+            // residual the solver can follow from any start. The angle form
+            // (`Perpendicular`) locks its turn side at construction and stalls
+            // when the pair has to swing through the axis direction — a point
+            // starting far from its mirror image never arrived.
+            let across_axis = |sys: &mut System, pa: GPoint, pb: GPoint| -> Rc<dyn Constraint> {
+                let zero = sys.add_param(0.0, true);
+                Rc::new(ProjectedDistanceAlongLine::new(pa, pb, zero, mirror, false))
+            };
             if let (Some(pa), Some(pb)) =
                 (point_ref(sys, cache, *a), point_ref(sys, cache, *b))
             {
                 let pair = GLine { p1: pa, p2: pb };
                 return vec![
                     Rc::new(MidpointOnLine::new(pair, mirror)),
-                    Rc::new(PerpendicularConstraint::new(sys.store(), pair, mirror)),
+                    across_axis(sys, pa, pb),
                 ];
             }
             let (Some(first), Some(second)) = (
@@ -1500,11 +1516,7 @@ fn build_constraint(
                     };
                     vec![
                         Rc::new(MidpointOnLine::new(centers, mirror)),
-                        Rc::new(PerpendicularConstraint::new(
-                            sys.store(),
-                            centers,
-                            mirror,
-                        )),
+                        across_axis(sys, first.center, second.center),
                         Rc::new(Equal::new(second.rad, first.rad, 1.0)),
                     ]
                 }
@@ -1523,11 +1535,7 @@ fn build_constraint(
                     };
                     vec![
                         Rc::new(MidpointOnLine::new(centers, mirror)),
-                        Rc::new(PerpendicularConstraint::new(
-                            sys.store(),
-                            centers,
-                            mirror,
-                        )),
+                        across_axis(sys, first.center, second.center),
                         Rc::new(SymmetricLineDirections::new(
                             sys.store(),
                             first_axis,
@@ -1590,6 +1598,14 @@ fn build_constraint(
             let Some(resolved) = resolved_target(params, c) else {
                 return Vec::new();
             };
+            // A zero distance folds the points together; the distance
+            // residual has no gradient there, the coordinate equalities do.
+            if resolved.abs() <= f64::EPSILON {
+                return vec![
+                    Rc::new(Equal::new(pa.x, pb.x, 1.0)),
+                    Rc::new(Equal::new(pa.y, pb.y, 1.0)),
+                ];
+            }
             let target = sys.add_param(resolved, true);
             vec![Rc::new(P2PDistance::new(pa, pb, target))]
         }
@@ -1611,10 +1627,13 @@ fn build_constraint(
                 distance_direction_type::PARALLEL_TO_LINE
                     | distance_direction_type::PERPENDICULAR_TO_LINE
             ) {
-                if let Some(line) = direction_ref
-                    .first()
-                    .and_then(|reference| whole_line(sys, cache, *reference))
-                {
+                if let Some(line) = direction_ref.first().and_then(|reference| {
+                    // A text baseline or an ellipse axis directs the
+                    // distance the same way a line does.
+                    whole_line(sys, cache, *reference).or_else(|| {
+                        directional_line(sys, cache, *reference).map(|(line, _)| line)
+                    })
+                }) {
                     let current = {
                         let store = sys.store();
                         let delta = [
@@ -2441,7 +2460,32 @@ fn solve_scope(
             })
         })
         .flatten();
-        let pinned = axis_pin.unwrap_or(*reference);
+        // A transformed entity whose own end points a driving dimension
+        // measures keeps only its second constraint point where the transform
+        // put it; the dimension pulls the first end back to its value (a line
+        // scaled 2x about its start keeps its d1 by moving that start), as in
+        // the reference.
+        let dimension_pin = (reference.marker.is_none() && axis_pin.is_none())
+            .then(|| {
+                constraints.iter().find_map(|c| {
+                    (c.enabled
+                        && c.driving_param.is_some()
+                        && matches!(
+                            c.kind,
+                            ConstraintKind::Distance
+                                | ConstraintKind::DistanceX
+                                | ConstraintKind::DistanceY
+                                | ConstraintKind::DistanceDirected
+                        )
+                        && c.refs.len() >= 2
+                        && c.refs
+                            .iter()
+                            .all(|r| r.entity == reference.entity && r.marker.is_some()))
+                    .then(|| c.refs[1])
+                })
+            })
+            .flatten();
+        let pinned = axis_pin.or(dimension_pin).unwrap_or(*reference);
         // The re-aligned entity keeps the length the transform gave it (a
         // scaled vertical line stays scaled), not its pre-edit length.
         if axis_pin.is_some() {
@@ -2741,6 +2785,21 @@ fn solve_scope(
                     constraint.refs.get(2).is_some_and(|axis| axis.entity == *handle)
                 })
                 || equal_followers.iter().any(|follower| follower.entity == *handle)
+                // A driving dimension between an entity's own ends is its size;
+                // a retained length would contradict a new value.
+                || constraints.iter().any(|c| {
+                    c.enabled
+                        && c.driving_param.is_some()
+                        && matches!(
+                            c.kind,
+                            ConstraintKind::Distance
+                                | ConstraintKind::DistanceX
+                                | ConstraintKind::DistanceY
+                                | ConstraintKind::DistanceDirected
+                        )
+                        && c.refs.len() >= 2
+                        && c.refs.iter().all(|r| r.entity == *handle && r.marker.is_some())
+                })
             {
                 continue;
             }
@@ -3713,6 +3772,9 @@ impl Scene {
                     let before = self.parametric_constraints[i].clone();
                     self.record_undo_parametric_constraints_before(scope, before);
                     self.parametric_constraints[i].remove_all_touching(*handle);
+                    // Erasing an entity deletes its constraints with it — the
+                    // glyph set changed.
+                    self.bump_constraints_epoch();
                 }
             }
         }
@@ -3765,11 +3827,36 @@ impl Scene {
             };
             if initial_fixed_refs.is_empty() {
                 self.parametric_constraints[i].dof = Some(dof);
-                self.parametric_constraints[i].conflicts = conflicts;
+                if self.parametric_constraints[i].conflicts != conflicts {
+                    self.parametric_constraints[i].conflicts = conflicts;
+                    // Conflict badges render on the glyphs themselves.
+                    self.bump_constraints_epoch();
+                }
             } else {
                 self.parametric_constraints[i].dof = None;
-                self.parametric_constraints[i].conflicts.clear();
+                if !self.parametric_constraints[i].conflicts.is_empty() {
+                    self.parametric_constraints[i].conflicts.clear();
+                    self.bump_constraints_epoch();
+                }
             }
+            // A dimensional constraint set to zero means the collapse.
+            let zero_collapse: HashSet<Handle> = {
+                let set = &self.parametric_constraints[i];
+                let params = if set.local_parameters.is_empty() {
+                    &self.named_parameters
+                } else {
+                    &set.local_parameters
+                };
+                set.constraints
+                    .iter()
+                    .filter(|c| {
+                        c.enabled
+                            && c.kind == ConstraintKind::Distance
+                            && resolved_target(params, c).is_some_and(|v| v.abs() <= f64::EPSILON)
+                    })
+                    .flat_map(|c| c.refs.iter().map(|r| r.entity))
+                    .collect()
+            };
             for (handle, new_entity) in solved {
                 // An edit the constraints can only satisfy by collapsing the
                 // entity (a rotated line whose start is fixed and direction
@@ -3778,7 +3865,8 @@ impl Scene {
                 let new_entity = match originals.get(&handle) {
                     Some(original)
                         if collapsed_by_solve(&new_entity)
-                            && !collapsed_by_solve(original.as_ref()) =>
+                            && !collapsed_by_solve(original.as_ref())
+                            && !zero_collapse.contains(&handle) =>
                     {
                         original.as_ref().clone()
                     }
@@ -4062,10 +4150,23 @@ mod tests {
             Vector3::new(1.0, 0.0, 0.0),
         )));
         let refs = [ParametricRef::point(line, 0), ParametricRef::point(line, 1)];
+        // A distance keeps a negative value's sign in the parameter and
+        // measures its magnitude (`d1=-50`); a radius has no such reading.
         assert!(scene
             .validate_parametric_constraint(
                 ConstraintKind::Distance,
                 &refs,
+                Some(&DrivingValue::Literal(-1.0)),
+            )
+            .is_ok());
+        let circle = scene.add_entity(EntityType::Circle(acadrust::entities::Circle::from_center_radius(
+            Vector3::new(0.0, 0.0, 0.0),
+            1.0,
+        )));
+        assert!(scene
+            .validate_parametric_constraint(
+                ConstraintKind::Radius,
+                &[ParametricRef::whole(circle)],
                 Some(&DrivingValue::Literal(-1.0)),
             )
             .is_err());

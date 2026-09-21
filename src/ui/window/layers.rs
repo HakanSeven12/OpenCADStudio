@@ -206,6 +206,8 @@ impl LayerPanel {
 
         self.layers = doc_layers
             .iter()
+            // The reference's hidden system layers (`*ADSK_CONSTRAINTS`) stay out.
+            .filter(|l| !l.name.starts_with('*'))
             .map(|l| {
                 let layer_handle = l.handle;
                 let vp_frozen = vp_info

@@ -329,6 +329,15 @@ pub fn format_snap_angle(deg: f32) -> String {
 /// GRIPOBJLIMIT default: past this many selected objects, no grips are drawn.
 pub const DEFAULT_GRIP_OBJECT_LIMIT: i32 = 100;
 
+/// GRIPVERTLIMIT default: cap on TOTAL selection grips across all selected
+/// objects. `grip_object_limit` gates object count, but one dense polyline
+/// can emit ~2 grips/vertex past it — this caps the vertex blowup. Mid-segment
+/// grips are dropped first; vertex grips are kept.
+///
+/// `pub` so the `cargo bench` harness (external crate) measures the real
+/// constant alongside [`crate::app::apply_grip_budget`] as `ui_grip_budget`.
+pub const MAX_SELECTED_GRIPS: usize = 4096;
+
 /// The "settings" section of the consolidated config ([`crate::app::config`]).
 /// Field defaults mirror the app's in-code defaults so a missing key restores
 /// the value the app boots with.

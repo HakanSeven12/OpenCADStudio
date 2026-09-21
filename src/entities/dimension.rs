@@ -6295,6 +6295,40 @@ fn dimension_text_is_outside(dim: &Dimension, style: Option<&DimStyle>) -> bool 
         }
 }
 
+/// Where a dynamic dimension's lock mark sits: just after the text on its
+/// baseline, with the direction that points away from the text.
+pub(crate) fn dynamic_dimension_lock_anchor(
+    document: &CadDocument,
+    dim: &Dimension,
+    anno_scale: f64,
+) -> Option<(Vector3, Vector3)> {
+    let style_name = &dim.base().style_name;
+    let source_style = document.dim_styles.iter().find(|s| {
+        s.name.eq_ignore_ascii_case(style_name)
+            || (style_name.trim().is_empty() && s.name.eq_ignore_ascii_case("Standard"))
+    });
+    let effective_style = source_style.map(|style| resolved_dimension_style(style, dim, document));
+    let style = effective_style.as_ref();
+    let dim_scale = style
+        .map(|s| if s.dimscale > 1e-6 { s.dimscale } else { anno_scale })
+        .unwrap_or(1.0);
+    let text_height = style.map(|s| s.dimtxt * dim_scale).unwrap_or(2.5);
+    let value = dimension_text_value(dim, style)?;
+    let stack_scale = style.map(dimtfac_or_one).unwrap_or(1.0);
+    let half_width = text_cells(&value, stack_scale) * text_height * CELL_WIDTH * 0.5;
+    let pos = dimension_text_pos_f64(dim, style, text_height, dim_scale);
+    // The text angle the renderer draws (DIMTIH/DIMTOH overrides make a
+    // dynamic dimension's text horizontal).
+    let (sr, cr) = dimension_text_rotation(dim, style).sin_cos();
+    let outward = Vector3::new(cr, sr, 0.0);
+    // A glyph-sized gap keeps the lock clear of the last digit.
+    let reach = half_width + text_height * 0.9;
+    Some((
+        Vector3::new(pos.x + outward.x * reach, pos.y + outward.y * reach, pos.z),
+        outward,
+    ))
+}
+
 fn dimension_text_natural_rotation(dim: &Dimension) -> f64 {
     let angle = match dim {
         Dimension::Linear(d) => d.rotation,

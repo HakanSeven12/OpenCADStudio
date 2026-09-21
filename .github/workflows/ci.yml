@@ -1,0 +1,44 @@
+name: Tests
+
+# Until now nothing ran the test suite on a change: the release workflows
+# build the app, web-check.yml type-checks the wasm target, and pull requests
+# reported their own local runs. Run the workspace tests on every push to
+# main and on every pull request. There is deliberately no formatter check:
+# the tree is not rustfmt-clean and is not going to be reformatted.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # The same libraries the Linux release build needs (windowing, GL,
+      # fonts); the packaging tools are left out.
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev \
+            libxkbcommon-dev libwayland-dev libfontconfig1-dev libfreetype6-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # LC_ALL=C: a few tests compare English message text.
+      - name: cargo test
+        env:
+          LC_ALL: C
+        run: cargo test --workspace --locked

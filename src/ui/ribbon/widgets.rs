@@ -301,8 +301,8 @@ pub(super) const TOP_HIST_GAP: f32 = 4.0;
 
 // ── Dropdown / combo ID constants ─────────────────────────────────────────
 
-pub(super) const UNDO_HISTORY_ID: &str = "UNDO_HISTORY";
-pub(super) const REDO_HISTORY_ID: &str = "REDO_HISTORY";
+pub(crate) const UNDO_HISTORY_ID: &str = "UNDO_HISTORY";
+pub(crate) const REDO_HISTORY_ID: &str = "REDO_HISTORY";
 pub(super) const LAYER_COMBO_ID: &str = "LAYER_COMBO";
 /// Dropdown id for the tab-bar panel-density selector.
 pub(super) const COLLAPSE_MODE_ID: &str = "COLLAPSE_MODE";

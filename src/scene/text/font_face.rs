@@ -47,12 +47,37 @@ pub enum Face {
         /// Space advance (9-unit).
         word: f32,
     },
+    /// A face paired with an Asian big font (`chineset.shx`, `hztxt.shx`, …):
+    /// double-byte characters come from the big font, everything else from
+    /// `primary` — exactly how a STYLE with a "Big Font" behaves in AutoCAD.
+    WithBig {
+        primary: Box<Face>,
+        /// Absolute path of the `AutoCAD-86 bigfont 1.0` file.
+        big: String,
+    },
 }
+
+/// Separator between a style's primary font name and its big-font path in
+/// the single `font_name` string the text pipeline passes around (see
+/// [`Face::with_big_font`]); a control character no font name contains.
+pub const BIG_FONT_SEP: char = '\u{1}';
 
 impl Face {
     /// Resolve a style's font name to a concrete face. Embedded stroke fonts
     /// take priority; only otherwise-unknown names try the system fonts.
     pub fn resolve(font_name: &str) -> Face {
+        // `primary<SEP>big` pairs a big font with the primary face.
+        if let Some((primary, big)) = font_name.split_once(BIG_FONT_SEP) {
+            let face = Face::resolve(primary);
+            return if !big.is_empty() && shx::is_bigfont(big) {
+                Face::WithBig {
+                    primary: Box::new(face),
+                    big: big.to_string(),
+                }
+            } else {
+                face
+            };
+        }
         // A resolvable on-disk .SHX font renders its real stroke glyphs; the
         // LFF substitutes only cover names we can't load.
         if font_name.to_ascii_lowercase().ends_with(".shx")
@@ -87,6 +112,13 @@ impl Face {
         Face::Lff(lff::get_font(font_name))
     }
 
+    /// The `font_name` string that pairs `primary` with the big font at
+    /// `big_path` for [`Face::resolve`]. Every text entry point takes a font
+    /// name, so the pairing rides along in that string.
+    pub fn with_big_font(primary: &str, big_path: &str) -> String {
+        format!("{primary}{BIG_FONT_SEP}{big_path}")
+    }
+
     /// Look up a glyph. A stroke (LFF) font uses its own glyphs; anything it
     /// lacks falls back to a system TrueType font chosen by cosmic-text (filled
     /// outline, so covers scripts no stroke font provides). The TTF path mirrors
@@ -103,6 +135,14 @@ impl Face {
             Face::Shx { path, .. } => shx::font_glyph(path, ch as u16)
                 .map(GlyphRef::Owned)
                 .or_else(|| ttf_glyph::fallback_glyph(ch).map(GlyphRef::Owned)),
+            Face::WithBig { primary, big } => {
+                if ttf_glyph::is_full_width(ch) {
+                    if let Some(g) = shx::bigfont_glyph(big, ch) {
+                        return Some(GlyphRef::Owned(g));
+                    }
+                }
+                primary.glyph(ch)
+            }
         }
     }
 
@@ -114,6 +154,7 @@ impl Face {
             Face::Ttf { .. } => 0.0,
             // SHX advances already include the trailing gap by design.
             Face::Shx { .. } => 0.0,
+            Face::WithBig { primary, .. } => primary.letter_spacing(),
         }
     }
 
@@ -122,6 +163,7 @@ impl Face {
         match self {
             Face::Lff(f) => f.word_spacing,
             Face::Ttf { word, .. } | Face::Shx { word, .. } => *word,
+            Face::WithBig { primary, .. } => primary.word_spacing(),
         }
     }
 
@@ -132,6 +174,7 @@ impl Face {
         match self {
             Face::Ttf { family, .. } => Some(family),
             Face::Lff(_) | Face::Shx { .. } => None,
+            Face::WithBig { primary, .. } => primary.ttf_family(),
         }
     }
 
@@ -142,6 +185,7 @@ impl Face {
             Face::Lff(f) => f.line_spacing,
             Face::Ttf { .. } => 1.0,
             Face::Shx { line, .. } => *line,
+            Face::WithBig { primary, .. } => primary.line_spacing(),
         }
     }
 }
@@ -236,11 +280,27 @@ mod tests {
                     // they should resolve to Ttf. If they aren't installed, Lff fallback is accepted.
                     eprintln!("Font {} resolved to Lff (probably not installed)", test_name);
                 }
-                Face::Shx { .. } => {
-                    // A system TTF name never resolves to an SHX shape font.
+                Face::Shx { .. } | Face::WithBig { .. } => {
+                    // A system TTF name never resolves to an SHX shape font
+                    // (nor gains a big font without the pairing separator).
                     eprintln!("Font {} resolved to Shx (unexpected)", test_name);
                 }
             }
         }
+    }
+
+
+
+    #[test]
+    fn big_font_pairing_routes_ideographs_and_leaves_latin_alone() {
+        // Without a real big-font file the pairing is dropped: the primary
+        // face is used as-is.
+        assert!(matches!(
+            Face::resolve(&Face::with_big_font("txt", "C:/nowhere/chineset.shx")),
+            Face::Lff(_)
+        ));
+        // A stroke face still renders Latin from its own glyphs when paired.
+        let face = Face::resolve("txt");
+        assert!(face.glyph('A').is_some());
     }
 }

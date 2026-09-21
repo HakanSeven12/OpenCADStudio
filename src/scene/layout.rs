@@ -22,12 +22,21 @@ impl Scene {
         self.model_pane_min_px.clone()
     }
 
+    /// Create a paper-space layout. Wraps `document.add_layout` so the
+    /// cached layout-name list is invalidated on insert.
+    pub fn add_layout(&mut self, name: &str) -> acadrust::Result<Handle> {
+        let handle = self.document.add_layout(name)?;
+        self.bump_layout_epoch();
+        Ok(handle)
+    }
+
     /// Rename a paper-space layout.  Updates the Layout object name in the document.
     pub fn rename_layout(&mut self, old_name: &str, new_name: &str) {
         for obj in self.document.objects.values_mut() {
             if let ObjectType::Layout(l) = obj {
                 if l.name == old_name {
                     l.name = new_name.to_string();
+                    self.bump_layout_epoch();
                     return;
                 }
             }
@@ -96,6 +105,7 @@ impl Scene {
         }
 
         self.bump_geometry();
+        self.bump_layout_epoch();
         true
     }
 
@@ -123,6 +133,7 @@ impl Scene {
                     }
                 }
             }
+            self.bump_layout_epoch();
         }
     }
 
@@ -139,6 +150,7 @@ impl Scene {
                 }
             }
         }
+        self.bump_layout_epoch();
     }
 
     /// Rebuild the `pane_grid` layout from the current `model_tiles` rects

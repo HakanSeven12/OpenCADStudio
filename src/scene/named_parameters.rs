@@ -474,11 +474,31 @@ pub struct Parameter {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ParameterTable {
     parameters: Vec<Parameter>,
+    /// The free-text description a parameter carries (the reference's
+    /// Description column), by name.
+    descriptions: HashMap<String, String>,
 }
 
 impl ParameterTable {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn description(&self, name: &str) -> &str {
+        self.descriptions.get(name).map_or("", String::as_str)
+    }
+
+    /// Stores `description` for an existing parameter; an empty text clears it.
+    pub fn set_description(&mut self, name: &str, description: &str) {
+        if !self.contains(name) {
+            return;
+        }
+        if description.trim().is_empty() {
+            self.descriptions.remove(name);
+        } else {
+            self.descriptions
+                .insert(name.to_string(), description.trim().to_string());
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -549,6 +569,7 @@ impl ParameterTable {
     /// need to invent (a future UI stage may still want to warn before
     /// deleting — that's a UI-layer decision, not a data-layer one).
     pub fn remove(&mut self, name: &str) -> bool {
+        self.descriptions.remove(name);
         match self.index_of(name) {
             Some(i) => {
                 self.parameters.remove(i);

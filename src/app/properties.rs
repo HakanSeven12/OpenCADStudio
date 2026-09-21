@@ -1,7 +1,7 @@
 use super::helpers::{entity_type_key, entity_type_label, title_case_word};
 use super::{OpenCADStudio, VARIES_LABEL};
 use crate::io::linetypes;
-use crate::scene::model::object::PropValue;
+use crate::scene::model::object::{GripDef, PropValue};
 use crate::scene::view::dispatch;
 use crate::t;
 use crate::ui;
@@ -12,6 +12,47 @@ use acadrust::{Entity, EntityType, Handle};
 /// property aggregation (which is O(n) per row, plus an O(n²) group filter) and
 /// shows a count-only summary instead. Bulk edits still go through the ribbon.
 const MAX_PROP_AGGREGATE: usize = 2_000;
+
+/// Cap the total number of selection grips at
+/// [`crate::app::settings::MAX_SELECTED_GRIPS`], keeping entity order with
+/// non-midpoint (vertex/stretch) grips first. Below the cap both vecs are
+/// returned untouched, so existing selections are identical. The parallel
+/// `handles` vec is truncated in lockstep with `grips`.
+///
+/// `pub` (not private) so the `cargo bench` harness (external crate) measures
+/// the real function as `ui_grip_budget`.
+pub fn apply_grip_budget(
+    mut grips: Vec<GripDef>,
+    mut handles: Vec<Handle>,
+) -> (Vec<GripDef>, Vec<Handle>) {
+    debug_assert_eq!(
+        grips.len(),
+        handles.len(),
+        "grips/handles are parallel vecs built in lockstep"
+    );
+    if grips.len() > crate::app::settings::MAX_SELECTED_GRIPS {
+        // Vertex budget: one dense polyline can emit ~2 grips/vertex past the
+        // object-count gate above. Keep entity order; non-midpoint (stretch)
+        // grips first, midpoints fill the remainder.
+        let cap = crate::app::settings::MAX_SELECTED_GRIPS;
+        let mut idx: Vec<usize> = (0..grips.len()).collect();
+        idx.sort_by_key(|&j| grips[j].is_midpoint); // false (vertex) first; stable
+        idx.truncate(cap);
+        idx.sort_unstable(); // restore entity order for determinism
+        let keep: rustc_hash::FxHashSet<usize> = idx.into_iter().collect();
+        let mut kept_grips = Vec::with_capacity(cap);
+        let mut kept_handles = Vec::with_capacity(cap);
+        for (j, (grip, handle)) in grips.into_iter().zip(handles.into_iter()).enumerate() {
+            if keep.contains(&j) {
+                kept_grips.push(grip);
+                kept_handles.push(handle);
+            }
+        }
+        grips = kept_grips;
+        handles = kept_handles;
+    }
+    (grips, handles)
+}
 
 fn visual_style_properties_text(style: &acadrust::objects::VisualStyle) -> String {
     style
@@ -79,6 +120,8 @@ impl OpenCADStudio {
             .layers
             .iter()
             .map(|l| l.name.clone())
+            // The reference's hidden system layers (`*ADSK_CONSTRAINTS`) stay out.
+            .filter(|name| !name.starts_with('*'))
             .collect();
         let linetype_items: Vec<ui::properties::LinetypeItem> = self.tabs[i]
             .scene
@@ -2292,6 +2335,29 @@ impl OpenCADStudio {
                         }
                         _ => entity_type_label(entity),
                     };
+                    // A dynamic dimension shows only its constraint and text
+                    // rotation, as the reference does.
+                    let title = match crate::scene::parametric_constraints::dynamic_dimension_constraint(
+                        &self.tabs[i].scene.parametric_constraints,
+                        handle,
+                    ) {
+                        Some((set, constraint)) => {
+                            sections = dynamic_dimension_sections(
+                                &self.tabs[i].scene,
+                                handle,
+                                set,
+                                constraint,
+                                sections,
+                            );
+                            match entity {
+                                acadrust::EntityType::Dimension(
+                                    acadrust::entities::Dimension::Aligned(_),
+                                ) => t!("Aligned Dimensional Constraint").into_owned(),
+                                _ => t!("Linear Dimensional Constraint").into_owned(),
+                            }
+                        }
+                        None => title,
+                    };
                     ui::PropertiesPanel {
                         choice_combos: sections
                             .iter()
@@ -2739,6 +2805,26 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                         }
                     }
                 }
+                if self.tabs[i].scene.is_dynamic_dimension(handle) {
+                    // A dynamic dimension shows the reference's grips: a
+                    // triangle at each constraint point aimed at the other
+                    // one, and the text square — no dimension line grip.
+                    let points: Vec<glam::DVec3> = entity_grips
+                        .iter()
+                        .filter(|grip| grip.id <= 1)
+                        .map(|grip| grip.world)
+                        .collect();
+                    entity_grips.retain(|grip| grip.id != 2);
+                    for grip in &mut entity_grips {
+                        if grip.id <= 1 {
+                            let other = points.get(1 - grip.id).copied().unwrap_or(grip.world);
+                            let dir = (other - grip.world).normalize_or(glam::DVec3::X);
+                            *grip = crate::entities::common::oriented_triangle_grip(
+                                grip.id, grip.world, dir,
+                            );
+                        }
+                    }
+                }
                 entity_grips.extend(crate::scene::model::solid_history::primitive_grips(
                     &self.tabs[i].scene.document,
                     handle,
@@ -2753,6 +2839,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                     grips.push(grip);
                 }
             }
+            let (grips, handles) = apply_grip_budget(grips, handles);
             (single_handle, grips, handles)
         };
         self.tabs[i].selected_handle = new_handle;
@@ -3572,6 +3659,105 @@ fn set_row(sections: &mut [crate::scene::model::object::PropSection], field: &st
 
 /// Replace a row's value with an arbitrary control (editable field, dropdown,
 /// colour picker …) rather than plain read-only text.
+/// A dimensional constraint's Properties as the reference shows them: the
+/// Constraint rows, then only the text rotation for a dynamic dimension
+/// and the full dimension sections for an annotational one.
+fn dynamic_dimension_sections(
+    scene: &crate::scene::Scene,
+    handle: Handle,
+    set: &crate::scene::parametric_constraints::ParametricConstraintSet,
+    constraint: &crate::scene::parametric_constraints::ParametricConstraint,
+    sections: Vec<crate::scene::model::object::PropSection>,
+) -> Vec<crate::scene::model::object::PropSection> {
+    use crate::scene::model::object::{PropSection, PropValue, Property};
+    use crate::scene::named_parameters::DrivingValue;
+    let table = if set.local_parameters.is_empty() {
+        scene.named_parameters()
+    } else {
+        &set.local_parameters
+    };
+    let reference = !constraint.enabled;
+    let annotational = scene.dimension_is_annotational(handle);
+    let (name, expression, value, description) = match &constraint.driving_param {
+        Some(DrivingValue::Named(name)) => (
+            name.clone(),
+            table
+                .iter()
+                .find(|parameter| &parameter.name == name)
+                .map(|parameter| parameter.source.clone())
+                .unwrap_or_default(),
+            table.resolve(name).ok(),
+            table.description(name).to_string(),
+        ),
+        Some(DrivingValue::Literal(value)) => {
+            (String::new(), format!("{value}"), Some(*value), String::new())
+        }
+        None => (String::new(), String::new(), None, String::new()),
+    };
+    let row = |label: &str, field: &'static str, value: PropValue| Property {
+        label: label.to_string(),
+        field,
+        value,
+    };
+    let yes_no = |flag: bool| PropValue::Choice {
+        selected: if flag { t!("Yes") } else { t!("No") }.into_owned(),
+        options: vec![t!("Yes").into_owned(), t!("No").into_owned()],
+    };
+    let text_rotation = sections
+        .iter()
+        .flat_map(|section| section.props.iter())
+        .find(|property| property.field == "text_rotation")
+        .cloned();
+    let mut result = vec![PropSection {
+        title: t!("Constraint").into_owned(),
+        props: vec![
+            row(
+                t!("Constraint Form").as_ref(),
+                "dyn_constraint_form",
+                PropValue::Choice {
+                    selected: if annotational { "Annotational" } else { "Dynamic" }.to_string(),
+                    options: vec!["Dynamic".to_string(), "Annotational".to_string()],
+                },
+            ),
+            row(
+                t!("Reference").as_ref(),
+                "dyn_constraint_reference",
+                yes_no(reference),
+            ),
+            row(t!("Name").as_ref(), "dyn_constraint_name", PropValue::EditText(name)),
+            row(
+                t!("Expression").as_ref(),
+                "dyn_constraint_expression",
+                // A reference constraint's expression is the measurement.
+                if reference {
+                    PropValue::ReadOnly(expression)
+                } else {
+                    PropValue::EditText(expression)
+                },
+            ),
+            row(
+                t!("Value").as_ref(),
+                "dyn_constraint_value",
+                PropValue::ReadOnly(value.map(|v| format!("{v:.4}")).unwrap_or_default()),
+            ),
+            row(
+                t!("Description").as_ref(),
+                "dyn_constraint_description",
+                PropValue::EditText(description),
+            ),
+        ],
+    }];
+    if annotational {
+        result.extend(sections);
+    } else if let Some(text_rotation) = text_rotation {
+        result.push(PropSection {
+            title: t!("Text").into_owned(),
+            props: vec![text_rotation],
+        });
+    }
+    result
+}
+
 fn set_row_value(
     sections: &mut [crate::scene::model::object::PropSection],
     field: &str,
@@ -4353,6 +4539,126 @@ mod chprop_integration_tests {
 #[cfg(test)]
 mod grip_limit_tests {
     use super::*;
+    use crate::scene::model::object::GripShape;
+
+    fn test_grip(id: usize, is_midpoint: bool) -> GripDef {
+        GripDef {
+            id,
+            world: glam::DVec3::ZERO,
+            is_midpoint,
+            shape: GripShape::Square,
+            dir: None,
+            axis: None,
+        }
+    }
+
+    #[test]
+    fn refresh_selected_grips_caps_total_grip_count() {
+        let cap = crate::app::settings::MAX_SELECTED_GRIPS;
+        let n = cap + 500;
+        let grips: Vec<GripDef> = (0..n).map(|id| test_grip(id, false)).collect();
+        let handles: Vec<Handle> = (0..n as u64).map(|k| Handle::new(k + 1)).collect();
+        let (grips, handles) = super::apply_grip_budget(grips, handles);
+        assert_eq!(
+            grips.len(),
+            cap,
+            "grips past the budget must be dropped, kept {}/{}",
+            grips.len(),
+            n,
+        );
+        assert_eq!(
+            handles.len(),
+            grips.len(),
+            "handles must stay in lockstep with grips",
+        );
+        for (grip, handle) in grips.iter().zip(handles.iter()) {
+            assert_eq!(
+                *handle,
+                Handle::new(grip.id as u64 + 1),
+                "handle at each index must still belong to its grip",
+            );
+        }
+    }
+
+    #[test]
+    fn refresh_selected_grips_prefers_vertex_grips_over_midpoints() {
+        let cap = crate::app::settings::MAX_SELECTED_GRIPS;
+        let n = cap + 500;
+        // Interleaved: even ids are midpoints, odd ids are vertices.
+        let grips: Vec<GripDef> = (0..n).map(|id| test_grip(id, id % 2 == 0)).collect();
+        let handles: Vec<Handle> = (0..n as u64).map(|k| Handle::new(k + 1)).collect();
+        let (grips, handles) = super::apply_grip_budget(grips, handles);
+        assert_eq!(grips.len(), cap);
+        assert_eq!(handles.len(), grips.len());
+        // Fewer vertices than the cap: every vertex grip survives, midpoints
+        // fill the remainder — no vertex is sacrificed for a midpoint.
+        let kept_vertices: Vec<usize> = grips
+            .iter()
+            .filter(|grip| !grip.is_midpoint)
+            .map(|grip| grip.id)
+            .collect();
+        let all_vertices: Vec<usize> = (0..n).filter(|id| id % 2 == 1).collect();
+        assert_eq!(
+            kept_vertices, all_vertices,
+            "no vertex grip may be sacrificed for a midpoint",
+        );
+        let ids: Vec<usize> = grips.iter().map(|grip| grip.id).collect();
+        assert!(ids.is_sorted(), "retained grips must keep entity order");
+        for (grip, handle) in grips.iter().zip(handles.iter()) {
+            assert_eq!(*handle, Handle::new(grip.id as u64 + 1));
+        }
+
+        // Vertices alone past the cap: the tail is truncated deterministically.
+        let over = cap + 100;
+        let grips: Vec<GripDef> = (0..over).map(|id| test_grip(id, false)).collect();
+        let handles: Vec<Handle> = (0..over as u64).map(|k| Handle::new(k + 1)).collect();
+        let (grips, handles) = super::apply_grip_budget(grips, handles);
+        assert_eq!(grips.len(), cap);
+        assert_eq!(handles.len(), grips.len());
+        assert!(
+            grips.iter().zip(0..cap).all(|(grip, id)| grip.id == id),
+            "vertex overflow must keep the first `cap` grips in entity order",
+        );
+        for (grip, handle) in grips.iter().zip(handles.iter()) {
+            assert_eq!(*handle, Handle::new(grip.id as u64 + 1));
+        }
+    }
+
+    #[test]
+    fn grip_budget_boundary_lengths() {
+        let cap = crate::app::settings::MAX_SELECTED_GRIPS;
+
+        // Empty vec passthrough.
+        let (grips, handles) = super::apply_grip_budget(Vec::new(), Vec::new());
+        assert!(grips.is_empty());
+        assert!(handles.is_empty());
+
+        // len == cap passthrough: content untouched.
+        let grips: Vec<GripDef> = (0..cap).map(|id| test_grip(id, id % 2 == 0)).collect();
+        let handles: Vec<Handle> = (0..cap as u64).map(|k| Handle::new(k + 1)).collect();
+        let (kept_grips, kept_handles) = super::apply_grip_budget(grips, handles);
+        assert_eq!(kept_grips.len(), cap);
+        assert_eq!(kept_handles.len(), cap);
+        assert!(
+            kept_grips.iter().zip(0..cap).all(|(grip, id)| grip.id == id),
+            "at exactly the cap every grip must survive in order",
+        );
+        for (grip, handle) in kept_grips.iter().zip(kept_handles.iter()) {
+            assert_eq!(*handle, Handle::new(grip.id as u64 + 1));
+        }
+
+        // len == cap + 1 truncates to cap.
+        let over = cap + 1;
+        let grips: Vec<GripDef> = (0..over).map(|id| test_grip(id, false)).collect();
+        let handles: Vec<Handle> = (0..over as u64).map(|k| Handle::new(k + 1)).collect();
+        let (kept_grips, kept_handles) = super::apply_grip_budget(grips, handles);
+        assert_eq!(kept_grips.len(), cap);
+        assert_eq!(kept_handles.len(), cap);
+        assert!(
+            kept_grips.iter().zip(0..cap).all(|(grip, id)| grip.id == id),
+            "one over the cap must drop exactly the tail grip",
+        );
+    }
 
     #[test]
     fn a_selection_past_the_limit_gets_no_grips() {

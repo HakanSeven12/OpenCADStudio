@@ -36,9 +36,6 @@ __pycache__/
 # Claude Code local preview/dev-server config
 .claude/launch.json
 
-# nix-direnv
-.direnv/
-
 # Worktrees created for isolated runs
 .claude/worktrees/
 

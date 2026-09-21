@@ -44,6 +44,13 @@ mod visibility;
 
 pub use style_ops::StyleKind;
 
+/// Re-exported `pub` (not `pub(crate)`) so the `cargo bench` harness
+/// (`benches/`, an external crate) can measure the real grip-budget helper as
+/// `ui_grip_budget`. The `properties` / `settings` modules themselves stay
+/// private / `pub(crate)`; only these two names are reachable externally.
+pub use properties::apply_grip_budget;
+pub use settings::MAX_SELECTED_GRIPS;
+
 use document::DocumentTab;
 
 use crate::modules::ModuleEvent;
@@ -612,6 +619,10 @@ pub(super) struct OpenCADStudio {
     pub constraint_solve_mode: bool,
     pub constraint_infer: bool,
     pub constraint_bar_display: i16,
+    /// DCFORM: new dimensional constraints use the annotational form.
+    pub constraint_form_annotational: bool,
+    /// The dimensional constraint DIMCONSTRAINT offers by default: the last one used.
+    pub dim_constraint_last: &'static str,
     pub constraint_bar_mode: i16,
     /// Minutes between autosaves to a `.sv$` recovery file (SAVETIME command);
     /// 0 disables autosave.
@@ -4210,6 +4221,8 @@ impl OpenCADStudio {
             constraint_solve_mode: true,
             constraint_infer: false,
             constraint_bar_display: 3,
+            constraint_form_annotational: false,
+            dim_constraint_last: "Aligned",
             constraint_bar_mode: 4095,
             savetime_min: 10,
             default_bg_color: None,

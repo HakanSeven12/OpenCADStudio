@@ -1566,5 +1566,16 @@ impl Scene {
         self.camera_generation += 1;
     }
 
-    pub fn update(&mut self, _dt: Duration) {}
+    pub fn update(&mut self, _dt: Duration) {
+        // The glyph atlas grew or re-baked since this scene last built its
+        // caches (a CJK sheet set bakes thousands of tiles on first sight):
+        // every quad laid out before that samples the wrong tile — scrambled
+        // text in the affected blocks / viewports. One structural bump
+        // re-lays-out all text against the settled atlas.
+        let atlas_gen = crate::scene::text::sdf_atlas::generation();
+        if self.last_atlas_generation.get() != atlas_gen {
+            self.last_atlas_generation.set(atlas_gen);
+            self.bump_geometry();
+        }
+    }
 }

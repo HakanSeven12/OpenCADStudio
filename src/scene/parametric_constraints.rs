@@ -2,6 +2,8 @@
 
 use super::named_parameters::DrivingValue;
 use acadrust::types::{Handle, Vector3};
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 /// One endpoint a constraint attaches to: an entity plus which sub-element
 /// of it.
@@ -351,6 +353,213 @@ pub(crate) fn equal_size_follower(
     Some(entity)
 }
 
+/// The first free `d1`, `d2`, … name a new dimensional constraint takes.
+pub(crate) fn next_dimensional_parameter_name(
+    table: &super::named_parameters::ParameterTable,
+) -> String {
+    (1..)
+        .map(|n| format!("d{n}"))
+        .find(|name| !table.contains(name))
+        .unwrap_or_else(|| "d1".to_string())
+}
+
+/// The constraint-bar label that draws a dynamic dimension's lock mark.
+pub const DYNAMIC_DIMENSION_GLYPH: &str = "\u{1F512}";
+
+/// The on-screen text height of a dynamic dimension, in pixels.
+pub const DYNAMIC_DIMENSION_TEXT_PX: f32 = 12.0;
+
+/// The layer the reference keeps dynamic dimensions on; an annotational
+/// dimensional constraint sits on an ordinary layer instead.
+pub(crate) const DYNAMIC_DIMENSION_LAYER: &str = "*ADSK_CONSTRAINTS";
+
+/// The text a dynamic dimension shows: CONSTRAINTNAMEFORMAT 0 = name,
+/// 1 = value, 2 = name=value, the value with its trailing zeros dropped
+/// (`d9=80`, `d1=111.8034`). A parameter defined by a formula shows the
+/// formula behind `fx:` (`fx: len=d1*2`); a reference (driven) constraint's
+/// text sits in parentheses; an annotational one keeps dimension precision.
+pub(crate) fn dynamic_dimension_text(
+    name: &str,
+    value: f64,
+    format: u8,
+    reference: bool,
+    expression: Option<&str>,
+    annotational: bool,
+) -> String {
+    let formula = expression
+        .map(str::trim)
+        .filter(|source| !source.is_empty() && source.parse::<f64>().is_err());
+    let shown = match formula {
+        Some(source) => source.to_string(),
+        // An annotational dimension shows the value at dimension precision
+        // (`d1=100.0000`), as the reference does.
+        None if annotational => format!("{value:.4}"),
+        None => {
+            let text = format!("{value:.4}");
+            let text = text.trim_end_matches('0').trim_end_matches('.');
+            if text.is_empty() || text == "-" {
+                "0".to_string()
+            } else {
+                text.to_string()
+            }
+        }
+    };
+    let text = match format {
+        0 => name.to_string(),
+        1 => shown,
+        _ => format!("{name}={shown}"),
+    };
+    let text = if formula.is_some() {
+        format!("fx: {text}")
+    } else {
+        text
+    };
+    if reference {
+        format!("({text})")
+    } else {
+        text
+    }
+}
+
+/// The expression a measured value seeds a parameter with: twelve
+/// significant digits with the trailing zeros dropped (`100`,
+/// `111.803398875`), as the reference stores it.
+pub(crate) fn measured_expression(value: f64) -> String {
+    if !value.is_finite() {
+        return "0".to_string();
+    }
+    // Solver noise (24.9999999047) reads as the round value it means.
+    let snapped = (value * 1.0e4).round() / 1.0e4;
+    let value = if (value - snapped).abs() < 1.0e-6 {
+        snapped
+    } else {
+        value
+    };
+    let magnitude = value.abs();
+    let integer_digits = if magnitude < 1.0 {
+        1
+    } else {
+        magnitude.log10().floor() as i32 + 1
+    };
+    let decimals = (12 - integer_digits).clamp(0, 12) as usize;
+    let text = format!("{value:.decimals$}");
+    let text = if text.contains('.') {
+        text.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        text.as_str()
+    };
+    if text.is_empty() || text == "-" || text == "-0" {
+        "0".to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+/// Moves a dynamic dimension's extension origins to `first`/`second`,
+/// keeping its dimension line where it was; true when anything moved.
+fn dynamic_dimension_follow_points(
+    dimension: &mut acadrust::entities::Dimension,
+    first: Vector3,
+    second: Vector3,
+) -> bool {
+    use acadrust::entities::Dimension;
+    let same = |a: Vector3, b: Vector3| (a - b).length_squared() < 1.0e-16;
+    let to_dvec = |p: Vector3| glam::DVec3::new(p.x, p.y, p.z);
+    let (current_first, current_second, definition, axis) = match dimension {
+        Dimension::Aligned(d) => (d.first_point, d.second_point, d.definition_point, None),
+        Dimension::Linear(d) => (
+            d.first_point,
+            d.second_point,
+            d.definition_point,
+            Some(glam::DVec3::new(d.rotation.cos(), d.rotation.sin(), 0.0)),
+        ),
+        _ => return false,
+    };
+    if same(current_first, first) && same(current_second, second) {
+        return false;
+    }
+    let text = dimension.base().user_text.clone();
+    let rebuilt = match axis {
+        None => crate::modules::annotate::aligned_dim::aligned_dimension_entity(
+            to_dvec(first),
+            to_dvec(second),
+            to_dvec(definition),
+            text,
+        ),
+        Some(axis) => crate::modules::annotate::linear_dim::linear_dimension_entity(
+            to_dvec(first),
+            to_dvec(second),
+            to_dvec(definition),
+            axis,
+            text,
+        ),
+    };
+    let acadrust::EntityType::Dimension(mut rebuilt) = rebuilt else {
+        return false;
+    };
+    // Everything but the geometry stays: identity, layer, color, style, xdata.
+    let base = dimension.base();
+    let target = rebuilt.base_mut();
+    target.common = base.common.clone();
+    target.style_name = base.style_name.clone();
+    target.text_rotation = base.text_rotation;
+    target.attachment_point = base.attachment_point;
+    target.line_spacing_style = base.line_spacing_style;
+    target.line_spacing_factor = base.line_spacing_factor;
+    *dimension = rebuilt;
+    true
+}
+
+/// What stays put when a dimensional constraint's value changes: its first
+/// point, and — when the distance runs perpendicular to a line that owns
+/// that point (2Lines, line-first Point & line) — the whole line, so the
+/// other object moves, as in the reference.
+pub(crate) fn dimensional_anchor_refs(
+    document: &acadrust::CadDocument,
+    refs: &[ParametricRef],
+) -> Vec<ParametricRef> {
+    let Some(&first) = refs.first() else {
+        return Vec::new();
+    };
+    let mut anchors = vec![first];
+    if let Some(&line) = refs.get(2).filter(|line| line.entity == first.entity) {
+        let ends = match line.segment_index() {
+            Some(index) => {
+                let index = index as i32;
+                let end = document
+                    .get_entity(line.entity)
+                    .and_then(|entity| resolve_point(entity, index + 1))
+                    .map_or(0, |_| index + 1);
+                [
+                    ParametricRef::point(line.entity, index),
+                    ParametricRef::point(line.entity, end),
+                ]
+            }
+            None => [
+                ParametricRef::point(line.entity, 0),
+                ParametricRef::point(line.entity, 1),
+            ],
+        };
+        anchors.extend(ends.into_iter().filter(|end| *end != first));
+    }
+    anchors
+}
+
+/// The constraint a dynamic dimension shows, with the table its parameter
+/// lives in.
+pub(crate) fn dynamic_dimension_constraint(
+    sets: &[ParametricConstraintSet],
+    handle: Handle,
+) -> Option<(&ParametricConstraintSet, &ParametricConstraint)> {
+    sets.iter().find_map(|set| {
+        let id = set
+            .dimensions
+            .iter()
+            .find_map(|(id, dimension)| (*dimension == handle).then_some(*id))?;
+        Some((set, set.get(id)?))
+    })
+}
+
 /// Grabbed points are exact kernel inputs; the solver anchors the remaining
 /// endpoint coordinates according to the line's directional constraints.
 pub(crate) fn grip_solve_anchor_refs(
@@ -589,6 +798,8 @@ pub struct ParametricConstraintSet {
     /// parameter names may legitimately occur in different blocks.
     pub(crate) local_parameters: super::named_parameters::ParameterTable,
     pub(crate) retained_standard_groups: Vec<Handle>,
+    /// The dynamic dimension that shows a dimensional constraint, by id.
+    pub(crate) dimensions: std::collections::HashMap<ConstraintId, Handle>,
     /// Cached total remaining degrees of freedom, summed across every
     /// independent solve partition in this scope — updated by
     /// `parametric_solve::solve_scope` each time this set is resolved. `None`
@@ -615,6 +826,7 @@ impl ParametricConstraintSet {
             next_id: 0,
             local_parameters: super::named_parameters::ParameterTable::new(),
             retained_standard_groups: Vec::new(),
+            dimensions: std::collections::HashMap::new(),
             dof: None,
             conflicts: Vec::new(),
         }
@@ -706,6 +918,7 @@ impl ParametricConstraintSet {
 
     /// Removes a constraint by id. Returns whether one was actually removed.
     pub fn remove(&mut self, id: ConstraintId) -> bool {
+        self.dimensions.remove(&id);
         let before = self.constraints.len();
         self.constraints.retain(|c| c.id != id);
         self.constraints.len() != before
@@ -1372,6 +1585,170 @@ pub(crate) fn constraint_hover_points(
     points
 }
 
+/// Memoised key for `Scene::cached_glyph_placements`.
+/// `sel_sig` hashes the hide sets the dynamic pills read on EVERY display
+/// mode (`preview_hidden`, `command_preview_hidden`,
+/// `hidden_dynamic_dimensions` — `constraint_glyph_placements_screen` filters
+/// `entity_temporarily_hidden` unconditionally) PLUS, only when
+/// `display_mode & 2 != 0`, the selection-gated sets (`selected`,
+/// `hidden_parametric_constraints`, `shown_parametric_constraints`, and again
+/// `preview_hidden` as a selection source). Hover and selection-highlight
+/// state deliberately stay OUT — they only affect the highlight, never the
+/// placement set. Isolation contents stay OUT — the isolation mutators bump
+/// `constraints_epoch` instead, so no key input is needed for them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlyphKey {
+    pub scope: ParametricScope,
+    pub c_epoch: u64,
+    pub g_epoch: u64,
+    pub cam_gen: u64,
+    pub active_vp: Option<Handle>,
+    pub layout_is_model: bool,
+    pub vp_bits: (u32, u32),
+    pub show_values: bool,
+    pub disp: i16,
+    pub bar: i16,
+    pub sel_sig: u64,
+    pub annotation_scale: u32,
+}
+
+/// One cached glyph placement: the `constraint_glyph_placements_screen`
+/// tuple plus its precomputed overlay layout (`size`, `tangent_dx`,
+/// `top_left`), so overlay consumers never re-clone labels or recompute
+/// offsets. `is_selected` and the tooltip stay OUT — applied post-hoc.
+#[derive(Debug, Clone)]
+pub struct GlyphEntry {
+    pub id: ConstraintId,
+    pub anchor: iced::Point,
+    pub outward: [f32; 2],
+    pub label: Arc<str>,
+    pub conflicting: bool,
+    pub hover: Arc<[iced::Point]>,
+    pub size: iced::Size,
+    pub tangent_dx: f32,
+    pub top_left: iced::Point,
+}
+
+// Single source of truth for constraint-glyph layout (Task 4): the overlay
+// side was deleted and imports these instead, so the drawn pills, the
+// hit-test, and the cached `top_left`/`tangent_dx` can never drift apart.
+pub(crate) const GLYPH_SIZE: f32 = 14.0;
+const GLYPH_PAD_X: f32 = 7.0;
+const GLYPH_PAD_Y: f32 = 4.0;
+const GLYPH_GAP: f32 = 6.0;
+const GLYPH_ROW_GAP: f32 = 4.0;
+const GLYPH_COINCIDENT_SIZE: f32 = 9.0;
+
+pub(crate) fn glyph_is_compact(label: &str) -> bool {
+    matches!(label, "≡" | "∈")
+}
+
+pub(crate) fn glyph_is_fixed(label: &str) -> bool {
+    label == "F" || label == FIXED_POINT_GLYPH
+}
+
+pub(crate) fn glyph_is_vertical(label: &str) -> bool {
+    label == "│" || label == VERTICAL_POINTS_GLYPH
+}
+
+pub(crate) fn constraint_glyph_size(label: &str) -> iced::Size {
+    if glyph_is_compact(label) {
+        return iced::Size::new(GLYPH_COINCIDENT_SIZE, GLYPH_COINCIDENT_SIZE);
+    }
+    if label == "G²"
+        || glyph_is_fixed(label)
+        || glyph_is_vertical(label)
+        || label == DYNAMIC_DIMENSION_GLYPH
+    {
+        let side = GLYPH_SIZE + GLYPH_PAD_Y * 2.0;
+        return iced::Size::new(side, side);
+    }
+    let w = label.chars().count() as f32 * GLYPH_SIZE * 0.62 + GLYPH_PAD_X * 2.0;
+    let h = GLYPH_SIZE + GLYPH_PAD_Y * 2.0;
+    iced::Size::new(w, h)
+}
+
+pub(crate) fn constraint_glyph_box(
+    anchor: iced::Point,
+    outward: [f32; 2],
+    label: &str,
+    tangent_offset: f32,
+) -> (iced::Point, iced::Size) {
+    let size = constraint_glyph_size(label);
+    let gap = if glyph_is_compact(label) {
+        1.0
+    } else {
+        GLYPH_GAP
+    };
+    let distance =
+        outward[0].abs() * size.width * 0.5 + outward[1].abs() * size.height * 0.5 + gap;
+    let tangent = [-outward[1], outward[0]];
+    (
+        iced::Point::new(
+            anchor.x + outward[0] * distance + tangent[0] * tangent_offset - size.width * 0.5,
+            anchor.y + outward[1] * distance + tangent[1] * tangent_offset - size.height * 0.5,
+        ),
+        size,
+    )
+}
+
+pub(crate) fn constraint_glyph_offsets(glyphs: &[(iced::Point, [f32; 2], &str)]) -> Vec<f32> {
+    let mut groups: rustc_hash::FxHashMap<[u32; 4], Vec<usize>> =
+        rustc_hash::FxHashMap::default();
+    for (index, (anchor, outward, _)) in glyphs.iter().enumerate() {
+        groups
+            .entry([
+                anchor.x.to_bits(),
+                anchor.y.to_bits(),
+                outward[0].to_bits(),
+                outward[1].to_bits(),
+            ])
+            .or_default()
+            .push(index);
+    }
+
+    let mut offsets = vec![0.0; glyphs.len()];
+    for indices in groups.values().filter(|indices| indices.len() > 1) {
+        let half_extents: Vec<f32> = indices
+            .iter()
+            .map(|index| {
+                let (_, outward, label) = &glyphs[*index];
+                let size = constraint_glyph_size(label);
+                let tangent = [-outward[1], outward[0]];
+                tangent[0].abs() * size.width * 0.5 + tangent[1].abs() * size.height * 0.5
+            })
+            .collect();
+        let total =
+            half_extents.iter().sum::<f32>() * 2.0 + GLYPH_ROW_GAP * (indices.len() - 1) as f32;
+        let mut cursor = -total * 0.5;
+        for (index, half_extent) in indices.iter().zip(half_extents) {
+            offsets[*index] = cursor + half_extent;
+            cursor += half_extent * 2.0 + GLYPH_ROW_GAP;
+        }
+    }
+    offsets
+}
+
+/// Hit-tests screen point `p` against the precomputed `top_left`/`size` boxes
+/// in `entries` — the same pills `draw` renders, including the tangential
+/// fan-out baked into `tangent_dx` at cache time. Returns the index of the
+/// topmost (last-drawn) match. Shared by `Scene::constraint_glyph_hit` and
+/// the overlay draw/hover paths so the clickable area can never drift from
+/// what's drawn and no caller recomputes offsets.
+pub(crate) fn glyph_hit_test_entries(entries: &[GlyphEntry], p: iced::Point) -> Option<usize> {
+    entries
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, entry)| {
+            let within = p.x >= entry.top_left.x
+                && p.x <= entry.top_left.x + entry.size.width
+                && p.y >= entry.top_left.y
+                && p.y <= entry.top_left.y + entry.size.height;
+            within.then_some(index)
+        })
+}
+
 impl super::Scene {
     /// Expand through enabled constraints. Whole-object translations follow
     /// point connections; grip previews include curve relations as well.
@@ -1424,6 +1801,117 @@ impl super::Scene {
         !self.hidden_parametric_constraints.contains(&(scope, id))
     }
 
+    /// Rewrites every dynamic dimension's text from its constraint's
+    /// parameter name and current value, in the CONSTRAINTNAMEFORMAT
+    /// reading `constraint_name_format` selects, and moves its extension
+    /// origins to where the solve left the constraint points.
+    pub(crate) fn refresh_dynamic_dimension_texts(&mut self) {
+        let format = self.constraint_name_format;
+        let mut updates: Vec<(Handle, String, Option<(Vector3, Vector3)>)> = Vec::new();
+        // A reference (driven) constraint's parameter follows the geometry.
+        let mut followed: Vec<(String, f64)> = Vec::new();
+        for set in &self.parametric_constraints {
+            let model_table = set.local_parameters.is_empty();
+            let table = if model_table {
+                &self.named_parameters
+            } else {
+                &set.local_parameters
+            };
+            for (id, dimension) in &set.dimensions {
+                let Some(constraint) = set.get(*id) else {
+                    continue;
+                };
+                let world = |reference: &ParametricRef| {
+                    let entity = self.document.get_entity(reference.entity)?;
+                    resolve_point(entity, reference.marker?)
+                };
+                let points = match constraint.refs.as_slice() {
+                    [first, second, ..] => world(first).zip(world(second)),
+                    _ => None,
+                };
+                let reference = !constraint.enabled;
+                let measured = points.map(|(first, second)| {
+                    let delta = second - first;
+                    let axis = match self.document.get_entity(*dimension) {
+                        Some(acadrust::EntityType::Dimension(
+                            acadrust::entities::Dimension::Linear(linear),
+                        )) => Some((linear.rotation.cos(), linear.rotation.sin())),
+                        _ => None,
+                    };
+                    match (constraint.kind, axis) {
+                        (ConstraintKind::DistanceX, _) => delta.x.abs(),
+                        (ConstraintKind::DistanceY, _) => delta.y.abs(),
+                        (ConstraintKind::DistanceDirected, Some((ax, ay))) => {
+                            (delta.x * ax + delta.y * ay).abs()
+                        }
+                        _ => delta.length(),
+                    }
+                });
+                let (name, value, source) = match &constraint.driving_param {
+                    Some(DrivingValue::Named(name)) => {
+                        let value = match (reference, measured) {
+                            (true, Some(measured)) => {
+                                if model_table {
+                                    followed.push((name.clone(), measured));
+                                }
+                                measured
+                            }
+                            _ => table.resolve(name).unwrap_or(f64::NAN),
+                        };
+                        let source = (!reference)
+                            .then(|| table.get(name).map(|parameter| parameter.source.clone()))
+                            .flatten();
+                        (name.clone(), value, source)
+                    }
+                    Some(DrivingValue::Literal(value)) => (String::new(), *value, None),
+                    None => continue,
+                };
+                let annotational = self.dimension_is_annotational(*dimension);
+                updates.push((
+                    *dimension,
+                    dynamic_dimension_text(
+                        &name,
+                        value,
+                        format,
+                        reference,
+                        source.as_deref(),
+                        annotational,
+                    ),
+                    points,
+                ));
+            }
+        }
+        for (name, measured) in followed {
+            let source = measured_expression(measured);
+            if self.named_parameters.get(&name).map(|p| p.source.as_str()) != Some(source.as_str()) {
+                let _ = self.named_parameters.set(&name, &source);
+            }
+        }
+        for (handle, text, points) in updates {
+            let Some(acadrust::EntityType::Dimension(mut dimension)) =
+                self.document.get_entity(handle).cloned()
+            else {
+                continue;
+            };
+            let mut changed = false;
+            if let Some((first, second)) = points {
+                if dynamic_dimension_follow_points(&mut dimension, first, second) {
+                    changed = true;
+                }
+            }
+            if dimension.base().user_text.as_deref() != Some(text.as_str()) {
+                crate::entities::dimension::set_dimension_text_override(
+                    dimension.base_mut(),
+                    Some(text),
+                );
+                changed = true;
+            }
+            if changed {
+                self.update_entity(acadrust::EntityType::Dimension(dimension));
+            }
+        }
+    }
+
     pub fn should_display_parametric_constraint(
         &self,
         scope: ParametricScope,
@@ -1454,6 +1942,10 @@ impl super::Scene {
         } else {
             self.shown_parametric_constraints.remove(&(scope, id));
         }
+        // Every production `add` flows through here, so this bump covers all
+        // constraint creations (add / add_axis_constraint / AUTOCONSTRAIN /
+        // DCCONVERT / Coincident / Equal / Fixed / dimensional handlers).
+        self.bump_constraints_epoch();
     }
 
     pub fn set_parametric_constraint_visibility(
@@ -1487,7 +1979,203 @@ impl super::Scene {
                 self.shown_parametric_constraints.remove(&(scope, *id));
             }
         }
+        self.refresh_hidden_dynamic_dimensions();
+        if !ids.is_empty() {
+            self.bump_constraints_epoch();
+        }
         ids.len()
+    }
+
+    /// Makes sure the reference's dynamic dimension layer exists: hidden
+    /// from the layer lists (the `*` prefix) and never plotted.
+    pub(crate) fn ensure_dynamic_dimension_layer(&mut self) {
+        if self.document.layers.contains(DYNAMIC_DIMENSION_LAYER) {
+            return;
+        }
+        let mut layer = acadrust::tables::Layer::new(DYNAMIC_DIMENSION_LAYER);
+        layer.color = acadrust::types::Color::from_index(7);
+        layer.is_plottable = false;
+        layer.handle = self.document.allocate_handle();
+        let _ = self.document.layers.add(layer);
+    }
+
+    /// True for a dynamic dimension of a dimensional constraint (not an
+    /// annotational one, which is an ordinary plotted dimension).
+    pub(crate) fn is_dynamic_dimension(&self, handle: Handle) -> bool {
+        self.parametric_constraints
+            .iter()
+            .any(|set| set.dimensions.values().any(|dimension| *dimension == handle))
+            && !self.dimension_is_annotational(handle)
+    }
+
+    /// True when a dimensional constraint's dimension uses the annotational
+    /// form: on an ordinary layer instead of the reference's constraints
+    /// layer, drawn with its style, plotted, never rescaled to the screen.
+    pub(crate) fn dimension_is_annotational(&self, handle: Handle) -> bool {
+        self.document.get_entity(handle).is_some_and(|entity| {
+            !entity
+                .common()
+                .layer
+                .eq_ignore_ascii_case(DYNAMIC_DIMENSION_LAYER)
+        })
+    }
+
+    /// The document as written to a file: a dynamic dimension's screen-size
+    /// overrides are a display matter and stay out of the file.
+    pub(crate) fn document_for_save(&self) -> acadrust::CadDocument {
+        use crate::entities::dim_override as ov;
+        let mut document = self.document.clone();
+        for set in &self.parametric_constraints {
+            for handle in set.dimensions.values().copied() {
+                if self.dimension_is_annotational(handle) {
+                    continue;
+                }
+                for code in [ov::DIMSCALE, ov::DIMTIH, ov::DIMTOH] {
+                    ov::set(&mut document, handle, code, None);
+                }
+            }
+        }
+        document
+    }
+
+    /// Gives every dynamic dimension a DIMSCALE override that keeps its
+    /// text, arrows and offsets at a screen size (the reference draws them
+    /// at a constant pixel size whatever the zoom). Runs whenever the camera
+    /// changed; `force` re-applies after a dimension was created or loaded.
+    pub fn refresh_dynamic_dimension_scales(&mut self, force: bool) {
+        let Some(wpp) = self.world_per_pixel() else {
+            return;
+        };
+        if !force && self.dynamic_dimension_camera_gen == Some(self.camera_generation) {
+            return;
+        }
+        self.dynamic_dimension_camera_gen = Some(self.camera_generation);
+        let handles: Vec<Handle> = self
+            .parametric_constraints
+            .iter()
+            .flat_map(|set| set.dimensions.values().copied())
+            .collect();
+        let mut changes = Vec::new();
+        for handle in handles {
+            let Some(acadrust::EntityType::Dimension(dimension)) = self.document.get_entity(handle)
+            else {
+                continue;
+            };
+            // An annotational dimension keeps its style's size.
+            if self.dimension_is_annotational(handle) {
+                continue;
+            }
+            let style_name = dimension.base().style_name.clone();
+            let text_height = self
+                .document
+                .dim_styles
+                .iter()
+                .find(|style| {
+                    style.name.eq_ignore_ascii_case(&style_name)
+                        || (style_name.trim().is_empty()
+                            && style.name.eq_ignore_ascii_case("Standard"))
+                })
+                .map(|style| style.dimtxt)
+                .filter(|height| *height > 1e-9)
+                .unwrap_or(0.18);
+            let scale = f64::from(wpp) * f64::from(DYNAMIC_DIMENSION_TEXT_PX) / text_height;
+            use crate::entities::dim_override as ov;
+            let xdata = &dimension.base().common.extended_data;
+            let current = ov::real(xdata, ov::DIMSCALE);
+            // The reference draws dynamic dimension text horizontally.
+            let horizontal = ov::int(xdata, ov::DIMTIH) == Some(1) && ov::int(xdata, ov::DIMTOH) == Some(1);
+            if current.is_some_and(|value| (value - scale).abs() < 1e-9) && horizontal {
+                continue;
+            }
+            ov::set(
+                &mut self.document,
+                handle,
+                ov::DIMSCALE,
+                Some(acadrust::xdata::XDataValue::Real(scale)),
+            );
+            if !horizontal {
+                for code in [ov::DIMTIH, ov::DIMTOH] {
+                    ov::set(
+                        &mut self.document,
+                        handle,
+                        code,
+                        Some(acadrust::xdata::XDataValue::Integer16(1)),
+                    );
+                }
+            }
+            changes.push((handle, super::ChangeKind::Modified));
+        }
+        if !changes.is_empty() {
+            self.bump_entities(&changes);
+        }
+    }
+
+    /// Re-derives which dynamic dimensions stay off screen (DCHIDE, or
+    /// DYNCONSTRAINTDISPLAY 0 for all of them) and redraws the ones that
+    /// changed.
+    pub(crate) fn refresh_hidden_dynamic_dimensions(&mut self) {
+        let desired: rustc_hash::FxHashSet<Handle> = self
+            .parametric_constraints
+            .iter()
+            .flat_map(|set| {
+                set.dimensions.iter().filter_map(|(id, dimension)| {
+                    (!self.dimension_is_annotational(*dimension)
+                        && (!self.dynamic_constraint_display
+                            || !self.is_parametric_constraint_visible(set.scope, *id)))
+                    .then_some(*dimension)
+                })
+            })
+            .collect();
+        if desired == self.hidden_dynamic_dimensions {
+            return;
+        }
+        let changes: Vec<_> = self
+            .hidden_dynamic_dimensions
+            .symmetric_difference(&desired)
+            .copied()
+            .map(|handle| (handle, super::ChangeKind::Modified))
+            .collect();
+        self.hidden_dynamic_dimensions = desired;
+        // The memoised glyph placements read this set on every display mode
+        // (dynamic pills filter `entity_temporarily_hidden` unconditionally),
+        // so a change here must invalidate them — this covers all four
+        // callers, including the DYNCONSTRAINTDISPLAY toggle that has no
+        // call-site bump of its own.
+        self.bump_constraints_epoch();
+        self.bump_entities(&changes);
+    }
+
+    /// Enables or disables one constraint without losing it — the production
+    /// path for toggling `ParametricConstraint::enabled` (a re-solve skips a
+    /// disabled constraint; glyph placements filter it out). Returns whether
+    /// a constraint with `id` exists in `scope`. Bumps the constraints epoch
+    /// exactly when the value actually changes so future callers cannot
+    /// introduce a stale-glyph path by writing the field directly.
+    pub fn set_constraint_enabled(
+        &mut self,
+        scope: ParametricScope,
+        id: ConstraintId,
+        enabled: bool,
+    ) -> bool {
+        let mut found = false;
+        let mut changed = false;
+        if let Some(set) = self
+            .parametric_constraints
+            .iter_mut()
+            .find(|set| set.scope == scope)
+        {
+            if let Some(constraint) = set.constraints.iter_mut().find(|c| c.id == id) {
+                found = true;
+                if constraint.enabled != enabled {
+                    constraint.enabled = enabled;
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            self.bump_constraints_epoch();
+        }
+        found
     }
 
     /// Infers relations already present in the selected geometry.
@@ -1826,10 +2514,11 @@ impl super::Scene {
     /// `vp_size` is the full canvas size (as `SelectionState::vp_size`
     /// reports it), matching what `viewport_edit_frame`/
     /// `active_model_tile_bounds` expect. Mirrors the projection
-    /// `crate::app::view` builds its own render list with, and is reused by
-    /// [`constraint_glyph_hit`](Self::constraint_glyph_hit) — both feed the
-    /// same `(anchor, outward, label)` triples into
-    /// `crate::ui::overlay::constraint_glyph_box`/`constraint_glyph_offsets`,
+    /// `crate::app::view` builds its own render list with. The memoised
+    /// [`cached_glyph_placements`](Self::cached_glyph_placements) maps these
+    /// same `(anchor, outward, label)` triples through
+    /// [`constraint_glyph_box`](crate::scene::parametric_constraints::constraint_glyph_box)/
+    /// [`constraint_glyph_offsets`](crate::scene::parametric_constraints::constraint_glyph_offsets),
     /// so hit-testing can never drift from what's actually drawn.
     pub fn constraint_glyph_placements_screen(
         &self,
@@ -1863,9 +2552,11 @@ impl super::Scene {
             let cam = self.camera.borrow();
             (cam.view_proj_rte(bounds), cam.eye())
         };
-        set.constraints
+        let mut placements = set
+            .constraints
             .iter()
-            .filter(|c| c.enabled)
+            // A dynamic dimension is its constraint's whole display.
+            .filter(|c| c.enabled && !set.dimensions.contains_key(&c.id))
             .filter(|c| {
                 let selected = c
                     .refs
@@ -1956,14 +2647,82 @@ impl super::Scene {
                     })
                     .collect::<Vec<_>>()
             })
-            .collect()
+            .collect::<Vec<_>>();
+        // The reference marks an object once for Equal however many
+        // relations of that kind it carries; the stacked duplicates only
+        // repeated the same badge.
+        let mut equal_anchors: Vec<iced::Point> = Vec::new();
+        placements.retain(|(_, point, _, label, _, _)| {
+            if label != "=" {
+                return true;
+            }
+            if equal_anchors
+                .iter()
+                .any(|seen| (seen.x - point.x).abs() < 0.5 && (seen.y - point.y).abs() < 0.5)
+            {
+                return false;
+            }
+            equal_anchors.push(*point);
+            true
+        });
+        // A dynamic dimension carries the reference's lock mark at the
+        // start of its text instead of a constraint bar.
+        for (id, dimension) in &set.dimensions {
+            let Some(constraint) = set.get(*id) else {
+                continue;
+            };
+            if !constraint.enabled || self.entity_temporarily_hidden(*dimension) {
+                continue;
+            }
+            let Some(acadrust::EntityType::Dimension(entity)) = self.document.get_entity(*dimension)
+            else {
+                continue;
+            };
+            let Some((anchor, outward)) = crate::entities::dimension::dynamic_dimension_lock_anchor(
+                &self.document,
+                entity,
+                self.annotation_scale as f64,
+            ) else {
+                continue;
+            };
+            let project = |point: Vector3| {
+                crate::scene::pick::grip::project_rte(
+                    glam::DVec3::new(point.x, point.y, point.z),
+                    view_rot,
+                    eye,
+                    bounds,
+                )
+            };
+            let (Some(screen), Some(outward_screen)) = (
+                project(anchor),
+                project(Vector3::new(
+                    anchor.x + outward.x,
+                    anchor.y + outward.y,
+                    anchor.z + outward.z,
+                )),
+            ) else {
+                continue;
+            };
+            let direction = (outward_screen - screen).normalize_or(glam::Vec2::NEG_X);
+            let point = iced::Point::new(bounds.x + screen.x, bounds.y + screen.y);
+            if point.x.is_finite() && point.y.is_finite() {
+                placements.push((
+                    *id,
+                    point,
+                    direction.to_array(),
+                    DYNAMIC_DIMENSION_GLYPH.to_string(),
+                    false,
+                    Vec::new(),
+                ));
+            }
+        }
+        placements
     }
 
     /// Hit-tests screen point `p` (same coordinate space as `p_full` in the
-    /// viewport click handler) against the glyph pills from
-    /// [`constraint_glyph_placements_screen`](Self::constraint_glyph_placements_screen),
-    /// via `crate::ui::overlay::constraint_glyph_hit_test`'s shared layout
-    /// math, so a click only registers where the pill is actually drawn.
+    /// viewport click handler) against the memoised [`cached_glyph_placements`](Self::cached_glyph_placements)
+    /// entries, so a click only registers where the pill is actually drawn —
+    /// with no placement recompute on the mouse-move/click hot path.
     pub fn constraint_glyph_hit(
         &self,
         scope: ParametricScope,
@@ -1973,6 +2732,111 @@ impl super::Scene {
         bar_mode: i16,
         p: iced::Point,
     ) -> Option<ConstraintId> {
+        let entries = self.cached_glyph_placements(scope, vp_size, show_values, display_mode, bar_mode);
+        let index = glyph_hit_test_entries(&entries, p)?;
+        Some(entries[index].id)
+    }
+
+    /// Order-independent hash of the visibility sets that feed
+    /// [`constraint_glyph_placements_screen`](Self::constraint_glyph_placements_screen).
+    /// The dynamic pills filter `entity_temporarily_hidden` on EVERY display
+    /// mode, so `preview_hidden`, `command_preview_hidden` and
+    /// `hidden_dynamic_dimensions` are hashed UNCONDITIONALLY; `selected` and
+    /// the hidden/shown override sets only affect the `should_display` filter
+    /// when `display_mode & 2 != 0`, so they stay conditional (and the key
+    /// stays shared across selection changes in the other modes).
+    pub(crate) fn glyph_selection_signature(&self, display_mode: i16) -> u64 {
+        fn item_hash(item: &impl Hash) -> u64 {
+            let mut hasher = rustc_hash::FxHasher::default();
+            item.hash(&mut hasher);
+            hasher.finish()
+        }
+        // Order-independent single pass: per-item hashes combine
+        // commutatively (wrapping add), so iteration order never matters;
+        // one FxHasher over (combined, count) folds in the total length, no
+        // alloc/sort on the hot hit path.
+        let mut combined: u64 = 0;
+        let mut count: u64 = 0;
+        // Always-read hide sets: the dynamic-dimension pills consult these
+        // whatever the display mode, so a stale signature here would serve a
+        // pill for a just-hidden dimension (or hide a just-shown one).
+        for item in self.preview_hidden.iter() {
+            combined = combined.wrapping_add(item_hash(item));
+            count += 1;
+        }
+        for item in self.command_preview_hidden.iter() {
+            combined = combined.wrapping_add(item_hash(item));
+            count += 1;
+        }
+        for item in self.hidden_dynamic_dimensions.iter() {
+            combined = combined.wrapping_add(item_hash(item));
+            count += 1;
+        }
+        if display_mode & 2 != 0 {
+            for item in self.selected.iter() {
+                combined = combined.wrapping_add(item_hash(item));
+                count += 1;
+            }
+            for item in self.hidden_parametric_constraints.iter() {
+                combined = combined.wrapping_add(item_hash(item));
+                count += 1;
+            }
+            for item in self.shown_parametric_constraints.iter() {
+                combined = combined.wrapping_add(item_hash(item));
+                count += 1;
+            }
+        }
+        let mut hasher = rustc_hash::FxHasher::default();
+        combined.hash(&mut hasher);
+        count.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Memoised [`constraint_glyph_placements_screen`](Self::constraint_glyph_placements_screen),
+    /// keyed by [`GlyphKey`]: the miss path calls the existing placements fn
+    /// VERBATIM (no algorithm change), maps each tuple to a [`GlyphEntry`]
+    /// with precomputed layout, and stores the `Arc<[GlyphEntry]>` in the
+    /// Scene-owned single-slot memo. NaN filtering is the placements fn's own and is
+    /// cached as-is. Camera/layout/selection state is read from `self`, so
+    /// the `(scope, vp_size, show_values, display_mode, bar_mode)` signature
+    /// stays identical to the stub's.
+    ///
+    /// Single-slot rationale: within one frame, view + hit-test + dwell +
+    /// click all share the key (hits); across camera motion each frame misses
+    /// once by design; across edits the stale single entry just misses — no
+    /// leak possible (an unbounded map would orphan an entry per camera frame
+    /// and per edit, since `cam_gen` is in the key).
+    pub fn cached_glyph_placements(
+        &self,
+        scope: ParametricScope,
+        vp_size: (f32, f32),
+        show_values: bool,
+        display_mode: i16,
+        bar_mode: i16,
+    ) -> std::sync::Arc<[GlyphEntry]> {
+        let key = GlyphKey {
+            scope,
+            c_epoch: self.constraints_epoch,
+            g_epoch: self.geometry_epoch,
+            cam_gen: self.camera_generation,
+            active_vp: self.active_viewport,
+            layout_is_model: self.current_layout == "Model",
+            vp_bits: (vp_size.0.to_bits(), vp_size.1.to_bits()),
+            show_values,
+            disp: display_mode,
+            bar: bar_mode,
+            sel_sig: self.glyph_selection_signature(display_mode),
+            // The dynamic pills anchor through `dynamic_dimension_lock_anchor`
+            // with this scale — a CANNOSCALE change moves them, so it is keyed
+            // (bitwise: NaN never occurs here, and distinct bit patterns must
+            // miss rather than alias).
+            annotation_scale: self.annotation_scale.to_bits(),
+        };
+        if let Some((cached_key, cached_arc)) = self.glyph_cache.borrow().as_ref() {
+            if *cached_key == key {
+                return std::sync::Arc::clone(cached_arc);
+            }
+        }
         let placements = self.constraint_glyph_placements_screen(
             scope,
             vp_size,
@@ -1980,14 +2844,36 @@ impl super::Scene {
             display_mode,
             bar_mode,
         );
-        let glyphs: Vec<(iced::Point, [f32; 2], String, bool)> = placements
-            .iter()
-            .map(|(_, point, direction, label, is_conflicting, _)| {
-                (*point, *direction, label.clone(), *is_conflicting)
-            })
+        let offsets = constraint_glyph_offsets(
+            &placements
+                .iter()
+                .map(|(_, point, direction, label, _, _)| (*point, *direction, label.as_str()))
+                .collect::<Vec<_>>(),
+        );
+        let entries: Vec<GlyphEntry> = placements
+            .into_iter()
+            .zip(offsets)
+            .map(
+                |((id, anchor, outward, label, conflicting, hover), tangent_dx)| {
+                    let size = constraint_glyph_size(&label);
+                    let (top_left, _) = constraint_glyph_box(anchor, outward, &label, tangent_dx);
+                    GlyphEntry {
+                        id,
+                        anchor,
+                        outward,
+                        label: Arc::from(label),
+                        conflicting,
+                        hover: Arc::from(hover),
+                        size,
+                        tangent_dx,
+                        top_left,
+                    }
+                },
+            )
             .collect();
-        let index = crate::ui::overlay::constraint_glyph_hit_test(&glyphs, p)?;
-        Some(placements[index].0)
+        let arc: Arc<[GlyphEntry]> = Arc::from(entries);
+        *self.glyph_cache.borrow_mut() = Some((key, Arc::clone(&arc)));
+        arc
     }
 
     /// Handle remapping lives in each command that duplicates
@@ -2055,6 +2941,7 @@ impl super::Scene {
         }
         touched.sort();
         touched.dedup();
+        self.bump_constraints_epoch();
         let changes: Vec<(Handle, super::ChangeKind)> = touched
             .into_iter()
             .map(|h| (h, super::ChangeKind::Modified))
@@ -2355,6 +3242,135 @@ mod tests {
     }
 
     #[test]
+    fn glyph_hit_test_entries_matches_precomputed_boxes() {
+        let mut scene = super::super::Scene::new();
+        let scope = ParametricScope::ModelSpace;
+        let line = scene.add_entity(acadrust::EntityType::Line(
+            acadrust::entities::Line::from_points(
+                Vector3::new(-1.0, 0.0, 0.0),
+                Vector3::new(1.0, 0.0, 0.0),
+            ),
+        ));
+        scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        let id = scene.parametric_constraint_set_mut(scope).add(
+            ConstraintKind::Horizontal,
+            vec![ParametricRef::whole(line)],
+            None,
+        );
+        scene.note_parametric_constraint_applied(scope, id, 3);
+        let vp = (800.0_f32, 600.0_f32);
+        let entries = scene.cached_glyph_placements(scope, vp, true, 3, 4095);
+        assert!(!entries.is_empty(), "fixture must yield glyphs");
+        // A click at the centre of the precomputed box must hit that entry,
+        // using the cached layout only (no offset recompute).
+        let centre = iced::Point::new(
+            entries[0].top_left.x + entries[0].size.width * 0.5,
+            entries[0].top_left.y + entries[0].size.height * 0.5,
+        );
+        assert_eq!(super::glyph_hit_test_entries(&entries, centre), Some(0));
+        // Far away from every box must miss.
+        assert_eq!(
+            super::glyph_hit_test_entries(&entries, iced::Point::new(-5000.0, -5000.0)),
+            None
+        );
+        // `constraint_glyph_hit` must agree with the cached entries (it reuses
+        // the cache rather than recomputing placements).
+        assert_eq!(
+            scene.constraint_glyph_hit(scope, vp, true, 3, 4095, centre),
+            Some(entries[0].id)
+        );
+    }
+
+    #[test]
+    fn cached_glyph_placements_hit_returns_same_arc() {
+        let mut scene = super::super::Scene::new();
+        let scope = ParametricScope::ModelSpace;
+        let line = scene.add_entity(acadrust::EntityType::Line(
+            acadrust::entities::Line::from_points(
+                Vector3::new(-1.0, 0.0, 0.0),
+                Vector3::new(1.0, 0.0, 0.0),
+            ),
+        ));
+        scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        let id = scene.parametric_constraint_set_mut(scope).add(
+            ConstraintKind::Horizontal,
+            vec![ParametricRef::whole(line)],
+            None,
+        );
+        scene.note_parametric_constraint_applied(scope, id, 3);
+        let vp = (800.0_f32, 600.0_f32);
+        let first = scene.cached_glyph_placements(scope, vp, true, 3, 4095);
+        let second = scene.cached_glyph_placements(scope, vp, true, 3, 4095);
+        assert!(
+            !first.is_empty(),
+            "fixture must yield at least one glyph placement"
+        );
+        assert!(
+            std::sync::Arc::ptr_eq(&first, &second),
+            "identical key inputs must return the same cached Arc"
+        );
+    }
+
+    #[test]
+    fn cached_glyph_placements_invalidated_by_metadata_edit() {
+        let mut scene = super::super::Scene::new();
+        let scope = ParametricScope::ModelSpace;
+        let line = scene.add_entity(acadrust::EntityType::Line(
+            acadrust::entities::Line::from_points(
+                Vector3::new(-1.0, 0.0, 0.0),
+                Vector3::new(1.0, 0.0, 0.0),
+            ),
+        ));
+        scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        let id = scene.parametric_constraint_set_mut(scope).add(
+            ConstraintKind::Horizontal,
+            vec![ParametricRef::whole(line)],
+            None,
+        );
+        scene.note_parametric_constraint_applied(scope, id, 3);
+        let vp = (800.0_f32, 600.0_f32);
+        let before = scene.cached_glyph_placements(scope, vp, true, 3, 4095);
+        assert!(
+            !before.is_empty(),
+            "fixture must yield at least one glyph placement"
+        );
+        // NOTE: no production set_enabled/toggle_enabled method exists (grep:
+        // `enabled` is only written in `add()`, DWG import, and tests), so the
+        // metadata edit goes through the REAL production Scene-level toggle
+        // used by draw/update paths — hiding the geometric constraint — which
+        // Task 2 must wire to an epoch bump. Not a direct field write.
+        scene.set_parametric_constraint_visibility(scope, None, false, false);
+        let after = scene.cached_glyph_placements(scope, vp, true, 3, 4095);
+        assert!(
+            !std::sync::Arc::ptr_eq(&before, &after),
+            "metadata edit must invalidate the cache (new Arc)"
+        );
+        assert!(
+            after.is_empty(),
+            "output must reflect the edit: hidden constraint yields no glyphs"
+        );
+        // A selection change must also miss when `display_mode & 2 != 0`
+        // (sel_sig is part of the key): restore, warm, then reselect.
+        scene.set_parametric_constraint_visibility(scope, None, false, true);
+        let restored = scene.cached_glyph_placements(scope, vp, true, 3, 4095);
+        assert!(
+            !restored.is_empty(),
+            "restored constraint must yield glyphs again"
+        );
+        let reselected_warm = scene.cached_glyph_placements(scope, vp, true, 3, 4095);
+        assert!(
+            std::sync::Arc::ptr_eq(&restored, &reselected_warm),
+            "identical key inputs must return the same cached Arc"
+        );
+        scene.selected.insert(line);
+        let reselected = scene.cached_glyph_placements(scope, vp, true, 3, 4095);
+        assert!(
+            !std::sync::Arc::ptr_eq(&reselected_warm, &reselected),
+            "selection change must invalidate the cache (new Arc)"
+        );
+    }
+
+    #[test]
     fn scope_owner_handle_resolves_block_directly() {
         let block_handle = h(42);
         let scope = ParametricScope::Block(block_handle);
@@ -2375,7 +3391,10 @@ mod tests {
     }
 
     #[test]
-    fn arc_grips_drive_center_start_and_end_but_not_midpoint() {
+    /// The center grip drives the center; the start, end and midpoint grips
+    /// reshape the arc, so they drive the whole curve and a paired Equal or
+    /// Symmetric follows the new radius and sweep.
+    fn arc_grips_drive_center_or_the_whole_arc() {
         let handle = h(8);
         let arc = acadrust::EntityType::Arc(acadrust::entities::Arc::from_coords(
             0.0,
@@ -2390,15 +3409,14 @@ mod tests {
             grip_solve_anchor_refs(&arc, handle, 0),
             vec![ParametricRef::center(handle)]
         );
-        assert_eq!(
-            grip_solve_anchor_refs(&arc, handle, 1),
-            vec![ParametricRef::point(handle, 0)]
-        );
-        assert_eq!(
-            grip_solve_anchor_refs(&arc, handle, 2),
-            vec![ParametricRef::point(handle, 1)]
-        );
-        assert_eq!(grip_solve_anchor_refs(&arc, handle, 3), Vec::new());
+        for grip in 1..=3 {
+            assert_eq!(
+                grip_solve_anchor_refs(&arc, handle, grip),
+                vec![ParametricRef::whole(handle)],
+                "grip {grip}"
+            );
+        }
+        assert_eq!(grip_solve_anchor_refs(&arc, handle, 4), Vec::new());
     }
 
     #[test]

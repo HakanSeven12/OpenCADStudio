@@ -38,6 +38,16 @@
         animation: ocs-spin 0.9s linear infinite;
       }
       @keyframes ocs-spin { to { transform: rotate(360deg); } }
+      /* Browser-menu print support: hidden on screen, the only thing shown on
+         paper. beforeprint snapshots the WebGL canvas into it (below), so the
+         printout is the drawing instead of a blank page — WebGL canvases do
+         not composite into the print surface on their own. */
+      #print-snapshot { display: none; }
+      @media print {
+        body > *:not(#print-snapshot) { display: none !important; }
+        html, body { overflow: visible; height: auto; background: #fff; }
+        #print-snapshot { display: block; max-width: 100%; height: auto; }
+      }
     </style>
     <link data-trunk rel="rust" data-bin="OpenCADStudio" />
     <link data-trunk rel="copy-dir" href="web/fonts" />
@@ -56,6 +66,8 @@
       <div class="title">Open <span>CAD</span> Studio</div>
       <div class="sub">Loading…</div>
     </div>
+    <!-- Print-only copy of the canvas; filled by beforeprint below. -->
+    <img id="print-snapshot" alt="" />
     <script src="ocs-control.js" defer></script>
     <script>
       // Offline support: register the service worker. It is copied next to
@@ -69,6 +81,32 @@
         if (!("serviceWorker" in navigator)) return;
         navigator.serviceWorker.register("sw.js").catch(error => {
           console.warn("service worker registration failed; offline support disabled:", error);
+        });
+      })();
+    </script>
+    <script>
+      // Print support. The drawing lives in a WebGL canvas, which browsers
+      // rasterize as blank on the print surface. beforeprint therefore copies
+      // it onto a 2D canvas (the same drawImage readback the Rust side's
+      // sys::capture_canvas uses — no Rust state involved, the canvas is
+      // located from the DOM) and shows the snapshot in the print-only
+      // <img>; afterprint drops it again to free the PNG.
+      (() => {
+        const snapshot = document.getElementById("print-snapshot");
+        if (!snapshot) return;
+        window.addEventListener("beforeprint", () => {
+          const canvas = document.querySelector("canvas");
+          if (!canvas || !canvas.width || !canvas.height) return;
+          const copy = document.createElement("canvas");
+          copy.width = canvas.width;
+          copy.height = canvas.height;
+          const context = copy.getContext("2d");
+          if (!context) return;
+          context.drawImage(canvas, 0, 0);
+          snapshot.src = copy.toDataURL("image/png");
+        });
+        window.addEventListener("afterprint", () => {
+          snapshot.removeAttribute("src");
         });
       })();
     </script>

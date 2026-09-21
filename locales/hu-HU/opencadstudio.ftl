@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = A vágólap nem tartalmaz támogatott szöveget vagy rajzobjektumot.
+    .image-unsupported = A beillesztett "{ $name }" kép nem dekódolható.
+    .pasted-image = "{ $name }" kép beillesztve: { $width }×{ $height } px
     .unavailable = A rendszer vágólapja nem érhető el.
     .occupied = A rendszer vágólapja jelenleg használatban van. Próbálja újra.
     .conversion-failed = A vágólap szövege nem olvasható.
@@ -3581,6 +3583,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = A OCS beszélgetések megnyitása segítségért és kérdésekért...
     .opening-ocs-web = A OCS web megnyitása...
     .browser-cannot-open-typed-path = A böngésző nem nyithat meg beírt útvonalat; válaszd a fájlt.
+    .save-picker-failed-downloading = A mentési cél kiválasztása nem sikerült: __ocs_fmt_0__; másolat letöltése
+    .in-place-save-failed-downloaded = A helyben mentés nem sikerült (__ocs_fmt_0__); másolat lett letöltve
     .opening-the-command-reference = A parancsreferencia megnyitása...
     .already-loaded-different-contents-kept = A(z) "__ocs_fmt_0__" már betöltve eltérő tartalommal; a meglévő fájl megőrizve.
     .opening-patreon-page = Patreon oldal megnyitása...

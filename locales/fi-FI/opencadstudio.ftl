@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = Leikepöydällä ei ole tuettua tekstiä tai piirustusobjekteja.
+    .image-unsupported = Liitettyä kuvaa "{ $name }" ei voitu purkaa.
+    .pasted-image = Liitetty kuva "{ $name }": { $width }×{ $height } px
     .unavailable = Järjestelmän leikepöytä ei ole käytettävissä.
     .occupied = Järjestelmän leikepöytä on parhaillaan käytössä. Yritä uudelleen.
     .conversion-failed = Leikepöydän tekstiä ei voitu lukea.
@@ -3581,6 +3583,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = OCS-keskustelujen avaaminen apua ja kysymyksiä varten...
     .opening-ocs-web = Avataan OCS Web...
     .browser-cannot-open-typed-path = Selain ei voi avata kirjoitettua polkua; valitse tiedosto.
+    .save-picker-failed-downloading = Tallennuskohteen valinta epäonnistui: __ocs_fmt_0__; ladataan kopio
+    .in-place-save-failed-downloaded = Tallennus paikallaan epäonnistui (__ocs_fmt_0__); kopio ladattiin
     .opening-the-command-reference = Avataan komentoviittausta...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__" on jo ladattu eri sisällöllä; olemassa oleva tiedosto säilytettiin.
     .opening-patreon-page = Avataan Patreon-sivua...

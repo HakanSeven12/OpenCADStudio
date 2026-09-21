@@ -160,6 +160,8 @@ modal =
 
 clipboard =
     .no-supported-content = 剪贴板中没有受支持的文本或图形对象。
+    .image-unsupported = 无法解码粘贴的图像 "{ $name }"。
+    .pasted-image = 已粘贴图像 "{ $name }"：{ $width }×{ $height } px
     .unavailable = 系统剪贴板不可用。
     .occupied = 系统剪贴板当前正被使用，请重试。
     .conversion-failed = 无法读取剪贴板文本。
@@ -3565,6 +3567,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = 开幕OCS 讨论帮助和问题...
     .opening-ocs-web = 打开OCS网络...
     .browser-cannot-open-typed-path = 浏览器无法打开键入的路径；请改为选择文件。
+    .save-picker-failed-downloading = 选择保存目标失败:__ocs_fmt_0__;正在下载副本
+    .in-place-save-failed-downloaded = 就地保存失败(__ocs_fmt_0__);已下载副本
     .opening-the-command-reference = 正在打开命令参考...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__"已以不同内容加载；保留了现有文件。
     .opening-patreon-page = 打开帕特伦的页面...

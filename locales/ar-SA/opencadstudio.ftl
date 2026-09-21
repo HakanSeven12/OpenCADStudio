@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = لا تحتوي الحافظة على نص أو كائنات رسم مدعومة.
+    .image-unsupported = تعذّر فك ترميز الصورة الملصقة "{ $name }".
+    .pasted-image = تم لصق الصورة "{ $name }": { $width }×{ $height } px
     .unavailable = حافظة النظام غير متاحة.
     .occupied = حافظة النظام قيد الاستخدام حاليًا. حاول مرة أخرى.
     .conversion-failed = تعذرت قراءة نص الحافظة.
@@ -3594,6 +3596,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = يجري فتح مناقشات OCS للمساعدة والأسئلة...
     .opening-ocs-web = يجري فتح OCS Web...
     .browser-cannot-open-typed-path = لا يستطيع المتصفح فتح مسار مكتوب؛ اختر الملف بدلاً من ذلك.
+    .save-picker-failed-downloading = فشل اختيار وجهة الحفظ: __ocs_fmt_0__؛ يتم تنزيل نسخة
+    .in-place-save-failed-downloaded = فشل الحفظ في الموقع (__ocs_fmt_0__)؛ تم تنزيل نسخة
     .opening-the-command-reference = فتح مرجع الأوامر...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__" محمّل بالفعل بمحتوى مختلف؛ تم الاحتفاظ بالملف الموجود.
     .opening-patreon-page = يجري فتح صفحة Patreon...

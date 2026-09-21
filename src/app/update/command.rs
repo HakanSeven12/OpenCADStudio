@@ -117,6 +117,13 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 // This tab is closing for good — drop its autosave recovery copy.
                 #[cfg(not(target_arch = "wasm32"))]
                 let _ = std::fs::remove_file(self.autosave_target(idx));
+                // …and, on the web, its retained in-place save handle: the
+                // next tab to reuse that id must start with a fresh pick
+                // instead of silently writing over the closed drawing's file.
+                #[cfg(target_arch = "wasm32")]
+                if let Some(closing_id) = self.tabs.get(idx).map(|t| t.id) {
+                    crate::io::fs_access::drop_handle(closing_id);
+                }
                 // Only-tab case: when the lone non-start tab closes, fall
                 // back to the Start tab if it exists; otherwise spawn a
                 // fresh blank drawing (legacy behaviour).
@@ -1881,6 +1888,68 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 Message::SystemClipboardPaste(result)
             })
         }
+    }
+
+    /// Attach a clipboard image read on the web (a pasted screenshot) the way
+    /// the IMAGE command's pick does: register the bytes name-keyed, decode
+    /// for the file's true pixel size, then commit the entity — but placed
+    /// directly at the cursor (0,0 before any pointer move) with the command's
+    /// default width, skipping the pick prompts a paste should not run.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn paste_clipboard_image(&mut self, name: String, bytes: Vec<u8>) -> Task<Message> {
+        let i = self.active_tab;
+        if self.tabs[i].is_start {
+            self.command_line.push_error(
+                crate::tr!("common", "no-drawing-open-use-new-or-open-first").as_ref(),
+            );
+            return Task::none();
+        }
+        crate::scene::model::image_model::register_source(&name, std::sync::Arc::new(bytes));
+        let Some(decoded) = crate::scene::model::image_model::resolve_image(&name) else {
+            self.command_line.push_error(
+                crate::tr!("clipboard", "image-unsupported", name = name.clone()).as_ref(),
+            );
+            return Task::none();
+        };
+        let (pixels_w, pixels_h) = (decoded.source_width, decoded.source_height);
+        // Same default footprint as the IMAGE command's Enter placement: one
+        // world unit per 100 px (min 1), height from the true aspect ratio.
+        let width = (pixels_w as f64 / 100.0).max(1.0);
+        let aspect = if pixels_h == 0 {
+            1.0
+        } else {
+            pixels_w as f64 / pixels_h as f64
+        };
+        let height = width / aspect;
+        let origin = self.tabs[i].last_cursor_world;
+        let mut image = acadrust::entities::RasterImage::with_size(
+            &name,
+            acadrust::types::Vector3::new(origin.x, origin.y, origin.z),
+            pixels_w as f64,
+            pixels_h as f64,
+            width,
+            height,
+        );
+        image.flags = acadrust::entities::ImageDisplayFlags::SHOW_IMAGE
+            | acadrust::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
+        let short = std::path::Path::new(&name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&name)
+            .to_string();
+        self.command_line.push_output(
+            crate::tr!(
+                "clipboard",
+                "pasted-image",
+                name = short,
+                width = pixels_w,
+                height = pixels_h
+            )
+            .as_ref(),
+        );
+        self.apply_cmd_result(crate::command::CmdResult::CommitAndExit(
+            acadrust::EntityType::RasterImage(image),
+        ))
     }
 
     pub(super) fn on_qselect_open(&mut self) -> Task<Message> {

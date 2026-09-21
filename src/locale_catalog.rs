@@ -1888,6 +1888,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Opening OCS Web..." => Some(("view", "opening-ocs-web")),
         "Opening the command reference..." => Some(("view", "opening-the-command-reference")),
         "The browser cannot open a typed path; pick the file instead." => Some(("view", "browser-cannot-open-typed-path")),
+        "Save destination picker failed: {error}; downloading a copy instead" => Some(("file", "save-picker-failed-downloading")),
+        "In-place save failed ({error}); a copy was downloaded instead" => Some(("file", "in-place-save-failed-downloaded")),
         "\"{name}\" could not be sized from its header and decoding it exceeded the {limit} MB image limit of this build — it cannot be attached." => Some(("file", "image-refusal-unknown-size")),
         "\"{name}\" is already loaded with different contents; the existing file was kept." => Some(("view", "already-loaded-different-contents-kept")),
         "Opening Patreon page..." => Some(("view", "opening-patreon-page")),

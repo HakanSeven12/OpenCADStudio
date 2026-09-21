@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = क्लिपबोर्ड में समर्थित टेक्स्ट या ड्रॉइंग ऑब्जेक्ट नहीं है।
+    .image-unsupported = पेस्ट की गई छवि "{ $name }" को डिकोड नहीं किया जा सका।
+    .pasted-image = छवि "{ $name }" पेस्ट की गई: { $width }×{ $height } px
     .unavailable = सिस्टम क्लिपबोर्ड उपलब्ध नहीं है।
     .occupied = सिस्टम क्लिपबोर्ड अभी उपयोग में है। फिर प्रयास करें।
     .conversion-failed = क्लिपबोर्ड का टेक्स्ट पढ़ा नहीं जा सका।
@@ -3570,6 +3572,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = OCS मदद और प्रश्नों के लिए चर्चा खोलना।
     .opening-ocs-web = OCS वेब खोलना ...
     .browser-cannot-open-typed-path = ब्राउज़र टाइप किए गए पथ को नहीं खोल सकता; इसके बजाय फ़ाइल चुनें।
+    .save-picker-failed-downloading = सेव गंतव्य चुनना विफल: __ocs_fmt_0__; प्रतिलिपि डाउनलोड हो रही है
+    .in-place-save-failed-downloaded = इन-प्लेस सेव विफल (__ocs_fmt_0__); प्रतिलिपि डाउनलोड की गई
     .opening-the-command-reference = कमांड संदर्भ खोला जा रहा है...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__" अलग सामग्री के साथ पहले से लोड है; मौजूदा फ़ाइल रखी गई।
     .opening-patreon-page = Patreon पृष्ठ खोला जा रहा है…

@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = Die Zwischenablage enthält keinen unterstützten Text und keine Zeichnungsobjekte.
+    .image-unsupported = Das eingefügte Bild "{ $name }" konnte nicht dekodiert werden.
+    .pasted-image = Bild "{ $name }" eingefügt: { $width }×{ $height } px
     .unavailable = Die Systemzwischenablage ist nicht verfügbar.
     .occupied = Die Systemzwischenablage wird gerade verwendet. Versuchen Sie es erneut.
     .conversion-failed = Der Text in der Zwischenablage konnte nicht gelesen werden.
@@ -3580,6 +3582,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = Eröffnung OCS Diskussionen für Hilfe und Fragen...
     .opening-ocs-web = Öffnen OCS Web...
     .browser-cannot-open-typed-path = Der Browser kann einen eingegebenen Pfad nicht öffnen; wähle die Datei.
+    .save-picker-failed-downloading = Speicherziel-Auswahl fehlgeschlagen: __ocs_fmt_0__; eine Kopie wird heruntergeladen
+    .in-place-save-failed-downloaded = Direktes Speichern fehlgeschlagen (__ocs_fmt_0__); eine Kopie wurde heruntergeladen
     .opening-the-command-reference = Öffnen der Befehlsreferenz...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__" ist bereits mit anderem Inhalt geladen; die vorhandene Datei wurde behalten.
     .opening-patreon-page = Eröffnungsseite Patreon...

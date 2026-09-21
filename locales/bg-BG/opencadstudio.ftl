@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = Клипбордът не съдържа поддържан текст или чертожни обекти.
+    .image-unsupported = Вставеното изображение "{ $name }" не може да бъде декодирано.
+    .pasted-image = Вставено изображение "{ $name }": { $width }×{ $height } px
     .unavailable = Системният клипборд не е наличен.
     .occupied = Системният клипборд в момента се използва. Опитай отново.
     .conversion-failed = Текстът от клипборда не можа да бъде прочетен.
@@ -3581,6 +3583,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = Отваряне на OCS дискусии за помощ и въпроси...
     .opening-ocs-web = Отваряне на OCS уебсайта...
     .browser-cannot-open-typed-path = Браузърът не може да отвори въведен път; изберете файла.
+    .save-picker-failed-downloading = Изборът на място за запис се провали: __ocs_fmt_0__; изтегля се копие
+    .in-place-save-failed-downloaded = Записът на място се провали (__ocs_fmt_0__); изтеглено е копие
     .opening-the-command-reference = Отваряне на справочника за команди...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__" вече е зареден с различно съдържание; съществуващият файл е запазен.
     .opening-patreon-page = Отваряне на страницата в Patreon...

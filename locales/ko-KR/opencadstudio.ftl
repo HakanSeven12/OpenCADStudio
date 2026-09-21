@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = 클립보드에 지원되는 텍스트나 도면 객체가 없습니다.
+    .image-unsupported = 붙여넣은 이미지 "{ $name }"을(를) 디코딩할 수 없습니다.
+    .pasted-image = 이미지 "{ $name }" 붙여넣음: { $width }×{ $height } px
     .unavailable = 시스템 클립보드를 사용할 수 없습니다.
     .occupied = 시스템 클립보드가 현재 사용 중입니다. 다시 시도하세요.
     .conversion-failed = 클립보드 텍스트를 읽을 수 없습니다.
@@ -3581,6 +3583,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = OCS 열기 도움말 및 질문에 대한 토론...
     .opening-ocs-web = OCS 웹을 여는 중...
     .browser-cannot-open-typed-path = 브라우저는 입력한 경로를 열 수 없습니다. 파일을 선택하세요.
+    .save-picker-failed-downloading = 저장 대상 선택 실패: __ocs_fmt_0__; 대신 사본을 내려받는 중
+    .in-place-save-failed-downloaded = 제자리 저장 실패(__ocs_fmt_0__); 대신 사본을 내려받았습니다
     .opening-the-command-reference = 명령 참조 열기...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__"이(가) 이미 다른 내용으로 로드되었습니다. 기존 파일을 유지했습니다.
     .opening-patreon-page = Patreon 페이지를 여는 중...

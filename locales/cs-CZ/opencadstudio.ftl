@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = Schránka neobsahuje podporovaný text ani objekty výkresu.
+    .image-unsupported = Vložený obrázek "{ $name }" se nepodařilo dekódovat.
+    .pasted-image = Vložen obrázek "{ $name }": { $width }×{ $height } px
     .unavailable = Systémová schránka není dostupná.
     .occupied = Systémová schránka se právě používá. Zkuste to znovu.
     .conversion-failed = Text ze schránky se nepodařilo přečíst.
@@ -3579,6 +3581,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = Otevírání diskuzí OCS pro nápovědu a dotazy...
     .opening-ocs-web = Otevírání webu OCS...
     .browser-cannot-open-typed-path = Prohlížeč nemůže otevřít zadanou cestu; vyberte soubor.
+    .save-picker-failed-downloading = Výběr cíle uložení selhal: __ocs_fmt_0__; stahuje se kopie
+    .in-place-save-failed-downloaded = Uložení na místo selhalo (__ocs_fmt_0__); kopie byla stažena
     .opening-the-command-reference = Otevírání referenční příručky příkazů...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__" je již načten s jiným obsahem; existující soubor byl zachován.
     .opening-patreon-page = Otevírání stránky Patreon...

@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = Het klembord bevat geen ondersteunde tekst of tekenobjecten.
+    .image-unsupported = De geplakte afbeelding "{ $name }" kon niet worden gedecodeerd.
+    .pasted-image = Afbeelding "{ $name }" geplakt: { $width }×{ $height } px
     .unavailable = Het systeemklembord is niet beschikbaar.
     .occupied = Het systeemklembord is momenteel in gebruik. Probeer het opnieuw.
     .conversion-failed = De tekst op het klembord kon niet worden gelezen.
@@ -3580,6 +3582,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = Openen OCS Discussie voor hulp en vragen...
     .opening-ocs-web = Openen OCS Web...
     .browser-cannot-open-typed-path = De browser kan een getypt pad niet openen; kies het bestand.
+    .save-picker-failed-downloading = Kiezen van opslagbestemming mislukt: __ocs_fmt_0__; een kopie wordt gedownload
+    .in-place-save-failed-downloaded = Ter plekke opslaan mislukt (__ocs_fmt_0__); een kopie is gedownload
     .opening-the-command-reference = Commandoreferentie openen...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__" is al geladen met andere inhoud; het bestaande bestand is bewaard.
     .opening-patreon-page = Patreon pagina openen...

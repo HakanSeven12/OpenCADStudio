@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = Буфер обмена не содержит поддерживаемого текста или объектов чертежа.
+    .image-unsupported = Не удалось декодировать вставленное изображение "{ $name }".
+    .pasted-image = Вставлено изображение "{ $name }": { $width }×{ $height } px
     .unavailable = Системный буфер обмена недоступен.
     .occupied = Системный буфер обмена сейчас используется. Повторите попытку.
     .conversion-failed = Не удалось прочитать текст из буфера обмена.
@@ -3583,6 +3585,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = Открытие OCS Дискуссии о помощи и вопросах
     .opening-ocs-web = Открытие OCS Веб-сайт
     .browser-cannot-open-typed-path = Браузер не может открыть введённый путь; выберите файл.
+    .save-picker-failed-downloading = Не удалось выбрать место сохранения: __ocs_fmt_0__; загружается копия
+    .in-place-save-failed-downloaded = Не удалось сохранить в файл (__ocs_fmt_0__); копия загружена
     .opening-the-command-reference = Открытие справочника команд...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__" уже загружен с другим содержимым; существующий файл сохранён.
     .opening-patreon-page = Открытие страницы Patreon...

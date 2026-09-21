@@ -113,6 +113,13 @@ pub(super) struct State {
     serial: u64,
     events: VecDeque<Value>,
     pub(super) routing: bool,
+    /// Web `capture` op's destination path, parked until the next presented
+    /// frame arrives: the canvas readback (sys::capture_canvas) only sees the
+    /// drawing before the browser clears the WebGL drawing buffer, so the op
+    /// stays pending across frames instead of using iced's GPU-mapped window
+    /// screenshot, which cannot run on wasm.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) pending_capture: Option<String>,
 }
 impl State {
     pub(super) fn new() -> Self {
@@ -895,12 +902,26 @@ impl OpenCADStudio {
                 }
             }
             "capture" => {
-                let window = self
-                    .main_window
-                    .ok_or_else(|| failure("gui_required", "Capture requires a GUI window"))?;
                 let path = string(req, "path")?.to_owned();
-                iced::window::screenshot(window)
-                    .map(move |s| Message::ControlScreenshot(path.clone(), Some(s)))
+                // Web: iced's window screenshot needs a synchronous GPU map
+                // wasm cannot provide. Park the path until the next presented
+                // frame (the view's frames subscription turns it into
+                // ControlCaptureFrame) and read the canvas there — the same
+                // readback the save-thumbnail path uses. The op stays pending
+                // until ControlScreenshot lands from that frame.
+                #[cfg(target_arch = "wasm32")]
+                {
+                    self.control.pending_capture = Some(path);
+                    Task::none()
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let window = self.main_window.ok_or_else(|| {
+                        failure("gui_required", "Capture requires a GUI window")
+                    })?;
+                    iced::window::screenshot(window)
+                        .map(move |s| Message::ControlScreenshot(path.clone(), Some(s)))
+                }
             }
             "stop" => {
                 self.control.enabled = false;
@@ -998,6 +1019,12 @@ impl OpenCADStudio {
         if !self.active_save_jobs.is_empty() || self.pending_native_thumbnail_save.is_some() {
             return;
         }
+        // A web capture is still waiting for its presented frame; completing
+        // now would report the op done before ControlScreenshot exists.
+        #[cfg(target_arch = "wasm32")]
+        if self.control.pending_capture.is_some() {
+            return;
+        }
         let p = self.control.pending.take().unwrap();
         let previous = self.active_tab;
         if let Some(index) = p
@@ -1089,6 +1116,20 @@ impl OpenCADStudio {
         json!({"ok":true,"document_id":tab.id,"geometry_revision":tab.scene.geometry_epoch,"measurements":out})
     }
 
+    /// Web capture frame: the just-presented frame's canvas contents are
+    /// still readable, so a parked `capture` op takes its screenshot here and
+    /// settles. Same window of validity the save-thumbnail flow reads the
+    /// canvas in — one frame after the request, before the buffer clears.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn on_control_capture_frame(&mut self) -> Task<Message> {
+        if let Some(path) = self.control.pending_capture.take() {
+            let screenshot = crate::sys::capture_canvas();
+            self.control_screenshot(path, screenshot);
+            self.control_settle();
+        }
+        Task::none()
+    }
+
     pub(super) fn control_screenshot(
         &mut self,
         path: String,
@@ -1151,6 +1192,23 @@ impl OpenCADStudio {
                     image::imageops::FilterType::Triangle,
                 );
             }
+            #[cfg(target_arch = "wasm32")]
+            {
+                // No filesystem behind a web "path": encode the PNG in
+                // memory and hand it to the browser as a download, named
+                // after the request's file name — the delivery every other
+                // web output uses.
+                let mut png = Vec::new();
+                image
+                    .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                    .map_err(|e| e.to_string())?;
+                let download = std::path::Path::new(&path)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.clone());
+                crate::sys::download_bytes(&download, &png);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
             image
                 .save_with_format(&path, image::ImageFormat::Png)
                 .map_err(|e| e.to_string())?;

@@ -22,6 +22,15 @@ use iced::{mouse, Point, Task};
 
 impl OpenCADStudio {
     pub(in crate::app) fn open_save_dialog_window(&mut self, tab_idx: usize) -> Task<Message> {
+        // Every entry here is Save-As semantics (the SAVEAS command, the
+        // recovery save-as, the native failure redirects): the user is
+        // choosing a destination, so on the web the FS Access picker must
+        // open even when the tab already holds a handle (plain Save sets
+        // the flag back in save_with_default_format).
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.save_plain_reuse_fs_handle = false;
+        }
         // Default the format dropdown to the loaded file's own format — its
         // DWG-vs-DXF kind (from the extension) and its version (from the parsed
         // document) — so Save-As round-trips the format instead of silently

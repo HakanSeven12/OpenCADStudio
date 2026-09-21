@@ -122,6 +122,9 @@ web-sys = { version = "=0.3.85", features = [
     "File",
     "FileSystemDirectoryHandle",
     "FileSystemFileHandle",
+    # FileSystemFileHandle derefs to FileSystemHandle for the `name()`
+    # getter the in-place save (io::fs_access) reads off a picked handle.
+    "FileSystemHandle",
     "FileSystemGetDirectoryOptions",
     "FileSystemGetFileOptions",
     "FileSystemWritableFileStream",
@@ -144,6 +147,10 @@ web-sys = { version = "=0.3.85", features = [
     "MessageEvent",
     "ErrorEvent",
     "Clipboard",
+    # The web image paste reads `navigator.clipboard.read()` items
+    # (sys::read_clipboard_image): their `types()`/`getType()` surface lives
+    # on ClipboardItem.
+    "ClipboardItem",
     "KeyboardEvent",
     "KeyboardEventInit",
     "EventInit",

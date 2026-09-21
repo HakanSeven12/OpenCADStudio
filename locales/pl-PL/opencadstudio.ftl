@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = Schowek nie zawiera obsługiwanego tekstu ani obiektów rysunku.
+    .image-unsupported = Nie udało się zdekodować wklejonego obrazu "{ $name }".
+    .pasted-image = Wklejono obraz "{ $name }": { $width }×{ $height } px
     .unavailable = Schowek systemowy jest niedostępny.
     .occupied = Schowek systemowy jest obecnie używany. Spróbuj ponownie.
     .conversion-failed = Nie można odczytać tekstu ze schowka.
@@ -3581,6 +3583,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = Otwieranie dyskusji OCS w celu uzyskania pomocy i pytań...
     .opening-ocs-web = Otwieranie OCS Web...
     .browser-cannot-open-typed-path = Przeglądarka nie otworzy wpisanej ścieżki; wybierz plik.
+    .save-picker-failed-downloading = Wybór miejsca zapisu nie powiódł się: __ocs_fmt_0__; pobieranie kopii
+    .in-place-save-failed-downloaded = Zapis w miejscu nie powiódł się (__ocs_fmt_0__); pobrano kopię
     .opening-the-command-reference = Otwieranie dokumentacji poleceń...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__" jest już wczytany z inną zawartością; zachowano istniejący plik.
     .opening-patreon-page = Otwieranie strony Patreon...

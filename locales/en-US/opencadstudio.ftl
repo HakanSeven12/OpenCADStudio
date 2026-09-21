@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = Clipboard does not contain supported text or drawing objects.
+    .image-unsupported = The pasted image "{ $name }" could not be decoded.
+    .pasted-image = Pasted image "{ $name }": { $width }×{ $height } px
     .unavailable = System clipboard is unavailable.
     .occupied = System clipboard is currently in use. Try again.
     .conversion-failed = Clipboard text could not be read.
@@ -3577,6 +3579,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = Opening OCS Discussions for help and questions...
     .opening-ocs-web = Opening OCS Web...
     .browser-cannot-open-typed-path = The browser cannot open a typed path; pick the file instead.
+    .save-picker-failed-downloading = Save destination picker failed: __ocs_fmt_0__; downloading a copy instead
+    .in-place-save-failed-downloaded = In-place save failed (__ocs_fmt_0__); a copy was downloaded instead
     .opening-the-command-reference = Opening the command reference...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__" is already loaded with different contents; the existing file was kept.
     .opening-patreon-page = Opening Patreon page...

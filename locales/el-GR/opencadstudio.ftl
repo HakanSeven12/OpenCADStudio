@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = Το πρόχειρο δεν περιέχει υποστηριζόμενο κείμενο ή αντικείμενα σχεδίου.
+    .image-unsupported = Δεν ήταν δυνατή η αποκωδικοποίηση της επικολλημένης εικόνας "{ $name }".
+    .pasted-image = Επικολλήθηκε η εικόνα "{ $name }": { $width }×{ $height } px
     .unavailable = Το πρόχειρο του συστήματος δεν είναι διαθέσιμο.
     .occupied = Το πρόχειρο του συστήματος χρησιμοποιείται αυτή τη στιγμή. Δοκιμάστε ξανά.
     .conversion-failed = Δεν ήταν δυνατή η ανάγνωση του κειμένου του προχείρου.
@@ -3576,6 +3578,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = Άνοιγμα των συζητήσεων OCS για βοήθεια και ερωτήσεις...
     .opening-ocs-web = Άνοιγμα του OCS Web...
     .browser-cannot-open-typed-path = Ο browser δεν μπορεί να ανοίξει πληκτρολογημένη διαδρομή· διάλεξε το αρχείο.
+    .save-picker-failed-downloading = Απέτυχε η επιλογή προορισμού αποθήκευσης: __ocs_fmt_0__· γίνεται λήψη αντιγράφου
+    .in-place-save-failed-downloaded = Απέτυχε η αποθήκευση επί τόπου (__ocs_fmt_0__)· λήφθηκε αντίγραφο
     .opening-the-command-reference = Άνοιγμα της αναφοράς εντολών...
     .already-loaded-different-contents-kept = Το "__ocs_fmt_0__" είναι ήδη φορτωμένο με διαφορετικό περιεχόμενο· διατηρήθηκε το υπάρχον αρχείο.
     .opening-patreon-page = Άνοιγμα της σελίδας Patreon...

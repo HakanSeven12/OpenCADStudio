@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = Gli Appunti non contengono testo o oggetti di disegno supportati.
+    .image-unsupported = Impossibile decodificare l'immagine incollata "{ $name }".
+    .pasted-image = Immagine "{ $name }" incollata: { $width }×{ $height } px
     .unavailable = Gli Appunti di sistema non sono disponibili.
     .occupied = Gli Appunti di sistema sono attualmente in uso. Riprova.
     .conversion-failed = Impossibile leggere il testo dagli Appunti.
@@ -3581,6 +3583,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = Apertura delle discussioni OCS per assistenza e domande...
     .opening-ocs-web = Apertura del Web OCS...
     .browser-cannot-open-typed-path = Il browser non può aprire un percorso digitato; scegli il file.
+    .save-picker-failed-downloading = Selezione della destinazione non riuscita: __ocs_fmt_0__; scarico una copia
+    .in-place-save-failed-downloaded = Salvataggio sul posto non riuscito (__ocs_fmt_0__); è stata scaricata una copia
     .opening-the-command-reference = Apertura del riferimento dei comandi...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__" è già caricato con contenuti diversi; il file esistente è stato mantenuto.
     .opening-patreon-page = Apertura della pagina Patreon...

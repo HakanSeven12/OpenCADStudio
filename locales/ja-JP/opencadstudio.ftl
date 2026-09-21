@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = クリップボードに対応するテキストまたは図面オブジェクトがありません。
+    .image-unsupported = 貼り付けた画像 "{ $name }" をデコードできませんでした。
+    .pasted-image = 画像 "{ $name }" を貼り付けました: { $width }×{ $height } px
     .unavailable = システムのクリップボードを使用できません。
     .occupied = システムのクリップボードは現在使用中です。もう一度お試しください。
     .conversion-failed = クリップボードのテキストを読み取れませんでした。
@@ -3570,6 +3572,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = ヘルプと質問のため OCS ディスカッションを開いています...
     .opening-ocs-web = OCS Web を開いています...
     .browser-cannot-open-typed-path = ブラウザは入力されたパスを開けません。ファイルを選択してください。
+    .save-picker-failed-downloading = 保存先の選択に失敗しました: __ocs_fmt_0__。代わりにコピーをダウンロードしています
+    .in-place-save-failed-downloaded = その場での保存に失敗しました(__ocs_fmt_0__)。代わりにコピーをダウンロードしました
     .opening-the-command-reference = コマンドリファレンスを開いています...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__" は既に別の内容で読み込まれています。既存のファイルを保持しました。
     .opening-patreon-page = Patreon ページを開いています...

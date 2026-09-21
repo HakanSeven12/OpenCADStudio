@@ -724,6 +724,14 @@ pub(super) struct OpenCADStudio {
     pending_native_thumbnail_save: Option<PendingNativeThumbnailSave>,
     #[cfg(target_arch = "wasm32")]
     pending_web_thumbnail_save: Option<PendingWebThumbnailSave>,
+    /// Web: whether the save in flight came from a plain Save
+    /// (Save/QSAVE or the save-before-close flow), so the tab's retained
+    /// File System Access handle (see io::fs_access) may be written
+    /// through directly; Save As opens the dialog modal and must re-pick.
+    /// Set true by `save_with_default_format`, false by
+    /// `open_save_dialog_window`.
+    #[cfg(target_arch = "wasm32")]
+    save_plain_reuse_fs_handle: bool,
     /// One web autosave round is running; ticks that fire while it lasts are
     /// dropped instead of queued (the next interval retries).
     #[cfg(target_arch = "wasm32")]
@@ -1955,6 +1963,12 @@ pub enum Message {
     ControlStep(String, Box<Message>),
     ControlTaskDone(String),
     ControlScreenshot(String, Option<iced::window::Screenshot>),
+    /// Web: a presented frame arrived while a control `capture` op is parked
+    /// waiting for one, so the canvas readback can run before the browser
+    /// clears the WebGL drawing buffer. Native uses iced's window screenshot
+    /// directly and never emits this.
+    #[cfg(target_arch = "wasm32")]
+    ControlCaptureFrame,
     ControlToggle,
     Tick(Instant),
     /// Periodic drain of plugin-to-host requests that arrived outside a host
@@ -1978,6 +1992,12 @@ pub enum Message {
     PasteShortcut,
     /// Completion of a system text clipboard read requested by PASTECLIP.
     SystemClipboardPaste(SystemClipboardText),
+    /// Web: completion of the clipboard-image read the paste fallback starts
+    /// when no text was found — `Some((name, bytes))` attaches the image,
+    /// `None` reports the usual unsupported-content error. Native never
+    /// constructs it.
+    #[cfg(target_arch = "wasm32")]
+    SystemClipboardPasteImage(Option<(String, Vec<u8>)>),
     /// Ctrl/Cmd+A — select all layer rows when the Layer Manager is open, or all
     /// drawing objects otherwise (#236).
     SelectAllShortcut,
@@ -2371,6 +2391,41 @@ pub enum Message {
         edit_revision: u64,
         camera_generation: u64,
         result: Result<Vec<u8>, String>,
+    },
+    /// Web SAVE with the File System Access API: the showSaveFilePicker
+    /// promise settled. The picker ran in the save-confirm handler — the
+    /// user-gesture moment — because the serialization that follows may
+    /// outlast the transient-activation window; the retained handle (kept
+    /// in io::fs_access's tab-keyed registry, since a JsValue handle cannot
+    /// ride in a Send Message) is written to later without needing a
+    /// gesture. `Ok(Some(name))` = destination chosen (`name` is its real,
+    /// possibly renamed name); `Ok(None)` = the user dismissed the picker
+    /// (cancel the save, like desktop); `Err` = the picker itself failed
+    /// (fall back to the legacy download).
+    #[cfg(target_arch = "wasm32")]
+    WebSaveHandlePicked {
+        tab_id: u64,
+        filename: String,
+        ext: String,
+        version: acadrust::DxfVersion,
+        picked: Result<Option<String>, String>,
+    },
+    /// Web SAVE in-place completion: the retained FS Access handle's
+    /// createWritable write settled (on failure the task already fell back
+    /// to a download); run the shared save bookkeeping, including the OPFS
+    /// recent-copy store the download path performs. Same race-guard
+    /// markers as `WebSaveSerialized`.
+    #[cfg(target_arch = "wasm32")]
+    WebSaveWritten {
+        tab_id: u64,
+        filename: String,
+        autosave_key: String,
+        version: acadrust::DxfVersion,
+        geometry_epoch: u64,
+        edit_revision: u64,
+        camera_generation: u64,
+        result: Result<(), String>,
+        bytes: Vec<u8>,
     },
     /// Web WBLOCK: the serializer worker (or the inline fallback) produced
     /// the block document bytes; download them under `filename`, then run
@@ -3918,6 +3973,8 @@ impl OpenCADStudio {
             pending_native_thumbnail_save: None,
             #[cfg(target_arch = "wasm32")]
             pending_web_thumbnail_save: None,
+            #[cfg(target_arch = "wasm32")]
+            save_plain_reuse_fs_handle: false,
             #[cfg(target_arch = "wasm32")]
             web_autosave_in_flight: false,
             #[cfg(target_arch = "wasm32")]

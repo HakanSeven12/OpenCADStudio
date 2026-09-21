@@ -488,6 +488,10 @@ impl OpenCADStudio {
                 self.control_screenshot(path, screenshot);
                 Task::none()
             }
+            // Web: a presented frame arrived for a parked capture op (see
+            // control::on_control_capture_frame).
+            #[cfg(target_arch = "wasm32")]
+            Message::ControlCaptureFrame => self.on_control_capture_frame(),
             Message::ControlToggle => {
                 self.control.enabled = !self.control.enabled;
                 Task::none()
@@ -5244,9 +5248,24 @@ impl OpenCADStudio {
                         self.focus_cmd_input()
                     }
                     Text::EmptyOrUnsupported => {
-                        self.command_line
-                            .push_error(crate::tr!("clipboard", "no-supported-content").as_ref());
-                        Task::none()
+                        // Web: no text — the clipboard may still hold an IMAGE
+                        // (a pasted screenshot). Read it through the async
+                        // Clipboard API and attach it the way the IMAGE
+                        // command's pick does; only when that also finds
+                        // nothing does the unsupported-content error surface.
+                        // Native has no image route off the sync clipboard.
+                        #[cfg(target_arch = "wasm32")]
+                        return Task::perform(
+                            crate::sys::read_clipboard_image(),
+                            Message::SystemClipboardPasteImage,
+                        );
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            self.command_line.push_error(
+                                crate::tr!("clipboard", "no-supported-content").as_ref(),
+                            );
+                            Task::none()
+                        }
                     }
                     Text::Unavailable => {
                         self.command_line
@@ -5265,6 +5284,19 @@ impl OpenCADStudio {
                     }
                 }
             }
+
+            // Web: the clipboard-image fallback of a text-less paste either
+            // attaches the image or falls back to the same error the text
+            // path reports when nothing readable was on the clipboard.
+            #[cfg(target_arch = "wasm32")]
+            Message::SystemClipboardPasteImage(image) => match image {
+                Some((name, bytes)) => self.paste_clipboard_image(name, bytes),
+                None => {
+                    self.command_line
+                        .push_error(crate::tr!("clipboard", "no-supported-content").as_ref());
+                    Task::none()
+                }
+            },
 
             Message::SelectAllShortcut => {
                 let i = self.active_tab;
@@ -8399,6 +8431,38 @@ impl OpenCADStudio {
                 edit_revision,
                 camera_generation,
                 result,
+            ),
+
+            #[cfg(target_arch = "wasm32")]
+            Message::WebSaveHandlePicked {
+                tab_id,
+                filename,
+                ext,
+                version,
+                picked,
+            } => self.on_web_save_handle_picked(tab_id, filename, ext, version, picked),
+
+            #[cfg(target_arch = "wasm32")]
+            Message::WebSaveWritten {
+                tab_id,
+                filename,
+                autosave_key,
+                version,
+                geometry_epoch,
+                edit_revision,
+                camera_generation,
+                result,
+                bytes,
+            } => self.on_web_save_written(
+                tab_id,
+                filename,
+                autosave_key,
+                version,
+                geometry_epoch,
+                edit_revision,
+                camera_generation,
+                result,
+                bytes,
             ),
 
             #[cfg(target_arch = "wasm32")]

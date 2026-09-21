@@ -242,6 +242,98 @@ pub async fn read_clipboard_text() -> Option<String> {
     value.as_string()
 }
 
+/// Extension the pasted-image registry name carries for a clipboard MIME
+/// type. Unknown image types fall back to `png` — the flavor every OS
+/// screenshot paste uses — so the reference still names a decodable format.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // tested everywhere, used on wasm
+pub(crate) fn clipboard_image_extension(mime_type: &str) -> &'static str {
+    match mime_type.trim().to_ascii_lowercase().as_str() {
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "image/bmp" | "image/x-ms-bmp" | "image/x-bmp" => "bmp",
+        _ => "png",
+    }
+}
+
+#[test]
+fn clipboard_image_extensions_cover_the_paste_flavors() {
+    assert_eq!(clipboard_image_extension("image/png"), "png");
+    assert_eq!(clipboard_image_extension("IMAGE/JPEG"), "jpg");
+    assert_eq!(clipboard_image_extension(" image/webp "), "webp");
+    assert_eq!(clipboard_image_extension("image/gif"), "gif");
+    assert_eq!(clipboard_image_extension("image/x-ms-bmp"), "bmp");
+    // Anything else (a vendor flavor, a bare "image/*") still gets a name
+    // the image registry can key and the `image` crate can decode.
+    assert_eq!(clipboard_image_extension("image/avif"), "png");
+    assert_eq!(clipboard_image_extension(""), "png");
+}
+
+/// Web: read an image from the system clipboard via the async Clipboard API
+/// (`navigator.clipboard.read()`), used when a paste found no text. Returns
+/// the registry name (`pasted-YYYYMMDD-HHMMSS.<ext>`) plus the image bytes,
+/// or `None` when the clipboard holds no image item or the read is denied.
+/// Like `read_clipboard_text`, the Ctrl+V keypress that reaches it is a user
+/// gesture, which is what makes the permission-gated read allowed at all.
+#[cfg(target_arch = "wasm32")]
+pub async fn read_clipboard_image() -> Option<(String, Vec<u8>)> {
+    use wasm_bindgen::JsCast;
+
+    let clipboard = web_sys::window()?.navigator().clipboard();
+    let items = wasm_bindgen_futures::JsFuture::from(clipboard.read())
+        .await
+        .ok()?;
+    let items = js_sys::Array::from(&items);
+    for index in 0..items.length() {
+        let Ok(item) = items.get(index).dyn_into::<web_sys::ClipboardItem>() else {
+            continue;
+        };
+        // A clipboard item can offer several flavors; take the first image
+        // one (browsers list at most one per item in practice). An item with
+        // no image flavor just moves the search to the next one.
+        let Some(mime_type) = item
+            .types()
+            .iter()
+            .filter_map(|kind| kind.as_string())
+            .find(|mime| mime.starts_with("image/"))
+        else {
+            continue;
+        };
+        let blob = wasm_bindgen_futures::JsFuture::from(item.get_type(&mime_type))
+            .await
+            .ok()?
+            .dyn_into::<web_sys::Blob>()
+            .ok()?;
+        let buffer = wasm_bindgen_futures::JsFuture::from(blob.array_buffer())
+            .await
+            .ok()?;
+        let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+        if bytes.is_empty() {
+            return None;
+        }
+        return Some((pasted_image_name(&mime_type), bytes));
+    }
+    None
+}
+
+/// Registry name for a pasted clipboard image: `pasted-YYYYMMDD-HHMMSS.ext`
+/// stamped from the wall clock (local time, the same clock a screenshot file
+/// name uses) with the extension derived from the MIME type.
+#[cfg(target_arch = "wasm32")]
+fn pasted_image_name(mime_type: &str) -> String {
+    let now = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(0.0));
+    format!(
+        "pasted-{:04}{:02}{:02}-{:02}{:02}{:02}.{}",
+        now.get_full_year(),
+        now.get_month() + 1,
+        now.get_date(),
+        now.get_hours(),
+        now.get_minutes(),
+        now.get_seconds(),
+        clipboard_image_extension(mime_type)
+    )
+}
+
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(module = "/web/clipboard.js")]
 extern "C" {

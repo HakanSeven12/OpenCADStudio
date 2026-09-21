@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = Le presse-papiers ne contient aucun texte ni objet de dessin pris en charge.
+    .image-unsupported = L'image collée "{ $name }" n'a pas pu être décodée.
+    .pasted-image = Image collée "{ $name }" : { $width }×{ $height } px
     .unavailable = Le presse-papiers système n’est pas disponible.
     .occupied = Le presse-papiers système est en cours d’utilisation. Réessayez.
     .conversion-failed = Impossible de lire le texte du presse-papiers.
@@ -3582,6 +3584,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = Ouverture OCS Discussions pour l'aide et les questions...
     .opening-ocs-web = Ouverture du site Web OCS...
     .browser-cannot-open-typed-path = Le navigateur ne peut pas ouvrir un chemin saisi ; choisissez le fichier.
+    .save-picker-failed-downloading = Échec du sélecteur de destination : __ocs_fmt_0__ ; téléchargement d’une copie
+    .in-place-save-failed-downloaded = Échec de l’enregistrement local (__ocs_fmt_0__) ; une copie a été téléchargée
     .opening-the-command-reference = Ouverture de la référence des commandes...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__" est déjà chargé avec un contenu différent ; le fichier existant a été conservé.
     .opening-patreon-page = Ouverture de la page Patreon...

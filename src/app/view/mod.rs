@@ -2531,6 +2531,17 @@ impl OpenCADStudio {
         } else {
             Subscription::none()
         };
+        // Web control capture: the parked op needs one presented frame so the
+        // canvas readback runs before the browser clears the WebGL drawing
+        // buffer (same timing requirement as the thumbnail capture above).
+        #[cfg(target_arch = "wasm32")]
+        let control_capture = if self.control.pending_capture.is_some() {
+            window::frames().map(|_| Message::ControlCaptureFrame)
+        } else {
+            Subscription::none()
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let control_capture = Subscription::none();
         // Blink the MText preview caret while the editor is open.
         let caret_blink = if self.mtext_editor.is_some() {
             iced::time::every(std::time::Duration::from_millis(530))
@@ -2735,6 +2746,7 @@ impl OpenCADStudio {
             nav_settle,
             gpu_probe,
             thumbnail_capture,
+            control_capture,
             caret_blink,
             web_fonts,
             autosave,

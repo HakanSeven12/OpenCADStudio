@@ -1508,7 +1508,7 @@ impl OpenCADStudio {
         #[cfg(target_arch = "wasm32")]
         if self.web_session_focus_pending && self.web_autosave_restore_all_remaining == 0 {
             self.web_session_focus_pending = false;
-            self.select_remembered_session_tab();
+            let _ = self.select_remembered_session_tab();
         }
 
         let mut recovery_report = recovery_needed.then(|| {
@@ -2193,10 +2193,12 @@ impl OpenCADStudio {
     }
 
     /// Web SAVE completion: the serializer worker (or inline fallback) has the
-    /// drawing bytes. The download and tab bookkeeping that used to run
-    /// synchronously inside `on_web_save_screenshot`, unchanged in semantics —
-    /// except the dirty flag is only cleared when the serialized snapshot is
-    /// still the tab's current state.
+    /// drawing bytes. When the tab holds a File System Access handle the
+    /// bytes go to it in place (createWritable needs no user gesture, so the
+    /// write may happen long after the pick); completion continues in
+    /// `on_web_save_written`. Otherwise the legacy download fires — the only
+    /// artifact of the save, launched even if the tab was closed while
+    /// serialization was in flight.
     #[cfg(target_arch = "wasm32")]
     pub(super) fn on_web_save_serialized(
         &mut self,
@@ -2217,9 +2219,111 @@ impl OpenCADStudio {
                 return self.finish_web_save(false);
             }
         };
+        // In-place write through the handle picked at the confirm gesture
+        // (or an earlier one). The bookkeeping runs at write completion
+        // (WebSaveWritten) so a failed write cannot clear the dirty flag;
+        // the bytes ride back with the completion so the OPFS recent store
+        // gets the same copy the download path uses.
+        if let Some(picked_name) = crate::io::fs_access::handle_name(tab_id) {
+            let download_name = picked_name.clone();
+            return Task::perform(
+                async move {
+                    let result = if let Err(error) =
+                        crate::io::fs_access::write_handle(tab_id, &bytes).await
+                    {
+                        // Keep the save alive: the drawing still lands
+                        // somewhere via the legacy download (which needs no
+                        // activation), and the error travels with the
+                        // completion message for the command-line note.
+                        crate::sys::download_bytes(&download_name, &bytes);
+                        Err(error)
+                    } else {
+                        Ok(())
+                    };
+                    (result, bytes)
+                },
+                move |(result, bytes)| Message::WebSaveWritten {
+                    tab_id,
+                    filename: picked_name,
+                    autosave_key,
+                    version,
+                    geometry_epoch,
+                    edit_revision,
+                    camera_generation,
+                    result,
+                    bytes,
+                },
+            );
+        }
         // The download is the only artifact of the save — fire it even if the
         // tab was closed while serialization was in flight.
         crate::sys::download_bytes(&filename, &bytes);
+        self.finalize_web_save(
+            tab_id,
+            filename,
+            autosave_key,
+            version,
+            geometry_epoch,
+            edit_revision,
+            camera_generation,
+            bytes,
+        )
+    }
+
+    /// Web SAVE in-place completion: the retained handle's write settled.
+    /// Success keeps the handle for the next plain Save; failure drops it
+    /// (the task already downloaded a copy — note that in the command line,
+    /// and re-pick on the next save instead of failing the same way again).
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn on_web_save_written(
+        &mut self,
+        tab_id: u64,
+        filename: String,
+        autosave_key: String,
+        version: acadrust::DxfVersion,
+        geometry_epoch: u64,
+        edit_revision: u64,
+        camera_generation: u64,
+        result: Result<(), String>,
+        bytes: Vec<u8>,
+    ) -> Task<Message> {
+        if let Err(error) = result {
+            crate::io::fs_access::drop_handle(tab_id);
+            self.command_line.push_error(
+                crate::tf!(
+                    "In-place save failed ({error}); a copy was downloaded instead"
+                )
+                .as_ref(),
+            );
+        }
+        self.finalize_web_save(
+            tab_id,
+            filename,
+            autosave_key,
+            version,
+            geometry_epoch,
+            edit_revision,
+            camera_generation,
+            bytes,
+        )
+    }
+
+    /// Shared completion half of the web save — download and in-place write
+    /// alike: recent-copy store task, tab bookkeeping under the race guard
+    /// (the dirty flag only clears when the persisted snapshot is still the
+    /// tab's current state), autosave-key retirement and the "Saved" line.
+    #[cfg(target_arch = "wasm32")]
+    fn finalize_web_save(
+        &mut self,
+        tab_id: u64,
+        filename: String,
+        autosave_key: String,
+        version: acadrust::DxfVersion,
+        geometry_epoch: u64,
+        edit_revision: u64,
+        camera_generation: u64,
+        bytes: Vec<u8>,
+    ) -> Task<Message> {
         let cache_name = std::path::Path::new(&filename)
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -2992,6 +3096,14 @@ impl OpenCADStudio {
     /// save-before-close flow — the version picker is reserved for Save As.
     pub(in crate::app) fn save_with_default_format(&mut self, tab_idx: usize) -> Task<Message> {
         self.active_tab = tab_idx;
+        // Every caller of this entry (Save/QSAVE, the save-before-close
+        // flow) is plain-save semantics: on the web, the tab's retained
+        // FS Access handle may be written through directly. Save As opens
+        // the dialog modal instead (open_save_dialog_window resets this).
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.save_plain_reuse_fs_handle = true;
+        }
         self.save_dialog_format = if self.tabs[tab_idx].recovery_save_as_required {
             let document = &self.tabs[tab_idx].scene.document;
             let is_dxf =
@@ -3088,7 +3200,9 @@ impl OpenCADStudio {
             );
             Task::batch([close, pick])
         }
-        // Web: no filesystem — serialize and hand the browser a download.
+        // Web: no filesystem path — the destination is either a retained
+        // File System Access handle (in-place write), a fresh
+        // showSaveFilePicker pick, or the legacy download.
         #[cfg(target_arch = "wasm32")]
         {
             let close = self.close_save_dialog_window();
@@ -3098,30 +3212,147 @@ impl OpenCADStudio {
             self.sync_solid_models_for_save(i);
             self.tabs[i].scene.sync_native_parametric_graph();
             let tab_id = self.tabs[i].id;
-            let bounds =
-                crate::ui::wrap_bar::dropdown_bounds(crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID);
-            let Some(bounds) = bounds else {
-                return Task::batch([
-                    close,
-                    Task::done(Message::WebSaveScreenshot {
-                        tab_id,
-                        filename,
-                        ext: ext.to_string(),
-                        version,
-                        bounds: None,
-                        screenshot: None,
-                    }),
-                ]);
-            };
-            self.pending_web_thumbnail_save = Some(crate::app::PendingWebThumbnailSave {
+            // File System Access routing, decided HERE: showSaveFilePicker
+            // may only run while the page holds the Save click's transient
+            // user activation, and the thumbnail capture + worker
+            // serialization that follow can outlast that window. So the
+            // handle is secured at this gesture moment (or reused from a
+            // previous pick — retained handles need no activation to write)
+            // and only the write happens later.
+            let route = crate::io::fs_access::save_route(
+                crate::io::fs_access::supported(),
+                self.save_plain_reuse_fs_handle,
+                crate::io::fs_access::handle_ext(tab_id).as_deref(),
+                ext,
+            );
+            match route {
+                crate::io::fs_access::SaveRoute::WriteInPlace => {
+                    // Plain Save on a matching handle — THE point: Ctrl+S
+                    // updates the picked file, no dialog at all. The real
+                    // name (the user may have renamed it in the picker)
+                    // drives the save bookkeeping.
+                    let picked_name =
+                        crate::io::fs_access::handle_name(tab_id).unwrap_or(filename);
+                    Task::batch([
+                        close,
+                        self.web_save_capture(tab_id, picked_name, ext.to_string(), version),
+                    ])
+                }
+                crate::io::fs_access::SaveRoute::PickHandle => {
+                    // The picker IS the save dialog here: it opens inside
+                    // the click's activation window, before any serialize
+                    // task starts. Cancelling it cancels the save (same as
+                    // a native save-dialog cancel); a picker failure falls
+                    // back to the legacy download.
+                    let suggested = filename;
+                    let pick_suggested = suggested.clone();
+                    Task::batch([
+                        close,
+                        Task::perform(
+                            async move {
+                                crate::io::fs_access::pick_save_handle(
+                                    tab_id,
+                                    &pick_suggested,
+                                    ext,
+                                )
+                                .await
+                            },
+                            move |picked| Message::WebSaveHandlePicked {
+                                tab_id,
+                                filename: suggested,
+                                ext: ext.to_string(),
+                                version,
+                                picked,
+                            },
+                        ),
+                    ])
+                }
+                // Firefox/Safari (no showSaveFilePicker): untouched legacy
+                // download flow.
+                crate::io::fs_access::SaveRoute::Download => {
+                    Task::batch([
+                        close,
+                        self.web_save_capture(tab_id, filename, ext.to_string(), version),
+                    ])
+                }
+            }
+        }
+    }
+
+    /// Web save, destination-known half shared by the legacy download path
+    /// and both File System Access paths: queue the viewport thumbnail
+    /// capture (or skip straight to the serializer when the bounds are
+    /// unavailable), which continues in `on_web_save_screenshot`.
+    #[cfg(target_arch = "wasm32")]
+    fn web_save_capture(
+        &mut self,
+        tab_id: u64,
+        filename: String,
+        ext: String,
+        version: acadrust::DxfVersion,
+    ) -> Task<Message> {
+        let bounds = crate::ui::wrap_bar::dropdown_bounds(crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID);
+        let Some(bounds) = bounds else {
+            return Task::done(Message::WebSaveScreenshot {
                 tab_id,
                 filename,
-                ext: ext.to_string(),
+                ext,
                 version,
-                bounds,
+                bounds: None,
+                screenshot: None,
             });
-            self.thumbnail_capture_clean = true;
-            close
+        };
+        self.pending_web_thumbnail_save = Some(crate::app::PendingWebThumbnailSave {
+            tab_id,
+            filename,
+            ext,
+            version,
+            bounds,
+        });
+        self.thumbnail_capture_clean = true;
+        Task::none()
+    }
+
+    /// Web SAVE: the showSaveFilePicker promise from the confirm handler
+    /// settled. `Ok(Some(name))` continues the save against the picked
+    /// file's real name (the registry already retains the handle, replacing
+    /// any previous one — Save As re-picks); `Ok(None)` (dismissed picker)
+    /// cancels the save like a native save-dialog cancel; `Err` keeps the
+    /// save alive through the legacy download, with a note that the copy
+    /// was downloaded.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn on_web_save_handle_picked(
+        &mut self,
+        tab_id: u64,
+        filename: String,
+        ext: String,
+        version: acadrust::DxfVersion,
+        picked: Result<Option<String>, String>,
+    ) -> Task<Message> {
+        match picked {
+            Ok(Some(picked_name)) => {
+                self.web_save_capture(tab_id, picked_name, ext, version)
+            }
+            Ok(None) => {
+                // The picker was the save dialog: dismissing it means no
+                // save — the download fallback must NOT fire (that would
+                // surprise the user with a stray "drawing (1).dwg"). If
+                // this came from the unsaved-changes → save → close flow,
+                // re-show the confirmation so the tab isn't lost.
+                if self.save_dialog_for_unsaved && self.pending_close.is_some() {
+                    return self.open_unsaved_dialog_window();
+                }
+                Task::none()
+            }
+            Err(error) => {
+                self.command_line.push_error(
+                    crate::tf!(
+                        "Save destination picker failed: {error}; downloading a copy instead"
+                    )
+                    .as_ref(),
+                );
+                self.web_save_capture(tab_id, filename, ext, version)
+            }
         }
     }
 

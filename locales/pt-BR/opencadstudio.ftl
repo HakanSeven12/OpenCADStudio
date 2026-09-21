@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = A área de transferência não contém texto nem objetos de desenho compatíveis.
+    .image-unsupported = Não foi possível decodificar a imagem colada "{ $name }".
+    .pasted-image = Imagem "{ $name }" colada: { $width }×{ $height } px
     .unavailable = A área de transferência do sistema não está disponível.
     .occupied = A área de transferência do sistema está em uso. Tente novamente.
     .conversion-failed = Não foi possível ler o texto da área de transferência.
@@ -3582,6 +3584,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = Abrindo Discussões do OCS para ajuda e perguntas...
     .opening-ocs-web = Abrindo OCS Web...
     .browser-cannot-open-typed-path = O navegador não pode abrir um caminho digitado; escolha o ficheiro.
+    .save-picker-failed-downloading = A escolha do destino de gravação falhou: __ocs_fmt_0__; a descarregar uma cópia
+    .in-place-save-failed-downloaded = A gravação no local falhou (__ocs_fmt_0__); foi descarregada uma cópia
     .opening-the-command-reference = Abrindo a referência de comandos...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__" já está carregado com conteúdo diferente; o ficheiro existente foi mantido.
     .opening-patreon-page = Abrindo página do Patreon...

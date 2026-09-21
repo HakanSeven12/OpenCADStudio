@@ -159,6 +159,8 @@ modal =
 
 clipboard =
     .no-supported-content = Panoda desteklenen metin veya çizim nesnesi yok.
+    .image-unsupported = Yapıştırılan "{ $name }" görseli çözümlenemedi.
+    .pasted-image = "{ $name }" görseli yapıştırıldı: { $width }×{ $height } px
     .unavailable = Sistem panosuna erişilemiyor.
     .occupied = Sistem panosu şu anda kullanılıyor. Yeniden deneyin.
     .conversion-failed = Panodaki metin okunamadı.
@@ -3532,6 +3534,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = Yardım ve sorular için OCS Tartışmaları açılıyor...
     .opening-ocs-web = OCS Web açılıyor...
     .browser-cannot-open-typed-path = Tarayıcı yazılan bir yolu açamaz; dosyayı seçin.
+    .save-picker-failed-downloading = Kayıt hedefi seçimi başarısız: __ocs_fmt_0__; bir kopya indiriliyor
+    .in-place-save-failed-downloaded = Yerine kayıt başarısız (__ocs_fmt_0__); bir kopya indirildi
     .opening-the-command-reference = Komut başvurusu açılıyor...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__" zaten farklı içerikle yüklü; mevcut dosya tutuldu.
     .opening-patreon-page = Patreon sayfası açılıyor...

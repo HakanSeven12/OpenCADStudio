@@ -161,6 +161,8 @@ modal =
 
 clipboard =
     .no-supported-content = El portapapeles no contiene texto ni objetos de dibujo compatibles.
+    .image-unsupported = No se pudo decodificar la imagen pegada "{ $name }".
+    .pasted-image = Imagen "{ $name }" pegada: { $width }×{ $height } px
     .unavailable = El portapapeles del sistema no está disponible.
     .occupied = El portapapeles del sistema está en uso. Inténtelo de nuevo.
     .conversion-failed = No se pudo leer el texto del portapapeles.
@@ -3582,6 +3584,8 @@ view =
     .opening-ocs-discussions-for-help-and-questions = Abriendo Debates de OCS para obtener ayuda y hacer preguntas...
     .opening-ocs-web = Abriendo OCS Web...
     .browser-cannot-open-typed-path = El navegador no puede abrir una ruta escrita; elige el archivo.
+    .save-picker-failed-downloading = Falló la selección del destino de guardado: __ocs_fmt_0__; descargando una copia
+    .in-place-save-failed-downloaded = Error al guardar en el sitio (__ocs_fmt_0__); se descargó una copia
     .opening-the-command-reference = Abriendo la referencia de comandos...
     .already-loaded-different-contents-kept = "__ocs_fmt_0__" ya está cargado con contenido diferente; se conservó el archivo existente.
     .opening-patreon-page = Abriendo la página de Patreon...

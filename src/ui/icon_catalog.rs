@@ -8,6 +8,7 @@ use iced::Element;
 
 static LINE: &[u8] = include_bytes!("../../assets/icons/line.svg");
 static POLYLINE: &[u8] = include_bytes!("../../assets/icons/polyline.svg");
+static RECTANGLE: &[u8] = include_bytes!("../../assets/icons/shapes/rect.svg");
 static CIRCLE: &[u8] = include_bytes!("../../assets/icons/circle/circle_cr.svg");
 static CIRCLE_CD: &[u8] = include_bytes!("../../assets/icons/circle/circle_cd.svg");
 static CIRCLE_2P: &[u8] = include_bytes!("../../assets/icons/circle/circle_2p.svg");
@@ -36,11 +37,7 @@ static ROTATE: &[u8] = include_bytes!("../../assets/icons/rotate.svg");
 static MIRROR: &[u8] = include_bytes!("../../assets/icons/mirror.svg");
 static STRETCH: &[u8] = include_bytes!("../../assets/icons/stretch.svg");
 static DRAW_ORDER: &[u8] = include_bytes!("../../assets/icons/modify_draworder.svg");
-static UNDO: &[u8] = include_bytes!("../../assets/icons/ui/undo.svg");
-static REDO: &[u8] = include_bytes!("../../assets/icons/ui/redo.svg");
 static ISOLATE: &[u8] = include_bytes!("../../assets/icons/status/isolate.svg");
-static PAN: &[u8] = include_bytes!("../../assets/icons/pan.svg");
-static ZOOM: &[u8] = include_bytes!("../../assets/icons/zoom_in.svg");
 static ZOOM_EXTENTS: &[u8] = include_bytes!("../../assets/icons/zoom_ext.svg");
 static PROPERTIES: &[u8] = include_bytes!("../../assets/icons/properties.svg");
 static OPTIONS: &[u8] = include_bytes!("../../assets/icons/options_tool.svg");
@@ -55,6 +52,7 @@ static PRINT: &[u8] = include_bytes!("../../assets/icons/ui/print.svg");
 pub enum IconId {
     Line,
     Polyline,
+    Rectangle,
     Circle,
     CircleDiameter,
     Circle2Point,
@@ -111,6 +109,7 @@ pub const fn bytes(id: IconId) -> &'static [u8] {
     match id {
         Line => LINE,
         Polyline => POLYLINE,
+        Rectangle => RECTANGLE,
         Circle => CIRCLE,
         CircleDiameter => CIRCLE_CD,
         Circle2Point => CIRCLE_2P,
@@ -139,11 +138,11 @@ pub const fn bytes(id: IconId) -> &'static [u8] {
         Mirror => MIRROR,
         Stretch => STRETCH,
         DrawOrder => DRAW_ORDER,
-        Undo => UNDO,
-        Redo => REDO,
+        Undo => crate::ui::icons::undo_icon(),
+        Redo => crate::ui::icons::redo_icon(),
         Isolate => ISOLATE,
-        Pan => PAN,
-        Zoom => ZOOM,
+        Pan => crate::ui::icons::pan_icon(),
+        Zoom => crate::ui::icons::zoom_icon(),
         ZoomExtents => ZOOM_EXTENTS,
         Properties => PROPERTIES,
         Options => OPTIONS,
@@ -164,6 +163,7 @@ pub fn command_icon(command: &str) -> Option<IconId> {
     let exact = match normalized.as_str() {
         "LINE" => Some(Line),
         "PLINE" | "POLYLINE" => Some(Polyline),
+        "RECT" | "RECTANG" => Some(Rectangle),
         "CIRCLE" => Some(Circle),
         "CIRCLE_CD" => Some(CircleDiameter),
         "CIRCLE_2P" => Some(Circle2Point),
@@ -191,11 +191,9 @@ pub fn command_icon(command: &str) -> Option<IconId> {
         "ROTATE" => Some(Rotate),
         "MIRROR" => Some(Mirror),
         "STRETCH" => Some(Stretch),
-        "DRAWORDER" | "DRAWORDER_FRONT" | "DRAWORDER_BACK" | "DRAWORDER_ABOVE"
-        | "DRAWORDER_UNDER" => Some(DrawOrder),
+        "DRAWORDER" => Some(DrawOrder),
         "UNDO" => Some(Undo),
         "REDO" => Some(Redo),
-        "ISOLATEOBJECTS" | "HIDEOBJECTS" | "UNISOLATEOBJECTS" => Some(Isolate),
         "PAN" => Some(Pan),
         "ZOOM" | "ZOOM DYNAMIC" => Some(Zoom),
         "ZOOM EXTENTS" => Some(ZoomExtents),
@@ -208,10 +206,7 @@ pub fn command_icon(command: &str) -> Option<IconId> {
         "PRINT" | "PLOT" => Some(Print),
         _ => None,
     };
-    exact.or_else(|| match normalized.split_whitespace().next()? {
-        "DRAWORDER" => Some(DrawOrder),
-        _ => None,
-    })
+    exact
 }
 
 /// Render catalog artwork with the shared semantic enabled/disabled treatment.
@@ -234,8 +229,11 @@ mod tests {
         assert_eq!(command_icon("ARC"), Some(IconId::Arc3Point));
         assert_eq!(command_icon("ARC_3P"), Some(IconId::Arc3Point));
         assert_eq!(command_icon("ARC_SEA"), Some(IconId::ArcStartEndAngle));
+        assert_eq!(command_icon("RECTANG"), Some(IconId::Rectangle));
         assert_eq!(command_icon("'PAN"), Some(IconId::Pan));
-        assert_eq!(command_icon("DRAWORDER F"), Some(IconId::DrawOrder));
+        assert_eq!(command_icon("DRAWORDER"), Some(IconId::DrawOrder));
+        assert_eq!(command_icon("DRAWORDER F"), None);
+        assert_eq!(command_icon("ISOLATEOBJECTS"), None);
         assert_eq!(command_icon("ZOOM EXTENTS"), Some(IconId::ZoomExtents));
         assert_eq!(command_icon("NOT_A_COMMAND"), None);
     }
@@ -245,19 +243,41 @@ mod tests {
         for id in [
             IconId::Line,
             IconId::Polyline,
+            IconId::Rectangle,
             IconId::Circle,
+            IconId::CircleDiameter,
+            IconId::Circle2Point,
+            IconId::Circle3Point,
+            IconId::CircleTangentRadius,
+            IconId::CircleThreeTangents,
             IconId::Arc3Point,
+            IconId::ArcStartCenterEnd,
+            IconId::ArcStartCenterAngle,
+            IconId::ArcStartCenterLength,
+            IconId::ArcStartEndAngle,
+            IconId::ArcStartEndDirection,
+            IconId::ArcStartEndRadius,
+            IconId::ArcCenterStartEnd,
+            IconId::ArcCenterStartAngle,
+            IconId::ArcCenterStartLength,
+            IconId::ArcContinue,
             IconId::Cut,
             IconId::CopyClipboard,
             IconId::Paste,
             IconId::Erase,
             IconId::Move,
+            IconId::Copy,
+            IconId::Scale,
+            IconId::Rotate,
+            IconId::Mirror,
+            IconId::Stretch,
             IconId::DrawOrder,
             IconId::Undo,
             IconId::Redo,
             IconId::Isolate,
             IconId::Pan,
             IconId::Zoom,
+            IconId::ZoomExtents,
             IconId::Properties,
             IconId::Options,
             IconId::New,

@@ -94,16 +94,7 @@ impl CommandDescriptor {
     }
 
     pub fn translated_description(&self) -> Option<Cow<'static, str>> {
-        self.description_source.map(|source| {
-            if source == RIBBON_DESCRIPTION_TEMPLATE {
-                crate::i18n::translate_args(
-                    source,
-                    &[("label", self.translated_label().into_owned())],
-                )
-            } else {
-                crate::i18n::translate(source)
-            }
-        })
+        self.description_source.map(crate::i18n::translate)
     }
 }
 
@@ -165,7 +156,8 @@ impl CoverageReport {
 
 pub struct CommandCatalog {
     descriptors: BTreeMap<&'static str, CommandDescriptor>,
-    aliases: HashMap<&'static str, &'static str>,
+    canonical_ids: HashMap<String, &'static str>,
+    aliases: HashMap<String, &'static str>,
     validation_errors: Vec<String>,
 }
 
@@ -225,20 +217,19 @@ impl CommandCatalog {
             let upper = alias.to_ascii_uppercase();
             if let Some(existing) = canonical_upper.get(&upper) {
                 if *existing != target {
-                    let is_derived = descriptors
-                        .get(existing)
-                        .is_some_and(|d| d.metadata_quality == MetadataQuality::Derived);
-                    if is_derived {
-                        descriptors.remove(existing);
-                    } else {
-                        validation_errors.push(format!(
-                            "alias {alias} for {target} shadows canonical command {existing}"
-                        ));
-                        continue;
+                    if let Some(existing_descriptor) = descriptors.get(existing) {
+                        if existing_descriptor.metadata_quality == MetadataQuality::Derived {
+                            descriptors.remove(existing);
+                        } else {
+                            validation_errors.push(format!(
+                                "alias {alias} for {target} shadows canonical command {existing}"
+                            ));
+                            continue;
+                        }
                     }
                 }
             }
-            if let Some(previous) = aliases.insert(alias, target) {
+            if let Some(previous) = aliases.insert(upper, target) {
                 if previous != target {
                     validation_errors.push(format!(
                         "alias {alias} maps to both {previous} and {target}"
@@ -247,37 +238,31 @@ impl CommandCatalog {
             }
         }
 
+        let canonical_ids = descriptors
+            .keys()
+            .map(|id| (id.to_ascii_uppercase(), *id))
+            .collect();
+
         Self {
             descriptors,
+            canonical_ids,
             aliases,
             validation_errors,
         }
     }
 
     pub fn descriptor(&self, command: &str) -> Option<&CommandDescriptor> {
-        let normalized = normalize_command(command);
-        if let Some((id, descriptor)) = self
-            .descriptors
-            .iter()
-            .find(|(id, _)| id.eq_ignore_ascii_case(normalized))
-        {
-            return self
-                .aliases
-                .get(id)
-                .and_then(|target| self.descriptors.get(target))
-                .or(Some(descriptor));
+        let normalized = normalize_command(command).to_ascii_uppercase();
+        if let Some(id) = self.canonical_ids.get(&normalized) {
+            return self.descriptors.get(id);
         }
-        if let Some(target) = self
-            .aliases
-            .iter()
-            .find_map(|(alias, target)| alias.eq_ignore_ascii_case(normalized).then_some(target))
-        {
+        if let Some(target) = self.aliases.get(&normalized) {
             return self.descriptors.get(target);
         }
         let base = normalized.split_whitespace().next()?;
-        self.descriptors
-            .iter()
-            .find_map(|(id, descriptor)| id.eq_ignore_ascii_case(base).then_some(descriptor))
+        self.canonical_ids
+            .get(base)
+            .and_then(|id| self.descriptors.get(id))
     }
 
     pub fn descriptors(&self) -> impl Iterator<Item = &CommandDescriptor> {
@@ -386,8 +371,6 @@ fn derived_descriptor(id: &'static str) -> CommandDescriptor {
     }
 }
 
-const RIBBON_DESCRIPTION_TEMPLATE: &str = "Runs the %{label} command.";
-
 /// Promote the labels, categories and SVGs already authored for built-in
 /// ribbon tools into catalog-owned descriptors. Core metadata below can still
 /// override these values with a more specific description or shared IconId.
@@ -471,7 +454,6 @@ fn apply_builtin_ribbon_metadata(descriptors: &mut BTreeMap<&'static str, Comman
             .entry(id)
             .or_insert_with(|| derived_descriptor(id));
         descriptor.label_source = label.to_string();
-        descriptor.description_source = Some(RIBBON_DESCRIPTION_TEMPLATE);
         descriptor.icon = icon;
         descriptor.category = category;
         descriptor.metadata_quality = MetadataQuality::Authored;
@@ -678,6 +660,14 @@ const CORE_METADATA: &[CommandMetadata] = &[
         CommandCategory::Draw,
     ),
     meta(
+        "RECT",
+        &["RECTANG"],
+        "Rectangle - Two Corners",
+        None,
+        Some(IconId::Rectangle),
+        CommandCategory::Draw,
+    ),
+    meta(
         "MOVE",
         &[],
         "Move",
@@ -842,7 +832,7 @@ const CORE_METADATA: &[CommandMetadata] = &[
         &[],
         "Isolate Objects",
         Some("Temporarily hides all objects except the selection."),
-        Some(IconId::Isolate),
+        None,
         CommandCategory::Selection,
     ),
     meta(
@@ -850,7 +840,7 @@ const CORE_METADATA: &[CommandMetadata] = &[
         &[],
         "Hide Objects",
         Some("Temporarily hides selected objects."),
-        Some(IconId::Isolate),
+        None,
         CommandCategory::Selection,
     ),
     meta(
@@ -858,7 +848,7 @@ const CORE_METADATA: &[CommandMetadata] = &[
         &[],
         "End Object Isolation",
         Some("Restores temporarily hidden objects."),
-        Some(IconId::Isolate),
+        None,
         CommandCategory::Selection,
     ),
     meta(
@@ -912,9 +902,16 @@ mod tests {
     #[test]
     fn authored_aliases_resolve_to_the_canonical_command() {
         assert_eq!(canonical_id("POLYLINE"), Some("PLINE"));
+        assert_eq!(canonical_id("RECTANG"), Some("RECT"));
         assert_eq!(canonical_id("delete"), Some("ERASE"));
         assert_eq!(canonical_id("'PAN"), Some("PAN"));
         assert_eq!(canonical_id("ZOOM EXTENTS"), Some("ZOOM"));
+    }
+
+    #[test]
+    fn canonical_lookup_is_case_insensitive() {
+        assert_eq!(canonical_id("line"), Some("LINE"));
+        assert_eq!(canonical_id("  zoom extents  "), Some("ZOOM"));
     }
 
     #[test]
@@ -962,16 +959,12 @@ mod tests {
         use crate::modules::{ModuleEvent, RibbonItem};
         let mut missing = Vec::new();
         let mut derived = Vec::new();
-        let mut missing_descriptions = Vec::new();
         let mut missing_icons = Vec::new();
         let mut check = |command: &str| match descriptor(command) {
             None => missing.push(command.to_string()),
             Some(descriptor) => {
                 if descriptor.metadata_quality == MetadataQuality::Derived {
                     derived.push(command.to_string());
-                }
-                if descriptor.description_source.is_none() {
-                    missing_descriptions.push(command.to_string());
                 }
                 if crate::ui::command_presentation::icon(command)
                     .is_none_or(|icon| crate::ui::icon_catalog::bytes(icon).is_empty())
@@ -1026,8 +1019,6 @@ mod tests {
         missing.dedup();
         derived.sort();
         derived.dedup();
-        missing_descriptions.sort();
-        missing_descriptions.dedup();
         missing_icons.sort();
         missing_icons.dedup();
         assert!(
@@ -1037,10 +1028,6 @@ mod tests {
         assert!(
             derived.is_empty(),
             "built-in ribbon commands still using derived metadata: {derived:?}"
-        );
-        assert!(
-            missing_descriptions.is_empty(),
-            "built-in ribbon commands missing descriptions: {missing_descriptions:?}"
         );
         assert!(
             missing_icons.is_empty(),
@@ -1063,7 +1050,7 @@ mod tests {
     }
 
     #[test]
-    fn every_builtin_extension_command_has_complete_metadata() {
+    fn every_builtin_extension_command_has_authored_metadata_and_category() {
         for (command, _, _, _) in crate::ui::ribbon::builtin_extension_command_presentations() {
             let descriptor = descriptor(command)
                 .unwrap_or_else(|| panic!("extension command {command} has no descriptor"));
@@ -1071,15 +1058,6 @@ mod tests {
                 descriptor.metadata_quality,
                 MetadataQuality::Authored,
                 "{command} still uses derived metadata"
-            );
-            assert!(
-                descriptor.description_source.is_some(),
-                "{command} has no description"
-            );
-            assert!(
-                crate::ui::command_presentation::icon(command)
-                    .is_some_and(|icon| { !crate::ui::icon_catalog::bytes(icon).is_empty() }),
-                "{command} has no icon"
             );
             assert_ne!(
                 descriptor.category,

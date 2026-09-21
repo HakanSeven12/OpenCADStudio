@@ -669,13 +669,11 @@ fn idle_rows(
                 MenuItem::new(
                     t!("Bring Above Object").into_owned(),
                     MenuAction::DrawOrderPickRef(true),
-                )
-                .command_icon("DRAWORDER"),
+                ),
                 MenuItem::new(
                     t!("Send Under Object").into_owned(),
                     MenuAction::DrawOrderPickRef(false),
-                )
-                .command_icon("DRAWORDER"),
+                ),
             ],
             open: open_submenu == Some(SubmenuId::DrawOrder),
         });
@@ -694,7 +692,7 @@ fn idle_rows(
     rows.push(MenuRow::Submenu {
         id: SubmenuId::Isolate,
         label: t!("Isolate").into_owned(),
-        icon: crate::ui::command_presentation::icon("ISOLATEOBJECTS").map(MenuIcon::Catalog),
+        icon: Some(MenuIcon::Catalog(crate::ui::icon_catalog::IconId::Isolate)),
         items: vec![
             cmd(t!("Isolate Objects").into_owned(), "ISOLATEOBJECTS").enabled(has_selection),
             cmd(t!("Hide Objects").into_owned(), "HIDEOBJECTS").enabled(has_selection),
@@ -1038,11 +1036,6 @@ mod tests {
 
     #[test]
     fn shortcut_menu_uses_the_shared_icon_catalog() {
-        assert_eq!(
-            crate::ui::icon_catalog::command_icon("CIRCLE"),
-            Some(crate::ui::icon_catalog::IconId::Circle)
-        );
-
         let menu = build_context_menu(&idle_ctx(false), None);
         let undo = menu
             .rows
@@ -1076,6 +1069,19 @@ mod tests {
                 ..
             }
         )));
+        let isolate_items = menu
+            .rows
+            .iter()
+            .find_map(|row| match row {
+                MenuRow::Submenu {
+                    id: SubmenuId::Isolate,
+                    items,
+                    ..
+                } => Some(items),
+                _ => None,
+            })
+            .expect("Isolate submenu");
+        assert!(isolate_items.iter().all(|item| item.icon.is_none()));
     }
 
     #[test]
@@ -1091,6 +1097,19 @@ mod tests {
                 ..
             }
         )));
+        let draw_order_items = menu
+            .rows
+            .iter()
+            .find_map(|row| match row {
+                MenuRow::Submenu {
+                    id: SubmenuId::DrawOrder,
+                    items,
+                    ..
+                } => Some(items),
+                _ => None,
+            })
+            .expect("Draw Order submenu");
+        assert!(draw_order_items.iter().all(|item| item.icon.is_none()));
         let acts = actions(&menu);
         for want in [
             MenuAction::DeleteSelected,

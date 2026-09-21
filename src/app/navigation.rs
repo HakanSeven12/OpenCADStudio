@@ -301,25 +301,16 @@ impl OpenCADStudio {
 pub(super) fn actions() -> Vec<Action> {
     use crate::modules::{IconKind, ModuleEvent, RibbonItem, ToolDef};
     use std::collections::BTreeMap;
-    let mut names: Vec<&'static str> = crate::command::catalog::all()
+    fn description(command: &str, label: &str) -> String {
+        crate::ui::command_presentation::description(command).map_or_else(
+            || format!("{label} ({command})"),
+            |text| format!("{label} — {text} ({command})"),
+        )
+    }
+
+    let mut actions: BTreeMap<String, Action> = crate::command::catalog::all()
         .descriptors()
         .map(|descriptor| descriptor.id)
-        .collect();
-    names.extend([
-        "UNDO",
-        "REDO",
-        "CANCEL",
-        "QSAVE",
-        "OPEN",
-        "ZOOM",
-        "PLAN",
-        "SPACEMOUSEFIT",
-        "SPACEMOUSETOP",
-    ]);
-    names.sort_unstable();
-    names.dedup();
-    let mut actions: BTreeMap<String, Action> = names
-        .into_iter()
         .map(|name| {
             let surface_label = match name {
                 "SPACEMOUSE" => "SpaceMouse preferences",
@@ -333,10 +324,7 @@ pub(super) fn actions() -> Vec<Action> {
                 _ => name,
             };
             let label = crate::ui::command_presentation::label(name, surface_label);
-            let description = crate::ui::command_presentation::description(name).map_or_else(
-                || format!("{label} ({name})"),
-                |text| format!("{label} — {text} ({name})"),
-            );
+            let description = description(name, &label);
             let icon = crate::ui::command_presentation::icon(name)
                 .map(crate::ui::icon_catalog::bytes)
                 .or_else(|| {
@@ -362,10 +350,7 @@ pub(super) fn actions() -> Vec<Action> {
     ) {
         if let Some(action) = actions.get_mut(command) {
             action.label = crate::ui::command_presentation::label(command, label);
-            action.description = crate::ui::command_presentation::description(command).map_or_else(
-                || format!("{} ({command})", action.label),
-                |text| format!("{} — {text} ({command})", action.label),
-            );
+            action.description = description(command, &action.label);
             action.icon = crate::ui::command_presentation::icon(command)
                 .map(crate::ui::icon_catalog::bytes)
                 .or_else(|| match icon {

@@ -39,6 +39,21 @@ pub fn description(command: &str) -> Option<String> {
 
 /// Stable catalog icon identity for a command.
 pub fn icon(command: &str) -> Option<IconId> {
+    let normalized = command.trim().trim_start_matches('\'').to_ascii_uppercase();
+    if matches!(
+        normalized.as_str(),
+        "ISOLATEOBJECTS"
+            | "HIDEOBJECTS"
+            | "UNISOLATEOBJECTS"
+            | "DRAWORDER F"
+            | "DRAWORDER B"
+            | "DRAWORDER_FRONT"
+            | "DRAWORDER_BACK"
+            | "DRAWORDER_ABOVE"
+            | "DRAWORDER_UNDER"
+    ) {
+        return None;
+    }
     // Exact variants (for example `ZOOM EXTENTS`) must win over the base
     // descriptor (`ZOOM`).
     icon_catalog::command_icon(command)
@@ -99,6 +114,29 @@ mod tests {
     #[test]
     fn derived_commands_preserve_descriptive_surface_labels() {
         assert_eq!(label("SPLINE", "Spline Fit"), "Spline Fit");
+    }
+
+    #[test]
+    fn ribbon_metadata_does_not_invent_descriptions() {
+        assert_eq!(description("DATAEXTRACTION"), None);
+    }
+
+    #[test]
+    fn submenu_commands_do_not_reuse_parent_icons() {
+        for command in [
+            "ISOLATEOBJECTS",
+            "HIDEOBJECTS",
+            "UNISOLATEOBJECTS",
+            "DRAWORDER F",
+            "DRAWORDER B",
+            "DRAWORDER_FRONT",
+            "DRAWORDER_BACK",
+            "DRAWORDER_ABOVE",
+            "DRAWORDER_UNDER",
+        ] {
+            assert_eq!(icon(command), None, "{command}");
+        }
+        assert_eq!(icon("DRAWORDER"), Some(IconId::DrawOrder));
     }
 
     #[test]

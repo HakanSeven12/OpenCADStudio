@@ -1131,26 +1131,29 @@ const MENU_ICON_SIZE: f32 = 14.0;
 /// The gutter cell: the row's glyph, or empty space of the same width.
 fn context_menu_gutter(icon: Option<MenuIcon>, enabled: bool) -> Element<'static, Message> {
     let cell: Element<'static, Message> = match icon {
-        Some(MenuIcon::Snap(t)) if enabled => {
-            crate::ui::icons::themed(crate::ui::icons::osnap(t), MENU_ICON_SIZE)
-        }
-        Some(MenuIcon::Snap(t)) => {
-            crate::ui::icons::themed_disabled(crate::ui::icons::osnap(t), MENU_ICON_SIZE)
-        }
-        Some(MenuIcon::Mtp) if enabled => {
-            crate::ui::icons::themed(crate::ui::icons::mtp_icon(), MENU_ICON_SIZE)
-        }
-        Some(MenuIcon::Mtp) => {
-            crate::ui::icons::themed_disabled(crate::ui::icons::mtp_icon(), MENU_ICON_SIZE)
-        }
         Some(MenuIcon::Catalog(id)) => crate::ui::icon_catalog::render(id, MENU_ICON_SIZE, enabled),
-        None => iced::widget::Space::new().width(MENU_ICON_SIZE).height(MENU_ICON_SIZE).into(),
+        Some(MenuIcon::Snap(target)) => {
+            context_menu_chrome_icon(crate::ui::icons::osnap(target), enabled)
+        }
+        Some(MenuIcon::Mtp) => context_menu_chrome_icon(crate::ui::icons::mtp_icon(), enabled),
+        None => iced::widget::Space::new()
+            .width(MENU_ICON_SIZE)
+            .height(MENU_ICON_SIZE)
+            .into(),
     };
     container(cell)
         .width(Length::Fixed(MENU_GUTTER_W))
         .align_x(iced::Center)
         .align_y(iced::Center)
         .into()
+}
+
+fn context_menu_chrome_icon(bytes: &'static [u8], enabled: bool) -> Element<'static, Message> {
+    if enabled {
+        crate::ui::icons::themed(bytes, MENU_ICON_SIZE)
+    } else {
+        crate::ui::icons::themed_disabled(bytes, MENU_ICON_SIZE)
+    }
 }
 
 /// Render the right-click context menu (rows from

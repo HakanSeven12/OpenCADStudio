@@ -1,7 +1,5 @@
 //! Additional drawing tools, reached from the Draw panel's title.
 
-use std::time::Duration;
-
 use iced::widget::{button, column, container, row, scrollable, text, tooltip};
 use iced::{Element, Fill, Theme};
 
@@ -108,6 +106,7 @@ struct Panel {
     id: &'static str,
     title_id: &'static str,
     title: &'static str,
+    owner: &'static str,
     tools: &'static [Tool],
 }
 
@@ -116,31 +115,28 @@ const PANELS: &[Panel] = &[
         id: PANEL_ID,
         title_id: TITLE_ID,
         title: "Draw",
+        owner: "draw",
         tools: TOOLS,
     },
     Panel {
         id: "modify_extension",
         title_id: "modify_extension_title",
         title: "Modify",
+        owner: "modify",
         tools: super::modify_panel::TOOLS,
     },
 ];
 
-pub(super) fn command_presentations(
-) -> Vec<(&'static str, &'static str, &'static [u8], &'static str)> {
+pub(super) fn command_presentations() -> Vec<super::BuiltinCommandPresentation> {
     PANELS
         .iter()
         .flat_map(|panel| {
-            let category = if panel.id == "modify_extension" {
-                "modify"
-            } else {
-                "draw"
-            };
+            let owner = panel.owner;
             panel.tools.iter().flat_map(move |tool| {
-                std::iter::once((tool.command, tool.label, tool.icon, category)).chain(
+                std::iter::once((tool.command, tool.label, tool.icon, owner)).chain(
                     tool.options
                         .iter()
-                        .map(move |(command, label)| (*command, *label, tool.icon, category)),
+                        .map(move |(command, label)| (*command, *label, tool.icon, owner)),
                 )
             })
         })
@@ -214,7 +210,7 @@ fn tool_button(tool: &Tool, active: bool, panel_id: &'static str) -> Element<'st
         .padding(3.0 * SCALE);
     let tip = crate::ui::command_presentation::tooltip(tool.command, tool.label);
     let face: Element<'static, Message> = tooltip(face, make_tip(tip), tooltip::Position::Bottom)
-        .delay(Duration::from_millis(400))
+        .delay(super::RIBBON_TOOLTIP_DELAY)
         .style(tip_style)
         .into();
     if !tool.options.is_empty() {

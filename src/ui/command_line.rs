@@ -781,7 +781,6 @@ impl CommandLine {
                 let mut col = column![].spacing(0).width(Length::Fill);
                 for (idx, cmd) in matches.iter().enumerate() {
                     let is_selected = idx == cursor;
-                    let label = crate::ui::command_presentation::label(cmd, "");
                     let icon_slot: Element<'_, Message> =
                         if let Some(icon) = crate::ui::command_presentation::icon(cmd) {
                             crate::ui::icon_catalog::render::<Message>(
@@ -794,22 +793,9 @@ impl CommandLine {
                                 .width(Length::Fixed(AUTOCOMPLETE_ICON_SIZE))
                                 .into()
                         };
-                    let labels = if label.eq_ignore_ascii_case(cmd) {
-                        column![text(cmd.clone()).size(11)]
-                    } else {
-                        column![
-                            text(cmd.clone()).size(11),
-                            text(label).size(9).style(|theme: &Theme| {
-                                iced::widget::text::Style {
-                                    color: Some(
-                                        theme.palette().background.base.text.scale_alpha(0.65),
-                                    ),
-                                }
-                            }),
-                        ]
-                        .spacing(0)
-                    };
-                    let suggestion = row![icon_slot, labels].spacing(6).align_y(iced::Center);
+                    let suggestion = row![icon_slot, text(cmd.clone()).size(11)]
+                        .spacing(6)
+                        .align_y(iced::Center);
                     let suggestion = button(suggestion)
                         .on_press(Message::CommandSuggestionPick(cmd.clone()))
                         .width(Length::Fill)
@@ -833,19 +819,6 @@ impl CommandLine {
                                 ..Default::default()
                             }
                         });
-                    let suggestion: Element<'_, Message> = if let Some(description) =
-                        crate::ui::command_presentation::description(cmd)
-                    {
-                        tooltip(
-                            suggestion,
-                            container(text(description).size(10)).padding(5),
-                            tooltip::Position::Left,
-                        )
-                        .gap(4)
-                        .into()
-                    } else {
-                        suggestion.into()
-                    };
                     col = col.push(suggestion);
                 }
                 container(col)
@@ -1090,17 +1063,18 @@ pub fn ranked_matches(
     }
     let mut matches: Vec<String> = crate::command::catalog::all()
         .descriptors()
-        .map(|descriptor| descriptor.id.to_string())
-        // Plugin names are uppercased to match the built-ins and the needle,
-        // so ranking and display stay consistent across both sources.
-        .chain(dynamic.iter().map(|cmd| cmd.to_uppercase()))
         // Hide aliases (keys of the table); their target command still shows.
-        .filter(|cmd| {
-            !aliases.contains_key(cmd)
-                && (cmd.contains(&needle)
-                    || crate::ui::command_presentation::searchable_text(cmd).contains(&needle))
+        .filter(|descriptor| {
+            !aliases.contains_key(descriptor.id) && descriptor.id.contains(&needle)
         })
+        .map(|descriptor| descriptor.id.to_string())
         .collect();
+    // Runtime plugin commands do not have static catalog metadata. Uppercase
+    // them to match built-ins and only inspect their invariant command ID.
+    matches.extend(dynamic.iter().filter_map(|command| {
+        let command = command.to_uppercase();
+        (!aliases.contains_key(&command) && command.contains(&needle)).then_some(command)
+    }));
     matches.sort();
     matches.dedup();
     // Prefix matches rank above mid-string ones, then alphabetical so the
@@ -1223,17 +1197,6 @@ mod tests {
     fn builtin_commands_still_match_with_an_empty_pool() {
         let m = ranked_matches("LINE", &[], &FxHashMap::default());
         assert!(m.iter().any(|c| c == "LINE"), "got {m:?}");
-    }
-
-    #[test]
-    fn authored_labels_and_descriptions_are_searchable() {
-        let select_all_label = crate::ui::command_presentation::label("SELECTALL", "");
-        let by_label = ranked_matches(&select_all_label, &[], &FxHashMap::default());
-        assert!(by_label.iter().any(|command| command == "SELECTALL"));
-
-        let line_description = crate::ui::command_presentation::description("LINE").unwrap();
-        let by_description = ranked_matches(&line_description, &[], &FxHashMap::default());
-        assert!(by_description.iter().any(|command| command == "LINE"));
     }
 
     #[test]

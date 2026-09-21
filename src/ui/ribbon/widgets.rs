@@ -3,7 +3,6 @@
 
 use rustc_hash::FxHashMap as HashMap;
 use std::cell::RefCell;
-use std::time::Duration;
 
 use acadrust::types::{Color as AcadColor, LineWeight};
 use iced::advanced::{
@@ -536,7 +535,7 @@ pub(super) fn render_small<'a>(
                 .padding([4, 4]);
             tooltip(btn, make_tip(tip_text), TipPos::Right)
                 .gap(6.0)
-                .delay(Duration::from_millis(400))
+                .delay(super::RIBBON_TOOLTIP_DELAY)
                 .style(tip_style)
                 .into()
         }
@@ -558,7 +557,7 @@ pub(super) fn render_small<'a>(
                 .height(ROW_H)
                 .padding([3, 4]);
             tooltip(btn, make_tip(tip_text), TipPos::Right)
-                .gap(6.0).delay(Duration::from_millis(400)).style(tip_style).into()
+                .gap(6.0).delay(super::RIBBON_TOOLTIP_DELAY).style(tip_style).into()
         }
 
         RibbonItem::Dropdown {
@@ -636,11 +635,11 @@ pub(super) fn render_small<'a>(
 
             let icon_with_tip = tooltip(icon_btn, make_tip(tip_text), TipPos::Right)
                 .gap(6.0)
-                .delay(Duration::from_millis(400))
+                .delay(super::RIBBON_TOOLTIP_DELAY)
                 .style(tip_style);
             let arr_with_tip = tooltip(arr_btn, make_tip(arr_tip), TipPos::Right)
                 .gap(6.0)
-                .delay(Duration::from_millis(400))
+                .delay(super::RIBBON_TOOLTIP_DELAY)
                 .style(tip_style);
 
             PosReport::new(
@@ -681,9 +680,9 @@ pub(super) fn render_small<'a>(
             let arrow_tip = format!("{} {}", localized_label, t!("options"));
             PosReport::new(*id, row![
                 tooltip(face_btn, make_tip(face_tip), TipPos::Right)
-                    .gap(6.0).delay(Duration::from_millis(400)).style(tip_style),
+                    .gap(6.0).delay(super::RIBBON_TOOLTIP_DELAY).style(tip_style),
                 tooltip(arrow, make_tip(arrow_tip), TipPos::Right)
-                    .gap(6.0).delay(Duration::from_millis(400)).style(tip_style),
+                    .gap(6.0).delay(super::RIBBON_TOOLTIP_DELAY).style(tip_style),
             ].spacing(0).height(ROW_H)).into()
         }
 
@@ -804,11 +803,11 @@ pub(super) fn render_large_dropdown<'a>(
 
     let top_with_tip = tooltip(top_btn, make_tip(tip_text), TipPos::Right)
         .gap(6.0)
-        .delay(Duration::from_millis(400))
+        .delay(super::RIBBON_TOOLTIP_DELAY)
         .style(tip_style);
     let arr_with_tip = tooltip(arr_btn, make_tip(arr_tip), TipPos::Right)
         .gap(6.0)
-        .delay(Duration::from_millis(400))
+        .delay(super::RIBBON_TOOLTIP_DELAY)
         .style(tip_style);
 
     let content = column![top_with_tip, arr_with_tip]
@@ -843,7 +842,7 @@ fn tool_row<'a>(tools: &[ToolDef], active_tool: &Option<String>) -> Element<'a, 
                 TipPos::Right,
             )
             .gap(4.0)
-            .delay(Duration::from_millis(400))
+            .delay(super::RIBBON_TOOLTIP_DELAY)
             .style(tip_style)
             .into()
         })
@@ -922,7 +921,7 @@ pub(super) fn render_large<'a>(
                 TipPos::Right,
             )
                 .gap(6.0)
-                .delay(Duration::from_millis(400))
+                .delay(super::RIBBON_TOOLTIP_DELAY)
                 .style(tip_style)
                 .into()
         }
@@ -1254,7 +1253,7 @@ pub(super) fn quick_access_btn<'a>(
         TipPos::Bottom,
     )
         .gap(6.0)
-        .delay(Duration::from_millis(400))
+        .delay(super::RIBBON_TOOLTIP_DELAY)
         .style(tip_style)
         .into()
 }
@@ -1312,7 +1311,7 @@ pub(super) fn render_history_control<'a>(
             TipPos::Right,
         )
         .gap(6.0)
-        .delay(Duration::from_millis(400))
+        .delay(super::RIBBON_TOOLTIP_DELAY)
         .style(tip_style)
     };
 
@@ -1348,7 +1347,7 @@ pub(super) fn render_history_control<'a>(
             TipPos::Right,
         )
         .gap(6.0)
-        .delay(Duration::from_millis(400))
+        .delay(super::RIBBON_TOOLTIP_DELAY)
         .style(tip_style)
     };
 

@@ -31,6 +31,17 @@ pub use collapse::CollapseMode;
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
 use crate::t;
 
+pub(crate) type BuiltinCommandPresentation = (
+    &'static str,
+    &'static str,
+    &'static [u8],
+    &'static str,
+);
+
+/// AutoCAD's default initial delay before displaying ribbon tooltips.
+pub(super) const RIBBON_TOOLTIP_DELAY: std::time::Duration =
+    std::time::Duration::from_secs(1);
+
 pub(crate) fn tooltip_content(text: String) -> Element<'static, Message> {
     widgets::make_tip(text)
 }
@@ -39,8 +50,7 @@ pub(crate) fn tooltip_style(theme: &Theme) -> container::Style {
     widgets::tip_style(theme)
 }
 
-pub(crate) fn builtin_extension_command_presentations(
-) -> Vec<(&'static str, &'static str, &'static [u8], &'static str)> {
+pub(crate) fn builtin_extension_command_presentations() -> Vec<BuiltinCommandPresentation> {
     draw_panel::command_presentations()
 }
 
@@ -726,7 +736,7 @@ impl Ribbon {
                 iced::widget::tooltip::Position::Bottom,
             )
             .gap(6.0)
-            .delay(std::time::Duration::from_millis(400))
+            .delay(RIBBON_TOOLTIP_DELAY)
             .style(tip_style);
 
             iced::widget::stack![tool_bar, iced::widget::opaque(shield)].into()

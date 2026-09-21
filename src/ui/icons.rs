@@ -654,19 +654,19 @@ pub fn mtp_icon() -> &'static [u8] {
 }
 
 /// Context-menu glyphs for the transparent navigation rows.
-pub fn pan_icon() -> &'static [u8] {
+pub const fn pan_icon() -> &'static [u8] {
     NAV_PAN
 }
 
-pub fn zoom_icon() -> &'static [u8] {
+pub const fn zoom_icon() -> &'static [u8] {
     NAV_ZOOM
 }
 
-pub fn undo_icon() -> &'static [u8] {
+pub const fn undo_icon() -> &'static [u8] {
     UNDO
 }
 
-pub fn redo_icon() -> &'static [u8] {
+pub const fn redo_icon() -> &'static [u8] {
     REDO
 }
 
@@ -726,7 +726,7 @@ pub fn themed_disabled_arrow_down<'a, M: 'a>(size: f32) -> Element<'a, M> {
 }
 
 pub fn themed_disabled_arrow_right<'a, M: 'a>(size: f32) -> Element<'a, M> {
-    semantic_disabled(TRI_RIGHT, size)
+    themed_disabled(TRI_RIGHT, size)
 }
 
 pub fn themed_home<'a, M: 'a>(size: f32) -> Element<'a, M> {

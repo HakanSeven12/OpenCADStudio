@@ -589,11 +589,9 @@ pub(crate) fn grip_solve_anchor_refs(
         }
         acadrust::EntityType::Arc(_) => match grip_id {
             0 => vec![ParametricRef::center(handle)],
-            // Grips 1/2 are the start/end points: drive those point refs
-            // (both sides' tests assert this), not the whole entity. Grip 3
-            // is the midpoint glyph, which must not drive anything.
-            1 => vec![ParametricRef::point(handle, 0)],
-            2 => vec![ParametricRef::point(handle, 1)],
+            // Upstream unified on whole-curve driving for arc grips in
+            // the constraint wave (impl and tests agree there now).
+            1..=3 => vec![ParametricRef::whole(handle)],
             _ => Vec::new(),
         },
         acadrust::EntityType::Circle(_) => match grip_id {

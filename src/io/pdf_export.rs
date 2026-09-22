@@ -2433,12 +2433,33 @@ mod tests {
     }
 
     /// Decode the page's drawing operators out of the page content stream.
-    /// printpdf zlib-compresses streams, but very short ones can be stored
-    /// raw — so each `stream…endstream` body is inflated when possible and
-    /// identified by the white page-background op every plotted page starts
-    /// with (`1 1 1 rg`).
-    fn page_content_stream(bytes: &[u8]) -> Vec<u8> {
+    ///
+    /// Since the lopdf save path Flate-compresses every stream, each
+    /// `stream…endstream` body is inflated before use — trying zlib first
+    /// (what lopdf's `Stream::compress` and printpdf's embedded image/form
+    /// streams write), then raw deflate (defensive: any producer may emit an
+    /// unwrapped Flate body), and finally the verbatim bytes, which tiny
+    /// streams that do not shrink under compression keep. The page content
+    /// stream is then identified by the white page-background op every
+    /// plotted page starts with (`1 1 1 rg`).
+    fn inflate_stream_body(raw: &[u8]) -> Vec<u8> {
         use std::io::Read;
+        // Each decoder is a distinct reader type, so the try-order is spelled
+        // out per decoder instead of a closure over one concrete type.
+        let mut zlib = flate2::read::ZlibDecoder::new(raw);
+        let mut decoded = Vec::new();
+        if zlib.read_to_end(&mut decoded).is_ok() && !decoded.is_empty() {
+            return decoded;
+        }
+        let mut deflate = flate2::read::DeflateDecoder::new(raw);
+        let mut decoded = Vec::new();
+        if deflate.read_to_end(&mut decoded).is_ok() && !decoded.is_empty() {
+            return decoded;
+        }
+        raw.to_vec()
+    }
+
+    fn page_content_stream(bytes: &[u8]) -> Vec<u8> {
         let mut search = 0;
         while let Some(rel) = bytes[search..].windows(6).position(|w| w == b"stream") {
             let start = search + rel;
@@ -2451,18 +2472,16 @@ mod tests {
                 .position(|w| w == b"endstream")
                 .map(|i| body + i)
                 .unwrap_or(bytes.len());
-            let raw = &bytes[body..end];
-            let mut inflated = Vec::new();
-            let decoded = flate2::read::ZlibDecoder::new(raw)
-                .read_to_end(&mut inflated)
-                .ok()
-                .filter(|_| !inflated.is_empty())
-                .map(|_| inflated)
-                .unwrap_or_else(|| raw.to_vec());
+            let decoded = inflate_stream_body(&bytes[body..end]);
             if decoded.windows(8).any(|w| w == b"1 1 1 rg") {
                 return decoded;
             }
-            search = end;
+            // Skip PAST the whole `endstream` marker: restarting at its first
+            // byte re-matched the `stream` inside the marker itself, so every
+            // other stream (e.g. the page content behind a glyph form) was
+            // scanned with a body offset in between-object territory and the
+            // helper reported "no page content stream" for text/image pages.
+            search = (end + b"endstream".len()).min(bytes.len());
         }
         panic!("no page content stream found in the PDF");
     }
@@ -2485,6 +2504,15 @@ mod tests {
 
     /// Byte offset of the stroke operator for a stroke color (e.g.
     /// `1 0 0 RG` … `S`), searched from `from`.
+    ///
+    /// The paint `S` is a standalone operator: preceded by a newline and
+    /// followed by a newline OR the end of the stream — lopdf's
+    /// `Content::encode` joins operators with LEADING newlines only, so a
+    /// page's final operator has no trailing delimiter. Probing for a bare
+    /// `\nS\n` therefore missed the last stroke of the page and failed the
+    /// draw-order tests once the Flate save path decoded exact content bytes
+    /// (the old uncompressed fallback had accidentally kept lopdf's `\n`
+    /// before `endstream`).
     fn stroke_op_pos(stream: &[u8], color: &str, from: usize) -> usize {
         let token = color.as_bytes();
         let start = stream[from..]
@@ -2492,11 +2520,17 @@ mod tests {
             .position(|w| w == token)
             .map(|i| from + i)
             .unwrap_or_else(|| panic!("no {color:?} stroke color op in stream"));
-        stream[start..]
-            .windows(3)
-            .position(|w| w == b"\nS\n")
-            .map(|i| start + i)
-            .unwrap_or_else(|| panic!("stroke color {color:?} has no S paint op"))
+        let mut i = start;
+        while i + 1 < stream.len() {
+            if stream[i] == b'\n' && stream[i + 1] == b'S' {
+                let after = i + 2;
+                if after == stream.len() || stream[after] == b'\n' {
+                    return i + 1;
+                }
+            }
+            i += 1;
+        }
+        panic!("stroke color {color:?} has no S paint op");
     }
 
     fn render_stream(page: PdfPageInput) -> Vec<u8> {
@@ -2648,6 +2682,51 @@ mod tests {
         assert!(
             wipe < black,
             "deeper wipeout must paint before the wire: {wipe} !< {black}"
+        );
+    }
+
+    // Regression (Flate save path): lopdf's `Content::encode` writes each
+    // operator's newline BEFORE it, so the page's LAST operator is terminated
+    // by end-of-stream, not by a delimiter — a valid, complete encoding that
+    // only delimiter-hungry probes can miss. The old uncompressed save path
+    // hid this because the test helper's raw fallback kept lopdf's `\n`
+    // before `endstream`; the Flate path decodes the exact content bytes, so
+    // the final stroke must be findable at (and as) the stream's last bytes.
+    // The final op is NOT dropped for other page kinds either: text and image
+    // pages end with their own last op (`Q`) at EOF.
+    #[test]
+    fn last_stroke_op_survives_the_lopdf_conversion() {
+        let stream = render_stream(test_page(vec![
+            line_wire("80001", 0.10, BLUE),
+            line_wire("80002", 0.20, GREEN),
+        ]));
+        assert!(
+            stream.ends_with(b"S"),
+            "stream must end with the last wire's paint op: {:?}",
+            String::from_utf8_lossy(&stream[stream.len().saturating_sub(30)..])
+        );
+        let blue = stroke_op_pos(&stream, "0 0 1 RG", 0);
+        let green = stroke_op_pos(&stream, "0 1 0 RG", 0);
+        assert!(
+            blue < green,
+            "both wires' paint ops must be findable: {blue} !< {green}"
+        );
+
+        // Boundary: the text and image passes close with a RestoreGraphicsState
+        // (`Q`); those final ops survive the conversion the same way.
+        let text_stream = render_stream(test_page(vec![text_wire("HI", [20.0, 20.0, 0.0])]));
+        assert!(
+            text_stream.ends_with(b"Q"),
+            "text page must keep its final op: {:?}",
+            String::from_utf8_lossy(&text_stream[text_stream.len().saturating_sub(30)..])
+        );
+        let mut image_page = test_page(Vec::new());
+        image_page.content.images = vec![plot_image(8, 10.0)];
+        let image_stream = render_stream(image_page);
+        assert!(
+            image_stream.ends_with(b"Q"),
+            "image page must keep its final op: {:?}",
+            String::from_utf8_lossy(&image_stream[image_stream.len().saturating_sub(30)..])
         );
     }
 

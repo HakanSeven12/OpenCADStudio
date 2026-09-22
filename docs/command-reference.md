@@ -2,7 +2,7 @@
 
 Generated from the in-repo command registry; manual edits are overwritten. Regenerate with `UPDATE_COMMAND_REFERENCE=1 cargo test command_reference`.
 
-## Annotate (25)
+## Annotate (26)
 
 | Command | Default shortcut | Selection |
 |---|---|---|
@@ -14,6 +14,7 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `DIMBASELINE` |  | command-driven |
 | `DIMBREAK` |  | command-driven |
 | `DIMCENTER` |  | command-driven |
+| `DIMCONSTRAINT` |  | command-driven |
 | `DIMCONTINUE` |  | command-driven |
 | `DIMDIAMETER` |  | command-driven |
 | `DIMEDIT` |  | command-driven |
@@ -109,10 +110,11 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `STRETCH` |  | current selection or prompt |
 | `TRIM` |  | command-driven |
 
-## Other (529)
+## Other (531)
 
 | Command | Default shortcut | Selection |
 |---|---|---|
+| `-PARAMETERS` |  | command-driven |
 | `-PSETUPIN` |  | command-driven |
 | `-SETBYLAYER` |  | command-driven |
 | `-XREF` |  | command-driven |
@@ -257,6 +259,7 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `DCCONVERT` |  | command-driven |
 | `DCDIAMETER` |  | command-driven |
 | `DCE` |  | command-driven |
+| `DCFORM` |  | command-driven |
 | `DCHIDE` |  | command-driven |
 | `DCHIDEALL` |  | command-driven |
 | `DCHORIZONTAL` |  | command-driven |
@@ -673,4 +676,4 @@ Generated from the in-repo command registry; manual edits are overwritten. Regen
 | `VPORTS` |  | command-driven |
 | `ZOOM` |  | command-driven |
 
-_631 commands across 8 categories._
+_634 commands across 8 categories._

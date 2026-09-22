@@ -16,6 +16,15 @@ full semantic equivalence beyond the checks listed here.
 - `cargo test --lib raw_dxf_audit_detects_objects_orphaned_from_the_root_dictionary -- --nocapture`
 - `cargo test --lib advertises_the_shared_tools -- --nocapture`
 - `python docs/automation/mcp_smoke.py target/debug/OpenCADStudio.exe`
+- `python docs/automation/mcp_eval.py target/debug/OpenCADStudio.exe`: passed
+  with 7 tool calls, 1 asynchronous task and 13 RPC calls.
+- `python docs/automation/mcp_acceptance.py target/debug/OpenCADStudio.exe`:
+  created five entities through the live GUI/MCP session, captured a 1600x791
+  viewport PNG, and verified DWG 2000/2013/2018 plus DXF 2000.
+- AutoCAD 2025 Core Console `AUDIT` reported `Total errors found 0 fixed 0`
+  for all three DWG outputs. It used isolated profiles after Controlled Folder
+  Access blocked Autodesk's normal profile path; no Windows security setting
+  was changed.
 - cad-core R12 and R2000 fixtures converted through OpenCADStudio to DWG 2000
   and back to DXF 2000; both reopened with the expected normalized semantic
   manifest and ezdxf reported zero audit errors and zero fixes.
@@ -26,6 +35,18 @@ full semantic equivalence beyond the checks listed here.
   dictionaries orphaned from the root, leaving layout and placeholder owners
   invalid. The raw ASCII DXF graph audit now reports this as a failed audit
   rather than allowing a false-green delivery.
+
+## Open observations
+
+- The live MCP acceptance created and serialized its `TEXT` entity, but the
+  text was not visible in the captured viewport and the command history showed
+  a later text-editor cancellation. Geometry, semantic manifest, save/reopen,
+  DXF graph checks, and AutoCAD audits passed; viewport text rendering remains
+  a separate unresolved visual observation.
+- AutoCAD Core Console emitted its final zero-error audit result but did not
+  exit after scripted `QUIT` on this workstation. The acceptance runner killed
+  only its own isolated process after 25 seconds; therefore the audit is passed
+  while process shutdown is recorded as abnormal, not silently reclassified.
 
 ## Boundary
 

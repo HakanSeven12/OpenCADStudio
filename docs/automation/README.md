@@ -17,6 +17,20 @@ The server provides four tools:
 - `ocs_execute` performs one operation, an atomic record update, or a sequential batch against the real editor.
 - `ocs_capture` returns a bounded PNG of the drawing viewport or complete window.
 
+Run `python docs/automation/mcp_acceptance.py target/debug/OpenCADStudio.exe`
+for a repeatable end-to-end acceptance. It creates visible geometry through
+MCP, audits and verified-saves DWG 2000/2013/2018 plus DXF 2000, and records a
+viewport PNG and JSON report below `target/acceptance/`.
+
+On a workstation with AutoCAD 2025, run
+`docs/automation/autocad_acceptance.ps1 -Directory target/acceptance/TIMESTAMP`.
+It opens the three generated DWGs read-only in isolated Core Console profiles,
+runs AutoCAD's audit without repairs, and retains one log per version. Isolation
+keeps Autodesk profile writes outside protected Documents folders. On the
+verified workstation Core Console reported the audit result and then remained
+alive after `QUIT`; the runner terminates only the process it launched after the
+timeout and records `ForcedTermination` separately from the audit outcome.
+
 Native builds also accept a second, headless entry point (`OpenCADStudio --serve`, one
 JSON request per line) for scripts and CI; the two native channels, their startup dialogs
 and their limits are described in [native.md](native.md).

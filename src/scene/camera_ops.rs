@@ -161,7 +161,7 @@ impl Scene {
     // ── Hit-test convenience: wire name → Handle ──────────────────────────
 
     pub fn handle_from_wire_name(name: &str) -> Option<Handle> {
-        name.parse::<u64>().ok().map(Handle::new)
+        crate::scene::pipeline::wire_gpu::fast_parse_u64(name).map(Handle::new)
     }
 
     /// Restore camera to a named view from the document view table.

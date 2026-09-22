@@ -411,6 +411,10 @@ fn pack_color(color: [f32; 4]) -> [u8; 4] {
 /// non-dash-first patterns keep the legacy centred phase.
 fn wire_distances(wire: &WireModel) -> (Vec<f32>, f32, f32) {
     let n = wire.points.len();
+    let pat_len = wire.pattern_length;
+    if pat_len <= 1e-6 || n < 2 {
+        return (Vec::new(), 0.0, 0.0);
+    }
     let explicit = wire.pattern_stations.len() >= n + 1;
     let (mut dists, has_break, total) = if explicit {
         (
@@ -446,8 +450,7 @@ fn wire_distances(wire: &WireModel) -> (Vec<f32>, f32, f32) {
         (dists, has_break, total)
     };
 
-    let pat_len = wire.pattern_length;
-    if pat_len <= 1e-6 || has_break || n < 2 {
+    if has_break {
         return (dists, 0.0, 0.0);
     }
     if total <= 1e-6 {
@@ -589,7 +592,12 @@ pub(crate) fn emit_wire_packed(
     if seg_count == 0 {
         return Vec::new();
     }
-    let (dists, align_end, align_total) = wire_distances(wire);
+    let has_pattern = wire.pattern_length > 1e-6;
+    let (dists, align_end, align_total) = if has_pattern {
+        wire_distances(wire)
+    } else {
+        (Vec::new(), 0.0, 0.0)
+    };
     let (marker_origin_high, marker_origin_low, marker_normal_scale) = marker_metadata(wire);
     let low = |i: usize| -> [f32; 3] { wire.points_low.get(i).copied().unwrap_or([0.0; 3]) };
     let is_tapered = !wire.taper_widths.is_empty();
@@ -607,14 +615,19 @@ pub(crate) fn emit_wire_packed(
         if !finite3(a) || !finite3(b) {
             continue;
         }
+        let (dist_a, dist_b) = if has_pattern && dists.len() > i + 1 {
+            (dists[i], dists[i + 1])
+        } else {
+            (0.0, 0.0)
+        };
         instances.push(PackedWireInstance {
             pos_a: a,
             pos_a_low: low(i),
             pos_b: b,
             pos_b_low: low(i + 1),
             color: color_u8,
-            distance_a: dists[i],
-            distance_b: dists[i + 1],
+            distance_a: dist_a,
+            distance_b: dist_b,
             half_width,
             pattern_length: wire.pattern_length,
             pat0,
@@ -641,7 +654,14 @@ pub(crate) fn emit_wire_native(
     color: [f32; 4],
     draw_depth: f32,
 ) -> (Vec<WireInstance>, WireConst) {
-    let (dists, align_end, align_total) = wire_distances(wire);
+    let n = wire.points.len();
+    let seg_count = n.saturating_sub(1);
+    let has_pattern = wire.pattern_length > 1e-6 && seg_count > 0;
+    let (dists, align_end, align_total) = if has_pattern {
+        wire_distances(wire)
+    } else {
+        (Vec::new(), 0.0, 0.0)
+    };
     let (marker_origin_high, marker_origin_low, marker_normal_scale) = marker_metadata(wire);
     let is_tapered = !wire.taper_widths.is_empty();
     let cst = WireConst {
@@ -660,8 +680,6 @@ pub(crate) fn emit_wire_native(
         marker_origin_low,
         marker_normal_scale,
     };
-    let n = wire.points.len();
-    let seg_count = n.saturating_sub(1);
     if seg_count == 0 {
         return (Vec::new(), cst);
     }
@@ -681,18 +699,40 @@ pub(crate) fn emit_wire_native(
         if !finite3(a) || !finite3(b) {
             continue;
         }
+        let (dist_a, dist_b) = if has_pattern && dists.len() > i + 1 {
+            (dists[i], dists[i + 1])
+        } else {
+            (0.0, 0.0)
+        };
         instances.push(WireInstance {
             pos_a: a,
             pos_a_low: low(i),
             pos_b: b,
             pos_b_low: low(i + 1),
-            distance_a: dists[i],
-            distance_b: dists[i + 1],
+            distance_a: dist_a,
+            distance_b: dist_b,
             wire_id,
             taper_ratio: [taper_ratio(i), taper_ratio(i + 1)],
         });
     }
     (instances, cst)
+}
+
+/// Fast ASCII decimal parsing for handle IDs, avoiding standard library unicode/formatting overhead.
+#[inline]
+pub fn fast_parse_u64(s: &str) -> Option<u64> {
+    let bytes = s.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut val: u64 = 0;
+    for &b in bytes {
+        if !b.is_ascii_digit() {
+            return None;
+        }
+        val = val.checked_mul(10)?.checked_add((b - b'0') as u64)?;
+    }
+    Some(val)
 }
 
 /// Looks up a wire's draw-order depth from the per-entity map using the
@@ -704,10 +744,7 @@ pub(crate) fn wire_draw_depth(
     wire: &WireModel,
     depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
 ) -> f32 {
-    let base = wire
-        .name
-        .parse::<u64>()
-        .ok()
+    let base = fast_parse_u64(&wire.name)
         .and_then(|h| depth_map.get(&h).copied());
     match (base, wire.depth_override) {
         (Some([d, half]), Some(local)) => d + local * half,

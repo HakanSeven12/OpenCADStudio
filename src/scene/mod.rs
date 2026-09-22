@@ -9062,7 +9062,7 @@ impl Scene {
         let mut changed_slots = HashMap::default();
         let mut next_ordinal: HashMap<u64, u32> = HashMap::default();
         for wire in changed_wires {
-            if let Ok(handle) = wire.name.parse::<u64>() {
+            if let Some(handle) = pipeline::wire_gpu::fast_parse_u64(&wire.name) {
                 let ordinal = next_ordinal.entry(handle).or_default();
                 changed_slots.insert((handle, *ordinal), wires.len() as u32);
                 *ordinal += 1;

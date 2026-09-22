@@ -290,7 +290,7 @@ pub fn build_handle_index(wires: &[WireModel]) -> std::sync::Arc<FxHashMap<u64, 
     let mut index: FxHashMap<u64, Vec<u32>> = FxHashMap::default();
     index.reserve(wires.len());
     for (idx, w) in wires.iter().enumerate() {
-        if let Ok(h) = w.name.parse::<u64>() {
+        if let Some(h) = crate::scene::pipeline::wire_gpu::fast_parse_u64(&w.name) {
             index.entry(h).or_default().push(idx as u32);
         }
     }

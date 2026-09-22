@@ -2615,7 +2615,7 @@ impl Pipeline {
             wires
                 .par_iter()
                 .enumerate()
-                .filter_map(|(idx, w)| w.name.parse::<u64>().ok().map(|h| (h, idx as u32)))
+                .filter_map(|(idx, w)| wire_gpu::fast_parse_u64(&w.name).map(|h| (h, idx as u32)))
                 .collect()
         };
         let mut index: rustc_hash::FxHashMap<u64, Vec<u32>> = rustc_hash::FxHashMap::default();

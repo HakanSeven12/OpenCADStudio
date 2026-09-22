@@ -841,7 +841,7 @@ impl InteractionIndex {
         let mut next_ordinal: rustc_hash::FxHashMap<u64, u32> =
             rustc_hash::FxHashMap::with_capacity_and_hasher(n_wires.min(4096), Default::default());
         for wire in wires {
-            let handle = wire.name.parse::<u64>().ok();
+            let handle = crate::scene::pipeline::wire_gpu::fast_parse_u64(&wire.name);
             wire_handles.push(handle);
             wire_ordinals.push(handle.map(|h| {
                 let entry = next_ordinal.entry(h).or_default();

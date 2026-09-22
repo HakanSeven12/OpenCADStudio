@@ -20,27 +20,19 @@ use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem};
 use crate::plugin::all_ribbon_modules;
 use crate::ui::properties::{linetype_display_name, lw_options, LinetypeItem};
 
-mod widgets;
+mod color_dropdown;
 mod draw_panel;
 mod modify_panel;
-mod color_dropdown;
+mod widgets;
 use widgets::{StyleContext, *};
 mod collapse;
-use collapse::{CollapsePanels, Panel};
-pub use collapse::CollapseMode;
-use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
 use crate::t;
-
-pub(crate) type BuiltinCommandPresentation = (
-    &'static str,
-    &'static str,
-    &'static [u8],
-    &'static str,
-);
+use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
+pub use collapse::CollapseMode;
+use collapse::{CollapsePanels, Panel};
 
 /// AutoCAD's default initial delay before displaying ribbon tooltips.
-pub(super) const RIBBON_TOOLTIP_DELAY: std::time::Duration =
-    std::time::Duration::from_secs(1);
+pub(super) const RIBBON_TOOLTIP_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
 
 pub(crate) fn tooltip_content(text: String) -> Element<'static, Message> {
     widgets::make_tip(text)
@@ -48,10 +40,6 @@ pub(crate) fn tooltip_content(text: String) -> Element<'static, Message> {
 
 pub(crate) fn tooltip_style(theme: &Theme) -> container::Style {
     widgets::tip_style(theme)
-}
-
-pub(crate) fn builtin_extension_command_presentations() -> Vec<BuiltinCommandPresentation> {
-    draw_panel::command_presentations()
 }
 
 // ── Ribbon state ───────────────────────────────────────────────────────────
@@ -470,29 +458,34 @@ impl Ribbon {
                 let is_active = i == self.active;
                 let is_contextual = module.id() == "layout";
                 let btn = container(
-                    button(text(crate::i18n::ribbon_module_title(module.id(), module.title())).size(12))
-                        .on_press(Message::RibbonSelectTab(i))
-                        .style(move |theme: &Theme, status| {
-                            let palette = theme.palette();
-                            let accent = if is_contextual {
-                                palette.warning.base
-                            } else {
-                                palette.primary.base
-                            };
-                            let pair = match (is_active, status) {
-                                (true, _) => palette.background.weakest,
-                                (false, button::Status::Hovered) => {
-                                    if is_contextual {
-                                        palette.warning.weak
-                                    } else {
-                                        palette.background.weak
-                                    }
+                    button(
+                        text(crate::i18n::ribbon_module_title(
+                            module.id(),
+                            module.title(),
+                        ))
+                        .size(12),
+                    )
+                    .on_press(Message::RibbonSelectTab(i))
+                    .style(move |theme: &Theme, status| {
+                        let palette = theme.palette();
+                        let accent = if is_contextual {
+                            palette.warning.base
+                        } else {
+                            palette.primary.base
+                        };
+                        let pair = match (is_active, status) {
+                            (true, _) => palette.background.weakest,
+                            (false, button::Status::Hovered) => {
+                                if is_contextual {
+                                    palette.warning.weak
+                                } else {
+                                    palette.background.weak
                                 }
-                                _ => palette.background.base,
-                            };
-                            button::Style {
-                            background: (is_active
-                                || matches!(status, button::Status::Hovered))
+                            }
+                            _ => palette.background.base,
+                        };
+                        button::Style {
+                            background: (is_active || matches!(status, button::Status::Hovered))
                                 .then_some(Background::Color(pair.color)),
                             text_color: if is_active {
                                 pair.text
@@ -512,9 +505,9 @@ impl Ribbon {
                             },
                             shadow: iced::Shadow::default(),
                             snap: false,
-                            }
-                        })
-                        .padding([5, 14]),
+                        }
+                    })
+                    .padding([5, 14]),
                 )
                 .style(move |theme: &Theme| container::Style {
                     border: Border {
@@ -554,9 +547,7 @@ impl Ribbon {
         let dd_open = self.open_dropdown.as_deref() == Some(COLLAPSE_MODE_ID);
         let mode_btn = button(crate::ui::icons::themed_arrow_down(10.0))
             .on_press(Message::ToggleRibbonDropdown(COLLAPSE_MODE_ID.to_string()))
-            .style(move |theme: &Theme, status| {
-                top_hist_btn_style(theme, true, dd_open, status)
-            })
+            .style(move |theme: &Theme, status| top_hist_btn_style(theme, true, dd_open, status))
             .height(24)
             .padding([2, 8]);
         let mode_dd = PosReport::new(COLLAPSE_MODE_ID, mode_btn);
@@ -575,9 +566,7 @@ impl Ribbon {
 
         let tab_bar = container(tab_row)
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(
-                    theme.palette().background.base.color,
-                )),
+                background: Some(Background::Color(theme.palette().background.base.color)),
                 ..Default::default()
             })
             .padding(Padding {
@@ -621,67 +610,68 @@ impl Ribbon {
                     .map(|g| {
                         let ts = self.toggle_state(show_block_palette);
                         Panel {
-                        id: g.title.to_string(),
-                        elements: [render_group(
-                            false,
-                            g,
-                            &self.active_tool,
-                            &self.open_dropdown,
-                            &self.last_cmd,
-                            ts,
-                            &self.layer_infos,
-                            &self.active_layer,
-                            self.active_color,
-                            &self.active_linetype,
-                            self.active_lineweight,
-                            &style_ctx,
-                        ),
-                        render_group(
-                            true,
-                            g,
-                            &self.active_tool,
-                            &self.open_dropdown,
-                            &self.last_cmd,
-                            ts,
-                            &self.layer_infos,
-                            &self.active_layer,
-                            self.active_color,
-                            &self.active_linetype,
-                            self.active_lineweight,
-                            &style_ctx,
-                        ),
-                        collapse_button(
-                            g,
-                            self.last_panel_tool.get(g.title).copied(),
-                            &self.active_tool,
-                            &self.open_dropdown,
-                            &self.last_cmd,
-                            ts,
-                            &self.layer_infos,
-                            &self.active_layer,
-                            self.active_color,
-                            &self.active_linetype,
-                            self.active_lineweight,
-                            &style_ctx,
-                            false,
-                        ),
-                        collapse_button(
-                            g,
-                            self.last_panel_tool.get(g.title).copied(),
-                            &self.active_tool,
-                            &self.open_dropdown,
-                            &self.last_cmd,
-                            ts,
-                            &self.layer_infos,
-                            &self.active_layer,
-                            self.active_color,
-                            &self.active_linetype,
-                            self.active_lineweight,
-                            &style_ctx,
-                            true,
-                        ),
-                        ],
-                    }
+                            id: g.title.to_string(),
+                            elements: [
+                                render_group(
+                                    false,
+                                    g,
+                                    &self.active_tool,
+                                    &self.open_dropdown,
+                                    &self.last_cmd,
+                                    ts,
+                                    &self.layer_infos,
+                                    &self.active_layer,
+                                    self.active_color,
+                                    &self.active_linetype,
+                                    self.active_lineweight,
+                                    &style_ctx,
+                                ),
+                                render_group(
+                                    true,
+                                    g,
+                                    &self.active_tool,
+                                    &self.open_dropdown,
+                                    &self.last_cmd,
+                                    ts,
+                                    &self.layer_infos,
+                                    &self.active_layer,
+                                    self.active_color,
+                                    &self.active_linetype,
+                                    self.active_lineweight,
+                                    &style_ctx,
+                                ),
+                                collapse_button(
+                                    g,
+                                    self.last_panel_tool.get(g.title).copied(),
+                                    &self.active_tool,
+                                    &self.open_dropdown,
+                                    &self.last_cmd,
+                                    ts,
+                                    &self.layer_infos,
+                                    &self.active_layer,
+                                    self.active_color,
+                                    &self.active_linetype,
+                                    self.active_lineweight,
+                                    &style_ctx,
+                                    false,
+                                ),
+                                collapse_button(
+                                    g,
+                                    self.last_panel_tool.get(g.title).copied(),
+                                    &self.active_tool,
+                                    &self.open_dropdown,
+                                    &self.last_cmd,
+                                    ts,
+                                    &self.layer_infos,
+                                    &self.active_layer,
+                                    self.active_color,
+                                    &self.active_linetype,
+                                    self.active_lineweight,
+                                    &style_ctx,
+                                    true,
+                                ),
+                            ],
+                        }
                     })
                     .collect();
                 CollapsePanels::new(panels, self.collapsed_open.clone(), TOOL_BAR_H)
@@ -695,9 +685,7 @@ impl Ribbon {
 
         let tool_bar: Element<'_, Message> = container(tool_area)
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(
-                    theme.palette().background.weakest.color,
-                )),
+                background: Some(Background::Color(theme.palette().background.weakest.color)),
                 border: Border {
                     color: theme.palette().background.neutral.color,
                     width: 1.0,
@@ -718,12 +706,7 @@ impl Ribbon {
                     .height(Fill)
                     .style(|theme: &Theme| container::Style {
                         background: Some(Background::Color(
-                            theme
-                                .palette()
-                                .background
-                                .strongest
-                                .color
-                                .scale_alpha(0.58),
+                            theme.palette().background.strongest.color.scale_alpha(0.58),
                         )),
                         ..Default::default()
                     }),
@@ -865,9 +848,9 @@ impl Ribbon {
                     RibbonItem::Dropdown {
                         id, items, default, ..
                     } => (*id, items, *default),
-                    RibbonItem::LabeledDropdown { id, items, default, .. } => {
-                        (*id, items, *default)
-                    }
+                    RibbonItem::LabeledDropdown {
+                        id, items, default, ..
+                    } => (*id, items, *default),
                     RibbonItem::LargeDropdown {
                         id, items, default, ..
                     } => (*id, items, *default),
@@ -891,26 +874,18 @@ impl Ribbon {
                 let checkmark: Element<'_, Message> =
                     crate::ui::icons::themed_check_cell(is_current);
                 let resolved_icon =
-                    crate::ui::command_presentation::ribbon_icon(cmd, *item_icon);
-                let icon_el: Element<Message> =
-                    container(make_icon(resolved_icon, 20.0))
-                        .width(Length::Fixed(20.0))
-                        .into();
+                    crate::ui::command_presentation::ribbon_command_icon(cmd, *item_icon);
+                let icon_el: Element<Message> = container(make_icon(resolved_icon, 20.0))
+                    .width(Length::Fixed(20.0))
+                    .into();
                 let resolved_label = crate::ui::command_presentation::label(cmd, label);
-                let label_el =
-                    text(resolved_label)
-                        .size(11)
-                        .wrapping(iced::advanced::text::Wrapping::None)
-                        .style(move |theme: &Theme| iced::widget::text::Style {
-                            color: (!is_current).then_some(
-                                theme
-                                    .palette()
-                                    .background
-                                    .base
-                                    .text
-                                    .scale_alpha(0.72),
-                            ),
-                        });
+                let label_el = text(resolved_label)
+                    .size(11)
+                    .wrapping(iced::advanced::text::Wrapping::None)
+                    .style(move |theme: &Theme| iced::widget::text::Style {
+                        color: (!is_current)
+                            .then_some(theme.palette().background.base.text.scale_alpha(0.72)),
+                    });
 
                 button(
                     row![checkmark, icon_el, label_el]
@@ -968,9 +943,7 @@ impl Ribbon {
             .layer_infos
             .iter()
             .enumerate()
-            .filter(|(_, info)| {
-                filter.is_empty() || info.name.to_lowercase().contains(&filter)
-            })
+            .filter(|(_, info)| filter.is_empty() || info.name.to_lowercase().contains(&filter))
             .map(|(index, info)| {
                 let is_active = info.name == self.active_layer;
                 let lc = info.color;
@@ -1006,19 +979,12 @@ impl Ribbon {
                 );
                 let checkmark: Element<'_, Message> =
                     crate::ui::icons::themed_check_cell(is_active);
-                let label =
-                    text(&info.name)
-                        .size(11)
-                        .style(move |theme: &Theme| iced::widget::text::Style {
-                            color: (!is_active).then_some(
-                                theme
-                                    .palette()
-                                    .background
-                                    .base
-                                    .text
-                                    .scale_alpha(0.72),
-                            ),
-                        });
+                let label = text(&info.name).size(11).style(move |theme: &Theme| {
+                    iced::widget::text::Style {
+                        color: (!is_active)
+                            .then_some(theme.palette().background.base.text.scale_alpha(0.72)),
+                    }
+                });
 
                 // The swatch + label area selects the layer as active; the
                 // icon buttons above handle their own toggles.
@@ -1078,8 +1044,8 @@ impl Ribbon {
             ]
             .spacing(2),
         )
-            .style(popup_panel_style)
-            .width(Length::Fixed(220.0));
+        .style(popup_panel_style)
+        .width(Length::Fixed(220.0));
 
         let (align_right, h_pad, top) = self.dd_anchor(LAYER_COMBO_ID, 220.0, win.0);
         let positioned = position_ribbon_dropdown(panel.into(), align_right, h_pad, top);
@@ -1133,23 +1099,17 @@ impl Ribbon {
             .map(|name| {
                 let is_sel = name.as_str() == active.as_str();
                 let n = name.clone();
-                let checkmark: Element<Message> =
-                    crate::ui::icons::themed_check_cell(is_sel);
+                let checkmark: Element<Message> = crate::ui::icons::themed_check_cell(is_sel);
                 button(
                     row![
                         checkmark,
-                        text(name.clone())
-                            .size(11)
-                            .style(move |theme: &Theme| iced::widget::text::Style {
+                        text(name.clone()).size(11).style(move |theme: &Theme| {
+                            iced::widget::text::Style {
                                 color: (!is_sel).then_some(
-                                    theme
-                                        .palette()
-                                        .background
-                                        .base
-                                        .text
-                                        .scale_alpha(0.72),
+                                    theme.palette().background.base.text.scale_alpha(0.72),
                                 ),
-                            }),
+                            }
+                        }),
                     ]
                     .spacing(4)
                     .align_y(iced::Center),
@@ -1229,19 +1189,12 @@ impl Ribbon {
             .into_iter()
             .map(|lt| {
                 let is_cur = lt.name == *active_lt;
-                let check: Element<'_, Message> =
-                    crate::ui::icons::themed_check_cell(is_cur);
+                let check: Element<'_, Message> = crate::ui::icons::themed_check_cell(is_cur);
                 let name_col = text(linetype_display_name(&lt.name))
                     .size(11)
                     .style(move |theme: &Theme| iced::widget::text::Style {
-                        color: (!is_cur).then_some(
-                            theme
-                                .palette()
-                                .background
-                                .base
-                                .text
-                                .scale_alpha(0.72),
-                        ),
+                        color: (!is_cur)
+                            .then_some(theme.palette().background.base.text.scale_alpha(0.72)),
                     })
                     .width(Length::Fixed(90.0));
                 let art_col = text(lt.art.clone()).size(9).style(muted_text_style);
@@ -1279,23 +1232,17 @@ impl Ribbon {
             .map(|item| {
                 let is_cur = item.0 == active_lw;
                 let label = item.to_string();
-                let check: Element<'_, Message> =
-                    crate::ui::icons::themed_check_cell(is_cur);
+                let check: Element<'_, Message> = crate::ui::icons::themed_check_cell(is_cur);
                 button(
                     row![
                         check,
-                        text(label)
-                            .size(11)
-                            .style(move |theme: &Theme| iced::widget::text::Style {
+                        text(label).size(11).style(move |theme: &Theme| {
+                            iced::widget::text::Style {
                                 color: (!is_cur).then_some(
-                                    theme
-                                        .palette()
-                                        .background
-                                        .base
-                                        .text
-                                        .scale_alpha(0.72),
+                                    theme.palette().background.base.text.scale_alpha(0.72),
                                 ),
-                            })
+                            }
+                        })
                     ]
                     .spacing(5)
                     .align_y(iced::Center),
@@ -1380,13 +1327,7 @@ fn render_group<'a>(
             flush_small_col(&mut small_buf, &mut items_row);
             items_row.push(render_large(item, &ctx));
         } else {
-            small_buf.push(render_small(
-                item,
-                active_tool,
-                open_dd,
-                last_cmd,
-                state,
-            ));
+            small_buf.push(render_small(item, active_tool, open_dd, last_cmd, state));
             if small_buf.len() == 3 {
                 flush_small_col(&mut small_buf, &mut items_row);
             }
@@ -1400,15 +1341,12 @@ fn render_group<'a>(
             r.push(e)
         });
 
-    column![
-        tools_el,
-        draw_panel::group_title(group.title, open_dd),
-    ]
-    .align_x(iced::Center)
-    .spacing(0)
-    .padding([3u16, 4])
-    .height(Length::Fixed(TOOL_BAR_H))
-    .into()
+    column![tools_el, draw_panel::group_title(group.title, open_dd),]
+        .align_x(iced::Center)
+        .spacing(0)
+        .padding([3u16, 4])
+        .height(Length::Fixed(TOOL_BAR_H))
+        .into()
 }
 
 /// The top-level command id of a ribbon item, if it has one.
@@ -1449,15 +1387,17 @@ fn first_tool_icon(group: &RibbonGroup) -> Option<IconKind> {
         RibbonItem::Dropdown { icon, default, .. }
         | RibbonItem::LabeledDropdown { icon, default, .. }
         | RibbonItem::LargeDropdown { icon, default, .. } => Some(
-            crate::ui::command_presentation::ribbon_icon(default, *icon),
+            crate::ui::command_presentation::ribbon_menu_icon(default, *icon),
         ),
         RibbonItem::PropertiesGroup { match_prop } => Some(widgets::tool_icon(match_prop)),
         RibbonItem::LayerComboGroup { row2, .. } => row2.first().map(widgets::tool_icon),
         RibbonItem::StyleComboGroup { rows, .. } => {
             rows.first().and_then(|r| r.first()).map(widgets::tool_icon)
-        },
-        RibbonItem::ToolGrid { columns } => columns.first()
-            .and_then(|column| column.first()).map(widgets::tool_icon),
+        }
+        RibbonItem::ToolGrid { columns } => columns
+            .first()
+            .and_then(|column| column.first())
+            .map(widgets::tool_icon),
     })
 }
 
@@ -1528,42 +1468,38 @@ fn collapse_button<'a>(
     // For a Properties panel the representative is its Match button.
     let rep = representative(group, last_used);
     let face: Element<'_, Message> = match rep {
-        Some(RibbonItem::PropertiesGroup { match_prop }) => {
-            render_large(
-                &RibbonItem::LargeTool(match_prop.clone()),
-                &widgets::RenderCtx {
-                    active_tool,
-                    open_dd,
-                    last_cmd,
-                    state,
-                    layer_infos,
-                    active_layer,
-                    active_color,
-                    active_linetype,
-                    active_lineweight,
-                    style_ctx,
-                    compact: false,
-                },
-            )
-        }
-        Some(item) => {
-            render_large(
-                item,
-                &widgets::RenderCtx {
-                    active_tool,
-                    open_dd,
-                    last_cmd,
-                    state,
-                    layer_infos,
-                    active_layer,
-                    active_color,
-                    active_linetype,
-                    active_lineweight,
-                    style_ctx,
-                    compact: false,
-                },
-            )
-        }
+        Some(RibbonItem::PropertiesGroup { match_prop }) => render_large(
+            &RibbonItem::LargeTool(match_prop.clone()),
+            &widgets::RenderCtx {
+                active_tool,
+                open_dd,
+                last_cmd,
+                state,
+                layer_infos,
+                active_layer,
+                active_color,
+                active_linetype,
+                active_lineweight,
+                style_ctx,
+                compact: false,
+            },
+        ),
+        Some(item) => render_large(
+            item,
+            &widgets::RenderCtx {
+                active_tool,
+                open_dd,
+                last_cmd,
+                state,
+                layer_infos,
+                active_layer,
+                active_color,
+                active_linetype,
+                active_lineweight,
+                style_ctx,
+                compact: false,
+            },
+        ),
         None => text("").into(),
     };
 

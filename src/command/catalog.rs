@@ -9,7 +9,10 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::OnceLock;
 
-use crate::ui::icon_catalog::{self, IconId};
+use crate::ui::icon_catalog::IconId;
+
+#[path = "builtin_presentation.rs"]
+mod builtin_presentation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CommandCategory {
@@ -47,6 +50,13 @@ pub struct CommandMetadata {
 
 pub struct CommandMetadataRegistration {
     pub metadata: CommandMetadata,
+}
+
+#[derive(Clone, Copy)]
+pub struct CommandVariantMetadata {
+    pub invocation: &'static str,
+    pub label: &'static str,
+    pub icon: Option<IconId>,
 }
 
 inventory::collect!(CommandMetadataRegistration);
@@ -173,34 +183,39 @@ impl CommandCatalog {
                 .or_insert_with(|| derived_descriptor(id));
         }
 
-        apply_builtin_ribbon_metadata(&mut descriptors);
-
-        let mut authored = Vec::from(CORE_METADATA);
-        authored.extend(
-            inventory::iter::<CommandMetadataRegistration>
-                .into_iter()
-                .map(|r| r.metadata),
-        );
+        for metadata in builtin_presentation::BUILTIN_PRESENTATION {
+            descriptors.insert(metadata.id, authored_descriptor(*metadata));
+        }
 
         let mut validation_errors = Vec::new();
         let mut authored_ids = HashSet::new();
-        for metadata in authored {
+        for supplement in CORE_METADATA_SUPPLEMENTS {
+            if !authored_ids.insert(supplement.id.to_ascii_uppercase()) {
+                validation_errors.push(format!(
+                    "duplicate command metadata supplement: {}",
+                    supplement.id
+                ));
+                continue;
+            }
+            match descriptors.get_mut(supplement.id) {
+                Some(descriptor) => {
+                    descriptor.aliases = supplement.aliases.to_vec();
+                    descriptor.description_source = supplement.description;
+                }
+                None => validation_errors.push(format!(
+                    "metadata supplement has no built-in descriptor: {}",
+                    supplement.id
+                )),
+            }
+        }
+
+        for registration in inventory::iter::<CommandMetadataRegistration> {
+            let metadata = registration.metadata;
             if !authored_ids.insert(metadata.id.to_ascii_uppercase()) {
                 validation_errors.push(format!("duplicate command metadata: {}", metadata.id));
                 continue;
             }
-            descriptors.insert(
-                metadata.id,
-                CommandDescriptor {
-                    id: metadata.id,
-                    aliases: metadata.aliases.to_vec(),
-                    label_source: metadata.label.to_string(),
-                    description_source: metadata.description,
-                    icon: metadata.icon,
-                    category: metadata.category,
-                    metadata_quality: MetadataQuality::Authored,
-                },
-            );
+            descriptors.insert(metadata.id, authored_descriptor(metadata));
         }
 
         let mut aliases = HashMap::new();
@@ -340,6 +355,19 @@ pub fn coverage_report() -> CoverageReport {
     all().coverage_report()
 }
 
+pub fn variant(command: &str) -> Option<&'static CommandVariantMetadata> {
+    let normalized = normalize_command(command);
+    builtin_presentation::BUILTIN_VARIANTS
+        .iter()
+        .find(|variant| variant.invocation.eq_ignore_ascii_case(normalized))
+}
+
+/// Icon override for a command invocation whose arguments select a distinct
+/// presentation variant. Canonical command icons live on their descriptors.
+pub fn variant_icon(command: &str) -> Option<IconId> {
+    variant(command).and_then(|variant| variant.icon)
+}
+
 fn normalize_command(command: &str) -> &str {
     command.trim().trim_start_matches('\'')
 }
@@ -359,169 +387,27 @@ fn humanize_command_id(id: &str) -> String {
         .join(" ")
 }
 
+fn authored_descriptor(metadata: CommandMetadata) -> CommandDescriptor {
+    CommandDescriptor {
+        id: metadata.id,
+        aliases: metadata.aliases.to_vec(),
+        label_source: metadata.label.to_string(),
+        description_source: metadata.description,
+        icon: metadata.icon,
+        category: metadata.category,
+        metadata_quality: MetadataQuality::Authored,
+    }
+}
+
 fn derived_descriptor(id: &'static str) -> CommandDescriptor {
     CommandDescriptor {
         id,
         aliases: Vec::new(),
         label_source: humanize_command_id(id),
         description_source: None,
-        icon: icon_catalog::command_icon(id),
+        icon: None,
         category: CommandCategory::Utility,
         metadata_quality: MetadataQuality::Derived,
-    }
-}
-
-/// Promote the labels, categories and SVGs already authored for built-in
-/// ribbon tools into catalog-owned descriptors. Core metadata below can still
-/// override these values with a more specific description or shared IconId.
-fn apply_builtin_ribbon_metadata(descriptors: &mut BTreeMap<&'static str, CommandDescriptor>) {
-    use crate::modules::{IconKind, ModuleEvent, RibbonItem, ToolDef};
-
-    fn category(module: &str) -> CommandCategory {
-        match module {
-            "draw" => CommandCategory::Draw,
-            "modify" => CommandCategory::Modify,
-            "parametric" => CommandCategory::Parametric,
-            "model" => CommandCategory::Model,
-            "insert" => CommandCategory::Insert,
-            "annotate" => CommandCategory::Annotate,
-            "view" | "layout" => CommandCategory::View,
-            "manage" => CommandCategory::Manage,
-            _ => CommandCategory::Utility,
-        }
-    }
-
-    fn ribbon_category(module: &str, group: &str) -> CommandCategory {
-        match group {
-            "Modify" => CommandCategory::Modify,
-            "Annotation" | "Text" | "Dimensions" | "Centerlines" | "Leaders" | "Tables"
-            | "Markup" | "Annotation Scaling" => CommandCategory::Annotate,
-            "Layers" => CommandCategory::Layers,
-            "Block" | "Reference" | "Point Cloud" | "Attributes" | "Import" | "Content" => {
-                CommandCategory::Insert
-            }
-            "Clipboard" => CommandCategory::Clipboard,
-            "Viewport" | "Viewport Tools" | "Navigate" | "Model Viewports" | "Visual Style"
-            | "Projection" | "Preset" | "Palettes" | "Interface" => CommandCategory::View,
-            "Plot" => CommandCategory::File,
-            "Properties" | "Groups" | "Measure" | "Customization" | "Cleanup" | "Application"
-            | "Manage" => CommandCategory::Manage,
-            _ => category(module),
-        }
-    }
-
-    fn canonical_surface_id(
-        descriptors: &BTreeMap<&'static str, CommandDescriptor>,
-        command: &str,
-        fallback: &'static str,
-    ) -> &'static str {
-        let base = normalize_command(command)
-            .split_whitespace()
-            .next()
-            .unwrap_or(fallback);
-        if let Some(metadata) = CORE_METADATA.iter().find(|metadata| {
-            metadata.id.eq_ignore_ascii_case(base)
-                || metadata
-                    .aliases
-                    .iter()
-                    .any(|alias| alias.eq_ignore_ascii_case(base))
-        }) {
-            return metadata.id;
-        }
-        descriptors
-            .keys()
-            .find(|id| id.eq_ignore_ascii_case(base))
-            .copied()
-            .unwrap_or(fallback)
-    }
-
-    fn promote(
-        descriptors: &mut BTreeMap<&'static str, CommandDescriptor>,
-        command: &str,
-        fallback_id: &'static str,
-        label: &'static str,
-        icon: IconKind,
-        category: CommandCategory,
-    ) {
-        let id = canonical_surface_id(descriptors, command, fallback_id);
-        let icon = match icon {
-            IconKind::Svg(svg) => {
-                icon_catalog::command_icon(command).or(Some(IconId::Ribbon { command: id, svg }))
-            }
-            IconKind::Glyph(_) => icon_catalog::command_icon(command),
-        };
-        let descriptor = descriptors
-            .entry(id)
-            .or_insert_with(|| derived_descriptor(id));
-        descriptor.label_source = label.to_string();
-        descriptor.icon = icon;
-        descriptor.category = category;
-        descriptor.metadata_quality = MetadataQuality::Authored;
-    }
-
-    fn promote_tool(
-        descriptors: &mut BTreeMap<&'static str, CommandDescriptor>,
-        tool: &ToolDef,
-        category: CommandCategory,
-    ) {
-        if let ModuleEvent::Command(command) = &tool.event {
-            promote(
-                descriptors,
-                command,
-                tool.id,
-                tool.label,
-                tool.icon,
-                category,
-            );
-        }
-    }
-
-    for module in crate::modules::registry::all_modules() {
-        for group in module.ribbon_groups() {
-            let category = ribbon_category(module.id(), group.title);
-            for item in &group.tools {
-                match item {
-                    RibbonItem::Tool(tool)
-                    | RibbonItem::LabeledTool(tool)
-                    | RibbonItem::LargeTool(tool) => {
-                        promote_tool(descriptors, tool, category);
-                    }
-                    RibbonItem::Dropdown { items, .. }
-                    | RibbonItem::LabeledDropdown { items, .. }
-                    | RibbonItem::LargeDropdown { items, .. } => {
-                        for (command, label, icon) in items {
-                            promote(descriptors, command, command, label, *icon, category);
-                        }
-                    }
-                    RibbonItem::ToolGrid { columns }
-                    | RibbonItem::StyleComboGroup { rows: columns, .. } => {
-                        for tool in columns.iter().flatten() {
-                            promote_tool(descriptors, tool, category);
-                        }
-                    }
-                    RibbonItem::LayerComboGroup { row2, row3 } => {
-                        for tool in row2.iter().chain(row3) {
-                            promote_tool(descriptors, tool, category);
-                        }
-                    }
-                    RibbonItem::PropertiesGroup { match_prop } => {
-                        promote_tool(descriptors, match_prop, category);
-                    }
-                }
-            }
-        }
-    }
-
-    for (command, label, svg, owner) in crate::ui::ribbon::builtin_extension_command_presentations()
-    {
-        promote(
-            descriptors,
-            command,
-            command,
-            label,
-            IconKind::Svg(svg),
-            category(owner),
-        );
     }
 }
 
@@ -570,312 +456,163 @@ const APP_COMMANDS: &[&str] = &[
     "XCLIP",
 ];
 
-const CORE_METADATA: &[CommandMetadata] = &[
-    meta(
-        "NEW",
-        &[],
-        "New",
-        Some("Creates a new drawing."),
-        Some(IconId::New),
-        CommandCategory::File,
-    ),
-    meta(
-        "OPEN",
-        &[],
-        "Open",
-        Some("Opens an existing drawing."),
-        Some(IconId::Open),
-        CommandCategory::File,
-    ),
-    meta(
-        "SAVE",
-        &[],
-        "Save",
-        Some("Saves the current drawing."),
-        Some(IconId::Save),
-        CommandCategory::File,
-    ),
-    meta(
+#[derive(Clone, Copy)]
+struct CommandMetadataSupplement {
+    id: &'static str,
+    aliases: &'static [&'static str],
+    description: Option<&'static str>,
+}
+
+// Aliases and descriptions enrich built-in presentation entries. Labels,
+// icons and categories deliberately remain in one authoritative table.
+const CORE_METADATA_SUPPLEMENTS: &[CommandMetadataSupplement] = &[
+    supplement("NEW", &[], Some("Creates a new drawing.")),
+    supplement("OPEN", &[], Some("Opens an existing drawing.")),
+    supplement("SAVE", &[], Some("Saves the current drawing.")),
+    supplement(
         "SAVEAS",
         &[],
-        "Save As",
         Some("Saves the current drawing under a new name or format."),
-        Some(IconId::SaveAs),
-        CommandCategory::File,
     ),
-    meta(
+    supplement(
         "QSAVE",
         &[],
-        "Quick Save",
         Some("Saves the current drawing using its existing name."),
-        Some(IconId::Save),
-        CommandCategory::File,
     ),
-    meta(
-        "PRINT",
-        &[],
-        "Print",
-        Some("Prints or plots the current drawing."),
-        Some(IconId::Print),
-        CommandCategory::File,
-    ),
-    meta(
-        "PLOT",
-        &[],
-        "Plot",
-        Some("Opens the drawing plot workflow."),
-        Some(IconId::Print),
-        CommandCategory::File,
-    ),
-    meta(
-        "LINE",
-        &[],
-        "Line",
-        Some("Creates straight line segments."),
-        Some(IconId::Line),
-        CommandCategory::Draw,
-    ),
-    meta(
+    supplement("PRINT", &[], Some("Prints or plots the current drawing.")),
+    supplement("PLOT", &[], Some("Opens the drawing plot workflow.")),
+    supplement("LINE", &[], Some("Creates straight line segments.")),
+    supplement(
         "PLINE",
         &["POLYLINE"],
-        "Polyline",
         Some("Creates connected line and arc segments as one polyline."),
-        Some(IconId::Polyline),
-        CommandCategory::Draw,
     ),
-    meta(
+    supplement(
         "CIRCLE",
         &[],
-        "Circle",
         Some("Creates a circle using a center point and radius."),
-        Some(IconId::Circle),
-        CommandCategory::Draw,
     ),
-    meta(
-        "ARC",
-        &[],
-        "Arc",
-        Some("Creates an arc using three points."),
-        Some(IconId::Arc3Point),
-        CommandCategory::Draw,
-    ),
-    meta(
-        "RECT",
-        &["RECTANG"],
-        "Rectangle - Two Corners",
-        None,
-        Some(IconId::Rectangle),
-        CommandCategory::Draw,
-    ),
-    meta(
+    supplement("ARC", &[], Some("Creates an arc using three points.")),
+    supplement("RECT", &["RECTANG"], None),
+    supplement(
         "MOVE",
         &[],
-        "Move",
         Some("Moves selected objects by a displacement."),
-        Some(IconId::Move),
-        CommandCategory::Modify,
     ),
-    meta(
-        "COPY",
-        &[],
-        "Copy",
-        Some("Copies selected objects."),
-        Some(IconId::Copy),
-        CommandCategory::Modify,
-    ),
-    meta(
+    supplement("COPY", &[], Some("Copies selected objects.")),
+    supplement(
         "ROTATE",
         &[],
-        "Rotate",
         Some("Rotates selected objects around a base point."),
-        Some(IconId::Rotate),
-        CommandCategory::Modify,
     ),
-    meta(
+    supplement(
         "SCALE",
         &[],
-        "Scale",
         Some("Scales selected objects around a base point."),
-        Some(IconId::Scale),
-        CommandCategory::Modify,
     ),
-    meta(
+    supplement(
         "MIRROR",
         &[],
-        "Mirror",
         Some("Creates a mirrored copy of selected objects."),
-        Some(IconId::Mirror),
-        CommandCategory::Modify,
     ),
-    meta(
+    supplement(
         "STRETCH",
         &[],
-        "Stretch",
         Some("Stretches vertices inside a crossing selection."),
-        Some(IconId::Stretch),
-        CommandCategory::Modify,
     ),
-    meta(
+    supplement(
         "ERASE",
         &["DELETE"],
-        "Erase",
         Some("Removes selected objects from the drawing."),
-        Some(IconId::Erase),
-        CommandCategory::Modify,
     ),
-    meta(
+    supplement(
         "CUTCLIP",
         &[],
-        "Cut",
         Some("Cuts selected objects to the clipboard."),
-        Some(IconId::Cut),
-        CommandCategory::Clipboard,
     ),
-    meta(
+    supplement(
         "COPYCLIP",
         &[],
-        "Copy",
         Some("Copies selected objects to the clipboard."),
-        Some(IconId::CopyClipboard),
-        CommandCategory::Clipboard,
     ),
-    meta(
+    supplement(
         "COPYBASE",
         &[],
-        "Copy with Base Point",
         Some("Copies selected objects using a specified base point."),
-        Some(IconId::CopyClipboard),
-        CommandCategory::Clipboard,
     ),
-    meta(
+    supplement(
         "PASTECLIP",
         &["PASTE"],
-        "Paste",
         Some("Pastes objects from the clipboard."),
-        Some(IconId::Paste),
-        CommandCategory::Clipboard,
     ),
-    meta(
+    supplement(
         "PASTEBLOCK",
         &[],
-        "Paste as Block",
         Some("Pastes clipboard objects as a block."),
-        Some(IconId::Paste),
-        CommandCategory::Clipboard,
     ),
-    meta(
+    supplement(
         "PASTEORIG",
         &[],
-        "Paste to Original Coordinates",
         Some("Pastes clipboard objects at their original coordinates."),
-        Some(IconId::Paste),
-        CommandCategory::Clipboard,
     ),
-    meta(
+    supplement(
         "DRAWORDER",
         &[],
-        "Draw Order",
         Some("Changes the display order of selected objects."),
-        Some(IconId::DrawOrder),
-        CommandCategory::Modify,
     ),
-    meta(
-        "UNDO",
-        &[],
-        "Undo",
-        Some("Reverses the most recent operation."),
-        Some(IconId::Undo),
-        CommandCategory::Utility,
-    ),
-    meta(
+    supplement("UNDO", &[], Some("Reverses the most recent operation.")),
+    supplement(
         "REDO",
         &[],
-        "Redo",
         Some("Restores the most recently undone operation."),
-        Some(IconId::Redo),
-        CommandCategory::Utility,
     ),
-    meta(
+    supplement(
         "PAN",
         &[],
-        "Pan",
         Some("Moves the view without changing its scale."),
-        Some(IconId::Pan),
-        CommandCategory::View,
     ),
-    meta(
+    supplement(
         "ZOOM",
         &[],
-        "Zoom",
         Some("Changes the magnification of the current view."),
-        Some(IconId::Zoom),
-        CommandCategory::View,
     ),
-    meta(
+    supplement(
         "PROPERTIES",
         &[],
-        "Properties",
         Some("Shows or hides the Properties panel."),
-        Some(IconId::Properties),
-        CommandCategory::View,
     ),
-    meta(
-        "OPTIONS",
-        &[],
-        "Options",
-        Some("Opens application settings."),
-        Some(IconId::Options),
-        CommandCategory::Manage,
-    ),
-    meta(
+    supplement("OPTIONS", &[], Some("Opens application settings.")),
+    supplement(
         "ISOLATEOBJECTS",
         &[],
-        "Isolate Objects",
         Some("Temporarily hides all objects except the selection."),
-        None,
-        CommandCategory::Selection,
     ),
-    meta(
+    supplement(
         "HIDEOBJECTS",
         &[],
-        "Hide Objects",
         Some("Temporarily hides selected objects."),
-        None,
-        CommandCategory::Selection,
     ),
-    meta(
+    supplement(
         "UNISOLATEOBJECTS",
         &[],
-        "End Object Isolation",
         Some("Restores temporarily hidden objects."),
-        None,
-        CommandCategory::Selection,
     ),
-    meta(
+    supplement(
         "SELECTALL",
         &[],
-        "Select All",
         Some("Selects all selectable objects in the current drawing."),
-        None,
-        CommandCategory::Selection,
     ),
 ];
 
-const fn meta(
+const fn supplement(
     id: &'static str,
     aliases: &'static [&'static str],
-    label: &'static str,
     description: Option<&'static str>,
-    icon: Option<IconId>,
-    category: CommandCategory,
-) -> CommandMetadata {
-    CommandMetadata {
+) -> CommandMetadataSupplement {
+    CommandMetadataSupplement {
         id,
         aliases,
-        label,
         description,
-        icon,
-        category,
     }
 }
 
@@ -919,7 +656,7 @@ mod tests {
         let move_command = descriptor("MOVE").expect("MOVE descriptor");
         assert!(!move_command.translated_label().is_empty());
         assert!(!move_command.translated_description().unwrap().is_empty());
-        assert!(!icon_catalog::bytes(move_command.icon.unwrap()).is_empty());
+        assert!(!crate::ui::icon_catalog::bytes(move_command.icon.unwrap()).is_empty());
     }
 
     #[test]
@@ -946,11 +683,47 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_icons_follow_the_shared_icon_catalog() {
-        for command in all().descriptors() {
-            if let Some(icon) = icon_catalog::command_icon(command.id) {
-                assert_eq!(command.icon, Some(icon), "icon mismatch for {}", command.id);
+    fn builtin_presentation_is_explicit_and_valid() {
+        let mut ids = HashSet::new();
+        let mut icon_keys = HashSet::new();
+        let mut validate_icon = |owner: &str, icon: Option<IconId>| {
+            let Some(icon) = icon else { return };
+            assert!(
+                !crate::ui::icon_catalog::bytes(icon).is_empty(),
+                "empty icon for {owner}"
+            );
+            if let IconId::Builtin { key, .. } = icon {
+                assert!(!key.trim().is_empty(), "empty icon key for {owner}");
+                assert!(icon_keys.insert(key), "duplicate built-in icon key: {key}");
             }
+        };
+        for metadata in builtin_presentation::BUILTIN_PRESENTATION {
+            assert!(
+                ids.insert(metadata.id),
+                "duplicate built-in metadata: {}",
+                metadata.id
+            );
+            assert!(
+                !metadata.label.trim().is_empty(),
+                "empty label for {}",
+                metadata.id
+            );
+            validate_icon(metadata.id, metadata.icon);
+        }
+
+        let mut invocations = HashSet::new();
+        for variant in builtin_presentation::BUILTIN_VARIANTS {
+            assert!(
+                invocations.insert(variant.invocation),
+                "duplicate built-in variant: {}",
+                variant.invocation
+            );
+            assert!(
+                !variant.label.trim().is_empty(),
+                "empty label for {}",
+                variant.invocation
+            );
+            validate_icon(variant.invocation, variant.icon);
         }
     }
 
@@ -1047,23 +820,5 @@ mod tests {
             .windows(2)
             .all(|ids| ids[0] <= ids[1]));
         assert!(report.render_text().contains("Command metadata coverage"));
-    }
-
-    #[test]
-    fn every_builtin_extension_command_has_authored_metadata_and_category() {
-        for (command, _, _, _) in crate::ui::ribbon::builtin_extension_command_presentations() {
-            let descriptor = descriptor(command)
-                .unwrap_or_else(|| panic!("extension command {command} has no descriptor"));
-            assert_eq!(
-                descriptor.metadata_quality,
-                MetadataQuality::Authored,
-                "{command} still uses derived metadata"
-            );
-            assert_ne!(
-                descriptor.category,
-                CommandCategory::Utility,
-                "{command} has no extension-panel category"
-            );
-        }
     }
 }

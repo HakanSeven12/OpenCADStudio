@@ -94,11 +94,9 @@ pub enum IconId {
     Save,
     SaveAs,
     Print,
-    /// Existing built-in ribbon artwork promoted into the shared catalog.
-    /// The command ID gives the embedded SVG a stable identity while built-in
-    /// modules are migrated away from carrying duplicate asset references.
-    Ribbon {
-        command: &'static str,
+    /// Built-in artwork registered directly by the command catalog.
+    Builtin {
+        key: &'static str,
         svg: &'static [u8],
     },
 }
@@ -151,62 +149,8 @@ pub const fn bytes(id: IconId) -> &'static [u8] {
         Save => SAVE,
         SaveAs => SAVE_AS,
         Print => PRINT,
-        Ribbon { svg, .. } => svg,
+        Builtin { svg, .. } => svg,
     }
-}
-
-/// Resolve a CAD command line to an icon. Exact variants are checked first;
-/// command arguments and transparent-command apostrophes are normalized.
-pub fn command_icon(command: &str) -> Option<IconId> {
-    use IconId::*;
-    let normalized = command.trim().trim_start_matches('\'').to_ascii_uppercase();
-    let exact = match normalized.as_str() {
-        "LINE" => Some(Line),
-        "PLINE" | "POLYLINE" => Some(Polyline),
-        "RECT" | "RECTANG" => Some(Rectangle),
-        "CIRCLE" => Some(Circle),
-        "CIRCLE_CD" => Some(CircleDiameter),
-        "CIRCLE_2P" => Some(Circle2Point),
-        "CIRCLE_3P" => Some(Circle3Point),
-        "CIRCLE_TTR" => Some(CircleTangentRadius),
-        "CIRCLE_TTT" => Some(CircleThreeTangents),
-        "ARC" | "ARC_3P" => Some(Arc3Point),
-        "ARC_SCE" => Some(ArcStartCenterEnd),
-        "ARC_SCA" => Some(ArcStartCenterAngle),
-        "ARC_SCL" => Some(ArcStartCenterLength),
-        "ARC_SEA" => Some(ArcStartEndAngle),
-        "ARC_SED" => Some(ArcStartEndDirection),
-        "ARC_SER" => Some(ArcStartEndRadius),
-        "ARC_CSE" => Some(ArcCenterStartEnd),
-        "ARC_CSA" => Some(ArcCenterStartAngle),
-        "ARC_CSL" => Some(ArcCenterStartLength),
-        "ARC_CONT" => Some(ArcContinue),
-        "CUTCLIP" => Some(Cut),
-        "COPYCLIP" | "COPYBASE" => Some(CopyClipboard),
-        "PASTE" | "PASTECLIP" | "PASTEBLOCK" | "PASTEORIG" => Some(Paste),
-        "ERASE" | "DELETE" => Some(Erase),
-        "MOVE" => Some(Move),
-        "COPY" => Some(Copy),
-        "SCALE" => Some(Scale),
-        "ROTATE" => Some(Rotate),
-        "MIRROR" => Some(Mirror),
-        "STRETCH" => Some(Stretch),
-        "DRAWORDER" => Some(DrawOrder),
-        "UNDO" => Some(Undo),
-        "REDO" => Some(Redo),
-        "PAN" => Some(Pan),
-        "ZOOM" | "ZOOM DYNAMIC" => Some(Zoom),
-        "ZOOM EXTENTS" => Some(ZoomExtents),
-        "PROPERTIES" => Some(Properties),
-        "OPTIONS" => Some(Options),
-        "NEW" => Some(New),
-        "OPEN" => Some(Open),
-        "SAVE" | "QSAVE" => Some(Save),
-        "SAVEAS" => Some(SaveAs),
-        "PRINT" | "PLOT" => Some(Print),
-        _ => None,
-    };
-    exact
 }
 
 /// Render catalog artwork with the shared semantic enabled/disabled treatment.
@@ -221,22 +165,6 @@ pub fn render<'a, M: 'a>(id: IconId, size: f32, enabled: bool) -> Element<'a, M>
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn command_lookup_normalizes_variants_and_arguments() {
-        assert_eq!(command_icon("circle"), Some(IconId::Circle));
-        assert_eq!(command_icon("CIRCLE_2P"), Some(IconId::Circle2Point));
-        assert_eq!(command_icon("ARC"), Some(IconId::Arc3Point));
-        assert_eq!(command_icon("ARC_3P"), Some(IconId::Arc3Point));
-        assert_eq!(command_icon("ARC_SEA"), Some(IconId::ArcStartEndAngle));
-        assert_eq!(command_icon("RECTANG"), Some(IconId::Rectangle));
-        assert_eq!(command_icon("'PAN"), Some(IconId::Pan));
-        assert_eq!(command_icon("DRAWORDER"), Some(IconId::DrawOrder));
-        assert_eq!(command_icon("DRAWORDER F"), None);
-        assert_eq!(command_icon("ISOLATEOBJECTS"), None);
-        assert_eq!(command_icon("ZOOM EXTENTS"), Some(IconId::ZoomExtents));
-        assert_eq!(command_icon("NOT_A_COMMAND"), None);
-    }
 
     #[test]
     fn every_icon_id_has_nonempty_artwork() {

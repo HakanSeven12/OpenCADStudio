@@ -106,7 +106,6 @@ struct Panel {
     id: &'static str,
     title_id: &'static str,
     title: &'static str,
-    owner: &'static str,
     tools: &'static [Tool],
 }
 
@@ -115,33 +114,15 @@ const PANELS: &[Panel] = &[
         id: PANEL_ID,
         title_id: TITLE_ID,
         title: "Draw",
-        owner: "draw",
         tools: TOOLS,
     },
     Panel {
         id: "modify_extension",
         title_id: "modify_extension_title",
         title: "Modify",
-        owner: "modify",
         tools: super::modify_panel::TOOLS,
     },
 ];
-
-pub(super) fn command_presentations() -> Vec<super::BuiltinCommandPresentation> {
-    PANELS
-        .iter()
-        .flat_map(|panel| {
-            let owner = panel.owner;
-            panel.tools.iter().flat_map(move |tool| {
-                std::iter::once((tool.command, tool.label, tool.icon, owner)).chain(
-                    tool.options
-                        .iter()
-                        .map(move |(command, label)| (*command, *label, tool.icon, owner)),
-                )
-            })
-        })
-        .collect()
-}
 
 fn panel_for_dropdown(id: &str) -> Option<Panel> {
     PANELS.iter().copied().find(|panel| {
@@ -194,7 +175,11 @@ pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Ele
 }
 
 fn tool_button(tool: &Tool, active: bool, panel_id: &'static str) -> Element<'static, Message> {
-    let icon = crate::ui::command_presentation::ribbon_icon(tool.command, IconKind::Svg(tool.icon));
+    let icon = if tool.options.is_empty() {
+        crate::ui::command_presentation::ribbon_command_icon(tool.command, IconKind::Svg(tool.icon))
+    } else {
+        crate::ui::command_presentation::ribbon_menu_icon(tool.command, IconKind::Svg(tool.icon))
+    };
     let face = button(make_icon(icon, 23.0 * SCALE))
         .on_press(Message::DropdownSelectItem {
             dropdown_id: panel_id,

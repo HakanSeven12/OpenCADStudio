@@ -1582,6 +1582,11 @@ pub(crate) fn wide_fills(pl: &acadrust::entities::LwPolyline) -> ([f64; 2], Vec<
     if n < 2 {
         return ([0.0; 2], vec![]);
     }
+    let is_wide = pl.constant_width > 1e-9
+        || verts.iter().any(|v| v.start_width > 1e-9 || v.end_width > 1e-9);
+    if !is_wide {
+        return ([0.0; 2], Vec::new());
+    }
     let origin = [verts[0].location.x, verts[0].location.y];
     let seg_count = if pl.is_closed { n } else { n - 1 };
     let mut out = Vec::new();

@@ -186,6 +186,9 @@ pub(crate) fn points_to_ds(
     let it = src.into_iter();
     let (lo, hi) = it.size_hint();
     let cap = hi.unwrap_or(lo);
+    if cap == 0 {
+        return (Vec::new(), Vec::new());
+    }
     let mut high = Vec::with_capacity(cap);
     let mut low = Vec::with_capacity(cap);
     for [x, y, z] in it {
@@ -327,9 +330,10 @@ fn split_mixed_polyline(
                 (sw, ew)
             };
 
-            let mut arc_pts = Vec::with_capacity(17);
-            let mut arc_widths = Vec::with_capacity(17);
             let n = 16;
+            let mut points = Vec::with_capacity(n + 1);
+            let mut points_low = Vec::with_capacity(n + 1);
+            let mut arc_widths = Vec::with_capacity(n + 1);
             let sweep = if end_angle >= start_angle {
                 end_angle - start_angle
             } else {
@@ -338,15 +342,15 @@ fn split_mixed_polyline(
             for s in 0..=n {
                 let frac = s as f64 / n as f64;
                 let ang = start_angle + frac * sweep;
-                let p = [
-                    center[0] + radius * (ang.cos() * axis_x[0] + ang.sin() * axis_y[0]),
-                    center[1] + radius * (ang.cos() * axis_x[1] + ang.sin() * axis_y[1]),
-                    center[2] + radius * (ang.cos() * axis_x[2] + ang.sin() * axis_y[2]),
-                ];
-                arc_pts.push(p);
+                let (sin_a, cos_a) = ang.sin_cos();
+                let x = center[0] + radius * (cos_a * axis_x[0] + sin_a * axis_y[0]);
+                let y = center[1] + radius * (cos_a * axis_x[1] + sin_a * axis_y[1]);
+                let z = center[2] + radius * (cos_a * axis_x[2] + sin_a * axis_y[2]);
+                let (h, l) = split_ds_xyz(x, y, z);
+                points.push(h);
+                points_low.push(l);
                 arc_widths.push(w_at_sa + (w_at_ea - w_at_sa) * frac as f32);
             }
-            let (points, points_low) = points_to_ds(arc_pts);
 
             let taper_widths = if (w_at_sa - w_at_ea).abs() > 1e-6 {
                 arc_widths

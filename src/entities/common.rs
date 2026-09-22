@@ -818,6 +818,9 @@ pub(crate) fn triangulate_band_ring(ring: &[[f64; 3]]) -> Vec<[f64; 3]> {
 }
 
 pub(crate) fn wide_band_tris(origin: [f64; 2], fills: &[Vec<[f32; 2]>]) -> Vec<[f64; 3]> {
+    if fills.is_empty() {
+        return Vec::new();
+    }
     let mut total_verts = 0;
     for poly in fills {
         let n = poly.len();
@@ -925,8 +928,8 @@ pub(crate) fn tapered_band_points(
 ) -> (Vec<[f64; 3]>, Vec<f32>) {
     let n = verts.len();
     let seg_count = if is_closed { n } else { n.saturating_sub(1) };
-    let mut pts: Vec<[f64; 3]> = Vec::new();
-    let mut widths: Vec<f32> = Vec::new();
+    let mut pts: Vec<[f64; 3]> = Vec::with_capacity(seg_count + 1);
+    let mut widths: Vec<f32> = Vec::with_capacity(seg_count + 1);
     let mut push = |x: f64, y: f64, w: f32| {
         let (wx, wy, wz) = to_wcs(x, y);
         pts.push([wx, wy, wz]);

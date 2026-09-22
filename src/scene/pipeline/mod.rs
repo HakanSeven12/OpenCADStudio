@@ -2675,7 +2675,11 @@ impl Pipeline {
                     }
                     let depth = wire_gpu::wire_draw_depth(wire, depth_map);
                     let mut circles = circle_gpu::extract_circle_instances(wire, depth);
-                    let mut ellipses = ellipse_gpu::extract_ellipse_instances(wire, depth);
+                    let mut ellipses = if circles.is_none() {
+                        ellipse_gpu::extract_ellipse_instances(wire, depth)
+                    } else {
+                        None
+                    };
                     if let Some(color) = color {
                         if let Some(instances) = circles.as_mut() {
                             for instance in instances {

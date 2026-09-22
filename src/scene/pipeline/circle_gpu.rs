@@ -296,24 +296,74 @@ pub fn extract_circle_instances(
     wire: &crate::scene::WireModel,
     draw_depth: f32,
 ) -> Option<Vec<CircleInstance>> {
+    let mut instances = Vec::new();
+    if extract_circle_instances_into(wire, draw_depth, &mut instances) {
+        Some(instances)
+    } else {
+        None
+    }
+}
+
+/// Allocation-free check whether this wire consists entirely of analytical circle/arc instances.
+pub fn can_extract_circle_instances(wire: &crate::scene::WireModel) -> bool {
     if wire.tangent_geoms.is_empty()
         || !wire.fill_tris.is_empty()
         || wire.fill_is_3d
         || !wire.text_verts.is_empty()
         || wire.render_instance.is_some()
     {
-        return None;
+        return false;
+    }
+    wire.tangent_geoms.iter().all(|geom| match *geom {
+        crate::scene::model::wire_model::TangentGeom::Circle { radius, .. } => {
+            radius > 0.0 && radius.is_finite() && radius <= 1e6
+        }
+        crate::scene::model::wire_model::TangentGeom::PlanarCircle { radius, .. } => {
+            radius > 0.0 && radius.is_finite() && radius <= 1e6
+        }
+        crate::scene::model::wire_model::TangentGeom::Arc {
+            radius,
+            start_angle,
+            end_angle,
+            ..
+        } => {
+            radius > 0.0
+                && radius.is_finite()
+                && (start_angle as f32).is_finite()
+                && (end_angle as f32).is_finite()
+                && radius <= 1e6
+        }
+        _ => false,
+    })
+}
+
+/// Appends all analytical circle/arc instances from `wire` directly into `out`.
+/// If extraction fails midway, `out` is restored to its original length and `false` is returned.
+pub fn extract_circle_instances_into(
+    wire: &crate::scene::WireModel,
+    draw_depth: f32,
+    out: &mut Vec<CircleInstance>,
+) -> bool {
+    if wire.tangent_geoms.is_empty()
+        || !wire.fill_tris.is_empty()
+        || wire.fill_is_3d
+        || !wire.text_verts.is_empty()
+        || wire.render_instance.is_some()
+    {
+        return false;
     }
 
-    let mut instances = Vec::with_capacity(wire.tangent_geoms.len());
+    let initial_len = out.len();
+    out.reserve(wire.tangent_geoms.len());
     for (i, geom) in wire.tangent_geoms.iter().enumerate() {
         if let Some(inst) = extract_circle_instance_from_geom_indexed(geom, wire, draw_depth, i) {
-            instances.push(inst);
+            out.push(inst);
         } else {
-            return None;
+            out.truncate(initial_len);
+            return false;
         }
     }
-    Some(instances)
+    true
 }
 
 /// Helper to extract a single analytical circle or circular arc instance from a `WireModel`.

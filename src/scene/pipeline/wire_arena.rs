@@ -149,10 +149,10 @@ pub fn classify_wire(wire: &WireModel) -> WireKind {
         && !wire.fill_is_3d
         && wire.text_verts.is_empty()
     {
-        if super::circle_gpu::extract_circle_instances(wire, 0.0).is_some() {
+        if super::circle_gpu::can_extract_circle_instances(wire) {
             return WireKind::Circle;
         }
-        if super::ellipse_gpu::extract_ellipse_instances(wire, 0.0).is_some() {
+        if super::ellipse_gpu::can_extract_ellipse_instances(wire) {
             return WireKind::Ellipse;
         }
     }
@@ -195,24 +195,23 @@ pub fn partition_wires<'a>(
     wires: &'a [WireModel],
     depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
 ) -> PartitionedWires<'a> {
-    let mut regular = Vec::new();
+    let cap = wires.len();
+    let mut regular = Vec::with_capacity(cap);
     let mut mesh = Vec::new();
     let mut instanced = Vec::new();
-    let mut circle_instances = Vec::new();
+    let mut circle_instances = Vec::with_capacity(cap);
     let mut ellipse_instances = Vec::new();
     let mut contributors: rustc_hash::FxHashSet<Handle> = rustc_hash::FxHashSet::default();
-    let note = |wire: &WireModel, set: &mut rustc_hash::FxHashSet<Handle>| {
-        if let Some(handle) = handle_of(wire) {
-            set.insert(handle);
-        }
-    };
+    contributors.reserve(cap.min(1024));
 
     for wire in wires {
         if !wire.display_visible {
             continue;
         }
         if wire.render_instance.is_some() {
-            note(wire, &mut contributors);
+            if let Some(handle) = handle_of(wire) {
+                contributors.insert(handle);
+            }
             instanced.push(wire);
             continue;
         }
@@ -223,14 +222,16 @@ pub fn partition_wires<'a>(
             && wire.text_verts.is_empty()
         {
             let depth = super::wire_gpu::wire_draw_depth(wire, depth_map);
-            if let Some(insts) = super::circle_gpu::extract_circle_instances(wire, depth) {
-                note(wire, &mut contributors);
-                circle_instances.extend(insts);
+            if super::circle_gpu::extract_circle_instances_into(wire, depth, &mut circle_instances) {
+                if let Some(handle) = handle_of(wire) {
+                    contributors.insert(handle);
+                }
                 continue;
             }
-            if let Some(insts) = super::ellipse_gpu::extract_ellipse_instances(wire, depth) {
-                note(wire, &mut contributors);
-                ellipse_instances.extend(insts);
+            if super::ellipse_gpu::extract_ellipse_instances_into(wire, depth, &mut ellipse_instances) {
+                if let Some(handle) = handle_of(wire) {
+                    contributors.insert(handle);
+                }
                 continue;
             }
         }

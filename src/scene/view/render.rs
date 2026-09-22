@@ -2788,8 +2788,8 @@ impl Scene {
 
         let mut result = CachedDocumentRenderEnvironment::default();
 
-        let environment = if crate::entities::object_data::cache_is_prepared(&self.object_data_cache) {
-            crate::entities::object_data::render_environments(&self.object_data_cache)
+        let (environment, preset) = if crate::entities::object_data::cache_is_prepared(&self.object_data_cache) {
+            let env = crate::entities::object_data::render_environments(&self.object_data_cache)
                 .iter()
                 .find_map(|handle| match self.document.objects.get(handle) {
                     Some(ObjectType::ClassObject(value)) => match &value.data {
@@ -2800,22 +2800,71 @@ impl Scene {
                     },
                     _ => None,
                 })
-                .map(|(_, environment)| environment)
-        } else {
-            self.document
-                .objects
+                .map(|(_, environment)| environment);
+
+            let pre = crate::entities::object_data::render_settings(&self.object_data_cache)
                 .iter()
-                .filter_map(|(handle, object)| match object {
-                    ObjectType::ClassObject(value) => match &value.data {
-                        ClassObjectData::RenderEnvironment(environment) => {
-                            Some((*handle, environment))
-                        }
-                        _ => None,
-                    },
+                .filter_map(|handle| match self.document.objects.get(handle) {
+                    Some(ObjectType::ClassObject(value)) => {
+                        let settings = match &value.data {
+                            ClassObjectData::RenderSettings(settings) => settings,
+                            ClassObjectData::MentalRayRenderSettings(settings) => &settings.base,
+                            ClassObjectData::RapidRtRenderSettings(settings) => &settings.base,
+                            _ => return None,
+                        };
+                        (settings.environment_image_enabled
+                            && !settings.environment_image_filename.is_empty())
+                            .then_some((*handle, settings))
+                    }
                     _ => None,
                 })
-                .min_by_key(|(handle, _)| handle.value())
-                .map(|(_, environment)| environment)
+                .min_by_key(|(handle, settings)| (!settings.has_predefined, handle.value()))
+                .map(|(_, settings)| settings);
+
+            (env, pre)
+        } else {
+            let mut best_env: Option<(acadrust::Handle, &acadrust::objects::RenderEnvironment)> = None;
+            let mut best_preset: Option<(acadrust::Handle, &acadrust::objects::RenderSettings)> = None;
+
+            for (handle, object) in &self.document.objects {
+                if let ObjectType::ClassObject(value) = object {
+                    match &value.data {
+                        ClassObjectData::RenderEnvironment(env) => {
+                            if best_env.as_ref().map_or(true, |(best_h, _)| handle.value() < best_h.value()) {
+                                best_env = Some((*handle, env));
+                            }
+                        }
+                        ClassObjectData::RenderSettings(settings) => {
+                            if settings.environment_image_enabled && !settings.environment_image_filename.is_empty() {
+                                let key = (!settings.has_predefined, handle.value());
+                                if best_preset.as_ref().map_or(true, |(best_h, best_s)| key < (!best_s.has_predefined, best_h.value())) {
+                                    best_preset = Some((*handle, settings));
+                                }
+                            }
+                        }
+                        ClassObjectData::MentalRayRenderSettings(settings) => {
+                            let base = &settings.base;
+                            if base.environment_image_enabled && !base.environment_image_filename.is_empty() {
+                                let key = (!base.has_predefined, handle.value());
+                                if best_preset.as_ref().map_or(true, |(best_h, best_s)| key < (!best_s.has_predefined, best_h.value())) {
+                                    best_preset = Some((*handle, base));
+                                }
+                            }
+                        }
+                        ClassObjectData::RapidRtRenderSettings(settings) => {
+                            let base = &settings.base;
+                            if base.environment_image_enabled && !base.environment_image_filename.is_empty() {
+                                let key = (!base.has_predefined, handle.value());
+                                if best_preset.as_ref().map_or(true, |(best_h, best_s)| key < (!best_s.has_predefined, best_h.value())) {
+                                    best_preset = Some((*handle, base));
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            (best_env.map(|(_, env)| env), best_preset.map(|(_, pre)| pre))
         };
 
         if let Some(environment) = environment {
@@ -2851,47 +2900,6 @@ impl Scene {
                 }
             }
         }
-
-        let preset = if crate::entities::object_data::cache_is_prepared(&self.object_data_cache) {
-            crate::entities::object_data::render_settings(&self.object_data_cache)
-                .iter()
-                .filter_map(|handle| match self.document.objects.get(handle) {
-                    Some(ObjectType::ClassObject(value)) => {
-                        let settings = match &value.data {
-                            ClassObjectData::RenderSettings(settings) => settings,
-                            ClassObjectData::MentalRayRenderSettings(settings) => &settings.base,
-                            ClassObjectData::RapidRtRenderSettings(settings) => &settings.base,
-                            _ => return None,
-                        };
-                        (settings.environment_image_enabled
-                            && !settings.environment_image_filename.is_empty())
-                            .then_some((*handle, settings))
-                    }
-                    _ => None,
-                })
-                .min_by_key(|(handle, settings)| (!settings.has_predefined, handle.value()))
-                .map(|(_, settings)| settings)
-        } else {
-            self.document
-                .objects
-                .iter()
-                .filter_map(|(handle, object)| match object {
-                    ObjectType::ClassObject(value) => {
-                        let settings = match &value.data {
-                            ClassObjectData::RenderSettings(settings) => settings,
-                            ClassObjectData::MentalRayRenderSettings(settings) => &settings.base,
-                            ClassObjectData::RapidRtRenderSettings(settings) => &settings.base,
-                            _ => return None,
-                        };
-                        (settings.environment_image_enabled
-                            && !settings.environment_image_filename.is_empty())
-                            .then_some((*handle, settings))
-                    }
-                    _ => None,
-                })
-                .min_by_key(|(handle, settings)| (!settings.has_predefined, handle.value()))
-                .map(|(_, settings)| settings)
-        };
 
         if let Some(settings) = preset {
             if let Some(image) = self.background_image(&settings.environment_image_filename) {
@@ -3375,33 +3383,43 @@ pub(in crate::scene) fn linetype_name_for<'a>(document: &'a CadDocument, e: &'a 
     linetype_name_for_viewport(document, e, None)
 }
 
-pub(in crate::scene) fn linetype_name_for_viewport<'a>(
+pub(in crate::scene) fn linetype_name_for_common_viewport<'a>(
     document: &'a CadDocument,
-    e: &'a EntityType,
+    common: &'a acadrust::entities::EntityCommon,
     viewport: Option<Handle>,
 ) -> &'a str {
-    let elt = &e.common().linetype;
+    let elt = &common.linetype;
     if elt.is_empty() || elt.eq_ignore_ascii_case("bylayer") {
-        if let Some(handle) = viewport_override(
-            document,
-            &e.common().layer,
-            viewport,
-            acadrust::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
-        )
-        .and_then(|value| value.as_handle())
-        {
-            if let Some(line_type) = document.line_types.iter().find(|line_type| line_type.handle == handle) {
-                return line_type.name.as_str();
+        if viewport.is_some() {
+            if let Some(handle) = viewport_override(
+                document,
+                &common.layer,
+                viewport,
+                acadrust::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
+            )
+            .and_then(|value| value.as_handle())
+            {
+                if let Some(line_type) = document.line_types.iter().find(|line_type| line_type.handle == handle) {
+                    return line_type.name.as_str();
+                }
             }
         }
         document
             .layers
-            .get(&e.common().layer)
+            .get(&common.layer)
             .map(|l| l.line_type.as_str())
             .unwrap_or("Continuous")
     } else {
         elt.as_str()
     }
+}
+
+pub(in crate::scene) fn linetype_name_for_viewport<'a>(
+    document: &'a CadDocument,
+    e: &'a EntityType,
+    viewport: Option<Handle>,
+) -> &'a str {
+    linetype_name_for_common_viewport(document, e.common(), viewport)
 }
 
 /// Returns `(entity_color, pattern_length, pattern, line_weight_px, aci)` for
@@ -3427,14 +3445,13 @@ fn viewport_override(
         .find_map(|(handle, value)| (handle == viewport).then_some(value))
 }
 
-pub(crate) fn render_style_for_viewport(
+pub(crate) fn render_style_for_common_viewport(
     document: &CadDocument,
-    e: &EntityType,
+    common: &acadrust::entities::EntityCommon,
     viewport: Option<Handle>,
 ) -> ([f32; 4], f32, [f32; 8], f32, u8) {
-    let layer_name = &e.common().layer;
+    let layer_name = &common.layer;
     let (entity_color, aci) = {
-        let common = e.common();
         let book_color = common
             .color_book_handle
             .filter(|handle| handle.is_valid())
@@ -3444,7 +3461,7 @@ pub(crate) fn render_style_for_viewport(
                 _ => None,
             });
         let ec = book_color.unwrap_or(&common.color);
-        let viewport_color = (!book_color.is_some() && *ec == AcadColor::ByLayer)
+        let viewport_color = (book_color.is_none() && *ec == AcadColor::ByLayer && viewport.is_some())
             .then(|| {
                 viewport_override(
                     document,
@@ -3473,16 +3490,21 @@ pub(crate) fn render_style_for_viewport(
         };
         let [r, g, b, _] = tess_util::aci_to_rgba(resolved);
         let transparency = if common.transparency.is_by_layer() {
-            viewport_override(
-                document,
-                layer_name,
-                viewport,
-                acadrust::objects::KnownXRecordKind::LayerViewportAlphaOverride,
-            )
-            .and_then(|value| value.as_i32())
-            .map(|value| acadrust::types::Transparency::from_alpha_value(value as u32))
-            .or_else(|| document.layers.get(layer_name).map(|layer| layer.transparency))
-            .unwrap_or(common.transparency)
+            let vp_trans = if viewport.is_some() {
+                viewport_override(
+                    document,
+                    layer_name,
+                    viewport,
+                    acadrust::objects::KnownXRecordKind::LayerViewportAlphaOverride,
+                )
+                .and_then(|value| value.as_i32())
+                .map(|value| acadrust::types::Transparency::from_alpha_value(value as u32))
+            } else {
+                None
+            };
+            vp_trans
+                .or_else(|| document.layers.get(layer_name).map(|layer| layer.transparency))
+                .unwrap_or(common.transparency)
         } else {
             common.transparency
         };
@@ -3490,18 +3512,14 @@ pub(crate) fn render_style_for_viewport(
         ([r, g, b, alpha], aci)
     };
 
-    let lt_name = linetype_name_for_viewport(document, e, viewport);
+    let lt_name = linetype_name_for_common_viewport(document, common, viewport);
     // Effective scale = global LTSCALE × per-entity scale (both default to 1.0).
-    let lt_scale = document.header.linetype_scale as f32 * e.common().linetype_scale as f32;
+    let lt_scale = document.header.linetype_scale as f32 * common.linetype_scale as f32;
     let (pattern_length, pattern) = resolve_pattern(&document.line_types, lt_name, lt_scale);
 
     let line_weight_px = {
-        // LWDISPLAY is no longer evaluated here — the toggle is now applied in
-        // the wire shader via `Uniforms.lwdisplay_enable`, so we always bake the
-        // entity's resolved (layer-inherited) weight. Toggling lineweight
-        // visibility costs only a uniform write, not a retessellate.
-        let ew = &e.common().line_weight;
-        let viewport_lineweight = matches!(ew, LineWeight::ByLayer | LineWeight::Default)
+        let ew = &common.line_weight;
+        let viewport_lineweight = (viewport.is_some() && matches!(ew, LineWeight::ByLayer | LineWeight::Default))
             .then(|| {
                 viewport_override(
                     document,
@@ -3526,12 +3544,27 @@ pub(crate) fn render_style_for_viewport(
     (entity_color, pattern_length, pattern, line_weight_px, aci)
 }
 
-pub(crate) fn has_resolved_book_color(document: &CadDocument, e: &EntityType) -> bool {
-    e.common()
+pub(crate) fn render_style_for_viewport(
+    document: &CadDocument,
+    e: &EntityType,
+    viewport: Option<Handle>,
+) -> ([f32; 4], f32, [f32; 8], f32, u8) {
+    render_style_for_common_viewport(document, e.common(), viewport)
+}
+
+pub(crate) fn has_resolved_book_color_common(
+    document: &CadDocument,
+    common: &acadrust::entities::EntityCommon,
+) -> bool {
+    common
         .color_book_handle
         .filter(|handle| handle.is_valid())
         .and_then(|handle| document.objects.get(&handle))
         .is_some_and(|object| matches!(object, acadrust::objects::ObjectType::BookColor(_)))
+}
+
+pub(crate) fn has_resolved_book_color(document: &CadDocument, e: &EntityType) -> bool {
+    has_resolved_book_color_common(document, e.common())
 }
 
 /// Resolved render style used as the inheritance source for a block child's
@@ -3569,51 +3602,71 @@ pub(crate) fn layer_render_style_viewport(
     viewport: Option<Handle>,
 ) -> InheritStyle {
     let layer = document.layers.get(layer_name);
-    let viewport_color = viewport_override(
-        document,
-        layer_name,
-        viewport,
-        acadrust::objects::KnownXRecordKind::LayerViewportColorOverride,
-    )
-    .and_then(|value| value.as_i32())
-    .map(AcadColor::from_true_color_value);
+    let has_vp = viewport.is_some();
+    let viewport_color = if has_vp {
+        viewport_override(
+            document,
+            layer_name,
+            viewport,
+            acadrust::objects::KnownXRecordKind::LayerViewportColorOverride,
+        )
+        .and_then(|value| value.as_i32())
+        .map(AcadColor::from_true_color_value)
+    } else {
+        None
+    };
     let color = viewport_color
         .as_ref()
         .or_else(|| layer.map(|layer| &layer.color))
         .unwrap_or(&AcadColor::WHITE);
     let [r, g, b, _] = tess_util::aci_to_rgba(color);
-    let alpha = viewport_override(
-        document,
-        layer_name,
-        viewport,
-        acadrust::objects::KnownXRecordKind::LayerViewportAlphaOverride,
-    )
-    .and_then(|value| value.as_i32())
-    .map(|value| acadrust::types::Transparency::from_alpha_value(value as u32))
-    .or_else(|| layer.map(|layer| layer.transparency))
+    let alpha = if has_vp {
+        viewport_override(
+            document,
+            layer_name,
+            viewport,
+            acadrust::objects::KnownXRecordKind::LayerViewportAlphaOverride,
+        )
+        .and_then(|value| value.as_i32())
+        .map(|value| acadrust::types::Transparency::from_alpha_value(value as u32))
+        .or_else(|| layer.map(|layer| layer.transparency))
         .map(|transparency| 1.0 - transparency.as_percent() as f32)
-        .unwrap_or(1.0);
-    let lt_name = viewport_override(
-        document,
-        layer_name,
-        viewport,
-        acadrust::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
-    )
-    .and_then(|value| value.as_handle())
-    .and_then(|handle| document.line_types.iter().find(|line_type| line_type.handle == handle))
-    .map(|line_type| line_type.name.as_str())
-    .or_else(|| layer.map(|layer| layer.line_type.as_str()))
-    .unwrap_or("Continuous");
+        .unwrap_or(1.0)
+    } else {
+        layer
+            .map(|layer| layer.transparency)
+            .map(|transparency| 1.0 - transparency.as_percent() as f32)
+            .unwrap_or(1.0)
+    };
+    let lt_name = if has_vp {
+        viewport_override(
+            document,
+            layer_name,
+            viewport,
+            acadrust::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
+        )
+        .and_then(|value| value.as_handle())
+        .and_then(|handle| document.line_types.iter().find(|line_type| line_type.handle == handle))
+        .map(|line_type| line_type.name.as_str())
+        .or_else(|| layer.map(|layer| layer.line_type.as_str()))
+        .unwrap_or("Continuous")
+    } else {
+        layer.map(|layer| layer.line_type.as_str()).unwrap_or("Continuous")
+    };
     let lt_scale = document.header.linetype_scale as f32;
     let (pat_len, pat) = resolve_pattern(&document.line_types, lt_name, lt_scale);
-    let viewport_lineweight = viewport_override(
-        document,
-        layer_name,
-        viewport,
-        acadrust::objects::KnownXRecordKind::LayerViewportLineweightOverride,
-    )
-    .and_then(|value| value.as_i32())
-    .map(|value| LineWeight::from_value(value as i16));
+    let viewport_lineweight = if has_vp {
+        viewport_override(
+            document,
+            layer_name,
+            viewport,
+            acadrust::objects::KnownXRecordKind::LayerViewportLineweightOverride,
+        )
+        .and_then(|value| value.as_i32())
+        .map(|value| LineWeight::from_value(value as i16))
+    } else {
+        None
+    };
     let lw = viewport_lineweight
         .as_ref()
         .or_else(|| layer.map(|layer| &layer.line_weight))

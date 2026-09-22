@@ -1656,6 +1656,19 @@ mod tests {
 
     #[test]
     fn test_pline_line_then_arc() {
+        // This viewport integration path nests the debug-build update,
+        // snapping, and command-driver frames. Keep enough headroom for that
+        // real path instead of relying on the test harness's 2 MiB default.
+        std::thread::Builder::new()
+            .name("pline-line-then-arc".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(test_pline_line_then_arc_inner)
+            .expect("spawn PLINE integration test")
+            .join()
+            .expect("PLINE integration test thread");
+    }
+
+    fn test_pline_line_then_arc_inner() {
         use crate::app::Message;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);

@@ -90,6 +90,11 @@ pub struct Cli {
     #[arg(help = crate::t!("Convert IN to OUT using the output file extension, then exit.").into_owned(), long_help = None)]
     pub export: Option<Vec<PathBuf>>,
 
+    /// Explicit output CAD version for --export (R14, 2000, 2004, 2007,
+    /// 2010, 2013 or 2018). Without it the source document version is kept.
+    #[arg(long, value_name = "VERSION", requires = "export")]
+    pub target_version: Option<String>,
+
     /// Run a command script at startup: one command line per line of FILE.
     #[arg(long, value_name = "FILE")]
     #[arg(help = crate::t!("Run a command script at startup, one command per line.").into_owned(), long_help = None)]

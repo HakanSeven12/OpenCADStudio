@@ -33,8 +33,8 @@ Two request styles share the channel, told apart by the `protocol` field:
 
 | Style | Shape | Operations |
 |---|---|---|
-| protocol 1 | `{"protocol":1,"request_id":"…","document_id":N,"op":"…"}` — the same requests and replies as `ocs_execute` / `ocs_read`, described in the README | `new`, `open`, `save`, `activate`, `select`, `run`, `start`, `input`, `cancel`, `stop`, `action`, `property`, `set_properties`, `embed_image`, `undo`, `redo`; reads `state`, `capabilities`, `query`, `entities`, `records`, `record_schema`, `layers`, `header`, `properties`, `measure`, `history`, `commands`, `events`, `operation` |
-| legacy | `{"op":"…"}` without `protocol` | `new`, `open`, `run`, `entities`, `query`, `records`, `record_schema`, `capabilities`, `layers`, `header`, `select`, `save`, `undo`, `redo` |
+| protocol 1 | `{"protocol":1,"request_id":"…","document_id":N,"op":"…"}` — the same requests and replies as `ocs_execute` / `ocs_read`, described in the README | `new`, `open`, `save`, `save_verified`, `activate`, `select`, `run`, `start`, `input`, `cancel`, `stop`, `action`, `property`, `set_properties`, `embed_image`, `undo`, `redo`; reads `state`, `capabilities`, `audit`, `query`, `entities`, `records`, `record_schema`, `layers`, `header`, `properties`, `measure`, `history`, `commands`, `events`, `operation` |
+| legacy | `{"op":"…"}` without `protocol` | `new`, `open`, `run`, `entities`, `audit`, `query`, `records`, `record_schema`, `capabilities`, `layers`, `header`, `select`, `save`, `undo`, `redo` |
 
 The two styles differ in how a waiting command is treated. A protocol-1 `run`
 or `start` while a command is still active is refused with `command_busy`:
@@ -104,8 +104,19 @@ README describes.
 
 `OpenCADStudio --export IN OUT` loads `IN` and writes `OUT` without a window or
 a session. The output format follows the extension: `.dxf` writes DXF, any other
-extension writes DWG at the document's own version. The exit code is 0 on
-success and 1 when the input cannot be read or the output cannot be written.
+extension writes DWG at the document's own version. Add `--target-version R14`
+(or `2000`, `2004`, `2007`, `2010`, `2013`, `2018`) to choose explicitly. The
+exit code is 0 on success, 1 when the input/output fails, and 2 for an invalid
+target version.
+
+The verified interoperability lane uses version 2000 for a DWG -> DXF
+round-trip. R14 DWG files can be written and reopened, but the current R14
+DWG -> DXF path can emit object dictionaries that are orphaned from the root,
+which leaves layout and placeholder ownership invalid. `audit` and
+`save_verified` reject that ASCII DXF instead of reporting a false green. Do
+not deliver that conversion unless `save_verified` passes. Raw
+group-code handle validation is not applied to binary DXF and is reported as
+skipped in the audit result.
 
 ## Interactive steps
 
@@ -129,3 +140,5 @@ For commands whose answers cannot be written on one line, use `start` and then
 | measure | `{"protocol":1,"op":"measure","handles":["2A"]}` — kernel-computed length, area, bounds and mass properties; no window needed | `ocs_read` with `op: "measure"` and `parameters.handles` |
 | capture | `{"protocol":1,"op":"capture","path":"out.png"}` — needs the editor window, so it answers `gui_required` here | `ocs_capture` with `scope` (`viewport` or `window`) and `max_dimension` |
 | `set_properties` | requires `collection`; colours are the serialised enum — `{"Index": 1}` or `"ByLayer"`; a colour name such as `"Red"` is rejected with `invalid_value` | same request through `ocs_execute` |
+| audit | `{"protocol":1,"op":"audit","target_format":"dwg","target_version":"2000"}` | `ocs_read` with `op: "audit"` and the same target parameters |
+| save verified | protocol-1 `save_verified` with absolute `path`, unique `request_id`, and target fields | `ocs_execute` with `op: "save_verified"`; returns hash, reopened version and semantic manifest |

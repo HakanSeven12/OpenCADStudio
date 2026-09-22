@@ -163,6 +163,10 @@ mod tests {
             ribbon_menu_icon("DRAWORDER_FRONT", IconKind::Glyph("menu")),
             IconKind::Glyph("menu")
         ));
+        assert!(matches!(
+            ribbon_command_icon("EXTERNAL_PLUGIN_COMMAND", IconKind::Glyph("plugin")),
+            IconKind::Glyph("plugin")
+        ));
     }
 
     #[test]

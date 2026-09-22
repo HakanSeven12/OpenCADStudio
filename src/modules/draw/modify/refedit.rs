@@ -24,18 +24,8 @@ use crate::modules::{IconKind, ModuleEvent, ToolDef};
 /// save the in-place block edit, or discard it. (#136)
 pub fn refedit_tools() -> Vec<ToolDef> {
     vec![
-        ToolDef {
-            id: "REFCLOSE_SAVE",
-            label: "Save Block Edit",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/mt_ok.svg")),
-            event: ModuleEvent::Command("REFCLOSE_SAVE".to_string()),
-        },
-        ToolDef {
-            id: "REFCLOSE_DISCARD",
-            label: "Discard Block Edit",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/mt_cancel.svg")),
-            event: ModuleEvent::Command("REFCLOSE_DISCARD".to_string()),
-        },
+        crate::modules::ribbon_command("REFCLOSE_SAVE"),
+        crate::modules::ribbon_command("REFCLOSE_DISCARD"),
     ]
 }
 

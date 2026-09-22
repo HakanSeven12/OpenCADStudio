@@ -1,7 +1,7 @@
 // DATALINK command — manages persistent links to external tabular data.
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
-use crate::modules::{IconKind, ModuleEvent, ToolDef};
+use crate::modules::{IconKind, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
 use acadrust::entities::Table;
@@ -11,12 +11,7 @@ use glam::DVec3;
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/data_link.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "DATALINK",
-        label: "Link\nData",
-        icon: ICON,
-        event: ModuleEvent::Command("DATALINK".to_string()),
-    }
+    crate::modules::ribbon_command("DATALINK")
 }
 
 pub struct DataLinkPlaceCommand {

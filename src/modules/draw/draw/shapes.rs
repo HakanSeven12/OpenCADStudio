@@ -59,14 +59,6 @@ const ICON_POLY_E: IconKind =
 
 pub const DROPDOWN_ID: &str = "SHAPES";
 
-pub const DROPDOWN_ITEMS: &[(&str, &str, IconKind)] = &[
-    ("RECT", "Rectangle - Two Corners", ICON_RECT),
-    ("RECT_ROT", "Rectangle - Rotated", ICON_RECT_ROT),
-    ("RECT_CEN", "Rectangle - Center", ICON_RECT_CEN),
-    ("POLY", "Polygon - Inscribed", ICON_POLY_I),
-    ("POLY_C", "Polygon - Circumscribed", ICON_POLY_C),
-    ("POLY_E", "Polygon - Edge", ICON_POLY_E),
-];
 
 pub const ICON: IconKind = ICON_RECT;
 

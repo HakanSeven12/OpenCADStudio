@@ -7,19 +7,14 @@ use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview, InputKind,
     WorkingPlane,
 };
-use crate::modules::{IconKind, ModuleEvent, ToolDef};
+use crate::modules::{IconKind, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_diameter.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "DIMDIAMETER",
-        label: "Diameter",
-        icon: ICON,
-        event: ModuleEvent::Command("DIMDIAMETER".to_string()),
-    }
+    crate::modules::ribbon_command("DIMDIAMETER")
 }
 
 enum Step {

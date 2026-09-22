@@ -23,12 +23,7 @@ use crate::scene::model::wire_model::WireModel;
 use crate::scene::Scene;
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "XATTACH",
-        label: "Attach XREF",
-        icon: IconKind::Svg(include_bytes!("../../../assets/icons/blocks/insert.svg")),
-        event: ModuleEvent::Command("XATTACH".to_string()),
-    }
+    crate::modules::ribbon_command("XATTACH")
 }
 
 /// Multi-step placement state: insertion point, then scale, then rotation.

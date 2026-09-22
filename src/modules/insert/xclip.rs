@@ -1,10 +1,5 @@
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/xclip.svg"));
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "XCLIP",
-        label: "Clip",
-        icon: ICON,
-        event: ModuleEvent::Command("XCLIP".to_string()),
-    }
+    crate::modules::ribbon_command("XCLIP")
 }

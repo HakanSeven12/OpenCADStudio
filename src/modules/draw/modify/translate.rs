@@ -16,12 +16,7 @@ use crate::scene::model::wire_model::WireModel;
 // ── Ribbon definition ──────────────────────────────────────────────────────
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "MOVE",
-        label: "Move",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/move.svg")),
-        event: ModuleEvent::Command("MOVE".to_string()),
-    }
+    crate::modules::ribbon_command("MOVE")
 }
 
 // ── Command implementation ─────────────────────────────────────────────────

@@ -17,12 +17,7 @@ use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "MIRROR",
-        label: "Mirror",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/mirror.svg")),
-        event: ModuleEvent::Command("MIRROR".to_string()),
-    }
+    crate::modules::ribbon_command("MIRROR")
 }
 
 enum Step {

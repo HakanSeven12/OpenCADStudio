@@ -13,14 +13,7 @@ use crate::modules::{IconKind, ModuleEvent, ToolDef};
 pub mod equal_distance_tool {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "EDCONSTRAINT",
-            label: "Equal Distance",
-            icon: IconKind::Svg(include_bytes!(
-                "../../../assets/icons/constrain/equal_distance.svg"
-            )),
-            event: ModuleEvent::Command("EDCONSTRAINT".to_string()),
-        }
+        crate::modules::ribbon_command("EDCONSTRAINT")
     }
 }
 

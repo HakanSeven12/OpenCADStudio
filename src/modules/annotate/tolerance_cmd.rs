@@ -15,12 +15,7 @@ use crate::t;
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/tolerance.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "TOLERANCE",
-        label: "Tolerance",
-        icon: ICON,
-        event: ModuleEvent::Command("TOLERANCE".to_string()),
-    }
+    crate::modules::ribbon_command("TOLERANCE")
 }
 
 pub struct ToleranceCommand {

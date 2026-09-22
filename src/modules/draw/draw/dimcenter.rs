@@ -16,12 +16,7 @@ use crate::scene::centerline::{
 
 #[allow(dead_code)] // ribbon definition ready for wiring; command works via the command line
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "CENTERMARK",
-        label: "Center Mark",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/line.svg")),
-        event: ModuleEvent::Command("CENTERMARK".to_string()),
-    }
+    crate::modules::ribbon_command("CENTERMARK")
 }
 
 // ── Command implementation ────────────────────────────────────────────────

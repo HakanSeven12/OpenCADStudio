@@ -14,12 +14,7 @@ use glam::DVec3;
 
 #[allow(dead_code)]
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "POINT",
-        label: "Point",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/point.svg")),
-        event: ModuleEvent::Command("POINT".to_string()),
-    }
+    crate::modules::ribbon_command("POINT")
 }
 
 pub struct PointCommand {

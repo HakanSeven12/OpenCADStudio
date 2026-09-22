@@ -28,11 +28,6 @@ const ICON_BOUNDARY: IconKind = IconKind::Svg(include_bytes!(
 pub const DROPDOWN_ID: &str = "HATCH";
 pub const ICON: IconKind = ICON_HATCH;
 
-pub const DROPDOWN_ITEMS: &[(&str, &str, IconKind)] = &[
-    ("HATCH", "Hatch", ICON_HATCH),
-    ("GRADIENT", "Gradient", ICON_GRADIENT),
-    ("BOUNDARY", "Boundary", ICON_BOUNDARY),
-];
 
 // ── Shared mode ────────────────────────────────────────────────────────────
 

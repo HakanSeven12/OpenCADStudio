@@ -44,18 +44,6 @@ use super::entity_index::ModifyEntityIndex;
 pub const DROPDOWN_ID: &str = "fillet_chamfer";
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../../assets/icons/fillet.svg"));
 
-pub const DROPDOWN_ITEMS: &[(&str, &str, IconKind)] = &[
-    (
-        "FILLET",
-        "Fillet",
-        IconKind::Svg(include_bytes!("../../../../assets/icons/fillet.svg")),
-    ),
-    (
-        "CHAMFER",
-        "Chamfer",
-        IconKind::Svg(include_bytes!("../../../../assets/icons/chamfer.svg")),
-    ),
-];
 
 // ══════════════════════════════════════════════════════════════════════════
 // Geometry

@@ -6,12 +6,7 @@ use glam::DVec3;
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/base_point.svg"));
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "BASE",
-        label: "Set Base\nPoint",
-        icon: ICON,
-        event: ModuleEvent::Command("BASE".to_string()),
-    }
+    crate::modules::ribbon_command("BASE")
 }
 
 // ── Command implementation ────────────────────────────────────────────────

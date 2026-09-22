@@ -8,7 +8,7 @@ use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionAssociationSource,
     DimensionPreview, InputKind, WorkingPlane,
 };
-use crate::modules::{IconKind, ModuleEvent, ToolDef};
+use crate::modules::{IconKind, ToolDef};
 use crate::scene::dimension_assoc::{
     polyline_arc_point_marker, RadialSourceGeometry,
     ARC_DIMENSION_POINT_MARKER, POLYLINE_ARC_CENTER_MARKER,
@@ -19,12 +19,7 @@ pub const ICON: IconKind =
     IconKind::Svg(include_bytes!("../../../assets/icons/dim_angular.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "DIMARC",
-        label: "Arc Length",
-        icon: ICON,
-        event: ModuleEvent::Command("DIMARC".to_string()),
-    }
+    crate::modules::ribbon_command("DIMARC")
 }
 
 #[derive(Clone, Copy)]

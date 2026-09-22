@@ -10,7 +10,7 @@ use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionAssociationSource,
     DimensionPreview, InputKind, WorkingPlane,
 };
-use crate::modules::{IconKind, ModuleEvent, ToolDef};
+use crate::modules::{IconKind, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
 use glam::DVec3;
@@ -18,12 +18,7 @@ use glam::DVec3;
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_angular.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "DIMANGULAR",
-        label: "Angular",
-        icon: ICON,
-        event: ModuleEvent::Command("DIMANGULAR".to_string()),
-    }
+    crate::modules::ribbon_command("DIMANGULAR")
 }
 
 enum Step {

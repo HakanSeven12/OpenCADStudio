@@ -23,12 +23,7 @@ use crate::scene::model::wire_model::WireModel;
 
 #[allow(dead_code)]
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "SCALE",
-        label: "Scale",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/scale.svg")),
-        event: ModuleEvent::Command("SCALE".to_string()),
-    }
+    crate::modules::ribbon_command("SCALE")
 }
 
 enum Step {

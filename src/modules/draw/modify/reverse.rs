@@ -32,12 +32,7 @@ use crate::modules::{IconKind, ModuleEvent, ToolDef};
 
 #[allow(dead_code)] // ribbon definition ready for wiring; command works via the command line
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "REVERSE",
-        label: "Reverse",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/line.svg")),
-        event: ModuleEvent::Command("REVERSE".to_string()),
-    }
+    crate::modules::ribbon_command("REVERSE")
 }
 
 // ── Command implementation ──────────────────────────────────────────────────

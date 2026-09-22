@@ -19,12 +19,7 @@ use crate::t;
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../../assets/icons/revcloud.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "REVCLOUD",
-        label: "Rev Cloud",
-        icon: ICON,
-        event: ModuleEvent::Command("REVCLOUD".to_string()),
-    }
+    crate::modules::ribbon_command("REVCLOUD")
 }
 
 const DEFAULT_ARC_LENGTH: f64 = 1.0;

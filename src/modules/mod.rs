@@ -22,6 +22,50 @@ pub use ocs_plugin_api::ribbon::{
     CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, StyleKey, ToolDef,
 };
 
+// Built-in ribbon presentation lives in the command catalog. Empty values are
+// intentional sentinels: external plugins still provide their own labels and
+// icons through the public ToolDef API.
+const CATALOG_LABEL: &str = "";
+const CATALOG_ICON: IconKind = IconKind::Glyph("");
+
+pub(crate) fn ribbon_command(command: &'static str) -> ToolDef {
+    ribbon_command_as(command, command)
+}
+
+pub(crate) fn ribbon_command_as(id: &'static str, command: &'static str) -> ToolDef {
+    ToolDef {
+        id,
+        label: CATALOG_LABEL,
+        icon: CATALOG_ICON,
+        event: ModuleEvent::Command(command.to_string()),
+    }
+}
+
+pub(crate) fn ribbon_action(id: &'static str, event: ModuleEvent) -> ToolDef {
+    ToolDef {
+        id,
+        label: CATALOG_LABEL,
+        icon: CATALOG_ICON,
+        event,
+    }
+}
+
+pub(crate) const fn ribbon_command_item(
+    command: &'static str,
+) -> (&'static str, &'static str, IconKind) {
+    (command, CATALOG_LABEL, CATALOG_ICON)
+}
+
+pub(crate) fn ribbon_command_items(
+    commands: &[&'static str],
+) -> Vec<(&'static str, &'static str, IconKind)> {
+    commands
+        .iter()
+        .copied()
+        .map(ribbon_command_item)
+        .collect()
+}
+
 // ── Module declarations ───────────────────────────────────────────────────
 
 pub mod annotate;

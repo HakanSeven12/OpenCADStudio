@@ -11,18 +11,8 @@ use crate::modules::{CadModule, IconKind, ModuleEvent, RibbonGroup, ToolDef};
 pub fn paper_space_tools() -> Vec<ToolDef> {
     vec![
         mview::tool(),
-        ToolDef {
-            id: "PAGESETUP",
-            label: "Page Setup",
-            icon: IconKind::Svg(include_bytes!("../../../assets/icons/pagesetup.svg")),
-            event: ModuleEvent::Command("PAGESETUP".to_string()),
-        },
-        ToolDef {
-            id: "PRINTALL",
-            label: "Print All",
-            icon: IconKind::Svg(include_bytes!("../../../assets/icons/plot.svg")),
-            event: ModuleEvent::Command("PRINTALL".to_string()),
-        },
+        crate::modules::ribbon_command("PAGESETUP"),
+        crate::modules::ribbon_command("PRINTALL"),
     ]
 }
 
@@ -47,22 +37,8 @@ impl CadModule for LayoutModule {
                 RibbonGroup {
                     title: "Plot",
                     tools: vec![
-                        ToolDef {
-                            id: "PAGESETUP",
-                            label: "Page Setup",
-                            icon: IconKind::Svg(include_bytes!(
-                                "../../../assets/icons/pagesetup.svg"
-                            )),
-                            event: ModuleEvent::Command("PAGESETUP".to_string()),
-                        }
-                        .into(),
-                        ToolDef {
-                            id: "PRINTALL",
-                            label: "Print All",
-                            icon: IconKind::Svg(include_bytes!("../../../assets/icons/plot.svg")),
-                            event: ModuleEvent::Command("PRINTALL".to_string()),
-                        }
-                        .into(),
+                        crate::modules::ribbon_command("PAGESETUP").into(),
+                        crate::modules::ribbon_command("PRINTALL").into(),
                     ],
                 },
             ]

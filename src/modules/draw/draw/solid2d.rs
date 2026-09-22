@@ -20,12 +20,7 @@ use glam::DVec3;
 
 #[allow(dead_code)] // ribbon definition ready for wiring; command works via the command line
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "SOLID2D",
-        label: "2D Solid",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/line.svg")),
-        event: ModuleEvent::Command("SOLID2D".to_string()),
-    }
+    crate::modules::ribbon_command("SOLID2D")
 }
 
 // ── Command implementation ────────────────────────────────────────────────

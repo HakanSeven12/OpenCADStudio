@@ -17,12 +17,7 @@ use crate::modules::{IconKind, ModuleEvent, ToolDef};
 
 #[allow(dead_code)]
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "MINSERT",
-        label: "Array Insert",
-        icon: IconKind::Svg(include_bytes!("../../../assets/icons/blocks/insert.svg")),
-        event: ModuleEvent::Command("MINSERT".to_string()),
-    }
+    crate::modules::ribbon_command("MINSERT")
 }
 
 /// Which step the command is currently collecting.

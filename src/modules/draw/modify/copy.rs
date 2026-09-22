@@ -15,12 +15,7 @@ use crate::scene::model::wire_model::WireModel;
 // ── Ribbon definition ──────────────────────────────────────────────────────
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "COPY",
-        label: "Copy",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/copy.svg")),
-        event: ModuleEvent::Command("COPY".to_string()),
-    }
+    crate::modules::ribbon_command("COPY")
 }
 
 // ── Command implementation ─────────────────────────────────────────────────

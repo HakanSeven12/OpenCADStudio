@@ -12,12 +12,7 @@ use crate::t;
 
 #[allow(dead_code)]
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "CENTERLINE",
-        label: "Center Line",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/line.svg")),
-        event: ModuleEvent::Command("CENTERLINE".to_owned()),
-    }
+    crate::modules::ribbon_command("CENTERLINE")
 }
 
 #[derive(Clone)]

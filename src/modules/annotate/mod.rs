@@ -55,25 +55,16 @@ impl CadModule for AnnotateModule {
                             id: "ANNOTATE_TEXT",
                             label: "Multiline\nText",
                             icon: mtext::ICON,
-                            items: vec![
-                                (mtext::tool().id, mtext::tool().label, mtext::tool().icon),
-                                (text::tool().id, text::tool().label, text::tool().icon),
-                                (ddedit::tool().id, ddedit::tool().label, ddedit::tool().icon),
-                            ],
+                            items: crate::modules::ribbon_command_items(&[
+                                "MTEXT", "TEXT", "DDEDIT",
+                            ]),
                             default: "MTEXT",
                         },
                         RibbonItem::StyleComboGroup {
                             style_key: StyleKey::TextStyle,
                             combo_id: "TEXT_STYLE_COMBO",
                             manager_cmd: Some("STYLE"),
-                            rows: vec![vec![crate::modules::ToolDef {
-                                id: "FIND",
-                                label: "Find",
-                                icon: crate::modules::IconKind::Svg(include_bytes!(
-                                    "../../../assets/icons/find.svg"
-                                )),
-                                event: crate::modules::ModuleEvent::Command("FIND".to_string()),
-                            }]],
+                            rows: vec![vec![crate::modules::ribbon_command("FIND")]],
                         },
                     ],
                 },
@@ -85,49 +76,17 @@ impl CadModule for AnnotateModule {
                             id: "ANNOTATE_DIM",
                             label: "Dimension",
                             icon: linear_dim::ICON,
-                            items: vec![
-                                (
-                                    linear_dim::tool().id,
-                                    linear_dim::tool().label,
-                                    linear_dim::tool().icon,
-                                ),
-                                (
-                                    aligned_dim::tool().id,
-                                    aligned_dim::tool().label,
-                                    aligned_dim::tool().icon,
-                                ),
-                                (
-                                    angular_dim::tool().id,
-                                    angular_dim::tool().label,
-                                    angular_dim::tool().icon,
-                                ),
-                                (
-                                    arc_length_dim::tool().id,
-                                    arc_length_dim::tool().label,
-                                    arc_length_dim::tool().icon,
-                                ),
-                                (
-                                    radius_dim::tool().id,
-                                    radius_dim::tool().label,
-                                    radius_dim::tool().icon,
-                                ),
-                                (
-                                    jogged_radius_dim::tool().id,
-                                    jogged_radius_dim::tool().label,
-                                    jogged_radius_dim::tool().icon,
-                                ),
-                                (
-                                    diameter_dim::tool().id,
-                                    diameter_dim::tool().label,
-                                    diameter_dim::tool().icon,
-                                ),
-                                (
-                                    ordinate_dim::tool().id,
-                                    ordinate_dim::tool().label,
-                                    ordinate_dim::tool().icon,
-                                ),
-                                (qdim::tool().id, qdim::tool().label, qdim::tool().icon),
-                            ],
+                            items: crate::modules::ribbon_command_items(&[
+                                "DIMLINEAR",
+                                "DIMALIGNED",
+                                "DIMANGULAR",
+                                "DIMARC",
+                                "DIMRADIUS",
+                                "DIMJOGGED",
+                                "DIMDIAMETER",
+                                "DIMORDINATE",
+                                "QDIM",
+                            ]),
                             default: "DIMLINEAR",
                         },
                         RibbonItem::StyleComboGroup {
@@ -159,29 +118,11 @@ impl CadModule for AnnotateModule {
                             icon: crate::modules::IconKind::Svg(include_bytes!(
                                 "../../../assets/icons/line.svg"
                             )),
-                            items: vec![
-                                (
+                            items: crate::modules::ribbon_command_items(&[
                                     "CENTERREASSOCIATE",
-                                    "Reassociate Center Object",
-                                    crate::modules::IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/line.svg"
-                                    )),
-                                ),
-                                (
                                     "CENTERDISASSOCIATE",
-                                    "Disassociate Center Object",
-                                    crate::modules::IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/line.svg"
-                                    )),
-                                ),
-                                (
                                     "CENTERRESET",
-                                    "Reset Center Object",
-                                    crate::modules::IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/line.svg"
-                                    )),
-                                ),
-                            ],
+                            ]),
                             default: "CENTERREASSOCIATE",
                         },
                     ],
@@ -194,18 +135,7 @@ impl CadModule for AnnotateModule {
                             id: "ANNOTATE_LEADER",
                             label: "Multileader",
                             icon: mleader_cmd::ICON,
-                            items: vec![
-                                (
-                                    mleader_cmd::tool().id,
-                                    mleader_cmd::tool().label,
-                                    mleader_cmd::tool().icon,
-                                ),
-                                (
-                                    leader_cmd::tool().id,
-                                    leader_cmd::tool().label,
-                                    leader_cmd::tool().icon,
-                                ),
-                            ],
+                            items: crate::modules::ribbon_command_items(&["MLEADER", "LEADER"]),
                             default: "MLEADER",
                         },
                         RibbonItem::StyleComboGroup {
@@ -250,54 +180,15 @@ impl CadModule for AnnotateModule {
                             icon: crate::modules::IconKind::Svg(include_bytes!(
                                 "../../../assets/icons/add_scale.svg"
                             )),
-                            items: vec![
-                                (
+                            items: crate::modules::ribbon_command_items(&[
                                     "OBJECTSCALE ADD",
-                                    "Add Current Scale",
-                                    crate::modules::IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/add_scale.svg"
-                                    )),
-                                ),
-                                (
                                     "OBJECTSCALE DELETE",
-                                    "Delete Current Scale",
-                                    crate::modules::IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/add_scale.svg"
-                                    )),
-                                ),
-                            ],
+                            ]),
                             default: "OBJECTSCALE ADD",
                         },
-                        RibbonItem::Tool(crate::modules::ToolDef {
-                            id: "SCALELISTEDIT",
-                            label: "Scale List",
-                            icon: crate::modules::IconKind::Svg(include_bytes!(
-                                "../../../assets/icons/scale_list.svg"
-                            )),
-                            event: crate::modules::ModuleEvent::Command(
-                                "SCALELISTEDIT".to_string(),
-                            ),
-                        }),
-                        RibbonItem::Tool(crate::modules::ToolDef {
-                            id: "OBJECTSCALE",
-                            label: "Add/Delete Scales",
-                            icon: crate::modules::IconKind::Svg(include_bytes!(
-                                "../../../assets/icons/add_scale.svg"
-                            )),
-                            event: crate::modules::ModuleEvent::Command(
-                                "OBJECTSCALE".to_string(),
-                            ),
-                        }),
-                        RibbonItem::Tool(crate::modules::ToolDef {
-                            id: "ANNORESET",
-                            label: "Sync Scale Positions",
-                            icon: crate::modules::IconKind::Svg(include_bytes!(
-                                "../../../assets/icons/sync.svg"
-                            )),
-                            event: crate::modules::ModuleEvent::Command(
-                                "ANNORESET".to_string(),
-                            ),
-                        }),
+                        RibbonItem::Tool(crate::modules::ribbon_command("SCALELISTEDIT")),
+                        RibbonItem::Tool(crate::modules::ribbon_command("OBJECTSCALE")),
+                        RibbonItem::Tool(crate::modules::ribbon_command("ANNORESET")),
                     ],
                 },
             ]

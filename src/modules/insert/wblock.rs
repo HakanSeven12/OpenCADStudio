@@ -11,12 +11,7 @@ use crate::modules::{IconKind, ModuleEvent, ToolDef};
 
 #[allow(dead_code)]
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "WBLOCK",
-        label: "Write Block",
-        icon: IconKind::Svg(include_bytes!("../../../assets/icons/blocks/insert.svg")),
-        event: ModuleEvent::Command("WBLOCK".to_string()),
-    }
+    crate::modules::ribbon_command("WBLOCK")
 }
 
 /// Build a standalone `CadDocument` containing the named block's entities

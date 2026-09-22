@@ -9,12 +9,7 @@ use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "INSERT",
-        label: "Insert Block",
-        icon: IconKind::Svg(include_bytes!("../../../assets/icons/blocks/insert.svg")),
-        event: ModuleEvent::Command("INSERT".to_string()),
-    }
+    crate::modules::ribbon_command("INSERT")
 }
 
 enum Step {

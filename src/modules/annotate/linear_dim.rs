@@ -38,12 +38,7 @@ fn measure_axis(first: DVec3, second: DVec3, def: DVec3) -> DVec3 {
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_linear.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "DIMLINEAR",
-        label: "Linear",
-        icon: ICON,
-        event: ModuleEvent::Command("DIMLINEAR".to_string()),
-    }
+    crate::modules::ribbon_command("DIMLINEAR")
 }
 
 enum Step {

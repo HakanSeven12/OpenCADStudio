@@ -18,12 +18,7 @@ use glam::DVec3;
 // ── Ribbon definition ─────────────────────────────────────────────────────
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "LINE",
-        label: "Line",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/line.svg")),
-        event: ModuleEvent::Command("LINE".to_string()),
-    }
+    crate::modules::ribbon_command("LINE")
 }
 
 // ── Command implementation ────────────────────────────────────────────────

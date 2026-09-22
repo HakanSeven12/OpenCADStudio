@@ -14,12 +14,7 @@ use glam::{DVec3, Vec3};
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_radius.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "DIMRADIUS",
-        label: "Radius",
-        icon: ICON,
-        event: ModuleEvent::Command("DIMRADIUS".to_string()),
-    }
+    crate::modules::ribbon_command("DIMRADIUS")
 }
 
 enum Step {

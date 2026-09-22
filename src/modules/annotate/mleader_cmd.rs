@@ -13,12 +13,7 @@ use crate::t;
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/mleader.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "MLEADER",
-        label: "MLeader",
-        icon: ICON,
-        event: ModuleEvent::Command("MLEADER".to_string()),
-    }
+    crate::modules::ribbon_command("MLEADER")
 }
 
 pub struct MLeaderCommand {

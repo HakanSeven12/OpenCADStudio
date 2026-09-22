@@ -16,12 +16,7 @@ use crate::t;
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_jog.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "DIMJOGGED",
-        label: "Jogged Radius",
-        icon: ICON,
-        event: ModuleEvent::Command("DIMJOGGED".to_string()),
-    }
+    crate::modules::ribbon_command("DIMJOGGED")
 }
 
 #[derive(Clone, Copy)]

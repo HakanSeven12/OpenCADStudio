@@ -7,11 +7,6 @@ pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../../assets/icon
 
 /// Paste-menu entries: (command id, label, icon). The first is the default
 /// fired by clicking the button body; the rest open from the ▾.
-pub const MENU_ITEMS: &[(&str, &str, IconKind)] = &[
-    ("PASTECLIP", "Paste", ICON),
-    ("PASTEORIG", "Paste to Original Coordinates", ICON),
-    ("PASTEBLOCK", "Paste as Block", ICON),
-];
 
 // ── CadCommand implementation ─────────────────────────────────────────────
 

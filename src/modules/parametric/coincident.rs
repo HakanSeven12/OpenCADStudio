@@ -10,14 +10,7 @@ use crate::modules::{IconKind, ModuleEvent, ToolDef};
 pub mod coincident_tool {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "CCONSTRAINT",
-            label: "Coincident",
-            icon: IconKind::Svg(include_bytes!(
-                "../../../assets/icons/constrain/coincident.svg"
-            )),
-            event: ModuleEvent::Command("CCONSTRAINT".to_string()),
-        }
+        crate::modules::ribbon_command("CCONSTRAINT")
     }
 }
 

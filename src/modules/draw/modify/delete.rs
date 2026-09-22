@@ -6,10 +6,5 @@
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "ERASE",
-        label: "Delete",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/erase.svg")),
-        event: ModuleEvent::Command("ERASE".to_string()),
-    }
+    crate::modules::ribbon_command("ERASE")
 }

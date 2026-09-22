@@ -87,10 +87,12 @@ impl CadModule for ViewModule {
                         id: "VISUAL_STYLE",
                         label: "Visual\nStyle",
                         icon: visual_style::VISUAL_STYLES[0].icon,
-                        items: visual_style::VISUAL_STYLES
+                        items: crate::modules::ribbon_command_items(
+                            &visual_style::VISUAL_STYLES
                             .iter()
-                            .map(|style| (style.command, style.label, style.icon))
-                            .collect(),
+                                .map(|style| style.command)
+                                .collect::<Vec<_>>(),
+                        ),
                         default: visual_style::VISUAL_STYLES[0].command,
                     }],
                 },
@@ -140,12 +142,7 @@ impl CadModule for ViewModule {
                 // entry here too.
                 RibbonGroup {
                     title: "Plot",
-                    tools: vec![RibbonItem::Tool(ToolDef {
-                        id: "PAGESETUP",
-                        label: "Page Setup",
-                        icon: IconKind::Svg(include_bytes!("../../../assets/icons/pagesetup.svg")),
-                        event: ModuleEvent::Command("PAGESETUP".to_string()),
-                    })],
+                    tools: vec![RibbonItem::Tool(crate::modules::ribbon_command("PAGESETUP"))],
                 },
             ]
         })

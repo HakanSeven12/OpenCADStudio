@@ -52,18 +52,6 @@ use super::entity_index::ModifyEntityIndex;
 pub const DROPDOWN_ID: &str = "trim_extend";
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../../assets/icons/trim.svg"));
 
-pub const DROPDOWN_ITEMS: &[(&str, &str, IconKind)] = &[
-    (
-        "TRIM",
-        "Trim",
-        IconKind::Svg(include_bytes!("../../../../assets/icons/trim.svg")),
-    ),
-    (
-        "EXTEND",
-        "Extend",
-        IconKind::Svg(include_bytes!("../../../../assets/icons/extend.svg")),
-    ),
-];
 
 // ══════════════════════════════════════════════════════════════════════════
 // Geometry helpers

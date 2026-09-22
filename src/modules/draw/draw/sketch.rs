@@ -15,12 +15,7 @@ const MIN_INCREMENT: f64 = 1.0e-9;
 
 #[allow(dead_code)]
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "SKETCH",
-        label: "Sketch",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/line.svg")),
-        event: ModuleEvent::Command("SKETCH".to_string()),
-    }
+    crate::modules::ribbon_command("SKETCH")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

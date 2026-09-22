@@ -12,12 +12,7 @@ pub const ICON: IconKind =
 
 /// Ribbon button: zoom into a rectangle picked by two corners.
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "ZOOM_WINDOW",
-        label: "Zoom Window",
-        icon: ICON,
-        event: ModuleEvent::Command("ZOOM WINDOW".to_string()),
-    }
+    crate::modules::ribbon_command_as("ZOOM_WINDOW", "ZOOM WINDOW")
 }
 
 pub struct ZoomWindowCommand {

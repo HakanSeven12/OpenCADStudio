@@ -17,12 +17,7 @@ use glam::{DVec2, DVec3, Vec2};
 // ── Ribbon definition ─────────────────────────────────────────────────────
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "MVIEW",
-        label: "Viewport",
-        icon: IconKind::Svg(include_bytes!("../../../assets/icons/viewport.svg")),
-        event: ModuleEvent::Command("MVIEW".to_string()),
-    }
+    crate::modules::ribbon_command("MVIEW")
 }
 
 // ── Command ───────────────────────────────────────────────────────────────

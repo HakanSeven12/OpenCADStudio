@@ -14,12 +14,7 @@ const EPSILON: f64 = 1.0e-9;
 
 #[allow(dead_code)]
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "HELIX",
-        label: "Helix",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/line.svg")),
-        event: ModuleEvent::Command("HELIX".to_string()),
-    }
+    crate::modules::ribbon_command("HELIX")
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

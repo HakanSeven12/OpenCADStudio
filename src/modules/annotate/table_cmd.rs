@@ -19,12 +19,7 @@ use crate::t;
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/table.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "TABLE",
-        label: "Table",
-        icon: ICON,
-        event: ModuleEvent::Command("TABLE".to_string()),
-    }
+    crate::modules::ribbon_command("TABLE")
 }
 
 const DEFAULT_COLS: usize = 3;

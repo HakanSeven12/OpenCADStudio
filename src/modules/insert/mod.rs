@@ -55,29 +55,9 @@ impl CadModule for InsertModule {
                             icon: IconKind::Svg(include_bytes!(
                                 "../../../assets/icons/underlay_frames.svg"
                             )),
-                            items: vec![
-                                (
-                                    "FRAMES0",
-                                    "Frames Off",
-                                    IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/underlay_frames.svg"
-                                    )),
-                                ),
-                                (
-                                    "FRAMES1",
-                                    "Frames On",
-                                    IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/underlay_frames.svg"
-                                    )),
-                                ),
-                                (
-                                    "FRAMES2",
-                                    "Frames On, Not Plotted",
-                                    IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/underlay_frames.svg"
-                                    )),
-                                ),
-                            ],
+                            items: crate::modules::ribbon_command_items(&[
+                                "FRAMES0", "FRAMES1", "FRAMES2",
+                            ]),
                             default: "FRAMES1",
                         },
                         RibbonItem::Tool(snap_underlays::tool()),

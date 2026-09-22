@@ -25,20 +25,20 @@ fn icon_el(icon: IconKind) -> Element<'static, Message> {
     }
 }
 
-fn tip_panel(label: &'static str) -> Element<'static, Message> {
+fn tip_panel(label: String) -> Element<'static, Message> {
     container(text(label).size(11))
         .padding([2, 6])
         .style(|theme: &Theme| {
             let palette = theme.palette();
             container::Style {
-            background: Some(Background::Color(palette.background.strong.color)),
-            border: Border {
-                color: palette.background.neutral.color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            text_color: Some(palette.background.strong.text),
-            ..Default::default()
+                background: Some(Background::Color(palette.background.strong.color)),
+                border: Border {
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                text_color: Some(palette.background.strong.text),
+                ..Default::default()
             }
         })
         .into()
@@ -54,7 +54,15 @@ pub fn view(tools: &[ToolDef]) -> Option<Element<'static, Message>> {
 
     let mut col = column![].spacing(4).align_x(iced::Center);
     for t in tools {
-        let btn = button(icon_el(t.icon))
+        let command = match &t.event {
+            crate::modules::ModuleEvent::Command(command) => command.as_str(),
+            _ => t.id,
+        };
+        let icon = crate::ui::command_presentation::icon(command)
+            .map(|id| IconKind::Svg(crate::ui::icon_catalog::bytes(id)))
+            .unwrap_or(t.icon);
+        let label = crate::ui::command_presentation::label(command, t.label);
+        let btn = button(icon_el(icon))
             .on_press(Message::RibbonToolClick {
                 tool_id: t.id.to_string(),
                 event: t.event.clone(),
@@ -63,37 +71,32 @@ pub fn view(tools: &[ToolDef]) -> Option<Element<'static, Message>> {
             .height(Length::Fixed(BTN_SIZE))
             .style(|theme: &Theme, status| {
                 let palette = theme.palette();
-                let hovered = matches!(
-                    status,
-                    button::Status::Hovered | button::Status::Pressed
-                );
+                let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
                 button::Style {
-                background: hovered
-                    .then_some(Background::Color(palette.background.strong.color)),
-                border: Border {
-                    radius: 3.0.into(),
+                    background: hovered
+                        .then_some(Background::Color(palette.background.strong.color)),
+                    border: Border {
+                        radius: 3.0.into(),
+                        ..Default::default()
+                    },
+                    text_color: palette.background.base.text,
                     ..Default::default()
-                },
-                text_color: palette.background.base.text,
-                ..Default::default()
                 }
             });
         // Label tooltip on the left so it never runs off the right edge.
-        col = col.push(
-            tooltip(btn, tip_panel(t.label), tooltip::Position::Left).gap(6),
-        );
+        col = col.push(tooltip(btn, tip_panel(label), tooltip::Position::Left).gap(6));
     }
 
     let panel = container(col).padding(4).style(|theme: &Theme| {
         let palette = theme.palette();
         container::Style {
-        background: Some(Background::Color(palette.background.weak.color)),
-        border: Border {
-            color: palette.background.neutral.color,
-            width: 1.0,
-            radius: 5.0.into(),
-        },
-        ..Default::default()
+            background: Some(Background::Color(palette.background.weak.color)),
+            border: Border {
+                color: palette.background.neutral.color,
+                width: 1.0,
+                radius: 5.0.into(),
+            },
+            ..Default::default()
         }
     });
 

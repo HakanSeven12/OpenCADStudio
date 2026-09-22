@@ -25,18 +25,8 @@ use crate::modules::{IconKind, ModuleEvent, ToolDef};
 /// active: save the block edits and leave, or discard them.
 pub fn block_edit_tools() -> Vec<ToolDef> {
     vec![
-        ToolDef {
-            id: "BEDIT_SAVE",
-            label: "Save Block",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/mt_ok.svg")),
-            event: ModuleEvent::Command("BEDIT_SAVE".to_string()),
-        },
-        ToolDef {
-            id: "BEDIT_DISCARD",
-            label: "Discard Block Edit",
-            icon: IconKind::Svg(include_bytes!("../../../../assets/icons/mt_cancel.svg")),
-            event: ModuleEvent::Command("BEDIT_DISCARD".to_string()),
-        },
+        crate::modules::ribbon_command("BEDIT_SAVE"),
+        crate::modules::ribbon_command("BEDIT_DISCARD"),
     ]
 }
 

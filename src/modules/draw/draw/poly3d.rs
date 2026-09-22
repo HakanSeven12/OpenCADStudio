@@ -14,12 +14,7 @@ use glam::DVec3;
 
 #[allow(dead_code)] // ribbon definition ready for wiring; command works via the command line
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "3DPOLY",
-        label: "3D Polyline",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/line.svg")),
-        event: ModuleEvent::Command("3DPOLY".to_string()),
-    }
+    crate::modules::ribbon_command("3DPOLY")
 }
 
 // ── Command implementation ────────────────────────────────────────────────

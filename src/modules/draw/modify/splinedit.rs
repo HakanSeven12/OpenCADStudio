@@ -20,12 +20,7 @@ use crate::scene::model::wire_model::WireModel;
 
 #[allow(dead_code)]
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "SPLINEDIT",
-        label: "Spline Edit",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/spline.svg")),
-        event: ModuleEvent::Command("SPLINEDIT".to_string()),
-    }
+    crate::modules::ribbon_command("SPLINEDIT")
 }
 
 #[derive(Clone, Copy)]

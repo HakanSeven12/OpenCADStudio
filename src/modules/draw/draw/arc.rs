@@ -40,19 +40,6 @@ const ICON_CONT: IconKind =
 
 pub const DROPDOWN_ID: &str = "ARC";
 
-pub const DROPDOWN_ITEMS: &[(&str, &str, IconKind)] = &[
-    ("ARC_3P", "3-Point", ICON_3P),
-    ("ARC_SCE", "Start, Center, End", ICON_SCE),
-    ("ARC_SCA", "Start, Center, Angle", ICON_SCA),
-    ("ARC_SCL", "Start, Center, Length", ICON_SCL),
-    ("ARC_SEA", "Start, End, Angle", ICON_SEA),
-    ("ARC_SED", "Start, End, Direction", ICON_SED),
-    ("ARC_SER", "Start, End, Radius", ICON_SER),
-    ("ARC_CSE", "Center, Start, End", ICON_CSE),
-    ("ARC_CSA", "Center, Start, Angle", ICON_CSA),
-    ("ARC_CSL", "Center, Start, Length", ICON_CSL),
-    ("ARC_CONT", "Continue", ICON_CONT),
-];
 
 /// Default icon — falls back to 3-Point before first use.
 pub const ICON: IconKind = ICON_3P;

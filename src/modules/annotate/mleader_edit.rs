@@ -22,12 +22,7 @@ pub const ICON_ADD: IconKind =
     IconKind::Svg(include_bytes!("../../../assets/icons/mleader_add.svg"));
 
 pub fn tool_add() -> ToolDef {
-    ToolDef {
-        id: "MLEADERADD",
-        label: "Add Leader",
-        icon: ICON_ADD,
-        event: ModuleEvent::Command("MLEADERADD".to_string()),
-    }
+    crate::modules::ribbon_command("MLEADERADD")
 }
 
 enum AddStep {
@@ -197,12 +192,7 @@ pub const ICON_REMOVE: IconKind =
     IconKind::Svg(include_bytes!("../../../assets/icons/mleader_remove.svg"));
 
 pub fn tool_remove() -> ToolDef {
-    ToolDef {
-        id: "MLEADERREMOVE",
-        label: "Remove Leader",
-        icon: ICON_REMOVE,
-        event: ModuleEvent::Command("MLEADERREMOVE".to_string()),
-    }
+    crate::modules::ribbon_command("MLEADERREMOVE")
 }
 
 enum RemoveStep {
@@ -323,12 +313,7 @@ pub const ICON_ALIGN: IconKind =
     IconKind::Svg(include_bytes!("../../../assets/icons/mleader_align.svg"));
 
 pub fn tool_align() -> ToolDef {
-    ToolDef {
-        id: "MLEADERALIGN",
-        label: "Align Leaders",
-        icon: ICON_ALIGN,
-        event: ModuleEvent::Command("MLEADERALIGN".to_string()),
-    }
+    crate::modules::ribbon_command("MLEADERALIGN")
 }
 
 enum AlignStep {
@@ -415,12 +400,7 @@ pub const ICON_COLLECT: IconKind =
     IconKind::Svg(include_bytes!("../../../assets/icons/mleader_collect.svg"));
 
 pub fn tool_collect() -> ToolDef {
-    ToolDef {
-        id: "MLEADERCOLLECT",
-        label: "Collect Leaders",
-        icon: ICON_COLLECT,
-        event: ModuleEvent::Command("MLEADERCOLLECT".to_string()),
-    }
+    crate::modules::ribbon_command("MLEADERCOLLECT")
 }
 
 enum CollectStep {

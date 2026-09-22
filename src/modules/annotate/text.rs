@@ -14,12 +14,7 @@ use crate::t;
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/text.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "TEXT",
-        label: "Text",
-        icon: ICON,
-        event: ModuleEvent::Command("TEXT".to_string()),
-    }
+    crate::modules::ribbon_command("TEXT")
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

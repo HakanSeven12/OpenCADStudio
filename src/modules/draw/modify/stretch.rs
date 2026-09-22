@@ -26,12 +26,7 @@ use crate::scene::model::wire_model::WireModel;
 // ── Ribbon definition ──────────────────────────────────────────────────────
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "STRETCH",
-        label: "Stretch",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/stretch.svg")),
-        event: ModuleEvent::Command("STRETCH".to_string()),
-    }
+    crate::modules::ribbon_command("STRETCH")
 }
 
 // ── Command implementation ─────────────────────────────────────────────────

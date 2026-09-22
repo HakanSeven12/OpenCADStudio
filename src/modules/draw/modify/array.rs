@@ -27,23 +27,6 @@ use crate::scene::model::wire_model::WireModel;
 pub const DROPDOWN_ID: &str = "array_type";
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../../assets/icons/array_rect.svg"));
 
-pub const DROPDOWN_ITEMS: &[(&str, &str, IconKind)] = &[
-    (
-        "ARRAYRECT",
-        "Rectangular Array",
-        IconKind::Svg(include_bytes!("../../../../assets/icons/array_rect.svg")),
-    ),
-    (
-        "ARRAYPATH",
-        "Path Array",
-        IconKind::Svg(include_bytes!("../../../../assets/icons/array_path.svg")),
-    ),
-    (
-        "ARRAYPOLAR",
-        "Polar Array",
-        IconKind::Svg(include_bytes!("../../../../assets/icons/array_polar.svg")),
-    ),
-];
 
 // ── Item limit ─────────────────────────────────────────────────────────────
 

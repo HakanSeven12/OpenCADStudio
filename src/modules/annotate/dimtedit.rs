@@ -12,12 +12,7 @@ use crate::t;
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_tedit.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "DIMTEDIT",
-        label: "Dim Text Edit",
-        icon: ICON,
-        event: ModuleEvent::Command("DIMTEDIT".to_string()),
-    }
+    crate::modules::ribbon_command("DIMTEDIT")
 }
 
 enum Step {

@@ -809,6 +809,62 @@ mod tests {
     }
 
     #[test]
+    fn builtin_ribbon_items_keep_presentation_in_the_catalog() {
+        use crate::modules::{IconKind, RibbonItem, ToolDef};
+
+        fn assert_catalog_tool(tool: &ToolDef) {
+            assert!(
+                tool.label.is_empty(),
+                "built-in ribbon tool {} still owns label {:?}",
+                tool.id,
+                tool.label
+            );
+            assert!(
+                matches!(tool.icon, IconKind::Glyph("")),
+                "built-in ribbon tool {} still owns an icon",
+                tool.id
+            );
+        }
+
+        for module in crate::modules::registry::all_modules() {
+            for group in module.ribbon_groups() {
+                for item in &group.tools {
+                    match item {
+                        RibbonItem::Tool(tool)
+                        | RibbonItem::LabeledTool(tool)
+                        | RibbonItem::LargeTool(tool) => assert_catalog_tool(tool),
+                        RibbonItem::Dropdown { items, .. }
+                        | RibbonItem::LabeledDropdown { items, .. }
+                        | RibbonItem::LargeDropdown { items, .. } => {
+                            for (command, label, icon) in items {
+                                assert!(label.is_empty(), "{command} still owns a dropdown label");
+                                assert!(
+                                    matches!(icon, IconKind::Glyph("")),
+                                    "{command} still owns a dropdown icon"
+                                );
+                            }
+                        }
+                        RibbonItem::ToolGrid { columns }
+                        | RibbonItem::StyleComboGroup { rows: columns, .. } => {
+                            for tool in columns.iter().flatten() {
+                                assert_catalog_tool(tool);
+                            }
+                        }
+                        RibbonItem::LayerComboGroup { row2, row3 } => {
+                            for tool in row2.iter().chain(row3) {
+                                assert_catalog_tool(tool);
+                            }
+                        }
+                        RibbonItem::PropertiesGroup { match_prop } => {
+                            assert_catalog_tool(match_prop)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn coverage_report_lists_every_remaining_fallback() {
         let report = coverage_report();
         assert_eq!(

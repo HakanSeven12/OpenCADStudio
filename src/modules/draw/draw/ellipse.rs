@@ -40,11 +40,6 @@ const ICON_ARC: IconKind = IconKind::Svg(include_bytes!(
 
 pub const DROPDOWN_ID: &str = "ELLIPSE";
 
-pub const DROPDOWN_ITEMS: &[(&str, &str, IconKind)] = &[
-    ("ELLIPSE", "Center, Axes", ICON_CTR),
-    ("ELLIPSE_AXIS", "Axis, End", ICON_AXIS),
-    ("ELLIPSE_ARC", "Ellipse Arc", ICON_ARC),
-];
 
 pub const ICON: IconKind = ICON_CTR;
 

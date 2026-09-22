@@ -24,12 +24,7 @@ const TAU: f64 = std::f64::consts::TAU;
 // ── Ribbon definition ──────────────────────────────────────────────────────
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "ROTATE",
-        label: "Rotate",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/rotate.svg")),
-        event: ModuleEvent::Command("ROTATE".to_string()),
-    }
+    crate::modules::ribbon_command("ROTATE")
 }
 
 // ── Command implementation ─────────────────────────────────────────────────

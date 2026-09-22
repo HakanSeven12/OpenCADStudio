@@ -16,18 +16,13 @@ use glam::DVec3;
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview,
 };
-use crate::modules::{IconKind, ModuleEvent, ToolDef};
+use crate::modules::{IconKind, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_baseline.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "DIMBASELINE",
-        label: "Baseline",
-        icon: ICON,
-        event: ModuleEvent::Command("DIMBASELINE".to_string()),
-    }
+    crate::modules::ribbon_command("DIMBASELINE")
 }
 
 #[derive(Clone)]

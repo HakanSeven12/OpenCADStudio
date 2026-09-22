@@ -37,12 +37,7 @@ use super::entity_index::ModifyEntityIndex;
 // ── Ribbon definition ──────────────────────────────────────────────────────
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "OFFSET",
-        label: "Offset",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/offset.svg")),
-        event: ModuleEvent::Command("OFFSET".to_string()),
-    }
+    crate::modules::ribbon_command("OFFSET")
 }
 
 // ── Line offset ────────────────────────────────────────────────────────────

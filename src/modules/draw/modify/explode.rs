@@ -35,12 +35,7 @@ use crate::t;
 // ── Ribbon definition ──────────────────────────────────────────────────────
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "EXPLODE",
-        label: "Explode",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/explode.svg")),
-        event: ModuleEvent::Command("EXPLODE".to_string()),
-    }
+    crate::modules::ribbon_command("EXPLODE")
 }
 
 // ── Geometry helpers ────────────────────────────────────────────────────────

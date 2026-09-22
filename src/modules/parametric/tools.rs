@@ -5,96 +5,49 @@ use crate::modules::{IconKind, ModuleEvent, ToolDef};
 pub mod horizontal {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "GCHORIZONTAL",
-            label: "Horizontal",
-            icon: IconKind::Svg(include_bytes!(
-                "../../../assets/icons/constrain/horizontal.svg"
-            )),
-            event: ModuleEvent::Command("GCHORIZONTAL".to_string()),
-        }
+        crate::modules::ribbon_command("GCHORIZONTAL")
     }
 }
 
 pub mod vertical {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "VCONSTRAINT",
-            label: "Vertical",
-            icon: IconKind::Svg(include_bytes!(
-                "../../../assets/icons/constrain/vertical.svg"
-            )),
-            event: ModuleEvent::Command("VCONSTRAINT".to_string()),
-        }
+        crate::modules::ribbon_command("VCONSTRAINT")
     }
 }
 
 pub mod parallel {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "PCONSTRAINT",
-            label: "Parallel",
-            icon: IconKind::Svg(include_bytes!(
-                "../../../assets/icons/constrain/parallel.svg"
-            )),
-            event: ModuleEvent::Command("PCONSTRAINT".to_string()),
-        }
+        crate::modules::ribbon_command("PCONSTRAINT")
     }
 }
 
 pub mod perpendicular {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "QCONSTRAINT",
-            label: "Perpendicular",
-            icon: IconKind::Svg(include_bytes!(
-                "../../../assets/icons/constrain/perpendicular.svg"
-            )),
-            event: ModuleEvent::Command("GCPERPENDICULAR".to_string()),
-        }
+        crate::modules::ribbon_command_as("QCONSTRAINT", "GCPERPENDICULAR")
     }
 }
 
 pub mod equal {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "ECONSTRAINT",
-            label: "Equal",
-            icon: IconKind::Svg(include_bytes!("../../../assets/icons/constrain/equal.svg")),
-            event: ModuleEvent::Command("ECONSTRAINT".to_string()),
-        }
+        crate::modules::ribbon_command("ECONSTRAINT")
     }
 }
 
 pub mod tangent {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "TCONSTRAINT",
-            label: "Tangent",
-            icon: IconKind::Svg(include_bytes!(
-                "../../../assets/icons/constrain/tangent.svg"
-            )),
-            event: ModuleEvent::Command("TCONSTRAINT".to_string()),
-        }
+        crate::modules::ribbon_command("TCONSTRAINT")
     }
 }
 
 pub mod concentric {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "GCCONCENTRIC",
-            label: "Concentric",
-            icon: IconKind::Svg(include_bytes!(
-                "../../../assets/icons/constrain/concentric.svg"
-            )),
-            event: ModuleEvent::Command("GCCONCENTRIC".to_string()),
-        }
+        crate::modules::ribbon_command("GCCONCENTRIC")
     }
 }
 
@@ -108,52 +61,28 @@ pub mod concentric {
 pub mod normal {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "NRCONSTRAINT",
-            label: "Normal",
-            icon: IconKind::Svg(include_bytes!("../../../assets/icons/constrain/normal.svg")),
-            event: ModuleEvent::Command("NRCONSTRAINT".to_string()),
-        }
+        crate::modules::ribbon_command("NRCONSTRAINT")
     }
 }
 
 pub mod colinear {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "LCONSTRAINT",
-            label: "Colinear",
-            icon: IconKind::Svg(include_bytes!(
-                "../../../assets/icons/constrain/colinear.svg"
-            )),
-            event: ModuleEvent::Command("LCONSTRAINT".to_string()),
-        }
+        crate::modules::ribbon_command("LCONSTRAINT")
     }
 }
 
 pub mod fixed {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "FXCONSTRAINT",
-            label: "Fix",
-            icon: IconKind::Svg(include_bytes!("../../../assets/icons/constrain/fixed.svg")),
-            event: ModuleEvent::Command("FXCONSTRAINT".to_string()),
-        }
+        crate::modules::ribbon_command("FXCONSTRAINT")
     }
 }
 
 pub mod symmetric {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "SYCONSTRAINT",
-            label: "Symmetric",
-            icon: IconKind::Svg(include_bytes!(
-                "../../../assets/icons/constrain/symmetric.svg"
-            )),
-            event: ModuleEvent::Command("SYCONSTRAINT".to_string()),
-        }
+        crate::modules::ribbon_command("SYCONSTRAINT")
     }
 }
 

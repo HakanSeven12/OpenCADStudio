@@ -9,19 +9,14 @@ use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview, InputKind,
     WorkingPlane,
 };
-use crate::modules::{IconKind, ModuleEvent, ToolDef};
+use crate::modules::{IconKind, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_aligned.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "DIMALIGNED",
-        label: "Aligned",
-        icon: ICON,
-        event: ModuleEvent::Command("DIMALIGNED".to_string()),
-    }
+    crate::modules::ribbon_command("DIMALIGNED")
 }
 
 enum Step {

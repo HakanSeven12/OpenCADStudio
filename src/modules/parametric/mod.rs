@@ -47,7 +47,7 @@ pub use value::{
     DistanceConstraintCommand, DistanceMode,
 };
 
-use crate::modules::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
+use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem};
 
 pub struct ParametricModule;
 
@@ -63,26 +63,17 @@ impl CadModule for ParametricModule {
     fn ribbon_groups(&self) -> &[RibbonGroup] {
         static GROUPS: std::sync::OnceLock<Vec<RibbonGroup>> = std::sync::OnceLock::new();
         GROUPS.get_or_init(|| {
-            let command = |id: &'static str, label: &'static str, icon: &'static [u8]| ToolDef {
-                id, label, icon: IconKind::Svg(icon), event: ModuleEvent::Command(id.to_string()),
-            };
             vec![
                 RibbonGroup {
                     title: "Geometric",
                     tools: vec![
-                        RibbonItem::LargeTool(command(
-                            "AUTOCONSTRAIN", "Auto Constrain",
-                            include_bytes!("../../../assets/icons/constrain/auto.svg"),
-                        )),
+                        RibbonItem::LargeTool(crate::modules::ribbon_command("AUTOCONSTRAIN")),
                         RibbonItem::LargeTool(coincident_tool::tool()),
                         RibbonItem::LargeTool(parallel::tool()),
                         RibbonItem::LargeTool(tangent::tool()),
                         RibbonItem::LargeTool(colinear::tool()),
                         RibbonItem::LargeTool(perpendicular::tool()),
-                        RibbonItem::LargeTool(command(
-                            "GCSMOOTH", "Smooth",
-                            include_bytes!("../../../assets/icons/constrain/smooth.svg"),
-                        )),
+                        RibbonItem::LargeTool(crate::modules::ribbon_command("GCSMOOTH")),
                         RibbonItem::LargeTool(concentric_tool::tool()),
                         RibbonItem::LargeTool(horizontal::tool()),
                         RibbonItem::LargeTool(symmetric::tool()),
@@ -92,18 +83,12 @@ impl CadModule for ParametricModule {
                         RibbonItem::LabeledDropdown {
                             id: "GCVISIBILITY", label: "Show/Hide",
                             icon: IconKind::Svg(include_bytes!("../../../assets/icons/constrain/show.svg")),
-                            items: vec![
-                                ("GCSHOW", "Show", IconKind::Svg(include_bytes!("../../../assets/icons/constrain/show.svg"))),
-                                ("GCHIDE", "Hide", IconKind::Svg(include_bytes!("../../../assets/icons/constrain/hide_all.svg"))),
-                                ("GCRESET", "Reset", IconKind::Svg(include_bytes!("../../../assets/icons/constrain/show.svg"))),
-                            ], default: "GCSHOW",
+                            items: crate::modules::ribbon_command_items(&[
+                                "GCSHOW", "GCHIDE", "GCRESET",
+                            ]), default: "GCSHOW",
                         },
-                        RibbonItem::LabeledTool(command(
-                            "GCSHOWALL", "Show All", include_bytes!("../../../assets/icons/constrain/show_all.svg"),
-                        )),
-                        RibbonItem::LabeledTool(command(
-                            "GCHIDEALL", "Hide All", include_bytes!("../../../assets/icons/constrain/hide_all.svg"),
-                        )),
+                        RibbonItem::LabeledTool(crate::modules::ribbon_command("GCSHOWALL")),
+                        RibbonItem::LabeledTool(crate::modules::ribbon_command("GCHIDEALL")),
                     ],
                 },
                 RibbonGroup {
@@ -111,8 +96,11 @@ impl CadModule for ParametricModule {
                     tools: vec![
                         RibbonItem::LargeDropdown {
                             id: "DC_LINEAR_MENU", label: "Linear", icon: dimensional_tools::linear().icon,
-                            items: [dimensional_tools::linear(), dimensional_tools::horizontal(), dimensional_tools::vertical()]
-                                .iter().map(|tool| (tool.id, tool.label, tool.icon)).collect(),
+                            items: crate::modules::ribbon_command_items(&[
+                                "DCLINEAR",
+                                "DCHORIZONTAL",
+                                "DCVERTICAL",
+                            ]),
                             default: "DCLINEAR",
                         },
                         RibbonItem::LargeTool(dimensional_tools::aligned()),
@@ -123,28 +111,17 @@ impl CadModule for ParametricModule {
                         RibbonItem::LabeledDropdown {
                             id: "DCVISIBILITY", label: "Show/Hide",
                             icon: IconKind::Svg(include_bytes!("../../../assets/icons/constrain/show.svg")),
-                            items: vec![
-                                ("DCSHOW", "Show", IconKind::Svg(include_bytes!("../../../assets/icons/constrain/show.svg"))),
-                                ("DCHIDE", "Hide", IconKind::Svg(include_bytes!("../../../assets/icons/constrain/hide_all.svg"))),
-                            ], default: "DCSHOW",
+                            items: crate::modules::ribbon_command_items(&["DCSHOW", "DCHIDE"]), default: "DCSHOW",
                         },
-                        RibbonItem::LabeledTool(command(
-                            "DCSHOWALL", "Show All", include_bytes!("../../../assets/icons/constrain/show_all.svg"),
-                        )),
-                        RibbonItem::LabeledTool(command(
-                            "DCHIDEALL", "Hide All", include_bytes!("../../../assets/icons/constrain/hide_all.svg"),
-                        )),
+                        RibbonItem::LabeledTool(crate::modules::ribbon_command("DCSHOWALL")),
+                        RibbonItem::LabeledTool(crate::modules::ribbon_command("DCHIDEALL")),
                     ],
                 },
                 RibbonGroup {
                     title: "Manage",
                     tools: vec![
-                        RibbonItem::LargeTool(command(
-                            "DELCONSTRAINT", "Delete Constraints", include_bytes!("../../../assets/icons/constrain/delete.svg"),
-                        )),
-                        RibbonItem::LargeTool(command(
-                            "PARAMETERS", "Parameters Manager", include_bytes!("../../../assets/icons/constrain/parameters.svg"),
-                        )),
+                        RibbonItem::LargeTool(crate::modules::ribbon_command("DELCONSTRAINT")),
+                        RibbonItem::LargeTool(crate::modules::ribbon_command("PARAMETERS")),
                     ],
                 },
             ]

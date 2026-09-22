@@ -17,12 +17,7 @@ use crate::t;
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/qdim.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "QDIM",
-        label: "Quick Dim",
-        icon: ICON,
-        event: ModuleEvent::Command("QDIM".to_string()),
-    }
+    crate::modules::ribbon_command("QDIM")
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

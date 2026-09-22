@@ -15,12 +15,7 @@ use crate::scene::model::wire_model::WireModel;
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../../assets/icons/wipeout.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "WIPEOUT",
-        label: "Wipeout",
-        icon: ICON,
-        event: ModuleEvent::Command("WIPEOUT".to_string()),
-    }
+    crate::modules::ribbon_command("WIPEOUT")
 }
 
 pub struct WipeoutCommand {

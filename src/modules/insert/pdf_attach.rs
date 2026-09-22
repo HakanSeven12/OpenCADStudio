@@ -11,12 +11,7 @@ pub const ICON: IconKind =
     IconKind::Svg(include_bytes!("../../../assets/icons/underlay_layers.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "PDFATTACH",
-        label: "Attach PDF",
-        icon: ICON,
-        event: ModuleEvent::Command("PDFATTACH".to_string()),
-    }
+    crate::modules::ribbon_command("PDFATTACH")
 }
 
 pub struct PdfAttachCommand {

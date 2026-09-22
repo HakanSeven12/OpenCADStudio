@@ -21,42 +21,21 @@ use acadrust::types::Handle;
 pub mod center_point_tool {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "CPCONSTRAINT",
-            label: "Center Point",
-            icon: IconKind::Svg(include_bytes!(
-                "../../../assets/icons/constrain/center_point.svg"
-            )),
-            event: ModuleEvent::Command("CPCONSTRAINT".to_string()),
-        }
+        crate::modules::ribbon_command("CPCONSTRAINT")
     }
 }
 
 pub mod midpoint_tool {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "MPCONSTRAINT",
-            label: "Midpoint",
-            icon: IconKind::Svg(include_bytes!(
-                "../../../assets/icons/constrain/midpoint.svg"
-            )),
-            event: ModuleEvent::Command("MPCONSTRAINT".to_string()),
-        }
+        crate::modules::ribbon_command("MPCONSTRAINT")
     }
 }
 
 pub mod point_on_curve_tool {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "OCCONSTRAINT",
-            label: "Point on Curve",
-            icon: IconKind::Svg(include_bytes!(
-                "../../../assets/icons/constrain/point_on_curve.svg"
-            )),
-            event: ModuleEvent::Command("OCCONSTRAINT".to_string()),
-        }
+        crate::modules::ribbon_command("OCCONSTRAINT")
     }
 }
 

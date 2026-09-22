@@ -31,14 +31,7 @@ impl CadModule for ManageModule {
                     title: "Customization",
                     tools: vec![
                         RibbonItem::LargeTool(user_interface::tool()),
-                        RibbonItem::LargeTool(crate::modules::ToolDef {
-                            id: "TOOLPALETTES",
-                            label: "Tool\nPalettes",
-                            icon: IconKind::Svg(include_bytes!(
-                                "../../../assets/icons/tool_palettes.svg"
-                            )),
-                            event: crate::modules::ModuleEvent::Command("TOOLPALETTES".to_string()),
-                        }),
+                        RibbonItem::LargeTool(crate::modules::ribbon_command("TOOLPALETTES")),
                         RibbonItem::Tool(cui_import::tool()),
                         RibbonItem::Tool(cui_export::tool()),
                         RibbonItem::Dropdown {
@@ -46,22 +39,7 @@ impl CadModule for ManageModule {
                             icon: IconKind::Svg(include_bytes!(
                                 "../../../assets/icons/edit_aliases.svg"
                             )),
-                            items: vec![
-                                (
-                                    "ALIASEDIT",
-                                    "Edit Aliases",
-                                    IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/edit_aliases.svg"
-                                    )),
-                                ),
-                                (
-                                    "CUILOAD",
-                                    "Load Partial CUI",
-                                    IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/cui_import.svg"
-                                    )),
-                                ),
-                            ],
+                            items: crate::modules::ribbon_command_items(&["ALIASEDIT", "CUILOAD"]),
                             default: "ALIASEDIT",
                         },
                     ],

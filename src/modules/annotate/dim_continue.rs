@@ -14,18 +14,13 @@ use glam::DVec3;
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview,
 };
-use crate::modules::{IconKind, ModuleEvent, ToolDef};
+use crate::modules::{IconKind, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_continue.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "DIMCONTINUE",
-        label: "Continue",
-        icon: ICON,
-        event: ModuleEvent::Command("DIMCONTINUE".to_string()),
-    }
+    crate::modules::ribbon_command("DIMCONTINUE")
 }
 
 #[derive(Clone)]

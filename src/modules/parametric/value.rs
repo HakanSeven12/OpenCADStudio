@@ -17,7 +17,7 @@ use acadrust::types::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, InputKind};
-use crate::modules::{IconKind, ModuleEvent, ToolDef};
+use crate::modules::ToolDef;
 use crate::scene::named_parameters::DrivingValue;
 use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef};
 use crate::scene::Scene;
@@ -49,96 +49,47 @@ fn parse_driving_value(text: &str, known_names: &[String]) -> Option<DrivingValu
 pub mod distance_tool {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "DCONSTRAINT",
-            label: "Distance",
-            icon: IconKind::Svg(include_bytes!(
-                "../../../assets/icons/constrain/distance.svg"
-            )),
-            event: ModuleEvent::Command("DCONSTRAINT".to_string()),
-        }
+        crate::modules::ribbon_command("DCONSTRAINT")
     }
 }
 
 pub mod dimensional_tools {
     use super::*;
 
-    fn command(id: &'static str, label: &'static str, icon: &'static [u8]) -> ToolDef {
-        ToolDef {
-            id,
-            label,
-            icon: IconKind::Svg(icon),
-            event: ModuleEvent::Command(id.to_string()),
-        }
+    fn command(id: &'static str) -> ToolDef {
+        crate::modules::ribbon_command(id)
     }
 
     pub fn linear() -> ToolDef {
-        command(
-            "DCLINEAR",
-            "Linear",
-            include_bytes!("../../../assets/icons/dim_linear.svg"),
-        )
+        command("DCLINEAR")
     }
     pub fn horizontal() -> ToolDef {
-        command(
-            "DCHORIZONTAL",
-            "Horizontal",
-            include_bytes!("../../../assets/icons/constrain/distance_x.svg"),
-        )
+        command("DCHORIZONTAL")
     }
     pub fn vertical() -> ToolDef {
-        command(
-            "DCVERTICAL",
-            "Vertical",
-            include_bytes!("../../../assets/icons/constrain/distance_y.svg"),
-        )
+        command("DCVERTICAL")
     }
     pub fn aligned() -> ToolDef {
-        command(
-            "DCALIGNED",
-            "Aligned",
-            include_bytes!("../../../assets/icons/dim_aligned.svg"),
-        )
+        command("DCALIGNED")
     }
     pub fn angular() -> ToolDef {
-        command(
-            "DCANGULAR",
-            "Angular",
-            include_bytes!("../../../assets/icons/dim_angular.svg"),
-        )
+        command("DCANGULAR")
     }
     pub fn radius() -> ToolDef {
-        command(
-            "DCRADIUS",
-            "Radius",
-            include_bytes!("../../../assets/icons/dim_radius.svg"),
-        )
+        command("DCRADIUS")
     }
     pub fn diameter() -> ToolDef {
-        command(
-            "DCDIAMETER",
-            "Diameter",
-            include_bytes!("../../../assets/icons/dim_diameter.svg"),
-        )
+        command("DCDIAMETER")
     }
     pub fn convert() -> ToolDef {
-        command(
-            "DCCONVERT",
-            "Convert",
-            include_bytes!("../../../assets/icons/constrain/convert.svg"),
-        )
+        command("DCCONVERT")
     }
 }
 
 pub mod angle_tool {
     use super::*;
     pub fn tool() -> ToolDef {
-        ToolDef {
-            id: "ACONSTRAINT",
-            label: "Angle",
-            icon: IconKind::Svg(include_bytes!("../../../assets/icons/constrain/angle.svg")),
-            event: ModuleEvent::Command("ACONSTRAINT".to_string()),
-        }
+        crate::modules::ribbon_command("ACONSTRAINT")
     }
 }
 

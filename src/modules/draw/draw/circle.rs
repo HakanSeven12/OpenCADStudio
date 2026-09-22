@@ -41,14 +41,6 @@ const ICON_TTT: IconKind = IconKind::Svg(include_bytes!(
 
 pub const DROPDOWN_ID: &str = "CIRCLE";
 
-pub const DROPDOWN_ITEMS: &[(&str, &str, IconKind)] = &[
-    ("CIRCLE", "Center, Radius", ICON_CR),
-    ("CIRCLE_CD", "Center, Diameter", ICON_CD),
-    ("CIRCLE_2P", "2-Point", ICON_2P),
-    ("CIRCLE_3P", "3-Point", ICON_3P),
-    ("CIRCLE_TTR", "Tan, Tan, Radius", ICON_TTR),
-    ("CIRCLE_TTT", "Tan, Tan, Tan", ICON_TTT),
-];
 
 /// Default icon — shown until first use (falls back to Center, Radius).
 pub const ICON: IconKind = ICON_CR;

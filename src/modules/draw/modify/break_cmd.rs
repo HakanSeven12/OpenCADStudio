@@ -24,12 +24,7 @@ use crate::scene::model::wire_model::WireModel;
 
 #[allow(dead_code)]
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "BREAK",
-        label: "Break",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/trim.svg")),
-        event: ModuleEvent::Command("BREAK".to_string()),
-    }
+    crate::modules::ribbon_command("BREAK")
 }
 
 // ── Geometry ───────────────────────────────────────────────────────────────

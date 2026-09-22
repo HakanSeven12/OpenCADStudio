@@ -12,12 +12,7 @@ use crate::scene::model::wire_model::WireModel;
 use crate::t;
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "DIMORDINATE",
-        label: "Ordinate",
-        icon: IconKind::Svg(include_bytes!("../../../assets/icons/dim_ordinate.svg")),
-        event: ModuleEvent::Command("DIMORDINATE".to_string()),
-    }
+    crate::modules::ribbon_command("DIMORDINATE")
 }
 
 enum Step {

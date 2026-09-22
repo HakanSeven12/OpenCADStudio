@@ -26,12 +26,7 @@ use crate::scene::model::wire_model::{TangentGeom, WireModel};
 // ── Ribbon definition ──────────────────────────────────────────────────────
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "PLINE",
-        label: "Polyline",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/polyline.svg")),
-        event: ModuleEvent::Command("PLINE".to_string()),
-    }
+    crate::modules::ribbon_command("PLINE")
 }
 
 // ── Segment mode ───────────────────────────────────────────────────────────

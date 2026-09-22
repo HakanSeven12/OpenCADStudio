@@ -11,18 +11,13 @@ use acadrust::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
-use crate::modules::{IconKind, ModuleEvent, ToolDef};
+use crate::modules::{IconKind, ToolDef};
 use crate::t;
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/ddedit.svg"));
 
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "DDEDIT",
-        label: "Edit Text",
-        icon: ICON,
-        event: ModuleEvent::Command("DDEDIT".to_string()),
-    }
+    crate::modules::ribbon_command("DDEDIT")
 }
 
 pub struct DdeditCommand;

@@ -15,12 +15,7 @@ use glam::DVec3;
 
 #[allow(dead_code)]
 pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "SPLINE",
-        label: "Spline",
-        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/spline.svg")),
-        event: ModuleEvent::Command("SPLINE".to_string()),
-    }
+    crate::modules::ribbon_command("SPLINE")
 }
 
 pub struct SplineCommand {

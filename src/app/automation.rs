@@ -1465,6 +1465,33 @@ mod tests {
     }
 
     #[test]
+    fn zoom_extents_includes_sdf_text_outside_other_geometry() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+
+        let line = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 200,0"}"#);
+        assert_eq!(line["added"], 1, "{line}");
+        let text = app.automation_op(
+            r#"{"op":"run","cmd":"TEXT 100,135 8 0 OPEN CAD MCP ACCEPTANCE"}"#,
+        );
+        assert_eq!(text["added"], 1, "{text}");
+
+        app.tabs[i].scene.selection.borrow_mut().vp_size = (1600.0, 800.0);
+        app.tabs[i].scene.fit_all();
+        let (_, max) = app.tabs[i]
+            .scene
+            .camera
+            .borrow()
+            .fitted_model_bounds()
+            .expect("ZOOM EXTENTS did not fit the drawing");
+        assert!(
+            max.y >= 142.0,
+            "text at y=135..143 was clipped from fitted bounds: {max:?}"
+        );
+    }
+
+    #[test]
     fn a_stray_editor_is_not_hijacked_by_the_next_line() {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);

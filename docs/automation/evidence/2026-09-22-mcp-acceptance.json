@@ -1,0 +1,91 @@
+{
+  "schema": "ocs.mcp-acceptance-evidence.v1",
+  "run_id": "20260922-175512",
+  "scope": "Live GUI/MCP acceptance after including SDF glyph vertices in ZOOM EXTENTS",
+  "source": {
+    "branch": "feat/audited-mcp-save",
+    "base_commit": "a7f03d43"
+  },
+  "tests": {
+    "cargo_test_lib": "1560 passed, 0 failed, 19 ignored",
+    "zoom_extents_includes_sdf_text_outside_other_geometry": "passed",
+    "model_space_extents_mixed_entities_accuracy": "passed",
+    "mcp_acceptance": "passed"
+  },
+  "drawing": {
+    "entity_count": 5,
+    "by_type": {
+      "Circle": 2,
+      "Line": 1,
+      "Polyline": 1,
+      "Text": 1
+    },
+    "bounds": {
+      "min": [0.0, 0.0, 0.0],
+      "max": [210.4, 143.0, 0.0]
+    },
+    "text": {
+      "value": "OPEN CAD MCP ACCEPTANCE",
+      "position": [100.0, 135.0, 0.0],
+      "height": 8.0
+    }
+  },
+  "capture": {
+    "width": 1600,
+    "height": 791,
+    "sha256": "3c25057855bb69bd874def3e92680619289c5ae8ff1423813085aecb3fabd7d4",
+    "visual_check": "passed: OPEN CAD MCP ACCEPTANCE is visible above the rectangle"
+  },
+  "outputs": [
+    {
+      "format": "dwg",
+      "target_version": "AC1015",
+      "bytes": 28362,
+      "sha256": "336983520053c3dc38fa2f4927dfb63d21e24607ae876444bd82dfa7388881b6",
+      "save_verified": true,
+      "autocad_audit": "Total errors found 0 fixed 0; Erased 0 objects",
+      "autocad_forced_termination_after_result": true,
+      "autocad_log_sha256": "df424d6238d72db28f4d14dd6527e56a71a4b261d8eaa3fd13689492c820c518"
+    },
+    {
+      "format": "dwg",
+      "target_version": "AC1027",
+      "bytes": 24723,
+      "sha256": "b58e761bf196652ed15c9e8aa3541c2b836a3213062d53e7258aa2a59ff88de2",
+      "save_verified": true,
+      "autocad_audit": "Total errors found 0 fixed 0; Erased 0 objects",
+      "autocad_forced_termination_after_result": true,
+      "autocad_log_sha256": "4a7381582177c5d4a7d60c208271c9515cc7456e8d3cea390163ab2d907a06b4"
+    },
+    {
+      "format": "dwg",
+      "target_version": "AC1032",
+      "bytes": 24757,
+      "sha256": "ec2fc74e95c866a55ead5f15d9615e3c0de65061b21934efd4d458a3556c7e1f",
+      "save_verified": true,
+      "autocad_audit": "Total errors found 0 fixed 0; Erased 0 objects",
+      "autocad_forced_termination_after_result": true,
+      "autocad_log_sha256": "4885099270022d8cb2195951e32ecff8a2c07c92f6daba456f1ee63541908383"
+    },
+    {
+      "format": "dxf",
+      "target_version": "AC1015",
+      "bytes": 61030,
+      "sha256": "7df8d518c65340d4140dd6f1b5a6a1ba350320926e3b13125598b5907bff94ba",
+      "save_verified": true,
+      "raw_graph_audit": {
+        "ok": true,
+        "declared_handles": 106,
+        "dangling_handles": [],
+        "duplicate_handles": [],
+        "orphaned_objects": []
+      }
+    }
+  ],
+  "boundary": {
+    "official_installation_modified": false,
+    "development_executable": "target/debug/OpenCADStudio.exe",
+    "raw_artifacts_committed": false,
+    "raw_artifacts_location": "target/acceptance/20260922-175512"
+  }
+}

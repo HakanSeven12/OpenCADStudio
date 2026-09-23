@@ -1428,6 +1428,19 @@ impl Scene {
                 sy += y as f64;
                 n += 1;
             }
+            // SDF text is carried as textured glyph quads, not ordinary wire
+            // points. Include those vertices so a text-only wire participates
+            // in the robust-centre filter used by ZOOM EXTENTS.
+            for vertex in &wire.text_verts {
+                let x = vertex.pos[0] as f64 + vertex.pos_low[0] as f64;
+                let y = vertex.pos[1] as f64 + vertex.pos_low[1] as f64;
+                if !x.is_finite() || !y.is_finite() {
+                    continue;
+                }
+                sx += x;
+                sy += y;
+                n += 1;
+            }
             if n > 0 {
                 cents.push(WireCent {
                     idx,
@@ -1484,6 +1497,17 @@ impl Scene {
                 } else {
                     min = min.min(glam::Vec3::new(x, y, z));
                     max = max.max(glam::Vec3::new(x, y, z));
+                }
+            }
+            for vertex in &wire.text_verts {
+                let point = glam::Vec3::new(
+                    vertex.pos[0] + vertex.pos_low[0],
+                    vertex.pos[1] + vertex.pos_low[1],
+                    vertex.pos[2] + vertex.pos_low[2],
+                );
+                if point.is_finite() {
+                    min = min.min(point);
+                    max = max.max(point);
                 }
             }
         }

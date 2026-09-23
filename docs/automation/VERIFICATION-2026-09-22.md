@@ -7,7 +7,7 @@ full semantic equivalence beyond the checks listed here.
 ## Passed
 
 - `cargo check --bin OpenCADStudio`
-- `cargo test --lib`: 1,559 passed, 0 failed, 19 ignored.
+- `cargo test --lib`: 1,560 passed, 0 failed, 19 ignored.
 - `cargo test --lib audit_rejects_an_undeclared_entity_layer -- --nocapture`
 - `cargo test --lib save_verified_writes_reopens_hashes_and_matches_manifest -- --nocapture`
 - `cargo test --lib explicit_target_version_parser_never_silently_defaults -- --nocapture`
@@ -21,6 +21,11 @@ full semantic equivalence beyond the checks listed here.
 - `python docs/automation/mcp_acceptance.py target/debug/OpenCADStudio.exe`:
   created five entities through the live GUI/MCP session, captured a 1600x791
   viewport PNG, and verified DWG 2000/2013/2018 plus DXF 2000.
+- Follow-up acceptance `20260922-175512` fixed the visual observation below:
+  `ZOOM EXTENTS` now includes SDF glyph vertices, the TEXT is visible in the
+  1600x791 capture, and all four versioned outputs passed `save_verified` again.
+  The portable hashes and exact result boundary are recorded in
+  [`evidence/2026-09-22-mcp-acceptance.json`](evidence/2026-09-22-mcp-acceptance.json).
 - AutoCAD 2025 Core Console `AUDIT` reported `Total errors found 0 fixed 0`
   for all three DWG outputs. It used isolated profiles after Controlled Folder
   Access blocked Autodesk's normal profile path; no Windows security setting
@@ -36,13 +41,17 @@ full semantic equivalence beyond the checks listed here.
   invalid. The raw ASCII DXF graph audit now reports this as a failed audit
   rather than allowing a false-green delivery.
 
+## Resolved observations
+
+- The live MCP acceptance had created and serialized its `TEXT` entity, but
+  `ZOOM EXTENTS` considered only ordinary wire points and clipped the SDF text
+  above the viewport. It now includes SDF glyph vertices in both the robust
+  center filter and fitted bounds. The command-history cancellation was the
+  intentional Escape that ends TEXT's repeat mode after a successful batch
+  commit, not a lost entity.
+
 ## Open observations
 
-- The live MCP acceptance created and serialized its `TEXT` entity, but the
-  text was not visible in the captured viewport and the command history showed
-  a later text-editor cancellation. Geometry, semantic manifest, save/reopen,
-  DXF graph checks, and AutoCAD audits passed; viewport text rendering remains
-  a separate unresolved visual observation.
 - AutoCAD Core Console emitted its final zero-error audit result but did not
   exit after scripted `QUIT` on this workstation. The acceptance runner killed
   only its own isolated process after 25 seconds; therefore the audit is passed

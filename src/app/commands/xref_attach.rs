@@ -23,7 +23,9 @@ impl OpenCADStudio {
             ("ATTACH", true) => Some(Task::done(Message::AttachPick)),
             ("XATTACH", true) => Some(Task::done(Message::XAttachPick)),
             // A file named on the command line skips the picker.
-            ("ATTACH", false) => Some(Task::done(Message::AttachPickResult(Ok(
+            // Handled at once, so the placement it starts belongs to this
+            // command line (automation included).
+            ("ATTACH", false) => Some(self.update(Message::AttachPickResult(Ok(
                 std::path::PathBuf::from(rest.trim_matches('"')),
             )))),
             ("XATTACH", false) => {

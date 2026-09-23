@@ -1148,13 +1148,20 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::MissingFontsDownload => {
+                if self.missing_fonts_downloading {
+                    return Task::none();
+                }
                 // Remember the source across sessions — and across drawings.
                 let source = self.font_source_input.trim().to_string();
                 if self.font_source_url != source {
                     self.font_source_url = source.clone();
                     self.save_config();
                 }
-                let fonts = self.missing_fonts.take().unwrap_or_default();
+                let fonts = self.missing_fonts.clone().unwrap_or_default();
+                if fonts.is_empty() {
+                    return Task::none();
+                }
+                self.missing_fonts_downloading = true;
                 Task::perform(
                     async move {
                         let source = crate::io::font_repo::FontSource::from_url(&source);
@@ -1164,31 +1171,66 @@ impl OpenCADStudio {
                 )
             }
             Message::MissingFontsDismiss => {
-                self.missing_fonts = None;
+                if self.missing_fonts_downloading {
+                    return Task::none();
+                }
+                for name in self.missing_fonts.take().unwrap_or_default() {
+                    self.suppressed_missing_fonts
+                        .insert(crate::io::font_repo::font_key(&name));
+                }
+                self.missing_fonts_path = None;
                 self.close_active_modal();
                 Task::none()
             }
             Message::MissingFontsResult(result) => {
-                self.missing_fonts = None;
-                self.close_active_modal();
+                self.missing_fonts_downloading = false;
                 match result {
                     Ok(pairs) if pairs.is_empty() => {
+                        let unavailable = self.missing_fonts.take().unwrap_or_default();
+                        for name in &unavailable {
+                            self.suppressed_missing_fonts
+                                .insert(crate::io::font_repo::font_key(name));
+                        }
+                        self.missing_fonts_path = None;
+                        self.close_active_modal();
                         self.command_line.push_error(crate::t!(
-                            "None of the missing fonts are in the community repository yet. Contribute them at github.com/huaninstratech/OpenCADStudio/tree/main/fonts."
+                            "None of the requested fonts are available from the selected source. Substitute fonts remain active; this notice will not repeat during this session."
                         ).as_ref());
                     }
                     Ok(pairs) => {
+                        let requested = self.missing_fonts.take().unwrap_or_default();
+                        let downloaded: rustc_hash::FxHashSet<String> = pairs
+                            .iter()
+                            .map(|(name, _)| crate::io::font_repo::font_key(name))
+                            .collect();
+                        let unavailable: Vec<String> = requested
+                            .into_iter()
+                            .filter(|name| {
+                                !downloaded.contains(&crate::io::font_repo::font_key(name))
+                            })
+                            .collect();
+                        for name in &unavailable {
+                            self.suppressed_missing_fonts
+                                .insert(crate::io::font_repo::font_key(name));
+                        }
                         for (name, path) in &pairs {
                             self.command_line.push_output(crate::tf!(
                                 "FONT  Downloaded {name} → {path}",
                                 path = path.display()
                             ).as_ref());
                         }
+                        if !unavailable.is_empty() {
+                            self.command_line.push_info(crate::tf!(
+                                "FONT  Not available from the selected source: {fonts}. Substitute fonts remain active.",
+                                fonts = unavailable.join(", ")
+                            ).as_ref());
+                        }
                         // The downloaded files change glyph resolution for the
                         // whole drawing — reload it through the standard open
                         // pipeline so every wire is rebuilt with the real fonts.
-                        let i = self.active_tab;
-                        if let Some(path) = self.tabs[i].current_path.clone() {
+                        let path = self.missing_fonts_path.take();
+                        self.close_active_modal();
+                        if let Some(path) = path {
                             return Task::done(Message::OpenExternal(path));
                         }
                         self.command_line.push_info(crate::t!(
@@ -1196,6 +1238,8 @@ impl OpenCADStudio {
                         ).as_ref());
                     }
                     Err(e) => {
+                        // Keep the prompt open: the user can correct a custom
+                        // source or retry a transient network failure.
                         self.command_line.push_error(crate::tf!("Font download failed: {e}").as_ref());
                     }
                 }
@@ -8010,6 +8054,12 @@ impl OpenCADStudio {
             Message::CloseModal => {
                 if self.active_modal == Some(super::ModalKind::RecoveryPrompt) {
                     return self.update(Message::RecoveryDecline);
+                }
+                // The title-bar X, Escape, and MCP `close_modal` action mean
+                // the same thing as Skip for this prompt. Record that choice
+                // so reopening the drawing does not immediately nag again.
+                if self.active_modal == Some(super::ModalKind::MissingFonts) {
+                    return self.update(Message::MissingFontsDismiss);
                 }
                 // The Options window's × and Esc behave like its Close button.
                 if self.active_modal == Some(super::ModalKind::Options) {

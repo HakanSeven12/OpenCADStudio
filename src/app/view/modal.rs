@@ -1675,6 +1675,7 @@ impl OpenCADStudio {
                     crate::ui::window::missing_fonts::view_window(
                         fonts,
                         &font_source,
+                        self.missing_fonts_downloading,
                         flow,
                     )
                 })

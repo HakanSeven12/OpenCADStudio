@@ -391,8 +391,10 @@ impl OpenCADStudio {
     pub(super) fn control_state(&self) -> Value {
         let tab = &self.tabs[self.active_tab];
         let command = tab.active_cmd.as_deref().map(active_command_metadata);
+        let missing_fonts = crate::io::font_repo::missing_shx_fonts(&tab.scene.document);
         json!({"ok":true,"protocol":1,"session_id":session_id(),"version":env!("OCS_APP_VERSION"),
             "mode":if self.main_window.is_some(){"gui"}else{"headless"},"enabled":self.control.enabled,
+            "read_only":self.read_only,"missing_fonts":missing_fonts,
             "document_id":tab.id,"revision":tab.edit_revision,"geometry_revision":tab.scene.geometry_epoch,"camera_revision":tab.scene.camera_generation,
             "plugins":plugin_ids(),
             "documents":self.tabs.iter().map(|t|json!({"id":t.id,"title":t.tab_title,"path":t.current_path,"dirty":t.dirty,"revision":t.edit_revision,"start":t.is_start})).collect::<Vec<_>>(),

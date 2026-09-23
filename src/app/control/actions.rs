@@ -47,6 +47,7 @@ fn color_value(color: acadrust::types::Color) -> Value {
 }
 pub(super) const NAMES: &[&str] = &[
     "close_modal",
+    "dialog_ok",
     "close_document",
     "toggle_properties",
     "toggle_layers",
@@ -255,6 +256,14 @@ impl OpenCADStudio {
         let name = string(req, "name")?;
         let msg = match name {
             "close_modal" => Message::CloseModal,
+            // The open dialog's OK button.
+            "dialog_ok" => match self.active_modal {
+                Some(crate::app::ModalKind::XrefAttach) => Message::XrefAttach(
+                    crate::ui::window::xref_attach::XrefAttachMsg::Apply,
+                ),
+                Some(crate::app::ModalKind::BlockDefinition) => Message::BlockDefApply,
+                _ => return Err(failure("no_dialog", "No dialog with an OK button is open")),
+            },
             "close_document" => Message::TabClose(self.active_tab),
             "toggle_properties" => Message::ToggleProperties,
             "toggle_layers" => Message::ToggleLayers,

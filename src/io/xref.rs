@@ -305,6 +305,82 @@ fn resolve_xrefs_with_filter(
     (result, dropped)
 }
 
+/// Layer properties an override can change, as compared for the
+/// "Layer property overrides" row.
+#[derive(Clone, PartialEq)]
+struct LayerLook {
+    color: acadrust::types::Color,
+    line_type: String,
+    line_weight: acadrust::types::LineWeight,
+    off: bool,
+    frozen: bool,
+    locked: bool,
+    plottable: bool,
+}
+
+impl LayerLook {
+    fn of(layer: &acadrust::tables::Layer) -> Self {
+        Self {
+            color: layer.color.clone(),
+            line_type: layer.line_type.to_uppercase(),
+            line_weight: layer.line_weight,
+            off: layer.flags.off,
+            frozen: layer.flags.frozen,
+            locked: layer.flags.locked,
+            plottable: layer.is_plottable,
+        }
+    }
+}
+
+/// The source file's layers by upper-case name, read once per file version.
+fn source_layers(path: &Path) -> Option<HashMap<String, LayerLook>> {
+    type Cache = std::sync::Mutex<HashMap<PathBuf, (std::time::SystemTime, HashMap<String, LayerLook>)>>;
+    static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
+    let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some((stamp, layers)) = cache.lock().ok()?.get(path) {
+        if *stamp == modified {
+            return Some(layers.clone());
+        }
+    }
+    let doc = super::load_file(path).ok()?;
+    let layers: HashMap<String, LayerLook> = doc
+        .layers
+        .iter()
+        .map(|layer| (layer.name.to_uppercase(), LayerLook::of(layer)))
+        .collect();
+    cache
+        .lock()
+        .ok()?
+        .insert(path.to_path_buf(), (modified, layers.clone()));
+    Some(layers)
+}
+
+/// Whether any of reference `name`'s layers was changed in the host — the
+/// Properties "Layer property overrides" row. Compares the host's dependent
+/// layers with the source file's own.
+pub fn layer_overrides(doc: &CadDocument, name: &str, raw_path: &str, base_dir: &Path) -> bool {
+    let Some(source) = resolve_path(raw_path, base_dir).and_then(|p| source_layers(&p)) else {
+        return false;
+    };
+    let prefix = format!("{}|", name.to_uppercase());
+    doc.layers.iter().any(|layer| {
+        let upper = layer.name.to_uppercase();
+        let Some(own) = upper.strip_prefix(&prefix) else {
+            return false;
+        };
+        let Some(original) = source.get(own) else {
+            return false;
+        };
+        let mut here = LayerLook::of(layer);
+        // Dependent linetypes carry the reference prefix.
+        if let Some(stripped) = here.line_type.strip_prefix(&prefix) {
+            here.line_type = stripped.to_string();
+        }
+        here != *original
+    })
+}
+
 /// Try to build an absolute path from a raw xref path string.
 /// Handles absolute paths, relative paths, and Windows-style separators.
 fn resolve_path(raw: &str, base_dir: &Path) -> Option<PathBuf> {
@@ -342,18 +418,44 @@ fn resolve_path(raw: &str, base_dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Make sure `doc` has BLOCK + ENDBLK entities for `block_name`.
-/// These are required so renderers can find the block content.
-fn ensure_block_entities(doc: &mut CadDocument, block_name: &str) {
-    let has_block = doc
-        .entities()
-        .any(|e| matches!(e, EntityType::Block(b) if b.name == block_name));
-    if has_block {
+/// Give a block record its BLOCK / ENDBLK markers, linked through the
+/// record's marker handles. The DWG writer emits the markers the record
+/// points at; a record left pointing at a null handle is written with
+/// handle 0, which makes the whole drawing unreadable elsewhere.
+pub(crate) fn ensure_block_entities(doc: &mut CadDocument, block_name: &str) {
+    let Some((owner, begin, end, path)) = doc.block_records.get(block_name).map(|br| {
+        (
+            br.handle,
+            br.block_entity_handle,
+            br.block_end_handle,
+            br.xref_path.clone(),
+        )
+    }) else {
         return;
+    };
+    if begin.is_null() || !matches!(doc.get_entity(begin), Some(EntityType::Block(_))) {
+        let handle = doc.allocate_handle();
+        let mut block = Block::new(block_name, Vector3::zero());
+        if !path.is_empty() {
+            block = block.with_xref_path(&path);
+        }
+        block.common.handle = handle;
+        block.common.owner_handle = owner;
+        let _ = doc.add_entity(EntityType::Block(block));
+        if let Some(br) = doc.block_records.get_mut(block_name) {
+            br.block_entity_handle = handle;
+        }
     }
-    let b = Block::new(block_name, Vector3::zero());
-    let _ = doc.add_entity(EntityType::Block(b));
-    let _ = doc.add_entity(EntityType::BlockEnd(BlockEnd::new()));
+    if end.is_null() || !matches!(doc.get_entity(end), Some(EntityType::BlockEnd(_))) {
+        let handle = doc.allocate_handle();
+        let mut block_end = BlockEnd::new();
+        block_end.common.handle = handle;
+        block_end.common.owner_handle = owner;
+        let _ = doc.add_entity(EntityType::BlockEnd(block_end));
+        if let Some(br) = doc.block_records.get_mut(block_name) {
+            br.block_end_handle = handle;
+        }
+    }
 }
 
 /// Shared symbol-remap core for XREF load-merge and BIND (SPIKE3 REFACTOR
@@ -471,6 +573,7 @@ struct XrefSymbolMaps {
     layers: HashMap<String, String>,
     linetypes: HashMap<String, String>,
     text_styles: HashMap<String, String>,
+    text_style_handles: HashMap<Handle, Handle>,
     dim_styles: HashMap<String, String>,
     blocks: HashMap<String, String>,
     br_handles: HashMap<Handle, Handle>,
@@ -493,14 +596,53 @@ fn import_xref_symbols(
 ) -> XrefSymbolMaps {
     let mut maps = XrefSymbolMaps::default();
 
+    // A layer's plot style and material point at objects of the file it came
+    // from; carried over verbatim they point at whatever the host keeps under
+    // those handles. Take the host's defaults (its layer 0) instead.
+    // ponytail: every imported layer gets the default plot style and material;
+    // map them by name if a reference ever carries non-default ones.
+    let (host_plotstyle, host_material) = doc
+        .layers
+        .get("0")
+        .map(|layer| (layer.plotstyle_handle, layer.material))
+        .unwrap_or((Handle::NULL, Handle::NULL));
+
     for layer in xref_doc.layers.iter() {
         let old = layer.name.clone();
         let new = naming.name_for(SymbolKind::Layer, &old);
         let mut cloned = layer.clone();
         cloned.name = new.clone();
+        cloned.plotstyle_handle = host_plotstyle;
+        cloned.material = host_material;
         cloned.set_handle(doc.allocate_handle());
         doc.layers.add_or_replace(cloned);
         maps.layers.insert(old.to_uppercase(), new);
+    }
+
+    for ts in xref_doc.text_styles.iter() {
+        // A shape-file style has no name of its own; the host's style for the
+        // same shape file serves the imported linetypes.
+        if ts.is_shape_file {
+            let same_file = doc
+                .text_styles
+                .iter()
+                .find(|host| host.is_shape_file && host.font_file.eq_ignore_ascii_case(&ts.font_file))
+                .map(|host| host.handle);
+            if let Some(host_handle) = same_file {
+                maps.text_style_handles.insert(ts.handle, host_handle);
+                continue;
+            }
+        }
+        let old = ts.name.clone();
+        let new = naming.name_for(SymbolKind::TextStyle, &old);
+        let mut cloned = ts.clone();
+        cloned.name = new.clone();
+        let new_handle = doc.allocate_handle();
+        cloned.set_handle(new_handle);
+        cloned.xref_dependent = false;
+        doc.text_styles.add_or_replace(cloned);
+        maps.text_style_handles.insert(ts.handle, new_handle);
+        maps.text_styles.insert(old.to_uppercase(), new);
     }
 
     for lt in xref_doc.line_types.iter() {
@@ -511,20 +653,18 @@ fn import_xref_symbols(
         let new = naming.name_for(SymbolKind::Linetype, &old);
         let mut cloned = lt.clone();
         cloned.name = new.clone();
+        // Shape and text segments name their style by handle: point them at
+        // the imported copy, not at the source file's record.
+        for element in &mut cloned.elements {
+            if let Some(complex) = element.complex.as_mut() {
+                if let Some(new_style) = maps.text_style_handles.get(&complex.style_handle) {
+                    complex.style_handle = *new_style;
+                }
+            }
+        }
         cloned.set_handle(doc.allocate_handle());
         doc.line_types.add_or_replace(cloned);
         maps.linetypes.insert(old.to_uppercase(), new);
-    }
-
-    for ts in xref_doc.text_styles.iter() {
-        let old = ts.name.clone();
-        let new = naming.name_for(SymbolKind::TextStyle, &old);
-        let mut cloned = ts.clone();
-        cloned.name = new.clone();
-        cloned.set_handle(doc.allocate_handle());
-        cloned.xref_dependent = false;
-        doc.text_styles.add_or_replace(cloned);
-        maps.text_styles.insert(old.to_uppercase(), new);
     }
 
     for ds in xref_doc.dim_styles.iter() {
@@ -798,6 +938,21 @@ fn merge_xref_into_block(
         prefix: prefix.to_string(),
     };
     let maps = import_xref_symbols(doc, &xref_doc, &mut naming);
+    // Dependent layers and linetypes carry the xref flag and their owning
+    // reference, the way the file stores them; without it the host writes
+    // plain records with a "|" in the name, which other readers reject.
+    for name in maps.layers.values() {
+        if let Some(layer) = doc.layers.get_mut(name) {
+            layer.flags.xref_dependent = true;
+            layer.xref_block_record_handle = br_handle;
+        }
+    }
+    for name in maps.linetypes.values() {
+        if let Some(linetype) = doc.line_types.get_mut(name) {
+            linetype.xref_dependent = true;
+            linetype.xref_block_record_handle = br_handle;
+        }
+    }
 
     // ── Entities (shared helper) ────────────────────────────────────────
     // The unremapped-handle count is ignored on the load path (BIND reports
@@ -1709,7 +1864,54 @@ fn same_file(a: &Path, b: &Path) -> bool {
 /// Shared by Detach (which then also erases the BlockRecord itself) and BIND
 /// (which drops the previous merge before re-merging under `$N$` names). The
 /// xref BlockRecord itself, its INSERTs, and non-prefixed symbols stay.
+/// Drop from a save copy what resolving each xref merged into the host but
+/// the file never stores: the reference's own geometry, its nested block
+/// definitions and its text and dimension styles. Dependent layers and
+/// linetypes stay (flagged), so layer overrides kept under VISRETAIN persist.
+pub fn strip_resolved_xref_content(doc: &mut CadDocument) {
+    let xrefs: Vec<(String, Handle)> = doc
+        .block_records
+        .iter()
+        .filter(|br| br.flags.is_xref || br.flags.is_xref_overlay)
+        .map(|br| (br.name.clone(), br.handle))
+        .collect();
+    for (name, handle) in xrefs {
+        let (begin, end) = doc
+            .block_records
+            .get(&name)
+            .map(|br| (br.block_entity_handle, br.block_end_handle))
+            .unwrap_or((Handle::NULL, Handle::NULL));
+        let owned: Vec<Handle> = doc
+            .entities()
+            .filter(|e| e.common().owner_handle == handle)
+            .map(|e| e.common().handle)
+            .filter(|h| *h != begin && *h != end)
+            .collect();
+        for h in owned {
+            doc.remove_entity(h);
+        }
+        if let Some(br) = doc.block_records.get_mut(&name) {
+            br.entity_handles.clear();
+        }
+        remove_dependent_symbols(doc, &name, false);
+    }
+}
+
+/// Text styles a kept linetype draws its shapes or text with.
+fn linetype_styles(doc: &CadDocument) -> HashSet<Handle> {
+    doc.line_types
+        .iter()
+        .flat_map(|linetype| linetype.elements.iter())
+        .filter_map(|element| element.complex.as_ref().map(|complex| complex.style_handle))
+        .filter(|handle| !handle.is_null())
+        .collect()
+}
+
 fn remove_pipe_symbols(doc: &mut CadDocument, name: &str) {
+    remove_dependent_symbols(doc, name, true);
+}
+
+fn remove_dependent_symbols(doc: &mut CadDocument, name: &str, layers_too: bool) {
     let prefix = format!("{}|", name.to_uppercase());
     let is_dep = |n: &str| n.to_uppercase().starts_with(&prefix);
     // Dependent blocks first — their handles route the owned-entity cleanup.
@@ -1746,7 +1948,7 @@ fn remove_pipe_symbols(doc: &mut CadDocument, name: &str) {
     let layers: Vec<String> = doc
         .layers
         .names()
-        .filter(|n| is_dep(n))
+        .filter(|n| layers_too && is_dep(n))
         .map(|s| s.to_string())
         .collect();
     for n in layers {
@@ -1755,20 +1957,37 @@ fn remove_pipe_symbols(doc: &mut CadDocument, name: &str) {
     let lts: Vec<String> = doc
         .line_types
         .names()
-        .filter(|n| is_dep(n))
+        .filter(|n| layers_too && is_dep(n))
         .map(|s| s.to_string())
         .collect();
     for n in lts {
         doc.line_types.remove(&n);
     }
+    // Styles a kept dependent linetype still draws with stay, flagged.
+    let used = if layers_too {
+        HashSet::default()
+    } else {
+        linetype_styles(doc)
+    };
     let styles: Vec<String> = doc
         .text_styles
-        .names()
-        .filter(|n| is_dep(n))
-        .map(|s| s.to_string())
+        .iter()
+        .filter(|style| is_dep(&style.name) && !used.contains(&style.handle))
+        .map(|style| style.name.clone())
         .collect();
     for n in styles {
         doc.text_styles.remove(&n);
+    }
+    let owner = doc
+        .block_records
+        .get(name)
+        .map(|br| br.handle)
+        .unwrap_or(Handle::NULL);
+    for style in doc.text_styles.iter_mut() {
+        if is_dep(&style.name) {
+            style.xref_dependent = true;
+            style.xref_block_record_handle = owner;
+        }
     }
     let dims: Vec<String> = doc
         .dim_styles

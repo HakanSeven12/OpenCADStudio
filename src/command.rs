@@ -2838,9 +2838,9 @@ pub trait CadCommand: Send {
         false
     }
 
-    /// If this command is XATTACH, returns the file path to attach.
-    /// Default: None.
-    fn xattach_path(&self) -> Option<String> {
+    /// If this command is XATTACH, what it attaches and how the reference is
+    /// stored. Default: None.
+    fn xattach_request(&self) -> Option<crate::modules::insert::xattach::XrefAttachRequest> {
         None
     }
 

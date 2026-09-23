@@ -208,6 +208,7 @@ impl OpenCADStudio {
             }
             Some(GeometricTolerance) => self.geometric_tolerance = None,
             Some(BlockDefinition) => self.block_definition = None,
+            Some(XrefAttach) => self.xref_attach = None,
             Some(Hyperlink) => {
                 self.hyperlink_editor_handles.clear();
                 self.hyperlink_editor_url.clear();
@@ -1278,15 +1279,13 @@ impl OpenCADStudio {
             ),
 
             Message::XAttachPickResult(Ok(path)) => {
-                use crate::command::CadCommand;
-                use crate::modules::insert::xattach::XAttachCommand;
-                let path_str = path.to_string_lossy().into_owned();
-                let cmd = XAttachCommand::with_path(path_str);
-                let i = self.active_tab;
-                self.command_line.push_info(&cmd.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(cmd));
+                self.open_xref_attach_dialog(path);
                 Task::none()
             }
+            message @ (Message::AttachPick
+            | Message::AttachPickResult(_)
+            | Message::XrefAttach(_)
+            | Message::XrefAttachBrowseResult(_)) => self.update_xref_attach(message),
 
             Message::XAttachPickResult(Err(e)) => {
                 if e != "Cancelled" {

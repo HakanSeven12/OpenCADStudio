@@ -2105,7 +2105,8 @@ impl OpenCADStudio {
         }
 
         let mut recent_task = Task::none();
-        let saved = match crate::io::save_to_bytes(&self.tabs[i].scene.document, &ext, version) {
+        let document = self.tabs[i].scene.document_for_save();
+        let saved = match crate::io::save_to_bytes(&document, &ext, version) {
             Ok(bytes) => {
                 crate::sys::download_bytes(&filename, &bytes);
                 let cache_name = std::path::Path::new(&filename)

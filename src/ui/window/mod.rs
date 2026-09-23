@@ -24,5 +24,6 @@ pub mod annotation_data;
 pub mod alias_editor;
 pub mod find_replace;
 pub mod named_parameters;
+pub mod xref_attach;
 pub mod xref_help;
 pub mod xref_manager;

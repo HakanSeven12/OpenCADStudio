@@ -155,7 +155,7 @@ impl BlockDefinitionState {
     }
 }
 
-fn group<'a>(
+pub(crate) fn group<'a>(
     title: impl Into<String>,
     body: impl Into<Element<'a, Message>>,
     height: impl Into<Length>,
@@ -185,7 +185,7 @@ fn group<'a>(
     .into()
 }
 
-fn labeled_checkbox<'a>(
+pub(crate) fn labeled_checkbox<'a>(
     label: impl Into<String>,
     is_checked: bool,
     on_toggle: impl Fn(bool) -> Message + 'a,

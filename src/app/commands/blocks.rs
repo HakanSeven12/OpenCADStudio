@@ -663,10 +663,6 @@ impl OpenCADStudio {
             "PDFATTACH" => {
                 return Some(Task::done(Message::PdfAttachPick));
             }
-            "XATTACH" => {
-                // Launch the file picker; XAttachPickResult will start the command.
-                return Some(Task::done(Message::XAttachPick));
-            }
             cmd if cmd == "WBLOCK" || cmd == "WB" || cmd.starts_with("WBLOCK ") => {
                 let arg = cmd.splitn(2, ' ').nth(1).unwrap_or("").trim();
                 if arg.is_empty() {
@@ -1366,11 +1362,16 @@ impl OpenCADStudio {
                     if after.is_empty() {
                         return Some(Task::done(Message::XAttachPick));
                     }
-                    let cmd = crate::modules::insert::xattach::XAttachCommand::with_path(
-                        after.to_string(),
+                    self.start_xref_attach(
+                        i,
+                        crate::modules::insert::xattach::XrefAttachRequest {
+                            path: after.trim_matches('"').to_string(),
+                            overlay: false,
+                            path_type: crate::io::xref_model::Pathtype::Full,
+                        },
+                        crate::modules::insert::xattach::XrefPlacement::on_screen(),
+                        "-XREF",
                     );
-                    self.command_line.push_info(&cmd.prompt());
-                    self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
                     self.command_line.push_error(crate::tf!(
                         "XREF: unknown option '{}'. Options: ? Reload Unload Detach Path Pathtype Bind Overlay Attach",

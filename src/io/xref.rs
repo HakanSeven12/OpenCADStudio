@@ -1864,6 +1864,21 @@ fn same_file(a: &Path, b: &Path) -> bool {
 /// Shared by Detach (which then also erases the BlockRecord itself) and BIND
 /// (which drops the previous merge before re-merging under `$N$` names). The
 /// xref BlockRecord itself, its INSERTs, and non-prefixed symbols stay.
+/// Make the named references' paths relative to `host` (their drawing's
+/// first save); a reference that cannot be relative keeps its full path.
+pub fn make_relative(
+    doc: &mut CadDocument,
+    names: &rustc_hash::FxHashSet<String>,
+    host: &Path,
+) {
+    for name in names {
+        let Some(key) = doc.block_records.get(name).map(|br| br.handle.value()) else {
+            continue;
+        };
+        let _ = apply_pathtype(doc, key, crate::io::xref_model::Pathtype::Relative, host);
+    }
+}
+
 /// Drop from a save copy what resolving each xref merged into the host but
 /// the file never stores: the reference's own geometry, its nested block
 /// definitions and its text and dimension styles. Dependent layers and

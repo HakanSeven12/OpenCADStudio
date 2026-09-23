@@ -231,6 +231,9 @@ pub(super) struct DocumentTab {
     /// Session set of unloaded reference keys (Task 8b). Owns the set that
     /// `collect_entries` takes as `unloaded`, so CLI and palette agree.
     pub(super) xref_unloaded: crate::io::xref_model::UnloadSet,
+    /// References attached with a relative path while the drawing had no
+    /// file yet: stored full until the first save, then made relative.
+    pub(super) xref_relative_on_save: rustc_hash::FxHashSet<String>,
     /// Load-time mtimes per reference key (Task 8b). Written on every
     /// palette refresh; `Stale` is detectable from the second refresh on.
     pub(super) xref_stat_cache: crate::io::xref_model::RefStatCache,
@@ -650,6 +653,7 @@ impl DocumentTab {
             active_mleader_style: "Standard".to_string(),
             last_synced_camera_gen: 0,
             xref_unloaded: crate::io::xref_model::UnloadSet::default(),
+            xref_relative_on_save: rustc_hash::FxHashSet::default(),
             xref_stat_cache: crate::io::xref_model::RefStatCache::default(),
             xref_missing: 0,
             is_start: false,

@@ -36,6 +36,13 @@ impl XrefCommand {
         }
     }
 
+    /// Whether any reference name matches `pattern` (`*` / `?` wildcards).
+    fn matches(&self, pattern: &str) -> bool {
+        self.saved_paths
+            .iter()
+            .any(|(name, _)| crate::io::xref_model::wildcard_match(name, pattern))
+    }
+
     fn choose(&mut self, token: &str) -> CmdResult {
         self.step = match token {
             "?" => Step::List,
@@ -118,6 +125,15 @@ impl CadCommand for XrefCommand {
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let value = text.trim().trim_matches('"').to_string();
         let token = value.to_uppercase();
+        let names_step = matches!(
+            self.step,
+            Step::Names(_) | Step::PathTypeNames | Step::ShowNames
+        );
+        if names_step && !self.matches(&value) {
+            return Some(CmdResult::Measurement(
+                "No matching xref names found.".to_string(),
+            ));
+        }
         Some(match self.step.clone() {
             Step::Option => self.choose(&token),
             Step::List => CmdResult::Dispatch(format!("XREFLIST {value}")),
@@ -133,7 +149,7 @@ impl CadCommand for XrefCommand {
                     .find(|(name, _)| crate::io::xref_model::wildcard_match(name, &value))
                     .cloned()
                 else {
-                    return Some(CmdResult::CancelWithMessage(
+                    return Some(CmdResult::Measurement(
                         "No matching xref names found.".to_string(),
                     ));
                 };
@@ -171,7 +187,7 @@ impl CadCommand for XrefCommand {
             Step::Option => self.choose("A"),
             Step::List => CmdResult::Dispatch("XREFLIST *".to_string()),
             Step::NewPath { .. } => {
-                CmdResult::CancelWithMessage("Path unchanged.".to_string())
+                CmdResult::Measurement("Path unchanged.".to_string())
             }
             Step::PathTypeKind { .. } => CmdResult::NeedPoint,
             _ => CmdResult::Cancel,

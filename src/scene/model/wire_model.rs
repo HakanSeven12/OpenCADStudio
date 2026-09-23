@@ -633,6 +633,28 @@ impl WireModel {
         out
     }
 
+    /// Return a preview clone with every point mapped through `map` (an
+    /// INSERT-style placement: per-axis scale, rotation, translation).
+    /// Tangent geometry is dropped; a preview is not snapped to.
+    pub fn mapped(&self, map: impl Fn(glam::DVec3) -> glam::DVec3) -> Self {
+        let mut out = self.clone();
+        out.name = format!("preview_{}", self.name);
+        out.color = Self::CYAN;
+        out.selected = false;
+        map_points(&mut out.points, &mut out.points_low, &map);
+        if let Some(marker) = &mut out.point_marker {
+            marker.origin = map(marker.origin);
+        }
+        if !out.text_verts.is_empty() {
+            out.text_verts = map_text_verts(&self.text_verts, |x, y, z| {
+                let p = map(glam::DVec3::new(x, y, z));
+                (p.x, p.y, p.z)
+            });
+        }
+        out.tangent_geoms.clear();
+        out
+    }
+
     /// Return a clone with every point rotated around `center` by `angle_rad`.
     pub fn rotated(&self, center: glam::Vec3, angle_rad: f32) -> Self {
         self.rotated_about_axis(center, glam::Vec3::Z, angle_rad)

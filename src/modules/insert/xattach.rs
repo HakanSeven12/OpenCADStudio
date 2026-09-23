@@ -136,6 +136,13 @@ pub struct XAttachCommand {
     /// Degrees.
     rotation: f64,
     rotation_fixed: bool,
+    /// Ghost of the reference's model space in its own coordinates.
+    preview: Vec<WireModel>,
+    /// Drawing units per reference unit; the INSERT's scale carries it.
+    unit: f64,
+    /// PScale / PX / PY / PZ / PRotate: preview-only values.
+    preview_scale: [f64; 3],
+    preview_rotation: f64,
 }
 
 const NONZERO: &str = "Value must be nonzero.";
@@ -154,6 +161,10 @@ impl XAttachCommand {
             scale_fixed: placement.scale.is_some(),
             rotation: placement.rotation.unwrap_or(0.0),
             rotation_fixed: placement.rotation.is_some(),
+            preview: Vec::new(),
+            unit: 1.0,
+            preview_scale: [1.0; 3],
+            preview_rotation: 0.0,
         };
         if command.point.is_some() {
             command.step = command.next_step().unwrap_or(Step::Rotation);
@@ -173,6 +184,44 @@ impl XAttachCommand {
             XrefPlacement::on_screen(),
             "XATTACH",
         )
+    }
+
+    /// Show `wires` (the reference's model space) while placing it.
+    pub fn with_preview(mut self, wires: Vec<WireModel>, unit: f64) -> Self {
+        self.preview = wires;
+        self.unit = if unit.is_finite() && unit != 0.0 { unit } else { 1.0 };
+        self
+    }
+
+    /// Placement shown for the cursor at `cursor` (local): insertion point,
+    /// scale and rotation (degrees) as far as they are known at this step.
+    fn preview_placement(&self, cursor: DVec3) -> (DVec3, [f64; 3], f64) {
+        let rotation = if self.rotation_fixed {
+            self.rotation
+        } else {
+            self.preview_rotation
+        };
+        let base = self.point.unwrap_or(cursor);
+        match self.step {
+            Step::Insert | Step::Preset(_) => {
+                let scale = if self.scale_fixed { self.scale } else { self.preview_scale };
+                (cursor, scale, rotation)
+            }
+            Step::XScale | Step::Corner | Step::XyzX => {
+                let (dx, dy) = (cursor.x - base.x, cursor.y - base.y);
+                let scale = if dx.abs() > 1e-12 && dy.abs() > 1e-12 {
+                    [dx, dy, dx.abs()]
+                } else {
+                    [1.0; 3]
+                };
+                (base, scale, rotation)
+            }
+            Step::Rotation => {
+                let angle = (cursor.y - base.y).atan2(cursor.x - base.x).to_degrees();
+                (base, self.scale, angle)
+            }
+            _ => (base, self.scale, rotation),
+        }
     }
 
     /// The finished INSERT when nothing is left to ask (all values fixed in
@@ -357,7 +406,11 @@ impl CadCommand for XAttachCommand {
                     }
                     // Preview-only values: the reference asks the real ones
                     // after the insertion point as usual.
-                    Preset::PScale | Preset::PX | Preset::PY | Preset::PZ | Preset::PRotate => {}
+                    Preset::PScale => self.preview_scale = [value; 3],
+                    Preset::PX => self.preview_scale[0] = value,
+                    Preset::PY => self.preview_scale[1] = value,
+                    Preset::PZ => self.preview_scale[2] = value,
+                    Preset::PRotate => self.preview_rotation = value,
                 }
                 self.step = Step::Insert;
                 Some(CmdResult::NeedPoint)
@@ -451,8 +504,19 @@ impl CadCommand for XAttachCommand {
         }
     }
 
-    fn on_preview_wires(&mut self, _pt: DVec3) -> Vec<WireModel> {
-        vec![]
+    fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
+        if self.preview.is_empty() {
+            return Vec::new();
+        }
+        let (origin, scale, degrees) = self.preview_placement(self.plane.to_local(pt));
+        let (sin, cos) = degrees.to_radians().sin_cos();
+        let unit = self.unit;
+        let plane = self.plane;
+        let place = |p: DVec3| {
+            let (x, y, z) = (p.x * scale[0] * unit, p.y * scale[1] * unit, p.z * scale[2] * unit);
+            plane.to_world(origin + DVec3::new(x * cos - y * sin, x * sin + y * cos, z))
+        };
+        self.preview.iter().map(|wire| wire.mapped(place)).collect()
     }
 
     fn xattach_request(&self) -> Option<XrefAttachRequest> {

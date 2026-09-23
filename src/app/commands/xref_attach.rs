@@ -125,7 +125,8 @@ impl OpenCADStudio {
                 return;
             }
         }
-        if let Some(existing) = existing_reference(&self.tabs[i].scene, &name) {
+        let existing = existing_reference(&self.tabs[i].scene, &name);
+        if let Some(existing) = existing.as_ref() {
             self.command_line
                 .push_output(&format!("Xref \"{}\" has already been defined.", existing));
             self.command_line
@@ -155,8 +156,58 @@ impl OpenCADStudio {
             self.commit_xref_attach(i, request, entity);
             return;
         }
+        let (wires, source_units) = self.xref_preview(i, existing.as_deref(), &full);
+        let host_units = self.tabs[i].scene.document.header.insertion_units;
+        let unit = crate::app::properties::insert_unit_scale(host_units, source_units).unwrap_or(1.0);
+        let command = command.with_preview(wires, unit);
         self.command_line.push_info(&command.prompt());
         self.tabs[i].active_cmd = Some(Box::new(command));
+    }
+
+    /// The reference's geometry for the placement ghost, in its own units:
+    /// an existing definition's content, or the file's model space.
+    fn xref_preview(
+        &self,
+        i: usize,
+        existing: Option<&str>,
+        path: &str,
+    ) -> (Vec<crate::scene::model::wire_model::WireModel>, i16) {
+        // ponytail: a huge reference skips the ghost; cap by entity count.
+        const MAX_PREVIEW_ENTITIES: usize = 20_000;
+        let scene = &self.tabs[i].scene;
+        if let Some(name) = existing {
+            let units = scene
+                .document
+                .block_records
+                .get(name)
+                .map(|br| br.units)
+                .unwrap_or(0);
+            return (scene.block_preview_wires(name), units);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Ok(source) = crate::io::load_file(std::path::Path::new(path)) {
+            let owner = source.header.model_space_block_handle;
+            let entities: Vec<acadrust::EntityType> = source
+                .entities()
+                .filter(|e| e.common().owner_handle == owner)
+                .filter(|e| {
+                    !matches!(
+                        e,
+                        acadrust::EntityType::Block(_) | acadrust::EntityType::BlockEnd(_)
+                    )
+                })
+                .take(MAX_PREVIEW_ENTITIES + 1)
+                .cloned()
+                .collect();
+            if entities.len() <= MAX_PREVIEW_ENTITIES {
+                return (
+                    scene.wires_for_entities(&entities),
+                    source.header.insertion_units,
+                );
+            }
+        }
+        let _ = path;
+        (Vec::new(), 0)
     }
 
     /// Creates (or reuses) the definition and commits its INSERT — one undo
@@ -170,6 +221,9 @@ impl OpenCADStudio {
         let pending = self.begin_undo(i, "XATTACH", 1, false);
         let host = self.tabs[i].current_path.clone();
         let name = prepare_xref_definition(&mut self.tabs[i].scene, &request, host.as_deref());
+        if host.is_none() && request.path_type == Pathtype::Relative {
+            self.tabs[i].xref_relative_on_save.insert(name.clone());
+        }
         if let acadrust::EntityType::Insert(insert) = &mut entity {
             insert.block_name = name;
         }

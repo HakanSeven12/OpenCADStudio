@@ -1310,92 +1310,204 @@ impl OpenCADStudio {
                 }
             }
 
+            // A pre-selection is not used: the reference always asks, and it
+            // gathers associative dimensions only.
             "DCCONVERT" => {
-                self.dim_constraint_last = "Convert";
+                use crate::modules::draw::select::SelectObjectsCommand;
+                self.tabs[i].scene.deselect_all();
+                let sel = SelectObjectsCommand::associative_dimensions(
+                    cmd,
+                    "DCCONVERTAPPLY",
+                    "Select associative dimensions to convert:",
+                );
+                self.command_line.push_info(&sel.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(sel));
+            }
+
+            // The gathered dimensions become dimensional constraints: each one
+            // keeps its dimension, which turns into the constraint's dynamic
+            // (or annotational) dimension driven by a new parameter.
+            "DCCONVERTAPPLY" => {
+                use crate::scene::named_parameters::DrivingValue;
+                use crate::scene::parametric_constraints::{
+                    dynamic_dimension_text, next_angular_parameter_name,
+                    next_dimensional_parameter_name, next_radial_parameter_name,
+                    ConstraintKind,
+                };
+
+                let scope = self.tabs[i].current_parametric_scope();
                 let handles = self.tabs[i].scene.selected_handles_in_order();
-                if handles.is_empty() {
-                    use crate::modules::draw::select::SelectObjectsCommand;
-                    let sel = SelectObjectsCommand::new(cmd);
-                    self.command_line.push_info(&sel.prompt());
-                    self.tabs[i].active_cmd = Some(Box::new(sel));
-                } else {
-                    let scope = self.tabs[i].current_parametric_scope();
-                    let conversions: Vec<_> = handles
-                        .iter()
-                        .copied()
-                        .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
-                        .filter_map(|handle| {
-                            let (kind, refs, value) =
-                                crate::scene::dimension_assoc::constraint_from_associative_dimension(
-                                    &self.tabs[i].scene.document,
-                                    handle,
-                                )?;
-                            self.tabs[i]
-                                .scene
-                                .validate_parametric_constraint(kind, &refs, Some(&value))
-                                .ok()?;
-                            Some((handle, kind, refs, value))
-                        })
-                        .collect();
-                    if conversions.is_empty() {
-                        self.command_line
-                            .push_output("No supported associative dimensions were selected.");
-                        return None;
+                let annotational = self.constraint_form_annotational;
+                let mut table = self.tabs[i].scene.named_parameters().clone();
+                let mut conversions = Vec::new();
+                let mut refused = 0usize;
+                for handle in handles {
+                    if self.tabs[i].scene.is_layer_locked(handle) {
+                        refused += 1;
+                        continue;
                     }
-                    let before = self.tabs[i]
-                        .scene
-                        .parametric_constraint_set(scope)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            crate::scene::parametric_constraints::ParametricConstraintSet::new(
-                                scope,
-                            )
-                        });
-                    let mut touched: Vec<_> = conversions
-                        .iter()
-                        .flat_map(|(_, _, refs, _)| refs.iter().map(|reference| reference.entity))
-                        .collect();
-                    touched.sort_unstable();
-                    touched.dedup();
-                    let dimensions: Vec<_> = conversions
-                        .iter()
-                        .map(|(handle, _, _, _)| *handle)
-                        .collect();
-                    let pending = self.begin_undo(
-                        i,
-                        "Convert dimensions to constraints",
-                        touched.len() + dimensions.len(),
-                        false,
-                    );
-                    self.tabs[i]
-                        .scene
-                        .record_undo_parametric_constraints_before(scope, before);
-                    for (_, kind, refs, value) in conversions {
-                        let id = self.tabs[i].scene.parametric_constraint_set_mut(scope).add(
-                            kind,
-                            refs,
-                            Some(value),
-                        );
-                        self.tabs[i].scene.note_parametric_constraint_applied(
-                            scope,
-                            id,
-                            self.constraint_bar_display,
-                        );
+                    // A dimension already driving a constraint is not converted
+                    // a second time.
+                    if crate::scene::parametric_constraints::dynamic_dimension_constraint(
+                        &self.tabs[i].scene.parametric_constraints,
+                        handle,
+                    )
+                    .is_some()
+                    {
+                        refused += 1;
+                        continue;
                     }
-                    self.tabs[i].scene.erase_entities(&dimensions);
-                    let changes: Vec<_> = touched
-                        .into_iter()
-                        .map(|handle| (handle, crate::scene::ChangeKind::Modified))
-                        .collect();
-                    self.tabs[i].scene.bump_entities(&changes);
-                    self.tabs[i].dirty = true;
-                    self.refresh_properties();
+                    let Some((kind, refs, value)) =
+                        crate::scene::dimension_assoc::constraint_from_associative_dimension(
+                            &self.tabs[i].scene.document,
+                            handle,
+                        )
+                    else {
+                        refused += 1;
+                        continue;
+                    };
+                    let DrivingValue::Literal(measured) = value else {
+                        refused += 1;
+                        continue;
+                    };
+                    if self.tabs[i]
+                        .scene
+                        .validate_parametric_constraint(kind, &refs, Some(&DrivingValue::Literal(measured)))
+                        .is_err()
+                    {
+                        refused += 1;
+                        continue;
+                    }
+                    // The parameter is named after the constraint it drives,
+                    // as a constraint made by hand would be.
+                    let name = match kind {
+                        ConstraintKind::Radius => next_radial_parameter_name(&table, false),
+                        ConstraintKind::Diameter => next_radial_parameter_name(&table, true),
+                        ConstraintKind::Angle | ConstraintKind::Angle3Point => {
+                            next_angular_parameter_name(&table)
+                        }
+                        _ => next_dimensional_parameter_name(&table),
+                    };
+                    let expression =
+                        crate::scene::parametric_constraints::measured_expression(measured);
+                    if table.set(&name, &expression).is_err() {
+                        refused += 1;
+                        continue;
+                    }
+                    conversions.push((handle, kind, refs, name, expression, measured));
+                }
+                if conversions.is_empty() {
+                    self.command_line
+                        .push_output("0 associative dimensions converted");
                     self.command_line.push_output(
-                        format!("{} dimension(s) converted.", dimensions.len()).as_str(),
+                        format!("{refused} associative dimension(s) could not be converted")
+                            .as_str(),
                     );
-                    if let Some(pd) = pending {
-                        self.commit_undo_delta(i, pd);
+                    self.tabs[i].scene.deselect_all();
+                    self.refresh_properties();
+                    return None;
+                }
+                let constraints_before = self.tabs[i]
+                    .scene
+                    .parametric_constraint_set(scope)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        crate::scene::parametric_constraints::ParametricConstraintSet::new(scope)
+                    });
+                let mut touched: Vec<_> = conversions
+                    .iter()
+                    .flat_map(|(_, _, refs, _, _, _)| refs.iter().map(|r| r.entity))
+                    .collect();
+                touched.sort_unstable();
+                touched.dedup();
+                // The constraints layer is made before the recording opens: a
+                // new layer inside it would cost the delta its entity undo.
+                if !annotational {
+                    self.tabs[i].scene.ensure_dynamic_dimension_layer();
+                }
+                let pending = self.begin_undo(
+                    i,
+                    "Convert dimensions to constraints",
+                    touched.len() + conversions.len(),
+                    false,
+                );
+                self.tabs[i]
+                    .scene
+                    .record_undo_parametric_constraints_before(scope, constraints_before);
+                self.tabs[i].scene.record_undo_named_parameters_before();
+                self.tabs[i].scene.named_parameters = table;
+                let format = self.tabs[i].scene.constraint_name_format;
+                let converted = conversions.len();
+                for (handle, kind, refs, name, expression, measured) in conversions {
+                    let angular =
+                        matches!(kind, ConstraintKind::Angle | ConstraintKind::Angle3Point);
+                    let decimals = angular.then(|| {
+                        crate::scene::parametric_constraints::angle_decimals(
+                            &self.tabs[i].scene.document,
+                            None,
+                        )
+                    });
+                    let text = dynamic_dimension_text(
+                        &name,
+                        measured,
+                        format,
+                        false,
+                        Some(&expression),
+                        annotational,
+                        decimals,
+                    );
+                    if let Some(acadrust::EntityType::Dimension(mut dimension)) =
+                        self.tabs[i].scene.document.get_entity(handle).cloned()
+                    {
+                        let before = self.tabs[i].scene.document.get_entity_arc(handle);
+                        self.tabs[i].scene.record_undo_before(handle, before);
+                        crate::entities::dimension::set_dimension_text_override(
+                            dimension.base_mut(),
+                            Some(text),
+                        );
+                        // The dynamic form lives on the reference's hidden
+                        // constraints layer in the constraint grey; the
+                        // annotational form stays where the dimension is.
+                        if !annotational {
+                            dimension.base_mut().common.layer =
+                                crate::scene::parametric_constraints::DYNAMIC_DIMENSION_LAYER
+                                    .to_string();
+                            dimension.base_mut().common.color = acadrust::types::Color::Rgb {
+                                r: 103,
+                                g: 109,
+                                b: 118,
+                            };
+                        }
+                        self.tabs[i]
+                            .scene
+                            .update_entity(acadrust::EntityType::Dimension(dimension));
                     }
+                    let set = self.tabs[i].scene.parametric_constraint_set_mut(scope);
+                    let id = set.add(kind, refs, Some(DrivingValue::Named(name)));
+                    set.dimensions.insert(id, handle);
+                    self.tabs[i].scene.note_parametric_constraint_applied(
+                        scope,
+                        id,
+                        self.constraint_bar_display,
+                    );
+                }
+                let changes: Vec<_> = touched
+                    .into_iter()
+                    .map(|handle| (handle, crate::scene::ChangeKind::Modified))
+                    .collect();
+                self.tabs[i].scene.bump_entities(&changes);
+                self.tabs[i].scene.refresh_hidden_dynamic_dimensions();
+                self.tabs[i].scene.refresh_dynamic_dimension_scales(true);
+                self.tabs[i].scene.deselect_all();
+                self.tabs[i].dirty = true;
+                self.refresh_properties();
+                self.command_line
+                    .push_output(format!("{converted} associative dimensions converted").as_str());
+                self.command_line.push_output(
+                    format!("{refused} associative dimension(s) could not be converted").as_str(),
+                );
+                if let Some(pd) = pending {
+                    self.commit_undo_delta(i, pd);
                 }
             }
 

@@ -525,28 +525,47 @@ pub(crate) fn measured_expression(value: f64) -> String {
 
 /// Writes a constraint point's position: a line's start (0) or end (1), a
 /// polyline's vertex by index. Other entities and markers are left alone.
+///
+/// The inverse of [`resolve_point`], which reads polyline vertices in WCS
+/// through the polyline's OCS: the world point goes back into the OCS the
+/// vertex is stored in (a mirrored polyline has a -Z normal, and writing the
+/// world X into its OCS X would flip the vertex), the elevation stays the
+/// polyline's own, and the closing segment's end marker names vertex 0.
 pub(crate) fn set_resolved_point(
     entity: &mut acadrust::EntityType,
     marker: i32,
     point: Vector3,
 ) -> bool {
+    if marker < 0 {
+        return false;
+    }
+    let index = polyline_vertex_index(entity, marker as usize).unwrap_or(marker as usize);
+    let to_ocs = |normal: Vector3| {
+        crate::scene::view::transform::wcs_point_to_ocs(
+            (point.x, point.y, point.z),
+            (normal.x, normal.y, normal.z),
+        )
+    };
     match entity {
         acadrust::EntityType::Line(line) => match marker {
             0 => line.start = point,
             1 => line.end = point,
             _ => return false,
         },
-        acadrust::EntityType::LwPolyline(polyline) if marker >= 0 => {
-            let Some(vertex) = polyline.vertices.get_mut(marker as usize) else {
+        acadrust::EntityType::LwPolyline(polyline) => {
+            let (x, y, _) = to_ocs(polyline.normal);
+            let Some(vertex) = polyline.vertices.get_mut(index) else {
                 return false;
             };
-            vertex.location = acadrust::types::Vector2::new(point.x, point.y);
+            vertex.location = acadrust::types::Vector2::new(x, y);
         }
-        acadrust::EntityType::Polyline2D(polyline) if marker >= 0 => {
-            let Some(vertex) = polyline.vertices.get_mut(marker as usize) else {
+        acadrust::EntityType::Polyline2D(polyline) => {
+            let (x, y, _) = to_ocs(polyline.normal);
+            let Some(vertex) = polyline.vertices.get_mut(index) else {
                 return false;
             };
-            vertex.location = point;
+            vertex.location.x = x;
+            vertex.location.y = y;
         }
         _ => return false,
     }
@@ -583,6 +602,36 @@ pub(crate) fn two_lines_placement(
     };
     let shift = normal * (target - turned);
     Some([s0 + shift, s0 + heading * length + shift])
+}
+
+/// The second line of an Aligned 2Lines pick moved to where
+/// [`two_lines_placement`] puts it, or `None` when either line cannot be
+/// resolved or written back.
+///
+/// Out of line and boxed on purpose: the caller is an arm of the command
+/// driver's result dispatcher, whose debug-build frame is on the stack of
+/// every click, and an `EntityType` held there is paid for on each of them.
+#[inline(never)]
+pub(crate) fn two_lines_placed_entity(
+    document: &acadrust::CadDocument,
+    first_ends: [ParametricRef; 2],
+    first_pick: glam::DVec3,
+    second_line: ParametricRef,
+    second_ends: [ParametricRef; 2],
+) -> Option<Box<acadrust::EntityType>> {
+    let world = |reference: ParametricRef| {
+        let point = resolve_point(document.get_entity(reference.entity)?, reference.marker?)?;
+        Some(glam::DVec3::new(point.x, point.y, point.z))
+    };
+    let ends = |pair: [ParametricRef; 2]| Some([world(pair[0])?, world(pair[1])?]);
+    let points = two_lines_placement(ends(first_ends)?, first_pick, ends(second_ends)?)?;
+    let mut entity = Box::new(document.get_entity(second_line.entity)?.clone());
+    let written = second_ends.iter().zip(points).all(|(reference, point)| {
+        reference.marker.is_some_and(|marker| {
+            set_resolved_point(&mut entity, marker, Vector3::new(point.x, point.y, point.z))
+        })
+    });
+    written.then_some(entity)
 }
 
 /// Moves a dynamic dimension's extension origins to `first`/`second`,
@@ -2398,6 +2447,17 @@ impl super::Scene {
         layer.is_plottable = false;
         layer.handle = self.document.allocate_handle();
         let _ = self.document.layers.add(layer);
+    }
+
+    /// Replace an entity in place inside an open undo recording, keeping the
+    /// previous version for undo. Out of line so a boxed entity handed over by
+    /// the command driver never lands in its frame.
+    #[inline(never)]
+    pub(crate) fn replace_entity_recorded(&mut self, entity: Box<acadrust::EntityType>) {
+        let handle = entity.common().handle;
+        let before = self.document.get_entity_arc(handle);
+        self.record_undo_before(handle, before);
+        self.update_entity(*entity);
     }
 
     /// True when an angular constraint drives with the parameter `name`.

@@ -4794,7 +4794,7 @@ impl OpenCADStudio {
                 second_ends,
             } => {
                 use crate::scene::parametric_constraints::{
-                    resolve_point, set_resolved_point, two_lines_placement, ConstraintKind,
+                    resolve_point, two_lines_placed_entity, ConstraintKind,
                 };
                 let scope = self.tabs[i].current_parametric_scope();
                 let refs = [first_line, second_line];
@@ -4806,38 +4806,16 @@ impl OpenCADStudio {
                     return self.apply_cmd_result(CmdResult::ReportError(message.to_string()));
                 }
                 // The reference's placement of the second line, written
-                // before the Parallel constraint holds it there.
-                let placed = {
-                    let document = &self.tabs[i].scene.document;
-                    let world = |reference: crate::scene::parametric_constraints::ParametricRef| {
-                        let entity = document.get_entity(reference.entity)?;
-                        let point = resolve_point(entity, reference.marker?)?;
-                        Some(glam::DVec3::new(point.x, point.y, point.z))
-                    };
-                    let ends = |pair: [crate::scene::parametric_constraints::ParametricRef; 2]| {
-                        Some([world(pair[0])?, world(pair[1])?])
-                    };
-                    ends(first_ends)
-                        .zip(ends(second_ends))
-                        .and_then(|(first, second)| two_lines_placement(first, first_pick, second))
-                };
-                let placed_entity = placed.and_then(|points| {
-                    let mut entity = self.tabs[i]
-                        .scene
-                        .document
-                        .get_entity(second_line.entity)
-                        .cloned()?;
-                    let written = second_ends.iter().zip(points).all(|(reference, point)| {
-                        reference.marker.is_some_and(|marker| {
-                            set_resolved_point(
-                                &mut entity,
-                                marker,
-                                acadrust::types::Vector3::new(point.x, point.y, point.z),
-                            )
-                        })
-                    });
-                    written.then_some(entity)
-                });
+                // before the Parallel constraint holds it there. Built out of
+                // line and boxed: this arm's locals would otherwise sit in
+                // `apply_cmd_result`'s frame, which is on every click's stack.
+                let placed_entity = two_lines_placed_entity(
+                    &self.tabs[i].scene.document,
+                    first_ends,
+                    first_pick,
+                    second_line,
+                    second_ends,
+                );
                 let already = self.tabs[i]
                     .scene
                     .parametric_constraint_set(scope)
@@ -4861,11 +4839,7 @@ impl OpenCADStudio {
                         });
                     let pending = self.begin_undo(i, "Parallel constraint", 1, true);
                     if let Some(entity) = placed_entity {
-                        let before = self.tabs[i].scene.document.get_entity_arc(second_line.entity);
-                        self.tabs[i]
-                            .scene
-                            .record_undo_before(second_line.entity, before);
-                        self.tabs[i].scene.update_entity(entity);
+                        self.tabs[i].scene.replace_entity_recorded(entity);
                     }
                     self.tabs[i]
                         .scene
@@ -6286,6 +6260,7 @@ impl OpenCADStudio {
                 if from_menu {
                     match cmd.as_str() {
                         "DCRADIUS" => self.dim_constraint_last = "Radius",
+                        "DCDIAMETER" => self.dim_constraint_last = "Diameter",
                         "DCCONVERT" => self.dim_constraint_last = "Convert",
                         _ => {}
                     }

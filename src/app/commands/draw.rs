@@ -1398,10 +1398,10 @@ impl OpenCADStudio {
                 }
                 if conversions.is_empty() {
                     self.command_line
-                        .push_output("0 associative dimensions converted");
+                        .push_output(crate::t!("0 associative dimensions converted").as_ref());
                     self.command_line.push_output(
-                        format!("{refused} associative dimension(s) could not be converted")
-                            .as_str(),
+                        crate::tf!("{refused} associative dimension(s) could not be converted")
+                            .as_ref(),
                     );
                     self.tabs[i].scene.deselect_all();
                     self.refresh_properties();
@@ -1502,9 +1502,9 @@ impl OpenCADStudio {
                 self.tabs[i].dirty = true;
                 self.refresh_properties();
                 self.command_line
-                    .push_output(format!("{converted} associative dimensions converted").as_str());
+                    .push_output(crate::tf!("{converted} associative dimensions converted").as_ref());
                 self.command_line.push_output(
-                    format!("{refused} associative dimension(s) could not be converted").as_str(),
+                    crate::tf!("{refused} associative dimension(s) could not be converted").as_ref(),
                 );
                 if let Some(pd) = pending {
                     self.commit_undo_delta(i, pd);

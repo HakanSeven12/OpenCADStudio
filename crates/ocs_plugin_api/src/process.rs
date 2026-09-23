@@ -222,6 +222,7 @@ fn base_max_floor(base: Duration, kind: &'static str) -> Duration {
         "GetManifest" | "GetRibbon" => Duration::from_secs(5),
         "Dispatch" => Duration::from_secs(10),
         "InteractiveEvent" | "GetPrompt" | "NeedsEntityPick" => Duration::from_secs(2),
+        "CursorMove" => Duration::from_millis(500),
         "ExecuteCode" => execute_code_timeout(),
         _ => Duration::from_secs(1),
     };
@@ -238,6 +239,7 @@ pub(crate) fn request_kind(req: &HostRequest) -> &'static str {
         HostRequest::NeedsEntityPick { .. } => "NeedsEntityPick",
         HostRequest::ExecuteCode { .. } => "ExecuteCode",
         HostRequest::DropInteractive { .. } => "DropInteractive",
+        HostRequest::CursorMove { .. } => "CursorMove",
         HostRequest::Shutdown => "Shutdown",
     }
 }
@@ -675,6 +677,35 @@ impl PluginProcess {
                 "needs_entity_pick",
                 |resp| match resp {
                     HostResponse::Bool(b) => Ok(b),
+                    other => Err(Box::new(other)),
+                },
+            )
+        }
+    }
+
+    /// Ask the plugin process for real-time preview wires for the cursor position.
+    pub fn on_cursor_move(
+        &self,
+        command_id: u64,
+        pt: [f64; 3],
+    ) -> Result<Vec<crate::host::PreviewWire>, PluginError> {
+        if let Some(v4) = &self.v4 {
+            let resp = v4.call(
+                &mut NullHost,
+                HostRequest::CursorMove { command_id, pt },
+                &mut |_| {},
+            )?;
+            match resp {
+                HostResponse::PreviewWires(w) => Ok(w),
+                other => Err(PluginError::UnexpectedResponse(Box::new(other))),
+            }
+        } else {
+            self.call_simple(
+                HostRequest::CursorMove { command_id, pt },
+                "CursorMove",
+                "cursor_move",
+                |resp| match resp {
+                    HostResponse::PreviewWires(w) => Ok(w),
                     other => Err(Box::new(other)),
                 },
             )

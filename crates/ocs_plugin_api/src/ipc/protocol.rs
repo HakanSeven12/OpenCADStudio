@@ -23,6 +23,7 @@ use crate::ribbon::owned::{OwnedPluginManifest, OwnedRibbonGroup};
 
 pub use acadrust::xdata::{ExtendedDataRecord, XDataValue};
 pub use acadrust::{CadDocument, EntityType, Handle};
+pub use crate::host::PreviewWire;
 
 /// Events the host forwards to an active plugin `InteractiveCommand`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,6 +84,11 @@ pub enum HostRequest {
     },
     /// V7: release an interactive command after completion or cancellation.
     DropInteractive { command_id: u64 },
+    /// V7: cursor move preview update during an interactive command.
+    CursorMove {
+        command_id: u64,
+        pt: [f64; 3],
+    },
 }
 
 /// Responses the plugin runner sends back for `HostRequest`.
@@ -95,6 +101,7 @@ pub enum HostResponse {
     Manifest(OwnedPluginManifest),
     Error(String),
     CodeExecutionResult(crate::host::ExecutionResult),
+    PreviewWires(Vec<PreviewWire>),
 }
 
 /// Requests the plugin runner sends to the host.

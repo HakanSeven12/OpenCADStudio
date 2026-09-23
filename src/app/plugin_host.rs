@@ -2842,6 +2842,26 @@ impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
         self.refresh();
         result
     }
+    fn on_preview_wires(&mut self, pt: glam::DVec3) -> Vec<crate::scene::model::wire_model::WireModel> {
+        let raw_wires = self
+            .process
+            .on_cursor_move(self.command_id, [pt.x as f64, pt.y as f64, pt.z as f64])
+            .unwrap_or_default();
+
+        raw_wires
+            .into_iter()
+            .filter(|w| w.points.len() >= 2)
+            .map(|w| {
+                let color = w.color.unwrap_or(crate::scene::model::wire_model::WireModel::CYAN);
+                crate::scene::model::wire_model::WireModel::solid_f64(
+                    "rubber_band".into(),
+                    w.points,
+                    color,
+                    false,
+                )
+            })
+            .collect()
+    }
 }
 
 fn plugin_step_to_result(step: ocs_plugin_api::host::CommandStep) -> crate::command::CmdResult {

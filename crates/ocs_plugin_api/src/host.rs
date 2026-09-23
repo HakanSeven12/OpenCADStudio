@@ -603,6 +603,38 @@ pub trait InteractiveCommand: Send {
     fn on_object_pick(&mut self, _handle: Handle, _pt: [f64; 3]) -> CommandStep {
         CommandStep::Cancel
     }
+
+    /// Real-time preview geometry (lines, arcs, polylines) to render as the cursor moves.
+    /// Each wire can specify custom vertices and an optional color (defaults to host cyan).
+    fn on_cursor_move(&mut self, _pt: [f64; 3]) -> Vec<PreviewWire> {
+        Vec::new()
+    }
+}
+
+/// A preview wire/polyline rendered in real-time during interactive commands.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "host", derive(serde::Serialize, serde::Deserialize))]
+pub struct PreviewWire {
+    /// World-coordinate points along the polyline.
+    pub points: Vec<[f64; 3]>,
+    /// Optional RGBA color (0.0 to 1.0). If `None`, the host's default rubber-band color (cyan) is used.
+    pub color: Option<[f32; 4]>,
+}
+
+impl PreviewWire {
+    pub fn new(points: Vec<[f64; 3]>) -> Self {
+        Self { points, color: None }
+    }
+
+    pub fn with_color(points: Vec<[f64; 3]>, color: [f32; 4]) -> Self {
+        Self { points, color: Some(color) }
+    }
+}
+
+impl From<Vec<[f64; 3]>> for PreviewWire {
+    fn from(points: Vec<[f64; 3]>) -> Self {
+        Self::new(points)
+    }
 }
 
 /// The outcome of an [`InteractiveCommand`] step.

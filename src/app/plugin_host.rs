@@ -2710,6 +2710,26 @@ impl crate::command::CadCommand for PluginInteractiveAdapter {
         .map(plugin_step_to_result)
         .unwrap_or(crate::command::CmdResult::Cancel)
     }
+    fn on_preview_wires(&mut self, pt: glam::DVec3) -> Vec<crate::scene::model::wire_model::WireModel> {
+        let raw_wires = crate::plugin::guard("InteractiveCommand::on_cursor_move", || {
+            self.inner.on_cursor_move([pt.x as f64, pt.y as f64, pt.z as f64])
+        })
+        .unwrap_or_default();
+
+        raw_wires
+            .into_iter()
+            .filter(|w| w.points.len() >= 2)
+            .map(|w| {
+                let color = w.color.unwrap_or(crate::scene::model::wire_model::WireModel::CYAN);
+                crate::scene::model::wire_model::WireModel::solid_f64(
+                    "rubber_band".into(),
+                    w.points,
+                    color,
+                    false,
+                )
+            })
+            .collect()
+    }
 }
 
 /// Bridges an out-of-process plugin's interactive command to the host's
@@ -9266,6 +9286,54 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             app.tabs[0].active_cmd.is_none(),
             "command should have ended"
         );
+    }
+
+    /// A plugin command that previews a rubber-band line to the cursor.
+    struct PreviewLine {
+        start: [f64; 3],
+        color: Option<[f32; 4]>,
+    }
+    impl ocs_plugin_api::host::InteractiveCommand for PreviewLine {
+        fn prompt(&self) -> String {
+            "Pick endpoint".to_string()
+        }
+        fn on_point(&mut self, _pt: [f64; 3]) -> ocs_plugin_api::host::CommandStep {
+            ocs_plugin_api::host::CommandStep::Done
+        }
+        fn on_cursor_move(&mut self, pt: [f64; 3]) -> Vec<ocs_plugin_api::host::PreviewWire> {
+            vec![ocs_plugin_api::host::PreviewWire {
+                points: vec![self.start, pt],
+                color: self.color,
+            }]
+        }
+    }
+
+    #[test]
+    fn plugin_cursor_move_preview_wires() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+
+        // 1. Default color (None -> CYAN)
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            host.start_interactive(Box::new(PreviewLine { start: [0.0, 0.0, 0.0], color: None }));
+        }
+        assert!(app.tabs[0].active_cmd.is_some());
+        let cmd = app.tabs[0].active_cmd.as_mut().unwrap();
+        let wires = cmd.on_preview_wires(glam::DVec3::new(10.0, 20.0, 0.0));
+        assert_eq!(wires.len(), 1);
+        assert_eq!(wires[0].name, "rubber_band");
+        assert_eq!(wires[0].color, crate::scene::model::wire_model::WireModel::CYAN);
+
+        // 2. Custom color ([1.0, 0.0, 0.0, 1.0])
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            host.start_interactive(Box::new(PreviewLine { start: [0.0, 0.0, 0.0], color: Some([1.0, 0.0, 0.0, 1.0]) }));
+        }
+        let cmd2 = app.tabs[0].active_cmd.as_mut().unwrap();
+        let wires2 = cmd2.on_preview_wires(glam::DVec3::new(10.0, 20.0, 0.0));
+        assert_eq!(wires2.len(), 1);
+        assert_eq!(wires2[0].color, [1.0, 0.0, 0.0, 1.0]);
     }
 
     /// A plugin command that picks an existing object, then marks it.

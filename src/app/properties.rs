@@ -2365,9 +2365,12 @@ impl OpenCADStudio {
                                     acadrust::EntityType::Dimension(Dimension::Aligned(_)) => {
                                         t!("Aligned Dimensional Constraint")
                                     }
-                                    acadrust::EntityType::Dimension(
-                                        Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_),
-                                    ) => t!("Angular Dimensional Constraint"),
+                                    acadrust::EntityType::Dimension(Dimension::Angular2Ln(_)) => {
+                                        t!("Angular Dimension (Dynamic)")
+                                    }
+                                    acadrust::EntityType::Dimension(Dimension::Angular3Pt(_)) => {
+                                        t!("3 Point Angular Dimension (Dynamic)")
+                                    }
                                     acadrust::EntityType::Dimension(Dimension::Radius(_)) => {
                                         t!("Radius Dimensional Constraint")
                                     }

@@ -523,6 +523,68 @@ pub(crate) fn measured_expression(value: f64) -> String {
     }
 }
 
+/// Writes a constraint point's position: a line's start (0) or end (1), a
+/// polyline's vertex by index. Other entities and markers are left alone.
+pub(crate) fn set_resolved_point(
+    entity: &mut acadrust::EntityType,
+    marker: i32,
+    point: Vector3,
+) -> bool {
+    match entity {
+        acadrust::EntityType::Line(line) => match marker {
+            0 => line.start = point,
+            1 => line.end = point,
+            _ => return false,
+        },
+        acadrust::EntityType::LwPolyline(polyline) if marker >= 0 => {
+            let Some(vertex) = polyline.vertices.get_mut(marker as usize) else {
+                return false;
+            };
+            vertex.location = acadrust::types::Vector2::new(point.x, point.y);
+        }
+        acadrust::EntityType::Polyline2D(polyline) if marker >= 0 => {
+            let Some(vertex) = polyline.vertices.get_mut(marker as usize) else {
+                return false;
+            };
+            vertex.location = point;
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// Where the reference puts the second line of an Aligned 2Lines pick: it
+/// turns about its start to run with the first line (keeping its heading
+/// and length) and settles at the distance the first line's picked point
+/// had from its original line, on the side nearer to where the turn left
+/// it — the right-hand side of the first line when both are as near.
+pub(crate) fn two_lines_placement(
+    first_ends: [glam::DVec3; 2],
+    first_pick: glam::DVec3,
+    second_ends: [glam::DVec3; 2],
+) -> Option<[glam::DVec3; 2]> {
+    let [f0, f1] = first_ends;
+    let [s0, s1] = second_ends;
+    let f_dir = (f1 - f0).try_normalize()?;
+    let normal = glam::DVec3::new(-f_dir.y, f_dir.x, 0.0);
+    let s_dir = (s1 - s0).try_normalize()?;
+    let length = (s1 - s0).length();
+    let pick = f0 + f_dir * (first_pick - f0).dot(f_dir);
+    let offset = pick - s0;
+    let distance = (s_dir.x * offset.y - s_dir.y * offset.x).abs();
+    let heading = if s_dir.dot(f_dir) >= 0.0 { f_dir } else { -f_dir };
+    let turned = (s0 - f0).dot(normal);
+    let target = if turned.abs() <= 1.0e-9 {
+        -distance
+    } else if (turned - distance).abs() <= (turned + distance).abs() {
+        distance
+    } else {
+        -distance
+    };
+    let shift = normal * (target - turned);
+    Some([s0 + shift, s0 + heading * length + shift])
+}
+
 /// Moves a dynamic dimension's extension origins to `first`/`second`,
 /// keeping its dimension line where it was; true when anything moved.
 fn dynamic_dimension_follow_points(
@@ -4171,5 +4233,53 @@ mod tests {
         assert_eq!(constraints.len(), 2);
         assert_eq!(constraints[1].refs, vec![ParametricRef::whole(copied)]);
         assert_eq!(constraints[1].axis_direction, Some(direction.normalize()));
+    }
+}
+
+#[cfg(test)]
+mod two_lines_placement_tests {
+    use super::two_lines_placement;
+    use glam::DVec3;
+
+    fn p(x: f64, y: f64) -> DVec3 {
+        DVec3::new(x, y, 0.0)
+    }
+
+    fn close(a: DVec3, b: DVec3) -> bool {
+        (a - b).length() < 1.0e-2
+    }
+
+    // Measured on the reference: first line (200,0)-(300,0) picked at its
+    // midpoint, the second line as listed, and where it ended up.
+    #[test]
+    fn follows_the_reference_measurements() {
+        let first = [p(200.0, 0.0), p(300.0, 0.0)];
+        let pick = p(250.0, 0.0);
+        let cases = [
+            ([p(0.0, 0.0), p(100.0, 50.0)], [p(0.0, -111.803), p(111.803, -111.803)]),
+            ([p(0.0, 40.0), p(100.0, 90.0)], [p(0.0, 147.58), p(111.803, 147.58)]),
+            ([p(100.0, 0.0), p(200.0, 50.0)], [p(100.0, -67.08), p(211.803, -67.08)]),
+            ([p(-100.0, 0.0), p(0.0, 50.0)], [p(-100.0, -156.52), p(11.803, -156.52)]),
+            ([p(0.0, 0.0), p(200.0, 100.0)], [p(0.0, -111.8), p(223.607, -111.8)]),
+            ([p(0.0, 0.0), p(79.0569, 79.0569)], [p(0.0, -176.78), p(111.803, -176.78)]),
+            ([p(0.0, 0.0), p(100.0, -50.0)], [p(0.0, -111.8), p(111.803, -111.8)]),
+            ([p(100.0, 50.0), p(0.0, 0.0)], [p(100.0, 111.8), p(-11.803, 111.8)]),
+            ([p(0.0, 20.0), p(100.0, 70.0)], [p(0.0, 129.69), p(111.803, 129.69)]),
+        ];
+        for (second, expected) in cases {
+            let placed = two_lines_placement(first, pick, second).expect("a placement");
+            assert!(close(placed[0], expected[0]) && close(placed[1], expected[1]), "{second:?} -> {placed:?}, expected {expected:?}");
+        }
+        // The first line picked near its end: the distance grows with it.
+        let placed = two_lines_placement(first, p(290.0, 0.0), [p(0.0, 0.0), p(100.0, 50.0)]).unwrap();
+        assert!(close(placed[0], p(0.0, -129.69)));
+        // A slanted first line: the second line's start keeps its place along it.
+        let placed = two_lines_placement(
+            [p(500.0, 300.0), p(600.0, 350.0)],
+            p(550.0, 325.0),
+            [p(400.0, 300.0), p(500.0, 300.0)],
+        )
+        .unwrap();
+        assert!(close(placed[0], p(408.82, 282.36)) && close(placed[1], p(498.26, 327.08)), "{placed:?}");
     }
 }

@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "acadrust"
 version = "0.5.5"
-source = "git+https://github.com/HakanSeven12/cadcodec.git?rev=5b682ed#5b682ed66ea2c89be8142c8dd83d83774fc3de08"
+source = "git+https://github.com/HakanSeven12/cadcodec.git?rev=dd1d7bf#dd1d7bfe03f4e733d351c0396e2cf82ae9df957d"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",

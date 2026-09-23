@@ -4358,27 +4358,15 @@ mod tests {
                 panic!("Leader missing after reopen");
             };
             assert_eq!(leader.vertices.len(), 4);
-            if is_dxf {
-                // BLOCKER: acadrust's DXF writer never emits group 340, so a
-                // DXF save unlinks the annotation. Flip this to
-                // `assert_eq!(.., text_handle)` once the engine writes it.
-                assert!(leader.annotation_handle.is_null(), "acadrust now writes DXF 340; drop the blocker");
-            } else {
-                assert_eq!(leader.annotation_handle, text_handle);
-            }
+            assert_eq!(leader.annotation_handle, text_handle);
             assert!(!leader.arrow_enabled);
-            // BLOCKER: neither writer stores `override_color`, so it reopens
-            // as ByLayer in both formats.
+            // The script sets a true colour. DXF's LEADER group 77 holds an ACI
+            // index only, so it cannot carry one, and the DWG writer does not
+            // store `override_color` at all (BLOCKER, cadcodec): it reopens as
+            // ByLayer in both formats.
             assert_eq!(leader.override_color, acadrust::types::Color::ByLayer,
-                "acadrust now persists Leader.override_color; drop the blocker");
-            if is_dxf {
-                // BLOCKER: the DXF writer emits group 213 but the reader's
-                // coordinate mapping does not reassemble it.
-                assert_eq!(leader.annotation_offset, acadrust::types::Vector3::ZERO,
-                    "acadrust now reads DXF 213; drop the blocker");
-            } else {
-                assert_eq!(leader.annotation_offset, acadrust::types::Vector3::new(1.0, 2.0, 0.0));
-            }
+                "acadrust now persists a true-colour Leader.override_color; drop the blocker");
+            assert_eq!(leader.annotation_offset, acadrust::types::Vector3::new(1.0, 2.0, 0.0));
             assert_eq!(leader.dimension_style, "Standard");
             if is_dxf {
                 assert!((leader.text_height - 4.0).abs() < 1e-12);
@@ -5081,16 +5069,15 @@ mod tests {
             if value.columns.first().map(|c| c.width) != Some(30.0) { gaps.push(format!("{format}: column width {:?}", value.columns.first().map(|c| c.width))); }
             let text = value.rows.get(1).and_then(|r| r.cells.get(1)).and_then(|c| c.contents.first()).map(|c| c.value.text.clone());
             if text.as_deref() != Some("Hello") { gaps.push(format!("{format}: cell text {text:?}")); }
-            // DWG stores the ranges; DXF stores the origin cell's merge
-            // dimensions and its reader does not rebuild `merged_ranges`
-            // (engine gap, recorded in the ledger). Scripted saves populate
-            // both, so each format keeps the merge in its own form.
+            // DWG stores the ranges and DXF the origin cell's merge dimensions;
+            // the DXF reader rebuilds the ranges from those, so both formats
+            // come back with the merge in both forms.
             let origin = &value.rows[0].cells[0];
-            if format == "DXF" {
-                if (origin.merge_width, origin.merge_height) != (3, 1) { gaps.push(format!("DXF: merge dims {}x{}", origin.merge_width, origin.merge_height)); }
-                if !value.merged_ranges.is_empty() { gaps.push("DXF: reader now rebuilds merged_ranges; drop the blocker".into()); }
-            } else if value.merged_ranges.len() != 1 {
-                gaps.push(format!("DWG: merged_ranges {}", value.merged_ranges.len()));
+            if format == "DXF" && (origin.merge_width, origin.merge_height) != (3, 1) {
+                gaps.push(format!("DXF: merge dims {}x{}", origin.merge_width, origin.merge_height));
+            }
+            if value.merged_ranges.len() != 1 {
+                gaps.push(format!("{format}: merged_ranges {}", value.merged_ranges.len()));
             }
             if value.insertion_point != edited.insertion_point { gaps.push(format!("{format}: insertion {:?}", value.insertion_point)); }
         }
@@ -5535,12 +5522,10 @@ mod tests {
             expect_created: "r5 t3 h2 endz6.0 ccwtrue cptrue",
             expect_edited: "r5 t5 h2 endz10.0 ccwfalse cptrue",
             expect_reedited: "r5 t6 h2 endz10.0 ccwfalse cptrue",
-            // BLOCKER: the DXF reader parses boolean group 290 as an i16 and
-            // never applies it, so handedness always reopens counter-clockwise.
             expect_edited_dwg: "",
             expect_reedited_dwg: "",
-            expect_edited_dxf: "r5 t5 h2 endz10.0 ccwtrue cptrue",
-            expect_reedited_dxf: "r5 t6 h2 endz10.0 ccwtrue cptrue",
+            expect_edited_dxf: "",
+            expect_reedited_dxf: "",
         });
     }
 
@@ -5674,12 +5659,10 @@ mod tests {
             expect_created: "Pdf at5.0,5.0 s2.0 r0.0 c100 f0 clip0",
             expect_edited: "Pdf at8.0,9.0 s3.0 r0.5 c70 f20 clip2",
             expect_reedited: "Pdf at8.0,9.0 s4.0 r0.5 c70 f20 clip2",
-            // BLOCKER: DXF stores the rotation in degrees and the reader returns
-            // it unconverted, so 0.5 rad reopens as 28.6 and a second save-reopen compounds it to 1641.4.
             expect_edited_dwg: "",
             expect_reedited_dwg: "",
-            expect_edited_dxf: "Pdf at8.0,9.0 s3.0 r28.6 c70 f20 clip2",
-            expect_reedited_dxf: "Pdf at8.0,9.0 s4.0 r1641.4 c70 f20 clip2",
+            expect_edited_dxf: "",
+            expect_reedited_dxf: "",
         });
     }
 
@@ -5757,12 +5740,10 @@ mod tests {
             expect_created: "max40.0,30.0 c20.0,15.0 s1.0 r0.0",
             expect_edited: "max60.0,45.0 c30.0,22.5 s2.0 r0.3",
             expect_reedited: "max60.0,45.0 c30.0,22.5 s3.0 r0.3",
-            // BLOCKER: a DXF DRAWINGVIEW reopens as a different (opaque) entity
-            // kind, not as a ViewBorder; only DWG restores the typed record.
             expect_edited_dwg: "",
             expect_reedited_dwg: "",
-            expect_edited_dxf: "wrong kind",
-            expect_reedited_dxf: "wrong kind",
+            expect_edited_dxf: "",
+            expect_reedited_dxf: "",
         });
     }
 
@@ -5801,12 +5782,10 @@ mod tests {
             expect_created: "Key t3 i1.5 pos10,10,10 tgt0,0 shfalse Rgb { r: 255, g: 240, b: 200 }",
             expect_edited: "Key t3 i3.0 pos12,8,10 tgt5,5 shtrue Rgb { r: 255, g: 240, b: 200 }",
             expect_reedited: "Key t3 i4.0 pos12,8,10 tgt5,5 shtrue Rgb { r: 255, g: 240, b: 200 }",
-            // BLOCKER: DXF does not restore `cast_shadows` (it reopens false),
-            // like the other boolean groups the reader parses as integers.
             expect_edited_dwg: "",
             expect_reedited_dwg: "",
-            expect_edited_dxf: "Key t3 i3.0 pos12,8,10 tgt5,5 shfalse Rgb { r: 255, g: 240, b: 200 }",
-            expect_reedited_dxf: "Key t3 i4.0 pos12,8,10 tgt5,5 shfalse Rgb { r: 255, g: 240, b: 200 }",
+            expect_edited_dxf: "",
+            expect_reedited_dxf: "",
         });
     }
 
@@ -6318,13 +6297,12 @@ mod tests {
             expect_created: "PART_NO|Part number|PN-001 ins1.0,2.0 al3.0,4.0 h2.5 r0.25 wf1.25 ob0.10 Center/Top f1010 fl12 tg2 lock1",
             expect_edited: "PART_NO|Serial|PN-002 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
             expect_reedited: "PART_NO|Serial|PN-003 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
-            // BLOCKER: acadrust's DXF ATTDEF reader handles only groups 1, 2, 3,
-            // 10, 40, 50, 280 and 101, so the alignment point and alignments,
-            // width factor, oblique angle, attribute flags, field length,
-            // generation flags, lock and text style (groups 7, 11, 41, 51, 70-74,
-            // 210, 280 lock) reopen as defaults. The writer emits all of them.
-            expect_edited_dxf: "PART_NO|Serial|PN-002 ins4.0,5.0 al0.0,0.0 h3.0 r0.50 wf1.00 ob0.00 Left/Baseline f0000 fl0 tg0 lock0",
-            expect_reedited_dxf: "PART_NO|Serial|PN-003 ins4.0,5.0 al0.0,0.0 h3.0 r0.50 wf1.00 ob0.00 Left/Baseline f0000 fl0 tg0 lock0",
+            // BLOCKER (cadcodec): the DXF ATTDEF writer emits no group 280 at
+            // all — neither the version byte nor the lock-position flag the
+            // reader looks for after it — so `lock_position` reopens false. Every
+            // other field round-trips since cadcodec dd1d7bf.
+            expect_edited_dxf: "PART_NO|Serial|PN-002 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock0",
+            expect_reedited_dxf: "PART_NO|Serial|PN-003 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock0",
             expect_edited_dwg: "",
             expect_reedited_dwg: "",
         });
@@ -7232,11 +7210,8 @@ mod tests {
             expect_created: "n2 ends 0.0,0.0->40.0,0.0 labelA tick2.0/2.0 scale1.0 counts2/2",
             expect_edited: "n3 ends 0.0,0.0->40.0,0.0 labelB tick3.0/-3.0 scale2.0 counts3/3",
             expect_reedited: "n3 ends 0.0,0.0->40.0,0.0 labelB tick3.0/-3.0 scale3.0 counts3/3",
-            // BLOCKER (cadcodec, see docs/cadcodec-reader-gaps.md issue 5): the
-            // DXF reader dispatches SECTIONLINE only inside blocks, so a symbol
-            // in the entity list reopens as an unknown entity.
-            expect_edited_dxf: "wrong kind Unknown",
-            expect_reedited_dxf: "wrong kind Unknown",
+            expect_edited_dxf: "",
+            expect_reedited_dxf: "",
             expect_edited_dwg: "",
             expect_reedited_dwg: "",
         });
@@ -7688,25 +7663,14 @@ check('d_modmissing', lambda: D.modify('Nope', dimscale=2))
             assert!((title.oblique_angle - 15f64.to_radians()).abs() < 1e-6, "{label}: oblique {}", title.oblique_angle);
             assert_eq!(title.font_file.to_lowercase(), "romans", "{label}");
             assert_eq!(title.big_font_file.to_lowercase(), "bigfont", "{label}");
-            if label == "DXF" {
-                // BLOCKER (cadcodec): the DXF STYLE writer hard-codes group 71 to 0, so the
-                // backward and upside-down generation flags are lost on a DXF save.
-                assert!(!title.flags.backward && !title.flags.upside_down, "{label}: cadcodec now keeps the flags; flip this canary");
-            } else {
-                assert!(title.flags.backward && title.flags.upside_down, "{label}");
-            }
+            assert!(title.flags.backward && title.flags.upside_down, "{label}");
             let remarks = document.text_styles.get("Remarks").unwrap_or_else(|| panic!("{label}: Remarks missing"));
             assert_eq!(remarks.font_file.to_lowercase(), "arial.ttf", "{label}: {remarks:?}");
             let metric = document.dim_styles.get("Metric").unwrap_or_else(|| panic!("{label}: Metric missing"));
             assert_eq!((metric.dimscale, metric.dimtxt, metric.dimasz), (3.0, 3.5, 2.5), "{label}");
+            assert_eq!(metric.dimtxsty, "Heading", "{label}: dimtxsty followed the rename");
             if label == "DXF" {
-                // BLOCKER (cadcodec): the DXF DIMSTYLE reader keeps only the text-style handle
-                // (group 340) and never resolves `dimtxsty` from it, so the name reopens as
-                // "Standard". The handle survives and identifies the right style.
-                assert_eq!(metric.dimtxsty, "Standard", "{label}: cadcodec now resolves the name; flip this canary");
                 assert_eq!(metric.dimtxsty_handle, title.handle, "{label}: text style link by handle");
-            } else {
-                assert_eq!(metric.dimtxsty, "Heading", "{label}: dimtxsty followed the rename");
             }
             let copy = document.dim_styles.get("Metric2").unwrap_or_else(|| panic!("{label}: Metric2 missing"));
             assert_eq!((copy.dimscale, copy.dimtxt), (2.0, 4.0), "{label}: copied before Metric changed");
@@ -7845,13 +7809,7 @@ check('modify_missing', lambda: B.modify('Nope', description='x'))
             let record = document.block_records.get("Gadget").unwrap();
             assert_eq!((record.base_point.x, record.base_point.y), (1.0, 1.0), "{label}: base point");
             assert!(!record.explodable, "{label}: explodable");
-            if label == "DXF" {
-                // BLOCKER (cadcodec): the DXF BLOCK_RECORD reader/writer does not carry the
-                // description, so it is lost on a DXF save (DWG keeps it).
-                assert_eq!(record.description, "", "{label}: cadcodec now keeps the description; flip this canary");
-            } else {
-                assert_eq!(record.description, "a gadget", "{label}: description");
-            }
+            assert_eq!(record.description, "a gadget", "{label}: description");
             assert_eq!(members("Widget2").len(), 1, "{label}: Widget2 members");
             let inserts: Vec<_> = document.entities().filter_map(|e| match e { EntityType::Insert(i) => Some(i.block_name.clone()), _ => None }).collect();
             assert_eq!(inserts.iter().filter(|n| n.as_str() == "Gadget").count(), 2, "{label}: inserts follow the rename: {inserts:?}");

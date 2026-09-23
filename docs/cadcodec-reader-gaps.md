@@ -1,12 +1,20 @@
 # cadcodec DXF reader/writer gaps found by the OCS Python host audit
 
-Reports on `HakanSeven12/cadcodec` (the `acadrust` crate). **Status (21 September
-2026):** fixes for issues 1-6 below, with regression tests, are submitted as
-[HakanSeven12/cadcodec#48](https://github.com/HakanSeven12/cadcodec/pull/48) (branch
-`fix/dxf-reader-writer-roundtrip` on `felixriestra/cadcodec`); the five findings under
-"Observed but not filed" and the style and block ones added later are not filed. Every finding was made against **cadcodec revision
-`5b682ed`** (OCS pins `acadrust` to it) by saving a document with
-`DxfWriter` or `DwgWriter`, reloading it, and comparing entity fields.
+Reports on `HakanSeven12/cadcodec` (the `acadrust` crate). Every finding was made against
+**cadcodec revision `5b682ed`** by saving a document with `DxfWriter` or `DwgWriter`,
+reloading it, and comparing entity fields.
+
+**Status (23 September 2026):** the fixes landed in cadcodec as
+[#48](https://github.com/HakanSeven12/cadcodec/pull/48) (issues 1-6) and
+[#51](https://github.com/HakanSeven12/cadcodec/pull/51) (the first three style findings), and
+the block description with commit `dd1d7bf` (cadcodec issue #49). OCS pins `dd1d7bf`, and the
+canaries below were flipped against it. What is still open:
+
+- **ATTDEF `lock_position`** (issue 1): the reader is complete, but the DXF writer emits no
+  group 280 at all, neither the version byte nor the lock flag the reader expects after it.
+- **LEADER true-colour `override_color`** (issue 4): DXF group 77 holds an ACI index only, so
+  a true colour cannot be written there, and the DWG writer does not store the field.
+- **`TextStyle::true_type_font`** (style findings): still neither written nor read.
 
 Each report names an executable canary in OCS (`src/app/plugin_host.rs`). The
 canaries assert today's wrong result, so they fail loudly once cadcodec is
@@ -214,7 +222,8 @@ AutoCAD expects and that cannot be checked here.
 - **`DIMSTYLE` text style name:** the DXF reader keeps only the text-style handle (group 340) and never
   resolves `dimtxsty` from it, so the name reopens as `Standard` (the handle is right; DWG resolves both).
 - **`TextStyle::true_type_font`** is never written or read by either codec, so it lives only in memory.
-- **`BLOCK_RECORD` description:** the DXF codec does not carry `BlockRecord::description`
-  (found by `audit_python_blocks_over_real_ipc`, pinned by a canary); DWG keeps it. Not filed, for
-  the same reason as `true_type_font`.
+- **`BLOCK_RECORD` description:** the DXF codec did not carry `BlockRecord::description`
+  (found by `audit_python_blocks_over_real_ipc`). It needs no XDATA: it is BLOCK group 4, which
+  the reader parsed onto the discarded BLOCK marker and the writer never emitted. Fixed in
+  cadcodec `dd1d7bf` (cadcodec issue #49).
 

@@ -432,11 +432,62 @@ impl OpenCADStudio {
         self.feed_command_consumed(input).0
     }
 
+    /// Keeps only associative dimensions in a completed selection when the
+    /// active command asks for that, deselecting the rest and reporting how
+    /// many objects were dropped.
+    fn filter_associative_dimension_selection(&mut self, input: StepInput) -> StepInput {
+        let StepInput::SelectionComplete(handles) = input else {
+            return input;
+        };
+        let i = self.active_tab;
+        if !self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|command| command.selection_keeps_associative_dimensions())
+        {
+            return StepInput::SelectionComplete(handles);
+        }
+        let (kept, dropped): (Vec<Handle>, Vec<Handle>) = handles.into_iter().partition(|handle| {
+            // A dimension that already drives a constraint is not one to
+            // convert either.
+            crate::scene::parametric_constraints::dynamic_dimension_constraint(
+                &self.tabs[i].scene.parametric_constraints,
+                *handle,
+            )
+            .is_none()
+                && crate::scene::dimension_assoc::constraint_from_associative_dimension(
+                    &self.tabs[i].scene.document,
+                    *handle,
+                )
+                .is_some()
+        });
+        for handle in &dropped {
+            self.tabs[i].scene.deselect_entity(*handle);
+        }
+        if !dropped.is_empty() {
+            let count = dropped.len();
+            self.command_line.push_info(
+                if count == 1 {
+                    crate::t!("1 was filtered out.")
+                } else {
+                    crate::tf!("{count} were filtered out.")
+                }
+                .as_ref(),
+            );
+            self.refresh_properties();
+        }
+        StepInput::SelectionComplete(kept)
+    }
+
     /// `feed_command`, also reporting whether the step actually took the input.
     /// Only a `Text` token can come back unclaimed (`on_text_input` returning
     /// `None`), which is what lets the caller read it as something else — a
     /// typed distance, say — instead of guessing beforehand.
     pub(super) fn feed_command_consumed(&mut self, input: StepInput) -> (Task<Message>, bool) {
+        // A command that takes associative dimensions only keeps just those:
+        // the rest leave the selection and the count of what went is reported,
+        // as the reference does while gathering.
+        let input = self.filter_associative_dimension_selection(input);
         // Selection keywords (P / PREVIOUS, L / LAST) consume the token
         // before it reaches the command (#426).
         if let StepInput::Text(s) = &input {
@@ -6179,15 +6230,18 @@ impl OpenCADStudio {
             CmdResult::Dispatch(cmd) => {
                 // End this interactive front-end, then run the assembled command
                 // through the normal dispatcher. Selection is left untouched.
-                // DIMCONSTRAINT's Radius option becomes its next default; the
-                // DCRADIUS command run on its own leaves the default alone.
-                if cmd == "DCRADIUS"
-                    && self.tabs[i]
-                        .active_cmd
-                        .as_ref()
-                        .is_some_and(|command| command.name() == "DIMCONSTRAINT")
-                {
-                    self.dim_constraint_last = "Radius";
+                // The option picked in DIMCONSTRAINT becomes its next default;
+                // the same command run on its own leaves the default alone.
+                let from_menu = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .is_some_and(|command| command.name() == "DIMCONSTRAINT");
+                if from_menu {
+                    match cmd.as_str() {
+                        "DCRADIUS" => self.dim_constraint_last = "Radius",
+                        "DCCONVERT" => self.dim_constraint_last = "Convert",
+                        _ => {}
+                    }
                 }
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;

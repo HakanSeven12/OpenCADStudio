@@ -36,6 +36,11 @@ pub struct SelectObjectsCommand {
     pick_crossing: bool,
     /// Add the command-specific Settings keyword used by Auto Constrain.
     auto_constrain_settings: bool,
+    /// A command-specific prompt replacing the generic "Select objects:".
+    prompt_text: Option<&'static str>,
+    /// The command works on associative dimensions only; the host drops
+    /// everything else from each completed selection.
+    associative_dimensions_only: bool,
 }
 
 impl SelectObjectsCommand {
@@ -50,6 +55,8 @@ impl SelectObjectsCommand {
             pick: None,
             pick_crossing: true,
             auto_constrain_settings: false,
+            prompt_text: None,
+            associative_dimensions_only: false,
         }
     }
 
@@ -65,6 +72,8 @@ impl SelectObjectsCommand {
             pick: None,
             pick_crossing: true,
             auto_constrain_settings: false,
+            prompt_text: None,
+            associative_dimensions_only: false,
         }
     }
 
@@ -80,6 +89,8 @@ impl SelectObjectsCommand {
             pick: None,
             pick_crossing: true,
             auto_constrain_settings: false,
+            prompt_text: None,
+            associative_dimensions_only: false,
         }
     }
 
@@ -95,7 +106,22 @@ impl SelectObjectsCommand {
             pick: None,
             pick_crossing: true,
             auto_constrain_settings: false,
+            prompt_text: None,
+            associative_dimensions_only: false,
         }
+    }
+
+    /// Gather associative dimensions with the command's own wording; the host
+    /// drops every other object from each completed selection.
+    pub fn associative_dimensions(
+        prompt_cmd: &str,
+        pending_cmd: &str,
+        prompt_text: &'static str,
+    ) -> Self {
+        let mut command = Self::plain(prompt_cmd, pending_cmd);
+        command.prompt_text = Some(prompt_text);
+        command.associative_dimensions_only = true;
+        command
     }
 
     pub fn auto_constrain(pending_cmd: &str) -> Self {
@@ -111,6 +137,11 @@ impl CadCommand for SelectObjectsCommand {
     }
 
     fn prompt(&self) -> String {
+        // A command with its own wording keeps it whatever is selected, the
+        // way the reference repeats its prompt after every selection.
+        if let (Some(text), None) = (self.prompt_text, self.pick.as_ref()) {
+            return format!("{}  {}", self.prompt_cmd, t!(text));
+        }
         if let Some(pick) = &self.pick {
             let label = if !pick.closed {
                 t!("Fence")
@@ -159,6 +190,10 @@ impl CadCommand for SelectObjectsCommand {
         // A path being picked needs the clicks as points; handing them to the
         // selection system instead would pick objects under each vertex.
         self.pick.is_none()
+    }
+
+    fn selection_keeps_associative_dimensions(&self) -> bool {
+        self.associative_dimensions_only
     }
 
     // Clickable selection keywords (#426, #596). Window and Crossing fix the

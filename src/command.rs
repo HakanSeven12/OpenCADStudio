@@ -1676,6 +1676,9 @@ pub enum CmdResult {
     MakeParallel {
         first_line: crate::scene::parametric_constraints::ParametricRef,
         first_ends: [crate::scene::parametric_constraints::ParametricRef; 2],
+        /// Where the first line was picked: the second line settles at the
+        /// distance this point had from it.
+        first_pick: DVec3,
         second_line: crate::scene::parametric_constraints::ParametricRef,
         second_ends: [crate::scene::parametric_constraints::ParametricRef; 2],
     },

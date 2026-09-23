@@ -4738,10 +4738,13 @@ impl OpenCADStudio {
             CmdResult::MakeParallel {
                 first_line,
                 first_ends,
+                first_pick,
                 second_line,
                 second_ends,
             } => {
-                use crate::scene::parametric_constraints::{resolve_point, ConstraintKind};
+                use crate::scene::parametric_constraints::{
+                    resolve_point, set_resolved_point, two_lines_placement, ConstraintKind,
+                };
                 let scope = self.tabs[i].current_parametric_scope();
                 let refs = [first_line, second_line];
                 if let Err(message) =
@@ -4751,6 +4754,39 @@ impl OpenCADStudio {
                 {
                     return self.apply_cmd_result(CmdResult::ReportError(message.to_string()));
                 }
+                // The reference's placement of the second line, written
+                // before the Parallel constraint holds it there.
+                let placed = {
+                    let document = &self.tabs[i].scene.document;
+                    let world = |reference: crate::scene::parametric_constraints::ParametricRef| {
+                        let entity = document.get_entity(reference.entity)?;
+                        let point = resolve_point(entity, reference.marker?)?;
+                        Some(glam::DVec3::new(point.x, point.y, point.z))
+                    };
+                    let ends = |pair: [crate::scene::parametric_constraints::ParametricRef; 2]| {
+                        Some([world(pair[0])?, world(pair[1])?])
+                    };
+                    ends(first_ends)
+                        .zip(ends(second_ends))
+                        .and_then(|(first, second)| two_lines_placement(first, first_pick, second))
+                };
+                let placed_entity = placed.and_then(|points| {
+                    let mut entity = self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(second_line.entity)
+                        .cloned()?;
+                    let written = second_ends.iter().zip(points).all(|(reference, point)| {
+                        reference.marker.is_some_and(|marker| {
+                            set_resolved_point(
+                                &mut entity,
+                                marker,
+                                acadrust::types::Vector3::new(point.x, point.y, point.z),
+                            )
+                        })
+                    });
+                    written.then_some(entity)
+                });
                 let already = self.tabs[i]
                     .scene
                     .parametric_constraint_set(scope)
@@ -4762,7 +4798,7 @@ impl OpenCADStudio {
                                 && c.refs.contains(&second_line)
                         })
                     });
-                if !already {
+                if !already || placed_entity.is_some() {
                     let constraints_before = self.tabs[i]
                         .scene
                         .parametric_constraint_set(scope)
@@ -4773,21 +4809,32 @@ impl OpenCADStudio {
                             )
                         });
                     let pending = self.begin_undo(i, "Parallel constraint", 1, true);
+                    if let Some(entity) = placed_entity {
+                        let before = self.tabs[i].scene.document.get_entity_arc(second_line.entity);
+                        self.tabs[i]
+                            .scene
+                            .record_undo_before(second_line.entity, before);
+                        self.tabs[i].scene.update_entity(entity);
+                    }
                     self.tabs[i]
                         .scene
                         .record_undo_parametric_constraints_before(scope, constraints_before);
-                    let set = self.tabs[i].scene.parametric_constraint_set_mut(scope);
-                    let id = set.add(ConstraintKind::Parallel, refs.to_vec(), None);
-                    self.tabs[i].scene.note_parametric_constraint_applied(
-                        scope,
-                        id,
-                        self.constraint_bar_display,
-                    );
-                    // The first line stays; the second turns parallel the way the
-                    // Parallel constraint itself moves it.
+                    if !already {
+                        let set = self.tabs[i].scene.parametric_constraint_set_mut(scope);
+                        let id = set.add(ConstraintKind::Parallel, refs.to_vec(), None);
+                        self.tabs[i].scene.note_parametric_constraint_applied(
+                            scope,
+                            id,
+                            self.constraint_bar_display,
+                        );
+                    }
+                    // Both lines' ends hold the placement; the solve only
+                    // settles whatever else is tied to them.
+                    let mut pins = first_ends.to_vec();
+                    pins.extend(second_ends);
                     self.tabs[i].scene.bump_entities_with_parametric_policy(
                         &[(second_line.entity, crate::scene::ChangeKind::Modified)],
-                        &first_ends,
+                        &pins,
                         self.constraint_solve_mode,
                     );
                     self.tabs[i].dirty = true;

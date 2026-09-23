@@ -645,8 +645,12 @@ pub enum CommandStep {
     NeedPoint,
     /// Commit an entity to the document and keep collecting points.
     Commit(EntityType),
+    /// Commit multiple entities to the document and keep collecting points.
+    CommitMany(Vec<EntityType>),
     /// Commit an entity and end the command.
     CommitAndEnd(EntityType),
+    /// Commit multiple entities to the document and end the command.
+    CommitManyAndEnd(Vec<EntityType>),
     /// End the command without committing.
     Done,
     /// Cancel the command.

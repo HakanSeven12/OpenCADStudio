@@ -2797,7 +2797,12 @@ impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
             .interactive_event(self.command_id, InteractiveEvent::Point([pt.x, pt.y, pt.z]))
             .map(plugin_step_to_result)
             .unwrap_or(crate::command::CmdResult::Cancel);
-        if matches!(result, crate::command::CmdResult::CommitAndExit(_) | crate::command::CmdResult::Cancel) {
+        if matches!(
+            result,
+            crate::command::CmdResult::CommitAndExit(_)
+                | crate::command::CmdResult::CommitEntitiesAndExit(_)
+                | crate::command::CmdResult::Cancel
+        ) {
             self.is_done = true;
         }
         self.refresh();
@@ -2810,7 +2815,12 @@ impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
             .interactive_event(self.command_id, InteractiveEvent::Enter)
             .map(plugin_step_to_result)
             .unwrap_or(crate::command::CmdResult::Cancel);
-        if matches!(result, crate::command::CmdResult::CommitAndExit(_) | crate::command::CmdResult::Cancel) {
+        if matches!(
+            result,
+            crate::command::CmdResult::CommitAndExit(_)
+                | crate::command::CmdResult::CommitEntitiesAndExit(_)
+                | crate::command::CmdResult::Cancel
+        ) {
             self.is_done = true;
         }
         self.refresh();
@@ -2836,7 +2846,12 @@ impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
             )
             .map(plugin_step_to_result)
             .unwrap_or(crate::command::CmdResult::Cancel);
-        if matches!(result, crate::command::CmdResult::CommitAndExit(_) | crate::command::CmdResult::Cancel) {
+        if matches!(
+            result,
+            crate::command::CmdResult::CommitAndExit(_)
+                | crate::command::CmdResult::CommitEntitiesAndExit(_)
+                | crate::command::CmdResult::Cancel
+        ) {
             self.is_done = true;
         }
         self.refresh();
@@ -2870,7 +2885,9 @@ fn plugin_step_to_result(step: ocs_plugin_api::host::CommandStep) -> crate::comm
     match step {
         CommandStep::NeedPoint => CmdResult::NeedPoint,
         CommandStep::Commit(e) => CmdResult::CommitEntity(e),
+        CommandStep::CommitMany(es) => CmdResult::CommitEntities(es),
         CommandStep::CommitAndEnd(e) => CmdResult::CommitAndExit(e),
+        CommandStep::CommitManyAndEnd(es) => CmdResult::CommitEntitiesAndExit(es),
         CommandStep::Done | CommandStep::Cancel => CmdResult::Cancel,
     }
 }

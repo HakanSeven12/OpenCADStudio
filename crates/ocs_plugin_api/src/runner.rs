@@ -197,6 +197,7 @@ fn handle_host_request(
                             CommandStep::Done
                                 | CommandStep::Cancel
                                 | CommandStep::CommitAndEnd(_)
+                                | CommandStep::CommitManyAndEnd(_)
                         );
                         (Ok(s), is_done)
                     }
@@ -335,6 +336,7 @@ fn handle_host_request_v4(
                             CommandStep::Done
                                 | CommandStep::Cancel
                                 | CommandStep::CommitAndEnd(_)
+                                | CommandStep::CommitManyAndEnd(_)
                         );
                         (Ok(s), is_done)
                     }

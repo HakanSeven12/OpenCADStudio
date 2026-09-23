@@ -260,7 +260,7 @@ mod tests {
             app.tabs[i].scene.page_setup_save("Site", ps.clone());
             ps.paper_size = "ISO_A2_(420.00_x_594.00_MM)".into();
             app.tabs[i].scene.page_setup_save("Overview", ps);
-            let save = format!(r#"{{"op":"save","path":"{}"}}"#, source.display());
+            let save = serde_json::json!({"op":"save","path":source}).to_string();
             let reply = app.automation_op(&save);
             assert_eq!(reply["ok"], true, "{reply}");
         }

@@ -109,6 +109,8 @@ pub struct Ribbon {
     underlay_ctx: Option<UnderlayContext>,
     /// The contextual underlay tab is the one shown.
     underlay_tab_active: bool,
+    /// XDWGFADECTL as the Reference slide-out shows it (negative = off).
+    pub xref_fade: i32,
 }
 
 /// Per-layer display data shown in the ribbon layer dropdown.
@@ -204,6 +206,7 @@ impl Ribbon {
             collapse_tight: Arc::new(AtomicBool::new(false)),
             underlay_ctx: None,
             underlay_tab_active: false,
+            xref_fade: 50,
         }
     }
 

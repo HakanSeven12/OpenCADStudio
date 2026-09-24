@@ -5742,6 +5742,20 @@ impl OpenCADStudio {
                 self.ribbon.close_dropdown();
                 Task::none()
             }
+            Message::XrefFadeSlide(amount) => {
+                let sign = if self.ribbon.xref_fade < 0 { -1 } else { 1 };
+                self.ribbon.xref_fade = sign * amount as i32;
+                Task::none()
+            }
+            Message::XrefFadeCommit => {
+                self.set_xref_fade(self.ribbon.xref_fade);
+                Task::none()
+            }
+            Message::XrefFadeToggle => {
+                let fade = crate::scene::cache::block_cache::xref_fade_ctl();
+                self.set_xref_fade(if fade == 0 { 50 } else { -fade });
+                Task::none()
+            }
             Message::DropdownSelectItem { dropdown_id, cmd } => {
                 if self.tabs[self.active_tab].is_start {
                     self.ribbon.close_dropdown();

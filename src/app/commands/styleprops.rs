@@ -10,6 +10,8 @@ impl OpenCADStudio {
             "FRAMES0" => return self.dispatch_styleprops("SETVAR FRAME 0", i),
             "FRAMES1" => return self.dispatch_styleprops("SETVAR FRAME 1", i),
             "FRAMES2" => return self.dispatch_styleprops("SETVAR FRAME 2", i),
+            "UOSNAP0" => return self.dispatch_styleprops("SETVAR UOSNAP 0", i),
+            "UOSNAP1" => return self.dispatch_styleprops("SETVAR UOSNAP 1", i),
             // COLOR <ByLayer|ByBlock|1-255|name> — the colour applied to new
             // objects (CECOLOR). Bare COLOR reports the current value.
             "COLOR" | "COLOUR" | "CECOLOR" | "DDCOLOR" => {
@@ -1020,6 +1022,7 @@ impl OpenCADStudio {
                     | "PDFIMPORTMODE"
                     | "PDFIMPORTFILTER"
                     | "PDFIMPORTLAYERS"
+                    | "XDWGFADECTL"
                     | "POINTCLOUDCLIPFRAME"
                     | "XCLIPFRAME"
                     | "WIPEOUTFRAME"
@@ -1086,6 +1089,19 @@ impl OpenCADStudio {
                         crate::t!("SETVAR: CETRANSPARENCY LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR SHORTCUTMENU SHORTCUTMENUDURATION CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES COMMANDLINEFADETIME ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE CONSTRAINTSOLVEMODE CONSTRAINTINFER CONSTRAINTBARDISPLAY CONSTRAINTBARMODE CONSTRAINTNAMEFORMAT DYNCONSTRAINTDISPLAY ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER GRIPOBJLIMIT | CLAYER CELTYPE TEXTSTYLE (read-only)").as_ref(),
                     );
                 } else {
+                    if name == "XDWGFADECTL" {
+                        let current = crate::scene::cache::block_cache::xref_fade_ctl();
+                        if let Some(value) = &value {
+                            match value.parse::<i32>().ok().filter(|v| (-90..=90).contains(v)) {
+                                Some(fade) => self.set_xref_fade(fade),
+                                None => self.command_line.push_error("Requires an integer between -90 and 90."),
+                            }
+                        } else {
+                            self.command_line.push_output(&format!("Enter new value for XDWGFADECTL <{current}>:"));
+                            self.pending_setvar = Some(name.clone());
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
                     if name == "CETRANSPARENCY" {
                         let current = self.tabs[i].scene.document.current_entity_transparency();
                         if let Some(value) = &value {
@@ -3575,6 +3591,21 @@ mod scale_validation_tests {
                     app.tabs[i].scene.document.header.current_entity_linetype_scale
                 };
                 assert_eq!(before, after, "{entry} must be refused");
+            }
+        }
+    }
+}
+
+impl OpenCADStudio {
+    /// XDWGFADECTL: store it, show it on the ribbon and redraw every tab's
+    /// referenced drawings.
+    pub(in crate::app) fn set_xref_fade(&mut self, fade: i32) {
+        crate::scene::cache::block_cache::set_xref_fade_ctl(fade);
+        self.ribbon.xref_fade = crate::scene::cache::block_cache::xref_fade_ctl();
+        for tab in &mut self.tabs {
+            if !tab.is_start {
+                tab.scene.recolor_meshes();
+                tab.scene.bump_geometry();
             }
         }
     }

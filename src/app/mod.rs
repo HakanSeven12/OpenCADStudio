@@ -3833,6 +3833,11 @@ pub enum Message {
     XAttachPickResult(Result<std::path::PathBuf, String>),
     /// ATTACH: pick a drawing, image or PDF to reference.
     AttachPick,
+    /// The Reference slide-out's xref fading: amount dragged, drag done,
+    /// switch.
+    XrefFadeSlide(u8),
+    XrefFadeCommit,
+    XrefFadeToggle,
     /// Result of the ATTACH file picker.
     AttachPickResult(Result<std::path::PathBuf, String>),
     /// An edit in the Attach External Reference dialog.

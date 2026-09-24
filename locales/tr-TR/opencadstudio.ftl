@@ -3545,6 +3545,12 @@ insert =
         Tek renkli
         göster
     .select-pdf-file = PDF Dosyası Seç
+    .refui-requires-int-90 = -90 ile 90 arasında bir tam sayı gerekir.
+    .refui-xref-fading = Xref soldurma
+    .refui-edit-reference = Referansı Düzenle
+    .refui-snap-to-underlays-off = Altlıklara Yakala Kapalı
+    .refui-snap-to-underlays-on = Altlıklara Yakala Açık
+    .refui-snap-to-underlays = Altlıklara Yakala
     .xref-attach-dialog-title = Harici Referans Ekle
     .xref-attach-browse = Gözat...
     .xref-attach-reference-type = Referans Türü

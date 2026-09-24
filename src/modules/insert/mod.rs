@@ -49,41 +49,39 @@ impl CadModule for InsertModule {
                     title: "Reference",
                     tools: vec![
                         RibbonItem::LargeTool(xattach::tool()),
-                        RibbonItem::LargeTool(pdf_attach::tool()),
                         RibbonItem::LargeTool(xclip::tool()),
                         RibbonItem::LargeTool(xadjust::tool()),
-                        RibbonItem::Tool(underlay_layers::tool()),
-                        RibbonItem::Dropdown {
+                        RibbonItem::LabeledTool(underlay_layers::tool()),
+                        // An empty label shows the chosen item's.
+                        RibbonItem::LabeledDropdown {
                             id: "FRAMES_DROPDOWN",
+                            label: "",
                             icon: IconKind::Svg(include_bytes!(
                                 "../../../assets/icons/underlay_frames.svg"
                             )),
                             items: vec![
-                                (
-                                    "FRAMES0",
-                                    "Frames Off",
-                                    IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/underlay_frames.svg"
-                                    )),
-                                ),
-                                (
-                                    "FRAMES1",
-                                    "Frames On",
-                                    IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/underlay_frames.svg"
-                                    )),
-                                ),
-                                (
-                                    "FRAMES2",
-                                    "Frames On, Not Plotted",
-                                    IconKind::Svg(include_bytes!(
-                                        "../../../assets/icons/underlay_frames.svg"
-                                    )),
-                                ),
+                                ("FRAMES0", "Frames Off", IconKind::Svg(include_bytes!(
+                                "../../../assets/icons/underlay_frames.svg"
+                            ))),
+                                ("FRAMES1", "Frames On", IconKind::Svg(include_bytes!(
+                                "../../../assets/icons/underlay_frames.svg"
+                            ))),
+                                ("FRAMES2", "Frames On, Not Plotted", IconKind::Svg(include_bytes!(
+                                "../../../assets/icons/underlay_frames.svg"
+                            ))),
                             ],
                             default: "FRAMES1",
                         },
-                        RibbonItem::Tool(snap_underlays::tool()),
+                        RibbonItem::LabeledDropdown {
+                            id: "UOSNAP_DROPDOWN",
+                            label: "Snap to Underlays",
+                            icon: snap_underlays::ICON,
+                            items: vec![
+                                ("UOSNAP1", "Snap to Underlays ON", snap_underlays::ICON),
+                                ("UOSNAP0", "Snap to Underlays OFF", snap_underlays::ICON),
+                            ],
+                            default: "UOSNAP1",
+                        },
                     ],
                 },
                 // ── Point Cloud ───────────────────────────────────────────────────

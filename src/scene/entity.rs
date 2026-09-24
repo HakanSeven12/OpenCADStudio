@@ -152,7 +152,7 @@ impl Scene {
         let _ = self.document.layers.add(layer);
     }
 
-    pub(super) fn ensure_app_id(&mut self, name: &str) {
+    pub(crate) fn ensure_app_id(&mut self, name: &str) {
         if name.trim().is_empty() || self.document.app_ids.contains(name) {
             return;
         }
@@ -2406,10 +2406,16 @@ impl Scene {
         match entity {
             EntityType::RasterImage(img) => ImageModel::from_raster_image(img),
             EntityType::Ole2Frame(ole) => ImageModel::from_ole2frame(ole),
-            EntityType::Underlay(u) if self.unloaded_underlay_definitions.contains(&u.definition_handle) => None,
             EntityType::Underlay(u) => match self.document.objects.get(&u.definition_handle) {
                 Some(acadrust::objects::ObjectType::UnderlayDefinition(def)) => {
-                    ImageModel::from_underlay(u, def, self.bg_color)
+                    // A paper-space underlay adjusts to the sheet, not the canvas.
+                    let owner = u.common.owner_handle;
+                    let background = if owner.is_null() || owner == self.model_space_block_handle() {
+                        self.bg_color
+                    } else {
+                        self.paper_bg_color
+                    };
+                    ImageModel::from_underlay(u, def, background)
                 }
                 _ => None,
             },

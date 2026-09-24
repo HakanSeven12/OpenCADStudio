@@ -205,7 +205,7 @@ impl ImageModel {
         if !u.flags.contains(UnderlayDisplayFlags::ON) {
             return None;
         }
-        if !matches!(def.underlay_type, UnderlayType::Pdf) {
+        if !matches!(def.underlay_type, UnderlayType::Pdf) || def.unloaded {
             return None;
         }
         let page = if def.page_name.trim().is_empty() {
@@ -214,10 +214,12 @@ impl ImageModel {
             def.page_name.trim()
         };
         let (page_w, page_h) = pdf_raster::page_size_inches(&def.file_path, page)?;
-        let raster = pdf_raster::rasterize_page_display(&def.file_path, page)?;
+        // Hidden PDF layers come from the underlay's layer overrides.
+        let source = super::pdf_layers::underlay_source(u, &def.file_path);
+        let raster = pdf_raster::rasterize_page_display(&source, page)?;
         let bg_lum = 0.299 * background[0] + 0.587 * background[1] + 0.114 * background[2];
         let pixels = pdf_raster::adjusted_pixels(
-            &def.file_path,
+            &source,
             page,
             &raster,
             PageAdjust {

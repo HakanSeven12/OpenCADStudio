@@ -37,13 +37,13 @@ impl Segment {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SubPath {
     pub segments: Vec<Segment>,
     pub closed: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PdfPath {
     pub subpaths: Vec<SubPath>,
     /// Stroke colour (RGB) and width in points, for stroked paths.
@@ -53,7 +53,7 @@ pub struct PdfPath {
 }
 
 /// A run of glyphs on one baseline in one font and size.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PdfText {
     pub text: String,
     /// Base font name without a subset prefix ("Helvetica").
@@ -69,10 +69,26 @@ pub struct PdfText {
     pub color: [u8; 3],
 }
 
+/// A raster image drawn on a page: its pixels and where they land.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PdfImage {
+    /// Straight RGBA, rows from the top.
+    pub rgba: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    /// Lower-left corner, page inches.
+    pub origin: [f64; 2],
+    /// One pixel along the image's rows and up its columns, inches.
+    pub u: [f64; 2],
+    pub v: [f64; 2],
+}
+
 #[derive(Default, Debug)]
 pub struct PageVectors {
     pub paths: Vec<PdfPath>,
     pub texts: Vec<PdfText>,
+    /// Filled only when images are asked for (`page_content`).
+    pub images: Vec<PdfImage>,
 }
 
 type Key = (String, String);
@@ -101,7 +117,66 @@ pub fn page_vectors(path: &str, page: &str) -> Option<Arc<PageVectors>> {
     built
 }
 
+/// A page's paths, text and raster images (not cached; import only).
+pub fn page_content(path: &str, page: &str) -> Option<PageVectors> {
+    read_page_with(path, page, true)
+}
+
+/// A page's content split by PDF layer: `None` for what no layer holds,
+/// then each named layer that is not in `hidden`. Each layer's share is
+/// what the page shows with that layer alone on, less what it shows with
+/// every layer off.
+// ponytail: content in several layers at once (membership dictionaries) is
+// credited to the first layer that shows it.
+pub fn page_content_by_layer(
+    path: &str,
+    page: &str,
+    hidden: &[String],
+) -> Option<Vec<(Option<String>, PageVectors)>> {
+    let layers = super::pdf_layers::layers(path);
+    if layers.is_empty() {
+        return Some(vec![(None, page_content(path, page)?)]);
+    }
+    let names: Vec<String> = layers.iter().map(|l| l.name.clone()).collect();
+    let base = page_content(&super::pdf_layers::source_with_layers(path, &names), page)?;
+    let key = |s: &dyn std::fmt::Debug| format!("{s:?}");
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    for item in base.paths.iter().map(|p| key(p)).chain(base.texts.iter().map(|t| key(t))) {
+        *seen.entry(item).or_default() += 1;
+    }
+    let mut out = Vec::new();
+    for layer in &layers {
+        if hidden.contains(&layer.name) {
+            continue;
+        }
+        let others: Vec<String> = names.iter().filter(|n| **n != layer.name).cloned().collect();
+        let Some(mut only) =
+            page_content(&super::pdf_layers::source_with_layers(path, &others), page)
+        else {
+            continue;
+        };
+        let mut left = seen.clone();
+        let mut fresh = |item: String| match left.get_mut(&item) {
+            Some(n) if *n > 0 => {
+                *n -= 1;
+                false
+            }
+            _ => true,
+        };
+        only.paths.retain(|p| fresh(key(p)));
+        only.texts.retain(|t| fresh(key(t)));
+        only.images.retain(|i| !base.images.contains(i));
+        out.push((Some(layer.name.clone()), only));
+    }
+    out.insert(0, (None, base));
+    Some(out)
+}
+
 fn read_page(path: &str, page: &str) -> Option<PageVectors> {
+    read_page_with(path, page, false)
+}
+
+fn read_page_with(path: &str, page: &str, images: bool) -> Option<PageVectors> {
     let bytes = super::pdf_raster::source_bytes(path)?;
     let pdf = Pdf::new(bytes).ok()?;
     let page_no = page.trim().parse::<usize>().ok()?;
@@ -117,7 +192,10 @@ fn read_page(path: &str, page: &str) -> Option<PageVectors> {
         page.xref(),
         InterpreterSettings::default(),
     );
-    let mut device = Collector::default();
+    let mut device = Collector {
+        want_images: images,
+        ..Collector::default()
+    };
     interpret_page(page, &mut context, &mut device);
     device.finish_text();
 
@@ -150,6 +228,7 @@ fn read_page(path: &str, page: &str) -> Option<PageVectors> {
     Some(PageVectors {
         paths: device.paths,
         texts: texts.into_iter().map(|t| t.text).collect(),
+        images: device.images,
     })
 }
 
@@ -169,6 +248,8 @@ struct Collector {
     texts: Vec<PendingText>,
     current: Option<PendingText>,
     font_order: Vec<u128>,
+    want_images: bool,
+    images: Vec<PdfImage>,
 }
 
 impl Collector {
@@ -355,9 +436,102 @@ impl<'a> Device<'a> for Collector {
             .sqrt();
         }
     }
-    fn draw_image(&mut self, _: Image<'a, '_>, _: Affine) {}
+    fn draw_image(&mut self, image: Image<'a, '_>, transform: Affine) {
+        let Image::Raster(raster) = image else {
+            return;
+        };
+        if !self.want_images {
+            return;
+        }
+        let mut decoded: Option<PdfImage> = None;
+        raster.with_rgba(
+            |data, alpha| {
+                use hayro::hayro_interpret::ImageData;
+                let (w, h) = (data.width(), data.height());
+                let n = (w * h) as usize;
+                let mut rgba = vec![255u8; n * 4];
+                match &data {
+                    ImageData::Rgb(rgb) => {
+                        for i in 0..n {
+                            rgba[i * 4..i * 4 + 3].copy_from_slice(&rgb.data[i * 3..i * 3 + 3]);
+                        }
+                    }
+                    ImageData::Luma(luma) => {
+                        for i in 0..n {
+                            rgba[i * 4..i * 4 + 3].fill(luma.data[i]);
+                        }
+                    }
+                }
+                if let Some(a) = alpha.filter(|a| a.width == w && a.height == h) {
+                    for i in 0..n {
+                        rgba[i * 4 + 3] = a.data[i];
+                    }
+                }
+                // The transform maps pixel space (y down) onto the page.
+                let at = |x: f64, y: f64| pt(transform * Point::new(x, y));
+                let (wf, hf) = (w as f64, h as f64);
+                let (o, x1, y1) = (at(0.0, hf), at(wf, hf), at(0.0, 0.0));
+                decoded = Some(PdfImage {
+                    rgba,
+                    width: w,
+                    height: h,
+                    origin: o,
+                    u: [(x1[0] - o[0]) / w as f64, (x1[1] - o[1]) / w as f64],
+                    v: [(y1[0] - o[0]) / h as f64, (y1[1] - o[1]) / h as f64],
+                });
+            },
+            None,
+        );
+        self.images.extend(decoded);
+    }
     fn pop_clip_path(&mut self) {}
     fn pop_transparency_group(&mut self) {}
+}
+
+/// A point of a segment at parameter `t` (0..1).
+pub fn bezier(seg: &Segment, t: f64) -> [f64; 2] {
+    match seg {
+        Segment::Line(a, b) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t],
+        Segment::Cubic(p0, p1, p2, p3) => {
+            let u = 1.0 - t;
+            let (a, b, c, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
+            [
+                a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0],
+                a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1],
+            ]
+        }
+    }
+}
+
+/// Centre and radius when a closed loop of cubics traces a circle.
+pub fn circle_of(sp: &SubPath) -> Option<([f64; 2], f64)> {
+    if !sp.closed || sp.segments.len() < 4 {
+        return None;
+    }
+    let cubics: Vec<&Segment> = sp
+        .segments
+        .iter()
+        .filter(|s| matches!(s, Segment::Cubic(..)))
+        .collect();
+    if cubics.len() != sp.segments.len() && sp.segments.len() - cubics.len() > 1 {
+        return None;
+    }
+    let starts: Vec<[f64; 2]> = cubics.iter().map(|s| s.start()).collect();
+    let n = starts.len() as f64;
+    let c = [
+        starts.iter().map(|p| p[0]).sum::<f64>() / n,
+        starts.iter().map(|p| p[1]).sum::<f64>() / n,
+    ];
+    let dist = |p: [f64; 2]| ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2)).sqrt();
+    let r = starts.iter().map(|p| dist(*p)).sum::<f64>() / n;
+    if r <= 0.0 {
+        return None;
+    }
+    let tol = r * 2e-3;
+    let on_circle = cubics.iter().all(|s| {
+        [0.0, 0.25, 0.5, 0.75].iter().all(|t| (dist(bezier(s, *t)) - r).abs() <= tol)
+    });
+    on_circle.then_some((c, r))
 }
 
 // ── Snapping ────────────────────────────────────────────────────────────────
@@ -391,7 +565,8 @@ pub fn underlay_snap_points(
     let Some(def) = crate::entities::underlay::definition(u, document) else {
         return Vec::new();
     };
-    let Some(vectors) = page_vectors(&def.file_path, crate::entities::underlay::page_of(def)) else {
+    let source = super::pdf_layers::underlay_source(u, &def.file_path);
+    let Some(vectors) = page_vectors(&source, crate::entities::underlay::page_of(def)) else {
         return Vec::new();
     };
     let world = |p: [f64; 2]| {
@@ -401,6 +576,13 @@ pub fn underlay_snap_points(
     let mut out = Vec::new();
     'paths: for path in &vectors.paths {
         for sp in &path.subpaths {
+            // A PDF circle offers its centre and quadrants, as a circle does.
+            if let Some((c, r)) = circle_of(sp) {
+                out.push((world(c), SnapHint::Center));
+                for (dx, dy) in [(r, 0.0), (0.0, r), (-r, 0.0), (0.0, -r)] {
+                    out.push((world([c[0] + dx, c[1] + dy]), SnapHint::Quadrant));
+                }
+            }
             for seg in &sp.segments {
                 if out.len() >= MAX_SNAP_POINTS {
                     break 'paths;
@@ -412,6 +594,52 @@ pub fn underlay_snap_points(
                         world([(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0]),
                         SnapHint::Midpoint,
                     ));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Most points of the snap-only geometry wire of one underlay.
+// ponytail: flat cap; a spatial index over page segments for huge drawings.
+const MAX_GEOMETRY_POINTS: usize = 200_000;
+
+/// The underlay's PDF geometry as world polylines (NaN-separated, curves
+/// flattened) for nearest, intersection and perpendicular snaps. Empty when
+/// PDFOSNAP is off or the page is not shown.
+pub fn underlay_snap_geometry(
+    u: &acadrust::entities::Underlay,
+    document: &acadrust::CadDocument,
+) -> Vec<[f64; 3]> {
+    if !pdf_osnap() || !u.flags.contains(acadrust::entities::UnderlayDisplayFlags::ON) {
+        return Vec::new();
+    }
+    let Some(def) = crate::entities::underlay::definition(u, document) else {
+        return Vec::new();
+    };
+    if def.unloaded {
+        return Vec::new();
+    }
+    let source = super::pdf_layers::underlay_source(u, &def.file_path);
+    let Some(vectors) = page_vectors(&source, crate::entities::underlay::page_of(def)) else {
+        return Vec::new();
+    };
+    let world = |p: [f64; 2]| crate::entities::underlay::local_to_world(u, p);
+    let mut out: Vec<[f64; 3]> = Vec::new();
+    for path in &vectors.paths {
+        for sp in &path.subpaths {
+            if out.len() >= MAX_GEOMETRY_POINTS {
+                return out;
+            }
+            if !out.is_empty() {
+                out.push([f64::NAN; 3]);
+            }
+            out.push(world(sp.segments[0].start()));
+            for seg in &sp.segments {
+                let steps = if matches!(seg, Segment::Cubic(..)) { 12 } else { 1 };
+                for k in 1..=steps {
+                    out.push(world(bezier(seg, k as f64 / steps as f64)));
                 }
             }
         }

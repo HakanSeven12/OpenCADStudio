@@ -128,12 +128,19 @@ impl OpenCADStudio {
     /// Close the active in-canvas modal (Plan B), mirroring what closing the
     /// old OS window did: a style editor discards its staged (un-applied)
     /// changes, and the ribbon tool that launched the dialog is de-highlighted.
-    fn close_active_modal(&mut self) {
+    pub(in crate::app) fn close_active_modal(&mut self) {
         self.mark_startup_modal_shown();
         use super::ModalKind::*;
         // Plot Style opened from PLOT behaves as a child modal.
         // Closing it restores the parent Plot dialog instead of returning
         // to the drawing.
+        // Options opened from a PDF dialog returns to it.
+        if self.active_modal == Some(Options) {
+            if let Some(parent) = self.options_parent.take() {
+                self.active_modal = Some(parent);
+                return;
+            }
+        }
         if self.active_modal == Some(Plotstyle) {
             if let Some((plot_offset, plot_resize)) = self.plotstyle_parent_plot_geometry.take() {
                 self.active_modal = Some(Plot);
@@ -208,6 +215,10 @@ impl OpenCADStudio {
             }
             Some(GeometricTolerance) => self.geometric_tolerance = None,
             Some(BlockDefinition) => self.block_definition = None,
+            Some(PdfAttach) => self.pdf_attach = None,
+            Some(UnderlayLayers) => self.underlay_layers = None,
+            Some(PdfImportSettings) => self.pdf_import_settings = None,
+            Some(PdfImportFile) => self.pdf_import_file = None,
             Some(Hyperlink) => {
                 self.hyperlink_editor_handles.clear();
                 self.hyperlink_editor_url.clear();
@@ -1254,20 +1265,13 @@ impl OpenCADStudio {
             ),
 
             Message::PdfAttachPickResult(Ok((path, bytes))) => {
-                use crate::command::CadCommand;
-                use crate::modules::insert::pdf_attach::PdfAttachCommand;
-
                 let i = self.active_tab;
                 let path_str = path.to_string_lossy().into_owned();
+                let _ = i;
                 crate::scene::model::pdf_raster::register_source(&path_str, bytes);
-                // The definition is created with the underlay when it is
-                // placed; the command asks for the page first.
-                let insunits = self.tabs[i].scene.document.header.insertion_units;
-                let cmd = PdfAttachCommand::with_file(&path_str, insunits);
-
-                self.command_line.push_info(&cmd.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(cmd));
-
+                // Pages, placement and path type are chosen in the Attach
+                // dialog; the definition is created with the underlay.
+                self.open_pdf_attach_dialog(&path_str);
                 Task::none()
             }
 
@@ -1292,11 +1296,9 @@ impl OpenCADStudio {
             Message::PdfImportPickResult(Ok((path, bytes))) => {
                 let i = self.active_tab;
                 let path_str = path.to_string_lossy().into_owned();
+                let _ = i;
                 crate::scene::model::pdf_raster::register_source(&path_str, bytes);
-                self.run_pdf_import(
-                    i,
-                    crate::app::commands::pdf_import::PdfImportSource::File(path_str),
-                );
+                self.open_pdf_import_file(&path_str);
                 Task::none()
             }
             Message::PdfImportPickResult(Err(_)) => Task::none(),
@@ -1711,6 +1713,12 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::RibbonSelectUnderlayTab => {
+                self.ribbon.select_underlay_tab();
+                Task::none()
+            }
+            Message::UnderlayTab(message) => self.update_underlay_tab(message),
+            Message::PdfDialog(message) => self.update_pdf_dialog(message),
             Message::RibbonSelectTab(idx) => {
                 self.ribbon.select(idx);
                 Task::none()

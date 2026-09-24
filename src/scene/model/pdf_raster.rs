@@ -48,6 +48,15 @@ pub fn register_source(path: &str, bytes: Arc<Vec<u8>>) {
         .retain(|key, _| key.0 != path);
 }
 
+/// Register bytes under a derived source name (a layer override of a
+/// file), leaving the file's own caches alone.
+pub(crate) fn register_derived_source(key: &str, bytes: Arc<Vec<u8>>) {
+    source_cache()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .insert(key.to_string(), bytes);
+}
+
 /// Rasterise a 1-based PDF page, memoised by source path and page name.
 pub fn rasterize_page(path: &str, page: &str) -> Option<Arc<PdfPage>> {
     rasterize_page_at_dpi(path, page, RASTER_DPI)
@@ -134,6 +143,46 @@ fn unpremultiply(pixels: &mut [u8]) {
     }
 }
 
+fn rgb_to_hsl([r, g, b]: [f32; 3]) -> (f32, f32, f32) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let l = (max + min) / 2.0;
+    let d = max - min;
+    if d <= f32::EPSILON {
+        return (0.0, 0.0, l);
+    }
+    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let h = if max == r {
+        ((g - b) / d).rem_euclid(6.0)
+    } else if max == g {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    } / 6.0;
+    (h, s, l)
+}
+
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [f32; 3] {
+    if s <= f32::EPSILON {
+        return [l; 3];
+    }
+    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = 2.0 * l - q;
+    let channel = |t: f32| {
+        let t = t.rem_euclid(1.0);
+        if t < 1.0 / 6.0 {
+            p + (q - p) * 6.0 * t
+        } else if t < 0.5 {
+            q
+        } else if t < 2.0 / 3.0 {
+            p + (q - p) * (2.0 / 3.0 - t) * 6.0
+        } else {
+            p
+        }
+    };
+    [channel(h + 1.0 / 3.0), channel(h), channel(h - 1.0 / 3.0)]
+}
+
 /// Number of pages in a PDF source.
 pub fn page_count(path: &str) -> Option<usize> {
     let bytes = source_bytes(path)?;
@@ -155,7 +204,8 @@ pub fn page_size_inches(path: &str, page: &str) -> Option<(f64, f64)> {
 /// Display adjustments of an underlay page, applied to its display raster.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PageAdjust {
-    /// 0..=100; 100 keeps the colours, lower values pull them to mid grey.
+    /// 0..=100; 100 keeps the colours, lower values pull their lightness
+    /// towards one third.
     pub contrast: u8,
     pub monochrome: bool,
     /// Lighten dark, unsaturated content on a dark background (black lines
@@ -198,20 +248,27 @@ pub fn adjusted_pixels(path: &str, page: &str, raster: &PdfPage, adjust: PageAdj
             rgb = [l; 3];
         }
         if adjust.adjust_for_background {
+            // Content that would vanish into the background — near-black on a
+            // dark background, near-white on a light one, without much
+            // colour — turns to its opposite; coloured and mid-tone content
+            // stays as drawn.
             let max = rgb[0].max(rgb[1]).max(rgb[2]);
             let min = rgb[0].min(rgb[1]).min(rgb[2]);
             let saturation = if max > 0.0 { (max - min) / max } else { 0.0 };
             let l = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
-            // ponytail: greyscale inversion of low-saturation content only;
-            // hue-preserving remap if coloured content must adapt too.
-            let clash = if adjust.dark_background { l < 0.5 } else { l > 0.5 };
+            // ponytail: fixed 0.2 / 0.8 thresholds measured on black, white
+            // and 30 % grey; a contrast-to-background test if mid tones clash.
+            let clash = if adjust.dark_background { l < 0.2 } else { l > 0.8 };
             if saturation < 0.25 && clash {
                 rgb = rgb.map(|c| 1.0 - c);
             }
         }
         if adjust.contrast < 100 {
+            // Lightness is pulled towards one third, hue and saturation kept:
+            // contrast 0 leaves every colour at a third of full lightness.
+            let (h, s, l) = rgb_to_hsl(rgb);
             let k = adjust.contrast as f32 / 100.0;
-            rgb = rgb.map(|c| 0.5 + (c - 0.5) * k);
+            rgb = hsl_to_rgb(h, s, 1.0 / 3.0 + (l - 1.0 / 3.0) * k);
         }
         for (dst, c) in px[..3].iter_mut().zip(rgb) {
             *dst = (c.clamp(0.0, 1.0) * 255.0).round() as u8;

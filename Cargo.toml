@@ -33,7 +33,7 @@ rfd = "0.17"
 clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
-acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "55a8987", features = ["serde"] }
+acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "d290dbe", features = ["serde"] }
 cadkernel = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "6eae7c9", features = ["acis", "offset"] }
 cadkernel-constraints = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "6eae7c9" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
@@ -82,7 +82,7 @@ block2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString", "NSObject", "NSNotification", "NSThread", "NSEnumerator"] }
 
 [patch."https://github.com/HakanSeven12/cadcodec.git"]
-acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "55a8987" }
+acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "d290dbe" }
 
 [patch.crates-io]
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }

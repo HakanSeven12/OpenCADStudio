@@ -420,7 +420,15 @@ impl PropertyEditable for Underlay {
                     ro(t!("Saved Path").as_ref(), "ul_path", String::new()),
                     yes_no(t!("Show underlay").as_ref(), "ul_on", show),
                     yes_no(t!("Show clipped").as_ref(), "ul_clip", clipping),
-                    ro(t!("Layer display overrides").as_ref(), "ul_layers", t!("None").into_owned()),
+                    ro(
+                        t!("Layer display overrides").as_ref(),
+                        "ul_layers",
+                        if crate::scene::model::pdf_layers::hidden_layers(self).is_empty() {
+                            t!("None").into_owned()
+                        } else {
+                            t!("Applied").into_owned()
+                        },
+                    ),
                 ],
             },
         ]

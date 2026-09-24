@@ -13,6 +13,8 @@ mod inquiry;
 mod layerprops;
 mod layers;
 pub(crate) mod pdf_import;
+mod pdf_underlay;
+mod pdf_dialogs;
 mod plotvars;
 mod styleprops;
 mod view;
@@ -248,6 +250,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_blocks(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_pdf_underlay(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_draw(cmd, i) {
@@ -609,6 +614,9 @@ inventory::submit!(crate::command::CommandRegistration {
         "PDFFRAME",
         "PDFOSNAP",
         "UOSNAP",
+        "PDFIMPORTMODE",
+        "PDFIMPORTFILTER",
+        "PDFIMPORTLAYERS",
         "POINTCLOUDCLIPFRAME",
         "XCLIPFRAME",
         "WIPEOUTFRAME",

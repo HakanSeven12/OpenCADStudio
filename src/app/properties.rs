@@ -2610,6 +2610,7 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
         let m_panel = t_all.map(|t| t.elapsed().as_secs_f64() * 1000.0);
         let t_ribbon = crate::perf::enabled().then(iced::time::Instant::now);
         self.sync_ribbon_from_selection();
+        self.sync_underlay_tab();
         if let Some(t) = t_all {
             let ribbon_ms = t_ribbon.map_or(0.0, |r| r.elapsed().as_secs_f64() * 1000.0);
             let total_ms = t.elapsed().as_secs_f64() * 1000.0;

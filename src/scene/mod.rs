@@ -1268,7 +1268,20 @@ fn build_derived_caches_impl(
                 EntityType::Ole2Frame(ole) => ImageModel::from_ole2frame(ole).map(|m| (handle, m)),
                 EntityType::Underlay(u) => match doc.objects.get(&u.definition_handle) {
                     Some(acadrust::objects::ObjectType::UnderlayDefinition(def)) => {
-                        ImageModel::from_underlay(u, def, LOAD_BG).map(|m| (handle, m))
+                        {
+                        // Paper-space underlays adjust to the white sheet.
+                        let model = doc.objects.values().find_map(|object| match object {
+                            acadrust::objects::ObjectType::Layout(l) if l.name == "Model" => Some(l.block_record),
+                            _ => None,
+                        });
+                        let owner = u.common.owner_handle;
+                        let background = if owner.is_null() || model.is_none_or(|m| m == owner) {
+                            LOAD_BG
+                        } else {
+                            [1.0, 1.0, 1.0, 1.0]
+                        };
+                        ImageModel::from_underlay(u, def, background).map(|m| (handle, m))
+                    }
                     }
                     _ => None,
                 },
@@ -2250,9 +2263,6 @@ pub struct Scene {
     pub bg_color: [f32; 4],
     /// Custom paper-space background fill color for Wipeout entities.
     pub paper_bg_color: [f32; 4],
-    /// PDF definitions unloaded in this session (PDFIMPORT Unload): their
-    /// underlays show no page content.
-    pub unloaded_underlay_definitions: std::collections::HashSet<Handle>,
     /// Dense model-space cluster half-span used for viewport recovery.
     pub local_extent_max: f32,
     /// Dense model-space cluster median used for viewport recovery.
@@ -2662,7 +2672,6 @@ impl Scene {
             active_viewport: None,
             bg_color: [33.0 / 255.0, 40.0 / 255.0, 48.0 / 255.0, 1.0],
             paper_bg_color: [1.0, 1.0, 1.0, 1.0],
-            unloaded_underlay_definitions: std::collections::HashSet::new(),
             local_extent_max: 1e9,
             local_center: [0.0, 0.0],
             annotation_scale: 1.0,

@@ -9,7 +9,7 @@ use crate::modules::insert::pdf_import::{self, ImportArea, PdfImportRequest, Und
 /// origin at full size.
 pub(crate) enum PdfImportSource {
     Underlay(PdfImportRequest),
-    File(String),
+    File(pdf_import::PdfFileImport),
 }
 
 impl OpenCADStudio {
@@ -26,11 +26,7 @@ impl OpenCADStudio {
                 let Some(def) = crate::entities::underlay::definition(underlay, document) else {
                     return;
                 };
-                if self.tabs[i]
-                    .scene
-                    .unloaded_underlay_definitions
-                    .contains(&underlay.definition_handle)
-                {
+                if def.unloaded {
                     self.command_line
                         .push_error("Cannot bind a PDF underlay that is unloaded.");
                     return;
@@ -44,10 +40,10 @@ impl OpenCADStudio {
                     Some(request.underlay),
                 )
             }
-            PdfImportSource::File(path) => (
-                acadrust::entities::Underlay::pdf(),
-                path.clone(),
-                "1".to_string(),
+            PdfImportSource::File(import) => (
+                import.placement(),
+                import.path.clone(),
+                import.page.clone(),
                 ImportArea::All,
                 None,
                 None,
@@ -62,14 +58,80 @@ impl OpenCADStudio {
                 .command_line
                 .push_output(&format!("Importing page {page} of PDF file: {shown}...")),
         }
-        let Some(vectors) = crate::scene::model::pdf_vector::page_vectors(&path, &page) else {
+        // The underlay's own layer overrides leave those layers out.
+        let hidden = crate::scene::model::pdf_layers::hidden_layers(&underlay);
+        let Some(content) =
+            crate::scene::model::pdf_vector::page_content_by_layer(&path, &page, &hidden)
+        else {
             self.command_line.push_error(&format!("{shown} not found."));
             return;
         };
-        let result = pdf_import::convert(&vectors, &underlay, &area);
+        let settings = pdf_import::import_settings();
+        let current_layer = {
+            let header = &self.tabs[i].scene.document.header;
+            if header.current_layer_name.is_empty() {
+                self.tabs[i].active_layer.clone()
+            } else {
+                header.current_layer_name.clone()
+            }
+        };
+        let naming = pdf_import::LayerNaming {
+            settings,
+            prefix: import_prefix(&path),
+            current: current_layer.clone(),
+        };
+        let mut result = pdf_import::convert(&content, &underlay, &area, &naming);
+        let images = std::mem::take(&mut result.images);
+        let image_dir = self.tabs[i]
+            .current_path
+            .as_deref()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf())
+            .or_else(|| std::path::Path::new(&path).parent().map(|p| p.to_path_buf()))
+            .map(|dir| dir.join("PDF Images"));
 
         self.push_undo_snapshot(i, "PDFIMPORT");
         let scene = &mut self.tabs[i].scene;
+        if result.dashed && !scene.document.line_types.contains(pdf_import::DASH_LINETYPE) {
+            let mut lt = acadrust::tables::LineType::new(pdf_import::DASH_LINETYPE);
+            lt.handle = scene.document.allocate_handle();
+            lt.add_element(acadrust::tables::LineTypeElement::dash(0.8));
+            lt.add_element(acadrust::tables::LineTypeElement::space(0.2));
+            lt.pattern_length = 1.0;
+            let _ = scene.document.line_types.add(lt);
+        }
+        // Raster images: each written as a PNG under "PDF Images" next to the
+        // drawing (or the PDF while the drawing is unsaved), then referenced.
+        let stem = std::path::Path::new(&path.replace('\\', "/"))
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "PDF".to_string());
+        for (n, image) in images.iter().enumerate() {
+            let Some(dir) = &image_dir else { break };
+            if std::fs::create_dir_all(dir).is_err() {
+                break;
+            }
+            let file = dir.join(format!("{stem}{:08x}.png", image_file_id(&path, &page, n)));
+            if image::save_buffer(&file, &image.rgba, image.width, image.height, image::ColorType::Rgba8)
+                .is_err()
+            {
+                continue;
+            }
+            let mut raster = acadrust::entities::RasterImage::with_size(
+                file.to_string_lossy().as_ref(),
+                image.insertion,
+                image.width as f64,
+                image.height as f64,
+                1.0,
+                1.0,
+            );
+            raster.u_vector = image.u;
+            raster.v_vector = image.v;
+            raster.flags = acadrust::entities::ImageDisplayFlags::SHOW_IMAGE
+                | acadrust::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
+            raster.common.layer = image.layer.clone();
+            result.entities.push(acadrust::EntityType::RasterImage(raster));
+        }
         for (name, color) in &result.layers {
             if !scene.document.layers.contains(name) {
                 let mut layer = acadrust::tables::Layer::new(name.as_str());
@@ -86,16 +148,40 @@ impl OpenCADStudio {
                 let _ = scene.document.text_styles.add(style);
             }
         }
-        for entity in result.entities {
-            scene.add_entity(entity);
+        if settings.as_block && !result.entities.is_empty() {
+            // One block named after the file, inserted at the origin on the
+            // current layer.
+            let mut name = stem.clone();
+            let mut n = 1;
+            while scene.document.block_records.get(&name).is_some() {
+                n += 1;
+                name = format!("{stem}({n})");
+            }
+            if scene
+                .define_block_from_owned_entities(result.entities, &name, glam::DVec3::ZERO)
+                .is_ok()
+            {
+                let mut insert = acadrust::entities::Insert::new(
+                    name,
+                    acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+                );
+                insert.common.layer = current_layer;
+                scene.add_entity(acadrust::EntityType::Insert(insert));
+            }
+        } else {
+            for entity in result.entities {
+                scene.add_entity(entity);
+            }
         }
         if let (Some(mode), Some(handle)) = (mode, handle) {
             match mode {
                 UnderlayMode::Keep => {}
                 UnderlayMode::Unload => {
-                    scene
-                        .unloaded_underlay_definitions
-                        .insert(underlay.definition_handle);
+                    if let Some(ObjectType::UnderlayDefinition(definition)) =
+                        scene.document.objects.get_mut(&underlay.definition_handle)
+                    {
+                        definition.unloaded = true;
+                    }
                     scene.reseed_underlays();
                 }
                 UnderlayMode::Detach => {
@@ -121,4 +207,63 @@ impl OpenCADStudio {
         self.refresh_layer_panel();
         self.refresh_properties();
     }
+}
+
+impl OpenCADStudio {
+    /// PDFATTACH's end: every page's definition (created or reused, with the
+    /// definitions dictionary) and underlay in one undo step.
+    pub(crate) fn attach_pdf_pages(
+        &mut self,
+        i: usize,
+        label: String,
+        path: &str,
+        pages: Vec<(String, acadrust::EntityType)>,
+    ) {
+        let pending = self.begin_undo(i, label, pages.len(), false);
+
+        for (page, mut entity) in pages {
+            let definition = crate::modules::insert::pdf_attach::ensure_pdf_definition(
+                &mut self.tabs[i].scene.document,
+                path,
+                &page,
+            );
+            if let acadrust::EntityType::Underlay(underlay) = &mut entity {
+                underlay.definition_handle = definition;
+            }
+            self.commit_entity_handle(entity);
+        }
+        self.tabs[i].dirty = true;
+        if let Some(pd) = pending {
+            self.commit_undo_delta(i, pd);
+        }
+    }
+}
+
+/// The layer prefix of an imported file: "PDF_" for the first file of the
+/// session, "PDF2_", "PDF3_" … for each other file.
+// ponytail: remembered for the session only; a reopened drawing starts from
+// "PDF_" again.
+fn import_prefix(path: &str) -> String {
+    static FILES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let mut files = FILES.lock().unwrap_or_else(|e| e.into_inner());
+    let index = match files.iter().position(|f| f.eq_ignore_ascii_case(path)) {
+        Some(at) => at,
+        None => {
+            files.push(path.to_string());
+            files.len() - 1
+        }
+    };
+    if index == 0 {
+        "PDF_".to_string()
+    } else {
+        format!("PDF{}_", index + 1)
+    }
+}
+
+/// A file name suffix for an imported image, different per import.
+fn image_file_id(path: &str, page: &str, n: usize) -> u32 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (path, page, n, std::time::SystemTime::now()).hash(&mut h);
+    h.finish() as u32
 }

@@ -1017,6 +1017,9 @@ impl OpenCADStudio {
                     | "PDFFRAME"
                     | "PDFOSNAP"
                     | "UOSNAP"
+                    | "PDFIMPORTMODE"
+                    | "PDFIMPORTFILTER"
+                    | "PDFIMPORTLAYERS"
                     | "POINTCLOUDCLIPFRAME"
                     | "XCLIPFRAME"
                     | "WIPEOUTFRAME"
@@ -1110,6 +1113,35 @@ impl OpenCADStudio {
                     }
                     // Snapping to the geometry inside underlays (one switch for
                     // PDF underlays and underlays in general).
+                    // The PDF Import Settings' options as bits.
+                    if matches!(name.as_str(), "PDFIMPORTMODE" | "PDFIMPORTFILTER" | "PDFIMPORTLAYERS") {
+                        use crate::modules::insert::pdf_import::{import_settings, set_import_settings, ImportLayers};
+                        let mut settings = import_settings();
+                        let (current, max) = match name.as_str() {
+                            "PDFIMPORTMODE" => (settings.mode(), 31),
+                            "PDFIMPORTFILTER" => (settings.filter(), 15),
+                            _ => (settings.layers_value(), 2),
+                        };
+                        if let Some(value) = &value {
+                            match value.parse::<i16>().ok().filter(|v| (0..=max).contains(v)) {
+                                Some(v) => {
+                                    match name.as_str() {
+                                        "PDFIMPORTMODE" => settings.set_mode(v),
+                                        "PDFIMPORTFILTER" => settings.set_filter(v),
+                                        _ => {
+                                            settings.layers = [ImportLayers::Pdf, ImportLayers::Object, ImportLayers::Current][v as usize]
+                                        }
+                                    }
+                                    set_import_settings(settings);
+                                }
+                                None => self.command_line.push_error(&format!("Requires an integer between 0 and {max}.")),
+                            }
+                        } else {
+                            self.command_line.push_output(&format!("Enter new value for {name} <{current}>:"));
+                            self.pending_setvar = Some(name.clone());
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
                     if matches!(name.as_str(), "PDFOSNAP" | "UOSNAP") {
                         let current = i16::from(crate::scene::model::pdf_vector::pdf_osnap());
                         if let Some(value) = &value {

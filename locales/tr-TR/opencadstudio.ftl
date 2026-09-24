@@ -3472,6 +3472,74 @@ annotate =
     .tolerance-specify-insertion-point = TOLERANCE  Ekleme noktasını belirtin:
 
 insert =
+    .pdfui-specify-insertion-point = Ekleme noktasını belirtin:
+    .pdfui-no-pdf-underlays = PDF altlığı bulunamadı.
+    .pdfui-imports-the-geometry-fills-raster-images-and-text-of-a-pdf-f = Bir PDF dosyasının geometrisini, dolu alanlarını, raster görüntülerini ve metnini çizim nesneleri olarak içe aktarır.
+    .pdfui-turns-the-layers-of-a-pdf-underlay-on-or-off = Bir PDF altlığının katmanlarını açar veya kapatır.
+    .pdfui-attaches-a-pdf-file-as-an-underlay = Bir PDF dosyasını altlık olarak ekler.
+    .pdfui-rotation = Döndürme:
+    .pdfui-scale = Ölçek:
+    .pdfui-specify-insertion-point-on-screen = Ekleme noktasını ekranda belirt
+    .pdfui-page-size-size = Sayfa boyutu: __ocs_fmt_0__
+    .pdfui-total-count = Toplam: __ocs_fmt_0__
+    .pdfui-page = Sayfa:
+    .pdfui-page-to-import = İçe aktarılacak sayfa
+    .pdfui-infer-linetypes-from-collinear-dashes = Aynı doğrultudaki kesiklerden çizgi tipi çıkar
+    .pdfui-apply-lineweight-properties = Çizgi kalınlığı özelliklerini uygula
+    .pdfui-convert-solid-fills-to-hatches = Dolu alanları taramaya dönüştür
+    .pdfui-join-line-and-arc-segments = Çizgi ve yay parçalarını birleştir
+    .pdfui-import-as-block = Blok olarak içe aktar
+    .pdfui-import-options = İçe aktarma seçenekleri
+    .pdfui-create-object-layers = Nesne katmanları oluştur
+    .pdfui-use-pdf-layers = PDF katmanlarını kullan
+    .pdfui-raster-images = Raster görüntüler
+    .pdfui-truetype-text = TrueType metin
+    .pdfui-solid-fills = Dolu alanlar
+    .pdfui-vector-geometry = Vektör geometri
+    .pdfui-pdf-data-to-import = İçe aktarılacak PDF verisi
+    .pdfui-select-an-underlay-to-view-its-layers = Katmanlarını görmek için bir altlık seçin.
+    .pdfui-this-file-does-not-contain-any-layers = Bu dosya herhangi bir katman içermiyor.
+    .pdfui-search-for-layer = Katman ara
+    .pdfui-reference-name = Referans adı:
+    .pdfui-show-details = Ayrıntıları Göster
+    .pdfui-hide-details = Ayrıntıları Gizle
+    .pdfui-page-size = Sayfa boyutu:
+    .pdfui-saved-path = Kayıtlı yol:
+    .pdfui-found-in = Bulunduğu yer:
+    .pdfui-angle = Açı:
+    .pdfui-insertion-point = Ekleme noktası
+    .pdfui-select-one-or-more-pages-from-the-pdf-file = PDF dosyasından bir veya daha fazla sayfa seçin:
+    .pdfui-browse = Gözat...
+    .pdfui-import-pdf = PDF İçe Aktar
+    .pdfui-pdf-import-settings = PDF İçe Aktarma Ayarları
+    .pdfui-underlay-layers = Altlık Katmanları
+    .pdfui-attach-pdf-underlay = PDF Altlığı Ekle
+    .pdfui-pdf-import = PDF İçe Aktar
+    .pdfui-pdf-layers = PDF Katmanları
+    .pdfui-import-as-objects =
+        Nesne Olarak
+        İçe Aktar
+    .pdfui-edit-layers =
+        Katmanları
+        Düzenle
+    .pdfui-external-references =
+        Harici
+        Referanslar
+    .pdfui-enable-snap =
+        Yakalamayı
+        Etkinleştir
+    .pdfui-show-underlay =
+        Altlığı
+        Göster
+    .pdfui-remove-clipping =
+        Kırpmayı
+        Kaldır
+    .pdfui-create-clipping-boundary =
+        Kırpma Sınırı
+        Oluştur
+    .pdfui-display-in-monochrome =
+        Tek renkli
+        göster
     .select-pdf-file = PDF Dosyası Seç
     .point-clouds =
         Nokta
@@ -4187,6 +4255,7 @@ view =
     .ucs-specify-point-in-positive-xy-plane = UCS  { common.specify }: XY · { common.positive-direction } · { common.point }:
 
 properties =
+    .applied = Uygulandı
     .pdf-underlay = PDF Altlığı
     .dwf-underlay = DWF Altlığı
     .dgn-underlay = DGN Altlığı

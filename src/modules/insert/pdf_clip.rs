@@ -58,6 +58,18 @@ impl PdfClipCommand {
         }
     }
 
+    /// A new boundary for an underlay already chosen (the underlay tab's
+    /// Create Clipping Boundary): the New boundary branch at once. Returns the
+    /// command and the result of its first step.
+    pub fn new_boundary(handle: Handle, underlay: Underlay) -> (Self, CmdResult) {
+        let mut command = Self::new(false);
+        command.handle = handle;
+        command.underlay = Some(underlay);
+        command.step = Step::Option;
+        let first = command.option("N");
+        (command, first)
+    }
+
     fn finish(&self, underlay: Underlay) -> CmdResult {
         CmdResult::UpdateEntityAndFinish {
             handle: self.handle,

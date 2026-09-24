@@ -24,6 +24,8 @@ mod widgets;
 mod draw_panel;
 mod modify_panel;
 mod color_dropdown;
+mod underlay_tab;
+pub use underlay_tab::{UnderlayContext, UnderlayTabMsg};
 use widgets::{StyleContext, *};
 pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
 mod collapse;
@@ -102,6 +104,10 @@ pub struct Ribbon {
     /// Set by `CollapsePanels` when the tool row is in its tight state; the mode
     /// selector hides itself then to give the cramped tab row its space back.
     collapse_tight: Arc<AtomicBool>,
+    /// The selected PDF underlay's values while the contextual tab exists.
+    underlay_ctx: Option<UnderlayContext>,
+    /// The contextual underlay tab is the one shown.
+    underlay_tab_active: bool,
 }
 
 /// Per-layer display data shown in the ribbon layer dropdown.
@@ -195,6 +201,8 @@ impl Ribbon {
             tool_bar_h: Arc::new(AtomicU32::new(TOOL_BAR_H.to_bits())),
             collapse_mode: CollapseMode::default(),
             collapse_tight: Arc::new(AtomicBool::new(false)),
+            underlay_ctx: None,
+            underlay_tab_active: false,
         }
     }
 
@@ -272,6 +280,7 @@ impl Ribbon {
     pub fn select(&mut self, index: usize) {
         if index < self.modules.len() {
             self.active = index;
+            self.underlay_tab_active = false;
         }
     }
 
@@ -335,6 +344,58 @@ impl Ribbon {
             show_block_palette,
             show_file_tabs: self.show_file_tabs,
             show_layout_tabs: self.show_layout_tabs,
+            underlay_mono: self.underlay_ctx.as_ref().is_some_and(|c| c.monochrome),
+            underlay_shown: self.underlay_ctx.as_ref().is_some_and(|c| c.shown),
+            underlay_snap: self.underlay_ctx.as_ref().is_some_and(|c| c.snap),
+        }
+    }
+
+    /// One panel in its four densities; `lead` adds controls before the
+    /// group's own tools.
+    fn panel<'a>(
+        &'a self,
+        g: &'a RibbonGroup,
+        ts: widgets::ToggleState,
+        style_ctx: &StyleContext<'_>,
+        lead: &dyn Fn(bool) -> Vec<Element<'a, Message>>,
+    ) -> Panel<'a> {
+        let group = |compact: bool| {
+            render_group(
+                compact,
+                g,
+                lead(compact),
+                &self.active_tool,
+                &self.open_dropdown,
+                &self.last_cmd,
+                ts,
+                &self.layer_infos,
+                &self.active_layer,
+                self.active_color,
+                &self.active_linetype,
+                self.active_lineweight,
+                style_ctx,
+            )
+        };
+        let button = |tight: bool| {
+            collapse_button(
+                g,
+                self.last_panel_tool.get(g.title).copied(),
+                &self.active_tool,
+                &self.open_dropdown,
+                &self.last_cmd,
+                ts,
+                &self.layer_infos,
+                &self.active_layer,
+                self.active_color,
+                &self.active_linetype,
+                self.active_lineweight,
+                style_ctx,
+                tight,
+            )
+        };
+        Panel {
+            id: g.title.to_string(),
+            elements: [group(false), group(true), button(false), button(true)],
         }
     }
 
@@ -453,7 +514,7 @@ impl Ribbon {
                     return acc;
                 }
 
-                let is_active = i == self.active;
+                let is_active = i == self.active && !self.underlay_tab_shown();
                 let is_contextual = module.id() == "layout";
                 let btn = container(
                     button(text(crate::i18n::ribbon_module_title(module.id(), module.title())).size(12))
@@ -522,6 +583,11 @@ impl Ribbon {
                 acc
             },
         );
+
+        let mut tab_items = tab_items;
+        if self.underlay_ctx.is_some() {
+            tab_items.push(underlay_tab_button(self.underlay_tab_shown()));
+        }
 
         // Tabs may squeeze their gaps to fit before wrapping: from the normal 6px
         // down to -12px on a narrow (e.g. phone) tab row, tucking neighbours into
@@ -602,74 +668,15 @@ impl Ribbon {
                 // fit they degrade from the right — a panel's large buttons first
                 // shrink to compact icon columns, then it collapses to a ▾ flyout
                 // button. See `CollapsePanels`.
-                let panels: Vec<Panel<'_>> = groups
-                    .iter()
-                    .map(|g| {
-                        let ts = self.toggle_state(show_block_palette);
-                        Panel {
-                        id: g.title.to_string(),
-                        elements: [render_group(
-                            false,
-                            g,
-                            &self.active_tool,
-                            &self.open_dropdown,
-                            &self.last_cmd,
-                            ts,
-                            &self.layer_infos,
-                            &self.active_layer,
-                            self.active_color,
-                            &self.active_linetype,
-                            self.active_lineweight,
-                            &style_ctx,
-                        ),
-                        render_group(
-                            true,
-                            g,
-                            &self.active_tool,
-                            &self.open_dropdown,
-                            &self.last_cmd,
-                            ts,
-                            &self.layer_infos,
-                            &self.active_layer,
-                            self.active_color,
-                            &self.active_linetype,
-                            self.active_lineweight,
-                            &style_ctx,
-                        ),
-                        collapse_button(
-                            g,
-                            self.last_panel_tool.get(g.title).copied(),
-                            &self.active_tool,
-                            &self.open_dropdown,
-                            &self.last_cmd,
-                            ts,
-                            &self.layer_infos,
-                            &self.active_layer,
-                            self.active_color,
-                            &self.active_linetype,
-                            self.active_lineweight,
-                            &style_ctx,
-                            false,
-                        ),
-                        collapse_button(
-                            g,
-                            self.last_panel_tool.get(g.title).copied(),
-                            &self.active_tool,
-                            &self.open_dropdown,
-                            &self.last_cmd,
-                            ts,
-                            &self.layer_infos,
-                            &self.active_layer,
-                            self.active_color,
-                            &self.active_linetype,
-                            self.active_lineweight,
-                            &style_ctx,
-                            true,
-                        ),
-                        ],
-                    }
-                    })
-                    .collect();
+                let ts = self.toggle_state(show_block_palette);
+                let panels: Vec<Panel<'_>> = if self.underlay_tab_shown() {
+                    self.underlay_panels(ts, &style_ctx)
+                } else {
+                    groups
+                        .iter()
+                        .map(|g| self.panel(g, ts, &style_ctx, &|_| Vec::new()))
+                        .collect()
+                };
                 CollapsePanels::new(panels, self.collapsed_open.clone(), TOOL_BAR_H)
                     .report_height(self.tool_bar_h.clone())
                     .report_tight(self.collapse_tight.clone())
@@ -1321,6 +1328,7 @@ impl Ribbon {
 fn render_group<'a>(
     compact: bool,
     group: &RibbonGroup,
+    lead: Vec<Element<'a, Message>>,
     active_tool: &Option<String>,
     open_dd: &Option<String>,
     last_cmd: &HashMap<&'static str, &'static str>,
@@ -1332,7 +1340,7 @@ fn render_group<'a>(
     active_lineweight: LineWeight,
     style_ctx: &StyleContext<'_>,
 ) -> Element<'a, Message> {
-    let mut items_row: Vec<Element<Message>> = Vec::new();
+    let mut items_row: Vec<Element<Message>> = lead;
     let mut small_buf: Vec<Element<Message>> = Vec::new();
 
     let ctx = widgets::RenderCtx {
@@ -1613,4 +1621,32 @@ mod tests {
         assert!(ribbon.escape_extension());
         assert_eq!(ribbon.open_dropdown, None);
     }
+}
+
+/// The contextual underlay tab's button: framed in the accent colour.
+fn underlay_tab_button<'a>(active: bool) -> Element<'a, Message> {
+    let btn = button(text(t!("PDF Underlay")).size(12))
+        .on_press(Message::RibbonSelectUnderlayTab)
+        .style(move |theme: &Theme, status| {
+            let palette = theme.palette();
+            let pair = match (active, status) {
+                (true, _) => palette.background.weakest,
+                (false, button::Status::Hovered) => palette.background.weak,
+                _ => palette.background.base,
+            };
+            button::Style {
+                background: (active || matches!(status, button::Status::Hovered))
+                    .then_some(Background::Color(pair.color)),
+                text_color: if active { pair.text } else { palette.primary.base.color },
+                border: Border {
+                    color: palette.primary.base.color,
+                    width: if active { 2.0 } else { 1.0 },
+                    radius: 0.0.into(),
+                },
+                shadow: iced::Shadow::default(),
+                snap: false,
+            }
+        })
+        .padding([5, 14]);
+    container(btn).into()
 }

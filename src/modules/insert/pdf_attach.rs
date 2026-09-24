@@ -101,7 +101,15 @@ enum Step {
 
 pub struct PdfAttachCommand {
     step: Step,
+    /// The file read for the page (absolute or registered source).
     path: String,
+    /// The path the definition stores (full, relative or file name only).
+    stored_path: Option<String>,
+    /// Pages after the first, attached beside it (dialog selection).
+    extra_pages: Vec<String>,
+    /// Scale and rotation fixed in the dialog: their prompts are skipped.
+    preset_scale: Option<f64>,
+    preset_rotation: Option<f64>,
     page: String,
     page_count: usize,
     page_size: (f64, f64),
@@ -122,6 +130,10 @@ impl PdfAttachCommand {
         Self {
             step: Step::Path,
             path: String::new(),
+            stored_path: None,
+            extra_pages: Vec::new(),
+            preset_scale: None,
+            preset_rotation: None,
             page: "1".to_string(),
             page_count: 0,
             page_size: (0.0, 0.0),
@@ -141,6 +153,46 @@ impl PdfAttachCommand {
             command.step = Step::Page;
         }
         command
+    }
+
+    /// The dialog's attach with the insertion point asked on screen: pages
+    /// chosen, the path to store, and any scale / rotation already given.
+    pub fn from_dialog(
+        read_path: &str,
+        stored_path: &str,
+        pages: &[String],
+        scale: Option<f64>,
+        rotation_deg: Option<f64>,
+        insunits: i16,
+    ) -> Self {
+        let mut command = Self::with_file(read_path, insunits);
+        command.stored_path = Some(stored_path.to_string());
+        if let Some((first, rest)) = pages.split_first() {
+            command.page = first.clone();
+            command.extra_pages = rest.to_vec();
+        }
+        command.page_size =
+            crate::scene::model::pdf_raster::page_size_inches(read_path, &command.page)
+                .unwrap_or((0.0, 0.0));
+        command.preset_scale = scale;
+        if let Some(s) = scale {
+            command.scale = s;
+        }
+        command.preset_rotation = rotation_deg;
+        command.step = Step::Insertion;
+        command
+    }
+
+    /// After the insertion point or the scale: the next prompt, or the
+    /// attach itself when the dialog fixed what is left.
+    fn after_scale(&mut self) -> CmdResult {
+        match self.preset_rotation {
+            Some(deg) => self.commit(deg.to_radians()),
+            None => {
+                self.step = Step::Rotation;
+                CmdResult::NeedPoint
+            }
+        }
     }
 
     fn base_image_size(&self) -> String {
@@ -207,8 +259,7 @@ impl PdfAttachCommand {
     fn accept_scale(&mut self, text: &str) -> CmdResult {
         let text = text.trim();
         if text.is_empty() {
-            self.step = Step::Rotation;
-            return CmdResult::NeedPoint;
+            return self.after_scale();
         }
         if text.eq_ignore_ascii_case("U") || text.eq_ignore_ascii_case("UNIT") {
             self.step = Step::Unit;
@@ -217,8 +268,7 @@ impl PdfAttachCommand {
         match crate::entities::common::parse_f64(text) {
             Some(v) if v > 0.0 => {
                 self.scale = v;
-                self.step = Step::Rotation;
-                CmdResult::NeedPoint
+                self.after_scale()
             }
             Some(_) => CmdResult::ReportError("Value must be positive and nonzero.".to_string()),
             None => CmdResult::ReportError("Requires numeric value or option keyword.".to_string()),
@@ -260,17 +310,23 @@ impl PdfAttachCommand {
     }
 
     fn commit(&mut self, rotation: f64) -> CmdResult {
-        let point = self.plane.to_local(self.insertion);
-        let mut underlay = Underlay::pdf();
-        underlay.insertion_point = Vector3::new(point.x, point.y, point.z);
-        underlay.set_scale(self.scale);
-        underlay.rotation = rotation;
-        // On, clipped by its boundary and colour-adjusted for the background,
-        // as the reference creates an underlay.
-        underlay.flags = UnderlayDisplayFlags::ON
-            | UnderlayDisplayFlags::CLIPPING
-            | UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND;
-        CmdResult::CommitAndExit(self.plane.place_entity(EntityType::Underlay(underlay)))
+        let pages: Vec<String> = std::iter::once(self.page.clone())
+            .chain(self.extra_pages.iter().cloned())
+            .collect();
+        let placed = underlays_for_pages(
+            &self.path,
+            &pages,
+            self.plane.to_local(self.insertion),
+            self.scale,
+            rotation,
+        )
+        .into_iter()
+        .map(|(page, underlay)| (page, self.plane.place_entity(underlay)))
+        .collect();
+        CmdResult::AttachPdfPages {
+            path: self.stored_path.clone().unwrap_or_else(|| self.path.clone()),
+            pages: placed,
+        }
     }
 
     fn frame_at(&self, pt: DVec3) -> Vec<[f32; 3]> {
@@ -336,15 +392,14 @@ impl CadCommand for PdfAttachCommand {
         }
     }
 
-    fn pdf_attach_source(&self) -> Option<(String, String)> {
-        (!self.path.is_empty()).then(|| (self.path.clone(), self.page.clone()))
-    }
-
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         if self.step != Step::Insertion {
             return CmdResult::NeedPoint;
         }
         self.insertion = pt;
+        if self.preset_scale.is_some() {
+            return self.after_scale();
+        }
         self.step = Step::Scale;
         CmdResult::ReportMeasurement(self.base_image_size())
     }
@@ -386,6 +441,39 @@ impl CadCommand for PdfAttachCommand {
             false,
         ))
     }
+}
+
+/// Underlays for `pages` of a file: the first at `insertion`, each next one
+/// beside the previous along the rotated X axis (page width times scale).
+// ponytail: side-by-side placement of the pages after the first is not
+// measured against the reference.
+pub fn underlays_for_pages(
+    read_path: &str,
+    pages: &[String],
+    insertion: DVec3,
+    scale: f64,
+    rotation: f64,
+) -> Vec<(String, EntityType)> {
+    let mut origin = insertion;
+    let (c, s) = (rotation.cos(), rotation.sin());
+    pages
+        .iter()
+        .map(|page| {
+            let mut underlay = Underlay::pdf();
+            underlay.insertion_point = Vector3::new(origin.x, origin.y, origin.z);
+            underlay.set_scale(scale);
+            underlay.rotation = rotation;
+            // On, clipped by its boundary and colour-adjusted for the
+            // background, as the reference creates an underlay.
+            underlay.flags = UnderlayDisplayFlags::ON
+                | UnderlayDisplayFlags::CLIPPING
+                | UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND;
+            let width = crate::scene::model::pdf_raster::page_size_inches(read_path, page)
+                .map_or(0.0, |(w, _)| w * scale);
+            origin += DVec3::new(c * width, s * width, 0.0);
+            (page.clone(), EntityType::Underlay(underlay))
+        })
+        .collect()
 }
 
 /// The `ACAD_PDFDEFINITIONS` dictionary under the named-objects root,

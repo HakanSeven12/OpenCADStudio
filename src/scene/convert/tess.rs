@@ -1285,6 +1285,20 @@ fn tessellate_entity_inner(
             b.set_fixed_screen_width(2.0);
         }
     }
+    // PDF underlay geometry: a hidden, unplotted wire that object snaps
+    // (nearest, intersection, perpendicular) find, beside the page frame.
+    if let EntityType::Underlay(underlay) = e {
+        let geometry = crate::scene::model::pdf_vector::underlay_snap_geometry(underlay, document);
+        if !geometry.is_empty() {
+            let (points, points_low) = convert::tessellate::points_to_ds(geometry);
+            let mut wire = WireModel::solid(h.value().to_string(), points, entity_color, sel);
+            wire.points_low = points_low;
+            wire.display_visible = false;
+            wire.plot_visible = false;
+            set_wire_aabb(&mut wire, aabb);
+            bases.push(wire);
+        }
+    }
 
     // A hidden mask frame remains selectable and appears while selected, but
     // contributes no visible line work during normal display. The interior

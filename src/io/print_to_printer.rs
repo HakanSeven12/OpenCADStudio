@@ -1073,7 +1073,18 @@ fn gdi_raster_print(
 }
 
 /// Open a file with the OS default application (used for print preview).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), test))]
+pub fn open_in_viewer(path: &std::path::Path) -> Result<(), String> {
+    // Unit tests exercise the complete preview pipeline, but must not launch
+    // the user's PDF application or leave generated previews in the temp
+    // directory. Production viewers need the file after this call returns;
+    // the test path has no external consumer, so it can be removed now.
+    std::fs::remove_file(path)
+        .map_err(|error| format!("Could not consume test preview: {error}"))
+}
+
+/// Open a file with the OS default application (used for print preview).
+#[cfg(all(not(target_arch = "wasm32"), not(test)))]
 pub fn open_in_viewer(path: &std::path::Path) -> Result<(), String> {
     let p = path.to_string_lossy().to_string();
     #[cfg(target_os = "windows")]
@@ -1097,6 +1108,19 @@ pub fn open_in_viewer(path: &std::path::Path) -> Result<(), String> {
     cmd.spawn()
         .map(|_| ())
         .map_err(|e| format!("Could not open preview: {e}"))
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod preview_isolation_tests {
+    #[test]
+    fn a_test_preview_is_consumed_without_leaving_a_temp_file() {
+        let path = super::temp_pdf_path("preview_test");
+        std::fs::write(&path, b"test preview").unwrap();
+
+        super::open_in_viewer(&path).unwrap();
+
+        assert!(!path.exists(), "test preview was not cleaned up: {}", path.display());
+    }
 }
 
 /// Ask the registered PDF application to print `path` on `printer` through

@@ -1598,11 +1598,11 @@ mod tests {
 
     #[test]
     fn xref_dash_alias_lists_like_xref() {
-        // `-XREF` is accepted as an alias for industry muscle memory; bare
-        // `XREF` keeps the legacy list output for compatibility.
+        // `-XREF` asks on the command line: `?` then Enter prints the
+        // reference table; `XREF ?` keeps the legacy list output for scripts.
         let mut app = fresh_app();
         let out = run_capture(&mut app, "-XREF ?");
-        assert!(out.contains("No external references") || out.contains("External references"));
+        assert!(out.contains("Total Xref(s): 0"), "got: {out:?}");
     }
 
     #[test]
@@ -2015,9 +2015,15 @@ mod tests {
     #[test]
     fn xref_attach_with_file_starts_placement() {
         // F10: `XREF Attach <file>` threads the file into the XATTACH
-        // placement command (same flow as the picker result).
+        // placement command (same flow as the picker result). A missing file
+        // is rejected up front, so the reference has to exist.
+        let dir = std::env::temp_dir().join(format!("ocs_xref_attach_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("plan.dwg");
+        std::fs::write(&file, b"fake").unwrap();
         let mut app = fresh_app();
-        let out = run_capture(&mut app, "XREF Attach C:/refs/plan.dwg");
+        let out = run_capture(&mut app, &format!("XREF Attach {}", file.to_string_lossy()));
+        std::fs::remove_dir_all(&dir).ok();
         assert!(
             !out.contains("ships with reference operations"),
             "dead-end text must be gone, got: {out:?}"

@@ -268,7 +268,6 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Attach External Reference" => Some(("insert", "xref-attach-dialog-title")),
         "Browse..." => Some(("insert", "xref-attach-browse")),
         "Reference Type" => Some(("insert", "xref-attach-reference-type")),
-        "Specify On-screen" => Some(("insert", "xref-attach-specify-on-screen")),
         "Uniform Scale" => Some(("insert", "xref-attach-uniform-scale")),
         "Insertion point" => Some(("insert", "xref-attach-insertion-point")),
         "Angle:" => Some(("insert", "xref-attach-angle")),

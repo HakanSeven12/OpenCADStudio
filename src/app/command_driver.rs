@@ -711,8 +711,12 @@ impl OpenCADStudio {
             let toks: Vec<String> = tokens.iter().map(|s| s.to_string()).collect();
             return self.finish_active_command(&toks, finish);
         }
+        // Bare XREF opens the External References palette, so probing the
+        // verb alone would open it (and refresh every entry) before the
+        // argument form `XREF Reload A` runs.
         if tokens[0].eq_ignore_ascii_case("BACKGROUND")
             || tokens[0].eq_ignore_ascii_case("COLORSCHEME")
+            || tokens[0].eq_ignore_ascii_case("XREF")
         {
             return self.dispatch_command(cmd);
         }

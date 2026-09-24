@@ -1857,13 +1857,6 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Remove one xref's `name|*` dependent symbols (case-insensitive): layers,
-/// linetypes, text styles, dim styles, and nested block records — plus every
-/// entity and draw-order table owned by those dependent blocks.
-///
-/// Shared by Detach (which then also erases the BlockRecord itself) and BIND
-/// (which drops the previous merge before re-merging under `$N$` names). The
-/// xref BlockRecord itself, its INSERTs, and non-prefixed symbols stay.
 /// Make the named references' paths relative to `host` (their drawing's
 /// first save); a reference that cannot be relative keeps its full path.
 pub fn make_relative(
@@ -1922,6 +1915,13 @@ fn linetype_styles(doc: &CadDocument) -> HashSet<Handle> {
         .collect()
 }
 
+/// Remove one xref's `name|*` dependent symbols (case-insensitive): layers,
+/// linetypes, text styles, dim styles, and nested block records — plus every
+/// entity and draw-order table owned by those dependent blocks.
+///
+/// Shared by Detach (which then also erases the BlockRecord itself) and BIND
+/// (which drops the previous merge before re-merging under `$N$` names). The
+/// xref BlockRecord itself, its INSERTs, and non-prefixed symbols stay.
 fn remove_pipe_symbols(doc: &mut CadDocument, name: &str) {
     remove_dependent_symbols(doc, name, true);
 }

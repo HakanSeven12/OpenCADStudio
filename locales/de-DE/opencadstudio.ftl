@@ -3501,7 +3501,6 @@ insert =
     .xref-attach-dialog-title = Attach External Reference
     .xref-attach-browse = Browse...
     .xref-attach-reference-type = Reference Type
-    .xref-attach-specify-on-screen = Specify On-screen
     .xref-attach-uniform-scale = Uniform Scale
     .xref-attach-insertion-point = Insertion point
     .xref-attach-angle = Angle:

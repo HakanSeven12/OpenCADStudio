@@ -3475,7 +3475,6 @@ insert =
     .xref-attach-dialog-title = Harici Referans Ekle
     .xref-attach-browse = Gözat...
     .xref-attach-reference-type = Referans Türü
-    .xref-attach-specify-on-screen = Ekranda belirt
     .xref-attach-uniform-scale = Eşit ölçek
     .xref-attach-insertion-point = Ekleme noktası
     .xref-attach-angle = Açı:

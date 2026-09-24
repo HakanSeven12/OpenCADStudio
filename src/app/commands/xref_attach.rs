@@ -175,6 +175,7 @@ impl OpenCADStudio {
         path: &str,
     ) -> (Vec<crate::scene::model::wire_model::WireModel>, i16) {
         // ponytail: a huge reference skips the ghost; cap by entity count.
+        #[cfg(not(target_arch = "wasm32"))]
         const MAX_PREVIEW_ENTITIES: usize = 20_000;
         let scene = &self.tabs[i].scene;
         if let Some(name) = existing {
@@ -264,6 +265,7 @@ impl OpenCADStudio {
     /// Fills the dialog from the chosen file: name, preview, block unit and
     /// the paths shown under Details.
     fn load_xref_attach_file(&self, state: &mut XrefAttachState, path: &str) {
+        #[cfg(not(target_arch = "wasm32"))]
         let i = self.active_tab;
         state.path = path.to_string();
         state.name = path_to_block_name(path);

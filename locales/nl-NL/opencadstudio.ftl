@@ -3505,6 +3505,12 @@ annotate =
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  Selecteer een boog, cirkel of polylijnboog:
 
 insert =
+    .refui-requires-int-90 = Requires an integer between -90 and 90.
+    .refui-xref-fading = Xref fading
+    .refui-edit-reference = Edit Reference
+    .refui-snap-to-underlays-off = Snap to Underlays OFF
+    .refui-snap-to-underlays-on = Snap to Underlays ON
+    .refui-snap-to-underlays = Snap to Underlays
     .xref-attach-dialog-title = Attach External Reference
     .xref-attach-browse = Browse...
     .xref-attach-reference-type = Reference Type

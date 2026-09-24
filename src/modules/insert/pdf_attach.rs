@@ -4,20 +4,7 @@ use acadrust::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
-use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::t;
-
-pub const ICON: IconKind =
-    IconKind::Svg(include_bytes!("../../../assets/icons/underlay_layers.svg"));
-
-pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "PDFATTACH",
-        label: "Attach PDF",
-        icon: ICON,
-        event: ModuleEvent::Command("PDFATTACH".to_string()),
-    }
-}
 
 pub struct PdfAttachCommand {
     definition_handle: Handle,

@@ -414,7 +414,7 @@ pub(crate) fn append_insert_attribute_wires(
                 );
             let sub_color = render::adapt_to_bg(sub_color, bg_color);
             let sub_color = if is_xref && !sel {
-                block_cache::fade_toward_bg(sub_color, bg_color)
+                block_cache::xref_fade(sub_color, bg_color)
             } else {
                 sub_color
             };

@@ -102,6 +102,8 @@ pub struct Ribbon {
     /// Set by `CollapsePanels` when the tool row is in its tight state; the mode
     /// selector hides itself then to give the cramped tab row its space back.
     collapse_tight: Arc<AtomicBool>,
+    /// XDWGFADECTL as the Reference slide-out shows it (negative = off).
+    pub xref_fade: i32,
 }
 
 /// Per-layer display data shown in the ribbon layer dropdown.
@@ -195,6 +197,7 @@ impl Ribbon {
             tool_bar_h: Arc::new(AtomicU32::new(TOOL_BAR_H.to_bits())),
             collapse_mode: CollapseMode::default(),
             collapse_tight: Arc::new(AtomicBool::new(false)),
+            xref_fade: 50,
         }
     }
 

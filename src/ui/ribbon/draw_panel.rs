@@ -111,6 +111,16 @@ struct Panel {
     tools: &'static [Tool],
 }
 
+/// The Reference panel's slide-out: Edit Reference, then the xref fading
+/// switch and amount (drawn by `reference_overlay`).
+const REFERENCE_TOOLS: &[Tool] = &[Tool {
+    command: "REFEDIT",
+    label: "Edit Reference",
+    icon: include_bytes!("../../../assets/icons/edit_block.svg"),
+    options: &[],
+}];
+pub(super) const REFERENCE_PANEL_ID: &str = "reference_extension";
+
 const PANELS: &[Panel] = &[
     Panel {
         id: PANEL_ID,
@@ -123,6 +133,12 @@ const PANELS: &[Panel] = &[
         title_id: "modify_extension_title",
         title: "Modify",
         tools: super::modify_panel::TOOLS,
+    },
+    Panel {
+        id: REFERENCE_PANEL_ID,
+        title_id: "reference_extension_title",
+        title: "Reference",
+        tools: REFERENCE_TOOLS,
     },
 ];
 
@@ -159,7 +175,7 @@ pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Ele
     } else {
         icons::themed_arrow_down(GROUP_TITLE_ARROW_SIZE)
     };
-    PosReport::new(
+    let title_button: Element<'a, Message> = PosReport::new(
         panel.id,
         button(
             row![
@@ -173,6 +189,30 @@ pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Ele
         .style(move |theme: &Theme, status| tool_btn_style(theme, expanded, status))
         .padding([1, 4]),
     )
+    .into();
+    if panel.id != REFERENCE_PANEL_ID {
+        return title_button;
+    }
+    // The corner arrow opens the External References palette.
+    let launcher = tooltip(
+        button(text("↘").size(10))
+            .on_press(Message::RibbonToolClick {
+                tool_id: "EXTERNALREFERENCES".to_string(),
+                event: crate::modules::ModuleEvent::Command("EXTERNALREFERENCES".to_string()),
+            })
+            .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
+            .padding([0, 3]),
+        make_tip(format!("{}\n{} EXTERNALREFERENCES", t!("External References"), t!("Command:"))),
+        tooltip::Position::Bottom,
+    )
+    .delay(Duration::from_millis(400))
+    .style(tip_style);
+    row![
+        iced::widget::Space::new().width(Fill),
+        title_button,
+        container(launcher).width(Fill).align_x(iced::Right)
+    ]
+    .align_y(iced::Center)
     .into()
 }
 
@@ -211,8 +251,70 @@ fn tool_button(tool: &Tool, active: bool, panel_id: &'static str) -> Element<'st
     }
 }
 
+/// The Reference slide-out: Edit Reference, and xref fading on/off with its
+/// amount (XDWGFADECTL; the switch keeps the amount as a negative value).
+fn reference_overlay<'a>(ribbon: &Ribbon, panel: Panel, win: (f32, f32)) -> Element<'a, Message> {
+    let width: f32 = 260.0_f32.min((win.0 - 8.0).max(120.0));
+    let (_, x, anchor_top) = ribbon.dd_anchor(panel.id, width, win.0);
+    let left = x.clamp(0.0, (win.0 - width).max(0.0));
+    let top = anchor_top.min((win.1 - 80.0).max(0.0));
+    let tool = &panel.tools[0];
+    let edit = button(
+        row![
+            make_icon(IconKind::Svg(tool.icon), 16.0),
+            text(t!(tool.label)).size(11)
+        ]
+        .spacing(6)
+        .align_y(iced::Center),
+    )
+    .on_press(Message::DropdownSelectItem {
+        dropdown_id: panel.id,
+        cmd: tool.command,
+    })
+    .style(popup_row_style)
+    .width(Fill)
+    .padding([3, 6]);
+    let fade = ribbon.xref_fade;
+    let on = fade > 0;
+    let switch = button(make_icon(
+        IconKind::Svg(include_bytes!("../../../assets/icons/underlay_frames.svg")),
+        16.0,
+    ))
+    .on_press(Message::XrefFadeToggle)
+    .style(move |theme: &Theme, status| tool_btn_style(theme, on, status))
+    .padding(3);
+    let amount = fade.unsigned_abs().min(90) as u8;
+    let fading = row![
+        tooltip(
+            switch,
+            make_tip(format!("{}\n{} XDWGFADECTL", t!("Xref fading"), t!("Command:"))),
+            tooltip::Position::Bottom
+        )
+        .delay(Duration::from_millis(400))
+        .style(tip_style),
+        text(t!("Xref fading")).size(11),
+        iced::widget::slider(0..=90u8, amount, Message::XrefFadeSlide)
+            .on_release(Message::XrefFadeCommit)
+            .width(Fill),
+        text(amount.to_string()).size(11).width(22),
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+    let body = container(column![edit, fading].spacing(4).padding(6))
+        .width(width)
+        .style(|theme: &Theme| {
+            let mut style = popup_panel_style(theme);
+            style.border.color = theme.palette().primary.base.color;
+            style
+        });
+    dropdown_backdrop(position_ribbon_dropdown(body.into(), false, left, top))
+}
+
 pub(super) fn overlay<'a>(ribbon: &Ribbon, id: &str, win: (f32, f32)) -> Element<'a, Message> {
     let panel = panel_for_dropdown(id).expect("registered ribbon extension");
+    if panel.id == REFERENCE_PANEL_ID {
+        return reference_overlay(ribbon, panel, win);
+    }
     let tools = panel.tools;
     let width = (7.0 * (CELL + GAP) - GAP + 12.0).min((win.0 - 8.0).max(CELL + 12.0));
     let (_, x, anchor_top) = ribbon.dd_anchor(panel.id, width, win.0);

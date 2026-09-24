@@ -1467,6 +1467,29 @@ pub(crate) fn fade_toward_bg(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
     ]
 }
 
+/// XDWGFADECTL: how far referenced drawings fade toward the background, in
+/// percent (0–90); zero or negative shows them unfaded.
+static XREF_FADE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(50);
+
+pub fn xref_fade_ctl() -> i32 {
+    XREF_FADE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_xref_fade_ctl(value: i32) {
+    XREF_FADE.store(value.clamp(-90, 90), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// A referenced drawing's colour faded by XDWGFADECTL.
+pub(crate) fn xref_fade(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
+    let t = xref_fade_ctl().clamp(0, 90) as f32 / 100.0;
+    [
+        color[0] * (1.0 - t) + bg[0] * t,
+        color[1] * (1.0 - t) + bg[1] * t,
+        color[2] * (1.0 - t) + bg[2] * t,
+        color[3],
+    ]
+}
+
 /// Style fingerprint used to group local wires into a single GPU buffer.
 /// f32 fields are bit-cast to u32 to make the key Hash + Eq.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -2135,7 +2158,7 @@ fn resolve_wire_color(lw: &LocalWire, ctx: &ExpandCtx) -> [f32; 4] {
         };
     }
     if ctx.is_xref && !ctx.selected {
-        fade_toward_bg(color, ctx.bg_color)
+        xref_fade(color, ctx.bg_color)
     } else {
         color
     }

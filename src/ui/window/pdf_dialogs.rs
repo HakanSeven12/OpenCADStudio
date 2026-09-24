@@ -779,6 +779,10 @@ pub fn view_import_file<'a>(
                 text(crate::tf!("Page size: {size}", size = state.page_size.clone()))
                     .size(11)
                     .style(muted_style),
+                Space::new().width(Fill),
+                text(crate::tf!("PDF scale: {scale}:1", scale = state.scale.trim()))
+                    .size(11)
+                    .style(muted_style),
             ],
         ]
         .spacing(6),

@@ -3472,6 +3472,7 @@ annotate =
     .tolerance-specify-insertion-point = TOLERANCE  Ekleme noktasını belirtin:
 
 insert =
+    .pdfui-pdf-scale = PDF ölçeği: __ocs_fmt_0__:1
     .pdfui-specify-insertion-point = Ekleme noktasını belirtin:
     .pdfui-no-pdf-underlays = PDF altlığı bulunamadı.
     .pdfui-imports-the-geometry-fills-raster-images-and-text-of-a-pdf-f = Bir PDF dosyasının geometrisini, dolu alanlarını, raster görüntülerini ve metnini çizim nesneleri olarak içe aktarır.

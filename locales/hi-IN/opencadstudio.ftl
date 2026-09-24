@@ -3486,6 +3486,7 @@ annotate =
     .tolerance-specify-insertion-point = TOLERANCE निर्दिष्ट सम्मिलन बिंदु:
 
 insert =
+    .pdfui-pdf-scale = PDF scale: {scale}:1
     .pdfui-specify-insertion-point = Specify insertion point:
     .pdfui-no-pdf-underlays = No PDF underlays found.
     .pdfui-imports-the-geometry-fills-raster-images-and-text-of-a-pdf-f = Imports the geometry, fills, raster images and text of a PDF file as drawing objects.

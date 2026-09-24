@@ -2910,6 +2910,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Unable to save: file is in use." => Some(("command-line", "unable-to-save-file-is-in-use")),
         "Unable to verify the server certificate" => Some(("plugins", "unable-to-verify-the-server-certificate")),
         "Unavailable" => Some(("plugins", "unavailable")),
+        "PDF scale: {scale}:1" => Some(("insert", "pdfui-pdf-scale")),
         "Applied" => Some(("properties", "applied")),
         "No PDF underlays found." => Some(("insert", "pdfui-no-pdf-underlays")),
         "Specify insertion point:" => Some(("insert", "pdfui-specify-insertion-point")),

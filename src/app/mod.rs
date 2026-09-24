@@ -3771,6 +3771,9 @@ pub enum Message {
     // ── PDF Underlay ──────────────────────────────────────────────────────
     /// Open file-picker dialog for PDFATTACH command (async).
     PdfAttachPick,
+    /// PDFIMPORT File: pick the PDF to import.
+    PdfImportPick,
+    PdfImportPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
     /// Result of the PDFATTACH file picker.
     PdfAttachPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
 

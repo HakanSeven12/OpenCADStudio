@@ -1256,23 +1256,14 @@ impl OpenCADStudio {
             Message::PdfAttachPickResult(Ok((path, bytes))) => {
                 use crate::command::CadCommand;
                 use crate::modules::insert::pdf_attach::PdfAttachCommand;
-                use acadrust::objects::{ObjectType, UnderlayDefinition};
 
                 let i = self.active_tab;
                 let path_str = path.to_string_lossy().into_owned();
                 crate::scene::model::pdf_raster::register_source(&path_str, bytes);
-
-                let definition_handle = self.tabs[i].scene.document.allocate_handle();
-
-                let mut definition = UnderlayDefinition::pdf(&path_str, "1");
-                definition.handle = definition_handle;
-
-                self.tabs[i].scene.document.objects.insert(
-                    definition_handle,
-                    ObjectType::UnderlayDefinition(definition),
-                );
-
-                let cmd = PdfAttachCommand::new(definition_handle);
+                // The definition is created with the underlay when it is
+                // placed; the command asks for the page first.
+                let insunits = self.tabs[i].scene.document.header.insertion_units;
+                let cmd = PdfAttachCommand::with_file(&path_str, insunits);
 
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -1280,6 +1271,35 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::PdfImportPick => Task::perform(
+                async {
+                    let handle = crate::sys::file_dialog()
+                        .set_title(crate::t!("Select PDF File").as_ref())
+                        .add_filter(crate::t!("PDF Files").as_ref(), &["pdf", "PDF"])
+                        .pick_file()
+                        .await;
+                    match handle {
+                        Some(h) => {
+                            let path = crate::sys::handle_path(&h);
+                            let bytes = std::sync::Arc::new(h.read().await);
+                            Ok((path, bytes))
+                        }
+                        None => Err("Cancelled".to_string()),
+                    }
+                },
+                Message::PdfImportPickResult,
+            ),
+            Message::PdfImportPickResult(Ok((path, bytes))) => {
+                let i = self.active_tab;
+                let path_str = path.to_string_lossy().into_owned();
+                crate::scene::model::pdf_raster::register_source(&path_str, bytes);
+                self.run_pdf_import(
+                    i,
+                    crate::app::commands::pdf_import::PdfImportSource::File(path_str),
+                );
+                Task::none()
+            }
+            Message::PdfImportPickResult(Err(_)) => Task::none(),
             Message::PdfAttachPickResult(Err(e)) => {
                 if e != "Cancelled" {
                     self.command_line

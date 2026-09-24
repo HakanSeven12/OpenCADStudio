@@ -105,6 +105,8 @@ pub fn visualization_section(entity: &EntityType) -> Option<PropSection> {
             | EntityType::Seqend(_)
             | EntityType::Leader(_)
             | EntityType::Wipeout(_)
+            // The reference lists no 3D group for an underlay.
+            | EntityType::Underlay(_)
             | EntityType::Unknown(_)
             // Non-plotting drawing-view border: never rendered, no properties.
             | EntityType::ViewBorder(_)

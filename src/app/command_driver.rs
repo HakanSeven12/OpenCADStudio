@@ -3190,8 +3190,24 @@ impl OpenCADStudio {
                 // (before `entity` is moved into commit_entity).
                 self.update_cont_anchor(&entity);
                 let label = self.history_label_from_active_cmd(i, "ENTITY");
-                let delta_safe = self.delta_add_safe(i, &entity);
+                // A PDF attach creates its definition (and the definitions
+                // dictionary) with the underlay, in the same undo step.
+                let pdf_source = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .and_then(|cmd| cmd.pdf_attach_source());
+                let delta_safe = pdf_source.is_none() && self.delta_add_safe(i, &entity);
                 let pending = self.begin_undo(i, label, 1, delta_safe);
+                if let Some((path, page)) = pdf_source {
+                    let definition = crate::modules::insert::pdf_attach::ensure_pdf_definition(
+                        &mut self.tabs[i].scene.document,
+                        &path,
+                        &page,
+                    );
+                    if let acadrust::EntityType::Underlay(underlay) = &mut entity {
+                        underlay.definition_handle = definition;
+                    }
+                }
                 let is_associative_dimension = matches!(
                     entity,
                     acadrust::EntityType::Dimension(
@@ -3930,6 +3946,15 @@ impl OpenCADStudio {
                     self.command_line.push_info(&prompt);
                 }
                 self.refresh_properties();
+            }
+            CmdResult::PdfImport(request) => {
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.run_pdf_import(
+                    i,
+                    crate::app::commands::pdf_import::PdfImportSource::Underlay(request),
+                );
             }
             CmdResult::UpdateEntityAndFinish { handle, entity } => {
                 if self.reject_locked_edit(i, handle) {

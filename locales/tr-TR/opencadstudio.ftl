@@ -3472,6 +3472,7 @@ annotate =
     .tolerance-specify-insertion-point = TOLERANCE  Ekleme noktasını belirtin:
 
 insert =
+    .select-pdf-file = PDF Dosyası Seç
     .point-clouds =
         Nokta
         Bulutları
@@ -4186,6 +4187,11 @@ view =
     .ucs-specify-point-in-positive-xy-plane = UCS  { common.specify }: XY · { common.positive-direction } · { common.point }:
 
 properties =
+    .pdf-underlay = PDF Altlığı
+    .dwf-underlay = DWF Altlığı
+    .dgn-underlay = DGN Altlığı
+    .page-number = Sayfa numarası
+    .layer-display-overrides = Katman görüntüleme geçersiz kılmaları
     .extended-data = Genişletilmiş Veri
     .count-objects-selected = __ocs_arg_count__ nesne seçildi
     .scope-visual-style = __ocs_arg_scope__ Görsel Stil

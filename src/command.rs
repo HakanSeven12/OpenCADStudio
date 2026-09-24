@@ -1556,6 +1556,8 @@ pub enum CmdResult {
     BatchCopy(Vec<Handle>, Vec<EntityTransform>),
     /// Erase `handle` and replace with new entities; command stays active.
     ReplaceEntity(Handle, Vec<EntityType>),
+    /// Import the vector content of a PDF underlay (PDFIMPORT); ends the command.
+    PdfImport(crate::modules::insert::pdf_import::PdfImportRequest),
     /// Update one entity in place, preserve its handle, and end the command.
     UpdateEntityAndFinish {
         handle: Handle,
@@ -2841,6 +2843,12 @@ pub trait CadCommand: Send {
     /// If this command is XATTACH, returns the file path to attach.
     /// Default: None.
     fn xattach_path(&self) -> Option<String> {
+        None
+    }
+
+    /// If this command attaches a PDF page: its file and page. The host
+    /// creates (or reuses) the definition with the committed underlay.
+    fn pdf_attach_source(&self) -> Option<(String, String)> {
         None
     }
 

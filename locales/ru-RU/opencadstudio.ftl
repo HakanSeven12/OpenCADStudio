@@ -3499,6 +3499,7 @@ annotate =
     .tolerance-specify-insertion-point = TOLERANCE Укажите точку вставки:
 
 insert =
+    .select-pdf-file = Select PDF File
     .point-clouds =
         Облака
         точек
@@ -4247,6 +4248,11 @@ view =
     .ucs-specify-point-in-positive-xy-plane = UCS  { common.specify }: XY · { common.positive-direction } · { common.point }:
 
 properties =
+    .pdf-underlay = PDF Underlay
+    .dwf-underlay = DWF Underlay
+    .dgn-underlay = DGN Underlay
+    .page-number = Page number
+    .layer-display-overrides = Layer display overrides
     .arrowhead-size = Размер стрелки
     .attachment = Прикрепление
     .chord = Хорда

@@ -3499,6 +3499,7 @@ annotate =
     .tolerance-specify-insertion-point = TOLERANCE  Specify insertion point:
 
 insert =
+    .select-pdf-file = Select PDF File
     .point-clouds =
         Point
         Clouds
@@ -4247,6 +4248,11 @@ view =
     .ucs-specify-point-in-positive-xy-plane = UCS  specify point in positive XY plane:
 
 properties =
+    .pdf-underlay = PDF Underlay
+    .dwf-underlay = DWF Underlay
+    .dgn-underlay = DGN Underlay
+    .page-number = Page number
+    .layer-display-overrides = Layer display overrides
     .count-objects-selected = __ocs_arg_count__ objects selected
     .scope-visual-style = __ocs_arg_scope__ Visual Style
     .value-3d-face = 3D Face

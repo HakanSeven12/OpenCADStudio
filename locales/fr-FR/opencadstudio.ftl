@@ -3498,6 +3498,7 @@ annotate =
     .tolerance-specify-insertion-point = TOLERANCE Spécifier le point d'insertion:
 
 insert =
+    .select-pdf-file = Select PDF File
     .point-clouds =
         Nuages de
         points
@@ -4246,6 +4247,11 @@ view =
     .ucs-specify-point-in-positive-xy-plane = UCS  { common.specify }: XY · { common.positive-direction } · { common.point }:
 
 properties =
+    .pdf-underlay = PDF Underlay
+    .dwf-underlay = DWF Underlay
+    .dgn-underlay = DGN Underlay
+    .page-number = Page number
+    .layer-display-overrides = Layer display overrides
     .arrowhead-size = Taille de la pointe de flèche
     .attachment = Attachement
     .chord = Corde

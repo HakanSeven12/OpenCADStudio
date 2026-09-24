@@ -1268,7 +1268,7 @@ fn build_derived_caches_impl(
                 EntityType::Ole2Frame(ole) => ImageModel::from_ole2frame(ole).map(|m| (handle, m)),
                 EntityType::Underlay(u) => match doc.objects.get(&u.definition_handle) {
                     Some(acadrust::objects::ObjectType::UnderlayDefinition(def)) => {
-                        ImageModel::from_underlay(u, def).map(|m| (handle, m))
+                        ImageModel::from_underlay(u, def, LOAD_BG).map(|m| (handle, m))
                     }
                     _ => None,
                 },
@@ -2250,6 +2250,9 @@ pub struct Scene {
     pub bg_color: [f32; 4],
     /// Custom paper-space background fill color for Wipeout entities.
     pub paper_bg_color: [f32; 4],
+    /// PDF definitions unloaded in this session (PDFIMPORT Unload): their
+    /// underlays show no page content.
+    pub unloaded_underlay_definitions: std::collections::HashSet<Handle>,
     /// Dense model-space cluster half-span used for viewport recovery.
     pub local_extent_max: f32,
     /// Dense model-space cluster median used for viewport recovery.
@@ -2659,6 +2662,7 @@ impl Scene {
             active_viewport: None,
             bg_color: [33.0 / 255.0, 40.0 / 255.0, 48.0 / 255.0, 1.0],
             paper_bg_color: [1.0, 1.0, 1.0, 1.0],
+            unloaded_underlay_definitions: std::collections::HashSet::new(),
             local_extent_max: 1e9,
             local_center: [0.0, 0.0],
             annotation_scale: 1.0,
@@ -3395,6 +3399,27 @@ impl Scene {
         if !self.parametric_constraints.is_empty() || !self.named_parameters.is_empty() {
             self.refresh_dynamic_dimension_texts();
             self.sync_native_parametric_graph();
+        }
+        // A modified image-bearing entity redraws its raster: an underlay's
+        // display adjustments and clip live on the entity, not the image.
+        for (handle, kind) in &changes {
+            if !matches!(kind, ChangeKind::Modified) {
+                continue;
+            }
+            let seed = match self.document.get_entity(*handle) {
+                Some(
+                    entity @ (EntityType::RasterImage(_)
+                    | EntityType::Ole2Frame(_)
+                    | EntityType::Underlay(_)),
+                ) => Some(self.image_seed_for(entity)),
+                _ => None,
+            };
+            if let Some(seed) = seed {
+                self.images.remove(handle);
+                if let Some(model) = seed {
+                    self.images.insert(*handle, model);
+                }
+            }
         }
         if !changes.is_empty() {
             self.refresh_dependency_index_for_changes(&changes);

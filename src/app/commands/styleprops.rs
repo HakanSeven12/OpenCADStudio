@@ -1015,6 +1015,8 @@ impl OpenCADStudio {
                     | "FRAME"
                     | "IMAGEFRAME"
                     | "PDFFRAME"
+                    | "PDFOSNAP"
+                    | "UOSNAP"
                     | "POINTCLOUDCLIPFRAME"
                     | "XCLIPFRAME"
                     | "WIPEOUTFRAME"
@@ -1102,6 +1104,26 @@ impl OpenCADStudio {
                             }
                         } else {
                             self.command_line.push_output(&format!("Enter new value for CETRANSPARENCY <{}>:", crate::scene::creation_style::current_transparency_label(current)));
+                            self.pending_setvar = Some(name.clone());
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    // Snapping to the geometry inside underlays (one switch for
+                    // PDF underlays and underlays in general).
+                    if matches!(name.as_str(), "PDFOSNAP" | "UOSNAP") {
+                        let current = i16::from(crate::scene::model::pdf_vector::pdf_osnap());
+                        if let Some(value) = &value {
+                            match value.parse::<i16>().ok().filter(|value| (0..=1).contains(value)) {
+                                Some(mode) => {
+                                    if current != mode {
+                                        crate::scene::model::pdf_vector::set_pdf_osnap(mode == 1);
+                                        self.tabs[i].scene.reseed_underlays();
+                                    }
+                                }
+                                None => self.command_line.push_error("Requires 0 or 1 only"),
+                            }
+                        } else {
+                            self.command_line.push_output(&format!("Enter new value for {name} <{current}>:"));
                             self.pending_setvar = Some(name.clone());
                         }
                         return Some(self.finish_dispatch(cmd));

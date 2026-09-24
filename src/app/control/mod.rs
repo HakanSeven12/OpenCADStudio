@@ -1162,7 +1162,7 @@ impl OpenCADStudio {
             let Some(entity) = tab.scene.document.get_entity(handle) else {
                 continue;
             };
-            let (min, max) = crate::scene::convert::tess::entity_bounds(entity);
+            let (min, max) = crate::scene::convert::tess::entity_bounds_in(&tab.scene.document, entity);
             let metrics = tab
                 .scene
                 .meshes

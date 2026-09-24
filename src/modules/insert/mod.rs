@@ -17,6 +17,8 @@ mod mview_block;
 mod open_obj;
 mod pc_attach;
 pub(crate) mod pdf_attach;
+pub(crate) mod pdf_clip;
+pub(crate) mod pdf_import;
 mod snap_underlays;
 pub(crate) mod solid3d_cmds;
 mod underlay_layers;

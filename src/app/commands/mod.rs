@@ -12,6 +12,7 @@ mod fileops;
 mod inquiry;
 mod layerprops;
 mod layers;
+pub(crate) mod pdf_import;
 mod plotvars;
 mod styleprops;
 mod view;
@@ -606,6 +607,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "FRAME",
         "IMAGEFRAME",
         "PDFFRAME",
+        "PDFOSNAP",
+        "UOSNAP",
         "POINTCLOUDCLIPFRAME",
         "XCLIPFRAME",
         "WIPEOUTFRAME",

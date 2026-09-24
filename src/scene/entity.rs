@@ -673,6 +673,25 @@ impl Scene {
     /// or drop them all if the handle is now absent. Mirrors the reseed block in
     /// [`Scene::update_entity`]; used by delta-undo when it re-applies an
     /// entity's before / after image so the fills and meshes follow.
+    /// Rebuild every underlay's raster and wire, after a setting they draw
+    /// or snap by (PDFOSNAP / UOSNAP) changed.
+    pub(crate) fn reseed_underlays(&mut self) {
+        let handles: Vec<Handle> = self
+            .document
+            .entities()
+            .filter(|entity| matches!(entity, EntityType::Underlay(_)))
+            .map(|entity| entity.common().handle)
+            .collect();
+        for handle in &handles {
+            self.reseed_derived_caches(*handle);
+        }
+        let changes: Vec<_> = handles
+            .iter()
+            .map(|handle| (*handle, crate::scene::ChangeKind::Modified))
+            .collect();
+        self.bump_entities(&changes);
+    }
+
     pub(crate) fn reseed_derived_caches(&mut self, handle: Handle) {
         let (hatch_seed, image_seed) = match self.document.get_entity(handle) {
             None => (None, None),
@@ -2387,9 +2406,10 @@ impl Scene {
         match entity {
             EntityType::RasterImage(img) => ImageModel::from_raster_image(img),
             EntityType::Ole2Frame(ole) => ImageModel::from_ole2frame(ole),
+            EntityType::Underlay(u) if self.unloaded_underlay_definitions.contains(&u.definition_handle) => None,
             EntityType::Underlay(u) => match self.document.objects.get(&u.definition_handle) {
                 Some(acadrust::objects::ObjectType::UnderlayDefinition(def)) => {
-                    ImageModel::from_underlay(u, def)
+                    ImageModel::from_underlay(u, def, self.bg_color)
                 }
                 _ => None,
             },

@@ -3497,6 +3497,7 @@ annotate =
     .tolerance-specify-insertion-point = TOLERANCE Beszúrási pont megadása:
 
 insert =
+    .select-pdf-file = Select PDF File
     .point-clouds =
         Pont
         Felhők
@@ -4245,6 +4246,11 @@ view =
     .ucs-specify-point-in-positive-xy-plane = UCS  { common.specify }: XY · { common.positive-direction } · { common.point }:
 
 properties =
+    .pdf-underlay = PDF Underlay
+    .dwf-underlay = DWF Underlay
+    .dgn-underlay = DGN Underlay
+    .page-number = Page number
+    .layer-display-overrides = Layer display overrides
     .arrowhead-size = Nyílhegy mérete
     .attachment = Csatolás
     .chord = Húr

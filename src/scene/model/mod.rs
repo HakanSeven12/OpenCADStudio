@@ -7,6 +7,7 @@ pub mod instance_model;
 pub mod material_model;
 pub mod ole_pres;
 pub mod pdf_raster;
+pub mod pdf_vector;
 pub mod mesh_model;
 pub mod solid_model;
 pub mod solid_history;

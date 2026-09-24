@@ -3486,6 +3486,7 @@ annotate =
     .tolerance-specify-insertion-point = TOLERANCE निर्दिष्ट सम्मिलन बिंदु:
 
 insert =
+    .select-pdf-file = Select PDF File
     .point-clouds =
         बिंदु
         बादल
@@ -4234,6 +4235,11 @@ view =
     .ucs-specify-point-in-positive-xy-plane = UCS  { common.specify }: XY · { common.positive-direction } · { common.point }:
 
 properties =
+    .pdf-underlay = PDF Underlay
+    .dwf-underlay = DWF Underlay
+    .dgn-underlay = DGN Underlay
+    .page-number = Page number
+    .layer-display-overrides = Layer display overrides
     .arrowhead-size = तीर शीर्ष का आकार
     .attachment = संलग्नक
     .chord = जीवा

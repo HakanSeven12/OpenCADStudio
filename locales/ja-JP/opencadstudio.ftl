@@ -3488,6 +3488,7 @@ annotate =
     .tolerance-specify-insertion-point = TOLERANCE  挿入点を指定:
 
 insert =
+    .select-pdf-file = Select PDF File
     .point-clouds = 点群
     .attsync-block-name-to-sync = ATTSYNC  同期するブロック名:
     .attsync-no-block-named-arg = ATTSYNC: "__ocs_fmt_0__" というブロックはありません。
@@ -4234,6 +4235,11 @@ view =
     .ucs-specify-point-in-positive-xy-plane = UCS  { common.specify }: XY · { common.positive-direction } · { common.point }:
 
 properties =
+    .pdf-underlay = PDF Underlay
+    .dwf-underlay = DWF Underlay
+    .dgn-underlay = DGN Underlay
+    .page-number = Page number
+    .layer-display-overrides = Layer display overrides
     .arrowhead-size = 矢印の先端サイズ
     .attachment = アタッチ
     .chord = 弦

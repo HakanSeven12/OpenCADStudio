@@ -30,6 +30,9 @@ pub(crate) mod xclip;
 
 use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem};
 
+const FRAMES_ICON: IconKind =
+    IconKind::Svg(include_bytes!("../../../assets/icons/underlay_frames.svg"));
+
 pub struct InsertModule;
 
 impl CadModule for InsertModule {
@@ -56,19 +59,11 @@ impl CadModule for InsertModule {
                         RibbonItem::LabeledDropdown {
                             id: "FRAMES_DROPDOWN",
                             label: "",
-                            icon: IconKind::Svg(include_bytes!(
-                                "../../../assets/icons/underlay_frames.svg"
-                            )),
+                            icon: FRAMES_ICON,
                             items: vec![
-                                ("FRAMES0", "Frames Off", IconKind::Svg(include_bytes!(
-                                "../../../assets/icons/underlay_frames.svg"
-                            ))),
-                                ("FRAMES1", "Frames On", IconKind::Svg(include_bytes!(
-                                "../../../assets/icons/underlay_frames.svg"
-                            ))),
-                                ("FRAMES2", "Frames On, Not Plotted", IconKind::Svg(include_bytes!(
-                                "../../../assets/icons/underlay_frames.svg"
-                            ))),
+                                ("FRAMES0", "Frames Off", FRAMES_ICON),
+                                ("FRAMES1", "Frames On", FRAMES_ICON),
+                                ("FRAMES2", "Frames On, Not Plotted", FRAMES_ICON),
                             ],
                             default: "FRAMES1",
                         },

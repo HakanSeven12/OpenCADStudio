@@ -206,17 +206,20 @@ pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Ele
     let launcher = tooltip(
         // A right arrow turned to point into the corner.
         button(
-            iced::widget::svg(iced::widget::svg::Handle::from_memory(icons::ARROW_LONG_RIGHT))
+            iced::widget::svg(icons::themed_handle(icons::ARROW_LONG_RIGHT))
                 .width(10)
                 .height(10)
-                .rotation(iced::Radians(std::f32::consts::FRAC_PI_4)),
+                .rotation(iced::Radians(std::f32::consts::FRAC_PI_4))
+                .style(|theme: &Theme, _| iced::widget::svg::Style {
+                    color: Some(theme.palette().background.base.text),
+                }),
         )
-            .on_press(Message::RibbonToolClick {
-                tool_id: "EXTERNALREFERENCES".to_string(),
-                event: crate::modules::ModuleEvent::Command("EXTERNALREFERENCES".to_string()),
-            })
-            .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
-            .padding([0, 3]),
+        .on_press(Message::RibbonToolClick {
+            tool_id: "EXTERNALREFERENCES".to_string(),
+            event: crate::modules::ModuleEvent::Command("EXTERNALREFERENCES".to_string()),
+        })
+        .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
+        .padding([0, 3]),
         make_tip(format!("{}\n{} EXTERNALREFERENCES", t!("External References"), t!("Command:"))),
         tooltip::Position::Bottom,
     )

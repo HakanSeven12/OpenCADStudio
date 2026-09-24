@@ -287,6 +287,7 @@ pub fn set_insert_clip(
         doc.objects.insert(fdict, ObjectType::Dictionary(d));
         let mut x = XRecord::new();
         (x.handle, x.owner) = (record, fdict);
+        x.cloning_flags = acadrust::objects::DictionaryCloningFlags::KeepExisting;
         let point = |p: &[f64; 2]| XRecordEntry::new(10, XRecordValue::Point3D(p[0], p[1], 0.0));
         x.entries.push(XRecordEntry::string(102, INVERTED));
         x.entries.extend(boundary.iter().map(point));

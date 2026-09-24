@@ -13507,7 +13507,7 @@ mod layout_cache_tests {
 
     #[test]
     fn cached_layout_names_returns_same_arc_until_bump() {
-        let mut scene = Scene::new();
+        let scene = Scene::new();
         let first = scene.cached_layout_names();
         let second = scene.cached_layout_names();
         assert!(std::sync::Arc::ptr_eq(&first, &second));

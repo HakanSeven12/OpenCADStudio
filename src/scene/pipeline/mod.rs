@@ -5949,7 +5949,7 @@ mod highlight_classification_tests {
 
     #[test]
     fn each_wire_lands_in_the_bucket_the_old_predicate_chose() {
-        let wires = vec![plain("1"), circle("2"), ellipse("3"), plain("4")];
+        let wires = [plain("1"), circle("2"), ellipse("3"), plain("4")];
         let refs: Vec<&WireModel> = wires.iter().collect();
         let depth_map = rustc_hash::FxHashMap::default();
 
@@ -5979,7 +5979,7 @@ mod highlight_classification_tests {
     // reach the instances.
     #[test]
     fn the_colour_override_reaches_the_instances() {
-        let wires = vec![circle("2"), ellipse("3")];
+        let wires = [circle("2"), ellipse("3")];
         let refs: Vec<&WireModel> = wires.iter().collect();
         let depth_map = rustc_hash::FxHashMap::default();
 

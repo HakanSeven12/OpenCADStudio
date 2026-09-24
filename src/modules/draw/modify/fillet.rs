@@ -2411,7 +2411,7 @@ mod tests {
         assert_eq!(keywords(&command), ["P", "R"]);
         // The host hands the restored document back; the cache follows it.
         let mut doc = acadrust::CadDocument::new();
-        doc.add_entity(line(0.0, 0.0, 20.0, 0.0, 7));
+        let _ = doc.add_entity(line(0.0, 0.0, 20.0, 0.0, 7));
         command.on_document_undone(&doc);
         assert_eq!(command.all_entities.len(), 1);
         assert_eq!(command.all_entities[0].common().handle, Handle::new(7));

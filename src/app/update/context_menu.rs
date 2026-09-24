@@ -389,7 +389,7 @@ impl OpenCADStudio {
 mod tests {
     use super::*;
     use crate::app::settings::RightClickMode;
-    use crate::command::{CadCommand, StepInput};
+    use crate::command::StepInput;
     use crate::ui::popup::context_menu::MenuAction;
     use glam::DVec3;
     use iced::Point;

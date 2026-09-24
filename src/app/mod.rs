@@ -1258,6 +1258,15 @@ pub(super) struct OpenCADStudio {
     /// Missing SHX fonts of the last opened drawing, offered for download
     /// from the community repository (see `crate::io::font_repo`).
     missing_fonts: Option<Vec<String>>,
+    /// Drawing that produced `missing_fonts`; the active tab may change while
+    /// a download is in flight.
+    missing_fonts_path: Option<PathBuf>,
+    /// Prevent duplicate download tasks and keep modal contents visible while
+    /// the background request is running.
+    missing_fonts_downloading: bool,
+    /// Fonts skipped or unavailable during this process lifetime. Reopening a
+    /// drawing must not repeatedly nag for the same unresolved file.
+    suppressed_missing_fonts: rustc_hash::FxHashSet<String>,
     /// Drawings handed to us by other launches while `opening` was busy.
     /// `opening` is a single slot that a second `OpenPathPicked` would
     /// overwrite, and `on_file_opened` drops any result arriving once it is
@@ -4178,6 +4187,9 @@ impl OpenCADStudio {
             open_job_serial: 0,
             recovery_report: None,
             missing_fonts: None,
+            missing_fonts_path: None,
+            missing_fonts_downloading: false,
+            suppressed_missing_fonts: rustc_hash::FxHashSet::default(),
             pending_opens: std::collections::VecDeque::new(),
             active_interaction_index: None,
             queued_interaction_indices: std::collections::VecDeque::new(),

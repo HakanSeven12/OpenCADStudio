@@ -1911,12 +1911,22 @@ impl OpenCADStudio {
                 // fetch them from the community repository before the user
                 // studies garbled substitute text (unless recovery already
                 // owns the modal slot).
-                let missing = crate::io::font_repo::missing_shx_fonts(
+                let mut missing = crate::io::font_repo::missing_shx_fonts(
                     &self.tabs[i].scene.document,
                 );
-                if !missing.is_empty() && self.check_missing_fonts {
+                missing.retain(|name| {
+                    !self
+                        .suppressed_missing_fonts
+                        .contains(&crate::io::font_repo::font_key(name))
+                });
+                // Read-only/MCP evaluation sessions must remain non-blocking:
+                // report missing fonts through control state, but never offer
+                // a network/download mutation from a read-only launch.
+                if !missing.is_empty() && self.check_missing_fonts && !self.read_only {
                     self.font_source_input = self.font_source_url.clone();
                     self.missing_fonts = Some(missing);
+                    self.missing_fonts_path = self.tabs[i].current_path.clone();
+                    self.missing_fonts_downloading = false;
                     self.active_modal = Some(crate::app::ModalKind::MissingFonts);
                 }
             }

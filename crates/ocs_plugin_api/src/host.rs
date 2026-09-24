@@ -611,23 +611,88 @@ pub trait InteractiveCommand: Send {
     }
 }
 
-/// A preview wire/polyline rendered in real-time during interactive commands.
+/// A preview wire rendered in real-time during interactive commands.
+/// Supports straight polylines as well as analytical circles and arcs
+/// that render via GPU shaders with infinite smoothness.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "host", derive(serde::Serialize, serde::Deserialize))]
-pub struct PreviewWire {
-    /// World-coordinate points along the polyline.
-    pub points: Vec<[f64; 3]>,
-    /// Optional RGBA color (0.0 to 1.0). If `None`, the host's default rubber-band color (cyan) is used.
-    pub color: Option<[f32; 4]>,
+pub enum PreviewWire {
+    /// A connected sequence of straight line segments in world space.
+    Polyline {
+        points: Vec<[f64; 3]>,
+        color: Option<[f32; 4]>,
+    },
+    /// An analytical circle rendered with sub-pixel GPU anti-aliasing.
+    Circle {
+        center: [f64; 3],
+        radius: f64,
+        color: Option<[f32; 4]>,
+    },
+    /// An analytical circular arc swept counter-clockwise from `start_angle_rad` to `end_angle_rad`.
+    Arc {
+        center: [f64; 3],
+        radius: f64,
+        start_angle_rad: f64,
+        end_angle_rad: f64,
+        color: Option<[f32; 4]>,
+    },
 }
 
 impl PreviewWire {
+    /// Create a polyline preview wire with default host cyan color.
     pub fn new(points: Vec<[f64; 3]>) -> Self {
-        Self { points, color: None }
+        Self::Polyline { points, color: None }
     }
 
+    /// Optional RGBA color (0.0 to 1.0) specified for this preview wire.
+    pub fn color(&self) -> Option<[f32; 4]> {
+        match self {
+            Self::Polyline { color, .. } => *color,
+            Self::Circle { color, .. } => *color,
+            Self::Arc { color, .. } => *color,
+        }
+    }
+
+    /// Create a polyline preview wire with a custom RGBA color.
     pub fn with_color(points: Vec<[f64; 3]>, color: [f32; 4]) -> Self {
-        Self { points, color: Some(color) }
+        Self::Polyline {
+            points,
+            color: Some(color),
+        }
+    }
+
+    /// Create a straight line segment preview between two points.
+    pub fn line(from: [f64; 3], to: [f64; 3], color: Option<[f32; 4]>) -> Self {
+        Self::Polyline {
+            points: vec![from, to],
+            color,
+        }
+    }
+
+    /// Create an analytical circle preview.
+    pub fn circle(center: [f64; 3], radius: f64, color: Option<[f32; 4]>) -> Self {
+        Self::Circle {
+            center,
+            radius,
+            color,
+        }
+    }
+
+    /// Create an analytical circular arc preview.
+    pub fn arc(
+        center: [f64; 3],
+        radius: f64,
+        start_angle_rad: f64,
+        end_angle_rad: f64,
+        color: Option<[f32; 4]>,
+    ) -> Self {
+        Self::Arc {
+            center,
+            radius,
+            start_angle_rad,
+            end_angle_rad,
+            color,
+        }
     }
 }
 

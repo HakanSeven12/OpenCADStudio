@@ -669,6 +669,17 @@ impl OpenCADStudio {
             "_PDFIMPORTFILE" => {
                 return Some(Task::done(Message::PdfImportPick));
             }
+            // A file named after it skips the picker.
+            cmd if cmd.starts_with("_PDFIMPORTFILE ") => {
+                let path = cmd["_PDFIMPORTFILE ".len()..].trim().trim_matches('"').to_string();
+                match std::fs::read(&path) {
+                    Ok(bytes) => {
+                        crate::scene::model::pdf_raster::register_source(&path, std::sync::Arc::new(bytes));
+                        self.open_pdf_import_file(&path);
+                    }
+                    Err(_) => self.command_line.push_error(&format!("{path} not found.")),
+                }
+            }
             "PDFCLIP" | "CLIP" => {
                 use crate::command::CadCommand;
                 let command = crate::modules::insert::pdf_clip::PdfClipCommand::new(cmd == "CLIP");

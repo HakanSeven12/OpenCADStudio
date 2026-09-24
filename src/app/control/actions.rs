@@ -50,6 +50,8 @@ pub(super) const NAMES: &[&str] = &[
     "pdf_dialog_ok",
     "pdf_layer_toggle",
     "pdf_page_select",
+    "ribbon_tab",
+    "ribbon_dropdown",
     "close_document",
     "toggle_properties",
     "toggle_layers",
@@ -683,6 +685,16 @@ impl OpenCADStudio {
                 state.selected = pages;
                 return Ok(Task::none());
             }
+            // Bring a ribbon tab forward by module id ("pdf_underlay" for the
+            // contextual underlay tab).
+            "ribbon_tab" => {
+                let id = string(req, "value")?;
+                if !self.ribbon.select_by_id(id) {
+                    return Err(failure("no_tab", "No such ribbon tab"));
+                }
+                return Ok(Task::none());
+            }
+            "ribbon_dropdown" => Message::ToggleRibbonDropdown(string(req, "value")?.into()),
             "pdf_dialog_ok" => {
                 use crate::ui::window::pdf_dialogs::PdfDialogMsg;
                 Message::PdfDialog(match self.active_modal {

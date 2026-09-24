@@ -180,6 +180,21 @@ impl Ribbon {
         self.underlay_ctx.as_mut()
     }
 
+    /// Select a tab by its module id; "pdf_underlay" is the contextual tab.
+    pub fn select_by_id(&mut self, id: &str) -> bool {
+        if id == "pdf_underlay" {
+            self.select_underlay_tab();
+            return self.underlay_tab_active;
+        }
+        match self.modules.iter().position(|m| m.id() == id) {
+            Some(index) => {
+                self.select(index);
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn select_underlay_tab(&mut self) {
         if self.underlay_ctx.is_some() {
             self.underlay_tab_active = true;

@@ -169,9 +169,10 @@ pub(crate) fn expand_block_object(
             }
             let frame_mode =
                 crate::scene::frame::mode(document, crate::scene::frame::FrameKind::Xclip);
+            let outline = pick::xclip::clip_outline_world(document, filter, &transform);
             if polygon.len() >= 3 {
                 let mut frame = pick::xclip::frame_wire(
-                    &polygon,
+                    &outline,
                     owner.value().to_string(),
                     style.color,
                     selected,

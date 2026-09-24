@@ -715,9 +715,39 @@ impl OpenCADStudio {
                     Err(_) => self.command_line.push_error(&format!("{path} not found.")),
                 }
             }
-            "PDFCLIP" | "CLIP" => {
+            "PDFCLIP" => {
                 use crate::command::CadCommand;
-                let command = crate::modules::insert::pdf_clip::PdfClipCommand::new(cmd == "CLIP");
+                let command = crate::modules::insert::pdf_clip::PdfClipCommand::new();
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+            "CLIP" => {
+                use crate::command::CadCommand;
+                let command = crate::modules::insert::xclip::ClipCommand::new();
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+            // XCLIP takes block references chosen beforehand; others are
+            // left out.
+            "XCLIP" => {
+                use crate::command::CadCommand;
+                use crate::modules::insert::xclip::XclipCommand;
+                let inserts: Vec<acadrust::Handle> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .iter()
+                    .filter(|(_, e)| matches!(e, acadrust::EntityType::Insert(_)))
+                    .map(|(h, _)| *h)
+                    .collect();
+                let command = if inserts.is_empty() {
+                    XclipCommand::new()
+                } else {
+                    let clipped = inserts.iter().any(|h| {
+                        crate::scene::pick::xclip::filter_handle(&self.tabs[i].scene.document, *h)
+                            .is_some()
+                    });
+                    XclipCommand::for_inserts(inserts, clipped)
+                };
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }

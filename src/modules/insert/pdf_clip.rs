@@ -1,6 +1,7 @@
-// PDFCLIP / CLIP — clip a PDF underlay to a boundary.
+// PDFCLIP — clip a PDF underlay to a boundary (CLIP continues here for a
+// PDF underlay).
 //
-//   Select PDF to clip:                      (CLIP: Select Object to clip:)
+//   Select PDF to clip:
 //   Enter PDF clipping option [ON/OFF/Delete/New boundary] <New boundary>:
 //   Delete old boundary? [Yes/No] <Yes>:     (when one exists)
 //   Outside mode - Objects outside boundary will be hidden.
@@ -31,8 +32,6 @@ enum Step {
 }
 
 pub struct PdfClipCommand {
-    /// CLIP asks for any object; PDFCLIP for a PDF.
-    generic: bool,
     step: Step,
     handle: Handle,
     underlay: Option<Underlay>,
@@ -46,9 +45,8 @@ const INSIDE: &str = "Inside mode - Objects inside boundary will be hidden.";
 const BOUNDARY: &str = "Specify clipping boundary or select invert option:";
 
 impl PdfClipCommand {
-    pub fn new(generic: bool) -> Self {
+    pub fn new() -> Self {
         Self {
-            generic,
             step: Step::Select,
             handle: Handle::NULL,
             underlay: None,
@@ -62,12 +60,21 @@ impl PdfClipCommand {
     /// Create Clipping Boundary): the New boundary branch at once. Returns the
     /// command and the result of its first step.
     pub fn new_boundary(handle: Handle, underlay: Underlay) -> (Self, CmdResult) {
-        let mut command = Self::new(false);
+        let mut command = Self::new();
         command.handle = handle;
         command.underlay = Some(underlay);
         command.step = Step::Option;
         let first = command.option("N");
         (command, first)
+    }
+
+    /// An underlay CLIP picked: straight to the clipping option.
+    pub fn for_underlay(handle: Handle, underlay: Underlay) -> Self {
+        let mut command = Self::new();
+        command.handle = handle;
+        command.underlay = Some(underlay);
+        command.step = Step::Option;
+        command
     }
 
     fn finish(&self, underlay: Underlay) -> CmdResult {
@@ -167,12 +174,11 @@ impl PdfClipCommand {
 
 impl CadCommand for PdfClipCommand {
     fn name(&self) -> &'static str {
-        if self.generic { "CLIP" } else { "PDFCLIP" }
+        "PDFCLIP"
     }
 
     fn prompt(&self) -> String {
         match self.step {
-            Step::Select if self.generic => "Select Object to clip:".to_string(),
             Step::Select => "Select PDF to clip:".to_string(),
             Step::Option => {
                 "Enter PDF clipping option [ON/OFF/Delete/New boundary] <New boundary>:".to_string()
@@ -343,5 +349,5 @@ impl CadCommand for PdfClipCommand {
 }
 
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["PDFCLIP", "CLIP"]
+    names: &["PDFCLIP"]
 });

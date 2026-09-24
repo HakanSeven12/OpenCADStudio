@@ -5645,6 +5645,9 @@ mod plot_paper_tests {
         app.automation_op(r#"{"op":"new"}"#);
         let _ = app.update(Message::LayoutSwitch("Layout1".into()));
         let i = app.active_tab;
+        // Millimetre drawing units, so a ratio plots as written; the metre
+        // case has its own test.
+        app.tabs[i].scene.document.header.insertion_units = 4;
         let mut ps = app.tabs[i]
             .scene
             .plot_settings_for("Layout1")

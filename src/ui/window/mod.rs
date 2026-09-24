@@ -27,3 +27,4 @@ pub mod named_parameters;
 pub mod xref_attach;
 pub mod xref_help;
 pub mod xref_manager;
+pub mod wblock;

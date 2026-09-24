@@ -5,7 +5,7 @@ use std::fmt;
 
 use acadrust::Handle;
 use iced::widget::{
-    button, checkbox, column, combo_box, container, mouse_area, pick_list, radio, row, stack, text,
+    button, checkbox, column, combo_box, container, mouse_area, pick_list, row, stack, text,
     text_editor, text_input, Space,
 };
 use iced::{Background, Border, Element, Fill, Length, Theme};
@@ -14,7 +14,7 @@ use crate::app::Message;
 use crate::modules::draw::units;
 use crate::t;
 use crate::ui::style::common::muted_style;
-use crate::ui::style::form::{button_style, field_style};
+use crate::ui::style::form::{button_style, dialog_button, field_style, form_radio};
 
 static ICON_PICK_POINT: &[u8] = include_bytes!("../../../assets/icons/blocks/pick_point.svg");
 static ICON_SELECT_OBJECTS: &[u8] =
@@ -353,33 +353,24 @@ pub fn view_window<'a>(
     let btns_row = row![sel_obj_btn, qsel_btn].spacing(5).align_y(iced::Center);
 
     let radios = column![
-        radio(
+        form_radio(
             t!("Retain"),
             BlockObjectMode::Retain,
             Some(state.object_mode),
             Message::BlockDefObjectMode,
-        )
-        .size(15)
-        .spacing(5)
-        .text_size(11),
-        radio(
+        ),
+        form_radio(
             t!("Convert to block"),
             BlockObjectMode::Convert,
             Some(state.object_mode),
             Message::BlockDefObjectMode,
-        )
-        .size(15)
-        .spacing(5)
-        .text_size(11),
-        radio(
+        ),
+        form_radio(
             t!("Delete"),
             BlockObjectMode::Delete,
             Some(state.object_mode),
             Message::BlockDefObjectMode,
-        )
-        .size(15)
-        .spacing(5)
-        .text_size(11),
+        ),
     ]
     .spacing(2);
 
@@ -580,20 +571,11 @@ pub fn view_window<'a>(
     // ── Footer Bar ────────────────────────────────────────────────────────────
     let actions = row![
         Space::new().width(Fill),
-        button(text(t!("OK")).size(11))
-            .on_press(Message::BlockDefApply)
-            .style(button_style(true))
-            .padding([4, 16]),
-        button(text(t!("Cancel")).size(11))
-            .on_press(Message::CloseModal)
-            .style(button_style(false))
-            .padding([4, 12]),
-        button(text(t!("Help")).size(11))
-            .on_press(Message::BlockDefHelp)
-            .style(button_style(false))
-            .padding([4, 12]),
+        dialog_button(t!("OK"), Message::BlockDefApply, true),
+        dialog_button(t!("Cancel"), Message::CloseModal, false),
+        dialog_button(t!("Help"), Message::BlockDefHelp, false),
     ]
-    .spacing(6)
+    .spacing(8)
     .align_y(iced::Center);
 
     // ── Error Banner ──────────────────────────────────────────────────────────
@@ -664,15 +646,9 @@ pub fn view_window<'a>(
                     .align_x(iced::alignment::Horizontal::Center),
                 Space::new().height(16),
                 row![
-                    button(text(t!("Yes")).size(12))
-                        .on_press(Message::BlockDefConfirmRedefine(true))
-                        .padding([6, 20])
-                        .style(button_style(false)),
+                    dialog_button(t!("Yes"), Message::BlockDefConfirmRedefine(true), false),
                     // Default / safe focus on "No"
-                    button(text(t!("No")).size(12))
-                        .on_press(Message::BlockDefConfirmRedefine(false))
-                        .padding([6, 22])
-                        .style(button_style(true)),
+                    dialog_button(t!("No"), Message::BlockDefConfirmRedefine(false), true),
                 ]
                 .spacing(12)
                 .align_y(iced::Center),

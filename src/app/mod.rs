@@ -495,6 +495,8 @@ pub(super) struct OpenCADStudio {
     block_definition: Option<crate::ui::window::block_definition::BlockDefinitionState>,
     /// Working copy of the Attach External Reference dialog; None while closed.
     xref_attach: Option<crate::ui::window::xref_attach::XrefAttachState>,
+    /// Working copy of the Write Block (WBLOCK) dialog; `None` while it is closed.
+    wblock: Option<crate::ui::window::wblock::WblockState>,
     /// Working copy of the structured feature-control-frame editor.
     geometric_tolerance: Option<crate::ui::window::geometric_tolerance::State>,
     /// PICKDRAG (#226): false (default) = press-drag lassoes; true =
@@ -1883,6 +1885,7 @@ pub enum ModalKind {
     DrawingUnits,
     BlockDefinition,
     XrefAttach,
+    WriteBlock,
     GeometricTolerance,
     DraftingSettings,
     AutoConstrainSettings,
@@ -2880,6 +2883,24 @@ pub enum Message {
     BlockDefConfirmRedefine(bool),
     BlockDefDismissError,
     BlockDefHelp,
+    /// Write Block (WBLOCK) dialog messages
+    WblockSourceMode(crate::ui::window::wblock::WblockSourceMode),
+    WblockBlockName(String),
+    WblockBlockSelect(String),
+    WblockPickPoint,
+    WblockBaseX(String),
+    WblockBaseY(String),
+    WblockBaseZ(String),
+    WblockSelectObjects,
+    WblockQuickSelect,
+    WblockObjectMode(crate::ui::window::wblock::WblockObjectMode),
+    WblockFilePath(String),
+    WblockBrowsePath,
+    WblockBrowsePathResult(Option<std::path::PathBuf>),
+    WblockUnit(i16),
+    WblockApply,
+    WblockDismissError,
+    WblockHelp,
     /// One structured feature-control-frame field changed.
     ToleranceDialogField(crate::ui::window::geometric_tolerance::Field),
     /// One structured feature-control-frame option changed.
@@ -3962,6 +3983,7 @@ impl OpenCADStudio {
             drawing_units: None,
             block_definition: None,
             xref_attach: None,
+            wblock: None,
             geometric_tolerance: None,
             pick_drag_rect: false,
             perf_hud: false,

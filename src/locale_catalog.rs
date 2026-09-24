@@ -3,6 +3,17 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "Entire drawing" => Some(("common", "entire-drawing")),
+        "Delete from drawing" => Some(("common", "delete-from-drawing")),
+        "Destination" => Some(("common", "destination")),
+        "File name and path:" => Some(("common", "file-name-and-path")),
+        "Insert units:" => Some(("common", "insert-units-label")),
+        "Please select or enter a block name." => Some(("common", "wblock-err-no-block-name")),
+        "Block \"{}\" does not exist in drawing." => Some(("common", "wblock-err-block-not-found")),
+        "Please specify a file name and path." => Some(("common", "wblock-err-no-path")),
+        "Cannot write to the current drawing file." => Some(("common", "wblock-err-current-drawing")),
+        "WBLOCK writes objects, a block, or the entire drawing to a new drawing file." => Some(("common", "wblock-help-info")),
+        "WBLOCK  Specify insertion base point:" => Some(("insert", "wblock-specify-insertion-base-point")),
         "Auto Constrain" => Some(("common", "auto-constrain")),
         "Delete Constraints" => Some(("common", "delete-constraints")),
         "Dimensional" => Some(("common", "dimensional")),

@@ -1163,6 +1163,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     self.reset_modal_geometry();
                     if self.block_definition.is_some() {
                         self.active_modal = Some(crate::app::ModalKind::BlockDefinition);
+                    } else if self.wblock.is_some() {
+                        self.active_modal = Some(crate::app::ModalKind::WriteBlock);
                     }
                     return Task::none();
                 }

@@ -209,6 +209,7 @@ impl OpenCADStudio {
             Some(GeometricTolerance) => self.geometric_tolerance = None,
             Some(BlockDefinition) => self.block_definition = None,
             Some(XrefAttach) => self.xref_attach = None,
+            Some(WriteBlock) => self.wblock = None,
             Some(Hyperlink) => {
                 self.hyperlink_editor_handles.clear();
                 self.hyperlink_editor_url.clear();
@@ -346,6 +347,14 @@ impl OpenCADStudio {
                         }
                     }
                 }
+                if self.active_modal == Some(super::ModalKind::WriteBlock) {
+                    if let Some(ref mut state) = self.wblock {
+                        if state.error_message.is_some() {
+                            state.error_message = None;
+                            return Task::none();
+                        }
+                    }
+                }
                 return self.update(Message::CloseModal);
             }
             if self.active_modal == Some(super::ModalKind::BlockDefinition) {
@@ -360,6 +369,13 @@ impl OpenCADStudio {
                             return self.update(Message::BlockDefApply);
                         }
                     }
+                }
+            }
+            if self.active_modal == Some(super::ModalKind::WriteBlock) {
+                if matches!(msg, Message::CommandFinalize)
+                    || matches!(&msg, Message::ShortcutPressed(key) if key.rsplit('+').next() == Some("ENTER") || key.rsplit('+').next() == Some("RETURN"))
+                {
+                    return self.update(Message::WblockApply);
                 }
             }
             if is_modal_blocked_key_msg(&msg) {
@@ -4950,6 +4966,294 @@ impl OpenCADStudio {
                 }
                 self.commit_block_definition(false)
             }
+            Message::WblockSourceMode(mode) => {
+                if let Some(state) = self.wblock.as_mut() {
+                    state.source_mode = mode;
+                }
+                Task::none()
+            }
+            Message::WblockBlockName(name) => {
+                if let Some(state) = self.wblock.as_mut() {
+                    state.block_name = name;
+                }
+                Task::none()
+            }
+            Message::WblockBlockSelect(name) => {
+                if let Some(state) = self.wblock.as_mut() {
+                    state.block_name = name.clone();
+                    let trimmed = name.trim();
+                    if !trimmed.is_empty() {
+                        let current_path = std::path::Path::new(&state.file_path);
+                        let file_stem = current_path.file_stem().and_then(|s| s.to_str());
+                        let is_default_or_block = file_stem == Some("new_block")
+                            || state.existing_blocks.iter().any(|b| Some(b.as_str()) == file_stem);
+                        if is_default_or_block {
+                            let new_file_name = format!("{}.dwg", trimmed);
+                            if let Some(parent) = current_path.parent() {
+                                if !parent.as_os_str().is_empty() {
+                                    state.file_path = parent.join(new_file_name).to_string_lossy().to_string();
+                                } else {
+                                    state.file_path = new_file_name;
+                                }
+                            } else {
+                                state.file_path = new_file_name;
+                            }
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::WblockPickPoint => {
+                self.active_modal = None;
+                let cmd = crate::modules::insert::wblock::WblockPickBasePointCommand;
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[self.active_tab].active_cmd = Some(Box::new(cmd));
+                Task::none()
+            }
+            Message::WblockBaseX(val) => {
+                if let Some(state) = self.wblock.as_mut() {
+                    state.base_point_x = val;
+                }
+                Task::none()
+            }
+            Message::WblockBaseY(val) => {
+                if let Some(state) = self.wblock.as_mut() {
+                    state.base_point_y = val;
+                }
+                Task::none()
+            }
+            Message::WblockBaseZ(val) => {
+                if let Some(state) = self.wblock.as_mut() {
+                    state.base_point_z = val;
+                }
+                Task::none()
+            }
+            Message::WblockSelectObjects => {
+                self.active_modal = None;
+                use crate::modules::draw::select::SelectObjectsCommand;
+                let cmd = SelectObjectsCommand::plain("WBLOCK", "WBLOCK_OBJECTS_GATHERED");
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[self.active_tab].active_cmd = Some(Box::new(cmd));
+                Task::none()
+            }
+            Message::WblockQuickSelect => {
+                self.active_modal = None;
+                self.on_qselect_open()
+            }
+            Message::WblockObjectMode(mode) => {
+                if let Some(state) = self.wblock.as_mut() {
+                    state.object_mode = mode;
+                }
+                Task::none()
+            }
+            Message::WblockFilePath(path) => {
+                if let Some(state) = self.wblock.as_mut() {
+                    state.file_path = path;
+                }
+                Task::none()
+            }
+            Message::WblockBrowsePath => {
+                let default_name = if let Some(state) = self.wblock.as_ref() {
+                    let p = std::path::Path::new(&state.file_path);
+                    p.file_name()
+                        .and_then(|f| f.to_str())
+                        .unwrap_or("new_block.dwg")
+                        .to_string()
+                } else {
+                    "new_block.dwg".to_string()
+                };
+                Task::perform(
+                    async move {
+                        let path = crate::sys::file_dialog()
+                            .set_title(crate::t!("Save Block As").as_ref())
+                            .set_file_name(&default_name)
+                            .add_filter(crate::t!("DWG Files").as_ref(), &["dwg"])
+                            .add_filter(crate::t!("DXF Files").as_ref(), &["dxf"])
+                            .save_file()
+                            .await
+                            .map(|h| crate::sys::handle_path(&h));
+                        path
+                    },
+                    |path| Message::WblockBrowsePathResult(path),
+                )
+            }
+            Message::WblockBrowsePathResult(opt_path) => {
+                if let Some(path) = opt_path {
+                    if let Some(state) = self.wblock.as_mut() {
+                        state.file_path = path.to_string_lossy().to_string();
+                    }
+                }
+                Task::none()
+            }
+            Message::WblockUnit(unit) => {
+                if let Some(state) = self.wblock.as_mut() {
+                    state.unit = unit;
+                }
+                Task::none()
+            }
+            Message::WblockDismissError => {
+                if let Some(state) = self.wblock.as_mut() {
+                    state.error_message = None;
+                }
+                Task::none()
+            }
+            Message::WblockHelp => {
+                self.command_line.push_info(
+                    crate::t!("WBLOCK writes objects, a block, or the entire drawing to a new drawing file.").as_ref(),
+                );
+                Task::none()
+            }
+            Message::WblockApply => {
+                let Some(state) = self.wblock.as_mut() else {
+                    return Task::none();
+                };
+                use crate::ui::window::wblock::{WblockObjectMode, WblockSourceMode};
+                match state.source_mode {
+                    WblockSourceMode::Block => {
+                        let name = state.block_name.trim();
+                        if name.is_empty() {
+                            state.error_message =
+                                Some(crate::t!("Please select or enter a block name.").into_owned());
+                            return Task::none();
+                        }
+                        let i = self.active_tab;
+                        if self.tabs[i].scene.document.block_records.get(name).is_none() {
+                            state.error_message = Some(
+                                crate::tf!("Block \"{}\" does not exist in drawing.", name)
+                                    .into_owned(),
+                            );
+                            return Task::none();
+                        }
+                    }
+                    WblockSourceMode::Objects => {
+                        if state.selected_handles.is_empty() {
+                            state.error_message = Some(
+                                crate::t!("No objects selected. You must select objects to define a block.")
+                                    .into_owned(),
+                            );
+                            return Task::none();
+                        }
+                    }
+                    WblockSourceMode::EntireDrawing => {}
+                }
+
+                let path_str = state.file_path.trim().to_string();
+                if path_str.is_empty() {
+                    state.error_message =
+                        Some(crate::t!("Please specify a file name and path.").into_owned());
+                    return Task::none();
+                }
+
+                let mut path = std::path::PathBuf::from(path_str);
+                if path.extension().is_none() {
+                    path.set_extension("dwg");
+                }
+
+                let i = self.active_tab;
+                if let Some(current_path) = self.tabs[i].current_path.as_ref() {
+                    if current_path == &path {
+                        state.error_message = Some(
+                            crate::t!("Cannot write to the current drawing file.").into_owned(),
+                        );
+                        return Task::none();
+                    }
+                }
+
+                let state = self.wblock.take().unwrap();
+                self.active_modal = None;
+                let document = self.tabs[i].scene.document_for_save();
+                let source_mode = state.source_mode;
+                let block_name = state.block_name.trim().to_string();
+                let handles = state.selected_handles.clone();
+                let base_point = state.parse_base_point();
+                let unit = state.unit;
+                let object_mode = state.object_mode;
+
+                if source_mode == WblockSourceMode::Objects {
+                    match object_mode {
+                        WblockObjectMode::Retain => {}
+                        WblockObjectMode::Delete => {
+                            self.push_undo_snapshot(i, "WBLOCK");
+                            self.tabs[i].scene.erase_entities(&handles);
+                            self.tabs[i].dirty = true;
+                            self.tabs[i].scene.bump_geometry();
+                            self.refresh_properties();
+                        }
+                        WblockObjectMode::Convert => {
+                            let block_name_for_conv = path
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("WBLOCK")
+                                .to_string();
+                            self.push_undo_snapshot(i, "WBLOCK");
+                            let ucs = self.tabs[i].ucs_xform();
+                            let world_to_block = ucs.to_ucs_transform_at(base_point);
+                            let block_to_world = ucs.to_wcs_transform_at(base_point);
+                            let options = crate::scene::CreateBlockOptions {
+                                name: block_name_for_conv,
+                                handles: handles.clone(),
+                                base_point,
+                                world_to_block,
+                                block_to_world,
+                                mode: crate::ui::window::block_definition::BlockObjectMode::Convert,
+                                annotative: false,
+                                match_orientation: false,
+                                scale_uniformly: false,
+                                allow_exploding: true,
+                                unit,
+                                description: String::new(),
+                                hyperlink_url: String::new(),
+                                hyperlink_desc: String::new(),
+                                redefine: true,
+                            };
+                            let _ = self.tabs[i].scene.create_block_with_options(options);
+                            self.tabs[i].dirty = true;
+                            self.tabs[i].scene.bump_geometry();
+                            self.refresh_properties();
+                        }
+                    }
+                }
+
+                let worker_path = path.clone();
+                let display_name = match source_mode {
+                    WblockSourceMode::Block => block_name.clone(),
+                    WblockSourceMode::EntireDrawing => "*".to_string(),
+                    WblockSourceMode::Objects => "*".to_string(),
+                };
+                let worker_display = display_name.clone();
+
+                file::background_task(
+                    move || {
+                        let out_doc = match source_mode {
+                            WblockSourceMode::Block => {
+                                let mut d = crate::modules::insert::wblock::extract_block_to_doc(
+                                    &document,
+                                    &block_name,
+                                )
+                                .map_err(|e| e.to_string())?;
+                                d.header.insertion_units = unit;
+                                d
+                            }
+                            WblockSourceMode::EntireDrawing => {
+                                let mut d = document.clone();
+                                d.header.insertion_units = unit;
+                                d
+                            }
+                            WblockSourceMode::Objects => {
+                                crate::modules::insert::wblock::extract_entities_to_doc_with_base(
+                                    &document,
+                                    &handles,
+                                    base_point,
+                                    unit,
+                                )
+                                .map_err(|e| e.to_string())?
+                            }
+                        };
+                        crate::io::save(&out_doc, &worker_path).map_err(|e| e.to_string())
+                    },
+                    move |result| Message::WblockWriteFinished(worker_display, path, result),
+                )
+            }
             Message::ToleranceDialogField(field) => {
                 if let Some(state) = self.geometric_tolerance.as_mut() {
                     state.apply_field(field);
@@ -5904,6 +6208,8 @@ impl OpenCADStudio {
                 self.reset_modal_geometry();
                 if self.block_definition.is_some() {
                     self.active_modal = Some(super::ModalKind::BlockDefinition);
+                } else if self.wblock.is_some() {
+                    self.active_modal = Some(super::ModalKind::WriteBlock);
                 }
                 Task::none()
             }
@@ -6110,6 +6416,15 @@ impl OpenCADStudio {
                         .collect();
                     block_def.error_message = None;
                     self.active_modal = Some(super::ModalKind::BlockDefinition);
+                } else if let Some(ref mut wblock) = self.wblock {
+                    wblock.selected_handles = self.tabs[i]
+                        .scene
+                        .selected_entities()
+                        .into_iter()
+                        .map(|(h, _)| h)
+                        .collect();
+                    wblock.error_message = None;
+                    self.active_modal = Some(super::ModalKind::WriteBlock);
                 }
                 Task::none()
             }

@@ -19,14 +19,36 @@ pub fn dialog_button<'a>(
     on_press: Message,
     primary: bool,
 ) -> button::Button<'a, Message> {
-    button(text(label).size(12))
-        .on_press(on_press)
-        .padding([6, 18])
-        .style(if primary {
+    dialog_button_styled(
+        label,
+        on_press,
+        if primary {
             button::primary
         } else {
             button::secondary
-        })
+        },
+    )
+}
+
+/// Standard dialog action button with an explicit button style and optional on_press action.
+pub fn dialog_button_styled_opt<'a>(
+    label: impl text::IntoFragment<'a>,
+    on_press: Option<Message>,
+    style: fn(&Theme, button::Status) -> button::Style,
+) -> button::Button<'a, Message> {
+    button(text(label).size(12))
+        .on_press_maybe(on_press)
+        .padding([6, 18])
+        .style(style)
+}
+
+/// Standard dialog action button with an explicit button style (primary, secondary, danger, warning, etc.).
+pub fn dialog_button_styled<'a>(
+    label: impl text::IntoFragment<'a>,
+    on_press: Message,
+    style: fn(&Theme, button::Status) -> button::Style,
+) -> button::Button<'a, Message> {
+    dialog_button_styled_opt(label, Some(on_press), style)
 }
 
 /// Unified radio button helper ensuring consistent 16px size for exact pixel-grid concentric alignment.

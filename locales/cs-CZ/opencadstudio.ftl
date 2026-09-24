@@ -2311,6 +2311,7 @@ common =
     .wblock-err-no-block-name = Vyberte nebo zadejte název bloku.
     .wblock-err-block-not-found = Blok "__ocs_fmt_0__" ve výkresu neexistuje.
     .wblock-err-no-path = Zadejte název souboru a cestu.
+    .wblock-err-current-drawing = Nelze zapisovat do aktuálního souboru výkresu.
     .wblock-help-info = WBLOCK zapíše objekty, blok nebo celý výkres do nového výkresového souboru.
 errors =
     .save-warning = Uložit varování

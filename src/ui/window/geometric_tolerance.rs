@@ -13,6 +13,7 @@ use iced::{Border, Element, Fill, Length, Theme};
 
 use crate::app::Message;
 use crate::t;
+use crate::ui::style::form::{dialog_button, dialog_button_styled_opt};
 
 const EMPTY: &str = "";
 
@@ -539,25 +540,22 @@ pub fn view_window<'a>(
 
     let mut actions = row![
         Space::new().width(Fill),
-        button(text(t!("Cancel")).size(12))
-            .on_press(Message::CloseModal)
-            .padding([4, 12]),
+        dialog_button(t!("Cancel"), Message::CloseModal, false),
     ]
     .spacing(6)
     .align_y(iced::Center);
     if state.editing.is_some() {
-        actions = actions.push(
-            button(text(t!("Apply")).size(12))
-                .on_press_maybe(state.is_valid().then_some(Message::ToleranceDialogApply))
-                .padding([4, 12]),
-        );
+        actions = actions.push(dialog_button_styled_opt(
+            t!("Apply"),
+            state.is_valid().then_some(Message::ToleranceDialogApply),
+            button::secondary,
+        ));
     }
-    actions = actions.push(
-        button(text(t!("OK")).size(12))
-            .on_press_maybe(state.is_valid().then_some(Message::ToleranceDialogOk))
-            .style(button::primary)
-            .padding([4, 12]),
-    );
+    actions = actions.push(dialog_button_styled_opt(
+        t!("OK"),
+        state.is_valid().then_some(Message::ToleranceDialogOk),
+        button::primary,
+    ));
 
     column![symbol, tolerances, datums, additions, actions]
         .spacing(8)

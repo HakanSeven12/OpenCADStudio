@@ -5,7 +5,7 @@
 use std::fmt;
 
 use iced::widget::{
-    button, column, combo_box, container, image, pick_list, radio, row, text, text_input, Space,
+    button, column, combo_box, container, image, pick_list, row, text, text_input, Space,
 };
 use iced::{Element, Fill, Length, Theme};
 
@@ -13,7 +13,7 @@ use crate::app::Message;
 use crate::io::xref_model::Pathtype;
 use crate::t;
 use crate::ui::style::common::muted_style;
-use crate::ui::style::form::{button_style, field_style};
+use crate::ui::style::form::{button_style, dialog_button, field_style, form_radio};
 use crate::ui::window::block_definition::{group, labeled_checkbox};
 
 /// One edit in the dialog.
@@ -236,19 +236,18 @@ pub fn view_window<'a>(
     let reference_type = group(
         t!("Reference Type").into_owned(),
         column![
-            radio(
+            form_radio(
                 t!("Attachment"),
                 false,
                 Some(state.overlay),
-                |v| msg(XrefAttachMsg::Overlay(v))
-            )
-            .size(14)
-            .text_size(11),
-            radio(t!("Overlay"), true, Some(state.overlay), |v| msg(
-                XrefAttachMsg::Overlay(v)
-            ))
-            .size(14)
-            .text_size(11),
+                |v| msg(XrefAttachMsg::Overlay(v)),
+            ),
+            form_radio(
+                t!("Overlay"),
+                true,
+                Some(state.overlay),
+                |v| msg(XrefAttachMsg::Overlay(v)),
+            ),
         ]
         .spacing(6),
         Length::Shrink,
@@ -385,25 +384,16 @@ pub fn view_window<'a>(
         t!("Show Details")
     };
     let footer = row![
-        button(text(details_label).size(11))
+        button(text(details_label).size(12))
             .on_press(msg(XrefAttachMsg::Details(!state.details)))
-            .style(button_style(false))
-            .padding([4, 12]),
+            .style(button::secondary)
+            .padding([6, 18]),
         Space::new().width(Fill),
-        button(text(t!("OK")).size(11))
-            .on_press(msg(XrefAttachMsg::Apply))
-            .style(button_style(true))
-            .padding([4, 16]),
-        button(text(t!("Cancel")).size(11))
-            .on_press(Message::CloseModal)
-            .style(button_style(false))
-            .padding([4, 12]),
-        button(text(t!("Help")).size(11))
-            .on_press(msg(XrefAttachMsg::Help))
-            .style(button_style(false))
-            .padding([4, 12]),
+        dialog_button(t!("OK"), msg(XrefAttachMsg::Apply), true),
+        dialog_button(t!("Cancel"), Message::CloseModal, false),
+        dialog_button(t!("Help"), msg(XrefAttachMsg::Help), false),
     ]
-    .spacing(6)
+    .spacing(8)
     .align_y(iced::Center);
 
     column![name_section, body, details, footer]

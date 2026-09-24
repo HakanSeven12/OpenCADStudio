@@ -1,6 +1,7 @@
 use crate::app::settings::IsoPlane;
 use crate::app::Message;
 use crate::snap::{SnapType, ALL_3D_SNAP_MODES, ALL_SNAP_MODES};
+use crate::ui::style::form::{dialog_button, dialog_button_styled_opt};
 use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input, Space};
 use iced::{Background, Border, Element, Fill, Theme};
 use std::borrow::Cow;
@@ -664,28 +665,23 @@ pub fn view_window<'a>(
     };
 
     // ── Bottom Action Buttons ────────────────────────────────────────────
-    let ok_button = button(text(crate::t!("OK")).size(12))
-        .on_press(Message::DraftingSettingsOk)
-        .style(button::primary)
-        .padding([6, 18]);
+    let ok_button = dialog_button(crate::t!("OK"), Message::DraftingSettingsOk, true);
 
-    let apply_button = button(text(crate::t!("Apply")).size(12))
-        .on_press_maybe(if dirty {
+    let apply_button = dialog_button_styled_opt(
+        crate::t!("Apply"),
+        if dirty {
             Some(Message::DraftingSettingsApply)
         } else {
             None
-        })
-        .style(if dirty {
+        },
+        if dirty {
             button::secondary
         } else {
             button::text
-        })
-        .padding([6, 18]);
+        },
+    );
 
-    let close_button = button(text(crate::t!("Close")).size(12))
-        .on_press(Message::DraftingSettingsClose)
-        .style(button::secondary)
-        .padding([6, 18]);
+    let close_button = dialog_button(crate::t!("Close"), Message::DraftingSettingsClose, false);
 
     let action_row = row![
         Space::new().width(Fill),

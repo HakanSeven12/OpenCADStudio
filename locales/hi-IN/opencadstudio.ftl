@@ -2300,6 +2300,7 @@ common =
     .wblock-err-no-block-name = कृपया एक ब्लॉक नाम चुनें या दर्ज करें।
     .wblock-err-block-not-found = ब्लॉक "__ocs_fmt_0__" रेखाचित्र में मौजूद नहीं है।
     .wblock-err-no-path = कृपया फ़ाइल का नाम और पथ निर्दिष्ट करें।
+    .wblock-err-current-drawing = वर्तमान आरेखण फ़ाइल में नहीं लिखा जा सकता।
     .wblock-help-info = WBLOCK ऑब्जेक्ट, एक ब्लॉक, या संपूर्ण रेखाचित्र को एक नई रेखाचित्र फ़ाइल में लिखता है।
 errors =
     .save-warning = चेतावनी सहेजें

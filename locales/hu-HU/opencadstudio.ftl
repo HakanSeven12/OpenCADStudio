@@ -2311,6 +2311,7 @@ common =
     .wblock-err-no-block-name = Válasszon vagy adjon meg egy blokknevet.
     .wblock-err-block-not-found = A(z) "__ocs_fmt_0__" blokk nem létezik a rajzban.
     .wblock-err-no-path = Adja meg a fájlnevet és az elérési utat.
+    .wblock-err-current-drawing = Nem lehet írni az aktuális rajzfájlba.
     .wblock-help-info = A WBLOCK objektumokat, egy blokkot vagy a teljes rajzot új rajzfájlba menti.
 errors =
     .save-warning = Figyelmeztetés mentése

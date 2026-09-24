@@ -2312,6 +2312,7 @@ common =
     .wblock-err-no-block-name = Seleccione o escriba un nombre de bloque.
     .wblock-err-block-not-found = El bloque "__ocs_fmt_0__" no existe en el dibujo.
     .wblock-err-no-path = Especifique un nombre de archivo y una ruta.
+    .wblock-err-current-drawing = No se puede escribir en el archivo de dibujo actual.
     .wblock-help-info = WBLOCK escribe objetos, un bloque o el dibujo completo en un nuevo archivo de dibujo.
 errors =
     .save-warning = Advertencia de guardado

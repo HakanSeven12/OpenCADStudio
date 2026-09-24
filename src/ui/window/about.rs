@@ -1,7 +1,8 @@
 use crate::app::Message;
 use crate::t;
 use crate::ui::style::common::muted_style;
-use iced::widget::{button, column, container, row, svg, text, Space};
+use crate::ui::style::form::dialog_button;
+use iced::widget::{column, container, row, svg, text, Space};
 use iced::{Background, Border, Element, Fill, Length, Shrink, Theme};
 
 fn primary_style(theme: &Theme) -> iced::widget::text::Style {
@@ -136,10 +137,7 @@ pub fn view_window(
     .spacing(8)
     .width(content_width);
 
-    let copy = button(text(t!("Copy Info")).size(11))
-        .on_press(Message::AboutCopyInfo)
-        .style(button::primary)
-        .padding([6, 16]);
+    let copy = dialog_button(t!("Copy Info"), Message::AboutCopyInfo, true);
 
     container(
         column![

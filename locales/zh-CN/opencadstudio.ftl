@@ -2299,6 +2299,7 @@ common =
     .wblock-err-no-block-name = 请选择或输入块名称。
     .wblock-err-block-not-found = 图形中不存在块“__ocs_fmt_0__”。
     .wblock-err-no-path = 请指定文件名和路径。
+    .wblock-err-current-drawing = 无法写入当前图形文件。
     .wblock-help-info = WBLOCK 将对象、块或整个图形写入新的图形文件。
 errors =
     .save-warning = 保存警告

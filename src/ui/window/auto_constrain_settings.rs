@@ -1,5 +1,6 @@
 use crate::app::settings::AutoConstrainSettings;
 use crate::app::Message;
+use crate::ui::style::form::dialog_button;
 use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input, Space};
 use iced::{Element, Fill};
 
@@ -106,18 +107,9 @@ pub fn view_window<'a>(
 
     let actions = row![
         Space::new().width(Fill),
-        button(text(crate::t!("OK")))
-            .on_press(Message::AutoConstrainOk)
-            .style(button::primary)
-            .padding([6, 18]),
-        button(text(crate::t!("Apply")))
-            .on_press(Message::AutoConstrainApply)
-            .style(button::secondary)
-            .padding([6, 18]),
-        button(text(crate::t!("Cancel")))
-            .on_press(Message::AutoConstrainCancel)
-            .style(button::secondary)
-            .padding([6, 18]),
+        dialog_button(crate::t!("OK"), Message::AutoConstrainOk, true),
+        dialog_button(crate::t!("Apply"), Message::AutoConstrainApply, false),
+        dialog_button(crate::t!("Cancel"), Message::AutoConstrainCancel, false),
     ]
     .spacing(8)
     .align_y(iced::Center);

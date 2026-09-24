@@ -2312,6 +2312,7 @@ common =
     .wblock-err-no-block-name = Selecteer of voer een bloknaam in.
     .wblock-err-block-not-found = Blok "__ocs_fmt_0__" bestaat niet in de tekening.
     .wblock-err-no-path = Geef een bestandsnaam en pad op.
+    .wblock-err-current-drawing = Kan niet schrijven naar het huidige tekeningbestand.
     .wblock-help-info = WBLOCK schrijft objecten, een blok of de volledige tekening naar een nieuw tekeningbestand.
 errors =
     .save-warning = Waarschuwing opslaan

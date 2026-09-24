@@ -2296,6 +2296,7 @@ common =
     .wblock-err-no-block-name = Lütfen bir blok adı seçin veya girin.
     .wblock-err-block-not-found = "__ocs_fmt_0__" bloğu çizimde mevcut değil.
     .wblock-err-no-path = Lütfen bir dosya adı ve yolu belirtin.
+    .wblock-err-current-drawing = Geçerli çizim dosyasına yazılamıyor.
     .wblock-help-info = WBLOCK nesneleri, bir bloğu veya tüm çizimi yeni bir çizim dosyasına yazar.
 errors =
     .save-warning = Kaydetme Uyarısı

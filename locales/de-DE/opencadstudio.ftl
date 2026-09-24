@@ -2312,6 +2312,7 @@ common =
     .wblock-err-no-block-name = Bitte wählen Sie einen Blocknamen aus oder geben Sie ihn ein.
     .wblock-err-block-not-found = Block "__ocs_fmt_0__" ist in der Zeichnung nicht vorhanden.
     .wblock-err-no-path = Bitte geben Sie einen Dateinamen und Pfad an.
+    .wblock-err-current-drawing = In die aktuelle Zeichnungsdatei kann nicht geschrieben werden.
     .wblock-help-info = WBLOCK schreibt Objekte, einen Block oder die gesamte Zeichnung in eine neue Zeichnungsdatei.
 errors =
     .save-warning = Warnhinweise speichern

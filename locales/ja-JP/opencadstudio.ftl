@@ -2302,6 +2302,7 @@ common =
     .wblock-err-no-block-name = ブロック名を選択または入力してください。
     .wblock-err-block-not-found = ブロック "__ocs_fmt_0__" は図面に存在しません。
     .wblock-err-no-path = ファイル名とパスを指定してください。
+    .wblock-err-current-drawing = 現在の図面ファイルには書き込めません。
     .wblock-help-info = WBLOCK はオブジェクト、ブロック、または図面全体を新しい図面ファイルに書き出します。
 errors =
     .save-warning = 保存の警告

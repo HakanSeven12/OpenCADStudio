@@ -2315,6 +2315,7 @@ common =
     .wblock-err-no-block-name = Выберите или введите имя блока.
     .wblock-err-block-not-found = Блок "__ocs_fmt_0__" отсутствует в чертеже.
     .wblock-err-no-path = Укажите имя файла и путь к нему.
+    .wblock-err-current-drawing = Невозможно записать в текущий файл чертежа.
     .wblock-help-info = WBLOCK записывает объекты, блок или весь чертеж в новый файл чертежа.
 errors =
     .save-warning = Спасти предостережение

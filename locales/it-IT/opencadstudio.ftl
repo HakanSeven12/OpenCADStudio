@@ -2311,6 +2311,7 @@ common =
     .wblock-err-no-block-name = Selezionare o immettere il nome di un blocco.
     .wblock-err-block-not-found = Il blocco "__ocs_fmt_0__" non esiste nel disegno.
     .wblock-err-no-path = Specificare un nome file e un percorso.
+    .wblock-err-current-drawing = Impossibile scrivere nel file di disegno corrente.
     .wblock-help-info = WBLOCK scrive gli oggetti, un blocco o l'intero disegno in un nuovo file di disegno.
 errors =
     .save-warning = Salva avviso

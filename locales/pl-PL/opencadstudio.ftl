@@ -2311,6 +2311,7 @@ common =
     .wblock-err-no-block-name = Wybierz lub wprowadź nazwę bloku.
     .wblock-err-block-not-found = Blok „__ocs_fmt_0__” nie istnieje w rysunku.
     .wblock-err-no-path = Podaj nazwę pliku i ścieżkę.
+    .wblock-err-current-drawing = Nie można zapisać do bieżącego pliku rysunku.
     .wblock-help-info = WBLOCK zapisuje obiekty, blok lub cały rysunek do nowego pliku rysunku.
 errors =
     .save-warning = Zapisz ostrzeżenie

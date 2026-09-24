@@ -4,6 +4,7 @@
 // mismatched substitute.
 
 use crate::app::Message;
+use crate::ui::style::form::dialog_button_styled_opt;
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Element, Fill, Length, Shrink, Theme};
 
@@ -34,23 +35,22 @@ pub fn view_window<'a>(
         .iter()
         .map(|name| text(format!("  {name}")).size(12).into())
         .collect();
-    let download = button(
-        text(if downloading {
+    let download = dialog_button_styled_opt(
+        if downloading {
             crate::t!("Downloading...")
         } else {
             crate::t!("Download available")
-        })
-        .size(12),
-    )
-    .on_press_maybe((!downloading).then_some(Message::MissingFontsDownload))
-    .style(button::primary)
-    .padding([6, 14]);
+        },
+        (!downloading).then_some(Message::MissingFontsDownload),
+        button::primary,
+    );
     let actions = row![
         Space::new().width(content_width),
-        button(text(crate::t!("Skip")).size(12))
-            .on_press_maybe((!downloading).then_some(Message::MissingFontsDismiss))
-            .style(button::secondary)
-            .padding([6, 14]),
+        dialog_button_styled_opt(
+            crate::t!("Skip"),
+            (!downloading).then_some(Message::MissingFontsDismiss),
+            button::secondary,
+        ),
         download,
     ]
     .spacing(8);

@@ -2324,6 +2324,7 @@ common =
     .wblock-err-no-block-name = يرجى تحديد أو إدخال اسم الكتلة.
     .wblock-err-block-not-found = الكتلة "__ocs_fmt_0__" غير موجودة في الرسم.
     .wblock-err-no-path = يرجى تحديد اسم الملف والمسار.
+    .wblock-err-current-drawing = لا يمكن الكتابة إلى ملف الرسم الحالي.
     .wblock-help-info = يقوم WBLOCK بكتابة كائنات أو كتلة أو الرسم بالكامل إلى ملف رسم جديد.
 errors =
     .save-warning = تحذير الحفظ

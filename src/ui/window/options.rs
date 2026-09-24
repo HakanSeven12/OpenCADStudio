@@ -2,6 +2,7 @@ pub(crate) mod spacemouse;
 use crate::app::config::UiThemeConfig;
 use crate::app::settings::{CursorType, RightClickMode};
 use crate::app::Message;
+use crate::ui::style::form::{dialog_button, dialog_button_styled_opt};
 use iced::widget::{
     button, column, container, row, scrollable, slider, text, text_input, Space,
 };
@@ -315,18 +316,17 @@ pub fn view_window<'a>(
 
     // Changes show at once but are committed by OK / Apply; Close puts them
     // back (asking first when there is something to lose).
-    let ok = button(text(crate::t!("OK")).size(12))
-        .on_press(Message::OptionsOk)
-        .padding([6, 18])
-        .style(button::primary);
-    let apply = button(text(crate::t!("Apply")).size(12))
-        .on_press_maybe(dirty.then_some(Message::OptionsApply))
-        .padding([6, 18])
-        .style(if dirty { button::secondary } else { button::text });
-    let close = button(text(crate::tr!("action", "close")).size(12))
-        .on_press(Message::OptionsClose)
-        .padding([6, 18])
-        .style(button::secondary);
+    let ok = dialog_button(crate::t!("OK"), Message::OptionsOk, true);
+    let apply = dialog_button_styled_opt(
+        crate::t!("Apply"),
+        dirty.then_some(Message::OptionsApply),
+        if dirty {
+            button::secondary
+        } else {
+            button::text
+        },
+    );
+    let close = dialog_button(crate::tr!("action", "close"), Message::OptionsClose, false);
 
     let general = column![
         text(crate::tr!("options", "language-section")).size(15),

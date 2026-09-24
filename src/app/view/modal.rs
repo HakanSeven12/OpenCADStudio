@@ -1751,11 +1751,7 @@ fn dialog_button<'a>(
     message: Message,
     style: fn(&Theme, button::Status) -> button::Style,
 ) -> Element<'a, Message> {
-    button(text(label.into()).size(13))
-        .on_press(message)
-        .style(style)
-        .padding([6, 18])
-        .into()
+    crate::ui::style::form::dialog_button_styled(label.into(), message, style).into()
 }
 
 fn dialog_body_style(theme: &Theme) -> container::Style {

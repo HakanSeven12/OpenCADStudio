@@ -2311,6 +2311,7 @@ common =
     .wblock-err-no-block-name = Valitse tai anna lohkon nimi.
     .wblock-err-block-not-found = Lohkoa "__ocs_fmt_0__" ei ole piirustuksessa.
     .wblock-err-no-path = Määritä tiedoston nimi ja polku.
+    .wblock-err-current-drawing = Nykyiseen piirustustiedostoon ei voi kirjoittaa.
     .wblock-help-info = WBLOCK kirjoittaa kohteet, lohkon tai koko piirustuksen uuteen piirustustiedostoon.
 errors =
     .save-warning = Tallenna varoitus

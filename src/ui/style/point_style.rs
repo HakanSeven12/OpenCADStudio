@@ -6,9 +6,10 @@
 //! does the same without the dialog.
 
 use crate::app::Message;
-use iced::widget::{button, canvas, column, container, radio, row, text, text_input, Space};
-use iced::{mouse, Background, Border, Element, Length, Point, Rectangle, Size, Theme};
 use crate::ui::style::common::muted_style;
+use crate::ui::style::form::{dialog_button, form_radio};
+use iced::widget::{button, canvas, column, container, row, text, text_input, Space};
+use iced::{mouse, Background, Border, Element, Length, Point, Rectangle, Size, Theme};
 use crate::t;
 use std::borrow::Cow;
 
@@ -162,29 +163,22 @@ pub fn view_window<'a>(
     .align_y(iced::Center);
 
     let radios = column![
-        radio(
+        form_radio(
             t!("Set Size Relative to Screen"),
             true,
             Some(relative),
             Message::PointStyleSizeRelative,
-        )
-        .size(16)
-        .text_size(13),
-        radio(
+        ),
+        form_radio(
             t!("Set Size in Absolute Units"),
             false,
             Some(relative),
             Message::PointStyleSizeRelative,
-        )
-        .size(16)
-        .text_size(13),
+        ),
     ]
     .spacing(6);
 
-    let ok = button(text(t!("OK")).size(13))
-        .padding([5, 22])
-        .on_press(Message::PointStyleOk)
-        .style(button::primary);
+    let ok = dialog_button(t!("OK"), Message::PointStyleOk, true);
 
     container(
         column![

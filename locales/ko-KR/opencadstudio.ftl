@@ -2311,6 +2311,7 @@ common =
     .wblock-err-no-block-name = 블록 이름을 선택하거나 입력하십시오.
     .wblock-err-block-not-found = 블록 "__ocs_fmt_0__"이(가) 도면에 존재하지 않습니다.
     .wblock-err-no-path = 파일 이름과 경로를 지정하십시오.
+    .wblock-err-current-drawing = 현재 도면 파일에는 쓸 수 없습니다.
     .wblock-help-info = WBLOCK은 객체, 블록 또는 도면 전체를 새 도면 파일로 내보냅니다.
 errors =
     .save-warning = 경고 저장

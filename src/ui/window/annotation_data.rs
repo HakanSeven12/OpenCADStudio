@@ -13,6 +13,7 @@ use iced::{Border, Element, Fill, Length, Theme};
 
 use crate::app::Message;
 use crate::t;
+use crate::ui::style::form::{dialog_button, dialog_button_styled_opt, form_radio};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TableSource {
@@ -435,9 +436,7 @@ fn cell_style_picker<'a>(
 }
 
 fn radio_button<'a>(selected: bool, label: impl Into<String>, msg: Message) -> Element<'a, Message> {
-    let mark = if selected { "◉" } else { "○" };
-    button(row![text(mark).size(13), text(label.into()).size(12)].spacing(6))
-        .on_press(msg).padding([4, 7]).style(button::text).into()
+    form_radio(label, true, selected.then_some(true), move |_| msg.clone()).into()
 }
 
 fn preview_grid<'a>(rows: &'a [Vec<String>]) -> Element<'a, Message> {
@@ -484,7 +483,11 @@ pub fn table_insert_view(state: &TableInsertState, sizing: crate::ui::modal::Mod
         group(t!("Set cell styles"), cell_styles.into()),
         checkbox(state.preview).label(t!("Preview")).on_toggle(|v| Message::TableInsertField(TableInsertField::Preview(v))).size(14),
         text(&state.error).size(11),
-        row![Space::new().width(Fill), button(text(t!("Cancel")).size(12)).on_press(Message::CloseModal).padding([5, 12]), button(text(t!("OK")).size(12)).on_press(Message::TableInsertApply).style(button::primary).padding([5, 12])].spacing(7),
+        row![
+            Space::new().width(Fill),
+            dialog_button(t!("Cancel"), Message::CloseModal, false),
+            dialog_button(t!("OK"), Message::TableInsertApply, true),
+        ].spacing(8),
     ].spacing(8).padding(10).width(sizing.width).height(sizing.height).into()
 }
 
@@ -542,22 +545,45 @@ pub fn data_link_view(state: &DataLinkManagerState, sizing: crate::ui::modal::Mo
         group(t!("Details"), text(t!("Select a data link or create a new one.")).size(11).style(muted).into())
     };
     let actions = if state.editing {
-        row![Space::new().width(Fill), button(text(t!("Cancel")).size(12)).on_press(Message::DataLinkEditCancel).padding([5, 11]), button(text(t!("OK")).size(12)).on_press(Message::DataLinkSave).style(button::primary).padding([5, 11])].spacing(7)
+        row![
+            Space::new().width(Fill),
+            dialog_button(t!("Cancel"), Message::DataLinkEditCancel, false),
+            dialog_button(t!("OK"), Message::DataLinkSave, true),
+        ]
+        .spacing(8)
     } else {
         let enabled = state.selected.is_some();
-        let edit = button(text(t!("Edit")).size(12)).padding([5, 11]);
-        let delete = button(text(t!("Delete")).size(12)).padding([5, 11]);
-        let insert = button(text(t!("Insert Table")).size(12)).padding([5, 11]);
-        row![if enabled { edit.on_press(Message::DataLinkEdit) } else { edit }, if enabled { delete.on_press(Message::DataLinkDelete) } else { delete }, Space::new().width(Fill), if enabled { insert.on_press(Message::DataLinkInsert) } else { insert }, button(text(t!("Close")).size(12)).on_press(Message::DataLinkClose).padding([5, 11])].spacing(7)
+        let edit = dialog_button_styled_opt(t!("Edit"), enabled.then_some(Message::DataLinkEdit), button::secondary);
+        let delete = dialog_button_styled_opt(t!("Delete"), enabled.then_some(Message::DataLinkDelete), button::secondary);
+        let insert = dialog_button_styled_opt(t!("Insert Table"), enabled.then_some(Message::DataLinkInsert), button::primary);
+        let close = dialog_button(t!("Close"), Message::DataLinkClose, false);
+        row![edit, delete, Space::new().width(Fill), insert, close].spacing(8)
     };
     column![row![tree, container(right).width(Fill).height(Fill)].spacing(8).height(Fill), text(&state.status).size(11), actions]
         .spacing(7).padding(10).width(sizing.width).height(sizing.height).into()
 }
 
 fn wizard_nav(state: &DataExtractionState) -> iced::widget::Row<'_, Message> {
-    let back = button(text(t!("Back")).size(12)).padding([5, 12]);
-    let next = button(text(if state.page == ExtractionPage::Finish { t!("Finish") } else { t!("Next") }).size(12)).padding([5, 12]).style(button::primary);
-    row![Space::new().width(Fill), if state.page == ExtractionPage::Begin { back } else { back.on_press(Message::DataExtractionBack) }, button(text(t!("Cancel")).size(12)).on_press(Message::CloseModal).padding([5, 12]), if state.error.is_empty() { next.on_press(if state.page == ExtractionPage::Finish { Message::DataExtractionFinish } else { Message::DataExtractionNext }) } else { next }].spacing(7)
+    let back = dialog_button_styled_opt(
+        t!("Back"),
+        (state.page != ExtractionPage::Begin).then_some(Message::DataExtractionBack),
+        button::secondary,
+    );
+    let cancel = dialog_button(t!("Cancel"), Message::CloseModal, false);
+    let next = dialog_button_styled_opt(
+        if state.page == ExtractionPage::Finish {
+            t!("Finish")
+        } else {
+            t!("Next")
+        },
+        state.error.is_empty().then_some(if state.page == ExtractionPage::Finish {
+            Message::DataExtractionFinish
+        } else {
+            Message::DataExtractionNext
+        }),
+        button::primary,
+    );
+    row![Space::new().width(Fill), back, cancel, next].spacing(8)
 }
 
 pub fn data_extraction_view(state: &DataExtractionState, sizing: crate::ui::modal::ModalSizing) -> Element<'_, Message> {

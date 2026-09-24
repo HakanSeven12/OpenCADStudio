@@ -1498,7 +1498,8 @@ fn qselect_content<'a>(
     candidate_count: usize,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
-    use iced::widget::{checkbox, radio, rule};
+    use iced::widget::{checkbox, rule};
+    use crate::ui::style::form::{dialog_button, dialog_button_styled_opt, form_radio};
     let mut type_options: Vec<String> = vec![QSELECT_ANY_TYPE.to_string()];
     type_options.extend(types.iter().cloned());
 
@@ -1627,18 +1628,12 @@ fn qselect_content<'a>(
         append = append.on_toggle(Message::QSelectSetAppend);
     }
 
-    let cancel = button(text(t!("Cancel")).size(12))
-        .on_press(Message::QSelectClose)
-        .style(button::subtle)
-        .padding([5, 16]);
-    let apply = button(text(t!("Apply")).size(12))
-        .style(button::primary)
-        .padding([5, 18]);
-    let apply = if error.is_none() {
-        apply.on_press(Message::QSelectApply)
-    } else {
-        apply
-    };
+    let cancel = dialog_button(t!("Cancel"), Message::QSelectClose, false);
+    let apply = dialog_button_styled_opt(
+        t!("Apply"),
+        error.is_none().then_some(Message::QSelectApply),
+        button::primary,
+    );
 
     let panel_body = column![
         section_label(t!("Scope")),
@@ -1722,22 +1717,18 @@ fn qselect_content<'a>(
         section_label(t!("Result")),
         Space::new().height(5),
         column![
-            radio(
+            form_radio(
                 t!("Include matching objects"),
                 crate::app::QSelectMode::Include,
                 Some(state.mode),
                 Message::QSelectSetMode,
-            )
-            .size(14)
-            .text_size(12),
-            radio(
+            ),
+            form_radio(
                 t!("Exclude matching objects"),
                 crate::app::QSelectMode::Exclude,
                 Some(state.mode),
                 Message::QSelectSetMode,
-            )
-            .size(14)
-            .text_size(12),
+            ),
         ]
         .spacing(5),
         Space::new().height(8),

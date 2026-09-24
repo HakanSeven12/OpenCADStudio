@@ -247,21 +247,15 @@ pub fn adjusted_pixels(path: &str, page: &str, raster: &PdfPage, adjust: PageAdj
             let l = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
             rgb = [l; 3];
         }
-        if adjust.adjust_for_background {
-            // Content that would vanish into the background — near-black on a
-            // dark background, near-white on a light one, without much
-            // colour — turns to its opposite; coloured and mid-tone content
-            // stays as drawn.
-            let max = rgb[0].max(rgb[1]).max(rgb[2]);
-            let min = rgb[0].min(rgb[1]).min(rgb[2]);
-            let saturation = if max > 0.0 { (max - min) / max } else { 0.0 };
-            let l = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
-            // ponytail: fixed 0.2 / 0.8 thresholds measured on black, white
-            // and 30 % grey; a contrast-to-background test if mid tones clash.
-            let clash = if adjust.dark_background { l < 0.2 } else { l > 0.8 };
-            if saturation < 0.25 && clash {
-                rgb = rgb.map(|c| 1.0 - c);
-            }
+        if adjust.adjust_for_background && adjust.dark_background {
+            // On a dark background every colour's lightness is turned over
+            // (plus 20/255, capped at full), hue and saturation kept: black
+            // becomes white, dark red light pink. On a light background the
+            // colours stay as drawn.
+            // ponytail: offset and the light-background rule measured on the
+            // default backgrounds only (pure white on paper not measured).
+            let (h, s, l) = rgb_to_hsl(rgb);
+            rgb = hsl_to_rgb(h, s, (1.0 - l + 20.0 / 255.0).min(1.0));
         }
         if adjust.contrast < 100 {
             // Lightness is pulled towards one third, hue and saturation kept:

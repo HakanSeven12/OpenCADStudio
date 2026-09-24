@@ -1559,6 +1559,11 @@ pub enum CmdResult {
     /// Attach PDF pages: each page's underlay with its file (as stored) and
     /// page; the host creates or reuses the definitions and commits them all
     /// in one undo step, then ends the command.
+    /// XCLIP on block references; ends the command.
+    XClip {
+        inserts: Vec<Handle>,
+        action: crate::modules::insert::xclip::XclipAction,
+    },
     /// Open the PDF Import Settings dialog; the command keeps its prompt.
     OpenPdfImportSettings,
     /// Import a page of a file (PDFIMPORT File); ends the command.
@@ -2804,6 +2809,16 @@ pub trait CadCommand: Send {
     fn selection_keeps_associative_dimensions(&self) -> bool {
         false
     }
+
+    /// The command takes block references only (XCLIP): the host drops the
+    /// rest and says how many were ineligible.
+    fn selection_keeps_block_references(&self) -> bool {
+        false
+    }
+
+    /// Before each input the host says which block references carry a clip
+    /// boundary.
+    fn inject_clipped(&mut self, _clipped: &dyn Fn(Handle) -> bool) {}
 
     /// Called after a selection action completes while `is_selection_gathering` is true.
     /// `handles` is the full set of currently selected entities.

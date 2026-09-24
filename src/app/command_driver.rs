@@ -479,6 +479,42 @@ impl OpenCADStudio {
         StepInput::SelectionComplete(kept)
     }
 
+    /// Keeps only block references in a completed selection when the active
+    /// command asks for that (XCLIP), deselecting the rest and saying how many
+    /// were ineligible.
+    fn filter_block_reference_selection(&mut self, input: StepInput) -> StepInput {
+        let StepInput::SelectionComplete(handles) = input else {
+            return input;
+        };
+        let i = self.active_tab;
+        if !self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|command| command.selection_keeps_block_references())
+        {
+            return StepInput::SelectionComplete(handles);
+        }
+        let (kept, dropped): (Vec<Handle>, Vec<Handle>) = handles.into_iter().partition(|h| {
+            matches!(
+                self.tabs[i].scene.document.get_entity(*h),
+                Some(acadrust::EntityType::Insert(_))
+            )
+        });
+        for handle in &dropped {
+            self.tabs[i].scene.deselect_entity(*handle);
+        }
+        if !dropped.is_empty() {
+            let count = dropped.len();
+            self.command_line.push_info(&if count == 1 {
+                "1 was ineligible for clipping.".to_string()
+            } else {
+                format!("{count} were ineligible for clipping.")
+            });
+            self.refresh_properties();
+        }
+        StepInput::SelectionComplete(kept)
+    }
+
     /// `feed_command`, also reporting whether the step actually took the input.
     /// Only a `Text` token can come back unclaimed (`on_text_input` returning
     /// `None`), which is what lets the caller read it as something else — a
@@ -488,6 +524,18 @@ impl OpenCADStudio {
         // the rest leave the selection and the count of what went is reported,
         // as the reference does while gathering.
         let input = self.filter_associative_dimension_selection(input);
+        let input = self.filter_block_reference_selection(input);
+        // XCLIP / CLIP learn which chosen references carry a clip already.
+        {
+            let i = self.active_tab;
+            let tab = &mut self.tabs[i];
+            if let Some(command) = tab.active_cmd.as_mut() {
+                let document = &tab.scene.document;
+                command.inject_clipped(&|h| {
+                    crate::scene::pick::xclip::filter_handle(document, h).is_some()
+                });
+            }
+        }
         // Selection keywords (P / PREVIOUS, L / LAST) consume the token
         // before it reaches the command (#426).
         if let StepInput::Text(s) = &input {
@@ -3891,6 +3939,12 @@ impl OpenCADStudio {
                     self.command_line.push_info(&prompt);
                 }
                 self.refresh_properties();
+            }
+            CmdResult::XClip { inserts, action } => {
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.apply_xclip(i, inserts, action);
             }
             CmdResult::OpenPdfImportSettings => self.open_pdf_import_settings(),
             CmdResult::PdfImportFile(import) => {

@@ -26,7 +26,7 @@ pub(crate) mod wblock;
 mod xadjust;
 pub(crate) mod xattach;
 pub(crate) mod xref_cmd;
-mod xclip;
+pub(crate) mod xclip;
 
 use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem};
 

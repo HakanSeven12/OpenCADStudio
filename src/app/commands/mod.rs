@@ -16,6 +16,7 @@ mod layers;
 pub(crate) mod pdf_import;
 mod pdf_underlay;
 mod pdf_dialogs;
+mod xclip;
 mod plotvars;
 mod styleprops;
 mod view;

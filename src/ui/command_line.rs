@@ -798,7 +798,16 @@ impl CommandLine {
                 let mut col = column![].spacing(0).width(Length::Fill);
                 for (idx, cmd) in matches.iter().enumerate() {
                     let is_selected = idx == cursor;
-                    let row = button(text(cmd.clone()).size(11))
+                    // Every row keeps the icon's width so names line up.
+                    let icon: Element<'_, Message> =
+                        match crate::modules::registry::command_icon(cmd) {
+                            Some(bytes) => crate::ui::icons::semantic(bytes, 14.0),
+                            None => Space::new().width(14.0).into(),
+                        };
+                    let label = row![icon, text(cmd.clone()).size(11)]
+                        .spacing(6)
+                        .align_y(iced::Center);
+                    let row = button(label)
                         .on_press(Message::CommandSuggestionPick(cmd.clone()))
                         .width(Length::Fill)
                         .padding([2, 8])

@@ -22,6 +22,7 @@ use crate::ui::properties::{linetype_display_name, lw_options, LinetypeItem};
 
 mod widgets;
 mod draw_panel;
+pub(crate) use draw_panel::tools as panel_tools;
 mod modify_panel;
 mod color_dropdown;
 use widgets::{StyleContext, *};

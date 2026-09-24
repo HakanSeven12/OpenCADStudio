@@ -314,6 +314,15 @@ pub fn semantic<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     })
 }
 
+/// [`semantic`] faded like disabled menu text.
+pub fn semantic_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
+    Element::new(SemanticIcon {
+        bytes,
+        size,
+        opacity: 0.42,
+    })
+}
+
 fn semantic_handle(bytes: &'static [u8], theme: &Theme) -> svg::Handle {
     let key = SemanticCacheKey {
         address: bytes.as_ptr() as usize,
@@ -654,6 +663,14 @@ pub fn zoom_icon() -> &'static [u8] {
     NAV_ZOOM
 }
 
+pub fn undo_icon() -> &'static [u8] {
+    UNDO
+}
+
+pub fn redo_icon() -> &'static [u8] {
+    REDO
+}
+
 /// Layer visibility icon bytes (on / off).
 pub fn layer_visible(visible: bool) -> &'static [u8] {
     if visible {
@@ -707,6 +724,10 @@ pub fn themed_secondary_arrow_down<'a, M: 'a>(size: f32) -> Element<'a, M> {
 
 pub fn themed_disabled_arrow_down<'a, M: 'a>(size: f32) -> Element<'a, M> {
     themed_disabled(TRI_DOWN, size)
+}
+
+pub fn themed_disabled_arrow_right<'a, M: 'a>(size: f32) -> Element<'a, M> {
+    themed_disabled(TRI_RIGHT, size)
 }
 
 pub fn themed_home<'a, M: 'a>(size: f32) -> Element<'a, M> {

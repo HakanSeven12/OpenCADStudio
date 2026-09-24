@@ -126,6 +126,15 @@ const PANELS: &[Panel] = &[
     },
 ];
 
+/// Command, label and icon of every tool in the expanded Draw and Modify
+/// panels.
+pub(crate) fn tools() -> impl Iterator<Item = (&'static str, &'static str, &'static [u8])> {
+    PANELS
+        .iter()
+        .flat_map(|panel| panel.tools)
+        .map(|tool| (tool.command, tool.label, tool.icon))
+}
+
 fn panel_for_dropdown(id: &str) -> Option<Panel> {
     PANELS.iter().copied().find(|panel| {
         panel.id == id

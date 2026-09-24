@@ -1124,20 +1124,27 @@ impl Widget<Message, Theme, iced::Renderer> for ClampedPin<'_> {
 /// panel's border, when the menu opens.
 const MENU_CURSOR_INSET_X: f32 = 24.0;
 /// Width of the icon gutter every row reserves so labels line up whether or
-/// not the row carries a glyph (object snaps, Pan / Zoom).
+/// not the row carries a glyph (object snaps, command icons).
 const MENU_GUTTER_W: f32 = 18.0;
 const MENU_ICON_SIZE: f32 = 14.0;
 
-/// The gutter cell: the row's glyph, or empty space of the same width.
-fn context_menu_gutter(icon: Option<MenuIcon>) -> Element<'static, Message> {
-    let bytes = icon.map(|icon| match icon {
-        MenuIcon::Snap(t) => crate::ui::icons::osnap(t),
-        MenuIcon::Mtp => crate::ui::icons::mtp_icon(),
-        MenuIcon::Pan => crate::ui::icons::pan_icon(),
-        MenuIcon::Zoom => crate::ui::icons::zoom_icon(),
-    });
-    let cell: Element<'static, Message> = match bytes {
-        Some(bytes) => crate::ui::icons::themed::<Message>(bytes, MENU_ICON_SIZE),
+/// The gutter cell: the row's glyph, faded with a disabled row, or empty
+/// space of the same width.
+fn context_menu_gutter(icon: Option<MenuIcon>, enabled: bool) -> Element<'static, Message> {
+    use crate::ui::icons;
+    let chrome = |bytes| {
+        if enabled {
+            icons::themed::<Message>(bytes, MENU_ICON_SIZE)
+        } else {
+            icons::themed_disabled::<Message>(bytes, MENU_ICON_SIZE)
+        }
+    };
+    let cell: Element<'static, Message> = match icon {
+        Some(MenuIcon::Snap(t)) => chrome(icons::osnap(t)),
+        Some(MenuIcon::Mtp) => chrome(icons::mtp_icon()),
+        Some(MenuIcon::Chrome(bytes)) => chrome(bytes),
+        Some(MenuIcon::Tool(bytes)) if enabled => icons::semantic(bytes, MENU_ICON_SIZE),
+        Some(MenuIcon::Tool(bytes)) => icons::semantic_disabled(bytes, MENU_ICON_SIZE),
         None => iced::widget::Space::new().width(MENU_ICON_SIZE).height(MENU_ICON_SIZE).into(),
     };
     container(cell)
@@ -1188,24 +1195,27 @@ pub(super) fn viewport_context_menu_overlay(
             MenuRow::Submenu {
                 id,
                 label,
+                icon,
                 items: children,
                 open,
             } => {
                 let is_hl = highlighted == Some(sel_idx);
-                let caret = if *open {
+                let enabled = !children.is_empty();
+                let caret = if !enabled {
+                    crate::ui::icons::themed_disabled_arrow_right(9.0)
+                } else if *open {
                     crate::ui::icons::themed_arrow_down(9.0)
                 } else {
                     crate::ui::icons::themed_arrow_right(9.0)
                 };
                 let content = row![
-                    context_menu_gutter(None),
+                    context_menu_gutter(*icon, enabled),
                     text(label.clone()).size(12),
                     iced::widget::Space::new().width(Fill),
                     caret,
                 ]
                 .spacing(4)
                 .align_y(iced::Center);
-                let enabled = !children.is_empty();
                 let mut btn = button(content)
                     .padding(iced::Padding {
                         top: 3.0,
@@ -1271,7 +1281,7 @@ fn context_menu_row(item: &MenuItem, indent: f32, highlighted: bool) -> Element<
         });
     }
     let enabled = item.enabled;
-    let mut content = row![context_menu_gutter(item.icon), label_text]
+    let mut content = row![context_menu_gutter(item.icon, enabled), label_text]
         .spacing(4)
         .align_y(iced::Center);
     if let Some(hint) = item.hint.as_ref() {

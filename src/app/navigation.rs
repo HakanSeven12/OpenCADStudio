@@ -299,7 +299,7 @@ impl OpenCADStudio {
 }
 
 pub(super) fn actions() -> Vec<Action> {
-    use crate::modules::{IconKind, ModuleEvent, RibbonItem, ToolDef};
+    use crate::modules::IconKind;
     use std::collections::BTreeMap;
     let mut names = crate::command::all_registered_command_names();
     names.extend([
@@ -342,54 +342,14 @@ pub(super) fn actions() -> Vec<Action> {
             )
         })
         .collect();
-    fn describe(
-        actions: &mut BTreeMap<String, Action>,
-        command: &str,
-        label: &str,
-        icon: IconKind,
-    ) {
-        if let Some(action) = actions.get_mut(command) {
-            action.label = crate::t!(label).into_owned();
+    for (command, (label, icon)) in crate::modules::registry::ribbon_commands() {
+        if let Some(action) = actions.get_mut(command.as_str()) {
+            action.label = crate::t!(*label).into_owned();
             action.description = format!("{} ({command})", action.label);
             action.icon = match icon {
-                IconKind::Svg(bytes) => Some(bytes),
-                _ => None,
+                IconKind::Svg(bytes) => Some(*bytes),
+                IconKind::Glyph(_) => None,
             };
-        }
-    }
-    fn tool(actions: &mut BTreeMap<String, Action>, tool: &ToolDef) {
-        if let ModuleEvent::Command(command) = &tool.event {
-            describe(actions, command, tool.label, tool.icon);
-        }
-    }
-    for module in crate::modules::registry::all_modules() {
-        for group in module.ribbon_groups() {
-            for item in &group.tools {
-                match item {
-                    RibbonItem::Tool(t) | RibbonItem::LabeledTool(t) | RibbonItem::LargeTool(t) => {
-                        tool(&mut actions, t)
-                    }
-                    RibbonItem::Dropdown { items, .. }
-                    | RibbonItem::LabeledDropdown { items, .. }
-                    | RibbonItem::LargeDropdown { items, .. } => {
-                        for (label, command, icon) in items {
-                            describe(&mut actions, command, label, *icon);
-                        }
-                    }
-                    RibbonItem::ToolGrid { columns }
-                    | RibbonItem::StyleComboGroup { rows: columns, .. } => {
-                        for t in columns.iter().flatten() {
-                            tool(&mut actions, t);
-                        }
-                    }
-                    RibbonItem::LayerComboGroup { row2, row3 } => {
-                        for t in row2.iter().chain(row3) {
-                            tool(&mut actions, t);
-                        }
-                    }
-                    RibbonItem::PropertiesGroup { match_prop } => tool(&mut actions, match_prop),
-                }
-            }
         }
     }
     actions.into_values().collect()

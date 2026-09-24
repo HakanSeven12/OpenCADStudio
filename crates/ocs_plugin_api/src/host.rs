@@ -710,16 +710,20 @@ pub enum CommandStep {
     NeedPoint,
     /// Commit an entity to the document and keep collecting points.
     Commit(EntityType),
-    /// Commit multiple entities to the document and keep collecting points.
-    CommitMany(Vec<EntityType>),
     /// Commit an entity and end the command.
     CommitAndEnd(EntityType),
-    /// Commit multiple entities to the document and end the command.
-    CommitManyAndEnd(Vec<EntityType>),
     /// End the command without committing.
     Done,
     /// Cancel the command.
     Cancel,
+    // New variants go after the existing ones: the step crosses the plugin
+    // IPC, which encodes a variant by its position, so inserting one earlier
+    // would make a plugin built against the previous API send `Done` and
+    // have the host read it as something else.
+    /// Commit multiple entities to the document and keep collecting points.
+    CommitMany(Vec<EntityType>),
+    /// Commit multiple entities to the document and end the command.
+    CommitManyAndEnd(Vec<EntityType>),
 }
 
 /// Export a `BuiltinPlugin` from a `cdylib` so the host can load it at runtime.

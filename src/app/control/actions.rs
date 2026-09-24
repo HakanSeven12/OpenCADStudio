@@ -47,6 +47,7 @@ fn color_value(color: acadrust::types::Color) -> Value {
 }
 pub(super) const NAMES: &[&str] = &[
     "close_modal",
+    "pdf_dialog_ok",
     "close_document",
     "toggle_properties",
     "toggle_layers",
@@ -663,6 +664,17 @@ impl OpenCADStudio {
         let name = string(req, "name")?;
         let msg = match name {
             "close_modal" => Message::CloseModal,
+            // The open PDF dialog's OK button.
+            "pdf_dialog_ok" => {
+                use crate::ui::window::pdf_dialogs::PdfDialogMsg;
+                Message::PdfDialog(match self.active_modal {
+                    Some(crate::app::ModalKind::PdfAttach) => PdfDialogMsg::AttachOk,
+                    Some(crate::app::ModalKind::UnderlayLayers) => PdfDialogMsg::LayersOk,
+                    Some(crate::app::ModalKind::PdfImportSettings) => PdfDialogMsg::SettingsOk,
+                    Some(crate::app::ModalKind::PdfImportFile) => PdfDialogMsg::ImportOk,
+                    _ => return Err(failure("no_dialog", "No PDF dialog is open")),
+                })
+            }
             "close_document" => Message::TabClose(self.active_tab),
             "toggle_properties" => Message::ToggleProperties,
             "toggle_layers" => Message::ToggleLayers,

@@ -29,3 +29,7 @@ rustflags = [
 rustflags = [
     "-Clink-arg=/STACK:16777216",
 ]
+
+[env]
+RUST_MIN_STACK = "8388608"
+

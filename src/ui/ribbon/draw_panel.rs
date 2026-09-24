@@ -195,7 +195,13 @@ pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Ele
     }
     // The corner arrow opens the External References palette.
     let launcher = tooltip(
-        button(text("↘").size(10))
+        // A right arrow turned to point into the corner.
+        button(
+            iced::widget::svg(iced::widget::svg::Handle::from_memory(icons::ARROW_LONG_RIGHT))
+                .width(10)
+                .height(10)
+                .rotation(iced::Radians(std::f32::consts::FRAC_PI_4)),
+        )
             .on_press(Message::RibbonToolClick {
                 tool_id: "EXTERNALREFERENCES".to_string(),
                 event: crate::modules::ModuleEvent::Command("EXTERNALREFERENCES".to_string()),

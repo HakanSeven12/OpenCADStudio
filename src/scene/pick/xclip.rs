@@ -64,14 +64,7 @@ const INVERTED_COMPARE: &str = "ACAD_INVERTEDCLIP_ROUNDTRIP_COMPARE";
 /// The boundary an inverted clip was drawn with (WCS), kept beside the
 /// filter's ring in an ACAD_XREC_ROUNDTRIP record as the reference keeps it.
 pub fn inverted_boundary(doc: &CadDocument, filter: &SpatialFilter) -> Option<Vec<[f64; 2]>> {
-    let xdict = match doc.objects.get(&filter.handle)? {
-        ObjectType::SpatialFilter(_) => filter_xdictionary(doc, filter.handle)?,
-        _ => return None,
-    };
-    let record = dict_entry(doc, xdict, ROUNDTRIP)?;
-    let Some(ObjectType::XRecord(x)) = doc.objects.get(&record) else {
-        return None;
-    };
+    let x = doc.xrecord(filter.handle, ROUNDTRIP)?;
     let mut points = Vec::new();
     let mut inside = false;
     for entry in &x.entries {
@@ -86,15 +79,6 @@ pub fn inverted_boundary(doc: &CadDocument, filter: &SpatialFilter) -> Option<Ve
         }
     }
     (points.len() >= 2).then_some(points)
-}
-
-/// Filters keep their extension dictionary in the document's owner map: the
-/// dictionary owned by the filter.
-fn filter_xdictionary(doc: &CadDocument, filter: Handle) -> Option<Handle> {
-    doc.objects.iter().find_map(|(h, o)| match o {
-        ObjectType::Dictionary(d) if d.owner == filter => Some(*h),
-        _ => None,
-    })
 }
 
 /// The inverted boundary drawn as the XCLIP frame and generated polyline,
@@ -154,7 +138,7 @@ pub fn remove_insert_clip(doc: &mut CadDocument, insert: Handle) -> bool {
     let Some(spatial) = filter_handle(doc, insert) else {
         return false;
     };
-    if let Some(xdict) = filter_xdictionary(doc, spatial) {
+    if let Some(xdict) = doc.extension_dictionary_handle(spatial) {
         let children: Vec<Handle> = match doc.objects.get(&xdict) {
             Some(ObjectType::Dictionary(d)) => d.entries.iter().map(|(_, h)| *h).collect(),
             _ => Vec::new(),
@@ -279,12 +263,11 @@ pub fn set_insert_clip(
         parent.add_entry("SPATIAL", spatial);
     }
     if inverted {
-        let fdict = doc.allocate_handle();
+        let fdict = doc.ensure_extension_dictionary(spatial);
         let record = doc.allocate_handle();
-        let mut d = Dictionary::new();
-        (d.handle, d.owner, d.hard_owner) = (fdict, spatial, true);
-        d.add_entry(ROUNDTRIP, record);
-        doc.objects.insert(fdict, ObjectType::Dictionary(d));
+        if let Some(ObjectType::Dictionary(d)) = doc.objects.get_mut(&fdict) {
+            d.add_entry(ROUNDTRIP, record);
+        }
         let mut x = XRecord::new();
         (x.handle, x.owner) = (record, fdict);
         x.cloning_flags = acadrust::objects::DictionaryCloningFlags::KeepExisting;

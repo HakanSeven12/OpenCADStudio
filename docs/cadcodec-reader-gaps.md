@@ -7,7 +7,7 @@ reloading it, and comparing entity fields.
 **Status (23 September 2026):** the fixes landed in cadcodec as
 [#48](https://github.com/HakanSeven12/cadcodec/pull/48) (issues 1-6) and
 [#51](https://github.com/HakanSeven12/cadcodec/pull/51) (the first three style findings), and
-the block description with commit `dd1d7bf` (cadcodec issue #49). OCS pins `d290dbe`, which
+the block description with commit `dd1d7bf` (cadcodec issue #49). OCS pins `1c3be0c`, which
 includes it; the canaries below were flipped against `dd1d7bf`. What is still open:
 
 - **ATTDEF `lock_position`** (issue 1): the reader is complete, but the DXF writer emits no

@@ -1268,20 +1268,14 @@ fn build_derived_caches_impl(
                 EntityType::Ole2Frame(ole) => ImageModel::from_ole2frame(ole).map(|m| (handle, m)),
                 EntityType::Underlay(u) => match doc.objects.get(&u.definition_handle) {
                     Some(acadrust::objects::ObjectType::UnderlayDefinition(def)) => {
-                        {
                         // Paper-space underlays adjust to the white sheet.
-                        let model = doc.objects.values().find_map(|object| match object {
-                            acadrust::objects::ObjectType::Layout(l) if l.name == "Model" => Some(l.block_record),
-                            _ => None,
-                        });
                         let owner = u.common.owner_handle;
-                        let background = if owner.is_null() || model.is_none_or(|m| m == owner) {
+                        let background = if owner.is_null() || owner == model_block {
                             LOAD_BG
                         } else {
                             [1.0, 1.0, 1.0, 1.0]
                         };
                         ImageModel::from_underlay(u, def, background).map(|m| (handle, m))
-                    }
                     }
                     _ => None,
                 },

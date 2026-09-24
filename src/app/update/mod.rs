@@ -137,6 +137,8 @@ impl OpenCADStudio {
         // Options opened from a PDF dialog returns to it.
         if self.active_modal == Some(Options) {
             if let Some(parent) = self.options_parent.take() {
+                self.options_saved = None;
+                self.options_close_confirm = false;
                 self.active_modal = Some(parent);
                 return;
             }
@@ -1326,9 +1328,7 @@ impl OpenCADStudio {
             ),
 
             Message::PdfAttachPickResult(Ok((path, bytes))) => {
-                let i = self.active_tab;
                 let path_str = path.to_string_lossy().into_owned();
-                let _ = i;
                 crate::scene::model::pdf_raster::register_source(&path_str, bytes);
                 // Pages, placement and path type are chosen in the Attach
                 // dialog; the definition is created with the underlay.
@@ -1355,9 +1355,7 @@ impl OpenCADStudio {
                 Message::PdfImportPickResult,
             ),
             Message::PdfImportPickResult(Ok((path, bytes))) => {
-                let i = self.active_tab;
                 let path_str = path.to_string_lossy().into_owned();
-                let _ = i;
                 crate::scene::model::pdf_raster::register_source(&path_str, bytes);
                 self.open_pdf_import_file(&path_str);
                 Task::none()

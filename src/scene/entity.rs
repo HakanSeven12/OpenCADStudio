@@ -343,28 +343,7 @@ impl Scene {
             None
         };
 
-        // Auto-create an ImageDefinition object for new RasterImage entities
-        // that don't already reference one.
-        if let EntityType::RasterImage(ref mut img) = entity {
-            if img.definition_handle.is_none() {
-                use acadrust::objects::{ImageDefinition, ObjectType};
-                let def_handle = Handle::new(self.document.next_handle());
-                if self.is_recording_undo() {
-                    self.record_undo_object_before(def_handle, None);
-                }
-                let mut img_def = ImageDefinition::with_dimensions(
-                    &img.file_path,
-                    img.size.x as u32,
-                    img.size.y as u32,
-                );
-                img_def.handle = def_handle;
-                img_def.is_loaded = true;
-                self.document
-                    .objects
-                    .insert(def_handle, ObjectType::ImageDefinition(img_def));
-                img.definition_handle = Some(def_handle);
-            }
-        }
+        self.ensure_image_definition(&mut entity);
 
         // Register the entity's layer if it names one no LAYER command created
         // (e.g. a plugin-supplied layer) so it survives a DWG save instead of
@@ -1069,6 +1048,30 @@ impl Scene {
     /// caller starts an interactive insert so paste-as-block can prompt for the
     /// drop point. The geometry comes from the clipboard rather than live
     /// entities, so there is nothing to stage or erase. (#129)
+    /// Give a new RasterImage the ImageDefinition object it must reference,
+    /// unless it already names one.
+    fn ensure_image_definition(&mut self, entity: &mut EntityType) {
+        let EntityType::RasterImage(img) = entity else {
+            return;
+        };
+        if img.definition_handle.is_some() {
+            return;
+        }
+        use acadrust::objects::{ImageDefinition, ObjectType};
+        let def_handle = Handle::new(self.document.next_handle());
+        if self.is_recording_undo() {
+            self.record_undo_object_before(def_handle, None);
+        }
+        let mut img_def =
+            ImageDefinition::with_dimensions(&img.file_path, img.size.x as u32, img.size.y as u32);
+        img_def.handle = def_handle;
+        img_def.is_loaded = true;
+        self.document
+            .objects
+            .insert(def_handle, ObjectType::ImageDefinition(img_def));
+        img.definition_handle = Some(def_handle);
+    }
+
     pub fn define_block_from_owned_entities(
         &mut self,
         entities: Vec<EntityType>,
@@ -1125,6 +1128,7 @@ impl Scene {
             Self::reset_clone_subhandles(&mut self.document, &mut entity);
             entity.common_mut().handle = Handle::NULL;
             entity.common_mut().owner_handle = br_handle;
+            self.ensure_image_definition(&mut entity);
             let handle = self
                 .document
                 .add_entity(entity)

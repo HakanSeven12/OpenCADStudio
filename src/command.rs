@@ -1556,13 +1556,13 @@ pub enum CmdResult {
     BatchCopy(Vec<Handle>, Vec<EntityTransform>),
     /// Erase `handle` and replace with new entities; command stays active.
     ReplaceEntity(Handle, Vec<EntityType>),
-    /// Attach PDF pages: each page's underlay with its file (as stored) and
-    /// page; the host creates or reuses the definitions and commits them all
-    /// in one undo step, then ends the command.
     /// Open the PDF Import Settings dialog; the command keeps its prompt.
     OpenPdfImportSettings,
     /// Import a page of a file (PDFIMPORT File); ends the command.
     PdfImportFile(crate::modules::insert::pdf_import::PdfFileImport),
+    /// Attach PDF pages: each page's underlay with its file (as stored) and
+    /// page; the host creates or reuses the definitions and commits them all
+    /// in one undo step, then ends the command.
     AttachPdfPages {
         path: String,
         pages: Vec<(String, EntityType)>,

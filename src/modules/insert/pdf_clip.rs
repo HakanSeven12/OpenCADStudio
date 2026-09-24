@@ -336,9 +336,9 @@ impl CadCommand for PdfClipCommand {
             }
             _ => return None,
         };
-        let mut points: Vec<[f32; 3]> = ring.iter().map(|p| [p.x as f32, p.y as f32, p.z as f32]).collect();
+        let mut points: Vec<[f64; 3]> = ring.iter().map(|p| p.to_array()).collect();
         points.push(points[0]);
-        Some(WireModel::solid("pdf_clip_boundary".into(), points, WireModel::CYAN, false))
+        Some(WireModel::solid_f64("pdf_clip_boundary".into(), points, WireModel::CYAN, false))
     }
 }
 

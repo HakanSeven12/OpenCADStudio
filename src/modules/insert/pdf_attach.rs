@@ -329,15 +329,12 @@ impl PdfAttachCommand {
         }
     }
 
-    fn frame_at(&self, pt: DVec3) -> Vec<[f32; 3]> {
+    fn frame_at(&self, pt: DVec3) -> Vec<[f64; 3]> {
         let (w, h) = (self.page_size.0 * self.scale, self.page_size.1 * self.scale);
         let x = self.plane.vector_to_world(DVec3::new(w, 0.0, 0.0));
         let y = self.plane.vector_to_world(DVec3::new(0.0, h, 0.0));
         let corners = [pt, pt + x, pt + x + y, pt + y, pt];
-        corners
-            .iter()
-            .map(|p| [p.x as f32, p.y as f32, p.z as f32])
-            .collect()
+        corners.iter().map(|p| p.to_array()).collect()
     }
 }
 
@@ -434,7 +431,7 @@ impl CadCommand for PdfAttachCommand {
         if self.step != Step::Insertion || self.page_size.0 <= 0.0 {
             return None;
         }
-        Some(WireModel::solid(
+        Some(WireModel::solid_f64(
             "pdf_attach_frame".into(),
             self.frame_at(pt),
             WireModel::CYAN,

@@ -4,8 +4,8 @@
 use std::fmt;
 
 use iced::widget::{
-    button, column, combo_box, container, image, pick_list, radio, row, scrollable, text,
-    text_input, Space,
+    button, column, combo_box, container, image, pick_list, row, scrollable, text, text_input,
+    Space,
 };
 use iced::{Background, Border, Element, Fill, Length, Theme};
 
@@ -14,7 +14,7 @@ use crate::io::xref_model::Pathtype;
 use crate::modules::insert::pdf_import::{ImportLayers, PdfImportSettings};
 use crate::t;
 use crate::ui::style::common::muted_style;
-use crate::ui::style::form::{button_style, field_style};
+use crate::ui::style::form::{button_style, dialog_button, field_style, form_radio};
 use crate::ui::window::block_definition::{group, labeled_checkbox};
 
 /// One edit in any of the PDF dialogs.
@@ -260,18 +260,9 @@ fn read_only<'a>(label: String, value: &'a str, label_width: f32) -> Element<'a,
 fn footer<'a>(ok: PdfDialogMsg, help: &'static str) -> iced::widget::Row<'a, Message> {
     row![
         Space::new().width(Fill),
-        button(text(t!("OK")).size(11))
-            .on_press(msg(ok))
-            .style(button_style(true))
-            .padding([4, 16]),
-        button(text(t!("Cancel")).size(11))
-            .on_press(Message::CloseModal)
-            .style(button_style(false))
-            .padding([4, 12]),
-        button(text(t!("Help")).size(11))
-            .on_press(msg(PdfDialogMsg::Help(help)))
-            .style(button_style(false))
-            .padding([4, 12]),
+        dialog_button(t!("OK"), msg(ok), true),
+        dialog_button(t!("Cancel"), Message::CloseModal, false),
+        dialog_button(t!("Help"), msg(PdfDialogMsg::Help(help)), false),
     ]
     .spacing(6)
     .align_y(iced::Center)
@@ -513,10 +504,11 @@ pub fn view_attach<'a>(
     } else {
         t!("Show Details")
     };
-    let footer = row![button(text(details_label).size(11))
-        .on_press(msg(PdfDialogMsg::AttachDetails(!state.details)))
-        .style(button_style(false))
-        .padding([4, 12])]
+    let footer = row![dialog_button(
+        details_label,
+        msg(PdfDialogMsg::AttachDetails(!state.details)),
+        false
+    )]
     .push(footer(PdfDialogMsg::AttachOk, "attach"))
     .align_y(iced::Center);
 
@@ -582,13 +574,10 @@ pub fn view_layers<'a>(
                 .filter(|name| needle.is_empty() || name.to_lowercase().contains(&needle))
                 .map(|name| {
                     let on = !t.hidden.contains(name);
-                    let bulb = button(text("●").size(12).style(move |theme: &Theme| text::Style {
-                        color: Some(if on {
-                            theme.palette().warning.base.color
-                        } else {
-                            theme.palette().background.strong.color
-                        }),
-                    }))
+                    let bulb = button(crate::ui::icons::semantic(
+                        crate::ui::icons::layer_visible(on),
+                        14.0,
+                    ))
                     .on_press(msg(PdfDialogMsg::LayersToggle(name.clone())))
                     .padding([0, 4])
                     .style(|_: &Theme, _| button::Style::default());
@@ -649,9 +638,7 @@ fn settings_groups<'a>(s: &'a PdfImportSettings) -> (Element<'a, Message>, Eleme
         Length::Fill,
     );
     let layer_radio = |label: std::borrow::Cow<'static, str>, value: ImportLayers| {
-        radio(label, value, Some(s.layers), |v| msg(PdfDialogMsg::Layers(v)))
-            .size(14)
-            .text_size(11)
+        form_radio(label, value, Some(s.layers), |v| msg(PdfDialogMsg::Layers(v)))
     };
     let layers = group(
         t!("Layers").into_owned(),
@@ -827,11 +814,8 @@ pub fn view_import_file<'a>(
     .width(Length::FillPortion(1));
     let body = row![container(page_group).width(Length::FillPortion(1)), right].spacing(8);
 
-    let footer = row![button(text(t!("Options...")).size(11))
-        .on_press(msg(PdfDialogMsg::Options))
-        .style(button_style(false))
-        .padding([4, 12])]
-    .push(footer(PdfDialogMsg::ImportOk, "import"))
+    let footer = row![dialog_button(t!("Options..."), msg(PdfDialogMsg::Options), false)]
+        .push(footer(PdfDialogMsg::ImportOk, "import"))
     .align_y(iced::Center);
 
     column![file_row, body, footer]

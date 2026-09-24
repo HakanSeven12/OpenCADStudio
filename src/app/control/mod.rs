@@ -444,7 +444,7 @@ impl OpenCADStudio {
             "mtext_editor":self.mtext_editor.as_ref().map(|e|json!({"text":e.content.text(),"height":e.height,"style":e.style})),
             "text_editor":self.text_inline.is_some(),"event_cursor":self.control.serial,
             "operation":self.control.pending.as_ref().map(|p| &p.id),
-            "capabilities":["commands","command_manifest","step_input","batch","compact_results","entity_pick","structure_pick","selection","user_select","properties","records","record_schemas","record_filters","atomic_record_updates","layers","history","documents","events","capture","viewport_capture","measure","spatial_query"]
+            "capabilities":["commands","command_manifest","step_input","batch","compact_results","entity_pick","structure_pick","selection","user_select","properties","records","record_schemas","record_filters","atomic_record_updates","layers","history","documents","events","capture","viewport_capture","measure","spatial_query","audit","verified_save","explicit_save_version"]
         })
     }
 
@@ -469,6 +469,7 @@ impl OpenCADStudio {
                 | "history"
                 | "xdata_get"
                 | "get_selection"
+                | "audit"
         );
         if !query && !self.control.enabled {
             return (
@@ -974,8 +975,36 @@ impl OpenCADStudio {
                     .map(std::path::PathBuf::from)
                     .or_else(|| self.tabs[i].current_path.clone())
                     .ok_or_else(|| failure("path_required", "Supply a save path"))?;
+                let default_is_dxf = crate::io::source_is_dxf(
+                    self.tabs[i].current_path.as_deref(),
+                    &self.tabs[i].scene.document,
+                );
+                let (version, is_dxf) = super::automation::requested_save_target(
+                    req,
+                    self.tabs[i].scene.document.version,
+                    default_is_dxf,
+                    Some(&path),
+                )
+                .map_err(|error| failure("invalid_target", error))?;
+                let dropped = crate::io::dropped_on_save_count(
+                    &self.tabs[i].scene.document,
+                    version,
+                    is_dxf,
+                );
+                if dropped > 0 && req["allow_lossy"].as_bool() != Some(true) {
+                    return Err(failure(
+                        "lossy_conversion_not_acknowledged",
+                        format!(
+                            "Conversion would drop {dropped} unsupported record(s); set allow_lossy=true to acknowledge"
+                        ),
+                    ));
+                }
+                self.set_control_result(json!({
+                    "saved":path,"target_format":if is_dxf { "dxf" } else { "dwg" },
+                    "target_version":format!("{version:?}"),"dropped_on_save":dropped,
+                }));
                 if self.main_window.is_none() {
-                    self.save_tab_synchronously_protected(i, path, true)
+                    self.save_tab_synchronously_protected_as(i, path, version, true)
                         .map_err(|e| failure("save_failed", e))?;
                     Task::none()
                 } else {
@@ -983,13 +1012,19 @@ impl OpenCADStudio {
                     self.queue_native_save(
                         i,
                         path,
-                        acadrust::DxfVersion::AC1032,
+                        version,
                         super::SavePurpose::SaveAs,
                         super::SaveContinuation::None,
                         true,
                         true,
                     )
                 }
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            "save_verified" => {
+                let result = self.save_verified_request(req)?;
+                self.set_control_result(result);
+                Task::none()
             }
             "capture" => {
                 let window = self

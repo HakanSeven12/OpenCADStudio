@@ -1360,6 +1360,25 @@ pub fn parse_save_format(format: &str) -> (&'static str, acadrust::DxfVersion) {
     (ext, version)
 }
 
+/// Parse an explicit automation/CLI target version without silently falling
+/// back to a newer format. Accepts either release names (`R14`, `2000`, …)
+/// or their DXF codes (`AC1014`, `AC1015`, …).
+pub fn parse_target_version(value: &str) -> Result<acadrust::DxfVersion, String> {
+    use acadrust::DxfVersion;
+    match value.trim().to_ascii_uppercase().as_str() {
+        "R14" | "14" | "AC1014" => Ok(DxfVersion::AC1014),
+        "2000" | "AC1015" => Ok(DxfVersion::AC1015),
+        "2004" | "AC1018" => Ok(DxfVersion::AC1018),
+        "2007" | "AC1021" => Ok(DxfVersion::AC1021),
+        "2010" | "AC1024" => Ok(DxfVersion::AC1024),
+        "2013" | "AC1027" => Ok(DxfVersion::AC1027),
+        "2018" | "AC1032" => Ok(DxfVersion::AC1032),
+        _ => Err(format!(
+            "unsupported target version {value:?}; use R14, 2000, 2004, 2007, 2010, 2013 or 2018"
+        )),
+    }
+}
+
 /// Reverse of [`parse_save_format`]: the Save-dialog format string for a
 /// version + DXF/DWG choice (e.g. `AC1018, is_dxf=false` -> `"DWG 2004"`).
 /// Used to default the Save-As dropdown to the loaded file's version so a

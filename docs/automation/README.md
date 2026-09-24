@@ -20,6 +20,19 @@ The server provides four tools:
 - `ocs_execute` performs one operation, an atomic record update, or a sequential batch against the real editor.
 - `ocs_capture` returns a bounded PNG of the drawing viewport or complete window.
 
+Run `python docs/automation/mcp_acceptance.py target/debug/OpenCADStudio.exe`
+for a repeatable end-to-end acceptance. It creates visible geometry through
+MCP, audits and verified-saves DWG 2000/2013/2018 plus DXF 2000, and records a
+viewport PNG and JSON report below `target/acceptance/`.
+
+On a Windows workstation with a reference CAD application's command-line
+console, run
+`docs/automation/reference_acceptance.ps1 -Directory target/acceptance/TIMESTAMP -ConsolePath <console.exe>`.
+It opens the three generated DWGs read-only in isolated console profiles, runs
+AUDIT without repairs, and keeps one log per version. A console that stays
+alive after `QUIT` is terminated after the timeout (only the process the runner
+launched), and `ForcedTermination` is recorded separately from the audit result.
+
 Native builds also accept a second, headless entry point (`OpenCADStudio --serve`, one
 JSON request per line) for scripts and CI; the two native channels, their startup dialogs
 and their limits are described in [native.md](native.md).
@@ -39,6 +52,42 @@ The normal flow is to call `ocs_sessions`, pass its returned `session_id` as `oc
 ```
 
 Call `ocs_read` with `op: "capabilities"` before unfamiliar work. It reports the command, geometry, transaction, capture, and database facilities supported by the running build. The `records.collections` list gives every available database collection, its record count, and whether it can be edited.
+
+Before delivery, call `ocs_read` with `op: "audit"` and the intended
+`target_format` / `target_version`. The report includes entity manifests,
+layers, blocks, finite bounds, duplicate entity handles, DXF dangling handle
+references, source hash, and `dropped_on_save`. A clean in-memory document can
+still be lossy for a different format, so target selection is part of the
+audit:
+
+```json
+{
+  "ocs_session_id": "SESSION_FROM_OCS_SESSIONS",
+  "op": "audit",
+  "parameters": {"target_format": "dwg", "target_version": "2000"}
+}
+```
+
+Use `save_verified` for the delivery write. It requires an explicit absolute
+path, refuses overwrite and lossy conversion unless separately acknowledged,
+writes the requested version, reopens it, checks the actual version, compares
+the semantic entity manifest, audits raw DXF handle references, and returns a
+SHA-256 hash. A verification failure preserves the output for diagnosis and
+reports it as failed instead of silently declaring success.
+
+```json
+{
+  "ocs_session_id": "SESSION_FROM_OCS_SESSIONS",
+  "request": {
+    "op": "save_verified",
+    "request_id": "deliver-2026-09-22-1",
+    "path": "C:\\drawings\\issued\\plan.dwg",
+    "target_format": "dwg",
+    "target_version": "2000",
+    "overwrite": false
+  }
+}
+```
 
 Call `ocs_read` with `op: "record_schema"` before editing an unfamiliar record. With no parameters it lists the complete generated type registry. A collection returns the record types accepted by that collection even when the current drawing has no instance of a type. Supplying both `collection` and `type` returns the type's complete dependency graph, flattened property paths, JSON types, optional and sequence markers, enum variants, integer bounds, unambiguous unit annotations, identity fields, and write rules:
 

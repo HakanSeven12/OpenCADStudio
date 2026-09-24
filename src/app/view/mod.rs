@@ -913,6 +913,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     isometric: self.isometric_drafting,
                     iso_plane: self.iso_plane,
                     snap_angle_deg: self.snap_angle_deg,
+                    pick_pending: self.pending_pick_label().is_some(),
                 },
                 crate::ui::overlay::SelectionVisualOptions {
                     area: self.model_space.selection_area,
@@ -2061,6 +2062,7 @@ bg={bg_ms:.1}ms n={view_count}"
             self.win_size.1,
             self.control.enabled,
             self.control_busy(),
+            self.pending_pick_label().is_some(),
         );
         let center_stack: Element<'_, Message> = if thumbnail_capture_clean {
             workspace
@@ -2726,7 +2728,11 @@ impl OpenCADStudio {
             })
         };
         #[cfg(not(target_arch = "wasm32"))]
-        let control = super::control::subscribe().map(Message::ControlRequest);
+        let control = iced::Subscription::batch([
+            super::control::subscribe().map(Message::ControlRequest),
+            // Loopback REST channel when launched with files + --http.
+            super::control::http_bridge::subscribe().map(Message::ControlRequest),
+        ]);
         #[cfg(target_arch = "wasm32")]
         let control = iced::time::every(std::time::Duration::from_millis(50))
             .map(|_| Message::PollWebControl);

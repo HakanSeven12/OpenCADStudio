@@ -358,6 +358,34 @@ fn plot_content_extents(content: &PlotContent) -> Option<(f64, f64, f64, f64)> {
         .then_some(bounds)
 }
 
+/// Stamp the owning entity's effective color index onto a plot wire so CTB
+/// plot-style lookups (`wire.aci > 0`) apply: an entity's own ACI 1-255 is
+/// used as-is, ByLayer resolves through the layer table, and true-color
+/// objects keep `aci = 0` ("0 means true-color" — no CTB mapping). Wires
+/// whose owner cannot be resolved keep the index they carry.
+fn plot_owner_aci(scene: &crate::scene::Scene, wire: &mut crate::scene::WireModel) {
+    let Some(handle) = crate::scene::Scene::handle_from_wire_name(&wire.name) else {
+        return;
+    };
+    let Some(entity) = scene.document.get_entity(handle) else {
+        return;
+    };
+    let common = entity.common();
+    wire.aci = match &common.color {
+        acadrust::types::Color::Index(index) => *index,
+        acadrust::types::Color::ByLayer => scene
+            .document
+            .layers
+            .get(&common.layer)
+            .map(|layer| match &layer.color {
+                acadrust::types::Color::Index(index) => *index,
+                _ => 0,
+            })
+            .unwrap_or(7),
+        _ => 0,
+    };
+}
+
 fn plot_scene_content(
     scene: &crate::scene::Scene,
     paper_space_last: bool,
@@ -389,7 +417,10 @@ fn plot_scene_content(
         wires
             .into_iter()
             .zip(depths)
-            .map(|(wire, draw_depth)| crate::io::pdf_export::PlotWire { wire, draw_depth })
+            .map(|(mut wire, draw_depth)| {
+                plot_owner_aci(scene, &mut wire);
+                crate::io::pdf_export::PlotWire { wire, draw_depth }
+            })
             .collect::<Vec<_>>()
     };
     let paper_wires = with_depth(paper_wires);
@@ -417,7 +448,10 @@ fn plot_scene_content(
     model_pattern_wires.retain(|(wire, _)| wire.plot_visible);
     let model_pattern_wires = model_pattern_wires
         .into_iter()
-        .map(|(wire, draw_depth)| crate::io::pdf_export::PlotWire { wire, draw_depth })
+        .map(|(mut wire, draw_depth)| {
+            plot_owner_aci(scene, &mut wire);
+            crate::io::pdf_export::PlotWire { wire, draw_depth }
+        })
         .collect::<Vec<_>>();
 
     let (wires, hatches, wipeouts, images, splits) = if paper_space_last {
@@ -3703,10 +3737,11 @@ impl OpenCADStudio {
             }
         };
         let worker_path = path.clone();
+        let fallback_style = self.dialog_plot_style(&dialog);
         self.save_config();
         self.close_active_modal();
         let work = move || {
-            crate::io::pdf_export::export_pdf_pages(&pages, &worker_path, None)
+            crate::io::pdf_export::export_pdf_pages(&pages, &worker_path, fallback_style.as_ref())
                 .map(|_| {
                     crate::tf!(
                         "Exported {} layouts to {}",
@@ -3745,13 +3780,14 @@ impl OpenCADStudio {
                 }
             };
             let options = self.plot_print_options(&dialog);
+            let fallback_style = self.dialog_plot_style(&dialog);
             let temp_path = crate::io::print_to_printer::temp_pdf_path("print_all");
             self.save_config();
             self.close_active_modal();
             self.command_line
                 .push_info(crate::t!("Sending selected layouts to the system printer…").as_ref());
             let work = move || {
-                crate::io::pdf_export::export_pdf_pages(&pages, &temp_path, None)
+                crate::io::pdf_export::export_pdf_pages(&pages, &temp_path, fallback_style.as_ref())
                     .and_then(|_| {
                         crate::io::print_to_printer::print_existing_pdf(&temp_path, &options)
                     })
@@ -3796,7 +3832,7 @@ impl OpenCADStudio {
         self.layout_plot_page_for(&self.plot_dialog.area)
     }
 
-    fn layout_plot_page_for(&self, plot_area: &str) -> PdfPageInput {
+    pub(in crate::app) fn layout_plot_page_for(&self, plot_area: &str) -> PdfPageInput {
         let i = self.active_tab;
         let scene = &self.tabs[i].scene;
         let paper_space = scene.current_layout != "Model";
@@ -4945,7 +4981,7 @@ impl OpenCADStudio {
     }
 
     /// Load a `PlotSettings` into the dialog editor fields.
-    fn load_plotsettings_into_dialog(&mut self, ps: &acadrust::objects::PlotSettings) {
+    pub(in crate::app) fn load_plotsettings_into_dialog(&mut self, ps: &acadrust::objects::PlotSettings) {
         use crate::io::paper_catalog::PaperUnits;
         use acadrust::objects::{PlotType, ShadePlotMode, ShadePlotResolutionLevel};
         self.plot_setup_template = Some(ps.clone());
@@ -5303,15 +5339,15 @@ impl OpenCADStudio {
             .cloned()
     }
 
-    fn window_plot_job(&self) -> Option<PdfPageInput> {
+    pub(in crate::app) fn window_plot_job(&self) -> Option<PdfPageInput> {
         self.area_plot_job(self.plot_window?)
     }
 
-    fn display_plot_job(&self) -> Option<PdfPageInput> {
+    pub(in crate::app) fn display_plot_job(&self) -> Option<PdfPageInput> {
         self.area_plot_job(self.display_plot_window()?)
     }
 
-    fn limits_plot_job(&self) -> Option<PdfPageInput> {
+    pub(in crate::app) fn limits_plot_job(&self) -> Option<PdfPageInput> {
         let (min, max) = self.tabs[self.active_tab].scene.current_drawing_limits()?;
         self.area_plot_job((min.x, min.y, max.x, max.y))
     }
@@ -5338,7 +5374,7 @@ impl OpenCADStudio {
         ))
     }
 
-    fn extents_plot_job(&self) -> Option<PdfPageInput> {
+    pub(in crate::app) fn extents_plot_job(&self) -> Option<PdfPageInput> {
         let scene = &self.tabs[self.active_tab].scene;
         if scene.current_layout == "Model" {
             let (min, max) = scene.model_space_extents()?;

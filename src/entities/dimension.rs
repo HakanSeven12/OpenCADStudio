@@ -27,6 +27,7 @@ pub(crate) fn set_dimension_text_override(base: &mut DimensionBase, text: Option
 
 /// Recompute the fields a script cannot set: the base definition point and
 /// the stored measurement, exactly as grip edits do.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) fn normalize_scripted_dimension(dim: &mut Dimension) {
     let definition_point = dimension_definition_point(dim);
     dim.base_mut().definition_point = definition_point;

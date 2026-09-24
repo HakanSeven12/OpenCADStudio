@@ -62,7 +62,7 @@ pub(super) fn layout_entry_name(s: &str) -> &str {
     s.trim_start_matches('*').trim_end_matches('*')
 }
 
-pub(super) fn parse_plot_scale(s: &str) -> (f64, f64) {
+pub(in crate::app) fn parse_plot_scale(s: &str) -> (f64, f64) {
     if s == "Fit" {
         return (1.0, 1.0);
     }

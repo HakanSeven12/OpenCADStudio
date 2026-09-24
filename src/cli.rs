@@ -85,6 +85,11 @@ pub struct Cli {
     #[arg(help = crate::t!("TCP port for --serve (defaults to stdin/stdout).").into_owned(), long_help = None)]
     pub port: Option<u16>,
 
+    /// Expose the headless automation API as a REST HTTP server on this port.
+    #[arg(long, value_name = "PORT")]
+    #[arg(help = crate::t!("Serve the automation API over REST on http://127.0.0.1:PORT").into_owned(), long_help = None)]
+    pub http: Option<u16>,
+
     /// Headless convert: read IN, write OUT (format from OUT's extension), exit.
     #[arg(long, num_args = 2, value_names = ["IN", "OUT"])]
     #[arg(help = crate::t!("Convert IN to OUT using the output file extension, then exit.").into_owned(), long_help = None)]

@@ -606,6 +606,7 @@ mod tests {
 /// Rebuild the derived spline after a scripted create or edit of the
 /// generating parameters. `radius` is the top radius; the base radius is the
 /// start point's distance from the axis.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) fn normalize_scripted_helix(old: Option<&Helix>, new: &mut Helix) -> Result<(), String> {
     let unchanged = old.is_some_and(|old| {
         old.axis_base_point == new.axis_base_point

@@ -51,11 +51,20 @@ fn cmd_input_id() -> iced::widget::Id {
     iced::widget::Id::new(CMD_INPUT_ID)
 }
 
-fn mcp_status(enabled: bool, busy: bool) -> (&'static str, Color) {
+/// Footer pill state for the automation channel. `waiting` — a client
+/// `user_select` / `getpoint` is parked and the person at the screen must
+/// answer — outranks `busy`: the screen has to say "act now", not just
+/// "something is running".
+fn mcp_status(enabled: bool, busy: bool, waiting: bool) -> (&'static str, Color) {
     if !enabled {
         (
             "MCP control is off",
             Color::from_rgb(0.90, 0.35, 0.35),
+        )
+    } else if waiting {
+        (
+            "MCP is waiting for you to pick — Enter confirms, Esc cancels",
+            Color::from_rgb(0.30, 0.55, 0.98),
         )
     } else if busy {
         (
@@ -633,6 +642,7 @@ impl CommandLine {
         window_height: f32,
         control_enabled: bool,
         control_busy: bool,
+        pick_pending: bool,
     ) -> Element<'a, Message> {
         // Only the most recent entries pushed within COMMANDLINEFADETIME
         // show on the overlay (0 skips transient lines). The dropdown button
@@ -844,7 +854,7 @@ impl CommandLine {
                 .align_y(iced::alignment::Vertical::Center),
         ]
         .width(Length::Fill);
-        let (mcp_tooltip, mcp_color) = mcp_status(control_enabled, control_busy);
+        let (mcp_tooltip, mcp_color) = mcp_status(control_enabled, control_busy, pick_pending);
         let mcp_btn = button(text("MCP").size(11))
             .on_press(Message::ControlToggle)
             .style(move |theme: &Theme, status| {
@@ -1157,9 +1167,14 @@ mod tests {
 
     #[test]
     fn mcp_status_distinguishes_off_ready_and_busy() {
-        assert_eq!(mcp_status(false, false).0, "MCP control is off");
-        assert_eq!(mcp_status(true, false).0, "MCP control is ready");
-        assert_eq!(mcp_status(true, true).0, "MCP is handling a request");
+        assert_eq!(mcp_status(false, false, false).0, "MCP control is off");
+        assert_eq!(mcp_status(true, false, false).0, "MCP control is ready");
+        assert_eq!(mcp_status(true, true, false).0, "MCP is handling a request");
+        // A parked pick outranks the plain busy state: the person must act.
+        assert_eq!(
+            mcp_status(true, true, true).0,
+            "MCP is waiting for you to pick — Enter confirms, Esc cancels"
+        );
     }
 
     #[test]

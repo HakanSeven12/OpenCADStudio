@@ -97,7 +97,7 @@ mod dynamic;
 mod file;
 mod page_setup_import;
 mod style;
-mod util;
+pub(in crate::app) mod util;
 mod viewport;
 mod viewport_snap;
 
@@ -404,10 +404,13 @@ impl OpenCADStudio {
         self.finish_all_pending_history();
         // After every message, mirror the active command step's prompt so
         // its history line stays pinned (non-fading) until the step changes.
+        // A pending client pick (`user_select` / `getpoint`) pins its labeled
+        // request line the same way while no command owns the prompt.
         let prompt = self.tabs[self.active_tab]
             .active_cmd
             .as_ref()
-            .map(|c| c.prompt());
+            .map(|c| c.prompt())
+            .or_else(|| self.pending_pick_label());
         self.command_line.set_step_prompt(prompt);
         // Mirror the step's clickable options so they render as buttons (#304).
         let opts = self.tabs[self.active_tab]
@@ -528,7 +531,36 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ControlRequest(envelope) => {
+                // Mirror the automation trail into the message list so the
+                // person at the screen can review what clients asked and
+                // where it failed — the JSON reply alone reaches only the
+                // caller. High-frequency polls are traffic, not activity.
+                let op = envelope.request["op"].as_str().unwrap_or("").to_owned();
                 let (response, task) = self.control_request(envelope.request);
+                if !matches!(
+                    op.as_str(),
+                    "" | "state" | "hello" | "operation" | "events" | "capabilities"
+                ) {
+                    if response["ok"] == false {
+                        let code = response["code"].as_str().unwrap_or("failed");
+                        let detail = response["error"].as_str().unwrap_or("");
+                        self.command_line.push_error(&format!(
+                            "automation {op}: {code} — {detail}"
+                        ));
+                    } else if matches!(
+                        response["status"].as_str(),
+                        Some("completed" | "cancelled" | "waiting_input")
+                    ) && !matches!(
+                        op.as_str(),
+                        // These already narrate themselves in richer lines.
+                        "user_select" | "getpoint" | "cancel"
+                    ) {
+                        self.command_line.push_info(&format!(
+                            "automation {op}: {}",
+                            response["status"].as_str().unwrap_or("")
+                        ));
+                    }
+                }
                 envelope.reply.send(response);
                 task
             }

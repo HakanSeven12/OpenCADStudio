@@ -1,6 +1,6 @@
 mod alias;
 mod automation;
-mod control;
+pub(crate) mod control;
 pub(crate) fn automation_action_names() -> &'static [&'static str] {
     control::action_names()
 }
@@ -3871,7 +3871,7 @@ impl OpenCADStudio {
         self.videos = videos;
     }
 
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let config = config::AppConfig::load();
         if let Err(error) = crate::i18n::set_language(config.settings.language) {
             eprintln!("Unable to apply saved UI language: {error}");
@@ -4437,6 +4437,17 @@ impl OpenCADStudio {
         app.apply_config(crate::app::config::AppConfig::default());
         app.last_saved_config = Some(app.current_config());
         app
+    }
+
+    /// Test hook for transports outside `crate::app` (the REST routing
+    /// tests): push a fresh tab and return its document id, so a second
+    /// open document can be addressed without reaching into `tabs`.
+    #[cfg(test)]
+    pub(crate) fn push_test_document(&mut self) -> u64 {
+        let tab = document::DocumentTab::new_drawing(1000 + self.tabs.len());
+        let id = tab.id;
+        self.tabs.push(tab);
+        id
     }
 
     /// Install `cmd` as the active interactive command for tab `tab`.

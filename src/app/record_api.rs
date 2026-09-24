@@ -499,7 +499,7 @@ fn collection_count(document: &acadrust::CadDocument, collection: &str) -> usize
     }
 }
 
-fn compare(
+pub(crate) fn compare(
     actual: Option<&Value>,
     operator: &str,
     expected: Option<&Value>,
@@ -1221,6 +1221,29 @@ impl OpenCADStudio {
             "concurrency":{"document_id":true,"revision":true,"request_id":true},
             "transactions":{"undo":true,"redo":true,"atomic_property_updates":true,"batch":true},
             "geometry":{"query":true,"kernel_measurements":true,"spatial_filters":true,"interactive_commands":true},
+            "operations":{
+                "batch":true,
+                "block_define":true,
+                "block_delete":true,
+                "embed_image":true,
+                "close":true,
+                "entities_copy_to":true,
+                "entities_create":true,
+                "entities_delete":true,
+                "entities_transform":true,
+                "file_identity":true,
+                "group_create":true,
+                "layout_create":true,
+                "page_setup_set":true,
+                "selection_set_load":true,
+                "selection_set_save":true,
+                "sysvar":true,
+                "plot":true,
+                "view_focus":true,
+                "wblock":true,
+                "xdata_get":true,
+                "xdata_set":true,
+            },
             "records":{
                 "read":"records",
                 "write":"set_properties",

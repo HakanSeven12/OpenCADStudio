@@ -1,0 +1,259 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "OpenCAD Studio Automation API",
+    "version": "1",
+    "description": "REST surface over the OpenCAD Studio automation dispatcher. The server runs headless via `OpenCADStudio --http <port>`, binds 127.0.0.1 only, and keeps one drawing session alive across requests. All bodies are JSON; failure bodies carry a symbolic `code` (see the automation README for the catalogue)."
+  },
+  "servers": [{"url": "http://127.0.0.1:8090"}],
+  "paths": {
+    "/api/v1/ready": {
+      "get": {
+        "summary": "Server readiness, version and active document id",
+        "responses": {"200": {"description": "Ready"}}
+      }
+    },
+    "/api/v1/state": {
+      "get": {
+        "summary": "Full editor state: session, documents, selection, command, camera",
+        "responses": {"200": {"description": "State"}}
+      }
+    },
+    "/api/v1/capabilities": {
+      "get": {
+        "summary": "Feature and collection advertisement",
+        "responses": {"200": {"description": "Capabilities"}}
+      }
+    },
+    "/api/v1/documents": {
+      "get": {"summary": "Open documents", "responses": {"200": {"description": "Documents"}}},
+      "post": {
+        "summary": "Open a drawing ({path}), start from a template ({template}, .dwt/.dwg/.dxf), or create a fresh untitled document in its own tab (empty body)",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"path": {"type": "string"}, "template": {"type": "string"}}}}}},
+        "responses": {"200": {"description": "Document ready"}, "201": {"description": "Fresh document created"}, "400": {"description": "Open failed"}}
+      }
+    },
+    "/api/v1/documents/{id}": {
+      "delete": {
+        "summary": "Close a document; a dirty document needs ?discard=true",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer"}}],
+        "responses": {"200": {"description": "Closed"}, "400": {"description": "Dirty document without discard"}}
+      }
+    },
+    "/api/v1/sysvars": {
+      "get": {
+        "summary": "Read sysvars (?names=csv; empty list returns every readable name)",
+        "parameters": [{"name": "names", "in": "query", "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Values"}}
+      },
+      "post": {
+        "summary": "Set sysvars atomically ({set:{name:value,…}}; unknown_sysvar / invalid_sysvar_value refused)",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"set": {"type": "object"}, "get": {"type": "array", "items": {"type": "string"}}}}}}},
+        "responses": {"200": {"description": "Applied"}, "400": {"description": "Unknown sysvar or invalid value"}}
+      }
+    },
+    "/api/v1/layouts": {
+      "post": {
+        "summary": "Create a layout with the default page setup",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}}}},
+        "responses": {"201": {"description": "Layout created"}, "400": {"description": "Duplicate or invalid name"}}
+      }
+    },
+    "/api/v1/layouts/{name}/page-setup": {
+      "put": {
+        "summary": "Write a layout's plot configuration (explicit fields win)",
+        "parameters": [{"name": "name", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+          "paper": {"type": "string"}, "orientation": {"type": "string", "enum": ["portrait", "landscape"]},
+          "fit": {"type": "boolean"}, "scale": {"type": "string"}, "center": {"type": "boolean"},
+          "window": {"type": "array", "items": {"type": "number"}}, "plot_style": {"type": "string"}
+        }}}}},
+        "responses": {"200": {"description": "Stored setup"}, "400": {"description": "Unknown layout, paper or scale"}}
+      }
+    },
+    "/api/v1/entities": {
+      "get": {
+        "summary": "Query entities (type, layer, detail, offset, limit, fields, handles, bounds, near, contains_point, intersections)",
+        "parameters": [
+          {"name": "type", "in": "query", "schema": {"type": "string"}},
+          {"name": "layer", "in": "query", "schema": {"type": "string"}},
+          {"name": "detail", "in": "query", "schema": {"type": "string", "enum": ["summary", "geometry", "full"]}},
+          {"name": "offset", "in": "query", "schema": {"type": "integer"}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer"}},
+          {"name": "fields", "in": "query", "schema": {"type": "string"}, "description": "Comma-separated projection"},
+          {"name": "bounds", "in": "query", "schema": {"type": "string"}, "description": "min_x,min_y,max_x,max_y"},
+          {"name": "near", "in": "query", "schema": {"type": "string"}, "description": "x,y[,z] distance ranking"},
+          {"name": "contains_point", "in": "query", "schema": {"type": "string"}},
+          {"name": "intersections", "in": "query", "schema": {"type": "string"}, "description": "handle1,handle2"},
+          {"name": "where", "in": "query", "schema": {"type": "string"}, "description": "JSON-encoded filter array over serialized properties, e.g. [{\"path\":\"/radius\",\"op\":\"gt\",\"value\":2}] with ops eq,ne,lt,lte,gt,gte,contains,starts_with,ends_with,in,exists,not_exists"}
+        ],
+        "responses": {"200": {"description": "Matched entities"}, "400": {"description": "Invalid filters"}}
+      },
+      "post": {
+        "summary": "Create a batch of typed entities (Line, Circle, Arc, LwPolyline, Point, Text, MText, Insert, Solid, Hatch); missing layers are created; one undo step",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "required": ["entities"], "properties": {"entities": {"type": "array", "items": {"type": "object"}}}}}}},
+        "responses": {"201": {"description": "Handles of the created entities"}, "400": {"description": "Invalid definitions; nothing committed"}}
+      },
+      "delete": {
+        "summary": "Erase entities by handle (?handles=a,b or body {handles})",
+        "responses": {"200": {"description": "Erased"}, "404": {"description": "Unknown handle; nothing erased"}}
+      }
+    },
+    "/api/v1/entities/{handle}": {
+      "get": {
+        "summary": "One entity with full detail",
+        "parameters": [{"name": "handle", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Entity"}, "404": {"description": "Unknown handle"}}
+      }
+    },
+    "/api/v1/entities/transform": {
+      "post": {
+        "summary": "Move/copy/rotate/scale/mirror/array entities (angles in degrees)",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "required": ["handles", "action"], "properties": {
+          "handles": {"type": "array", "items": {"type": "string"}},
+          "action": {"type": "string", "enum": ["move", "copy", "rotate", "scale", "mirror", "array"]},
+          "vector": {"type": "array", "items": {"type": "number"}},
+          "center": {"type": "array", "items": {"type": "number"}},
+          "angle_deg": {"type": "number"},
+          "factor": {"type": "number"},
+          "axis": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
+          "copy": {"type": "boolean"},
+          "rows": {"type": "integer"}, "columns": {"type": "integer"},
+          "row_spacing": {"type": "number"}, "column_spacing": {"type": "number"}
+        }}}}},
+        "responses": {"200": {"description": "Transformed; `created` lists new handles"}, "400": {"description": "Invalid action or parameters"}}
+      }
+    },
+    "/api/v1/entities/copy-to": {
+      "post": {
+        "summary": "Copy entities into another open document (referenced layer definitions travel along)",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "required": ["handles", "document_id"], "properties": {
+          "handles": {"type": "array", "items": {"type": "string"}},
+          "document_id": {"type": "integer", "description": "Target document"}
+        }}}}},
+        "responses": {"201": {"description": "New handles in the target document"}, "404": {"description": "Unknown handle"}, "400": {"description": "Target absent"}}
+      }
+    },
+    "/api/v1/entities/{handle}/xdata": {
+      "get": {
+        "summary": "Read extended data (?app= filters one application)",
+        "parameters": [
+          {"name": "handle", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "app", "in": "query", "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "Per-application records"}, "404": {"description": "Unknown handle"}}
+      }
+    },
+    "/api/v1/entities/{handle}/xdata/{app}": {
+      "put": {
+        "summary": "Replace one application's extended data (typed [{code,value}]; empty list removes it; RegApp registered implicitly)",
+        "parameters": [
+          {"name": "handle", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "app", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {"content": {"application/json": {"schema": {"type": "array", "items": {"type": "object", "properties": {"code": {"type": "integer"}, "value": {}}}}}}},
+        "responses": {"200": {"description": "Written"}, "400": {"description": "Unsupported code"}}
+      },
+      "delete": {
+        "summary": "Remove one application's extended data",
+        "parameters": [
+          {"name": "handle", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "app", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "Removed"}}
+      }
+    },
+    "/api/v1/blocks": {
+      "post": {
+        "summary": "Define a block from entities (BLOCK semantics: sources become the definition, one Insert placed at insert_at or base; replace:true drops a same-named definition first)",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "required": ["name", "base", "handles"], "properties": {
+          "name": {"type": "string"}, "base": {"type": "array", "items": {"type": "number"}},
+          "handles": {"type": "array", "items": {"type": "string"}},
+          "insert_at": {"type": "array", "items": {"type": "number"}},
+          "replace": {"type": "boolean"}
+        }}}}},
+        "responses": {"201": {"description": "Definition + insert handle"}, "400": {"description": "Invalid name, duplicate or empty selection"}}
+      }
+    },
+    "/api/v1/blocks/{name}": {
+      "delete": {
+        "summary": "Delete a block definition with its children, markers and every Insert referencing it",
+        "parameters": [{"name": "name", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Erased count"}, "404": {"description": "Unknown block"}}
+      }
+    },
+    "/api/v1/file-identity": {
+      "post": {
+        "summary": "Stable per-document GUID (the drawing's SPMDOCUNIQUE value); idempotent get-or-create, renew:true mints a fresh one",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"renew": {"type": "boolean"}}}}}},
+        "responses": {"200": {"description": "The identity GUID"}}
+      }
+    },
+    "/api/v1/groups": {
+      "post": {
+        "summary": "Create a named group over existing entities (stored in the group dictionary)",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "required": ["name", "handles"], "properties": {
+          "name": {"type": "string"}, "handles": {"type": "array", "items": {"type": "string"}}
+        }}}}},
+        "responses": {"201": {"description": "Group name + handle"}, "404": {"description": "Unknown handle"}}
+      }
+    },
+    "/api/v1/selection-sets": {
+      "post": {
+        "summary": "Save a named handle set for this session (session-scoped by design)",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "required": ["name", "handles"], "properties": {
+          "name": {"type": "string"}, "handles": {"type": "array", "items": {"type": "string"}}
+        }}}}},
+        "responses": {"201": {"description": "Stored set"}}
+      }
+    },
+    "/api/v1/selection-sets/{name}": {
+      "get": {
+        "summary": "Recall a named selection set (?select=true also makes it the current selection)",
+        "parameters": [
+          {"name": "name", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "select", "in": "query", "schema": {"type": "boolean"}}
+        ],
+        "responses": {"200": {"description": "Handles (+ selected count)"}, "404": {"description": "Unknown set"}}
+      }
+    },
+    "/api/v1/plot": {
+      "post": {
+        "summary": "Render to PDF (layout Model|name|all, area, paper, fit/scale, plot_style; per_page:true with layout all writes one PDF per layout and returns result.files)",
+        "responses": {"200": {"description": "Pages written"}, "400": {"description": "Plot failed"}}
+      }
+    },
+    "/api/v1/wblock": {
+      "post": {
+        "summary": "Export entities (handles) or a block definition to a new DWG/DXF; template:<file> bases the new database on that file's tables/styles, normalize:true shifts the export so its minimum lands on the origin",
+        "responses": {"200": {"description": "File written"}, "400": {"description": "Export failed"}}
+      }
+    },
+    "/api/v1/images": {
+      "post": {
+        "summary": "Attach a picture (embedded OLE2FRAME default; linked:true for path-linked)",
+        "responses": {"201": {"description": "Image handle"}, "400": {"description": "Attach failed"}}
+      }
+    },
+    "/api/v1/commands": {
+      "post": {
+        "summary": "Run one editor command line (e.g. \"LINE 0,0 10,10\")",
+        "responses": {"200": {"description": "Command status"}, "400": {"description": "Command failed"}}
+      }
+    },
+    "/api/v1/undo": {"post": {"summary": "Undo one step", "responses": {"200": {"description": "Undone"}}}},
+    "/api/v1/redo": {"post": {"summary": "Redo one step", "responses": {"200": {"description": "Redone"}}}},
+    "/api/v1/save": {"post": {"summary": "Save the active document ({path} optional once opened); a *.dwt path writes DWG bytes through a scratch file renamed into place", "responses": {"200": {"description": "Saved"}, "400": {"description": "Save failed"}}}},
+    "/api/v1/layers": {"get": {"summary": "Layer table", "responses": {"200": {"description": "Layers"}}}},
+    "/api/v1/header": {"get": {"summary": "Drawing header summary", "responses": {"200": {"description": "Header"}}}},
+    "/api/v1/records": {"get": {"summary": "Database records (collection, type, offset, limit)", "responses": {"200": {"description": "Records"}, "400": {"description": "Invalid query"}}}},
+    "/api/v1/openapi": {"get": {"summary": "This document", "responses": {"200": {"description": "OpenAPI JSON"}}}},
+    "/api/v1/{op}": {
+      "post": {
+        "summary": "Generic passthrough: any automation operation name with its JSON body (mutations are wrapped in the protocol envelope automatically)",
+        "parameters": [{"name": "op", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Operation response"}}
+      }
+    }
+  }
+}

@@ -22,7 +22,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
-const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Call record_schema to discover every record type, property path, JSON type, enum, unit, constraint and write rule before editing unfamiliar data. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. Verify important results with queries and a viewport capture, and save only to an explicit path.";
+const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Call record_schema to discover every record type, property path, JSON type, enum, unit, constraint and write rule before editing unfamiliar data. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. To have the person at the screen pick entities for you, call user_select and keep polling until it completes; running means they are still picking. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. Verify important results with queries and a viewport capture, and save only to an explicit path.";
 const READ_OPS: &[&str] = &[
     "state",
     "hello",
@@ -39,6 +39,7 @@ const READ_OPS: &[&str] = &[
     "commands",
     "events",
     "operation",
+    "xdata_get",
 ];
 const EXECUTE_OPS: &[&str] = &[
     "new",
@@ -55,6 +56,26 @@ const EXECUTE_OPS: &[&str] = &[
     "set_properties",
     "action",
     "embed_image",
+    "wblock",
+    "plot",
+    "entities_create",
+    "entities_delete",
+    "entities_transform",
+    "block_define",
+    "block_delete",
+    "xdata_set",
+    "view_focus",
+    "entities_copy_to",
+    "group_create",
+    "selection_set_save",
+    "selection_set_load",
+    "user_select",
+    "getpoint",
+    "close",
+    "sysvar",
+    "layout_create",
+    "page_setup_set",
+    "file_identity",
     "save",
     "stop",
     "batch",
@@ -74,6 +95,26 @@ const BATCH_STEP_OPS: &[&str] = &[
     "set_properties",
     "action",
     "embed_image",
+    "wblock",
+    "plot",
+    "entities_create",
+    "entities_delete",
+    "entities_transform",
+    "block_define",
+    "block_delete",
+    "xdata_set",
+    "view_focus",
+    "entities_copy_to",
+    "group_create",
+    "selection_set_save",
+    "selection_set_load",
+    "user_select",
+    "getpoint",
+    "close",
+    "sysvar",
+    "layout_create",
+    "page_setup_set",
+    "file_identity",
     "save",
     "stop",
 ];
@@ -725,6 +766,86 @@ fn validate_execute_request(request: &Value, op: &str) -> Result<(), String> {
                 r#"{"op":"embed_image","path":"/path/logo.png","at":[0,0,0],"width":100}"#,
             )
         }
+        "wblock" if request["path"].as_str().is_none_or(str::is_empty) => {
+            missing(
+                "path",
+                r#"{"op":"wblock","path":"/path/part.dwg","handles":["2A","31"]}"#,
+            )
+        }
+        "plot" if request["path"].as_str().is_none_or(str::is_empty) => {
+            missing(
+                "path",
+                r#"{"op":"plot","path":"/path/pages.pdf","layout":"Model"}"#,
+            )
+        }
+        "entities_create"
+            if request["entities"].as_array().is_none_or(Vec::is_empty) =>
+        {
+            missing(
+                "entities",
+                r#"{"op":"entities_create","entities":[{"type":"Circle","center":[0,0,0],"radius":5}]}"#,
+            )
+        }
+        "entities_delete" | "entities_transform" | "view_focus"
+            if request["handles"].as_array().is_none_or(Vec::is_empty) =>
+        {
+            missing(
+                "handles",
+                r#"{"op":"entities_delete","handles":["2A","31"]}"#,
+            )
+        }
+        "block_define"
+            if request["name"].as_str().is_none_or(str::is_empty)
+                || request["handles"].as_array().is_none_or(Vec::is_empty)
+                || request["base"].as_array().is_none() =>
+        {
+            missing(
+                "name, handles and base",
+                r#"{"op":"block_define","name":"MARK","base":[0,0,0],"handles":["2A"]}"#,
+            )
+        }
+        "xdata_set"
+            if request["app"].as_str().is_none_or(str::is_empty)
+                || request["handles"].as_array().is_none_or(Vec::is_empty) =>
+        {
+            missing(
+                "app and handles",
+                r#"{"op":"xdata_set","app":"SPM","handles":["2A"],"data":[{"code":1000,"value":"tag"}]}"#,
+            )
+        }
+        "entities_copy_to"
+            if request["handles"].as_array().is_none_or(Vec::is_empty)
+                || request["document_id"].as_u64().is_none() =>
+        {
+            missing(
+                "handles and document_id",
+                r#"{"op":"entities_copy_to","handles":["2A"],"document_id":2}"#,
+            )
+        }
+        "group_create" | "selection_set_save"
+            if request["name"].as_str().is_none_or(str::is_empty)
+                || request["handles"].as_array().is_none_or(Vec::is_empty) =>
+        {
+            missing(
+                "name and handles",
+                r#"{"op":"group_create","name":"Frame","handles":["2A"]}"#,
+            )
+        }
+        "selection_set_load" if request["name"].as_str().is_none_or(str::is_empty) => {
+            missing("name", r#"{"op":"selection_set_load","name":"Frame"}"#)
+        }
+        "block_delete" if request["name"].as_str().is_none_or(str::is_empty) => {
+            missing("name", r#"{"op":"block_delete","name":"Frame"}"#)
+        }
+        "layout_create" if request["name"].as_str().is_none_or(str::is_empty) => {
+            missing("name", r#"{"op":"layout_create","name":"Plan"}"#)
+        }
+        "page_setup_set" if request["layout"].as_str().is_none_or(str::is_empty) => {
+            missing(
+                "layout",
+                r#"{"op":"page_setup_set","layout":"Plan","paper":"ISO_A4_(210.00_x_297.00_MM)"}"#,
+            )
+        }
         _ => Ok(()),
     }
 }
@@ -910,7 +1031,49 @@ fn execute_request_schema() -> Value {
             "camera_revision":{"type":"integer","minimum":0,"description":"Expected camera revision when view state matters."},
             "selection":{"type":"array","items":handle.clone(),"description":"Expected selected handles from current state."},
             "cmd":{"type":"string","minLength":1,"description":"Command name followed by its prompt answers separated by spaces. Points use x,y or x,y,z; option answers use their token. Read command details first when unsure.","examples":["LINE 0,0 10,10","CIRCLE 5,5 3","PLINE 0,0 10,0 10,10 C"]},
-            "path":{"type":"string","minLength":1,"description":"Absolute path: drawing for open or save, image file for embed_image."},
+            "path":{"type":"string","minLength":1,"description":"Absolute path: drawing for open or save, image file for embed_image, target DWG/DXF for wblock, target PDF for plot."},
+            "block":{"type":"string","description":"Block definition name for wblock (exports its entities flattened into model space)."},
+            "linked":{"type":"boolean","description":"embed_image: true stores a path-linked RasterImage instead of an embedded OLE2FRAME."},
+            "layout":{"type":"string","description":"plot: Model (default), a layout name, or all."},
+            "area":{"type":"string","enum":["extents","display","limits","window","layout"],"description":"plot area; layout applies to paper-space layouts."},
+            "window":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"World [x0,y0,x1,y1] plot rectangle for area window."},
+            "paper":{"type":"string","description":"plot: canonical paper-catalog sheet name."},
+            "orientation":{"type":"string","enum":["Portrait","Landscape"],"description":"plot sheet orientation."},
+            "fit":{"type":"boolean","description":"plot: scale content to fit the sheet (default true)."},
+            "scale":{"type":"string","description":"plot scale as paper:drawing, e.g. 1:100; disables fit."},
+            "center":{"type":"boolean","description":"plot: center the content on the sheet (default true)."},
+            "offset_x":{"type":"number","description":"plot offset when not centered."},
+            "offset_y":{"type":"number","description":"plot offset when not centered."},
+            "upside_down":{"type":"boolean","description":"plot: rotate content 180 degrees."},
+            "plot_style":{"type":"string","description":"plot: CTB file path or a discovered plot style name."},
+            "transparency":{"type":"boolean","description":"plot: keep transparency."},
+            "lineweights":{"type":"boolean","description":"plot: honor object lineweights."},
+            "merge_lines":{"type":"boolean","description":"plot: merge overlapping lines."},
+            "stamp":{"type":"boolean","description":"plot: draw the plot stamp."},
+            "entities":{"type":"array","minItems":1,"description":"entities_create: typed definitions, one object per entity. type is one of Line, Circle, Arc, LwPolyline, Point, Text, MText, Insert, Solid, Hatch; geometry fields depend on the type; layer and color (ACI) are optional and a missing layer is created.","items":{"type":"object"}},
+            "action":{"type":"string","enum":["move","copy","rotate","scale","mirror","array"],"description":"entities_transform action (default move)."},
+            "vector":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"move/copy displacement [dx,dy(,dz)]."},
+            "center":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"rotate/scale center point."},
+            "angle_deg":{"type":"number","description":"rotate angle, degrees CCW."},
+            "factor":{"type":"number","exclusiveMinimum":0,"description":"scale factor."},
+            "axis":{"type":"array","minItems":2,"maxItems":2,"description":"mirror line [[x1,y1],[x2,y2]].","items":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":2}},
+            "copy":{"type":"boolean","description":"mirror: keep the originals and return mirrored copies."},
+            "rows":{"type":"integer","minimum":1,"description":"array row count (default 1)."},
+            "columns":{"type":"integer","minimum":1,"description":"array column count (default 1)."},
+            "row_spacing":{"type":"number","description":"array row spacing."},
+            "column_spacing":{"type":"number","description":"array column spacing."},
+            "base":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"block_define base point (becomes the block origin)."},
+            "insert_at":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"block_define Insert placement (default = base)."},
+            "app":{"type":"string","minLength":1,"description":"xdata_set: application name; its RegApp table entry is registered automatically."},
+            "data":{"type":"array","description":"xdata_set typed values [{code,value}]: 1000 string, 1003 layer, 1004 hex bytes, 1005 hex handle, 1010-1013 [x,y,z], 1040/1041/1042 real, 1070 int16, 1071 int32. An empty or absent list removes the application record.","items":{"type":"object","properties":{"code":{"type":"integer"},"value":{}},"required":["code","value"]}},
+            "highlight":{"type":"boolean","description":"view_focus: also select the entities (default true)."},
+            "template":{"type":"string","description":"new/wblock: load this DWG/DXF/DWT file as the base document so its tables and styles survive."},
+            "discard":{"type":"boolean","description":"close: true erases unsaved changes instead of refusing a dirty document."},
+            "per_page":{"type":"boolean","description":"plot: write one PDF per layout as <stem>-<Layout>.pdf."},
+            "get":{"type":"array","items":{"type":"string"},"description":"sysvar: variable names to read (ltscale, pdmode, pdsize, celtscale, textsize, filletrad, mirrtext, insunits, osmode, clayer, ctextstyle, extmin, extmax)."},
+            "set":{"type":"object","description":"sysvar: name=value pairs to write in one undo step.","additionalProperties":true},
+            "select":{"type":"boolean","description":"selection_set_load: also select the recalled entities (default true)."},
+            "where":{"type":"array","description":"query: cross-property filters over entity properties with RFC 6901 paths and the records operator set.","items":{"type":"object","properties":{"path":{"type":"string"},"op":{"type":"string"},"value":{}},"required":["path"]}},
             "at":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"World [x,y] or [x,y,z] placement corner for embed_image (picture grows up-right)."},
             "width":{"type":"number","exclusiveMinimum":0,"description":"World width for embed_image; height follows the image aspect ratio. Defaults to pixel_width/100."},
             "kind":{"type":"string","enum":["text","token","point","entity","structure","selection","enter"],"description":"Input kind listed in state.command.accepts."},
@@ -918,7 +1081,7 @@ fn execute_request_schema() -> Value {
             "point":point,
             "space":{"type":"string","enum":["wcs","ucs","relative"],"default":"wcs","description":"Coordinate space for point input."},
             "handle":handle.clone(),
-            "handles":{"type":"array","items":handle,"description":"Entity handles to select."},
+            "handles":{"type":"array","items":handle,"description":"Entity handles: selection filter for select, export set for wblock."},
             "type":{"type":"string","description":"Entity type filter for select."},
             "layer":{"type":"string","description":"Layer filter for select."},
             "clear":{"type":"boolean","description":"Clear the current selection before applying select filters."},
@@ -954,6 +1117,26 @@ fn execute_request_schema() -> Value {
             {"properties":{"op":{"const":"set_properties"}},"required":["collection","updates"]},
             {"properties":{"op":{"const":"action"}},"required":["name"]},
             {"properties":{"op":{"const":"embed_image"}},"required":["path"]},
+            {"properties":{"op":{"const":"wblock"}},"required":["path"]},
+            {"properties":{"op":{"const":"plot"}},"required":["path"]},
+            {"properties":{"op":{"const":"entities_create"}},"required":["entities"]},
+            {"properties":{"op":{"const":"entities_delete"}},"required":["handles"]},
+            {"properties":{"op":{"const":"entities_transform"}},"required":["handles"]},
+            {"properties":{"op":{"const":"block_define"}},"required":["name","base","handles"]},
+            {"properties":{"op":{"const":"block_delete"}},"required":["name"]},
+            {"properties":{"op":{"const":"xdata_set"}},"required":["app","handles"]},
+            {"properties":{"op":{"const":"view_focus"}},"required":["handles"]},
+            {"properties":{"op":{"const":"entities_copy_to"}},"required":["handles","document_id"]},
+            {"properties":{"op":{"const":"group_create"}},"required":["name","handles"]},
+            {"properties":{"op":{"const":"selection_set_save"}},"required":["name","handles"]},
+            {"properties":{"op":{"const":"selection_set_load"}},"required":["name"]},
+            {"properties":{"op":{"const":"user_select"},"description":"Ask the person at the screen to pick entities; resolves when they press Enter (or cancel on Escape). Optional type/layer/prompt/detail/clear."}},
+            {"properties":{"op":{"const":"getpoint"},"description":"Ask the person at the screen to pick one point; resolves with the picked point when they click, or cancels on Escape. Optional prompt."}},
+            {"properties":{"op":{"const":"close"}}},
+            {"properties":{"op":{"const":"sysvar"}}},
+            {"properties":{"op":{"const":"layout_create"}},"required":["name"]},
+            {"properties":{"op":{"const":"page_setup_set"}},"required":["layout"]},
+            {"properties":{"op":{"const":"file_identity"}}},
             {"properties":{"op":{"const":"save"}}},
             {"properties":{"op":{"const":"stop"}}},
             {"properties":{"op":{"const":"batch"}},"required":["steps"]}
@@ -1005,7 +1188,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name":"ocs_execute",
-            "description":"Execute semantic OCS actions. Use current state fields and a unique request_id. Use run for one complete command, batch to remove round trips, or start plus input for guided steps. accepted, running and waiting_input are not completion.",
+            "description":"Execute semantic OCS actions. Use current state fields and a unique request_id. Use run for one complete command, batch to remove round trips, or start plus input for guided steps. user_select asks the person at the screen to pick entities and stays running until they press Enter (answer with entities) or Escape (cancelled). accepted, running and waiting_input are not completion.",
             "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"request":execute_request_schema(),"wait_seconds":{"type":"number","minimum":0,"maximum":60,"default":30,"description":"Total time to wait for completion before returning."},"response_detail":{"type":"string","enum":["compact","changed_entities","full"],"default":"compact","description":"compact returns only state needed for the next edit; changed_entities also returns current geometry for changed handles; full preserves the complete editor state."}},"required":["ocs_session_id","request"],"additionalProperties":false},
             "outputSchema":execute_output_schema(),
             "annotations":{"title":"Execute OCS action","readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}

@@ -97,6 +97,50 @@ impl OpenCADStudio {
         let at = embed_point(req)?;
         let default_width = (image.pixel_width as f64 / 100.0).max(1.0);
         let width = req["width"].as_f64().filter(|w| *w > 0.0).unwrap_or(default_width);
+        if req["linked"].as_bool().unwrap_or(false) {
+            // Path-linked RasterImage + ImageDefinition: the drawing stores
+            // only the file path, so the picture file must travel with the
+            // drawing (unlike the embedded OLE2FRAME default below).
+            self.push_undo_snapshot(i, "IMAGEATTACH");
+            let height = width * image.pixel_height as f64 / image.pixel_width as f64;
+            let handle = {
+                let document = &mut self.tabs[i].scene.document;
+                let definition_handle = document.allocate_handle();
+                let mut definition = acadrust::objects::ImageDefinition::with_dimensions(
+                    path,
+                    image.pixel_width,
+                    image.pixel_height,
+                );
+                definition.handle = definition_handle;
+                document.objects.insert(
+                    definition_handle,
+                    acadrust::objects::ObjectType::ImageDefinition(definition),
+                );
+                let mut entity = acadrust::entities::RasterImage::with_size(
+                    path,
+                    at,
+                    image.pixel_width as f64,
+                    image.pixel_height as f64,
+                    width,
+                    height,
+                );
+                entity.definition_handle = Some(definition_handle);
+                document
+                    .add_entity(acadrust::EntityType::RasterImage(entity))
+                    .map_err(|e| failure("embed_failed", e))?
+            };
+            self.tabs[i].scene.populate_images_from_document();
+            self.post_ref_op(i);
+            self.set_control_result(json!({
+                "handle": format!("{:X}", handle.value()),
+                "kind": "RasterImage",
+                "path": path,
+                "width": width,
+                "height": height,
+                "linked": true,
+            }));
+            return Ok(Task::none());
+        }
         self.push_undo_snapshot(i, "IMAGEEMBED");
         let handle = crate::io::ole_embed::add_embedded_image(
             &mut self.tabs[i].scene.document,
@@ -111,6 +155,370 @@ impl OpenCADStudio {
             "kind": "Ole2Frame",
             "path": path,
             "width": width,
+        }));
+        Ok(Task::none())
+    }
+
+    /// `wblock` — write the named block's entities or the listed entity handles
+    /// out to a standalone DWG/DXF file. The open document is not modified, so
+    /// this needs no undo snapshot. Format follows the path extension.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn control_wblock(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let path = string(req, "path")?;
+        let document = &self.tabs[self.active_tab].scene.document;
+        // A template base keeps its tables/styles in the exported file
+        // (Catalog §2.1: clone from a .dwt/.dwg template).
+        let template_base = match req["template"].as_str().filter(|t| !t.is_empty()) {
+            Some(template) => Some(
+                crate::io::load_file(std::path::Path::new(template))
+                    .map_err(|e| failure("template_missing", e))?,
+            ),
+            None => None,
+        };
+        let extracted = if let Some(block) = req["block"].as_str() {
+            match &template_base {
+                Some(base) => {
+                    let mut base = base.clone();
+                    crate::modules::insert::wblock::extract_block_into(document, block, &mut base)?;
+                    Ok(base)
+                }
+                None => crate::modules::insert::wblock::extract_block_to_doc(document, block),
+            }
+        } else if let Some(listed) = req["handles"].as_array() {
+            let handles: Result<Vec<acadrust::Handle>, Value> = listed
+                .iter()
+                .map(|v| {
+                    u64::from_str_radix(
+                        v.as_str()
+                            .unwrap_or("")
+                            .trim_start_matches("0x")
+                            .trim_start_matches("0X"),
+                        16,
+                    )
+                    .map(acadrust::Handle::new)
+                    .map_err(|_| {
+                        failure(
+                            "invalid_handle",
+                            format!("Expected a hexadecimal handle, got {v}"),
+                        )
+                    })
+                })
+                .collect();
+            match &template_base {
+                Some(base) => {
+                    let mut base = base.clone();
+                    crate::modules::insert::wblock::extract_entities_into(
+                        document,
+                        &handles?,
+                        &mut base,
+                    )?;
+                    Ok(base)
+                }
+                None => crate::modules::insert::wblock::extract_entities_to_doc(document, &handles?),
+            }
+        } else {
+            return Err(failure(
+                "selection_required",
+                "Supply \"handles\" or \"block\"",
+            ));
+        };
+        let mut extracted = extracted.map_err(|e| failure("wblock_failed", e))?;
+        // CF-01.2: optionally shift the export so its overall bounds minimum
+        // lands on the origin (SPM.ACAD normalizes cloned drawings to 0,0,0).
+        let normalized = req["normalize"].as_bool().unwrap_or(false);
+        if normalized {
+            crate::modules::insert::wblock::normalize_to_origin(&mut extracted);
+        }
+        let entities = extracted.entities().count();
+        // A .dwt target is written as DWG bytes under a hidden scratch name,
+        // then renamed (DWT is a DWG-family file).
+        let mut target = std::path::PathBuf::from(path);
+        let mut scratch = None;
+        if target
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("dwt"))
+        {
+            scratch = Some(target.clone());
+            target = target.with_file_name(format!(
+                ".{}.tmp.dwg",
+                target.file_name().unwrap().to_string_lossy()
+            ));
+        }
+        crate::io::save(&extracted, &target).map_err(|e| failure("save_failed", e))?;
+        if let Some(final_path) = scratch {
+            std::fs::rename(&target, &final_path)
+                .map_err(|e| failure("save_failed", format!("rename to .dwt failed: {e}")))?;
+        }
+        self.set_control_result(json!({
+            "path": path,
+            "entities": entities,
+            "normalized": normalized,
+        }));
+        Ok(Task::none())
+    }
+
+    /// `plot` — render the current drawing to a PDF with every choice taken
+    /// from the request instead of the Plot dialog. Reuses the GUI pipeline
+    /// (area jobs over `plot_scene_content`, saved page setups for layouts);
+    /// dialog/layout/camera state is snapshotted and restored around the
+    /// build, exactly like the print-all path. Explicitly supplied request
+    /// fields win over a layout's stored page setup; unspecified fields keep
+    /// the stored setup (layouts) or the app's plot defaults (Model).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn control_plot(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        use crate::io::pdf_export::PdfPageInput;
+
+        let path = string(req, "path")?;
+        if !path.to_ascii_lowercase().ends_with(".pdf") {
+            return Err(failure("invalid_path", "plot writes .pdf files"));
+        }
+        let i = self.active_tab;
+        let names = self.tabs[i].scene.layout_names();
+        let requested = req["layout"].as_str().unwrap_or("Model").to_owned();
+        let targets: Vec<String> = if requested.eq_ignore_ascii_case("all") {
+            names
+        } else {
+            vec![names
+                .iter()
+                .find(|name| name.eq_ignore_ascii_case(&requested))
+                .cloned()
+                .ok_or_else(|| {
+                    failure("layout_missing", format!("Layout '{requested}' does not exist"))
+                })?]
+        };
+
+        // Optional plot style table: a CTB path or a folder-discovered name.
+        let style = req["plot_style"].as_str().filter(|s| !s.is_empty());
+        let loaded_style = match style {
+            Some(name) => Some(
+                crate::io::plot_style::PlotStyleTable::load(std::path::Path::new(name))
+                    .or_else(|_| crate::io::plot_style::PlotStyleTable::load_named(name))
+                    .map_err(|e| failure("plot_style_missing", e))?,
+            ),
+            None => None,
+        };
+
+        // Request → dialog vocabulary, before any stored setup is loaded so
+        // the explicit choices can be re-applied on top of it.
+        let mut request = self.plot_dialog.clone();
+        if let Some(paper) = req["paper"].as_str().filter(|p| !p.is_empty()) {
+            request.paper = crate::io::paper_catalog::resolve(paper)
+                .ok_or_else(|| failure("invalid_paper", format!("Unknown paper '{paper}'")))?
+                .canonical
+                .to_string();
+            request.paper_width_mm = 0.0;
+            request.paper_height_mm = 0.0;
+        }
+        if let Some(orientation) = req["orientation"].as_str() {
+            request.orientation = if orientation.eq_ignore_ascii_case("Portrait") {
+                "Portrait".into()
+            } else {
+                "Landscape".into()
+            };
+        }
+        let explicit_scale = req.get("scale").is_some();
+        if let Some(scale) = req["scale"].as_str().filter(|s| !s.is_empty()) {
+            request.scale = scale.to_owned();
+            request.fit_to_paper = false;
+        } else if req.get("fit").is_some() {
+            request.fit_to_paper = req["fit"].as_bool().unwrap_or(true);
+        }
+        let explicit_center = req.get("center").is_some();
+        request.center = req["center"].as_bool().unwrap_or(true);
+        if let Some(offset) = req["offset_x"].as_f64() {
+            request.offset_x = offset.to_string();
+        }
+        if let Some(offset) = req["offset_y"].as_f64() {
+            request.offset_y = offset.to_string();
+        }
+        if req.get("upside_down").is_some() {
+            request.upside_down = req["upside_down"].as_bool().unwrap_or(false);
+        }
+        for (key, field) in [
+            ("transparency", 0),
+            ("lineweights", 1),
+            ("merge_lines", 2),
+            ("stamp", 3),
+        ] {
+            if let Some(flag) = req[key].as_bool() {
+                match field {
+                    0 => request.transparency = flag,
+                    1 => request.lineweights = flag,
+                    2 => request.merge_lines = flag,
+                    _ => request.stamp = flag,
+                }
+            }
+        }
+        if let Some(table) = &loaded_style {
+            self.active_plot_style = Some(table.clone());
+            request.style_name = table.name.clone();
+            request.apply_plot_styles = true;
+            request.style_missing = false;
+        }
+        let area_explicit = req.get("area").is_some();
+        let area = req["area"].as_str().unwrap_or("").to_ascii_lowercase();
+        match area.as_str() {
+            "" => request.area = "Extents".into(),
+            "extents" => request.area = "Extents".into(),
+            "display" => request.area = "Display".into(),
+            "limits" => request.area = "Limits".into(),
+            "layout" => request.area = "Layout".into(),
+            "window" => {
+                let values = req["window"].as_array().filter(|v| v.len() == 4).ok_or_else(|| {
+                    failure("window_required", "area \"window\" needs window:[x0,y0,x1,y1]")
+                })?;
+                let coord = |k: usize| {
+                    values[k].as_f64().filter(|v| v.is_finite()).ok_or_else(|| {
+                        failure("invalid_window", "window must be four finite numbers")
+                    })
+                };
+                request.area = "Window".into();
+                request.window = Some((coord(0)?, coord(1)?, coord(2)?, coord(3)?));
+            }
+            other => return Err(failure("invalid_area", format!("Unknown area '{other}'"))),
+        }
+
+        // Snapshot everything the pipeline reads or mutates, like print-all.
+        let original_layout = self.tabs[i].scene.current_layout.clone();
+        let original_viewport = self.tabs[i].scene.active_viewport;
+        let original_psltscale = self.tabs[i].scene.document.header.paper_space_linetype_scaling;
+        let original_plimcheck = self.tabs[i].scene.document.header.paper_space_limit_check;
+        let original_dialog = self.plot_dialog.clone();
+        let original_window = self.plot_window;
+        let original_style = self.active_plot_style.clone();
+        let original_camera = self.tabs[i].scene.camera.borrow().clone();
+        let original_camera_generation = self.tabs[i].scene.camera_generation;
+
+        let build = |app: &mut Self| -> Result<Vec<PdfPageInput>, String> {
+            let mut pages = Vec::with_capacity(targets.len());
+            for name in &targets {
+                let is_model = name.eq_ignore_ascii_case("Model");
+                {
+                    let scene = &mut app.tabs[i].scene;
+                    scene.current_layout = name.clone();
+                    scene.active_viewport = None;
+                    scene.load_current_layout_state();
+                }
+                let mut page_dialog = request.clone();
+                page_dialog.paper_space = !is_model;
+                if is_model {
+                    if page_dialog.area == "Layout" {
+                        page_dialog.area = "Extents".into();
+                    }
+                } else if let Some(page_setup) = app.tabs[i].scene.plot_settings_for(name) {
+                    // Stored page setup first, then the explicit request
+                    // fields on top (a layout plot's behaviour).
+                    app.plot_dialog.paper_space = true;
+                    app.plot_dialog.window = None;
+                    app.load_plotsettings_into_dialog(&page_setup);
+                    page_dialog = app.plot_dialog.clone();
+                    page_dialog.paper_space = true;
+                    if area_explicit {
+                        page_dialog.area = request.area.clone();
+                    }
+                    if request.paper_width_mm == 0.0 && !request.paper.is_empty() {
+                        page_dialog.paper = request.paper.clone();
+                        page_dialog.paper_width_mm = 0.0;
+                        page_dialog.paper_height_mm = 0.0;
+                    }
+                    if req.get("orientation").is_some() {
+                        page_dialog.orientation = request.orientation.clone();
+                    }
+                    if explicit_scale {
+                        page_dialog.scale = request.scale.clone();
+                        page_dialog.fit_to_paper = request.fit_to_paper;
+                    }
+                    if explicit_center {
+                        page_dialog.center = request.center;
+                    }
+                    if req.get("offset_x").is_some() {
+                        page_dialog.offset_x = request.offset_x.clone();
+                    }
+                    if req.get("offset_y").is_some() {
+                        page_dialog.offset_y = request.offset_y.clone();
+                    }
+                    if req.get("upside_down").is_some() {
+                        page_dialog.upside_down = request.upside_down;
+                    }
+                }
+                app.plot_dialog = page_dialog;
+                if app.plot_dialog.area == "Display" {
+                    app.tabs[i].scene.restore_saved_camera();
+                }
+                if app.plot_dialog.style_missing && app.plot_dialog.apply_plot_styles {
+                    return Err(format!(
+                        "Plot style table '{}' is not loaded.",
+                        app.plot_dialog.style_name
+                    ));
+                }
+                let page = match app.plot_dialog.area.as_str() {
+                    "Layout" => Some(app.layout_plot_page_for("Layout")),
+                    "Display" => app.display_plot_job(),
+                    "Extents" => app.extents_plot_job(),
+                    "Limits" => app.limits_plot_job(),
+                    "Window" => {
+                        if let Some((x0, y0, x1, y1)) = app.plot_dialog.window {
+                            app.plot_window = Some((x0, y0, x1, y1));
+                        }
+                        app.window_plot_job()
+                    }
+                    _ => None,
+                };
+                let page =
+                    page.ok_or_else(|| format!("Layout '{name}' plot area is empty."))?;
+                pages.push(page);
+            }
+            Ok(pages)
+        };
+        let built = build(self);
+        self.tabs[i].scene.current_layout = original_layout;
+        self.tabs[i].scene.active_viewport = original_viewport;
+        self.tabs[i].scene.document.header.paper_space_linetype_scaling = original_psltscale;
+        self.tabs[i].scene.document.header.paper_space_limit_check = original_plimcheck;
+        self.plot_dialog = original_dialog;
+        self.plot_window = original_window;
+        self.active_plot_style = original_style;
+        *self.tabs[i].scene.camera.borrow_mut() = original_camera;
+        self.tabs[i].scene.camera_generation = original_camera_generation;
+        let pages = built.map_err(|e| failure("plot_failed", e))?;
+        if req["per_page"].as_bool().unwrap_or(false) {
+            // One PDF per layout: <stem>-<Layout>.pdf beside the requested
+            // path (sheet-by-sheet delivery).
+            let stem = path.strip_suffix(".pdf").unwrap_or(path).to_owned();
+            let mut files = Vec::with_capacity(pages.len());
+            for (name, page) in targets.iter().zip(&pages) {
+                let safe: String = name
+                    .chars()
+                    .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+                    .collect();
+                let file = format!("{stem}-{safe}.pdf");
+                crate::io::pdf_export::export_pdf_pages(
+                    std::slice::from_ref(page),
+                    std::path::Path::new(&file),
+                    loaded_style.as_ref(),
+                )
+                .map_err(|e| failure("plot_failed", e))?;
+                files.push(json!({"layout": name, "path": file}));
+            }
+            self.set_control_result(json!({ "files": files, "pages": pages.len() }));
+            return Ok(Task::none());
+        }
+        // Pages may drop the style when a stored page setup overwrites the
+        // dialog's style fields, so the explicit request style rides along as
+        // the export-level fallback.
+        crate::io::pdf_export::export_pdf_pages(
+            &pages,
+            std::path::Path::new(path),
+            loaded_style.as_ref(),
+        )
+        .map_err(|e| failure("plot_failed", e))?;
+        self.set_control_result(json!({
+            "path": path,
+            "pages": pages.len(),
+            "page_sizes": pages
+                .iter()
+                .map(|page| json!([page.paper_w, page.paper_h]))
+                .collect::<Vec<_>>(),
         }));
         Ok(Task::none())
     }

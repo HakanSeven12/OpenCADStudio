@@ -112,6 +112,26 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     self.pending_close = Some(crate::app::PendingClose::Tab(idx));
                     return self.open_unsaved_dialog_window();
                 }
+                // Pending client interactive requests pinned to this drawing
+                // can never be answered once the tab is gone — cancel them.
+                let closing_tab_id = self.tabs.get(idx).map(|t| t.id);
+                let pinned = self
+                    .control
+                    .get_point
+                    .as_ref()
+                    .map(|s| s.document_id)
+                    .filter(|&id| Some(id) == closing_tab_id)
+                    .or_else(|| {
+                        self.control
+                            .user_select
+                            .as_ref()
+                            .map(|s| s.document_id)
+                            .filter(|&id| Some(id) == closing_tab_id)
+                    });
+                if pinned.is_some() {
+                    self.resolve_get_point(None);
+                    self.resolve_user_select(false);
+                }
                 #[cfg(not(target_arch = "wasm32"))]
                 let tab_id = self.tabs.get(idx).map(|t| t.id);
                 // This tab is closing for good — drop its autosave recovery copy.
@@ -860,6 +880,13 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 if let Some(cmd) = self.command_line.submit() {
                     return self.dispatch_command_or_suggest(&cmd);
                 }
+                // Empty Enter with a pending client user_select request is the
+                // person's answer: hand the picked set back to the caller
+                // before the repeat-last-command shortcut can fire.
+                if self.control.user_select.is_some() {
+                    self.resolve_user_select(true);
+                    return Task::none();
+                }
                 // Empty Enter / Space with no active command repeats the
                 // last dispatched command — same shortcut `CommandFinalize`
                 // already implements, mirrored here so the trailing-space
@@ -1009,6 +1036,12 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 let i = self.active_tab;
                 if self.tabs[i].active_cmd.is_some() {
                     self.feed_command(crate::command::StepInput::Enter)
+                } else if self.control.user_select.is_some() {
+                    // Enter with no command active answers a pending client
+                    // user_select request — same contract as the command-line
+                    // empty-submit path above.
+                    self.resolve_user_select(true);
+                    Task::none()
                 } else if let Some(cmd) = self.tabs[i].last_cmd.clone() {
                     self.dispatch_command(&cmd)
                 } else {
@@ -1017,6 +1050,17 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
     }
 
     pub(super) fn on_command_escape(&mut self) -> Task<Message> {
+        // Escape answers a pending client getpoint request first: no point.
+        if self.control.get_point.is_some() {
+            self.resolve_get_point(None);
+            return Task::none();
+        }
+        // Escape answers a pending client user_select request before anything
+        // else — the person on the screen is who the request is waiting for.
+        if self.control.user_select.is_some() {
+            self.resolve_user_select(false);
+            return Task::none();
+        }
         if self.ribbon.escape_extension() {
             return Task::none();
         }

@@ -223,6 +223,10 @@ pub struct CrosshairOptions {
     pub iso_plane: IsoPlane,
     pub snap_angle_deg: f32,
     pub point_mode: bool,
+    /// A client pick (`user_select` / `getpoint`) is waiting for the person:
+    /// the crosshair arms disappear and a blue pickbox remains — the
+    /// screen-level "the client wants YOU to pick" signal.
+    pub pick_pending: bool,
 }
 
 /// Rendering style for the viewport grid.
@@ -1769,8 +1773,16 @@ impl canvas::Program<Message> for SelectionCanvas {
                     },
                 );
                 let color = Color { r, g, b, a };
+                // Pending client pick: drop the arms, keep a blue pickbox —
+                // the same blue as the MCP "waiting for you to pick" pill.
+                let pick_pending = self.crosshair.pick_pending;
+                let color = if pick_pending {
+                    Color::from_rgb(0.30, 0.55, 0.98)
+                } else {
+                    color
+                };
                 let stroke = canvas::Stroke {
-                    width: 1.0,
+                    width: if pick_pending { 1.5 } else { 1.0 },
                     style: canvas::Style::Solid(color),
                     ..Default::default()
                 };
@@ -1786,33 +1798,43 @@ impl canvas::Program<Message> for SelectionCanvas {
                 } else {
                     [0.0, 90.0]
                 };
-                for angle in base_angles {
-                    let rad = (angle + self.crosshair.snap_angle_deg as f64).to_radians();
-                    let dir = Point::new(rad.cos() as f32, -rad.sin() as f32);
-                    let gap = if point_mode {
-                        9.0
-                    } else if sq > 0.0 {
-                        sq / dir.x.abs().max(dir.y.abs()).max(1e-6)
-                    } else {
-                        0.0
-                    };
-                    let arms = canvas::Path::new(|path| {
-                        path.move_to(Point::new(cp.x + dir.x * gap, cp.y + dir.y * gap));
-                        path.line_to(Point::new(cp.x + dir.x * arm, cp.y + dir.y * arm));
-                        path.move_to(Point::new(cp.x - dir.x * gap, cp.y - dir.y * gap));
-                        path.line_to(Point::new(cp.x - dir.x * arm, cp.y - dir.y * arm));
-                    });
-                    frame.stroke(&arms, stroke.clone());
+                // The arms stay only for the normal (non-pending) cursor: a
+                // waiting pick shows the box alone, regardless of the UCS
+                // rotation, so the square is unmistakable.
+                if !pick_pending {
+                    for angle in base_angles {
+                        let rad = (angle + self.crosshair.snap_angle_deg as f64).to_radians();
+                        let dir = Point::new(rad.cos() as f32, -rad.sin() as f32);
+                        let gap = if point_mode {
+                            9.0
+                        } else if sq > 0.0 {
+                            sq / dir.x.abs().max(dir.y.abs()).max(1e-6)
+                        } else {
+                            0.0
+                        };
+                        let arms = canvas::Path::new(|path| {
+                            path.move_to(Point::new(cp.x + dir.x * gap, cp.y + dir.y * gap));
+                            path.line_to(Point::new(cp.x + dir.x * arm, cp.y + dir.y * arm));
+                            path.move_to(Point::new(cp.x - dir.x * gap, cp.y - dir.y * gap));
+                            path.line_to(Point::new(cp.x - dir.x * arm, cp.y - dir.y * arm));
+                        });
+                        frame.stroke(&arms, stroke.clone());
+                    }
                 }
                 if point_mode {
                     let dot = canvas::Path::circle(cp, 1.75);
                     frame.fill(&dot, color);
-                } else if sq > 0.0 {
-                    let square = canvas::Path::rectangle(
-                        Point::new(cp.x - sq, cp.y - sq),
-                        Size::new(sq * 2.0, sq * 2.0),
-                    );
-                    frame.stroke(&square, stroke);
+                } else {
+                    // A pending pick keeps the square visible even when the
+                    // user's PICKBOX setting would hide it.
+                    let sq = if pick_pending { sq.max(8.0) } else { sq };
+                    if sq > 0.0 {
+                        let square = canvas::Path::rectangle(
+                            Point::new(cp.x - sq, cp.y - sq),
+                            Size::new(sq * 2.0, sq * 2.0),
+                        );
+                        frame.stroke(&square, stroke);
+                    }
                 }
 
                 // Locked-layer badge: a small padlock beside the crosshair when

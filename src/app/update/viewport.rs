@@ -976,6 +976,21 @@ impl OpenCADStudio {
         Task::none()
     }
 
+    /// A client automation pick (`getpoint`/`user_select`) is waiting on tab
+    /// `i`'s document — the cursor behaves like a command point pick: the snap
+    /// engine runs on every move and the marker stays until the pick settles.
+    pub(super) fn client_pick_pending(&self, i: usize) -> bool {
+        self.control
+            .get_point
+            .as_ref()
+            .is_some_and(|session| session.document_id == self.tabs[i].id)
+            || self
+                .control
+                .user_select
+                .as_ref()
+                .is_some_and(|session| session.document_id == self.tabs[i].id)
+    }
+
     pub(in crate::app) fn on_viewport_move(&mut self, p: Point) -> Task<Message> {
         // A ribbon dropdown is open over the viewport. Its backdrop
         // cannot swallow cursor motion — in iced 0.14 mouse_area/opaque
@@ -1900,6 +1915,76 @@ impl OpenCADStudio {
             self.tabs[i].last_cursor_world = world;
         }
 
+        // A pending client pick (`getpoint` or `user_select`) is a command-grade
+        // pick without a command: run the object-snap engine here too, so the
+        // snap marker shows while the person aims. `getpoint` answers with the
+        // snapped point (`on_viewport_left_press` resolves from
+        // `last_cursor_world`); for `user_select` the marker is aiming feedback
+        // — the click still selects the entity under the cursor. Inputs mirror
+        // the command snap path below; OTRACK/polar/axis locks stay command-only.
+        if self.tabs[i].active_cmd.is_none() && self.client_pick_pending(i)
+        {
+            let bounds = iced::Rectangle {
+                x: 0.0,
+                y: 0.0,
+                width: vp_size.0,
+                height: vp_size.1,
+            };
+            let cursor_world = self.cursor_model_point(i, &edit_cam, p, bounds);
+            let (gx, gy, adaptive) = (self.grid_spacing_x, self.grid_spacing_y, self.grid_adaptive);
+            let visible_step = |distance: f32, fov_y: f32| {
+                let (sx, sy) = crate::ui::overlay::compute_grid_steps(
+                    gx, gy, distance, fov_y, bounds, adaptive,
+                );
+                sx.max(sy)
+            };
+            let (view_rot, eye, grid_spacing) = match &edit_cam {
+                Some(cam) => (
+                    cam.view_proj_rte(bounds),
+                    cam.eye(),
+                    visible_step(cam.distance, cam.fov_y),
+                ),
+                None => {
+                    let cam = self.tabs[i].scene.camera.borrow();
+                    (
+                        cam.view_proj_rte(bounds),
+                        cam.eye(),
+                        visible_step(cam.distance, cam.fov_y),
+                    )
+                }
+            };
+            self.snapper.grid_spacing = grid_spacing;
+            let all_wires =
+                if let (Some(_), Some(h)) = (&edit_cam, self.tabs[i].scene.active_viewport) {
+                    self.tabs[i].scene.model_wires_for_viewport_arc(h, bounds.height)
+                } else {
+                    self.tabs[i].scene.hit_test_wires()
+                };
+            let snap_candidates = self.tabs[i].scene.interaction_candidates_near(
+                all_wires,
+                cursor_world,
+                view_rot,
+                eye,
+                bounds,
+                self.snapper.osnap_radius_px,
+            );
+            let (go, gr) = self.drafting_grid_basis(i);
+            let snap_hit = self.snapper.snap(
+                cursor_world,
+                p,
+                &snap_candidates,
+                view_rot,
+                eye,
+                bounds,
+                go,
+                gr,
+                None,
+            );
+            self.tabs[i].snap_result = snap_hit;
+            self.tabs[i].last_cursor_world =
+                snap_hit.map(|hit| hit.world).unwrap_or(cursor_world);
+        }
+
         // Rollover highlight: when idle (no active command, no
         // drag), defer the pick until the cursor stops. The full
         // pick (wires + hatches + block hatches + shaded meshes) is
@@ -2674,7 +2759,10 @@ impl OpenCADStudio {
                 .scene
                 .set_command_preview_hidden(&preview_hidden);
             self.tabs[i].scene.set_preview_wires(previews);
-        } else {
+        } else if !self.client_pick_pending(i) {
+            // Idle (no command, no pending client pick): the snap marker is
+            // command-only, so clear it — a pending client pick keeps the
+            // marker its move-time snap block above computed.
             self.tabs[i].snap_result = None;
         }
 
@@ -3120,6 +3208,22 @@ impl OpenCADStudio {
         {
             let mut sel = self.tabs[i].scene.selection.borrow_mut();
             if sel.context_menu.take().is_some() {
+                return Task::none();
+            }
+        }
+        // A pending client `getpoint` request turns this click into the
+        // answer: the snapped world point under the cursor. The pick must
+        // not change the selection while the person is answering, and only
+        // the pinned document's viewport may answer.
+        if self.tabs[i].active_cmd.is_none() {
+            let answers = self
+                .control
+                .get_point
+                .as_ref()
+                .is_some_and(|session| session.document_id == self.tabs[i].id);
+            if answers {
+                let world = self.tabs[i].last_cursor_world;
+                self.resolve_get_point(Some([world.x, world.y, world.z]));
                 return Task::none();
             }
         }

@@ -1815,6 +1815,7 @@ fn build_selection_overlay_element(
             iso_plane: IsoPlane::Top,
             snap_angle_deg: 0.0,
             point_mode: false,
+            pick_pending: false,
         },
         SelectionVisualOptions::default(),
         empty_glyphs,

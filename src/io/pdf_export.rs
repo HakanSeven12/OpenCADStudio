@@ -1673,6 +1673,37 @@ fn emit_text(
     }
 }
 
+/// Everything searchable in an exported file: the raw bytes (printpdf
+/// leaves small content streams uncompressed) plus any zlib streams that
+/// decode to mostly-printable text, so the assertions hold either way.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn pdf_stream_text(bytes: &[u8]) -> String {
+    use std::io::Read as _;
+    let mut text = String::from_utf8_lossy(bytes).into_owned();
+    for start in 0..bytes.len().saturating_sub(2) {
+        // zlib streams start with a 2-byte header: deflate method, valid check.
+        let (cmf, flg) = (bytes[start], bytes[start + 1]);
+        if cmf & 0x0f != 8 || ((cmf as u16) << 8 | flg as u16) % 31 != 0 {
+            continue;
+        }
+        let mut decoded = Vec::new();
+        if flate2::read::ZlibDecoder::new(&bytes[start..])
+            .read_to_end(&mut decoded)
+            .is_ok()
+            && decoded.len() > 32
+        {
+            let printable = decoded
+                .iter()
+                .filter(|&&b| matches!(b, b'\n' | b'\r' | b'\t' | 32..=126))
+                .count();
+            if printable * 10 >= decoded.len() * 9 {
+                text.push_str(&String::from_utf8_lossy(&decoded));
+            }
+        }
+    }
+    text
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
@@ -1728,6 +1759,116 @@ mod tests {
         // A valid PDF is produced (starts with the PDF header) and is non-trivial.
         assert!(bytes.starts_with(b"%PDF"), "not a PDF");
         assert!(bytes.len() > 200, "suspiciously small: {}", bytes.len());
+    }
+
+
+    #[test]
+    fn export_fallback_plot_style_recolors_wires() {
+        // ACI 1 carrying pure device red: without a style it must export as an
+        // RGB operator; the monochrome fallback must recolor it. Guards the
+        // automation plot path, where the per-page style can be dropped.
+        let make_page = || {
+            let mut wire = PlotWire {
+                wire: WireModel::solid(
+                    "test".into(),
+                    vec![[0.0, 0.0, 0.0], [50.0, 50.0, 0.0]],
+                    [1.0, 0.0, 0.0, 1.0],
+                    false,
+                ),
+                draw_depth: 0.0,
+            };
+            wire.wire.aci = 1;
+            test_page(vec![wire])
+        };
+
+        let unstyled = pdf_stream_text(&build_pdf_pages(&[make_page()], None).unwrap());
+        let monochrome =
+            PlotStyleTable::builtin("monochrome.ctb").expect("shipped monochrome.ctb parses");
+        let styled =
+            pdf_stream_text(&build_pdf_pages(&[make_page()], Some(&monochrome)).unwrap());
+
+        assert!(
+            unstyled.contains("1 0 0 rg") || unstyled.contains("1 0 0 RG"),
+            "unstyled export should keep the wire's RGB color"
+        );
+        assert!(
+            !styled.contains("1 0 0 rg") && !styled.contains("1 0 0 RG"),
+            "monochrome fallback must recolor the wire"
+        );
+    }
+
+    /// Parse every stroke-width operator (`<pt> w`) out of the content text.
+    fn stroke_widths(text: &str) -> Vec<f32> {
+        let tokens: Vec<&str> = text.split_whitespace().collect();
+        tokens
+            .windows(2)
+            .filter_map(|pair| {
+                if pair[1] == "w" {
+                    pair[0].parse::<f32>().ok()
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn distinct_widths(mut widths: Vec<f32>) -> Vec<f32> {
+        widths.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        widths.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+        widths
+    }
+
+    #[test]
+    fn plot_honors_per_object_lineweight_with_and_without_style() {
+        // Two objects whose resolved lineweights differ (as two layers set to
+        // 0.13 mm and 0.50 mm produce): the PDF must carry two distinct pen
+        // widths, and a plot style that leaves weights at "use object" must
+        // keep that hierarchy.
+        let make_page = |px: f32| {
+            let mut wire = PlotWire {
+                wire: WireModel::solid(
+                    "test".into(),
+                    vec![[0.0, 0.0, 0.0], [50.0, 50.0, 0.0]],
+                    [1.0, 0.0, 0.0, 1.0],
+                    false,
+                ),
+                draw_depth: 0.0,
+            };
+            wire.wire.aci = 7;
+            wire.wire.line_weight_px = px;
+            test_page(vec![wire])
+        };
+
+        let monochrome =
+            PlotStyleTable::builtin("monochrome.ctb").expect("shipped monochrome.ctb parses");
+        eprintln!(
+            "monochrome resolve_lineweight(7) = {:?}",
+            monochrome.resolve_lineweight(7)
+        );
+
+        let unstyled = stroke_widths(&pdf_stream_text(
+            &build_pdf_pages(&[make_page(1.0), make_page(3.0)], None).unwrap(),
+        ));
+        let unstyled = distinct_widths(unstyled);
+        assert_eq!(unstyled.len(), 2, "two object weights, two pens: {unstyled:?}");
+        assert!(
+            (unstyled[1] / unstyled[0] - 3.0).abs() < 0.1,
+            "pen widths follow the object weights 1px:3px: {unstyled:?}"
+        );
+
+        let styled = stroke_widths(&pdf_stream_text(
+            &build_pdf_pages(&[make_page(1.0), make_page(3.0)], Some(&monochrome)).unwrap(),
+        ));
+        let styled = distinct_widths(styled);
+        assert_eq!(
+            styled.len(),
+            2,
+            "monochrome.ctb leaves weights at 'use object', so the two weights survive: {styled:?}"
+        );
+        assert!(
+            (styled[1] / styled[0] - 3.0).abs() < 0.1,
+            "weight hierarchy matches the unstyled plot: {styled:?}"
+        );
     }
 
     // Build a WireModel carrying the SDF glyph quads for `text` in the embedded

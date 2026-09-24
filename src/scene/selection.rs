@@ -160,6 +160,7 @@ impl Scene {
 
     /// Script-facing replacement: preserve exactly the validated input order.
     /// UI picks still use `select_entity` and its leader/annotation expansion.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(crate) fn replace_selection_exact(&mut self, handles: &[Handle]) {
         if self.selected_handles_in_order() == handles { return; }
         self.selected_constraint = None;

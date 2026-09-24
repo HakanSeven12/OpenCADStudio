@@ -421,6 +421,7 @@ fn restore_shifted_mline_segment(
 /// Recompute the derived MLine state after a scripted create or edit:
 /// vertex direction/miter, element segment layout and the per-element miter
 /// offsets. Dash/cut parameters survive an edit unless a vertex moved.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) fn normalize_scripted_mline(
     old: Option<&MLine>,
     new: &mut MLine,

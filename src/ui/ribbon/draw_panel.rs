@@ -207,13 +207,11 @@ pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Ele
     )
     .delay(Duration::from_millis(400))
     .style(tip_style);
-    row![
-        iced::widget::Space::new().width(Fill),
-        title_button,
-        container(launcher).width(Fill).align_x(iced::Right)
-    ]
-    .align_y(iced::Center)
-    .into()
+    // Shrink-sized: a Fill here would make the panel claim the whole row.
+    row![title_button, launcher]
+        .spacing(6)
+        .align_y(iced::Center)
+        .into()
 }
 
 fn tool_button(tool: &Tool, active: bool, panel_id: &'static str) -> Element<'static, Message> {

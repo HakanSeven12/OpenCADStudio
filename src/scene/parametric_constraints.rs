@@ -2507,7 +2507,9 @@ impl super::Scene {
     }
 
     /// The document as written to a file: a dynamic dimension's screen-size
-    /// overrides are a display matter and stay out of the file.
+    /// overrides are a display matter and stay out of the file, and so does
+    /// what resolving an external reference merged in (its geometry, nested
+    /// blocks and styles), which the file never stores.
     pub(crate) fn document_for_save(&self) -> acadrust::CadDocument {
         use crate::entities::dim_override as ov;
         let mut document = self.document.clone();
@@ -2530,6 +2532,7 @@ impl super::Scene {
                 }
             }
         }
+        crate::io::xref::strip_resolved_xref_content(&mut document);
         document
     }
 

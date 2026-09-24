@@ -16,9 +16,12 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufRead, Write};
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
+#[cfg(not(target_arch = "wasm32"))]
+use sha2::{Digest, Sha256};
 
 use super::OpenCADStudio;
 
@@ -38,7 +41,11 @@ pub fn serve() {
 /// writes `output` (format chosen from `output`'s extension), and returns a
 /// process exit code (0 on success). No window is created.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn export_headless(input: &std::path::Path, output: &std::path::Path) -> i32 {
+pub fn export_headless(
+    input: &std::path::Path,
+    output: &std::path::Path,
+    target_version: Option<&str>,
+) -> i32 {
     let doc = match crate::io::load_file(input) {
         Ok(doc) => doc,
         Err(e) => {
@@ -46,7 +53,17 @@ pub fn export_headless(input: &std::path::Path, output: &std::path::Path) -> i32
             return 1;
         }
     };
-    match crate::io::save(&doc, output) {
+    let version = match target_version {
+        Some(value) => match crate::io::parse_target_version(value) {
+            Ok(version) => version,
+            Err(e) => {
+                eprintln!("export: {e}");
+                return 2;
+            }
+        },
+        None => doc.version,
+    };
+    match crate::io::save_as_version(&doc, output, version) {
         Ok(()) => {
             println!("Exported {} → {}", input.display(), output.display());
             0
@@ -311,6 +328,202 @@ fn projected_fields(mut entity: Value, fields: Option<&Vec<Value>>) -> Value {
     entity
 }
 
+pub(super) fn requested_save_target(
+    req: &Value,
+    default_version: acadrust::DxfVersion,
+    default_is_dxf: bool,
+    path: Option<&std::path::Path>,
+) -> Result<(acadrust::DxfVersion, bool), String> {
+    let version = match req["target_version"].as_str() {
+        Some(value) => crate::io::parse_target_version(value)?,
+        None => default_version,
+    };
+    let path_format = path
+        .and_then(std::path::Path::extension)
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .filter(|value| value == "dxf" || value == "dwg");
+    let requested_format = match req["target_format"].as_str() {
+        Some(value) if value.eq_ignore_ascii_case("dxf") => Some("dxf".to_string()),
+        Some(value) if value.eq_ignore_ascii_case("dwg") => Some("dwg".to_string()),
+        Some(value) => return Err(format!("unsupported target format {value:?}; use dwg or dxf")),
+        None => None,
+    };
+    if let (Some(requested), Some(extension)) = (&requested_format, &path_format) {
+        if requested != extension {
+            return Err(format!(
+                "target_format {requested:?} conflicts with output extension .{extension}"
+            ));
+        }
+    }
+    let is_dxf = requested_format
+        .or(path_format)
+        .map_or(default_is_dxf, |value| value == "dxf");
+    Ok((version, is_dxf))
+}
+
+fn document_manifest(document: &acadrust::CadDocument) -> Value {
+    let mut by_type: BTreeMap<String, u64> = BTreeMap::new();
+    let mut by_layer: BTreeMap<String, u64> = BTreeMap::new();
+    let mut total = 0u64;
+    for entity in document.entities() {
+        *by_type
+            .entry(crate::entities::names::ui_name(entity).to_string())
+            .or_default() += 1;
+        *by_layer.entry(entity.common().layer.clone()).or_default() += 1;
+        total += 1;
+    }
+    json!({"total":total,"by_type":by_type,"by_layer":by_layer})
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn sha256_file(path: &std::path::Path) -> Result<String, String> {
+    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+    let digest = Sha256::digest(bytes);
+    Ok(format!("{digest:x}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn audit_ascii_dxf_references(path: &std::path::Path) -> Result<Value, String> {
+    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+    if bytes.starts_with(b"AutoCAD Binary DXF") {
+        return Ok(json!({
+            "ok":true,
+            "skipped":"binary_dxf",
+            "reason":"raw group-code handle audit applies only to ASCII DXF"
+        }));
+    }
+    let text = String::from_utf8_lossy(&bytes).replace("\r\n", "\n");
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() % 2 != 0 {
+        return Ok(json!({"ok":false,"malformed_pairs":true,"duplicate_handles":[],"dangling_handles":[]}));
+    }
+    let mut declared = HashSet::from(["0".to_string()]);
+    let mut duplicate = std::collections::BTreeSet::new();
+    let mut references = Vec::new();
+    let mut pairs = Vec::new();
+    let mut version = None;
+    let mut variable = None;
+    for pair in lines.chunks_exact(2) {
+        let Ok(code) = pair[0].trim().parse::<i32>() else {
+            return Ok(json!({"ok":false,"malformed_pairs":true,"duplicate_handles":[],"dangling_handles":[]}));
+        };
+        let value = pair[1].trim().to_ascii_uppercase();
+        pairs.push((code, value.clone()));
+        if code == 9 {
+            variable = Some(value.clone());
+        } else if code == 1 && variable.as_deref() == Some("$ACADVER") {
+            version = Some(value.clone());
+            variable = None;
+        }
+        if code == 5 || code == 105 {
+            if !declared.insert(value.clone()) {
+                duplicate.insert(value.clone());
+            }
+        } else if [330, 340, 350, 360, 390].contains(&code) {
+            references.push(value);
+        }
+    }
+    let dangling: std::collections::BTreeSet<String> = references
+        .into_iter()
+        .filter(|handle| !declared.contains(handle))
+        .collect();
+    let mut in_objects = false;
+    let mut pending_section = false;
+    let mut records: Vec<(String, Vec<(i32, String)>)> = Vec::new();
+    let mut current: Option<(String, Vec<(i32, String)>)> = None;
+    for (code, value) in &pairs {
+        if *code == 0 && value == "SECTION" {
+            pending_section = true;
+            continue;
+        }
+        if pending_section && *code == 2 {
+            in_objects = value == "OBJECTS";
+            pending_section = false;
+            continue;
+        }
+        if *code == 0 && value == "ENDSEC" {
+            if let Some(record) = current.take() {
+                records.push(record);
+            }
+            in_objects = false;
+            continue;
+        }
+        if !in_objects {
+            continue;
+        }
+        if *code == 0 {
+            if let Some(record) = current.take() {
+                records.push(record);
+            }
+            current = Some((value.clone(), Vec::new()));
+        } else if let Some((_, fields)) = &mut current {
+            fields.push((*code, value.clone()));
+        }
+    }
+    let root = records.iter().find_map(|(kind, fields)| {
+        let handle = fields
+            .iter()
+            .find(|(code, _)| *code == 5 || *code == 105)?
+            .1
+            .clone();
+        let owner = fields
+            .iter()
+            .rev()
+            .find(|(code, _)| *code == 330)?
+            .1
+            .as_str();
+        (kind == "DICTIONARY" && owner == "0").then_some(handle)
+    });
+    let mut orphaned_objects = std::collections::BTreeSet::new();
+    if let Some(root_handle) = root {
+        let root_targets: HashSet<String> = records
+            .iter()
+            .find(|(_, fields)| {
+                fields
+                    .iter()
+                    .any(|(code, value)| (*code == 5 || *code == 105) && value == &root_handle)
+            })
+            .map(|(_, fields)| {
+                fields
+                    .iter()
+                    .filter(|(code, _)| *code == 350 || *code == 360)
+                    .map(|(_, value)| value.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (_, fields) in &records {
+            let Some(handle) = fields
+                .iter()
+                .find(|(code, _)| *code == 5 || *code == 105)
+                .map(|(_, value)| value)
+            else {
+                continue;
+            };
+            let owner = fields
+                .iter()
+                .rev()
+                .find(|(code, _)| *code == 330)
+                .map(|(_, value)| value.as_str());
+            if owner == Some(root_handle.as_str())
+                && handle != &root_handle
+                && !root_targets.contains(handle)
+            {
+                orphaned_objects.insert(handle.clone());
+            }
+        }
+    }
+    Ok(json!({
+        "ok":duplicate.is_empty() && dangling.is_empty() && orphaned_objects.is_empty(),
+        "malformed_pairs":false,
+        "declared_handles":declared.len() - 1,
+        "duplicate_handles":duplicate,
+        "dangling_handles":dangling,
+        "orphaned_objects":orphaned_objects,
+        "declared_version":version,
+    }))
+}
+
 impl OpenCADStudio {
     /// Handle one JSON request line and return the JSON response.
     #[cfg(any(test, not(target_arch = "wasm32")))]
@@ -464,6 +677,7 @@ impl OpenCADStudio {
                 })
             }
             "entities" => self.entity_summary(),
+            "audit" => self.document_audit(&req),
             "query" => self.entity_query(&req),
             "records" => self.record_query(&req),
             "record_schema" => self.record_schema(&req),
@@ -583,7 +797,7 @@ impl OpenCADStudio {
                         ".{}.tmp.dwg",
                         path.file_name().unwrap().to_string_lossy()
                     ));
-                    let document = self.tabs[i].scene.document.clone();
+                    let document = self.tabs[i].scene.document_for_save();
                     if let Err(e) = crate::io::save(&document, &scratch) {
                         return err(format!("save: {e}"));
                     }
@@ -592,14 +806,48 @@ impl OpenCADStudio {
                     }
                     return json!({ "ok": true, "saved": path.to_string_lossy() });
                 }
+                let default_is_dxf = crate::io::source_is_dxf(
+                    self.tabs[i].current_path.as_deref(),
+                    &self.tabs[i].scene.document,
+                );
+                let (version, is_dxf) = match requested_save_target(
+                    &req,
+                    self.tabs[i].scene.document.version,
+                    default_is_dxf,
+                    Some(&path),
+                ) {
+                    Ok(target) => target,
+                    Err(error) => return err(format!("save: {error}")),
+                };
+                let dropped = crate::io::dropped_on_save_count(
+                    &self.tabs[i].scene.document,
+                    version,
+                    is_dxf,
+                );
+                if dropped > 0 && req["allow_lossy"].as_bool() != Some(true) {
+                    return err(format!(
+                        "save: conversion would drop {dropped} unsupported record(s); set allow_lossy=true to acknowledge"
+                    ));
+                }
                 #[cfg(not(target_arch = "wasm32"))]
-                let result = self.save_tab_synchronously_protected(i, path.clone(), true);
+                let result = self.save_tab_synchronously_protected_as(
+                    i,
+                    path.clone(),
+                    version,
+                    true,
+                );
                 #[cfg(target_arch = "wasm32")]
                 let result = crate::io::save(&self.tabs[i].scene.document, &path)
                     .map_err(crate::io::SaveFailure::other);
                 match result {
                     Ok(()) => {
-                        json!({ "ok": true, "saved": path.to_string_lossy() })
+                        json!({
+                            "ok": true,
+                            "saved": path.to_string_lossy(),
+                            "target_format": if is_dxf { "dxf" } else { "dwg" },
+                            "target_version": format!("{version:?}"),
+                            "dropped_on_save": dropped,
+                        })
                     }
                     Err(e) => err(format!("save: {e}")),
                 }
@@ -888,6 +1136,276 @@ impl OpenCADStudio {
         })
     }
 
+    /// Pre-delivery check of the active document against an intended output
+    /// format and version: dangling layers/blocks, duplicate handles,
+    /// non-finite bounds, lossy records and the source DXF handle graph.
+    fn document_audit(&self, req: &Value) -> Value {
+        let i = self.active_tab;
+        let tab = &self.tabs[i];
+        let document = &tab.scene.document;
+        let source_is_dxf = crate::io::source_is_dxf(tab.current_path.as_deref(), document);
+        let path = req["path"]
+            .as_str()
+            .map(std::path::Path::new)
+            .or(tab.current_path.as_deref());
+        let (target_version, target_is_dxf) = match requested_save_target(
+            req,
+            document.version,
+            source_is_dxf,
+            path,
+        ) {
+            Ok(target) => target,
+            Err(error) => return err(format!("audit: {error}")),
+        };
+
+        let declared_layers: HashSet<String> = document
+            .layers
+            .iter()
+            .map(|layer| layer.name.to_ascii_uppercase())
+            .collect();
+        let block_names: HashSet<String> = document
+            .block_records
+            .iter()
+            .map(|block| block.name.to_ascii_uppercase())
+            .collect();
+        let mut missing_layers = std::collections::BTreeSet::new();
+        let mut missing_blocks = std::collections::BTreeSet::new();
+        let mut duplicate_handles = std::collections::BTreeSet::new();
+        let mut seen_handles = HashSet::new();
+        let mut serialization_errors = Vec::new();
+        let mut non_finite_bounds = Vec::new();
+        let mut unknown_entities = 0usize;
+        let mut bounds: Option<([f64; 3], [f64; 3])> = None;
+
+        for entity in document.entities() {
+            let common = entity.common();
+            if !declared_layers.contains(&common.layer.to_ascii_uppercase()) {
+                missing_layers.insert(common.layer.clone());
+            }
+            if !seen_handles.insert(common.handle.value()) {
+                duplicate_handles.insert(format!("{:X}", common.handle.value()));
+            }
+            if let acadrust::EntityType::Insert(insert) = entity {
+                if !block_names.contains(&insert.block_name.to_ascii_uppercase()) {
+                    missing_blocks.insert(insert.block_name.clone());
+                }
+            }
+            if matches!(entity, acadrust::EntityType::Unknown(_)) {
+                unknown_entities += 1;
+            }
+            if let Err(error) = serde_json::to_value(entity) {
+                serialization_errors.push(format!("{:X}: {error}", common.handle.value()));
+            }
+            let (min, max) = crate::scene::convert::tess::entity_bounds(entity);
+            if min.into_iter().chain(max).any(|value| !value.is_finite()) {
+                non_finite_bounds.push(format!("{:X}", common.handle.value()));
+            } else {
+                bounds = Some(match bounds {
+                    None => (min, max),
+                    Some((mut all_min, mut all_max)) => {
+                        for axis in 0..3 {
+                            all_min[axis] = all_min[axis].min(min[axis]);
+                            all_max[axis] = all_max[axis].max(max[axis]);
+                        }
+                        (all_min, all_max)
+                    }
+                });
+            }
+        }
+        for (handle, object) in &document.objects {
+            if let Err(error) = serde_json::to_value(object) {
+                serialization_errors.push(format!("object {:X}: {error}", handle.value()));
+            }
+        }
+
+        let dropped = crate::io::dropped_on_save_count(
+            document,
+            target_version,
+            target_is_dxf,
+        );
+        let mut issues = Vec::new();
+        if !missing_layers.is_empty() {
+            issues.push(json!({"severity":"error","code":"undeclared_layer","values":missing_layers}));
+        }
+        if !missing_blocks.is_empty() {
+            issues.push(json!({"severity":"error","code":"missing_block","values":missing_blocks}));
+        }
+        if !duplicate_handles.is_empty() {
+            issues.push(json!({"severity":"error","code":"duplicate_entity_handle","values":duplicate_handles}));
+        }
+        if !serialization_errors.is_empty() {
+            issues.push(json!({"severity":"error","code":"non_serializable_record","values":serialization_errors}));
+        }
+        if !non_finite_bounds.is_empty() {
+            issues.push(json!({"severity":"error","code":"non_finite_bounds","handles":non_finite_bounds}));
+        }
+        if dropped > 0 {
+            issues.push(json!({
+                "severity":"warning",
+                "code":"lossy_conversion",
+                "message":format!("{dropped} unsupported record(s) would be dropped"),
+            }));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let source_dxf_structure = if source_is_dxf {
+            tab.current_path
+                .as_deref()
+                .filter(|path| path.is_file())
+                .and_then(|path| audit_ascii_dxf_references(path).ok())
+        } else {
+            None
+        };
+        #[cfg(target_arch = "wasm32")]
+        let source_dxf_structure: Option<Value> = None;
+        if source_dxf_structure
+            .as_ref()
+            .is_some_and(|audit| audit["ok"] != true)
+        {
+            issues.push(json!({
+                "severity":"error","code":"invalid_dxf_handle_graph",
+                "details":source_dxf_structure.clone(),
+            }));
+        }
+        let errors = issues.iter().filter(|issue| issue["severity"] == "error").count();
+        let warnings = issues.iter().filter(|issue| issue["severity"] == "warning").count();
+        #[cfg(not(target_arch = "wasm32"))]
+        let source_sha256 = tab.current_path.as_deref().filter(|path| path.is_file())
+            .and_then(|path| sha256_file(path).ok());
+        #[cfg(target_arch = "wasm32")]
+        let source_sha256: Option<String> = None;
+        json!({
+            "ok": errors == 0,
+            "status": if errors > 0 { "failed" } else if warnings > 0 { "warning" } else { "passed" },
+            "document_id": tab.id,
+            "source": {
+                "path": tab.current_path,
+                "format": if source_is_dxf { "dxf" } else { "dwg" },
+                "version": format!("{:?}", document.version),
+                "sha256": source_sha256,
+                "dxf_structure": source_dxf_structure,
+            },
+            "target": {
+                "format": if target_is_dxf { "dxf" } else { "dwg" },
+                "version": format!("{target_version:?}"),
+                "dropped_on_save": dropped,
+                "lossless": dropped == 0,
+            },
+            "manifest": document_manifest(document),
+            "bounds": bounds.map(|(min,max)| json!({"min":min,"max":max})),
+            "unknown_entities": unknown_entities,
+            "issues": issues,
+            "summary": {"errors":errors,"warnings":warnings},
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn save_verified_request(&mut self, req: &Value) -> Result<Value, Value> {
+        let i = self.active_tab;
+        let Some(raw_path) = req["path"].as_str() else {
+            return Err(json!({"ok":false,"status":"failed","code":"path_required","error":"save_verified requires an explicit absolute path"}));
+        };
+        let path = std::path::PathBuf::from(raw_path);
+        if !path.is_absolute() {
+            return Err(json!({"ok":false,"status":"failed","code":"absolute_path_required","error":"save_verified path must be absolute"}));
+        }
+        let extension = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(str::to_ascii_lowercase);
+        if !matches!(extension.as_deref(), Some("dwg" | "dxf")) {
+            return Err(json!({"ok":false,"status":"failed","code":"unsupported_format","error":"save_verified path must end in .dwg or .dxf"}));
+        }
+        if path.exists() && req["overwrite"].as_bool() != Some(true) {
+            return Err(json!({"ok":false,"status":"failed","code":"destination_exists","error":"destination exists; set overwrite=true to replace it"}));
+        }
+        let document = &self.tabs[i].scene.document;
+        let source_is_dxf = crate::io::source_is_dxf(self.tabs[i].current_path.as_deref(), document);
+        let (version, is_dxf) = requested_save_target(
+            req,
+            document.version,
+            source_is_dxf,
+            Some(&path),
+        )
+        .map_err(|error| json!({"ok":false,"status":"failed","code":"invalid_target","error":error}))?;
+        let audit = self.document_audit(req);
+        if audit["summary"]["errors"].as_u64().unwrap_or(0) > 0 {
+            return Err(json!({
+                "ok":false,"status":"failed","code":"audit_failed",
+                "error":"pre-save structural audit failed","audit":audit,
+            }));
+        }
+        let dropped = crate::io::dropped_on_save_count(document, version, is_dxf);
+        if dropped > 0 && req["allow_lossy"].as_bool() != Some(true) {
+            return Err(json!({
+                "ok":false,"status":"failed","code":"lossy_conversion_not_acknowledged",
+                "error":format!("conversion would drop {dropped} unsupported record(s); set allow_lossy=true to acknowledge"),
+                "dropped_on_save":dropped,
+            }));
+        }
+
+        self.prepare_native_save(i);
+        // The same snapshot a normal save writes: display-only overrides and
+        // resolved xref content stay out of the file.
+        let snapshot = self.tabs[i].scene.document_for_save();
+        let before = document_manifest(&snapshot);
+        crate::io::save_as_version(&snapshot, &path, version)
+            .map_err(|error| json!({
+                "ok":false,"status":"failed","code":"save_failed","error":error,
+            }))?;
+        let sha256 = sha256_file(&path).map_err(|error| json!({
+            "ok":false,"status":"failed","code":"hash_failed","error":error,
+            "saved":path,
+        }))?;
+        let dxf_structure = if is_dxf {
+            Some(audit_ascii_dxf_references(&path).map_err(|error| json!({
+                "ok":false,"status":"failed","code":"dxf_audit_failed","error":error,
+                "saved":path,"sha256":sha256,
+            }))?)
+        } else {
+            None
+        };
+        if dxf_structure
+            .as_ref()
+            .is_some_and(|audit| audit["ok"] != true)
+        {
+            return Err(json!({
+                "ok":false,"status":"failed","code":"invalid_dxf_handle_graph",
+                "error":"saved DXF contains duplicate or dangling handle references; file was preserved for diagnosis",
+                "saved":path,"sha256":sha256,"dxf_structure":dxf_structure,
+                "target_version":format!("{version:?}"),
+            }));
+        }
+        let reopened = crate::io::load_file(&path).map_err(|error| json!({
+            "ok":false,"status":"failed","code":"reopen_failed","error":error,
+            "saved":path,"sha256":sha256,
+        }))?;
+        if reopened.version != version {
+            return Err(json!({
+                "ok":false,"status":"failed","code":"version_mismatch",
+                "error":"saved drawing reopened with a different CAD version",
+                "saved":path,"sha256":sha256,"requested":format!("{version:?}"),
+                "actual":format!("{:?}",reopened.version),"dxf_structure":dxf_structure,
+            }));
+        }
+        let after = document_manifest(&reopened);
+        if before != after {
+            return Err(json!({
+                "ok":false,"status":"failed","code":"semantic_mismatch",
+                "error":"saved drawing reopened but its entity manifest changed; file was preserved for diagnosis",
+                "saved":path,"sha256":sha256,"before":before,"after":after,
+                "target_format":if is_dxf { "dxf" } else { "dwg" },
+                "target_version":format!("{version:?}"),"dropped_on_save":dropped,
+            }));
+        }
+        Ok(json!({
+            "ok":true,"status":"completed","verified":true,
+            "saved":path,"sha256":sha256,"bytes":std::fs::metadata(&path).map(|m|m.len()).unwrap_or(0),
+            "target_format":if is_dxf { "dxf" } else { "dwg" },
+            "target_version":format!("{version:?}"),"dropped_on_save":dropped,
+            "manifest":after,"audit":audit,"dxf_structure":dxf_structure,
+        }))
+    }
+
     /// Count of entities in the active document, total and by type.
     fn entity_summary(&self) -> Value {
         let i = self.active_tab;
@@ -947,6 +1465,118 @@ mod tests {
     }
     use crate::app::OpenCADStudio;
     use serde_json::{json, Value};
+
+    #[test]
+    fn audit_rejects_an_undeclared_entity_layer() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        assert_eq!(
+            app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#)["ok"],
+            true
+        );
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .document
+            .entities_mut()
+            .next()
+            .expect("line")
+            .common_mut()
+            .layer = "NOT_DECLARED".into();
+        let audit = app.automation_op(r#"{"op":"audit","target_format":"dwg","target_version":"R14"}"#);
+        assert_eq!(audit["ok"], false, "{audit}");
+        assert_eq!(audit["issues"][0]["code"], "undeclared_layer", "{audit}");
+    }
+
+    #[test]
+    fn save_verified_writes_reopens_hashes_and_matches_manifest() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        assert_eq!(
+            app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#)["ok"],
+            true
+        );
+        let path = std::env::temp_dir().join(format!(
+            "ocs_verified_save_{}_{}.dwg",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let _ = std::fs::remove_file(&path);
+        let result = app
+            .save_verified_request(&serde_json::json!({
+                "path":path,
+                "target_format":"dwg",
+                "target_version":"R14",
+                "overwrite":true,
+            }))
+            .expect("verified save");
+        assert_eq!(result["verified"], true, "{result}");
+        assert_eq!(result["target_version"], "AC1014", "{result}");
+        assert_eq!(result["manifest"]["total"], 1, "{result}");
+        assert_eq!(result["sha256"].as_str().map(str::len), Some(64));
+        assert!(path.is_file());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn explicit_target_version_parser_never_silently_defaults() {
+        assert_eq!(
+            crate::io::parse_target_version("R14").unwrap(),
+            acadrust::DxfVersion::AC1014
+        );
+        assert_eq!(
+            crate::io::parse_target_version("AC1015").unwrap(),
+            acadrust::DxfVersion::AC1015
+        );
+        assert!(crate::io::parse_target_version("R12").is_err());
+        assert!(crate::io::parse_target_version("future").is_err());
+    }
+
+    #[test]
+    fn raw_dxf_audit_detects_dangling_handle_references() {
+        let path = std::env::temp_dir().join(format!(
+            "ocs_dangling_handle_{}.dxf",
+            std::process::id()
+        ));
+        std::fs::write(&path, "  0\nLINE\n  5\n1\n330\n2\n").unwrap();
+        let audit = super::audit_ascii_dxf_references(&path).unwrap();
+        assert_eq!(audit["ok"], false, "{audit}");
+        assert_eq!(audit["dangling_handles"], serde_json::json!(["2"]));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn raw_dxf_audit_marks_binary_input_as_skipped() {
+        let path = std::env::temp_dir().join(format!(
+            "ocs_binary_dxf_{}.dxf",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"AutoCAD Binary DXF\r\n\x1a\0").unwrap();
+        let audit = super::audit_ascii_dxf_references(&path).unwrap();
+        assert_eq!(audit["ok"], true, "{audit}");
+        assert_eq!(audit["skipped"], "binary_dxf", "{audit}");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn raw_dxf_audit_detects_objects_orphaned_from_the_root_dictionary() {
+        let path = std::env::temp_dir().join(format!(
+            "ocs_orphaned_object_{}.dxf",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            "0\nSECTION\n2\nOBJECTS\n0\nDICTIONARY\n5\nC\n330\n0\n0\nDICTIONARY\n5\n23\n330\nC\n0\nENDSEC\n0\nEOF\n",
+        )
+        .unwrap();
+        let audit = super::audit_ascii_dxf_references(&path).unwrap();
+        assert_eq!(audit["ok"], false, "{audit}");
+        assert_eq!(audit["orphaned_objects"], serde_json::json!(["23"]));
+        let _ = std::fs::remove_file(path);
+    }
 
     #[test]
     fn layout_notice_skips_grid_camera_and_scene_builds() {
@@ -1016,6 +1646,33 @@ mod tests {
         // whole tail (not just its first token) has to land in the entity — an
         // off-by-one in the consumed index would still pass the checks above.
         assert_eq!(assert_one_text(&app), "hello world");
+    }
+
+    #[test]
+    fn zoom_extents_includes_sdf_text_outside_other_geometry() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+
+        let line = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 200,0"}"#);
+        assert_eq!(line["added"], 1, "{line}");
+        let text = app.automation_op(
+            r#"{"op":"run","cmd":"TEXT 100,135 8 0 OPEN CAD MCP ACCEPTANCE"}"#,
+        );
+        assert_eq!(text["added"], 1, "{text}");
+
+        app.tabs[i].scene.selection.borrow_mut().vp_size = (1600.0, 800.0);
+        app.tabs[i].scene.fit_all();
+        let (_, max) = app.tabs[i]
+            .scene
+            .camera
+            .borrow()
+            .fitted_model_bounds()
+            .expect("ZOOM EXTENTS did not fit the drawing");
+        assert!(
+            max.y >= 142.0,
+            "text at y=135..143 was clipped from fitted bounds: {max:?}"
+        );
     }
 
     #[test]

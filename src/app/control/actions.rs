@@ -52,6 +52,7 @@ pub(super) const NAMES: &[&str] = &[
     "pdf_page_select",
     "ribbon_tab",
     "ribbon_dropdown",
+    "dialog_ok",
     "close_document",
     "toggle_properties",
     "toggle_layers",
@@ -705,6 +706,14 @@ impl OpenCADStudio {
                     _ => return Err(failure("no_dialog", "No PDF dialog is open")),
                 })
             }
+            // The open dialog's OK button.
+            "dialog_ok" => match self.active_modal {
+                Some(crate::app::ModalKind::XrefAttach) => Message::XrefAttach(
+                    crate::ui::window::xref_attach::XrefAttachMsg::Apply,
+                ),
+                Some(crate::app::ModalKind::BlockDefinition) => Message::BlockDefApply,
+                _ => return Err(failure("no_dialog", "No dialog with an OK button is open")),
+            },
             "close_document" => Message::TabClose(self.active_tab),
             "toggle_properties" => Message::ToggleProperties,
             "toggle_layers" => Message::ToggleLayers,

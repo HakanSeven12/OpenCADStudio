@@ -711,8 +711,12 @@ impl OpenCADStudio {
             let toks: Vec<String> = tokens.iter().map(|s| s.to_string()).collect();
             return self.finish_active_command(&toks, finish);
         }
+        // Bare XREF opens the External References palette, so probing the
+        // verb alone would open it (and refresh every entry) before the
+        // argument form `XREF Reload A` runs.
         if tokens[0].eq_ignore_ascii_case("BACKGROUND")
             || tokens[0].eq_ignore_ascii_case("COLORSCHEME")
+            || tokens[0].eq_ignore_ascii_case("XREF")
         {
             return self.dispatch_command(cmd);
         }
@@ -3127,60 +3131,17 @@ impl OpenCADStudio {
                 self.sync_dyn_fields();
                 self.refresh_area_preview(i);
             }
-            CmdResult::CommitAndExit(mut entity) => {
-                // For XATTACH: ensure the xref block definition exists before
-                // committing the INSERT entity that references it.
-                // Extract path early to avoid borrow conflicts.
-                let xattach_path: Option<String> = {
-                    let tab = &self.tabs[i];
-                    if let Some(cmd) = tab.active_cmd.as_ref() {
-                        if cmd.name() == "XATTACH" {
-                            cmd.xattach_path()
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                };
-                if let Some(path) = xattach_path {
-                    // XREF-Task6: the host drawing path lives in the tab
-                    // (`current_path`), not in `Scene`, so the self-attach
-                    // guard runs here via the pure `is_self_attach` helper.
-                    let host_file = self.tabs[i].current_path.clone();
-                    let host_base = host_file
-                        .as_deref()
-                        .and_then(|p| p.parent())
-                        .map(|p| p.to_path_buf());
-                    if let Some(host) = host_file.as_deref() {
-                        if crate::modules::insert::xattach::is_self_attach(
-                            host,
-                            &path,
-                            host_base.as_deref(),
-                        ) {
-                            self.command_line.push_error(crate::t!("XATTACH: cannot attach the host drawing into itself.").as_ref());
-                            self.tabs[i].scene.clear_preview_wire();
-                            self.tabs[i].active_cmd = None;
-                            self.tabs[i].snap_result = None;
-                            self.restore_pre_cmd_tangent();
-                            return Task::none();
-                        }
-                    }
-                    let prepared_name = crate::modules::insert::xattach::prepare_xref_block(
-                        &mut self.tabs[i].scene,
-                        &path,
-                        host_base.as_deref(),
-                    );
-                    // `prepare_xref_block` may suffix a colliding stem. The
-                    // command was created before that collision was known, so
-                    // retarget its pending INSERT to the actual new block.
-                    if let acadrust::EntityType::Insert(insert) = &mut entity {
-                        insert.block_name = prepared_name;
-                    }
-                    // Resolving the xref merged its layer / linetype tables
-                    // into the document — mirror them into the Layers panel
-                    // and ribbon dropdowns now, not on the next reopen (#407).
-                    self.refresh_layer_panel();
+            CmdResult::CommitAndExit(entity) => {
+                // XATTACH: the definition and its INSERT are created together
+                // in one undo step.
+                let xattach_request = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .filter(|cmd| cmd.name() == "XATTACH")
+                    .and_then(|cmd| cmd.xattach_request());
+                if let Some(request) = xattach_request {
+                    self.commit_xref_attach(i, request, entity);
+                    return Task::none();
                 }
                 let insert_block_name = match &entity {
                     acadrust::EntityType::Insert(ins) => Some(ins.block_name.clone()),
@@ -9301,7 +9262,7 @@ impl OpenCADStudio {
         out
     }
 
-    fn restore_pre_cmd_tangent(&mut self) {
+    pub(super) fn restore_pre_cmd_tangent(&mut self) {
         if let Some(was_on) = self.pre_cmd_tangent.take() {
             if !was_on {
                 self.snapper.enabled.remove(&crate::snap::SnapType::Tangent);

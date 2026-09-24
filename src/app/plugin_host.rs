@@ -2710,6 +2710,13 @@ impl crate::command::CadCommand for PluginInteractiveAdapter {
         .map(plugin_step_to_result)
         .unwrap_or(crate::command::CmdResult::Cancel)
     }
+    fn on_preview_wires(&mut self, pt: glam::DVec3) -> Vec<crate::scene::model::wire_model::WireModel> {
+        let raw_wires = crate::plugin::guard("InteractiveCommand::on_cursor_move", || {
+            self.inner.on_cursor_move([pt.x as f64, pt.y as f64, pt.z as f64])
+        })
+        .unwrap_or_default();
+        convert_preview_wires(raw_wires)
+    }
 }
 
 /// Bridges an out-of-process plugin's interactive command to the host's
@@ -2777,7 +2784,12 @@ impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
             .interactive_event(self.command_id, InteractiveEvent::Point([pt.x, pt.y, pt.z]))
             .map(plugin_step_to_result)
             .unwrap_or(crate::command::CmdResult::Cancel);
-        if matches!(result, crate::command::CmdResult::CommitAndExit(_) | crate::command::CmdResult::Cancel) {
+        if matches!(
+            result,
+            crate::command::CmdResult::CommitAndExit(_)
+                | crate::command::CmdResult::CommitEntitiesAndExit(_)
+                | crate::command::CmdResult::Cancel
+        ) {
             self.is_done = true;
         }
         self.refresh();
@@ -2790,7 +2802,12 @@ impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
             .interactive_event(self.command_id, InteractiveEvent::Enter)
             .map(plugin_step_to_result)
             .unwrap_or(crate::command::CmdResult::Cancel);
-        if matches!(result, crate::command::CmdResult::CommitAndExit(_) | crate::command::CmdResult::Cancel) {
+        if matches!(
+            result,
+            crate::command::CmdResult::CommitAndExit(_)
+                | crate::command::CmdResult::CommitEntitiesAndExit(_)
+                | crate::command::CmdResult::Cancel
+        ) {
             self.is_done = true;
         }
         self.refresh();
@@ -2816,12 +2833,101 @@ impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
             )
             .map(plugin_step_to_result)
             .unwrap_or(crate::command::CmdResult::Cancel);
-        if matches!(result, crate::command::CmdResult::CommitAndExit(_) | crate::command::CmdResult::Cancel) {
+        if matches!(
+            result,
+            crate::command::CmdResult::CommitAndExit(_)
+                | crate::command::CmdResult::CommitEntitiesAndExit(_)
+                | crate::command::CmdResult::Cancel
+        ) {
             self.is_done = true;
         }
         self.refresh();
         result
     }
+    fn on_preview_wires(&mut self, pt: glam::DVec3) -> Vec<crate::scene::model::wire_model::WireModel> {
+        let raw_wires = self
+            .process
+            .on_cursor_move(self.command_id, [pt.x as f64, pt.y as f64, pt.z as f64])
+            .unwrap_or_default();
+        convert_preview_wires(raw_wires)
+    }
+}
+
+fn convert_preview_wires(
+    raw_wires: Vec<ocs_plugin_api::host::PreviewWire>,
+) -> Vec<crate::scene::model::wire_model::WireModel> {
+    use ocs_plugin_api::host::PreviewWire;
+    use crate::scene::model::wire_model::{TangentGeom, WireModel};
+
+    raw_wires
+        .into_iter()
+        .filter_map(|w| match w {
+            PreviewWire::Polyline { points, color } => {
+                if points.len() < 2 {
+                    return None;
+                }
+                let c = color.unwrap_or(WireModel::CYAN);
+                Some(WireModel::solid_f64("rubber_band".into(), points, c, false))
+            }
+            PreviewWire::Circle { center, radius, color } => {
+                if radius <= 0.0 || !radius.is_finite() {
+                    return None;
+                }
+                let c = color.unwrap_or(WireModel::CYAN);
+                // Two opposite diameter points ensure OCS's viewport frame-cache
+                // (render_signature) detects cursor motion and triggers 60-120 FPS
+                // redraws without requiring polar snap or artificial guide lines.
+                let points = vec![
+                    [center[0] - radius, center[1], center[2]],
+                    [center[0] + radius, center[1], center[2]],
+                ];
+                let mut wire = WireModel::solid_f64("rubber_band".into(), points, c, false);
+                wire.tangent_geoms.push(TangentGeom::PlanarCircle {
+                    center,
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius,
+                });
+                Some(wire)
+            }
+            PreviewWire::Arc {
+                center,
+                radius,
+                start_angle_rad,
+                end_angle_rad,
+                color,
+            } => {
+                if radius <= 0.0 || !radius.is_finite() {
+                    return None;
+                }
+                let c = color.unwrap_or(WireModel::CYAN);
+                // Start and end points along the circumference ensure OCS's viewport
+                // frame-cache (render_signature) detects cursor motion and triggers
+                // 60-120 FPS redraws without requiring polar snap or artificial guide lines.
+                let p_start = [
+                    center[0] + radius * start_angle_rad.cos(),
+                    center[1] + radius * start_angle_rad.sin(),
+                    center[2],
+                ];
+                let p_end = [
+                    center[0] + radius * end_angle_rad.cos(),
+                    center[1] + radius * end_angle_rad.sin(),
+                    center[2],
+                ];
+                let points = vec![p_start, p_end];
+                let mut wire = WireModel::solid_f64("rubber_band".into(), points, c, false);
+                wire.tangent_geoms.push(TangentGeom::Arc {
+                    center,
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius,
+                    start_angle: start_angle_rad,
+                    end_angle: end_angle_rad,
+                });
+                Some(wire)
+            }
+        })
+        .collect()
 }
 
 fn plugin_step_to_result(step: ocs_plugin_api::host::CommandStep) -> crate::command::CmdResult {
@@ -2830,7 +2936,9 @@ fn plugin_step_to_result(step: ocs_plugin_api::host::CommandStep) -> crate::comm
     match step {
         CommandStep::NeedPoint => CmdResult::NeedPoint,
         CommandStep::Commit(e) => CmdResult::CommitEntity(e),
+        CommandStep::CommitMany(es) => CmdResult::CommitEntities(es),
         CommandStep::CommitAndEnd(e) => CmdResult::CommitAndExit(e),
+        CommandStep::CommitManyAndEnd(es) => CmdResult::CommitEntitiesAndExit(es),
         CommandStep::Done | CommandStep::Cancel => CmdResult::Cancel,
     }
 }
@@ -9224,6 +9332,140 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             app.tabs[0].active_cmd.is_none(),
             "command should have ended"
         );
+    }
+
+    /// A plugin command that previews a rubber-band line to the cursor.
+    struct PreviewLine {
+        start: [f64; 3],
+        color: Option<[f32; 4]>,
+    }
+    impl ocs_plugin_api::host::InteractiveCommand for PreviewLine {
+        fn prompt(&self) -> String {
+            "Pick endpoint".to_string()
+        }
+        fn on_point(&mut self, _pt: [f64; 3]) -> ocs_plugin_api::host::CommandStep {
+            ocs_plugin_api::host::CommandStep::Done
+        }
+        fn on_cursor_move(&mut self, pt: [f64; 3]) -> Vec<ocs_plugin_api::host::PreviewWire> {
+            vec![ocs_plugin_api::host::PreviewWire::line(self.start, pt, self.color)]
+        }
+    }
+
+    /// A plugin command that previews an analytical circle.
+    struct PreviewCircle {
+        center: [f64; 3],
+        color: Option<[f32; 4]>,
+    }
+    impl ocs_plugin_api::host::InteractiveCommand for PreviewCircle {
+        fn prompt(&self) -> String {
+            "Pick radius".to_string()
+        }
+        fn on_point(&mut self, _pt: [f64; 3]) -> ocs_plugin_api::host::CommandStep {
+            ocs_plugin_api::host::CommandStep::Done
+        }
+        fn on_cursor_move(&mut self, pt: [f64; 3]) -> Vec<ocs_plugin_api::host::PreviewWire> {
+            let dx = pt[0] - self.center[0];
+            let dy = pt[1] - self.center[1];
+            let r = (dx * dx + dy * dy).sqrt();
+            vec![ocs_plugin_api::host::PreviewWire::circle(self.center, r, self.color)]
+        }
+    }
+
+    /// A plugin command that previews an analytical arc.
+    struct PreviewArc {
+        center: [f64; 3],
+        color: Option<[f32; 4]>,
+    }
+    impl ocs_plugin_api::host::InteractiveCommand for PreviewArc {
+        fn prompt(&self) -> String {
+            "Pick endpoint".to_string()
+        }
+        fn on_point(&mut self, _pt: [f64; 3]) -> ocs_plugin_api::host::CommandStep {
+            ocs_plugin_api::host::CommandStep::Done
+        }
+        fn on_cursor_move(&mut self, pt: [f64; 3]) -> Vec<ocs_plugin_api::host::PreviewWire> {
+            let dx = pt[0] - self.center[0];
+            let dy = pt[1] - self.center[1];
+            let r = (dx * dx + dy * dy).sqrt();
+            vec![ocs_plugin_api::host::PreviewWire::arc(
+                self.center,
+                r,
+                0.0,
+                std::f64::consts::PI,
+                self.color,
+            )]
+        }
+    }
+
+    #[test]
+    fn plugin_cursor_move_preview_wires() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+
+        // 1. Polyline default color (None -> CYAN)
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            host.start_interactive(Box::new(PreviewLine { start: [0.0, 0.0, 0.0], color: None }));
+        }
+        assert!(app.tabs[0].active_cmd.is_some());
+        let cmd = app.tabs[0].active_cmd.as_mut().unwrap();
+        let wires = cmd.on_preview_wires(glam::DVec3::new(10.0, 20.0, 0.0));
+        assert_eq!(wires.len(), 1);
+        assert_eq!(wires[0].name, "rubber_band");
+        assert_eq!(wires[0].color, crate::scene::model::wire_model::WireModel::CYAN);
+
+        // 2. Polyline custom color ([1.0, 0.0, 0.0, 1.0])
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            host.start_interactive(Box::new(PreviewLine { start: [0.0, 0.0, 0.0], color: Some([1.0, 0.0, 0.0, 1.0]) }));
+        }
+        let cmd2 = app.tabs[0].active_cmd.as_mut().unwrap();
+        let wires2 = cmd2.on_preview_wires(glam::DVec3::new(10.0, 20.0, 0.0));
+        assert_eq!(wires2.len(), 1);
+        assert_eq!(wires2[0].color, [1.0, 0.0, 0.0, 1.0]);
+
+        // 3. Analytical Circle with custom color
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            host.start_interactive(Box::new(PreviewCircle {
+                center: [5.0, 5.0, 0.0],
+                color: Some([0.0, 1.0, 0.0, 1.0]),
+            }));
+        }
+        let cmd3 = app.tabs[0].active_cmd.as_mut().unwrap();
+        let circle_wires = cmd3.on_preview_wires(glam::DVec3::new(15.0, 5.0, 0.0));
+        assert_eq!(circle_wires.len(), 1);
+        assert_eq!(circle_wires[0].points.len(), 2);
+        assert_eq!(circle_wires[0].color, [0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(circle_wires[0].tangent_geoms.len(), 1);
+        assert!(matches!(
+            circle_wires[0].tangent_geoms[0],
+            crate::scene::model::wire_model::TangentGeom::PlanarCircle { radius, .. } if (radius - 10.0).abs() < 1e-6
+        ));
+        let instances = crate::scene::pipeline::circle_gpu::extract_circle_instances(&circle_wires[0], 0.0);
+        assert!(instances.is_some());
+        assert_eq!(instances.unwrap().len(), 1);
+
+        // 4. Analytical Arc
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            host.start_interactive(Box::new(PreviewArc {
+                center: [0.0, 0.0, 0.0],
+                color: None,
+            }));
+        }
+        let cmd4 = app.tabs[0].active_cmd.as_mut().unwrap();
+        let arc_wires = cmd4.on_preview_wires(glam::DVec3::new(10.0, 0.0, 0.0));
+        assert_eq!(arc_wires.len(), 1);
+        assert_eq!(arc_wires[0].points.len(), 2);
+        assert_eq!(arc_wires[0].tangent_geoms.len(), 1);
+        assert!(matches!(
+            arc_wires[0].tangent_geoms[0],
+            crate::scene::model::wire_model::TangentGeom::Arc { radius, .. } if (radius - 10.0).abs() < 1e-6
+        ));
+        let arc_instances = crate::scene::pipeline::circle_gpu::extract_circle_instances(&arc_wires[0], 0.0);
+        assert!(arc_instances.is_some());
+        assert_eq!(arc_instances.unwrap().len(), 1);
     }
 
     /// A plugin command that picks an existing object, then marks it.

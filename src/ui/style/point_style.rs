@@ -168,7 +168,7 @@ pub fn view_window<'a>(
             Some(relative),
             Message::PointStyleSizeRelative,
         )
-        .size(15)
+        .size(16)
         .text_size(13),
         radio(
             t!("Set Size in Absolute Units"),
@@ -176,7 +176,7 @@ pub fn view_window<'a>(
             Some(relative),
             Message::PointStyleSizeRelative,
         )
-        .size(15)
+        .size(16)
         .text_size(13),
     ]
     .spacing(6);

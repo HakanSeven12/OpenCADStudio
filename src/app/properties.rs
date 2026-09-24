@@ -1478,6 +1478,25 @@ impl OpenCADStudio {
                                     },
                                 );
                             }
+                            if let Some(br) = doc
+                                .block_records
+                                .get(&ins.block_name)
+                                .filter(|br| br.flags.is_xref || br.flags.is_xref_overlay)
+                            {
+                                let base_dir = self.tabs[i]
+                                    .current_path
+                                    .as_deref()
+                                    .and_then(|p| p.parent())
+                                    .map(|p| p.to_path_buf())
+                                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                                let overrides = crate::io::xref::layer_overrides(
+                                    doc,
+                                    &br.name,
+                                    &br.xref_path,
+                                    &base_dir,
+                                );
+                                xref_rows(&mut sections, ins, &br.xref_path, factor, overrides);
+                            }
                         }
                         // Underlay: name, page, path and size from the definition.
                         acadrust::EntityType::Underlay(ul) => {
@@ -3713,6 +3732,69 @@ fn merge_prop_value(
 /// Set the first property row matching `field` (across all sections) to a
 /// read-only `value`. No-op when the field is absent. Used to fill the
 /// doc-dependent placeholder rows the entity builders leave empty.
+/// An external reference's rows as the reference application lists them:
+/// Insertion point X/Y/Z, Scale X/Y/Z without the unit conversion the INSERT
+/// carries (no uniform-scale or Annotative rows), Saved Path after the name
+/// and Layer property overrides last.
+fn xref_rows(
+    sections: &mut [crate::scene::model::object::PropSection],
+    ins: &acadrust::entities::Insert,
+    saved_path: &str,
+    factor: f64,
+    overrides: bool,
+) {
+    use crate::entities::common::{edit_prop, ro_prop};
+    let factor = if factor.abs() > 0.0 { factor } else { 1.0 };
+    for section in sections.iter_mut() {
+        for prop in section.props.iter_mut() {
+            let label = match prop.field {
+                "ins_x" => "Insertion point X",
+                "ins_y" => "Insertion point Y",
+                "ins_z" => "Insertion point Z",
+                _ => continue,
+            };
+            prop.label = t!(label).into_owned();
+        }
+        let scale_at = section.props.iter().position(|p| {
+            matches!(p.field, "x_scale" | "y_scale" | "z_scale" | "u_scale" | "ins_uniform")
+        });
+        section.props.retain(|p| {
+            !matches!(
+                p.field,
+                "x_scale" | "y_scale" | "z_scale" | "u_scale" | "ins_uniform" | "annotative"
+            )
+        });
+        if let Some(at) = scale_at {
+            let at = at.min(section.props.len());
+            section.props.splice(
+                at..at,
+                [
+                    edit_prop(t!("Scale X").as_ref(), "xref_x_scale", ins.x_scale() / factor),
+                    edit_prop(t!("Scale Y").as_ref(), "xref_y_scale", ins.y_scale() / factor),
+                    edit_prop(t!("Scale Z").as_ref(), "xref_z_scale", ins.z_scale() / factor),
+                ],
+            );
+        }
+        if let Some(at) = section.props.iter().position(|p| p.field == "block") {
+            section.props.insert(
+                at + 1,
+                ro_prop(
+                    t!("Saved Path").as_ref(),
+                    "xref_saved_path",
+                    crate::modules::insert::xref_cmd::display_path(saved_path),
+                ),
+            );
+        }
+        if section.props.iter().any(|p| p.field == "unit_factor") {
+            section.props.push(ro_prop(
+                t!("Layer property overrides").as_ref(),
+                "xref_layer_overrides",
+                if overrides { t!("Yes") } else { t!("No") }.into_owned(),
+            ));
+        }
+    }
+}
+
 fn set_row(sections: &mut [crate::scene::model::object::PropSection], field: &str, value: String) {
     for section in sections.iter_mut() {
         if let Some(row) = section.props.iter_mut().find(|p| p.field == field) {
@@ -4103,7 +4185,7 @@ fn dim_lineweight_label(dimlwd: i16) -> String {
 }
 
 /// Human-readable INSUNITS name (DXF group 70 unit codes).
-fn insunits_name(code: i16) -> &'static str {
+pub(in crate::app) fn insunits_name(code: i16) -> &'static str {
     match code {
         1 => "Inches",
         2 => "Feet",
@@ -4135,7 +4217,7 @@ fn insunits_name(code: i16) -> &'static str {
 }
 
 /// Unit-conversion scale for a new INSERT.
-fn insert_unit_scale(host_units: i16, src_units: i16) -> Option<f64> {
+pub(in crate::app) fn insert_unit_scale(host_units: i16, src_units: i16) -> Option<f64> {
     let host_mm = insunits_to_mm(host_units)?;
     let src_mm = insunits_to_mm(src_units)?;
     let ratio = src_mm / host_mm;
@@ -4145,7 +4227,7 @@ fn insert_unit_scale(host_units: i16, src_units: i16) -> Option<f64> {
     Some(ratio)
 }
 
-fn format_unit_factor(factor: f64) -> String {
+pub(in crate::app) fn format_unit_factor(factor: f64) -> String {
     let magnitude = factor.abs();
     if magnitude > 0.0 && !(1.0e-4..1.0e7).contains(&magnitude) {
         format!("{factor:.4e}")

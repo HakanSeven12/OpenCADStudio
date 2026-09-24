@@ -2884,11 +2884,11 @@ impl Scene {
     /// standard linetypes and a compatible page setup on every paper layout.
     pub fn populate_new_drawing_defaults(&mut self) {
         crate::io::linetypes::populate_document(&mut self.document);
-        // A new drawing is metric, as the reference's ISO template: millimetre
+        // A new drawing is metric, as the reference's new drawing: metre
         // insertion units, metric measurement, and the ISO-25 dimension style
         // current. Standard stays available for imperial work.
         self.document.header.measurement = 1;
-        self.document.header.insertion_units = 4;
+        self.document.header.insertion_units = 6;
         let iso = crate::scene::creation_style::ensure_iso_dim_style(&mut self.document);
         self.document.header.current_dimstyle_name = "ISO-25".to_string();
         // The name alone leaves the header pointing at the previous style, and

@@ -42,6 +42,15 @@ pub enum FontSource {
     Custom(String),
 }
 
+/// Stable key for comparing bare font names without path or case differences.
+pub fn font_key(name: &str) -> String {
+    name.rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(name)
+        .trim()
+        .to_ascii_lowercase()
+}
+
 impl FontSource {
     /// Empty / whitespace input selects the community repository.
     pub fn from_url(url: &str) -> Self {
@@ -263,6 +272,12 @@ mod tests {
             FontSource::Custom("https://intra/fonts".into())
         );
         assert_eq!(percent_encode_path("vn 30f.shx"), "vn%2030f.shx");
+    }
+
+    #[test]
+    fn font_keys_are_bare_trimmed_and_case_insensitive() {
+        assert_eq!(font_key(r#" C:\Fonts\ROMANS.SHX "#), "romans.shx");
+        assert_eq!(font_key("folder/simplex.shx"), "simplex.shx");
     }
 
     #[test]

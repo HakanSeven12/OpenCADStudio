@@ -25,6 +25,7 @@ mod underlay_layers;
 pub(crate) mod wblock;
 mod xadjust;
 pub(crate) mod xattach;
+pub(crate) mod xref_cmd;
 mod xclip;
 
 use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem};

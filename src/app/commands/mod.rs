@@ -5,6 +5,7 @@ use iced::Task;
 use std::path::PathBuf;
 
 mod blocks;
+mod xref_attach;
 mod dim;
 pub(crate) mod display;
 mod draw;
@@ -247,6 +248,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_layers(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_xref_attach(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_blocks(cmd, i) {
@@ -663,6 +667,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "3DORBIT",
         "3O",
         "ABOUT",
+        "ATTACH",
         "ATTDISP",
         "ATTEXT",
         "BACKGROUND",

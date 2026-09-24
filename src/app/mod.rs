@@ -500,6 +500,10 @@ pub(super) struct OpenCADStudio {
     pdf_import_file: Option<crate::ui::window::pdf_dialogs::PdfImportFileState>,
     /// The dialog Options was opened from; it comes back when Options closes.
     options_parent: Option<ModalKind>,
+    /// Working copy of the Attach External Reference dialog; None while closed.
+    xref_attach: Option<crate::ui::window::xref_attach::XrefAttachState>,
+    /// Working copy of the Write Block (WBLOCK) dialog; `None` while it is closed.
+    wblock: Option<crate::ui::window::wblock::WblockState>,
     /// Working copy of the structured feature-control-frame editor.
     geometric_tolerance: Option<crate::ui::window::geometric_tolerance::State>,
     /// PICKDRAG (#226): false (default) = press-drag lassoes; true =
@@ -1265,6 +1269,15 @@ pub(super) struct OpenCADStudio {
     /// Missing SHX fonts of the last opened drawing, offered for download
     /// from the community repository (see `crate::io::font_repo`).
     missing_fonts: Option<Vec<String>>,
+    /// Drawing that produced `missing_fonts`; the active tab may change while
+    /// a download is in flight.
+    missing_fonts_path: Option<PathBuf>,
+    /// Prevent duplicate download tasks and keep modal contents visible while
+    /// the background request is running.
+    missing_fonts_downloading: bool,
+    /// Fonts skipped or unavailable during this process lifetime. Reopening a
+    /// drawing must not repeatedly nag for the same unresolved file.
+    suppressed_missing_fonts: rustc_hash::FxHashSet<String>,
     /// Drawings handed to us by other launches while `opening` was busy.
     /// `opening` is a single slot that a second `OpenPathPicked` would
     /// overwrite, and `on_file_opened` drops any result arriving once it is
@@ -1882,6 +1895,8 @@ pub enum ModalKind {
     UnderlayLayers,
     PdfImportSettings,
     PdfImportFile,
+    XrefAttach,
+    WriteBlock,
     GeometricTolerance,
     DraftingSettings,
     AutoConstrainSettings,
@@ -2879,6 +2894,24 @@ pub enum Message {
     BlockDefConfirmRedefine(bool),
     BlockDefDismissError,
     BlockDefHelp,
+    /// Write Block (WBLOCK) dialog messages
+    WblockSourceMode(crate::ui::window::wblock::WblockSourceMode),
+    WblockBlockName(String),
+    WblockBlockSelect(String),
+    WblockPickPoint,
+    WblockBaseX(String),
+    WblockBaseY(String),
+    WblockBaseZ(String),
+    WblockSelectObjects,
+    WblockQuickSelect,
+    WblockObjectMode(crate::ui::window::wblock::WblockObjectMode),
+    WblockFilePath(String),
+    WblockBrowsePath,
+    WblockBrowsePathResult(Option<std::path::PathBuf>),
+    WblockUnit(i16),
+    WblockApply,
+    WblockDismissError,
+    WblockHelp,
     /// One structured feature-control-frame field changed.
     ToleranceDialogField(crate::ui::window::geometric_tolerance::Field),
     /// One structured feature-control-frame option changed.
@@ -3798,6 +3831,14 @@ pub enum Message {
     XAttachPick,
     /// Result of the XATTACH file picker.
     XAttachPickResult(Result<std::path::PathBuf, String>),
+    /// ATTACH: pick a drawing, image or PDF to reference.
+    AttachPick,
+    /// Result of the ATTACH file picker.
+    AttachPickResult(Result<std::path::PathBuf, String>),
+    /// An edit in the Attach External Reference dialog.
+    XrefAttach(crate::ui::window::xref_attach::XrefAttachMsg),
+    /// Result of the dialog's Browse picker.
+    XrefAttachBrowseResult(Result<std::path::PathBuf, String>),
     // ── WBLOCK ────────────────────────────────────────────────────────────
     /// Trigger the WBLOCK save dialog for `block_name` (or `*` = selection).
     WblockSave(String),
@@ -3965,6 +4006,8 @@ impl OpenCADStudio {
             pdf_import_settings: None,
             pdf_import_file: None,
             options_parent: None,
+            xref_attach: None,
+            wblock: None,
             geometric_tolerance: None,
             pick_drag_rect: false,
             perf_hud: false,
@@ -4202,6 +4245,9 @@ impl OpenCADStudio {
             open_job_serial: 0,
             recovery_report: None,
             missing_fonts: None,
+            missing_fonts_path: None,
+            missing_fonts_downloading: false,
+            suppressed_missing_fonts: rustc_hash::FxHashSet::default(),
             pending_opens: std::collections::VecDeque::new(),
             active_interaction_index: None,
             queued_interaction_indices: std::collections::VecDeque::new(),

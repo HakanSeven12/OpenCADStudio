@@ -35,6 +35,11 @@ const DEFAULT_ALIASES_PGP: &str = include_str!("../../assets/ocad.pgp");
 /// config base can't be resolved (headless, no `HOME`).
 #[cfg(not(target_arch = "wasm32"))]
 fn alias_file_path() -> Option<PathBuf> {
+    // Tests read the shipped defaults: parallel tests seeding and migrating one
+    // shared file race, and a half-written table fails unrelated alias tests.
+    if cfg!(test) {
+        return None;
+    }
     Some(crate::config::config_dir()?.join("ocad.pgp"))
 }
 
@@ -74,8 +79,8 @@ const WEB_ALIAS_KEY: &str = "opencadstudio.aliases";
 /// defaults add aliases or change a default target, so existing profiles can be
 /// migrated forward (see `introduced_at` / `migrate_aliases`). Version 1 shipped
 /// the pre-REDRAW table; version 2 introduced the REDRAW-family aliases; version 3
-/// introduced HB (HATCHTOBACK).
-const DEFAULT_ALIASES_VERSION: u32 = 3;
+/// introduced HB (HATCHTOBACK); version 4 introduced ER (EXTERNALREFERENCES).
+const DEFAULT_ALIASES_VERSION: u32 = 4;
 
 #[cfg(target_arch = "wasm32")]
 const WEB_ALIAS_VERSION_KEY: &str = "opencadstudio.aliases.version";
@@ -93,6 +98,7 @@ fn introduced_at(version: u32) -> &'static [(&'static str, &'static str)] {
             ("REA", "REGENALL"),
         ],
         3 => &[("HB", "HATCHTOBACK")],
+        4 => &[("ER", "EXTERNALREFERENCES")],
         _ => &[],
     }
 }

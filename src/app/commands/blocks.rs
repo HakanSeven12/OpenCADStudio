@@ -460,6 +460,41 @@ impl OpenCADStudio {
                 self.active_modal = Some(crate::app::ModalKind::BlockDefinition);
             }
 
+            cmd if cmd.starts_with("WBLOCK_POINT_PICKED ") => {
+                let parts: Vec<f64> = cmd["WBLOCK_POINT_PICKED ".len()..]
+                    .split_whitespace()
+                    .filter_map(|s| s.parse::<f64>().ok())
+                    .collect();
+                if parts.len() == 3 {
+                    if let Some(state) = self.wblock.as_mut() {
+                        state.base_point_x = format!("{:.4}", parts[0]);
+                        state.base_point_y = format!("{:.4}", parts[1]);
+                        state.base_point_z = format!("{:.4}", parts[2]);
+                    }
+                }
+                self.tabs[i].active_cmd = None;
+                self.active_modal = Some(crate::app::ModalKind::WriteBlock);
+            }
+
+            "WBLOCK_POINT_CANCELLED" => {
+                self.tabs[i].active_cmd = None;
+                self.active_modal = Some(crate::app::ModalKind::WriteBlock);
+            }
+
+            "WBLOCK_OBJECTS_GATHERED" => {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
+                if let Some(state) = self.wblock.as_mut() {
+                    state.selected_handles = handles;
+                }
+                self.tabs[i].active_cmd = None;
+                self.active_modal = Some(crate::app::ModalKind::WriteBlock);
+            }
+
             "INSERT" => {
                 let blocks = self.tabs[i].scene.custom_block_names();
                 if blocks.is_empty() {
@@ -718,9 +753,56 @@ impl OpenCADStudio {
                 // Launch the file picker; XAttachPickResult will start the command.
                 return Some(Task::done(Message::XAttachPick));
             }
-            cmd if cmd == "WBLOCK" || cmd == "WB" || cmd.starts_with("WBLOCK ") => {
-                let arg = cmd.splitn(2, ' ').nth(1).unwrap_or("").trim();
-                if arg.is_empty() {
+            "WBLOCK" | "WB" => {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
+                let existing_blocks = self.tabs[i].scene.custom_block_names();
+                let default_unit = self.tabs[i].scene.document.header.insertion_units;
+                let default_folder = self.tabs[i]
+                    .current_path
+                    .as_ref()
+                    .and_then(|p| p.parent())
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let default_path = if default_folder.is_empty() {
+                    "new_block.dwg".to_string()
+                } else {
+                    format!("{}/new_block.dwg", default_folder.replace('\\', "/"))
+                };
+                self.wblock = Some(
+                    crate::ui::window::wblock::WblockState::new(
+                        existing_blocks,
+                        handles,
+                        default_unit,
+                        default_path,
+                    ),
+                );
+                self.active_modal = Some(crate::app::ModalKind::WriteBlock);
+            }
+
+            cmd if cmd == "-WBLOCK"
+                || cmd == "-WB"
+                || cmd.starts_with("-WBLOCK ")
+                || cmd.starts_with("-WB ")
+                || cmd.starts_with("WBLOCK ")
+                || cmd.starts_with("WB ") =>
+            {
+                let rest = if let Some(r) = cmd.strip_prefix("-WBLOCK") {
+                    r.trim()
+                } else if let Some(r) = cmd.strip_prefix("-WB") {
+                    r.trim()
+                } else if let Some(r) = cmd.strip_prefix("WBLOCK") {
+                    r.trim()
+                } else if let Some(r) = cmd.strip_prefix("WB") {
+                    r.trim()
+                } else {
+                    ""
+                };
+                if rest.is_empty() {
                     // No argument: use selected entities (*) if any, else ask.
                     let sel: Vec<_> = self.tabs[i].scene.selected.iter().copied().collect();
                     if sel.is_empty() {
@@ -731,7 +813,7 @@ impl OpenCADStudio {
                         return Some(Task::done(Message::WblockSave("*".to_string())));
                     }
                 } else {
-                    return Some(Task::done(Message::WblockSave(arg.to_string())));
+                    return Some(Task::done(Message::WblockSave(rest.to_string())));
                 }
             }
 
@@ -1417,11 +1499,16 @@ impl OpenCADStudio {
                     if after.is_empty() {
                         return Some(Task::done(Message::XAttachPick));
                     }
-                    let cmd = crate::modules::insert::xattach::XAttachCommand::with_path(
-                        after.to_string(),
+                    self.start_xref_attach(
+                        i,
+                        crate::modules::insert::xattach::XrefAttachRequest {
+                            path: after.trim_matches('"').to_string(),
+                            overlay: false,
+                            path_type: crate::io::xref_model::Pathtype::Full,
+                        },
+                        crate::modules::insert::xattach::XrefPlacement::on_screen(),
+                        "-XREF",
                     );
-                    self.command_line.push_info(&cmd.prompt());
-                    self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
                     self.command_line.push_error(crate::tf!(
                         "XREF: unknown option '{}'. Options: ? Reload Unload Detach Path Pathtype Bind Overlay Attach",
@@ -1648,11 +1735,11 @@ mod tests {
 
     #[test]
     fn xref_dash_alias_lists_like_xref() {
-        // `-XREF` is accepted as an alias for industry muscle memory; bare
-        // `XREF` keeps the legacy list output for compatibility.
+        // `-XREF` asks on the command line: `?` then Enter prints the
+        // reference table; `XREF ?` keeps the legacy list output for scripts.
         let mut app = fresh_app();
         let out = run_capture(&mut app, "-XREF ?");
-        assert!(out.contains("No external references") || out.contains("External references"));
+        assert!(out.contains("Total Xref(s): 0"), "got: {out:?}");
     }
 
     #[test]
@@ -2065,9 +2152,15 @@ mod tests {
     #[test]
     fn xref_attach_with_file_starts_placement() {
         // F10: `XREF Attach <file>` threads the file into the XATTACH
-        // placement command (same flow as the picker result).
+        // placement command (same flow as the picker result). A missing file
+        // is rejected up front, so the reference has to exist.
+        let dir = std::env::temp_dir().join(format!("ocs_xref_attach_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("plan.dwg");
+        std::fs::write(&file, b"fake").unwrap();
         let mut app = fresh_app();
-        let out = run_capture(&mut app, "XREF Attach C:/refs/plan.dwg");
+        let out = run_capture(&mut app, &format!("XREF Attach {}", file.to_string_lossy()));
+        std::fs::remove_dir_all(&dir).ok();
         assert!(
             !out.contains("ships with reference operations"),
             "dead-end text must be gone, got: {out:?}"

@@ -7,9 +7,43 @@
 
 use crate::app::Message;
 use crate::ui::style::common::muted_style;
-use iced::widget::{button, container, pick_list, row, text, text_input, Space};
+use iced::widget::{button, container, pick_list, radio, row, text, text_input, Space};
 use iced::{Background, Border, Element, Length, Theme};
 use std::borrow::Cow;
+
+/// Standard dialog footer action button (OK, Cancel, Apply, Close, Help, etc.),
+/// matching the Drafting Settings / Options appearance: 12px text, [6, 18] padding,
+/// themed primary or secondary style.
+pub fn dialog_button<'a>(
+    label: impl text::IntoFragment<'a>,
+    on_press: Message,
+    primary: bool,
+) -> button::Button<'a, Message> {
+    button(text(label).size(12))
+        .on_press(on_press)
+        .padding([6, 18])
+        .style(if primary {
+            button::primary
+        } else {
+            button::secondary
+        })
+}
+
+/// Unified radio button helper ensuring consistent 16px size for exact pixel-grid concentric alignment.
+pub fn form_radio<'a, T>(
+    label: impl Into<String>,
+    value: T,
+    selected: Option<T>,
+    on_click: impl Fn(T) -> Message + 'a,
+) -> radio::Radio<'a, Message>
+where
+    T: Copy + Eq + 'a,
+{
+    radio(label, value, selected, on_click)
+        .size(16)
+        .spacing(6)
+        .text_size(11)
+}
 
 /// Width of the label column in a `label : control` row.
 pub const LABEL_WIDTH: f32 = 92.0;

@@ -197,6 +197,7 @@ fn handle_host_request(
                             CommandStep::Done
                                 | CommandStep::Cancel
                                 | CommandStep::CommitAndEnd(_)
+                                | CommandStep::CommitManyAndEnd(_)
                         );
                         (Ok(s), is_done)
                     }
@@ -241,6 +242,21 @@ fn handle_host_request(
                 Some(Ok(b)) => HostResponse::Bool(b),
                 Some(Err(_)) => HostResponse::Error("needs_object_pick() panicked".to_string()),
                 None => HostResponse::Error(format!("unknown interactive command {command_id}")),
+            }
+        }
+        HostRequest::CursorMove { command_id, pt } => {
+            let result = {
+                let mut registry = interactive.borrow_mut();
+                registry.get_mut(&command_id).map(|cmd| {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        cmd.on_cursor_move(pt)
+                    }))
+                })
+            };
+            match result {
+                Some(Ok(wires)) => HostResponse::PreviewWires(wires),
+                Some(Err(_)) => HostResponse::PreviewWires(Vec::new()),
+                None => HostResponse::PreviewWires(Vec::new()),
             }
         }
         HostRequest::ExecuteCode { .. } => {
@@ -320,6 +336,7 @@ fn handle_host_request_v4(
                             CommandStep::Done
                                 | CommandStep::Cancel
                                 | CommandStep::CommitAndEnd(_)
+                                | CommandStep::CommitManyAndEnd(_)
                         );
                         (Ok(s), is_done)
                     }
@@ -364,6 +381,21 @@ fn handle_host_request_v4(
                 Some(Ok(b)) => Some(HostResponse::Bool(b)),
                 Some(Err(_)) => Some(HostResponse::Error("needs_object_pick() panicked".to_string())),
                 None => Some(HostResponse::Error(format!("unknown interactive command {command_id}"))),
+            }
+        }
+        HostRequest::CursorMove { command_id, pt } => {
+            let result = {
+                let mut registry = interactive.borrow_mut();
+                registry.get_mut(&command_id).map(|cmd| {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        cmd.on_cursor_move(pt)
+                    }))
+                })
+            };
+            match result {
+                Some(Ok(wires)) => Some(HostResponse::PreviewWires(wires)),
+                Some(Err(_)) => Some(HostResponse::PreviewWires(Vec::new())),
+                None => Some(HostResponse::PreviewWires(Vec::new())),
             }
         }
         HostRequest::ExecuteCode {

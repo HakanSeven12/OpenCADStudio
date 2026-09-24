@@ -603,6 +603,103 @@ pub trait InteractiveCommand: Send {
     fn on_object_pick(&mut self, _handle: Handle, _pt: [f64; 3]) -> CommandStep {
         CommandStep::Cancel
     }
+
+    /// Real-time preview geometry (lines, arcs, polylines) to render as the cursor moves.
+    /// Each wire can specify custom vertices and an optional color (defaults to host cyan).
+    fn on_cursor_move(&mut self, _pt: [f64; 3]) -> Vec<PreviewWire> {
+        Vec::new()
+    }
+}
+
+/// A preview wire rendered in real-time during interactive commands.
+/// Supports straight polylines as well as analytical circles and arcs
+/// that render via GPU shaders with infinite smoothness.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "host", derive(serde::Serialize, serde::Deserialize))]
+pub enum PreviewWire {
+    /// A connected sequence of straight line segments in world space.
+    Polyline {
+        points: Vec<[f64; 3]>,
+        color: Option<[f32; 4]>,
+    },
+    /// An analytical circle rendered with sub-pixel GPU anti-aliasing.
+    Circle {
+        center: [f64; 3],
+        radius: f64,
+        color: Option<[f32; 4]>,
+    },
+    /// An analytical circular arc swept counter-clockwise from `start_angle_rad` to `end_angle_rad`.
+    Arc {
+        center: [f64; 3],
+        radius: f64,
+        start_angle_rad: f64,
+        end_angle_rad: f64,
+        color: Option<[f32; 4]>,
+    },
+}
+
+impl PreviewWire {
+    /// Create a polyline preview wire with default host cyan color.
+    pub fn new(points: Vec<[f64; 3]>) -> Self {
+        Self::Polyline { points, color: None }
+    }
+
+    /// Optional RGBA color (0.0 to 1.0) specified for this preview wire.
+    pub fn color(&self) -> Option<[f32; 4]> {
+        match self {
+            Self::Polyline { color, .. } => *color,
+            Self::Circle { color, .. } => *color,
+            Self::Arc { color, .. } => *color,
+        }
+    }
+
+    /// Create a polyline preview wire with a custom RGBA color.
+    pub fn with_color(points: Vec<[f64; 3]>, color: [f32; 4]) -> Self {
+        Self::Polyline {
+            points,
+            color: Some(color),
+        }
+    }
+
+    /// Create a straight line segment preview between two points.
+    pub fn line(from: [f64; 3], to: [f64; 3], color: Option<[f32; 4]>) -> Self {
+        Self::Polyline {
+            points: vec![from, to],
+            color,
+        }
+    }
+
+    /// Create an analytical circle preview.
+    pub fn circle(center: [f64; 3], radius: f64, color: Option<[f32; 4]>) -> Self {
+        Self::Circle {
+            center,
+            radius,
+            color,
+        }
+    }
+
+    /// Create an analytical circular arc preview.
+    pub fn arc(
+        center: [f64; 3],
+        radius: f64,
+        start_angle_rad: f64,
+        end_angle_rad: f64,
+        color: Option<[f32; 4]>,
+    ) -> Self {
+        Self::Arc {
+            center,
+            radius,
+            start_angle_rad,
+            end_angle_rad,
+            color,
+        }
+    }
+}
+
+impl From<Vec<[f64; 3]>> for PreviewWire {
+    fn from(points: Vec<[f64; 3]>) -> Self {
+        Self::new(points)
+    }
 }
 
 /// The outcome of an [`InteractiveCommand`] step.
@@ -619,6 +716,14 @@ pub enum CommandStep {
     Done,
     /// Cancel the command.
     Cancel,
+    // New variants go after the existing ones: the step crosses the plugin
+    // IPC, which encodes a variant by its position, so inserting one earlier
+    // would make a plugin built against the previous API send `Done` and
+    // have the host read it as something else.
+    /// Commit multiple entities to the document and keep collecting points.
+    CommitMany(Vec<EntityType>),
+    /// Commit multiple entities to the document and end the command.
+    CommitManyAndEnd(Vec<EntityType>),
 }
 
 /// Export a `BuiltinPlugin` from a `cdylib` so the host can load it at runtime.

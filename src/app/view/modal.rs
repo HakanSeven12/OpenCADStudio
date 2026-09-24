@@ -28,6 +28,8 @@ impl OpenCADStudio {
             Some(K::UnderlayLayers) => crate::t!("Underlay Layers").into_owned(),
             Some(K::PdfImportSettings) => crate::t!("PDF Import Settings").into_owned(),
             Some(K::PdfImportFile) => crate::t!("Import PDF").into_owned(),
+            Some(K::XrefAttach) => crate::t!("Attach External Reference").into_owned(),
+            Some(K::WriteBlock) => crate::t!("Write Block").into_owned(),
             Some(K::GeometricTolerance) => crate::t!("Geometric Tolerance").into_owned(),
             Some(K::DraftingSettings) => crate::t!("Drafting Settings").into_owned(),
             Some(K::AutoConstrainSettings) => crate::t!("Constraint Settings").into_owned(),
@@ -533,6 +535,19 @@ impl OpenCADStudio {
                 let state = self.pdf_import_file.as_ref()?;
                 sized_flow(ex, 900, 560, |flow| {
                     crate::ui::window::pdf_dialogs::view_import_file(state, flow)
+                })
+            }
+            super::super::ModalKind::XrefAttach => {
+                let state = self.xref_attach.as_ref()?;
+                let height = if state.details { 520 } else { 450 };
+                sized_flow(ex, 740, height, |flow| {
+                    crate::ui::window::xref_attach::view_window(state, flow)
+                })
+            }
+            super::super::ModalKind::WriteBlock => {
+                let state = self.wblock.as_ref()?;
+                sized_flow(ex, 440, 395, |flow| {
+                    crate::ui::window::wblock::view_window(state, flow)
                 })
             }
             super::super::ModalKind::GeometricTolerance => {
@@ -1704,6 +1719,7 @@ impl OpenCADStudio {
                     crate::ui::window::missing_fonts::view_window(
                         fonts,
                         &font_source,
+                        self.missing_fonts_downloading,
                         flow,
                     )
                 })

@@ -37,15 +37,9 @@ impl OpenCADStudio {
         handles: &[acadrust::Handle],
         base: glam::DVec3,
     ) -> usize {
-        let (entities, deps) = {
-            let document = &self.tabs[i].scene.document;
-            let entities: Vec<_> = handles
-                .iter()
-                .filter_map(|&handle| document.get_entity(handle).cloned())
-                .collect();
-            let deps = super::super::ClipboardDeps::capture(document, &entities);
-            (entities, deps)
-        };
+        // Clone + dep-capture live in the shared kernel; storage stays here.
+        let (entities, deps) =
+            super::super::command_driver::copy_to_clipboard_kernel(&self.tabs[i].scene.document, handles);
         let count = entities.len();
         self.clipboard_base = base;
         self.clipboard = entities;

@@ -51,14 +51,16 @@
 //!   dynamic dimensions, and the constraint-inference entry points
 //!   (`apply_continuous_constraints`, `apply_inferred_constraints`) shared by
 //!   the `constraint.rs` arms.
-//! - `property_match.rs` — MATCHPROP/LAYMATCH + `match_special_props`.
+//! - `property_match.rs` — MATCHPROP/LAYMATCH arms (special-prop kernels live
+//!   in `crate::entities::match_props`).
 //! - `entity_commit.rs` — entity/dimension/hatch/block commit arms.
 //! - `solid3d.rs` — extrude/thicken/presspull/revolve/sweep/loft/shell/boolean/slice.
 //! - `viewport.rs` — MVIEW/layout/plot/zoom/print arms.
 //! - `transform.rs` — MOVE/COPY/ALIGN/STRETCH arms.
 //! - `clipboard.rs` — COPYCLIP/PASTECLIP/PASTEORIG/PASTEBLOCK arms,
 //!   clipboard merge + xdict helpers; re-exports
-//!   `remap_ext_subtree_reference` for `app::commands::blocks`.
+//!   `remap_ext_subtree_reference` and `copy_to_clipboard_kernel`
+//!   for `app::commands::blocks`.
 //! - `modify.rs` — LENGTHEN/DIVIDE/MEASURE/PEDIT/JOIN/BREAK/HATCHEDIT arms +
 //!   `apply_pedit_result`. (Entity BREAK itself delegates to
 //!   `break_cmd::break_entity`; the DIMBREAK free helpers live in `dim_edit`.)
@@ -92,7 +94,7 @@ mod text_edit;
 mod constraint;
 mod dim_edit;
 
-pub(crate) use clipboard::remap_ext_subtree_reference;
+pub(crate) use clipboard::{copy_to_clipboard_kernel, remap_ext_subtree_reference};
 
 impl OpenCADStudio {
     /// Applies one command result, then — when that result ended the active

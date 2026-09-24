@@ -305,6 +305,25 @@ fn resolve_xrefs_with_filter(
     (result, dropped)
 }
 
+/// Underlay files named by a relative (or moved) path: read them from where
+/// the drawing is and register the bytes under the stored path, which is
+/// what the underlay's definition names.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn register_underlay_sources(doc: &CadDocument, base_dir: &Path) {
+    for object in doc.objects.values() {
+        let acadrust::objects::ObjectType::UnderlayDefinition(def) = object else {
+            continue;
+        };
+        let stored = def.file_path.as_str();
+        if stored.is_empty() || Path::new(stored).is_absolute() && Path::new(stored).exists() {
+            continue;
+        }
+        if let Some(bytes) = resolve_path(stored, base_dir).and_then(|p| std::fs::read(p).ok()) {
+            crate::scene::model::pdf_raster::register_source(stored, std::sync::Arc::new(bytes));
+        }
+    }
+}
+
 /// Layer properties an override can change, as compared for the
 /// "Layer property overrides" row.
 #[derive(Clone, PartialEq)]
@@ -1244,7 +1263,7 @@ pub fn collect_entries_with_prev(
         };
         let mut entry = ReferenceEntry::new(key, name, RefKind::Pdf);
         entry.saved_path = def.file_path.clone();
-        if unloaded.contains(&UnloadKey::Direct(key)) {
+        if def.unloaded || unloaded.contains(&UnloadKey::Direct(key)) {
             entry.status = RefStatus::Unloaded;
             resolve_only(&mut entry, &def.file_path, base_dir);
         } else {
@@ -1437,7 +1456,16 @@ pub fn unload_reference(doc: &mut CadDocument, key: u64) -> Result<String, Strin
             }
             Ok(name)
         }
-        RefTarget::Image { name, .. } | RefTarget::Pdf { name, .. } => Ok(name),
+        RefTarget::Image { name, .. } => Ok(name),
+        // A PDF keeps its unloaded state on the definition (saved with it).
+        RefTarget::Pdf { handle, name } => {
+            if let Some(acadrust::objects::ObjectType::UnderlayDefinition(def)) =
+                doc.objects.get_mut(&handle)
+            {
+                def.unloaded = true;
+            }
+            Ok(name)
+        }
     }
 }
 

@@ -40,6 +40,9 @@ pub(super) struct ToggleState {
     pub show_block_palette: bool,
     pub show_file_tabs: bool,
     pub show_layout_tabs: bool,
+    pub underlay_mono: bool,
+    pub underlay_shown: bool,
+    pub underlay_snap: bool,
 }
 
 // ── Layout constants (single source of truth: ROW_H from ui::mod) ─────────
@@ -375,6 +378,9 @@ pub(super) fn is_active_tool(
         "UCSICON" => state.show_ucs_icon,
         "PROPERTIES" => state.show_properties,
         "BLOCKPALETTE" => state.show_block_palette,
+        "_PDFULMONO" => state.underlay_mono,
+        "_PDFULSHOW" => state.underlay_shown,
+        "_PDFULSNAP" => state.underlay_snap,
         "FILETAB" => state.show_file_tabs,
         "LAYOUTTAB" => state.show_layout_tabs,
         id => active_tool.as_deref() == Some(id),

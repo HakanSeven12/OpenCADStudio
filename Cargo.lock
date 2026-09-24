@@ -36,6 +36,7 @@ dependencies = [
  "image",
  "inventory",
  "js-sys",
+ "kurbo 0.13.1",
  "libloading",
  "log",
  "lyon_tessellation",
@@ -87,7 +88,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.5.5"
-source = "git+https://github.com/HakanSeven12/cadcodec.git?rev=dd1d7bf#dd1d7bfe03f4e733d351c0396e2cf82ae9df957d"
+source = "git+https://github.com/ramox81/cadcodec.git?rev=d290dbe#d290dbe1712666d83dfd0fc63341ee3246f8de76"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",

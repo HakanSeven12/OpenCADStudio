@@ -493,6 +493,13 @@ pub(super) struct OpenCADStudio {
     drawing_units: Option<crate::ui::window::drawing_units::State>,
     /// Working copy of the Block Definition dialog; `None` while it is closed.
     block_definition: Option<crate::ui::window::block_definition::BlockDefinitionState>,
+    /// PDF dialogs' working copies; `None` while closed.
+    pdf_attach: Option<crate::ui::window::pdf_dialogs::PdfAttachState>,
+    underlay_layers: Option<crate::ui::window::pdf_dialogs::UnderlayLayersState>,
+    pdf_import_settings: Option<crate::modules::insert::pdf_import::PdfImportSettings>,
+    pdf_import_file: Option<crate::ui::window::pdf_dialogs::PdfImportFileState>,
+    /// The dialog Options was opened from; it comes back when Options closes.
+    options_parent: Option<ModalKind>,
     /// Working copy of the Attach External Reference dialog; None while closed.
     xref_attach: Option<crate::ui::window::xref_attach::XrefAttachState>,
     /// Working copy of the Write Block (WBLOCK) dialog; `None` while it is closed.
@@ -1884,6 +1891,10 @@ pub enum ModalKind {
     LayerTranslator,
     DrawingUnits,
     BlockDefinition,
+    PdfAttach,
+    UnderlayLayers,
+    PdfImportSettings,
+    PdfImportFile,
     XrefAttach,
     WriteBlock,
     GeometricTolerance,
@@ -3804,6 +3815,14 @@ pub enum Message {
     // ── PDF Underlay ──────────────────────────────────────────────────────
     /// Open file-picker dialog for PDFATTACH command (async).
     PdfAttachPick,
+    /// PDFIMPORT File: pick the PDF to import.
+    PdfImportPick,
+    /// The contextual PDF Underlay tab.
+    RibbonSelectUnderlayTab,
+    /// An edit in one of the PDF dialogs.
+    PdfDialog(crate::ui::window::pdf_dialogs::PdfDialogMsg),
+    UnderlayTab(crate::ui::ribbon::UnderlayTabMsg),
+    PdfImportPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
     /// Result of the PDFATTACH file picker.
     PdfAttachPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
 
@@ -3982,6 +4001,11 @@ impl OpenCADStudio {
             layer_translator: None,
             drawing_units: None,
             block_definition: None,
+            pdf_attach: None,
+            underlay_layers: None,
+            pdf_import_settings: None,
+            pdf_import_file: None,
+            options_parent: None,
             xref_attach: None,
             wblock: None,
             geometric_tolerance: None,

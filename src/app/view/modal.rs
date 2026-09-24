@@ -24,6 +24,10 @@ impl OpenCADStudio {
             Some(K::LayerTranslator) => crate::t!("Layer Translator").into_owned(),
             Some(K::DrawingUnits) => crate::t!("Drawing Units").into_owned(),
             Some(K::BlockDefinition) => crate::t!("Block Definition").into_owned(),
+            Some(K::PdfAttach) => crate::t!("Attach PDF Underlay").into_owned(),
+            Some(K::UnderlayLayers) => crate::t!("Underlay Layers").into_owned(),
+            Some(K::PdfImportSettings) => crate::t!("PDF Import Settings").into_owned(),
+            Some(K::PdfImportFile) => crate::t!("Import PDF").into_owned(),
             Some(K::XrefAttach) => crate::t!("Attach External Reference").into_owned(),
             Some(K::WriteBlock) => crate::t!("Write Block").into_owned(),
             Some(K::GeometricTolerance) => crate::t!("Geometric Tolerance").into_owned(),
@@ -506,6 +510,31 @@ impl OpenCADStudio {
                 let state = self.block_definition.as_ref()?;
                 sized_flow(ex, 580, 390, |flow| {
                     crate::ui::window::block_definition::view_window(state, flow)
+                })
+            }
+            super::super::ModalKind::PdfAttach => {
+                let state = self.pdf_attach.as_ref()?;
+                let height = if state.details { 520 } else { 440 };
+                sized_flow(ex, 820, height, |flow| {
+                    crate::ui::window::pdf_dialogs::view_attach(state, flow)
+                })
+            }
+            super::super::ModalKind::UnderlayLayers => {
+                let state = self.underlay_layers.as_ref()?;
+                sized_flow(ex, 500, 500, |flow| {
+                    crate::ui::window::pdf_dialogs::view_layers(state, flow)
+                })
+            }
+            super::super::ModalKind::PdfImportSettings => {
+                let settings = self.pdf_import_settings.as_ref()?;
+                sized_flow(ex, 600, 360, |flow| {
+                    crate::ui::window::pdf_dialogs::view_import_settings(settings, flow)
+                })
+            }
+            super::super::ModalKind::PdfImportFile => {
+                let state = self.pdf_import_file.as_ref()?;
+                sized_flow(ex, 900, 560, |flow| {
+                    crate::ui::window::pdf_dialogs::view_import_file(state, flow)
                 })
             }
             super::super::ModalKind::XrefAttach => {

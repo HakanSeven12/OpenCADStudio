@@ -695,8 +695,59 @@ impl OpenCADStudio {
                 self.open_attedit_dialog();
             }
 
-            "PDFATTACH" => {
-                return Some(Task::done(Message::PdfAttachPick));
+            "PDFIMPORT" => {
+                use crate::command::CadCommand;
+                let command = crate::modules::insert::pdf_import::PdfImportCommand::new();
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+            "_PDFIMPORTFILE" => {
+                return Some(Task::done(Message::PdfImportPick));
+            }
+            // A file named after it skips the picker.
+            cmd if cmd.starts_with("_PDFIMPORTFILE ") => {
+                let path = cmd["_PDFIMPORTFILE ".len()..].trim().trim_matches('"').to_string();
+                match std::fs::read(&path) {
+                    Ok(bytes) => {
+                        crate::scene::model::pdf_raster::register_source(&path, std::sync::Arc::new(bytes));
+                        self.open_pdf_import_file(&path);
+                    }
+                    Err(_) => self.command_line.push_error(&format!("{path} not found.")),
+                }
+            }
+            "PDFCLIP" | "CLIP" => {
+                use crate::command::CadCommand;
+                let command = crate::modules::insert::pdf_clip::PdfClipCommand::new(cmd == "CLIP");
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+            // PDFATTACH picks the file; -PDFATTACH asks for it on the command
+            // line. A path after either names the file at once.
+            cmd if matches!(
+                cmd.split_whitespace().next().map(|v| v.to_ascii_uppercase()).as_deref(),
+                Some("PDFATTACH") | Some("-PDFATTACH")
+            ) =>
+            {
+                use crate::command::CadCommand;
+                let (verb, rest) = cmd
+                    .split_once(char::is_whitespace)
+                    .map(|(verb, rest)| (verb.to_ascii_uppercase(), rest.trim()))
+                    .unwrap_or_else(|| (cmd.to_ascii_uppercase(), ""));
+                if verb == "PDFATTACH" && rest.is_empty() {
+                    return Some(Task::done(Message::PdfAttachPick));
+                }
+                let insunits = self.tabs[i].scene.document.header.insertion_units;
+                let mut command =
+                    crate::modules::insert::pdf_attach::PdfAttachCommand::new(insunits);
+                if !rest.is_empty() {
+                    if let Some(crate::command::CmdResult::ReportError(message)) =
+                        command.on_text_input(rest)
+                    {
+                        self.command_line.push_error(&message);
+                    }
+                }
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
             }
             "XATTACH" => {
                 // Launch the file picker; XAttachPickResult will start the command.

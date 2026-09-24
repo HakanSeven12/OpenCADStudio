@@ -152,7 +152,7 @@ impl Scene {
         let _ = self.document.layers.add(layer);
     }
 
-    pub(super) fn ensure_app_id(&mut self, name: &str) {
+    pub(crate) fn ensure_app_id(&mut self, name: &str) {
         if name.trim().is_empty() || self.document.app_ids.contains(name) {
             return;
         }
@@ -673,6 +673,25 @@ impl Scene {
     /// or drop them all if the handle is now absent. Mirrors the reseed block in
     /// [`Scene::update_entity`]; used by delta-undo when it re-applies an
     /// entity's before / after image so the fills and meshes follow.
+    /// Rebuild every underlay's raster and wire, after a setting they draw
+    /// or snap by (PDFOSNAP / UOSNAP) changed.
+    pub(crate) fn reseed_underlays(&mut self) {
+        let handles: Vec<Handle> = self
+            .document
+            .entities()
+            .filter(|entity| matches!(entity, EntityType::Underlay(_)))
+            .map(|entity| entity.common().handle)
+            .collect();
+        for handle in &handles {
+            self.reseed_derived_caches(*handle);
+        }
+        let changes: Vec<_> = handles
+            .iter()
+            .map(|handle| (*handle, crate::scene::ChangeKind::Modified))
+            .collect();
+        self.bump_entities(&changes);
+    }
+
     pub(crate) fn reseed_derived_caches(&mut self, handle: Handle) {
         let (hatch_seed, image_seed) = match self.document.get_entity(handle) {
             None => (None, None),
@@ -2389,7 +2408,14 @@ impl Scene {
             EntityType::Ole2Frame(ole) => ImageModel::from_ole2frame(ole),
             EntityType::Underlay(u) => match self.document.objects.get(&u.definition_handle) {
                 Some(acadrust::objects::ObjectType::UnderlayDefinition(def)) => {
-                    ImageModel::from_underlay(u, def)
+                    // A paper-space underlay adjusts to the sheet, not the canvas.
+                    let owner = u.common.owner_handle;
+                    let background = if owner.is_null() || owner == self.model_space_block_handle() {
+                        self.bg_color
+                    } else {
+                        self.paper_bg_color
+                    };
+                    ImageModel::from_underlay(u, def, background)
                 }
                 _ => None,
             },

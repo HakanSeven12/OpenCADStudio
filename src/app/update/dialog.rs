@@ -990,6 +990,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                         Err(msg) => self.command_line.push_error(msg.as_str()),
                     }
                 }
+                self.tabs[i].scene.reseed_underlays();
             }
             XrefPaletteOp::Reload => {
                 let base_dir: std::path::PathBuf = host
@@ -1016,6 +1017,21 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                             "XREF: cannot reload nested reference '{}'. Reload it in its host drawing.",
                             name
                         ).as_ref());
+                    } else if *kind == crate::io::xref_model::RefKind::Pdf {
+                        // A PDF reloads by clearing its definition's unloaded state.
+                        for (key, row_name, row_kind, _) in &picked {
+                            if row_kind != kind || row_name != name {
+                                continue;
+                            }
+                            let handle = acadrust::types::Handle::new(*key);
+                            if let Some(acadrust::objects::ObjectType::UnderlayDefinition(def)) =
+                                self.tabs[i].scene.document.objects.get_mut(&handle)
+                            {
+                                def.unloaded = false;
+                            }
+                            self.tabs[i].xref_unloaded.remove(key);
+                        }
+                        self.tabs[i].scene.reseed_underlays();
                     } else if *kind != crate::io::xref_model::RefKind::DwgXref {
                         self.command_line.push_error(crate::tf!(
                             "{}: reload applies to drawing references only.",

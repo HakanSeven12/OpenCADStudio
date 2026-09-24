@@ -47,6 +47,11 @@ fn color_value(color: acadrust::types::Color) -> Value {
 }
 pub(super) const NAMES: &[&str] = &[
     "close_modal",
+    "pdf_dialog_ok",
+    "pdf_layer_toggle",
+    "pdf_page_select",
+    "ribbon_tab",
+    "ribbon_dropdown",
     "dialog_ok",
     "close_document",
     "toggle_properties",
@@ -664,6 +669,43 @@ impl OpenCADStudio {
         let name = string(req, "name")?;
         let msg = match name {
             "close_modal" => Message::CloseModal,
+            // The open PDF dialog's OK button.
+            // Underlay Layers: switch a layer of the shown underlay.
+            "pdf_layer_toggle" => Message::PdfDialog(
+                crate::ui::window::pdf_dialogs::PdfDialogMsg::LayersToggle(string(req, "value")?.into()),
+            ),
+            // Attach dialog: choose pages by index ("0,2").
+            "pdf_page_select" => {
+                let pages: Vec<usize> = string(req, "value")?
+                    .split(',')
+                    .filter_map(|p| p.trim().parse().ok())
+                    .collect();
+                let Some(state) = self.pdf_attach.as_mut() else {
+                    return Err(failure("no_dialog", "The Attach dialog is not open"));
+                };
+                state.selected = pages;
+                return Ok(Task::none());
+            }
+            // Bring a ribbon tab forward by module id ("pdf_underlay" for the
+            // contextual underlay tab).
+            "ribbon_tab" => {
+                let id = string(req, "value")?;
+                if !self.ribbon.select_by_id(id) {
+                    return Err(failure("no_tab", "No such ribbon tab"));
+                }
+                return Ok(Task::none());
+            }
+            "ribbon_dropdown" => Message::ToggleRibbonDropdown(string(req, "value")?.into()),
+            "pdf_dialog_ok" => {
+                use crate::ui::window::pdf_dialogs::PdfDialogMsg;
+                Message::PdfDialog(match self.active_modal {
+                    Some(crate::app::ModalKind::PdfAttach) => PdfDialogMsg::AttachOk,
+                    Some(crate::app::ModalKind::UnderlayLayers) => PdfDialogMsg::LayersOk,
+                    Some(crate::app::ModalKind::PdfImportSettings) => PdfDialogMsg::SettingsOk,
+                    Some(crate::app::ModalKind::PdfImportFile) => PdfDialogMsg::ImportOk,
+                    _ => return Err(failure("no_dialog", "No PDF dialog is open")),
+                })
+            }
             // The open dialog's OK button.
             "dialog_ok" => match self.active_modal {
                 Some(crate::app::ModalKind::XrefAttach) => Message::XrefAttach(

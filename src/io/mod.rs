@@ -372,6 +372,7 @@ async fn open_path_with_phase_attempt(
                             });
                         callback
                     };
+                    crate::io::xref::register_underlay_sources(&doc, base_dir);
                     crate::io::xref::resolve_xrefs_with_progress(
                         &mut doc,
                         base_dir,

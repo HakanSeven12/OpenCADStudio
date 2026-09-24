@@ -3455,6 +3455,38 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         } else {
                             raw_val
                         };
+                        // Underlay rows: reject what the reference rejects, and
+                        // write a Width / Height as the scale that produces it.
+                        if field.starts_with("ul_") {
+                            if let Err(message) =
+                                crate::entities::underlay::validate_property(field, &val)
+                            {
+                                self.command_line.push_error(message);
+                                return Task::none();
+                            }
+                        }
+                        let (field, val) = match field {
+                            "ul_width" | "ul_height" => {
+                                let scale = handles.iter().find_map(|handle| {
+                                    match self.tabs[i].scene.document.get_entity(*handle) {
+                                        Some(acadrust::EntityType::Underlay(underlay)) => {
+                                            crate::entities::underlay::size_to_scale(
+                                                underlay,
+                                                &self.tabs[i].scene.document,
+                                                field,
+                                                &val,
+                                            )
+                                        }
+                                        _ => None,
+                                    }
+                                });
+                                match scale {
+                                    Some(scale) => ("ul_scale", scale),
+                                    None => return Task::none(),
+                                }
+                            }
+                            _ => (field, val),
+                        };
                         if matches!(
                             field,
                             "current_fit_point" | "current_control_point" | "pm_current_vertex"

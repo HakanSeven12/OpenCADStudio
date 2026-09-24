@@ -1498,25 +1498,29 @@ impl OpenCADStudio {
                                 xref_rows(&mut sections, ins, &br.xref_path, factor, overrides);
                             }
                         }
-                        // Underlay: name + path from the referenced definition.
+                        // Underlay: name, page, path and size from the definition.
                         acadrust::EntityType::Underlay(ul) => {
-                            if let Some((name, path)) =
-                                doc.objects.iter().find_map(|(h, o)| match o {
-                                    acadrust::objects::ObjectType::UnderlayDefinition(def)
-                                        if *h == ul.definition_handle =>
-                                    {
-                                        let nm = if !def.name.is_empty() {
-                                            def.name.clone()
-                                        } else {
-                                            def.page_name.clone()
-                                        };
-                                        Some((nm, def.file_path.clone()))
-                                    }
-                                    _ => None,
-                                })
-                            {
-                                set_row(&mut sections, "ul_name", name);
-                                set_row(&mut sections, "ul_path", path);
+                            use crate::entities::underlay as und;
+                            if let Some(def) = und::definition(ul, doc) {
+                                set_row(&mut sections, "ul_name", und::definition_display_name(def));
+                                set_row(&mut sections, "ul_page", und::page_of(def).to_string());
+                                set_row(
+                                    &mut sections,
+                                    "ul_path",
+                                    und::display_path(&def.file_path),
+                                );
+                            }
+                            if let Some((w, h)) = und::shown_size(ul, doc) {
+                                set_row_value(
+                                    &mut sections,
+                                    "ul_width",
+                                    crate::scene::model::object::PropValue::EditText(und::plain_number(w)),
+                                );
+                                set_row_value(
+                                    &mut sections,
+                                    "ul_height",
+                                    crate::scene::model::object::PropValue::EditText(und::plain_number(h)),
+                                );
                             }
                         }
                         // Leader: text style / vertical text placement / overall
@@ -2355,6 +2359,12 @@ impl OpenCADStudio {
                         acadrust::EntityType::Dimension(
                             acadrust::entities::Dimension::Angular3Pt(_),
                         ) => t!("3 Point Angular Dimension").into_owned(),
+                        acadrust::EntityType::Underlay(underlay) => match underlay.underlay_type {
+                            acadrust::entities::UnderlayType::Pdf => t!("PDF Underlay"),
+                            acadrust::entities::UnderlayType::Dwf => t!("DWF Underlay"),
+                            acadrust::entities::UnderlayType::Dgn => t!("DGN Underlay"),
+                        }
+                        .into_owned(),
                         _ => entity_type_label(entity),
                     };
                     // A dynamic dimension shows only its constraint and text
@@ -2619,6 +2629,7 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
         let m_panel = t_all.map(|t| t.elapsed().as_secs_f64() * 1000.0);
         let t_ribbon = crate::perf::enabled().then(iced::time::Instant::now);
         self.sync_ribbon_from_selection();
+        self.sync_underlay_tab();
         if let Some(t) = t_all {
             let ribbon_ms = t_ribbon.map_or(0.0, |r| r.elapsed().as_secs_f64() * 1000.0);
             let total_ms = t.elapsed().as_secs_f64() * 1000.0;

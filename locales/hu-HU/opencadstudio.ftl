@@ -3507,6 +3507,69 @@ annotate =
     .tolerance-specify-insertion-point = TOLERANCE Beszúrási pont megadása:
 
 insert =
+    .pdfui-pdf-scale = PDF scale: {scale}:1
+    .pdfui-specify-insertion-point = Specify insertion point:
+    .pdfui-no-pdf-underlays = No PDF underlays found.
+    .pdfui-imports-the-geometry-fills-raster-images-and-text-of-a-pdf-f = Imports the geometry, fills, raster images and text of a PDF file as drawing objects.
+    .pdfui-turns-the-layers-of-a-pdf-underlay-on-or-off = Turns the layers of a PDF underlay on or off.
+    .pdfui-attaches-a-pdf-file-as-an-underlay = Attaches a PDF file as an underlay.
+    .pdfui-rotation = Rotation:
+    .pdfui-scale = Scale:
+    .pdfui-specify-insertion-point-on-screen = Specify insertion point on-screen
+    .pdfui-page-size-size = Page size: {size}
+    .pdfui-total-count = Total: {count}
+    .pdfui-page = Page:
+    .pdfui-page-to-import = Page to import
+    .pdfui-infer-linetypes-from-collinear-dashes = Infer linetypes from collinear dashes
+    .pdfui-apply-lineweight-properties = Apply lineweight properties
+    .pdfui-convert-solid-fills-to-hatches = Convert solid fills to hatches
+    .pdfui-join-line-and-arc-segments = Join line and arc segments
+    .pdfui-import-as-block = Import as block
+    .pdfui-import-options = Import options
+    .pdfui-create-object-layers = Create object layers
+    .pdfui-use-pdf-layers = Use PDF layers
+    .pdfui-raster-images = Raster images
+    .pdfui-truetype-text = TrueType text
+    .pdfui-solid-fills = Solid fills
+    .pdfui-vector-geometry = Vector geometry
+    .pdfui-pdf-data-to-import = PDF data to import
+    .pdfui-select-an-underlay-to-view-its-layers = Select an underlay to view its layers.
+    .pdfui-this-file-does-not-contain-any-layers = This file does not contain any layers.
+    .pdfui-search-for-layer = Search for layer
+    .pdfui-reference-name = Reference name:
+    .pdfui-page-size = Page size:
+    .pdfui-select-one-or-more-pages-from-the-pdf-file = Select one or more pages from the PDF file:
+    .pdfui-import-pdf = Import PDF
+    .pdfui-pdf-import-settings = PDF Import Settings
+    .pdfui-underlay-layers = Underlay Layers
+    .pdfui-attach-pdf-underlay = Attach PDF Underlay
+    .pdfui-pdf-import = PDF Import
+    .pdfui-pdf-layers = PDF Layers
+    .pdfui-import-as-objects =
+        Import As
+        Objects
+    .pdfui-edit-layers =
+        Edit
+        Layers
+    .pdfui-external-references =
+        External
+        References
+    .pdfui-enable-snap =
+        Enable
+        Snap
+    .pdfui-show-underlay =
+        Show
+        Underlay
+    .pdfui-remove-clipping =
+        Remove
+        Clipping
+    .pdfui-create-clipping-boundary =
+        Create Clipping
+        Boundary
+    .pdfui-display-in-monochrome =
+        Display in
+        Monochrome
+    .select-pdf-file = Select PDF File
     .xref-attach-dialog-title = Attach External Reference
     .xref-attach-browse = Browse...
     .xref-attach-reference-type = Reference Type
@@ -4277,6 +4340,12 @@ view =
     .ucs-specify-point-in-positive-xy-plane = UCS  { common.specify }: XY · { common.positive-direction } · { common.point }:
 
 properties =
+    .applied = Applied
+    .pdf-underlay = PDF Underlay
+    .dwf-underlay = DWF Underlay
+    .dgn-underlay = DGN Underlay
+    .page-number = Page number
+    .layer-display-overrides = Layer display overrides
     .arrowhead-size = Nyílhegy mérete
     .attachment = Csatolás
     .chord = Húr

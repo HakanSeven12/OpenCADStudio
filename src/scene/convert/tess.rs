@@ -611,7 +611,7 @@ fn tessellate_entity_inner(
         match e {
             EntityType::Viewport(_) | EntityType::Insert(_) => {}
             _ => {
-                let ab = entity_aabb(e);
+                let ab = entity_aabb_in(document, e);
                 if ab != WireModel::UNBOUNDED_AABB {
                     if let Some(view) = view_aabb {
                         if cache::block_cache::aabb_disjoint_xy(ab, view) {
@@ -736,7 +736,7 @@ fn tessellate_entity_inner(
             bg_color,
             false,
         );
-        let ab = entity_aabb(e);
+        let ab = entity_aabb_in(document, e);
         for w in &mut wires {
             set_wire_aabb(w, ab);
         }
@@ -990,7 +990,7 @@ fn tessellate_entity_inner(
             )
             .wires;
             if !wires.is_empty() {
-                let aabb = entity_aabb(e);
+                let aabb = entity_aabb_in(document, e);
                 for wire in &mut wires {
                     if !wire.points.is_empty() || !wire.fill_tris.is_empty() {
                         set_wire_aabb(wire, aabb);
@@ -1002,7 +1002,7 @@ fn tessellate_entity_inner(
     }
 
     if let EntityType::Dimension(dim) = e {
-        let aabb = entity_aabb(e);
+        let aabb = entity_aabb_in(document, e);
         use crate::entities::dimension::DimensionTess;
         let mut wires = dim.tessellate(
             document,
@@ -1032,7 +1032,7 @@ fn tessellate_entity_inner(
     }
 
     if let EntityType::MultiLeader(ml) = e {
-        let aabb = entity_aabb(e);
+        let aabb = entity_aabb_in(document, e);
         use crate::entities::multileader::MultiLeaderTess;
         let mut wires = ml.tessellate(
             document,
@@ -1099,7 +1099,7 @@ fn tessellate_entity_inner(
             )
             .wires;
             if !wires.is_empty() {
-                let aabb = entity_aabb(e);
+                let aabb = entity_aabb_in(document, e);
                 for wire in &mut wires {
                     if !wire.points.is_empty() || !wire.fill_tris.is_empty() {
                         set_wire_aabb(wire, aabb);
@@ -1150,7 +1150,7 @@ fn tessellate_entity_inner(
             );
         }
         if !wires.is_empty() {
-            let aabb = entity_aabb(e);
+            let aabb = entity_aabb_in(document, e);
             for wire in &mut wires {
                 wire.aci = aci;
                 if !wire.points.is_empty() || !wire.fill_tris.is_empty() {
@@ -1245,7 +1245,7 @@ fn tessellate_entity_inner(
         return wires;
     }
 
-    let aabb = entity_aabb(e);
+    let aabb = entity_aabb_in(document, e);
 
     // TEXT / MTEXT / ATTDEF / ATTRIB / Tolerance all render as SDF glyph quads
     // (crisp at every zoom), so there is no text LOD ladder — they fall through
@@ -1283,6 +1283,20 @@ fn tessellate_entity_inner(
         if matches!(e, EntityType::Wipeout(_)) {
             b.depth_override = Some(0.5);
             b.set_fixed_screen_width(2.0);
+        }
+    }
+    // PDF underlay geometry: a hidden, unplotted wire that object snaps
+    // (nearest, intersection, perpendicular) find, beside the page frame.
+    if let EntityType::Underlay(underlay) = e {
+        let geometry = crate::scene::model::pdf_vector::underlay_snap_geometry(underlay, document);
+        if !geometry.is_empty() {
+            let (points, points_low) = convert::tessellate::points_to_ds(geometry);
+            let mut wire = WireModel::solid(h.value().to_string(), points, entity_color, sel);
+            wire.points_low = points_low;
+            wire.display_visible = false;
+            wire.plot_visible = false;
+            set_wire_aabb(&mut wire, aabb);
+            bases.push(wire);
         }
     }
 
@@ -1751,6 +1765,30 @@ pub(crate) fn entity_bounds(e: &acadrust::EntityType) -> ([f64; 3], [f64; 3]) {
         [bounds.min.x, bounds.min.y, bounds.min.z],
         [bounds.max.x, bounds.max.y, bounds.max.z],
     )
+}
+
+/// [`entity_bounds`] with the document, for entities whose extent is not
+/// stored on the entity: an underlay spans its page (or its clip).
+pub(crate) fn entity_bounds_in(
+    document: &acadrust::CadDocument,
+    e: &acadrust::EntityType,
+) -> ([f64; 3], [f64; 3]) {
+    if let acadrust::EntityType::Underlay(underlay) = e {
+        if let Some(bounds) = crate::entities::underlay::world_bounds(underlay, document) {
+            return bounds;
+        }
+    }
+    entity_bounds(e)
+}
+
+/// [`entity_aabb`] with the document (see [`entity_bounds_in`]).
+pub(crate) fn entity_aabb_in(document: &acadrust::CadDocument, e: &acadrust::EntityType) -> [f32; 4] {
+    if let acadrust::EntityType::Underlay(underlay) = e {
+        if let Some((min, max)) = crate::entities::underlay::world_bounds(underlay, document) {
+            return [min[0] as f32, min[1] as f32, max[0] as f32, max[1] as f32];
+        }
+    }
+    entity_aabb(e)
 }
 
 pub(crate) fn entity_aabb(e: &acadrust::EntityType) -> [f32; 4] {

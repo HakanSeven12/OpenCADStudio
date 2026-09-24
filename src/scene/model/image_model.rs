@@ -186,20 +186,26 @@ impl ImageModel {
 impl ImageModel {
     /// Build an ImageModel from a PDF UNDERLAY + its definition object.
     ///
-    /// The page rasterises through `pdf_raster` (system pdftoppm, cached);
-    /// the world quad sizes from the page's physical size — 1 underlay unit =
-    /// 1 PDF inch — times the entity's scale, placed at the insertion with
-    /// the entity's rotation. `None` when the underlay is off, non-PDF, or
-    /// the page can't be rendered (caller keeps the outline placeholder).
+    /// The page rasterises through `pdf_raster` with no page background, so
+    /// only the drawn content covers the drawing; contrast, monochrome and
+    /// the background adjustment recolour that raster and fade lowers its
+    /// opacity. The world quad is the page size in inches (1 drawing unit per
+    /// page inch) times the entity scale, placed at the insertion with the
+    /// entity rotation. A clip boundary (on, 2+ vertices, in underlay units)
+    /// limits the drawn area to its inside, or to the page outside it when
+    /// inverted. `None` when the underlay is off, non-PDF, or the page can't
+    /// be rendered (caller keeps the outline placeholder).
     pub fn from_underlay(
         u: &acadrust::entities::Underlay,
         def: &acadrust::entities::UnderlayDefinition,
+        background: [f32; 4],
     ) -> Option<Self> {
         use acadrust::entities::{UnderlayDisplayFlags, UnderlayType};
+        use super::pdf_raster::{self, PageAdjust};
         if !u.flags.contains(UnderlayDisplayFlags::ON) {
             return None;
         }
-        if !matches!(def.underlay_type, UnderlayType::Pdf) {
+        if !matches!(def.underlay_type, UnderlayType::Pdf) || def.unloaded {
             return None;
         }
         let page = if def.page_name.trim().is_empty() {
@@ -207,12 +213,27 @@ impl ImageModel {
         } else {
             def.page_name.trim()
         };
-        let raster = super::pdf_raster::rasterize_page(&def.file_path, page)?;
+        let (page_w, page_h) = pdf_raster::page_size_inches(&def.file_path, page)?;
+        // Hidden PDF layers come from the underlay's layer overrides.
+        let source = super::pdf_layers::underlay_source(u, &def.file_path);
+        let raster = pdf_raster::rasterize_page_display(&source, page)?;
+        let bg_lum = 0.299 * background[0] + 0.587 * background[1] + 0.114 * background[2];
+        let pixels = pdf_raster::adjusted_pixels(
+            &source,
+            page,
+            &raster,
+            PageAdjust {
+                contrast: u.contrast.min(100),
+                monochrome: u.flags.contains(UnderlayDisplayFlags::MONOCHROME),
+                adjust_for_background: u.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND),
+                dark_background: bg_lum <= 0.5,
+            },
+        );
 
         // Page size in drawing units (1 unit per PDF inch), entity scale applied.
-        let w_du = raster.width as f64 / raster.dpi as f64 * u.x_scale;
-        let h_du = raster.height as f64 / raster.dpi as f64 * u.y_scale;
-        if w_du <= 0.0 || h_du <= 0.0 {
+        let w_du = page_w * u.x_scale;
+        let h_du = page_h * u.y_scale;
+        if w_du.abs() <= 0.0 || h_du.abs() <= 0.0 {
             return None;
         }
         let (c, s) = (u.rotation.cos(), u.rotation.sin());
@@ -238,35 +259,7 @@ impl ImageModel {
         ];
         let corners_low = [[oxl, oyl, ozl]; 4];
 
-        // Visible region: the clip polygon (vertices in underlay units,
-        // scaled like the quad) fan-triangulated, or the full page. Inverted
-        // clips fall back to the full page (rare; better whole than hidden).
-        let clipping = u.flags.contains(UnderlayDisplayFlags::CLIPPING)
-            && !u.clip_inverted
-            && u.clip_boundary_vertices.len() >= 3;
-        let tris_uv: Vec<[f64; 2]> = if clipping {
-            let pts: Vec<[f64; 2]> = u
-                .clip_boundary_vertices
-                .iter()
-                .map(|p| [p.x * u.x_scale / w_du, p.y * u.y_scale / h_du])
-                .collect();
-            let mut tris = Vec::with_capacity((pts.len().saturating_sub(2)) * 3);
-            for i in 1..pts.len() - 1 {
-                tris.push(pts[0]);
-                tris.push(pts[i]);
-                tris.push(pts[i + 1]);
-            }
-            tris
-        } else {
-            vec![
-                [0.0, 0.0],
-                [1.0, 0.0],
-                [1.0, 1.0],
-                [0.0, 0.0],
-                [1.0, 1.0],
-                [0.0, 1.0],
-            ]
-        };
+        let tris_uv = underlay_visible_uv(u, page_w, page_h);
         let verts: Vec<ImageQuadVertex> = tris_uv
             .iter()
             .map(|&[fu, fv]| {
@@ -282,16 +275,39 @@ impl ImageModel {
         Some(Self {
             render_instance: None,
             file_path: def.file_path.clone(),
-            pixels: raster.pixels.clone(),
+            pixels,
             width: raster.width,
             height: raster.height,
-            opacity: 1.0 - u.fade as f32 / 100.0,
+            opacity: 1.0 - u.fade.min(100) as f32 / 100.0,
             corners,
             corners_low,
             draw_depth: 0.0,
             verts,
         })
     }
+}
+
+/// Visible region of an underlay page as triangles in page UV (0..1, y up):
+/// the whole page, the clip polygon, or — for an inverted clip — the page
+/// with the polygon cut out.
+fn underlay_visible_uv(u: &acadrust::entities::Underlay, page_w: f64, page_h: f64) -> Vec<[f64; 2]> {
+    use acadrust::entities::UnderlayDisplayFlags;
+    let page = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    let whole = || vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    let clip = crate::entities::underlay::clip_polygon_local(u);
+    if !u.flags.contains(UnderlayDisplayFlags::CLIPPING) || clip.len() < 3 {
+        return whole();
+    }
+    let ring: Vec<[f64; 2]> = clip.iter().map(|p| [p[0] / page_w, p[1] / page_h]).collect();
+    let (points, triangles) = if u.clip_inverted {
+        cadkernel::geom2d::triangulate(&page, &[ring])
+    } else {
+        cadkernel::geom2d::triangulate(&ring, &[])
+    };
+    triangles
+        .into_iter()
+        .flat_map(|t| t.map(|i| points[i]))
+        .collect()
 }
 
 impl ImageModel {

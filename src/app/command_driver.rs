@@ -3892,6 +3892,33 @@ impl OpenCADStudio {
                 }
                 self.refresh_properties();
             }
+            CmdResult::OpenPdfImportSettings => self.open_pdf_import_settings(),
+            CmdResult::PdfImportFile(import) => {
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.run_pdf_import(
+                    i,
+                    crate::app::commands::pdf_import::PdfImportSource::File(import),
+                );
+            }
+            CmdResult::AttachPdfPages { path, pages } => {
+                let label = self.history_label_from_active_cmd(i, "PDFATTACH");
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.attach_pdf_pages(i, label, &path, pages);
+                self.restore_pre_cmd_tangent();
+            }
+            CmdResult::PdfImport(request) => {
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.run_pdf_import(
+                    i,
+                    crate::app::commands::pdf_import::PdfImportSource::Underlay(request),
+                );
+            }
             CmdResult::UpdateEntityAndFinish { handle, entity } => {
                 if self.reject_locked_edit(i, handle) {
                     self.tabs[i].active_cmd = None;

@@ -1268,7 +1268,20 @@ fn build_derived_caches_impl(
                 EntityType::Ole2Frame(ole) => ImageModel::from_ole2frame(ole).map(|m| (handle, m)),
                 EntityType::Underlay(u) => match doc.objects.get(&u.definition_handle) {
                     Some(acadrust::objects::ObjectType::UnderlayDefinition(def)) => {
-                        ImageModel::from_underlay(u, def).map(|m| (handle, m))
+                        {
+                        // Paper-space underlays adjust to the white sheet.
+                        let model = doc.objects.values().find_map(|object| match object {
+                            acadrust::objects::ObjectType::Layout(l) if l.name == "Model" => Some(l.block_record),
+                            _ => None,
+                        });
+                        let owner = u.common.owner_handle;
+                        let background = if owner.is_null() || model.is_none_or(|m| m == owner) {
+                            LOAD_BG
+                        } else {
+                            [1.0, 1.0, 1.0, 1.0]
+                        };
+                        ImageModel::from_underlay(u, def, background).map(|m| (handle, m))
+                    }
                     }
                     _ => None,
                 },
@@ -3395,6 +3408,27 @@ impl Scene {
         if !self.parametric_constraints.is_empty() || !self.named_parameters.is_empty() {
             self.refresh_dynamic_dimension_texts();
             self.sync_native_parametric_graph();
+        }
+        // A modified image-bearing entity redraws its raster: an underlay's
+        // display adjustments and clip live on the entity, not the image.
+        for (handle, kind) in &changes {
+            if !matches!(kind, ChangeKind::Modified) {
+                continue;
+            }
+            let seed = match self.document.get_entity(*handle) {
+                Some(
+                    entity @ (EntityType::RasterImage(_)
+                    | EntityType::Ole2Frame(_)
+                    | EntityType::Underlay(_)),
+                ) => Some(self.image_seed_for(entity)),
+                _ => None,
+            };
+            if let Some(seed) = seed {
+                self.images.remove(handle);
+                if let Some(model) = seed {
+                    self.images.insert(*handle, model);
+                }
+            }
         }
         if !changes.is_empty() {
             self.refresh_dependency_index_for_changes(&changes);

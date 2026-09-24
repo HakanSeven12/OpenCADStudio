@@ -1,15 +1,18 @@
 // Underlay entity — PDF/DWF/DGN reference.
 //
-// Render: clip boundary polygon (or cross at insertion if no boundary).
+// Render: the visible outline (clip polygon, or the page frame) with a pick
+//         surface over it; a cross at the insertion when the page is unknown.
 // Grips:  insertion point + clip boundary vertices.
-// Props:  position, scales, rotation, contrast, fade, flags.
+// Props:  General → Underlay Adjust → Geometry → Misc, as the reference lists
+//         a PDF underlay. Rows that need the definition (name, page, path,
+//         width, height) are filled in by the Properties panel.
 
 use acadrust::entities::{Underlay, UnderlayDisplayFlags};
 use crate::t;
 use glam::DVec3;
 
 use crate::command::EntityTransform;
-use crate::entities::common::{center_grip, edit_angle_prop as edit_angle, edit_prop as edit, ro_prop as ro, square_grip};
+use crate::entities::common::{center_grip, ro_prop as ro, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
@@ -21,11 +24,7 @@ fn v3(v: &acadrust::types::Vector3) -> [f64; 3] {
     [v.x, v.y, v.z]
 }
 
-fn v3f32(v: &acadrust::types::Vector3) -> [f32; 3] {
-    [v.x as f32, v.y as f32, v.z as f32]
-}
-
-/// Small cross marker at the insertion point (used when no clip boundary).
+/// Small cross marker at the insertion point (used when the page is unknown).
 fn cross_wire(origin: [f64; 3], size: f64) -> Vec<[f64; 3]> {
     let [ox, oy, oz] = origin;
     vec![
@@ -37,92 +36,275 @@ fn cross_wire(origin: [f64; 3], size: f64) -> Vec<[f64; 3]> {
     ]
 }
 
-// ── RenderConvertible ──────────────────────────────────────────────────────────
-
-/// The underlay's page rectangle in world space (CCW from the insertion),
-/// when its definition resolves and the page rasterises: page inches × the
-/// entity scale, rotated about the insertion. `None` keeps the cross
-/// placeholder.
-fn page_quad(
+/// The underlay's definition, when the handle resolves to one.
+pub(crate) fn definition<'a>(
     u: &Underlay,
-    document: &acadrust::CadDocument,
-) -> Option<[[f64; 3]; 4]> {
-    let def = match document.objects.get(&u.definition_handle) {
-        Some(acadrust::objects::ObjectType::UnderlayDefinition(d)) => d,
-        _ => return None,
-    };
-    let page = if def.page_name.trim().is_empty() {
+    document: &'a acadrust::CadDocument,
+) -> Option<&'a acadrust::entities::UnderlayDefinition> {
+    match document.objects.get(&u.definition_handle) {
+        Some(acadrust::objects::ObjectType::UnderlayDefinition(d)) => Some(d),
+        _ => None,
+    }
+}
+
+/// Page number of a definition ("1" when unset).
+pub(crate) fn page_of(def: &acadrust::entities::UnderlayDefinition) -> &str {
+    if def.page_name.trim().is_empty() {
         "1"
     } else {
         def.page_name.trim()
-    };
-    let raster = crate::scene::model::pdf_raster::rasterize_page(&def.file_path, page)?;
-    let w = raster.width as f64 / raster.dpi as f64 * u.x_scale;
-    let h = raster.height as f64 / raster.dpi as f64 * u.y_scale;
+    }
+}
+
+/// Size of the referenced page in underlay units (page inches), when the
+/// definition resolves and its PDF page can be read.
+pub(crate) fn page_size(u: &Underlay, document: &acadrust::CadDocument) -> Option<(f64, f64)> {
+    let def = definition(u, document)?;
+    if !matches!(def.underlay_type, acadrust::entities::UnderlayType::Pdf) {
+        return None;
+    }
+    crate::scene::model::pdf_raster::page_size_inches(&def.file_path, page_of(def))
+}
+
+/// The name a definition shows: its own name, or "<file> - <page>" as the
+/// reference names a PDF definition.
+pub(crate) fn definition_display_name(def: &acadrust::entities::UnderlayDefinition) -> String {
+    if !def.name.trim().is_empty() {
+        return def.name.clone();
+    }
+    let stem = std::path::Path::new(&def.file_path.replace('\\', "/"))
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    format!("{stem} - {}", page_of(def))
+}
+
+/// A stored path as the platform writes it (backslashes on Windows).
+pub(crate) fn display_path(path: &str) -> String {
+    if cfg!(windows) {
+        path.replace('/', "\\")
+    } else {
+        path.to_string()
+    }
+}
+
+/// Clip polygon in underlay units (page inches). Two stored vertices are the
+/// opposite corners of a rectangle.
+pub(crate) fn clip_polygon_local(u: &Underlay) -> Vec<[f64; 2]> {
+    let v = &u.clip_boundary_vertices;
+    if v.len() == 2 {
+        let (a, b) = (&v[0], &v[1]);
+        return vec![[a.x, a.y], [b.x, a.y], [b.x, b.y], [a.x, b.y]];
+    }
+    v.iter().map(|p| [p.x, p.y]).collect()
+}
+
+/// Underlay units → world, through scale, rotation and insertion.
+pub(crate) fn local_to_world(u: &Underlay, p: [f64; 2]) -> [f64; 3] {
     let (c, s) = (u.rotation.cos(), u.rotation.sin());
+    let x = p[0] * u.x_scale;
+    let y = p[1] * u.y_scale;
     let o = &u.insertion_point;
-    let ux = (c * w, s * w);
-    let vx = (-s * h, c * h);
+    [o.x + x * c - y * s, o.y + x * s + y * c, o.z]
+}
+
+/// Whether a clip boundary limits what is shown.
+pub(crate) fn is_clipped(u: &Underlay) -> bool {
+    u.flags.contains(UnderlayDisplayFlags::CLIPPING) && clip_polygon_local(u).len() >= 3
+}
+
+/// Page frame in world space (CCW from the insertion).
+fn page_quad(u: &Underlay, document: &acadrust::CadDocument) -> Option<[[f64; 3]; 4]> {
+    let (w, h) = page_size(u, document)?;
     Some([
-        [o.x, o.y, o.z],
-        [o.x + ux.0, o.y + ux.1, o.z],
-        [o.x + ux.0 + vx.0, o.y + ux.1 + vx.1, o.z],
-        [o.x + vx.0, o.y + vx.1, o.z],
+        local_to_world(u, [0.0, 0.0]),
+        local_to_world(u, [w, 0.0]),
+        local_to_world(u, [w, h]),
+        local_to_world(u, [0.0, h]),
     ])
 }
 
-impl RenderConvertible for Underlay {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
-        let origin = v3(&self.insertion_point);
-        let _origin_f32 = v3f32(&self.insertion_point);
+/// Local-space extent of what is shown: the clip polygon's box when clipped
+/// to its inside, else the page.
+fn shown_local_extent(u: &Underlay, document: &acadrust::CadDocument) -> Option<(f64, f64)> {
+    if is_clipped(u) && !u.clip_inverted {
+        let clip = clip_polygon_local(u);
+        let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+        for p in &clip {
+            lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+            hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+        }
+        return Some((hi[0] - lo[0], hi[1] - lo[1]));
+    }
+    page_size(u, document)
+}
 
-        if !self.clip_boundary_vertices.is_empty() {
-            // Draw clip boundary polygon + close it.
-            let world_verts = self.world_clip_boundary();
-            let mut pts: Vec<[f64; 3]> = world_verts.iter().map(|v| [v.x, v.y, v.z]).collect();
-            // Close polygon.
-            if let Some(&first) = pts.first() {
-                pts.push(first);
-            }
-            // Insertion grip.
-            let key: Vec<[f64; 3]> = pts.clone();
-            // Interior pick surface over the clip polygon so the underlay
-            // selects on a click anywhere inside, not just on its outline.
-            let ring: Vec<[f64; 3]> = world_verts.iter().map(|v| [v.x, v.y, v.z]).collect();
-            let pick_tris = crate::entities::mesh::triangulate_planar(&ring);
-            Some(RenderEntity {
-                pick_tris,
-                object: RenderObject::Lines(pts),
-                snap_pts: vec![(glam::DVec3::new(self.insertion_point.x, self.insertion_point.y, self.insertion_point.z), SnapHint::Node)],
-                tangent_geoms: vec![],
-                key_vertices: key,
-                fill_tris: vec![],
-            })
-        } else if let Some(q) = page_quad(self, _document) {
-            // Rendered page: draw its frame so selection/pick cover the
-            // visible extent instead of a lone cross under the raster.
-            let pts = vec![q[0], q[1], q[2], q[3], q[0]];
-            let pick_tris = crate::entities::mesh::triangulate_planar(&q.to_vec());
-            Some(RenderEntity {
-                pick_tris,
-                object: RenderObject::Lines(pts),
-                snap_pts: vec![(glam::DVec3::new(self.insertion_point.x, self.insertion_point.y, self.insertion_point.z), SnapHint::Node)],
-                tangent_geoms: vec![],
-                key_vertices: q.to_vec(),
-                fill_tris: vec![],
-            })
+/// Width and height the Properties panel shows: the shown extent times the
+/// scale (the clip's size once clipped, as the reference reports it).
+pub(crate) fn shown_size(u: &Underlay, document: &acadrust::CadDocument) -> Option<(f64, f64)> {
+    shown_local_extent(u, document).map(|(w, h)| (w * u.x_scale.abs(), h * u.y_scale.abs()))
+}
+
+/// World bounds of the underlay: the clip polygon when clipped to its
+/// inside, else the page frame. `None` when the page is unknown.
+pub(crate) fn world_bounds(
+    u: &Underlay,
+    document: &acadrust::CadDocument,
+) -> Option<([f64; 3], [f64; 3])> {
+    let outline: Vec<[f64; 3]> = if is_clipped(u) && !u.clip_inverted {
+        clip_polygon_local(u).into_iter().map(|p| local_to_world(u, p)).collect()
+    } else {
+        page_quad(u, document)?.to_vec()
+    };
+    let mut min = [f64::INFINITY; 3];
+    let mut max = [f64::NEG_INFINITY; 3];
+    for p in outline {
+        for k in 0..3 {
+            min[k] = min[k].min(p[k]);
+            max[k] = max[k].max(p[k]);
+        }
+    }
+    Some((min, max))
+}
+
+/// A number as the reference Properties palette shows underlay values: up to
+/// four decimals, trailing zeros dropped.
+pub(crate) fn plain_number(value: f64) -> String {
+    let text = format!("{value:.4}");
+    let text = text.trim_end_matches('0').trim_end_matches('.').to_string();
+    if text == "-0" { "0".to_string() } else { text }
+}
+
+fn number_row(label: &str, field: &'static str, value: f64) -> Property {
+    Property {
+        label: label.into(),
+        field,
+        value: PropValue::EditText(plain_number(value)),
+    }
+}
+
+fn yes_no(label: &str, field: &'static str, flag: bool) -> Property {
+    Property {
+        label: label.into(),
+        field,
+        value: PropValue::Choice {
+            selected: if flag { t!("Yes") } else { t!("No") }.into_owned(),
+            options: vec![t!("Yes").into_owned(), t!("No").into_owned()],
+        },
+    }
+}
+
+/// A Yes/No list value (localized label, the English word, or a toggle).
+fn parse_flag(value: &str, current: bool) -> bool {
+    let v = value.trim();
+    if v == "toggle" {
+        return !current;
+    }
+    v == t!("Yes").as_ref() || v.eq_ignore_ascii_case("yes") || v.eq_ignore_ascii_case("true")
+}
+
+/// Checks a value typed into an underlay row before it is written. The
+/// messages are the reference's.
+pub(crate) fn validate_property(field: &str, value: &str) -> Result<(), &'static str> {
+    let number = || value.trim().parse::<f64>().ok();
+    match field {
+        "ul_contrast" | "ul_fade" => match number() {
+            Some(v) if (0.0..=100.0).contains(&v) && v.fract() == 0.0 => Ok(()),
+            _ => Err("Value must be an integer between 0 and 100"),
+        },
+        "ul_scale" | "ul_width" | "ul_height" => match number() {
+            Some(v) if v > 0.0 => Ok(()),
+            _ => Err("Value must be positive and nonzero."),
+        },
+        _ => Ok(()),
+    }
+}
+
+/// Turns a Width / Height write into the scale that produces it, since the
+/// size itself is the page (or clip) size times the scale.
+pub(crate) fn size_to_scale(
+    u: &Underlay,
+    document: &acadrust::CadDocument,
+    field: &str,
+    value: &str,
+) -> Option<String> {
+    let v = value.trim().parse::<f64>().ok()?;
+    let (w, h) = shown_local_extent(u, document)?;
+    let base = match field {
+        "ul_width" => w,
+        "ul_height" => h,
+        _ => return None,
+    };
+    (base > 0.0).then(|| (v / base).to_string())
+}
+
+// ── RenderConvertible ──────────────────────────────────────────────────────────
+
+impl RenderConvertible for Underlay {
+    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+        let origin = v3(&self.insertion_point);
+        let insertion_snap = (
+            DVec3::new(self.insertion_point.x, self.insertion_point.y, self.insertion_point.z),
+            SnapHint::Insertion,
+        );
+        let quad = page_quad(self, document);
+        let clip: Vec<[f64; 3]> = if is_clipped(self) {
+            clip_polygon_local(self)
+                .into_iter()
+                .map(|p| local_to_world(self, p))
+                .collect()
         } else {
-            // No clip boundary: draw a cross at insertion point.
-            let pts = cross_wire(origin, 1.0);
-            Some(RenderEntity {
+            Vec::new()
+        };
+
+        // The outline is the clip boundary when clipped (plus the page frame
+        // for an outside clip), else the page frame.
+        let mut pts: Vec<[f64; 3]> = Vec::new();
+        let ring = |poly: &[[f64; 3]], pts: &mut Vec<[f64; 3]>| {
+            if !pts.is_empty() {
+                pts.push([f64::NAN; 3]);
+            }
+            pts.extend_from_slice(poly);
+            pts.push(poly[0]);
+        };
+        if !clip.is_empty() {
+            ring(&clip, &mut pts);
+            if self.clip_inverted {
+                if let Some(q) = quad {
+                    ring(&q, &mut pts);
+                }
+            }
+        } else if let Some(q) = quad {
+            ring(&q, &mut pts);
+        }
+        if pts.is_empty() {
+            return Some(RenderEntity {
                 pick_tris: Vec::new(),
-                object: RenderObject::Lines(pts),
-                snap_pts: vec![(glam::DVec3::new(self.insertion_point.x, self.insertion_point.y, self.insertion_point.z), SnapHint::Node)],
+                object: RenderObject::Lines(cross_wire(origin, 1.0)),
+                snap_pts: vec![insertion_snap],
                 tangent_geoms: vec![],
                 key_vertices: vec![origin],
                 fill_tris: vec![],
-            })
+            });
         }
+
+        // Pick surface over the shown area so a click inside selects it.
+        let pick_ring: Vec<[f64; 3]> = if !clip.is_empty() && !self.clip_inverted {
+            clip.clone()
+        } else {
+            quad.map(|q| q.to_vec()).unwrap_or_default()
+        };
+        let pick_tris = crate::entities::mesh::triangulate_planar(&pick_ring);
+        let mut snap_pts = vec![insertion_snap];
+        snap_pts.extend(crate::scene::model::pdf_vector::underlay_snap_points(self, document));
+        Some(RenderEntity {
+            pick_tris,
+            object: RenderObject::Lines(pts),
+            snap_pts,
+            tangent_geoms: vec![],
+            key_vertices: pick_ring,
+            fill_tris: vec![],
+        })
     }
 }
 
@@ -200,25 +382,6 @@ impl Grippable for Underlay {
 
 impl PropertyEditable for Underlay {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
-        // Width / Height derived from the world-space clip boundary bounds
-        // (the only in-entity source of the placed footprint size).
-        let (width, height) = if self.clip_boundary_vertices.is_empty() {
-            (0.0_f64, 0.0_f64)
-        } else {
-            let verts = self.world_clip_boundary();
-            let mut min_x = f64::INFINITY;
-            let mut min_y = f64::INFINITY;
-            let mut max_x = f64::NEG_INFINITY;
-            let mut max_y = f64::NEG_INFINITY;
-            for v in &verts {
-                min_x = min_x.min(v.x);
-                min_y = min_y.min(v.y);
-                max_x = max_x.max(v.x);
-                max_y = max_y.max(v.y);
-            }
-            (max_x - min_x, max_y - min_y)
-        };
-
         let show = self.flags.contains(UnderlayDisplayFlags::ON);
         let clipping = self.flags.contains(UnderlayDisplayFlags::CLIPPING);
         let monochrome = self.flags.contains(UnderlayDisplayFlags::MONOCHROME);
@@ -226,74 +389,46 @@ impl PropertyEditable for Underlay {
 
         vec![
             PropSection {
-                title: t!("Geometry").into_owned(),
+                title: t!("Underlay Adjust").into_owned(),
                 props: vec![
-                    edit(t!("Position X").as_ref(), "ul_ix", self.insertion_point.x),
-                    edit(t!("Position Y").as_ref(), "ul_iy", self.insertion_point.y),
-                    edit(t!("Position Z").as_ref(), "ul_iz", self.insertion_point.z),
-                    edit(t!("Scale X").as_ref(), "ul_sx", self.x_scale),
-                    edit(t!("Scale Y").as_ref(), "ul_sy", self.y_scale),
-                    edit(t!("Scale Z").as_ref(), "ul_sz", self.z_scale),
-                    ro(t!("Width").as_ref(), "ul_width", crate::entities::common::format_length(width)),
-                    ro(t!("Height").as_ref(), "ul_height", crate::entities::common::format_length(height)),
-                    edit_angle(t!("Rotation").as_ref(), "ul_rot", self.rotation.to_degrees()),
+                    number_row(t!("Contrast").as_ref(), "ul_contrast", self.contrast as f64),
+                    number_row(t!("Fade").as_ref(), "ul_fade", self.fade as f64),
+                    yes_no(t!("Monochrome").as_ref(), "ul_mono", monochrome),
+                    yes_no(t!("Adjust colors for background").as_ref(), "ul_adjust_bg", adjust_bg),
                 ],
             },
             PropSection {
-                title: t!("Underlay Adjust").into_owned(),
+                title: t!("Geometry").into_owned(),
                 props: vec![
-                    edit(t!("Contrast").as_ref(), "ul_contrast", self.contrast as f64),
-                    edit(t!("Fade").as_ref(), "ul_fade", self.fade as f64),
-                    Property {
-                        label: t!("Monochrome").into_owned(),
-                        field: "ul_mono",
-                        value: PropValue::BoolToggle {
-                            field: "ul_mono",
-                            value: monochrome,
-                        },
-                    },
-                    Property {
-                        label: t!("Adjust Colors for Background").into_owned(),
-                        field: "ul_adjust_bg",
-                        value: PropValue::BoolToggle {
-                            field: "ul_adjust_bg",
-                            value: adjust_bg,
-                        },
-                    },
+                    number_row(t!("Position X").as_ref(), "ul_ix", self.insertion_point.x),
+                    number_row(t!("Position Y").as_ref(), "ul_iy", self.insertion_point.y),
+                    number_row(t!("Position Z").as_ref(), "ul_iz", self.insertion_point.z),
+                    number_row(t!("Rotation").as_ref(), "ul_rot", self.rotation.to_degrees()),
+                    // Filled from the page size by the Properties panel.
+                    number_row(t!("Width").as_ref(), "ul_width", 0.0),
+                    number_row(t!("Height").as_ref(), "ul_height", 0.0),
+                    number_row(t!("Scale").as_ref(), "ul_scale", self.x_scale),
                 ],
             },
             PropSection {
                 title: t!("Misc").into_owned(),
                 props: vec![
-                    // Underlay name/path/layers live on the separate
-                    // UnderlayDefinition object, not reachable from the entity.
-                    ro(t!("Underlay name").as_ref(), "ul_name", String::new()),
-                    ro(t!("Underlay path").as_ref(), "ul_path", String::new()),
-                    Property {
-                        label: t!("Show underlay").into_owned(),
-                        field: "ul_on",
-                        value: PropValue::BoolToggle {
-                            field: "ul_on",
-                            value: show,
+                    // Name, page and path live on the UnderlayDefinition and
+                    // are filled in by the Properties panel.
+                    ro(t!("Name").as_ref(), "ul_name", String::new()),
+                    ro(t!("Page number").as_ref(), "ul_page", String::new()),
+                    ro(t!("Saved Path").as_ref(), "ul_path", String::new()),
+                    yes_no(t!("Show underlay").as_ref(), "ul_on", show),
+                    yes_no(t!("Show clipped").as_ref(), "ul_clip", clipping),
+                    ro(
+                        t!("Layer display overrides").as_ref(),
+                        "ul_layers",
+                        if crate::scene::model::pdf_layers::hidden_layers(self).is_empty() {
+                            t!("None").into_owned()
+                        } else {
+                            t!("Applied").into_owned()
                         },
-                    },
-                    Property {
-                        label: t!("Clipping").into_owned(),
-                        field: "ul_clip",
-                        value: PropValue::BoolToggle {
-                            field: "ul_clip",
-                            value: clipping,
-                        },
-                    },
-                    Property {
-                        label: t!("Show clipped").into_owned(),
-                        field: "ul_clip_inverted",
-                        value: PropValue::BoolToggle {
-                            field: "ul_clip_inverted",
-                            value: self.clip_inverted,
-                        },
-                    },
-                    ro(t!("Underlay layers").as_ref(), "ul_layers", String::new()),
+                    ),
                 ],
             },
         ]
@@ -302,73 +437,45 @@ impl PropertyEditable for Underlay {
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
         match field {
             "ul_mono" => {
-                let on = if value == "toggle" {
-                    !self.flags.contains(UnderlayDisplayFlags::MONOCHROME)
-                } else {
-                    value == "true"
-                };
+                let on = parse_flag(value, self.flags.contains(UnderlayDisplayFlags::MONOCHROME));
                 self.set_monochrome(on);
                 return;
             }
             "ul_adjust_bg" => {
-                let on = if value == "toggle" {
-                    !self.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND)
-                } else {
-                    value == "true"
-                };
-                if on {
-                    self.flags |= UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND;
-                } else {
-                    self.flags -= UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND;
-                }
+                let on = parse_flag(
+                    value,
+                    self.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND),
+                );
+                self.flags.set(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND, on);
                 return;
             }
             "ul_on" => {
-                let on = if value == "toggle" {
-                    !self.flags.contains(UnderlayDisplayFlags::ON)
-                } else {
-                    value == "true"
-                };
+                let on = parse_flag(value, self.flags.contains(UnderlayDisplayFlags::ON));
                 self.set_on(on);
                 return;
             }
             "ul_clip" => {
-                let on = if value == "toggle" {
-                    !self.flags.contains(UnderlayDisplayFlags::CLIPPING)
-                } else {
-                    value == "true"
-                };
-                if on {
-                    self.flags |= UnderlayDisplayFlags::CLIPPING;
-                } else {
-                    self.flags -= UnderlayDisplayFlags::CLIPPING;
-                }
-                return;
-            }
-            "ul_clip_inverted" => {
-                let on = if value == "toggle" {
-                    !self.clip_inverted
-                } else {
-                    value == "true"
-                };
-                self.clip_inverted = on;
+                let on = parse_flag(value, self.flags.contains(UnderlayDisplayFlags::CLIPPING));
+                self.flags.set(UnderlayDisplayFlags::CLIPPING, on);
                 return;
             }
             _ => {}
         }
-        if let Ok(v) = value.trim().parse::<f64>() {
-            match field {
-                "ul_ix" => self.insertion_point.x = v,
-                "ul_iy" => self.insertion_point.y = v,
-                "ul_iz" => self.insertion_point.z = v,
-                "ul_sx" => self.x_scale = v,
-                "ul_sy" => self.y_scale = v,
-                "ul_sz" => self.z_scale = v,
-                "ul_rot" => self.rotation = v.to_radians(),
-                "ul_contrast" => self.set_contrast(v.clamp(0.0, 100.0) as u8),
-                "ul_fade" => self.set_fade(v.clamp(0.0, 80.0) as u8),
-                _ => {}
-            }
+        if validate_property(field, value).is_err() {
+            return;
+        }
+        let Some(v) = crate::entities::common::parse_f64(value) else {
+            return;
+        };
+        match field {
+            "ul_ix" => self.insertion_point.x = v,
+            "ul_iy" => self.insertion_point.y = v,
+            "ul_iz" => self.insertion_point.z = v,
+            "ul_scale" => self.set_scale(v),
+            "ul_rot" => self.rotation = v.to_radians(),
+            "ul_contrast" => self.set_contrast(v as u8),
+            "ul_fade" => self.set_fade(v as u8),
+            _ => {}
         }
     }
 }

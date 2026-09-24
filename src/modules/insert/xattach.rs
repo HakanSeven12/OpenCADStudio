@@ -1,23 +1,25 @@
-// XATTACH command — attach an external DWG/DXF file as an XREF block
-// and insert it at a picked point.
+// XATTACH placement — attach an external DWG/DXF file as an XREF block and
+// insert it.
 //
-// Workflow:
-//   Step 1 (point pick): user clicks the insertion point.
-//   Step 2 (text input): scale factor (default 1.0).
-//   Step 3 (text input): rotation angle (default 0.0).
-//   Result: BlockRecord + Block entities are created with is_xref=true,
-//           then an INSERT entity is committed with the chosen scale/rotation.
+// The reference options (type, path type, fixed or on-screen scale,
+// insertion point and rotation) come from the Attach External Reference
+// dialog or from -XREF Attach / Overlay. Values left "on-screen" are asked
+// here with the reference prompts:
+//   Specify insertion point or [Scale/X/Y/Z/Rotate/PScale/PX/PY/PZ/PRotate]:
+//   Enter X scale factor, specify opposite corner, or [Corner/XYZ] <1>:
+//   Enter Y scale factor <use X scale factor>:
+//   Specify rotation angle <0>:
+// The definition is created when the INSERT is committed (see the command
+// driver), so one undo removes both.
 
-use acadrust::entities::{Block, BlockEnd, Insert};
+use acadrust::entities::Insert;
 use acadrust::tables::block_record::{BlockFlags, BlockRecord};
 use acadrust::types::Vector3;
 use acadrust::EntityType;
 use glam::DVec3;
 
-use crate::t;
-
-use crate::command::{CadCommand, CmdResult, InputKind, WorkingPlane};
-use crate::io::xref_model::normalize_lexical;
+use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, WorkingPlane};
+use crate::io::xref_model::{normalize_lexical, Pathtype};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::scene::Scene;
@@ -31,45 +33,259 @@ pub fn tool() -> ToolDef {
     }
 }
 
-/// Multi-step placement state: insertion point, then scale, then rotation.
-/// Mirrors the INSERT command's scale/rotation value handling (single value
-/// typed after the point pick, bare Enter keeps the default).
-enum XAttachStep {
-    Point,
-    Scale { point: DVec3 },
-    Rotate { point: DVec3, sx: f64, sy: f64, sz: f64 },
+/// What to attach and how the reference is stored.
+#[derive(Debug, Clone, PartialEq)]
+pub struct XrefAttachRequest {
+    /// The drawing file as chosen (absolute).
+    pub path: String,
+    pub overlay: bool,
+    pub path_type: Pathtype,
 }
 
-pub struct XAttachCommand {
-    path: String,
-    block_name: String,
-    plane: WorkingPlane,
-    step: XAttachStep,
+/// Placement values fixed before the command starts; `None` = on-screen.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct XrefPlacement {
+    pub insert: Option<DVec3>,
+    pub scale: Option<[f64; 3]>,
+    /// Degrees.
+    pub rotation: Option<f64>,
 }
 
-impl XAttachCommand {
-    /// Create an XATTACH command with a path already filled in (from file-picker).
-    pub fn with_path(path: String) -> Self {
-        let block_name = path_to_block_name(&path);
-        Self {
-            path,
-            block_name,
-            plane: WorkingPlane::default(),
-            step: XAttachStep::Point,
+impl XrefPlacement {
+    /// Everything on-screen, as -XREF asks it.
+    pub fn on_screen() -> Self {
+        Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Preset {
+    Scale,
+    X,
+    Y,
+    Z,
+    Rotate,
+    PScale,
+    PX,
+    PY,
+    PZ,
+    PRotate,
+}
+
+impl Preset {
+    fn from_keyword(text: &str) -> Option<Self> {
+        Some(match text {
+            "S" | "SCALE" => Preset::Scale,
+            "X" => Preset::X,
+            "Y" => Preset::Y,
+            "Z" => Preset::Z,
+            "R" | "ROTATE" => Preset::Rotate,
+            "PS" | "PSCALE" => Preset::PScale,
+            "PX" => Preset::PX,
+            "PY" => Preset::PY,
+            "PZ" => Preset::PZ,
+            "PR" | "PROTATE" => Preset::PRotate,
+            _ => return None,
+        })
+    }
+
+    fn prompt(self) -> &'static str {
+        match self {
+            Preset::Scale => "Specify scale factor for XYZ axes:",
+            Preset::X => "Specify X scale factor:",
+            Preset::Y => "Specify Y scale factor:",
+            Preset::Z => "Specify Z Scale factor:",
+            Preset::Rotate => "Specify rotation angle:",
+            Preset::PScale => "Specify preview scale factor for XYZ axes:",
+            Preset::PX => "Specify preview X scale factor:",
+            Preset::PY => "Specify preview Y scale factor:",
+            Preset::PZ => "Specify preview Z scale factor:",
+            Preset::PRotate => "Specify preview rotation angle:",
         }
     }
 
-    fn commit_insert(&self, point: DVec3, sx: f64, sy: f64, sz: f64, rotation: f64) -> EntityType {
+    fn is_angle(self) -> bool {
+        matches!(self, Preset::Rotate | Preset::PRotate)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Step {
+    Insert,
+    Preset(Preset),
+    XScale,
+    Corner,
+    YScale,
+    XyzX,
+    XyzY,
+    XyzZ,
+    Rotation,
+}
+
+pub struct XAttachCommand {
+    request: XrefAttachRequest,
+    block_name: String,
+    /// Command name shown before each prompt (ATTACH, XATTACH or -XREF).
+    label: &'static str,
+    plane: WorkingPlane,
+    step: Step,
+    point: Option<DVec3>,
+    scale: [f64; 3],
+    /// Scale fixed in the dialog or by the Scale/X/Y/Z options.
+    scale_fixed: bool,
+    /// Degrees.
+    rotation: f64,
+    rotation_fixed: bool,
+    /// Ghost of the reference's model space in its own coordinates.
+    preview: Vec<WireModel>,
+    /// Drawing units per reference unit; the INSERT's scale carries it.
+    unit: f64,
+    /// PScale / PX / PY / PZ / PRotate: preview-only values.
+    preview_scale: [f64; 3],
+    preview_rotation: f64,
+}
+
+const NONZERO: &str = "Value must be nonzero.";
+
+impl XAttachCommand {
+    pub fn new(request: XrefAttachRequest, placement: XrefPlacement, label: &'static str) -> Self {
+        let block_name = path_to_block_name(&request.path);
+        let mut command = Self {
+            request,
+            block_name,
+            label,
+            plane: WorkingPlane::default(),
+            step: Step::Insert,
+            point: placement.insert,
+            scale: placement.scale.unwrap_or([1.0; 3]),
+            scale_fixed: placement.scale.is_some(),
+            rotation: placement.rotation.unwrap_or(0.0),
+            rotation_fixed: placement.rotation.is_some(),
+            preview: Vec::new(),
+            unit: 1.0,
+            preview_scale: [1.0; 3],
+            preview_rotation: 0.0,
+        };
+        if command.point.is_some() {
+            command.step = command.next_step().unwrap_or(Step::Rotation);
+        }
+        command
+    }
+
+    /// Attach with every value on-screen.
+    #[cfg(test)]
+    pub fn with_path(path: String) -> Self {
+        Self::new(
+            XrefAttachRequest {
+                path,
+                overlay: false,
+                path_type: Pathtype::Full,
+            },
+            XrefPlacement::on_screen(),
+            "XATTACH",
+        )
+    }
+
+    /// Show `wires` (the reference's model space) while placing it.
+    pub fn with_preview(mut self, wires: Vec<WireModel>, unit: f64) -> Self {
+        self.preview = wires;
+        self.unit = if unit.is_finite() && unit != 0.0 { unit } else { 1.0 };
+        self
+    }
+
+    /// Placement shown for the cursor at `cursor` (local): insertion point,
+    /// scale and rotation (degrees) as far as they are known at this step.
+    fn preview_placement(&self, cursor: DVec3) -> (DVec3, [f64; 3], f64) {
+        let rotation = if self.rotation_fixed {
+            self.rotation
+        } else {
+            self.preview_rotation
+        };
+        let base = self.point.unwrap_or(cursor);
+        match self.step {
+            Step::Insert | Step::Preset(_) => {
+                let scale = if self.scale_fixed { self.scale } else { self.preview_scale };
+                (cursor, scale, rotation)
+            }
+            Step::XScale | Step::Corner | Step::XyzX => {
+                let (dx, dy) = (cursor.x - base.x, cursor.y - base.y);
+                let scale = if dx.abs() > 1e-12 && dy.abs() > 1e-12 {
+                    [dx, dy, dx.abs()]
+                } else {
+                    [1.0; 3]
+                };
+                (base, scale, rotation)
+            }
+            Step::Rotation => {
+                let angle = (cursor.y - base.y).atan2(cursor.x - base.x).to_degrees();
+                (base, self.scale, angle)
+            }
+            _ => (base, self.scale, rotation),
+        }
+    }
+
+    /// The finished INSERT when nothing is left to ask (all values fixed in
+    /// the dialog).
+    pub fn immediate(&self) -> Option<EntityType> {
+        (self.point.is_some() && self.next_step().is_none()).then(|| self.commit_insert())
+    }
+
+    /// The step after the insertion point, or `None` when it can commit.
+    fn next_step(&self) -> Option<Step> {
+        if !self.scale_fixed {
+            Some(Step::XScale)
+        } else if !self.rotation_fixed {
+            Some(Step::Rotation)
+        } else {
+            None
+        }
+    }
+
+    fn advance(&mut self) -> CmdResult {
+        match self.next_step() {
+            Some(step) => {
+                self.step = step;
+                CmdResult::NeedPoint
+            }
+            None => CmdResult::CommitAndExit(self.commit_insert()),
+        }
+    }
+
+    /// Scale settled at this step: the rotation (if asked) comes next.
+    fn scale_done(&mut self) -> CmdResult {
+        self.scale_fixed = true;
+        self.advance()
+    }
+
+    fn commit_insert(&self) -> EntityType {
+        let point = self.point.unwrap_or(DVec3::ZERO);
         let mut ins = Insert::new(
             self.block_name.clone(),
             Vector3::new(point.x, point.y, point.z),
         );
-        ins.set_x_scale(sx);
-        ins.set_y_scale(sy);
-        ins.set_z_scale(sz);
-        ins.rotation = rotation;
+        ins.set_x_scale(self.scale[0]);
+        ins.set_y_scale(self.scale[1]);
+        ins.set_z_scale(self.scale[2]);
+        ins.rotation = self.rotation.to_radians();
         self.plane.place_entity(EntityType::Insert(ins))
     }
+
+    /// Corner pick at the X scale prompt: X and Y from the rectangle,
+    /// Z follows X.
+    fn corner(&mut self, pt: DVec3) -> CmdResult {
+        let base = self.point.unwrap_or(DVec3::ZERO);
+        let corner = self.plane.to_local(pt);
+        let (sx, sy) = (corner.x - base.x, corner.y - base.y);
+        if sx.abs() < 1e-12 || sy.abs() < 1e-12 {
+            return CmdResult::ReportError(NONZERO.to_string());
+        }
+        self.scale = [sx, sy, sx.abs()];
+        self.scale_done()
+    }
+}
+
+fn parse_number(text: &str) -> Option<f64> {
+    text.trim().replace(',', ".").parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 impl CadCommand for XAttachCommand {
@@ -82,121 +298,243 @@ impl CadCommand for XAttachCommand {
     }
 
     fn prompt(&self) -> String {
-        match &self.step {
-            XAttachStep::Point => t!(
-                "XATTACH  Specify insertion point for \"%{name}\":",
-                name = self.block_name
-            )
-            .into_owned(),
-            XAttachStep::Scale { .. } => {
-                t!("XATTACH  Specify scale factor <1.0> (X,Y,Z or pick Corner):").into_owned()
+        let text = match self.step {
+            Step::Insert => {
+                "Specify insertion point or [Scale/X/Y/Z/Rotate/PScale/PX/PY/PZ/PRotate]:"
             }
-            XAttachStep::Rotate { .. } => {
-                t!("XATTACH  Specify rotation angle <0>:").into_owned()
+            Step::Preset(preset) => preset.prompt(),
+            Step::XScale => {
+                "Enter X scale factor, specify opposite corner, or [Corner/XYZ] <1>:"
             }
+            Step::Corner => "Specify opposite corner:",
+            Step::YScale => "Enter Y scale factor <use X scale factor>:",
+            Step::XyzX => "Specify X scale factor or [Corner] <1>:",
+            Step::XyzY => "Enter Y scale factor <use X scale factor>:",
+            Step::XyzZ => "Specify Z scale factor or <use X scale factor>:",
+            Step::Rotation => "Specify rotation angle <0>:",
+        };
+        format!("{}  {}", self.label, text)
+    }
+
+    fn options(&self) -> Vec<CmdOption> {
+        match self.step {
+            Step::Insert => vec![
+                CmdOption::new("Scale", "S"),
+                CmdOption::new("X", "X"),
+                CmdOption::new("Y", "Y"),
+                CmdOption::new("Z", "Z"),
+                CmdOption::new("Rotate", "R"),
+                CmdOption::new("PScale", "PS"),
+                CmdOption::new("PX", "PX"),
+                CmdOption::new("PY", "PY"),
+                CmdOption::new("PZ", "PZ"),
+                CmdOption::new("PRotate", "PR"),
+            ],
+            Step::XScale => vec![CmdOption::new("Corner", "C"), CmdOption::new("XYZ", "XYZ")],
+            Step::XyzX => vec![CmdOption::new("Corner", "C")],
+            _ => Vec::new(),
         }
     }
 
     fn input_kind(&self) -> InputKind {
         match self.step {
-            XAttachStep::Point => InputKind::Point,
-            XAttachStep::Scale { .. } | XAttachStep::Rotate { .. } => InputKind::SingleToken,
+            Step::Insert | Step::Corner => InputKind::Point,
+            _ => InputKind::SingleToken,
         }
+    }
+
+    fn point_step_accepts_keywords(&self) -> bool {
+        self.step == Step::Insert
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
-            XAttachStep::Point => {
-                let point = self.plane.to_local(pt);
-                self.step = XAttachStep::Scale { point };
-                CmdResult::NeedPoint
+            Step::Insert => {
+                self.point = Some(self.plane.to_local(pt));
+                self.advance()
             }
-            XAttachStep::Scale { point } => {
-                // Corner: derive X/Y scale from the picked opposite corner.
-                let corner = self.plane.to_local(pt);
-                let sx = (corner.x - point.x).abs();
-                let sy = (corner.y - point.y).abs();
-                self.step = XAttachStep::Rotate {
-                    point,
-                    sx: if sx < 1e-9 { 1.0 } else { sx },
-                    sy: if sy < 1e-9 { 1.0 } else { sy },
-                    sz: 1.0,
-                };
-                CmdResult::NeedPoint
+            Step::XScale | Step::Corner | Step::XyzX => self.corner(pt),
+            Step::Rotation => {
+                let base = self.plane.to_world(self.point.unwrap_or(DVec3::ZERO));
+                self.rotation = self.plane.angle(base, pt).unwrap_or(0.0).to_degrees();
+                CmdResult::CommitAndExit(self.commit_insert())
             }
-            XAttachStep::Rotate { point, sx, sy, sz } => {
-                // Second point defines the rotation direction from the base.
-                let base_world = self.plane.to_world(point);
-                let rotation = self.plane.angle(base_world, pt).unwrap_or(0.0);
-                CmdResult::CommitAndExit(self.commit_insert(point, sx, sy, sz, rotation))
-            }
+            _ => CmdResult::NeedPoint,
         }
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        let token = text.trim().to_uppercase();
         match self.step {
-            XAttachStep::Point => None,
-            XAttachStep::Scale { point } => {
-                // Single value (uniform) or X/Y/Z triplet; invalid input is
-                // consumed and re-prompts (mirrors INSERT's scale handling).
-                if let Some((sx, sy, sz)) = parse_scale_spec(text) {
-                    self.step = XAttachStep::Rotate { point, sx, sy, sz };
-                }
+            Step::Insert => {
+                let preset = Preset::from_keyword(&token)?;
+                self.step = Step::Preset(preset);
                 Some(CmdResult::NeedPoint)
             }
-            XAttachStep::Rotate { point, sx, sy, sz } => {
-                if let Some(rotation) = crate::entities::common::parse_typed_angle(text) {
-                    Some(CmdResult::CommitAndExit(
-                        self.commit_insert(point, sx, sy, sz, rotation),
-                    ))
+            Step::Preset(preset) => {
+                let value = if preset.is_angle() {
+                    crate::entities::common::parse_typed_angle(text).map(f64::to_degrees)
                 } else {
-                    Some(CmdResult::NeedPoint)
+                    parse_number(text)
+                };
+                let Some(value) = value else {
+                    return Some(CmdResult::NeedPoint);
+                };
+                if !preset.is_angle() && value == 0.0 {
+                    return Some(CmdResult::ReportError(NONZERO.to_string()));
                 }
+                match preset {
+                    Preset::Scale => {
+                        self.scale = [value; 3];
+                        self.scale_fixed = true;
+                    }
+                    Preset::X => {
+                        self.scale[0] = value;
+                        self.scale_fixed = true;
+                    }
+                    Preset::Y => {
+                        self.scale[1] = value;
+                        self.scale_fixed = true;
+                    }
+                    Preset::Z => {
+                        self.scale[2] = value;
+                        self.scale_fixed = true;
+                    }
+                    Preset::Rotate => {
+                        self.rotation = value;
+                        self.rotation_fixed = true;
+                    }
+                    // Preview-only values: the reference asks the real ones
+                    // after the insertion point as usual.
+                    Preset::PScale => self.preview_scale = [value; 3],
+                    Preset::PX => self.preview_scale[0] = value,
+                    Preset::PY => self.preview_scale[1] = value,
+                    Preset::PZ => self.preview_scale[2] = value,
+                    Preset::PRotate => self.preview_rotation = value,
+                }
+                self.step = Step::Insert;
+                Some(CmdResult::NeedPoint)
             }
+            Step::XScale | Step::XyzX if token == "C" || token == "CORNER" => {
+                self.step = Step::Corner;
+                Some(CmdResult::NeedPoint)
+            }
+            Step::XScale if token == "XYZ" => {
+                self.step = Step::XyzX;
+                Some(CmdResult::NeedPoint)
+            }
+            Step::XScale | Step::XyzX => {
+                let value = parse_number(text)?;
+                if value == 0.0 {
+                    return Some(CmdResult::ReportError(NONZERO.to_string()));
+                }
+                self.scale = [value, value, value.abs()];
+                self.step = if self.step == Step::XScale {
+                    Step::YScale
+                } else {
+                    Step::XyzY
+                };
+                Some(CmdResult::NeedPoint)
+            }
+            Step::YScale | Step::XyzY => {
+                let value = parse_number(text)?;
+                if value == 0.0 {
+                    return Some(CmdResult::ReportError(NONZERO.to_string()));
+                }
+                self.scale[1] = value;
+                if self.step == Step::XyzY {
+                    self.step = Step::XyzZ;
+                    return Some(CmdResult::NeedPoint);
+                }
+                Some(self.scale_done())
+            }
+            Step::XyzZ => {
+                let value = parse_number(text)?;
+                if value == 0.0 {
+                    return Some(CmdResult::ReportError(NONZERO.to_string()));
+                }
+                self.scale[2] = value;
+                Some(self.scale_done())
+            }
+            Step::Rotation => {
+                let rotation = crate::entities::common::parse_typed_angle(text)?;
+                self.rotation = rotation.to_degrees();
+                Some(CmdResult::CommitAndExit(self.commit_insert()))
+            }
+            Step::Corner => None,
         }
     }
 
     fn on_enter(&mut self) -> CmdResult {
         match self.step {
-            // Bare Enter at the insertion-point step cancels (unchanged).
-            XAttachStep::Point => CmdResult::Cancel,
-            // Bare Enter accepts the default scale / rotation.
-            XAttachStep::Scale { point } => {
-                self.step = XAttachStep::Rotate {
-                    point,
-                    sx: 1.0,
-                    sy: 1.0,
-                    sz: 1.0,
+            Step::Insert => {
+                CmdResult::ReportError("Point or option keyword required.".to_string())
+            }
+            Step::Preset(_) => {
+                self.step = Step::Insert;
+                CmdResult::NeedPoint
+            }
+            Step::XScale | Step::XyzX => {
+                self.scale = [1.0; 3];
+                self.step = if self.step == Step::XScale {
+                    Step::YScale
+                } else {
+                    Step::XyzY
                 };
                 CmdResult::NeedPoint
             }
-            XAttachStep::Rotate { point, sx, sy, sz } => {
-                CmdResult::CommitAndExit(self.commit_insert(point, sx, sy, sz, 0.0))
+            Step::YScale => {
+                self.scale[1] = self.scale[0];
+                self.scale_done()
+            }
+            Step::XyzY => {
+                self.scale[1] = self.scale[0];
+                self.step = Step::XyzZ;
+                CmdResult::NeedPoint
+            }
+            Step::XyzZ => {
+                self.scale[2] = self.scale[0];
+                self.scale_done()
+            }
+            Step::Corner => CmdResult::NeedPoint,
+            Step::Rotation => {
+                self.rotation = 0.0;
+                CmdResult::CommitAndExit(self.commit_insert())
             }
         }
     }
 
-    fn on_preview_wires(&mut self, _pt: DVec3) -> Vec<WireModel> {
-        // XREF-Task6: PScale drag preview — no framework hook; revisit
-        vec![]
+    fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
+        if self.preview.is_empty() {
+            return Vec::new();
+        }
+        let (origin, scale, degrees) = self.preview_placement(self.plane.to_local(pt));
+        let (sin, cos) = degrees.to_radians().sin_cos();
+        let unit = self.unit;
+        let plane = self.plane;
+        let place = |p: DVec3| {
+            let (x, y, z) = (p.x * scale[0] * unit, p.y * scale[1] * unit, p.z * scale[2] * unit);
+            plane.to_world(origin + DVec3::new(x * cos - y * sin, x * sin + y * cos, z))
+        };
+        self.preview.iter().map(|wire| wire.mapped(place)).collect()
     }
 
-    fn xattach_path(&self) -> Option<String> {
-        Some(self.path.clone())
+    fn xattach_request(&self) -> Option<XrefAttachRequest> {
+        Some(self.request.clone())
     }
 }
 
-/// Derive a block name from the file path: take the file stem, uppercase it.
+/// Reference name for a file: its name without the extension, case kept.
 pub fn path_to_block_name(path: &str) -> String {
-    let p = std::path::Path::new(path);
-    p.file_stem()
-        .map(|s| s.to_string_lossy().to_uppercase())
+    let normalized = path.replace('\\', "/");
+    std::path::Path::new(&normalized)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "XREF".to_string())
 }
 
-/// Collision-free block name: `stem` unless taken (case-insensitive — block
-/// names are uppercase by convention), else `stem_1`, `stem_2`, ...
-/// (`$0$` numbering belongs to Bind, not Attach.)
+/// Collision-free block name: `stem` unless taken (case-insensitive), else
+/// `stem_1`, `stem_2`, ... (`$0$` numbering belongs to Bind, not Attach.)
 pub fn unique_block_name(stem: &str, taken: &[impl AsRef<str>]) -> String {
     let upper_taken: Vec<String> = taken.iter().map(|t| t.as_ref().to_uppercase()).collect();
     if !upper_taken.iter().any(|t| t == &stem.to_uppercase()) {
@@ -215,10 +553,6 @@ pub fn unique_block_name(stem: &str, taken: &[impl AsRef<str>]) -> String {
     }
 }
 
-/// Attach-default-Full store path: a relative incoming path is joined onto
-/// the host drawing's base dir (yielding an absolute path when the base dir
-/// is absolute); absolute paths and missing base dirs pass through verbatim.
-/// Separators are normalized to `/` for stable DWG storage.
 fn is_absolute_xref_path(path: &str) -> bool {
     let bytes = path.as_bytes();
     std::path::Path::new(path).is_absolute()
@@ -229,6 +563,9 @@ fn is_absolute_xref_path(path: &str) -> bool {
             && matches!(bytes[2], b'/' | b'\\'))
 }
 
+/// Full store path: a relative incoming path is joined onto the host
+/// drawing's base dir; absolute paths and missing base dirs pass through.
+/// Separators are normalized to `/` for stable DWG storage.
 pub fn resolve_xref_store_path(path: &str, host_base_dir: Option<&std::path::Path>) -> String {
     let p = std::path::Path::new(path);
     if is_absolute_xref_path(path) {
@@ -239,14 +576,6 @@ pub fn resolve_xref_store_path(path: &str, host_base_dir: Option<&std::path::Pat
         None => path.to_string(),
     }
 }
-
-// Host-path note (XREF-Task6): `Scene` exposes no host file path — it owns
-// the document plus view state only (verified in scene/mod.rs: no file path
-// field). The host drawing path lives one layer up, in `Tab::current_path`
-// (app/document.rs). The self-attach guard therefore runs at the command
-// driver layer, which owns both the tab path and the pending XATTACH path,
-// via this pure, unit-tested helper. `prepare_xref_block` below stays
-// side-effect-only and keeps its `-> String` return.
 
 /// True when attaching `ref_path` would attach the host drawing into itself.
 /// Lexical comparison only (no filesystem touch — the target may be missing);
@@ -271,46 +600,52 @@ pub fn is_self_attach(
     normalize_lexical(&candidate) == normalize_lexical(&host_file.to_string_lossy())
 }
 
-/// Parse a typed scale: a single uniform value, or an X/Y/Z triplet separated
-/// by commas, semicolons or whitespace. Zero never scales (rejected, like
-/// INSERT); unparseable input returns None and the caller re-prompts.
-fn parse_scale_spec(text: &str) -> Option<(f64, f64, f64)> {
-    let norm = text.trim().replace([',', ';'], " ");
-    let parts: Vec<&str> = norm.split_whitespace().collect();
-    match parts.as_slice() {
-        [single] => single
-            .parse::<f64>()
-            .ok()
-            .filter(|v| *v != 0.0)
-            .map(|v| (v, v, 1.0)),
-        [x, y, z] => {
-            let parsed: Option<Vec<f64>> =
-                [x, y, z].iter().map(|s| s.parse::<f64>().ok()).collect();
-            match parsed {
-                Some(v) if v.iter().all(|n| *n != 0.0) => Some((v[0], v[1], v[2])),
-                _ => None,
-            }
-        }
-        _ => None,
+/// The drawing's existing reference for `name`, if any (case-insensitive).
+pub fn existing_reference(scene: &Scene, name: &str) -> Option<String> {
+    scene
+        .document
+        .block_records
+        .iter()
+        .find(|br| {
+            (br.flags.is_xref || br.flags.is_xref_overlay) && br.name.eq_ignore_ascii_case(name)
+        })
+        .map(|br| br.name.clone())
+}
+
+/// The path to store for `request`: full, relative to the saved host, or
+/// the file name alone. A relative path needs a saved host; until then the
+/// full path is kept, as the reference does.
+pub fn stored_path(request: &XrefAttachRequest, host_file: Option<&std::path::Path>) -> String {
+    let full = resolve_xref_store_path(&request.path, None);
+    match request.path_type {
+        Pathtype::Full => full,
+        Pathtype::Relative => host_file
+            .and_then(|host| {
+                crate::io::xref_model::to_pathtype_result(&full, host, Pathtype::Relative).ok()
+            })
+            .unwrap_or(full),
+        Pathtype::None => std::path::Path::new(&full.replace('\\', "/"))
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or(full),
     }
 }
 
-/// Create the XREF BlockRecord + Block/EndBlock entities in the scene document
-/// for a given file path.  Returns the block name.
+/// Create (or reuse) the reference definition for `request` and load its
+/// content. Returns the block name the INSERT must use.
 ///
-/// This must be called before committing the INSERT so that the block
-/// definition exists when the renderer looks it up.
-///
-/// Name collisions get a `_1`, `_2`... suffix via [`unique_block_name`]; the
-/// stored path follows Attach-default-Full via [`resolve_xref_store_path`].
-/// Self-attach blocking is NOT done here — see the note on [`is_self_attach`];
-/// the driver checks it before calling.
-pub fn prepare_xref_block(
+/// A reference of the same name already in the drawing is reused ("Using
+/// existing definition."). The self-attach guard runs before this, where the
+/// host path is known.
+pub fn prepare_xref_definition(
     scene: &mut Scene,
-    path: &str,
-    host_base_dir: Option<&std::path::Path>,
+    request: &XrefAttachRequest,
+    host_file: Option<&std::path::Path>,
 ) -> String {
-    let stem = path_to_block_name(path);
+    let stem = path_to_block_name(&request.path);
+    if let Some(existing) = existing_reference(scene, &stem) {
+        return existing;
+    }
     let taken: Vec<String> = scene
         .document
         .block_records
@@ -318,20 +653,13 @@ pub fn prepare_xref_block(
         .map(|b| b.name.clone())
         .collect();
     let block_name = unique_block_name(&stem, &taken);
+    let store_path = stored_path(request, host_file);
 
-    // If a BlockRecord already exists with this name, skip creation.
-    if scene.document.block_records.get(&block_name).is_some() {
-        return block_name;
-    }
-
-    let store_path = resolve_xref_store_path(path, host_base_dir);
-
-    // Create the BlockRecord.
     let mut br = BlockRecord::new(&block_name);
     br.handle = scene.document.allocate_handle();
     br.flags = BlockFlags {
-        is_xref: true,
-        is_xref_overlay: false,
+        is_xref: !request.overlay,
+        is_xref_overlay: request.overlay,
         anonymous: false,
         has_attributes: false,
         is_external: false,
@@ -339,33 +667,50 @@ pub fn prepare_xref_block(
         is_xref_unloaded: false,
     };
     br.xref_path = store_path.clone();
+    let key = br.handle;
     let _ = scene.document.block_records.add(br);
 
-    // Create BLOCK entity.
-    let b = Block::new(&block_name, Vector3::zero()).with_xref_path(&store_path);
-    let _ = scene.document.add_entity(EntityType::Block(b));
-    let _ = scene
-        .document
-        .add_entity(EntityType::BlockEnd(BlockEnd::new()));
+    // BLOCK / ENDBLK markers linked through the record.
+    crate::io::xref::ensure_block_entities(&mut scene.document, &block_name);
 
-    // Resolve the XREF content immediately.
-    // Every reference in this host resolves relative to the host drawing, not
-    // relative to the newly-attached file. Using `store_path.parent()` here
-    // made an attach unexpectedly redirect existing relative xrefs.
-    if let Some(base_dir) = host_base_dir {
-        let _ = crate::io::xref::resolve_xrefs(&mut scene.document, base_dir);
-    } else if let Some(base_dir) = std::path::Path::new(&store_path).parent() {
-        let _ = crate::io::xref::resolve_xrefs(&mut scene.document, base_dir);
+    // Load this reference only. A stored relative path resolves against the
+    // host folder; a full path or bare file name against the chosen file's.
+    let file_dir = std::path::Path::new(&resolve_xref_store_path(&request.path, None))
+        .parent()
+        .map(|p| p.to_path_buf());
+    let base_dir = match request.path_type {
+        Pathtype::Relative => host_file.and_then(|h| h.parent()).map(|p| p.to_path_buf()),
+        _ => None,
+    }
+    .or(file_dir);
+    if let Some(base_dir) = base_dir {
+        let keys: rustc_hash::FxHashSet<acadrust::types::Handle> = [key].into_iter().collect();
+        let _ = crate::io::xref::resolve_xrefs_for_keys(&mut scene.document, &base_dir, &keys);
     }
 
     block_name
 }
 
+/// Full-path attach of `path` (kept for callers that only have a path).
+#[cfg(test)]
+pub fn prepare_xref_block(
+    scene: &mut Scene,
+    path: &str,
+    host_base_dir: Option<&std::path::Path>,
+) -> String {
+    let request = XrefAttachRequest {
+        path: resolve_xref_store_path(path, host_base_dir),
+        overlay: false,
+        path_type: Pathtype::Full,
+    };
+    prepare_xref_definition(scene, &request, None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        is_self_attach, parse_scale_spec, path_to_block_name, resolve_xref_store_path,
-        unique_block_name, XAttachCommand,
+        is_self_attach, path_to_block_name, resolve_xref_store_path, unique_block_name,
+        XAttachCommand,
     };
     use crate::command::{CadCommand, CmdResult};
     use acadrust::EntityType;
@@ -385,8 +730,9 @@ mod tests {
     }
 
     #[test]
-    fn block_name_derives_from_stem() {
-        assert_eq!(path_to_block_name("C:/refs/plan.dwg"), "PLAN");
+    fn block_name_keeps_the_file_name_case() {
+        assert_eq!(path_to_block_name("C:/refs/plan.dwg"), "plan");
+        assert_eq!(path_to_block_name("C:\\refs\\Site Plan.dwg"), "Site Plan");
     }
 
     #[test]
@@ -407,96 +753,91 @@ mod tests {
     fn self_attach_guard_matches_normalized_paths() {
         let host = std::path::Path::new("C:/Drawings/host.dwg");
         let base = std::path::Path::new("C:/Drawings");
-        // Verbatim, drive-letter case, dot segments, and base-relative forms.
         assert!(is_self_attach(host, "C:/Drawings/host.dwg", Some(base)));
         assert!(is_self_attach(host, "c:/Drawings/host.dwg", Some(base)));
         assert!(is_self_attach(host, "C:/Drawings/./host.dwg", Some(base)));
         assert!(is_self_attach(host, "host.dwg", Some(base)));
         assert!(is_self_attach(host, "C:/Drawings/host.dwg", None));
-        // Anything else attaches freely.
         assert!(!is_self_attach(host, "C:/Drawings/other.dwg", Some(base)));
         assert!(!is_self_attach(host, "other.dwg", Some(base)));
         assert!(!is_self_attach(host, "other.dwg", None));
     }
 
     #[test]
-    fn scale_spec_parses_single_and_triplet() {
-        assert_eq!(parse_scale_spec("2"), Some((2.0, 2.0, 1.0)));
-        assert_eq!(parse_scale_spec("2,3,4"), Some((2.0, 3.0, 4.0)));
-        assert_eq!(parse_scale_spec("2 3 4"), Some((2.0, 3.0, 4.0)));
-        assert_eq!(parse_scale_spec("0"), None);
-        assert_eq!(parse_scale_spec("abc"), None);
-        assert_eq!(parse_scale_spec("1,2"), None);
+    fn enter_at_insertion_point_asks_again() {
+        let mut cmd = XAttachCommand::with_path("C:/refs/plan.dwg".to_string());
+        assert!(matches!(cmd.on_enter(), CmdResult::ReportError(_)));
+        assert!(cmd.prompt().contains("Specify insertion point"));
     }
 
-    #[test]
-    fn enter_at_insertion_point_cancels() {
-        let mut cmd = XAttachCommand::with_path("C:/refs/plan.dwg".to_string());
-        assert!(matches!(cmd.on_enter(), CmdResult::Cancel));
-    }
-
-    #[test]
-    fn placement_flow_scale_then_rotate_commits() {
-        let mut cmd = XAttachCommand::with_path("C:/refs/plan.dwg".to_string());
-        assert!(matches!(
-            cmd.on_point(DVec3::new(10.0, 20.0, 0.0)),
-            CmdResult::NeedPoint
-        ));
-        assert!(cmd.prompt().contains("scale"));
-        assert!(matches!(cmd.on_text_input("2"), Some(CmdResult::NeedPoint)));
-        assert!(cmd.prompt().contains("rotation"));
-        match cmd.on_enter() {
-            CmdResult::CommitAndExit(EntityType::Insert(ins)) => {
-                assert_eq!(ins.block_name, "PLAN");
-                assert!((ins.x_scale() - 2.0).abs() < 1e-9);
-                assert!((ins.y_scale() - 2.0).abs() < 1e-9);
-                assert!(ins.rotation.abs() < 1e-9);
-                assert!((ins.insert_point.x - 10.0).abs() < 1e-9);
-                assert!((ins.insert_point.y - 20.0).abs() < 1e-9);
-            }
+    fn committed(result: Option<CmdResult>) -> acadrust::entities::Insert {
+        match result {
+            Some(CmdResult::CommitAndExit(EntityType::Insert(ins))) => ins,
             _ => panic!("expected CommitAndExit(Insert)"),
         }
     }
 
     #[test]
-    fn placement_flow_triplet_and_typed_rotation() {
+    fn x_scale_then_default_y_and_rotation() {
         let mut cmd = XAttachCommand::with_path("C:/refs/plan.dwg".to_string());
-        assert!(matches!(
-            cmd.on_point(DVec3::ZERO),
-            CmdResult::NeedPoint
-        ));
-        assert!(matches!(
-            cmd.on_text_input("2,3,4"),
-            Some(CmdResult::NeedPoint)
-        ));
-        match cmd.on_text_input("90") {
-            Some(CmdResult::CommitAndExit(EntityType::Insert(ins))) => {
-                assert!((ins.x_scale() - 2.0).abs() < 1e-9);
-                assert!((ins.y_scale() - 3.0).abs() < 1e-9);
-                assert!((ins.z_scale() - 4.0).abs() < 1e-9);
-                assert!((ins.rotation - std::f64::consts::FRAC_PI_2).abs() < 1e-6);
-            }
-            _ => panic!("expected CommitAndExit(Insert)"),
-        }
+        assert!(matches!(cmd.on_point(DVec3::new(10.0, 20.0, 0.0)), CmdResult::NeedPoint));
+        assert!(cmd.prompt().contains("Enter X scale factor"));
+        assert!(matches!(cmd.on_text_input("-2"), Some(CmdResult::NeedPoint)));
+        assert!(cmd.prompt().contains("Enter Y scale factor"));
+        assert!(matches!(cmd.on_enter(), CmdResult::NeedPoint));
+        assert!(cmd.prompt().contains("Specify rotation angle <0>"));
+        let ins = committed(Some(cmd.on_enter()));
+        assert_eq!(ins.block_name, "plan");
+        assert!((ins.x_scale() + 2.0).abs() < 1e-9);
+        assert!((ins.y_scale() + 2.0).abs() < 1e-9);
+        // Z follows the size of X, not its sign.
+        assert!((ins.z_scale() - 2.0).abs() < 1e-9);
+        assert!((ins.insert_point.x - 10.0).abs() < 1e-9);
     }
 
     #[test]
-    fn placement_flow_corner_pick_sets_xy_scale() {
+    fn zero_scale_is_refused() {
         let mut cmd = XAttachCommand::with_path("C:/refs/plan.dwg".to_string());
-        assert!(matches!(
-            cmd.on_point(DVec3::ZERO),
-            CmdResult::NeedPoint
-        ));
-        assert!(matches!(
-            cmd.on_point(DVec3::new(3.0, 4.0, 0.0)),
-            CmdResult::NeedPoint
-        ));
-        match cmd.on_enter() {
-            CmdResult::CommitAndExit(EntityType::Insert(ins)) => {
-                assert!((ins.x_scale() - 3.0).abs() < 1e-9);
-                assert!((ins.y_scale() - 4.0).abs() < 1e-9);
-            }
-            _ => panic!("expected CommitAndExit(Insert)"),
-        }
+        cmd.on_point(DVec3::ZERO);
+        assert!(matches!(cmd.on_text_input("0"), Some(CmdResult::ReportError(_))));
+        assert!(cmd.prompt().contains("Enter X scale factor"));
+    }
+
+    #[test]
+    fn xyz_option_takes_three_factors() {
+        let mut cmd = XAttachCommand::with_path("C:/refs/plan.dwg".to_string());
+        cmd.on_point(DVec3::ZERO);
+        cmd.on_text_input("XYZ");
+        cmd.on_text_input("2");
+        cmd.on_text_input("3");
+        cmd.on_text_input("4");
+        let ins = committed(cmd.on_text_input("90"));
+        assert!((ins.x_scale() - 2.0).abs() < 1e-9);
+        assert!((ins.y_scale() - 3.0).abs() < 1e-9);
+        assert!((ins.z_scale() - 4.0).abs() < 1e-9);
+        assert!((ins.rotation - std::f64::consts::FRAC_PI_2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn corner_pick_sets_x_and_y() {
+        let mut cmd = XAttachCommand::with_path("C:/refs/plan.dwg".to_string());
+        cmd.on_point(DVec3::ZERO);
+        assert!(matches!(cmd.on_point(DVec3::new(5.0, 7.0, 0.0)), CmdResult::NeedPoint));
+        let ins = committed(Some(cmd.on_enter()));
+        assert!((ins.x_scale() - 5.0).abs() < 1e-9);
+        assert!((ins.y_scale() - 7.0).abs() < 1e-9);
+        assert!((ins.z_scale() - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn scale_preset_skips_the_scale_prompts() {
+        let mut cmd = XAttachCommand::with_path("C:/refs/plan.dwg".to_string());
+        cmd.on_text_input("S");
+        assert!(cmd.prompt().contains("Specify scale factor for XYZ axes"));
+        cmd.on_text_input("2");
+        cmd.on_point(DVec3::ZERO);
+        assert!(cmd.prompt().contains("Specify rotation angle <0>"));
+        let ins = committed(Some(cmd.on_enter()));
+        assert!((ins.z_scale() - 2.0).abs() < 1e-9);
     }
 }

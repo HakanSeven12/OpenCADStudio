@@ -3515,6 +3515,46 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     }
                                 }
                             }
+                        } else if let Some(axis) = match field {
+                            "xref_x_scale" => Some(0),
+                            "xref_y_scale" => Some(1),
+                            "xref_z_scale" => Some(2),
+                            _ => None,
+                        } {
+                            // An xref's Scale rows show the scale without the
+                            // unit conversion its INSERT carries; write it back
+                            // with that conversion.
+                            let value = val
+                                .trim()
+                                .parse::<f64>()
+                                .ok()
+                                .filter(|v| v.is_finite() && *v != 0.0);
+                            if let Some(value) = value {
+                                let host = self.tabs[i].scene.document.header.insertion_units;
+                                for &handle in &handles {
+                                    let factor = match self.tabs[i].scene.document.get_entity(handle) {
+                                        Some(acadrust::EntityType::Insert(ins)) => self.tabs[i]
+                                            .scene
+                                            .document
+                                            .block_records
+                                            .get(&ins.block_name)
+                                            .and_then(|br| {
+                                                crate::app::properties::insert_unit_scale(host, br.units)
+                                            })
+                                            .unwrap_or(1.0),
+                                        _ => continue,
+                                    };
+                                    if let Some(acadrust::EntityType::Insert(ins)) =
+                                        self.tabs[i].scene.document.get_entity_mut(handle)
+                                    {
+                                        match axis {
+                                            0 => ins.set_x_scale(value * factor),
+                                            1 => ins.set_y_scale(value * factor),
+                                            _ => ins.set_z_scale(value * factor),
+                                        }
+                                    }
+                                }
+                            }
                         } else if field == "block" {
                             // Name row on a block reference: an existing name
                             // re-points the selected inserts; a new one renames

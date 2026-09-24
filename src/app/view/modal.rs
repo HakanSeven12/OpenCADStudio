@@ -24,6 +24,7 @@ impl OpenCADStudio {
             Some(K::LayerTranslator) => crate::t!("Layer Translator").into_owned(),
             Some(K::DrawingUnits) => crate::t!("Drawing Units").into_owned(),
             Some(K::BlockDefinition) => crate::t!("Block Definition").into_owned(),
+            Some(K::XrefAttach) => crate::t!("Attach External Reference").into_owned(),
             Some(K::GeometricTolerance) => crate::t!("Geometric Tolerance").into_owned(),
             Some(K::DraftingSettings) => crate::t!("Drafting Settings").into_owned(),
             Some(K::AutoConstrainSettings) => crate::t!("Constraint Settings").into_owned(),
@@ -504,6 +505,13 @@ impl OpenCADStudio {
                 let state = self.block_definition.as_ref()?;
                 sized_flow(ex, 580, 390, |flow| {
                     crate::ui::window::block_definition::view_window(state, flow)
+                })
+            }
+            super::super::ModalKind::XrefAttach => {
+                let state = self.xref_attach.as_ref()?;
+                let height = if state.details { 520 } else { 450 };
+                sized_flow(ex, 740, height, |flow| {
+                    crate::ui::window::xref_attach::view_window(state, flow)
                 })
             }
             super::super::ModalKind::GeometricTolerance => {

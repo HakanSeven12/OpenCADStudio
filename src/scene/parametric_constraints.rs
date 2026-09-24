@@ -2530,6 +2530,7 @@ impl super::Scene {
                 }
             }
         }
+        crate::io::xref::strip_resolved_xref_content(&mut document);
         document
     }
 

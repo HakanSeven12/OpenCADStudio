@@ -493,6 +493,8 @@ pub(super) struct OpenCADStudio {
     drawing_units: Option<crate::ui::window::drawing_units::State>,
     /// Working copy of the Block Definition dialog; `None` while it is closed.
     block_definition: Option<crate::ui::window::block_definition::BlockDefinitionState>,
+    /// Working copy of the Attach External Reference dialog; None while closed.
+    xref_attach: Option<crate::ui::window::xref_attach::XrefAttachState>,
     /// Working copy of the structured feature-control-frame editor.
     geometric_tolerance: Option<crate::ui::window::geometric_tolerance::State>,
     /// PICKDRAG (#226): false (default) = press-drag lassoes; true =
@@ -1880,6 +1882,7 @@ pub enum ModalKind {
     LayerTranslator,
     DrawingUnits,
     BlockDefinition,
+    XrefAttach,
     GeometricTolerance,
     DraftingSettings,
     AutoConstrainSettings,
@@ -3788,6 +3791,14 @@ pub enum Message {
     XAttachPick,
     /// Result of the XATTACH file picker.
     XAttachPickResult(Result<std::path::PathBuf, String>),
+    /// ATTACH: pick a drawing, image or PDF to reference.
+    AttachPick,
+    /// Result of the ATTACH file picker.
+    AttachPickResult(Result<std::path::PathBuf, String>),
+    /// An edit in the Attach External Reference dialog.
+    XrefAttach(crate::ui::window::xref_attach::XrefAttachMsg),
+    /// Result of the dialog's Browse picker.
+    XrefAttachBrowseResult(Result<std::path::PathBuf, String>),
     // ── WBLOCK ────────────────────────────────────────────────────────────
     /// Trigger the WBLOCK save dialog for `block_name` (or `*` = selection).
     WblockSave(String),
@@ -3950,6 +3961,7 @@ impl OpenCADStudio {
             layer_translator: None,
             drawing_units: None,
             block_definition: None,
+            xref_attach: None,
             geometric_tolerance: None,
             pick_drag_rect: false,
             perf_hud: false,

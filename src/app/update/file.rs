@@ -2149,7 +2149,8 @@ impl OpenCADStudio {
         }
 
         let mut recent_task = Task::none();
-        let saved = match crate::io::save_to_bytes(&self.tabs[i].scene.document, &ext, version) {
+        let document = self.tabs[i].scene.document_for_save();
+        let saved = match crate::io::save_to_bytes(&document, &ext, version) {
             Ok(bytes) => {
                 crate::sys::download_bytes(&filename, &bytes);
                 let cache_name = std::path::Path::new(&filename)
@@ -2347,6 +2348,15 @@ impl OpenCADStudio {
         });
         let clone_started = iced::time::Instant::now();
         let mut snapshot = self.tabs[i].scene.document_for_save();
+        // First save: references attached with a relative path type while
+        // the drawing had no file become relative to it.
+        if self.tabs[i].current_path.is_none() && purpose != crate::app::SavePurpose::Autosave {
+            crate::io::xref::make_relative(
+                &mut snapshot,
+                &self.tabs[i].xref_relative_on_save,
+                &path,
+            );
+        }
         // Save-As across folders: rebase relative reference paths onto the
         // new base dir inside the snapshot only (live strings are untouched).
         if purpose == crate::app::SavePurpose::SaveAs {
@@ -2649,6 +2659,14 @@ impl OpenCADStudio {
                 }
                 if outcome.set_current_path {
                     let old_path = self.tabs[i].current_path.clone();
+                    if old_path.is_none() {
+                        let pending = std::mem::take(&mut self.tabs[i].xref_relative_on_save);
+                        crate::io::xref::make_relative(
+                            &mut self.tabs[i].scene.document,
+                            &pending,
+                            &outcome.path,
+                        );
+                    }
                     self.tabs[i].current_path = Some(outcome.path.clone());
                     self.tabs[i].scene.document.version = outcome.version;
                     if outcome.purpose == crate::app::SavePurpose::SaveAs {

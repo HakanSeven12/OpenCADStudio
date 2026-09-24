@@ -247,6 +247,11 @@ pub fn to_pathtype_result(
             if parts.is_empty() {
                 return Ok(file_name_only(path));
             }
+            // A path at or below the host folder starts "./" ("./plan.dwg",
+            // "./refs/plan.dwg"), as the reference writes it; one above starts "../".
+            if parts[0] != ".." {
+                parts.insert(0, ".".to_string());
+            }
             Ok(parts.join("/"))
         }
     }
@@ -846,7 +851,7 @@ mod tests {
         let full = to_pathtype("C:/Drawings/refs/plan.dwg", host, Pathtype::Full);
         assert_eq!(full, "C:/Drawings/refs/plan.dwg");
         let rel = to_pathtype("C:/Drawings/refs/plan.dwg", host, Pathtype::Relative);
-        assert_eq!(rel, "refs/plan.dwg");
+        assert_eq!(rel, "./refs/plan.dwg");
         let none = to_pathtype("C:/Drawings/refs/plan.dwg", host, Pathtype::None);
         assert_eq!(none, "plan.dwg");
     }

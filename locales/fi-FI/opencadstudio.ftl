@@ -3497,6 +3497,28 @@ annotate =
     .tolerance-specify-insertion-point = TOLERANCE Määritä lisäyskohta:
 
 insert =
+    .xref-attach-dialog-title = Attach External Reference
+    .xref-attach-browse = Browse...
+    .xref-attach-reference-type = Reference Type
+    .xref-attach-specify-on-screen = Specify On-screen
+    .xref-attach-uniform-scale = Uniform Scale
+    .xref-attach-insertion-point = Insertion point
+    .xref-attach-angle = Angle:
+    .xref-attach-block-unit = Block Unit
+    .xref-attach-unit = Unit:
+    .xref-attach-factor = Factor:
+    .xref-attach-found-in = Found in:
+    .xref-attach-saved-path = Saved path:
+    .xref-attach-show-details = Show Details
+    .xref-attach-hide-details = Hide Details
+    .xref-attach-select-file = Select Reference File
+    .xref-attach-all-files = All Reference Files
+    .xref-attach-help = Inserts references to external files such as other drawings, raster images, and underlays.
+    .xref-attach-invalid-input = Invalid input.
+    .xref-insertion-point-x = Insertion point X
+    .xref-insertion-point-y = Insertion point Y
+    .xref-insertion-point-z = Insertion point Z
+    .xref-layer-property-overrides = Layer property overrides
     .point-clouds =
         Point
         Pilviä

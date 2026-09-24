@@ -584,7 +584,9 @@ fn join_strokes(strokes: Vec<Stroke>) -> Vec<Stroke> {
             open.push(s);
         }
     }
-    while let Some(mut chain) = open.pop() {
+    // Drawing order is kept: dashes read as a run only in the order drawn.
+    while !open.is_empty() {
+        let mut chain = open.remove(0);
         loop {
             let end = *chain.points.last().expect("strokes have points");
             let start = chain.points[0];
@@ -594,7 +596,7 @@ fn join_strokes(strokes: Vec<Stroke>) -> Vec<Stroke> {
             if let Some(i) = open.iter().position(|o| {
                 fits(o) && (same_point(o.points[0], end) || same_point(*o.points.last().unwrap(), end))
             }) {
-                let mut next = open.swap_remove(i);
+                let mut next = open.remove(i);
                 if !same_point(next.points[0], end) {
                     next.points.reverse();
                 }
@@ -603,7 +605,7 @@ fn join_strokes(strokes: Vec<Stroke>) -> Vec<Stroke> {
                 fits(o)
                     && (same_point(*o.points.last().unwrap(), start) || same_point(o.points[0], start))
             }) {
-                let mut prev = open.swap_remove(i);
+                let mut prev = open.remove(i);
                 if !same_point(*prev.points.last().unwrap(), start) {
                     prev.points.reverse();
                 }

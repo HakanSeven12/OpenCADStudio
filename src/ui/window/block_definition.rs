@@ -72,6 +72,7 @@ pub struct BlockDefinitionState {
     pub hyperlink_desc: String,
     pub error_message: Option<String>,
     pub confirm_redefine: Option<String>,
+    pub desc_placeholder: String,
 }
 
 impl Clone for BlockDefinitionState {
@@ -98,6 +99,7 @@ impl Clone for BlockDefinitionState {
             hyperlink_desc: self.hyperlink_desc.clone(),
             error_message: self.error_message.clone(),
             confirm_redefine: self.confirm_redefine.clone(),
+            desc_placeholder: self.desc_placeholder.clone(),
         }
     }
 }
@@ -126,6 +128,7 @@ impl BlockDefinitionState {
             hyperlink_desc: String::new(),
             error_message: None,
             confirm_redefine: None,
+            desc_placeholder: crate::t!("Enter block description...").into_owned(),
         }
     }
 
@@ -532,7 +535,7 @@ pub fn view_window<'a>(
     // ── Group: Description (Column 2 Bottom) ──────────────────────────────────
     let desc_editor = text_editor(&state.description_content)
         .on_action(Message::BlockDefDescriptionAction)
-        .placeholder("Enter block description...")
+        .placeholder(&state.desc_placeholder)
         .size(11)
         .padding([4, 6])
         .height(Fill)

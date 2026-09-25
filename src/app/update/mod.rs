@@ -6106,15 +6106,19 @@ impl OpenCADStudio {
             // take priority and system text is used when that clipboard is empty.
             Message::PasteShortcut => self.on_paste_shortcut(),
 
-            Message::PasteShortcutResolved(focused) => {
-                if focused {
-                    // A focused text_input widget already handled Ctrl+V natively.
-                    // Doing anything here would duplicate the paste or leak text into the command line.
+            // A focused text input pastes text natively: another field keeps
+            // Ctrl+V to itself, and the command line must not get the text a
+            // second time. Copied objects still paste over the command line.
+            Message::PasteShortcutResolved(focus) => {
+                use super::PasteFocus;
+                if focus == PasteFocus::Field {
                     Task::none()
-                } else if self.clipboard.is_empty() {
-                    self.read_system_clipboard_for_paste()
+                } else if !self.clipboard.is_empty() {
+                    self.update(Message::Command("PASTECLIP".to_string()))
+                } else if focus == PasteFocus::CommandLine {
+                    Task::none()
                 } else {
-                    self.dispatch_command("PASTECLIP")
+                    self.read_system_clipboard_for_paste()
                 }
             }
 
@@ -10983,25 +10987,32 @@ mod free_text_entry_tests {
     }
 
     #[test]
-    fn paste_shortcut_resolved_focused_is_noop() {
+    fn paste_shortcut_leaves_a_focused_field_alone() {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app.command_line.input = "EXISTING".into();
+        app.clipboard = vec![codec::EntityType::Line(codec::entities::Line::default())];
 
-        // When a text input is focused, PasteShortcutResolved(true) does not mutate command line or start a command.
-        let _ = app.update(Message::PasteShortcutResolved(true));
+        // A dialog field pasted natively: no command-line text, no PASTECLIP.
+        let _ = app.update(Message::PasteShortcutResolved(crate::app::PasteFocus::Field));
         assert_eq!(app.command_line.input, "EXISTING");
         assert!(app.tabs[0].active_cmd.is_none());
     }
 
     #[test]
-    fn paste_shortcut_resolved_unfocused_with_entities_starts_pasteclip() {
+    fn paste_shortcut_over_the_command_line_pastes_copied_objects() {
+        use crate::app::PasteFocus;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
-        app.clipboard = vec![acadrust::EntityType::Line(acadrust::entities::Line::default())];
 
-        // When unfocused and CAD entities are copied, dispatches PASTECLIP
-        let _ = app.update(Message::PasteShortcutResolved(false));
+        // Text only: the command line already pasted it natively.
+        let _ = app.update(Message::PasteShortcutResolved(PasteFocus::CommandLine));
+        assert!(app.command_line.input.is_empty());
+        assert!(app.tabs[0].active_cmd.is_none());
+
+        // Copied objects paste even though the command line holds focus.
+        app.clipboard = vec![codec::EntityType::Line(codec::entities::Line::default())];
+        let _ = app.update(Message::PasteShortcutResolved(PasteFocus::CommandLine));
         assert!(app.tabs[0].active_cmd.as_ref().is_some_and(|cmd| cmd.name() == "PASTECLIP"));
     }
 }

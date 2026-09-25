@@ -2063,6 +2063,15 @@ pub enum ArrowKey {
     Right,
 }
 
+/// The text input holding focus when Ctrl+V arrives (native only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasteFocus {
+    None,
+    CommandLine,
+    /// Any other text field (dialogs, panels).
+    Field,
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     SpaceMouseWake,
@@ -2106,8 +2115,8 @@ pub enum Message {
     /// Ctrl+V. Routed by `update` into an open text editor, the drawing-object
     /// clipboard, or the system text clipboard.
     PasteShortcut,
-    /// Result of probing whether a text input was focused when `PasteShortcut` arrived.
-    PasteShortcutResolved(bool),
+    /// Which text input held focus when `PasteShortcut` arrived.
+    PasteShortcutResolved(PasteFocus),
     /// Completion of a system text clipboard read requested by PASTECLIP.
     SystemClipboardPaste(SystemClipboardText),
     /// Ctrl/Cmd+A — select all layer rows when the Layer Manager is open, or all

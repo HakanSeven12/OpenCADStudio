@@ -70,22 +70,25 @@ fn polyline_vertex_count(entity: &AcadEntityType) -> Option<usize> {
     }
 }
 
+/// Which text input, if any, holds focus when Ctrl+V arrives: a focused
+/// text input pastes natively, so the shortcut must not paste again.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Default)]
-struct CheckTextInputFocused {
-    last_was_text_input: bool,
-    is_focused: bool,
+struct PasteFocusProbe {
+    /// The id of the text input whose `focusable` call comes next.
+    pending: Option<Option<iced::advanced::widget::Id>>,
+    focus: Option<crate::app::PasteFocus>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl iced::advanced::widget::Operation<bool> for CheckTextInputFocused {
+impl iced::advanced::widget::Operation<crate::app::PasteFocus> for PasteFocusProbe {
     fn text_input(
         &mut self,
-        _id: Option<&iced::advanced::widget::Id>,
+        id: Option<&iced::advanced::widget::Id>,
         _bounds: iced::Rectangle,
         _state: &mut dyn iced::advanced::widget::operation::TextInput,
     ) {
-        self.last_was_text_input = true;
+        self.pending = Some(id.cloned());
     }
 
     fn focusable(
@@ -94,21 +97,35 @@ impl iced::advanced::widget::Operation<bool> for CheckTextInputFocused {
         _bounds: iced::Rectangle,
         state: &mut dyn iced::advanced::widget::operation::Focusable,
     ) {
-        let is_text = std::mem::replace(&mut self.last_was_text_input, false);
-        if is_text && state.is_focused() {
-            self.is_focused = true;
-        }
-    }
-
-    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn iced::advanced::widget::Operation<bool>)) {
-        if self.is_focused {
+        // A text input reports `text_input` then `focusable`; other
+        // focusables (text editors) only the latter.
+        let Some(id) = self.pending.take() else {
             return;
+        };
+        if state.is_focused() {
+            let command_line =
+                iced::advanced::widget::Id::new(crate::ui::command_line::CMD_INPUT_ID);
+            self.focus = Some(if id.as_ref() == Some(&command_line) {
+                crate::app::PasteFocus::CommandLine
+            } else {
+                crate::app::PasteFocus::Field
+            });
         }
-        operate(self);
     }
 
-    fn finish(&self) -> iced::advanced::widget::operation::Outcome<bool> {
-        iced::advanced::widget::operation::Outcome::Some(self.is_focused)
+    fn traverse(
+        &mut self,
+        operate: &mut dyn FnMut(&mut dyn iced::advanced::widget::Operation<crate::app::PasteFocus>),
+    ) {
+        if self.focus.is_none() {
+            operate(self);
+        }
+    }
+
+    fn finish(&self) -> iced::advanced::widget::operation::Outcome<crate::app::PasteFocus> {
+        iced::advanced::widget::operation::Outcome::Some(
+            self.focus.unwrap_or(crate::app::PasteFocus::None),
+        )
     }
 }
 
@@ -1999,7 +2016,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    iced::advanced::widget::operate(CheckTextInputFocused::default())
+                    iced::advanced::widget::operate(PasteFocusProbe::default())
                         .map(Message::PasteShortcutResolved)
                 }
                 #[cfg(target_arch = "wasm32")]

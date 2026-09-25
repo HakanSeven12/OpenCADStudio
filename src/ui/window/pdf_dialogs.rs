@@ -228,8 +228,19 @@ fn segmented<'a, T: Copy + PartialEq + 'a>(
 
 /// A switch shown as a chip: filled with a tick while on.
 fn chip<'a>(label: String, on: bool, message: Message) -> Element<'a, Message> {
-    let label = if on { format!("\u{2713} {label}") } else { label };
-    button(text(label).size(11))
+    // The tick is an SVG: the web build's font has no check-mark glyph.
+    let mut content = row![].spacing(4).align_y(iced::Center);
+    if on {
+        content = content.push(
+            iced::widget::svg(crate::ui::icons::themed_handle(crate::ui::icons::CHECK))
+                .width(11.0)
+                .height(11.0)
+                .style(|theme: &Theme, _| iced::widget::svg::Style {
+                    color: Some(theme.palette().primary.base.text),
+                }),
+        );
+    }
+    button(content.push(text(label).size(11)))
         .on_press(message)
         .style(button_style(on))
         .padding([4, 10])
@@ -318,10 +329,10 @@ fn page_tiles<'a>(
             Some(handle) => image(handle.clone()).width(Fill).height(Fill).into(),
             None => Space::new().width(Fill).height(Fill).into(),
         };
-        let number = if chosen {
-            format!("\u{2713} {}", page.label)
+        let tick: Element<'a, Message> = if chosen {
+            crate::ui::icons::themed_primary(crate::ui::icons::CHECK, 11.0)
         } else {
-            page.label.clone()
+            Space::new().width(0.0).into()
         };
         let tile = column![
             container(picture)
@@ -337,13 +348,20 @@ fn page_tiles<'a>(
                     },
                     ..Default::default()
                 }),
-            container(text(number).size(11).style(move |theme: &Theme| text::Style {
-                color: Some(if chosen {
-                    theme.palette().primary.base.color
-                } else {
-                    theme.palette().background.base.text.scale_alpha(0.68)
-                }),
-            }))
+            container(
+                row![
+                    tick,
+                    text(page.label.clone()).size(11).style(move |theme: &Theme| text::Style {
+                        color: Some(if chosen {
+                            theme.palette().primary.base.color
+                        } else {
+                            theme.palette().background.base.text.scale_alpha(0.68)
+                        }),
+                    })
+                ]
+                .spacing(4)
+                .align_y(iced::Center),
+            )
             .width(Length::Fixed(132.0))
             .align_x(iced::Center),
         ]
@@ -794,14 +812,14 @@ pub fn view_import_file<'a>(
         Some(handle) => image(handle).width(Fill).height(Fill).into(),
         None => Space::new().width(Fill).height(Fill).into(),
     };
-    let step = |label: &'static str, to: Option<usize>| {
-        button(text(label).size(14))
+    let step = |icon: Element<'a, Message>, to: Option<usize>| {
+        button(icon)
             .on_press_maybe(to.map(|p| msg(PdfDialogMsg::ImportPage(p))))
             .style(button_style(false))
             .padding([2, 12])
     };
     let navigator = row![
-        step("\u{2039}", state.selected.checked_sub(1)),
+        step(crate::ui::icons::themed_arrow_left(12.0), state.selected.checked_sub(1)),
         Space::new().width(Fill),
         text_input("", &state.page_text)
             .on_input(|s| msg(PdfDialogMsg::ImportPageText(s)))
@@ -811,7 +829,10 @@ pub fn view_import_file<'a>(
             .style(field_style),
         text(format!("/ {count}")).size(11).style(muted_style),
         Space::new().width(Fill),
-        step("\u{203a}", (state.selected + 1 < count).then_some(state.selected + 1)),
+        step(
+            crate::ui::icons::themed_arrow_right(12.0),
+            (state.selected + 1 < count).then_some(state.selected + 1),
+        ),
     ]
     .spacing(6)
     .align_y(iced::Center);

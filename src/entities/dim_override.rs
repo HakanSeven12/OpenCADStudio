@@ -450,7 +450,24 @@ fn split_template(value: &str) -> (&str, &str) {
     value.split_once("<>").unwrap_or(("", value))
 }
 
+/// Apply a dimension override row. A changed override lays automatic text
+/// out afresh, so e.g. a new DIMTAD moves it off the stored position.
 pub fn set_property(
+    doc: &mut CadDocument,
+    handle: Handle,
+    field: &str,
+    value: &str,
+) -> bool {
+    let applied = apply_property(doc, handle, field, value);
+    if applied {
+        if let Some(EntityType::Dimension(dimension)) = doc.get_entity_mut(handle) {
+            crate::entities::dimension::reset_automatic_text_position(dimension.base_mut());
+        }
+    }
+    applied
+}
+
+fn apply_property(
     doc: &mut CadDocument,
     handle: Handle,
     field: &str,

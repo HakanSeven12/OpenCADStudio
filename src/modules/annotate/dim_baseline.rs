@@ -546,6 +546,7 @@ fn build_linear(
         result.base.definition_point = result.definition_point;
         result.base.text_middle_point = world(plane, first_line.lerp(second_line, 0.5));
         result.base.insertion_point = result.base.text_middle_point;
+        crate::entities::dimension::reset_automatic_text_position(&mut result.base);
         Some(Dimension::Aligned(result))
     } else {
         let mut result = DimensionLinear::new(world(plane, fixed), world(plane, point));
@@ -554,6 +555,7 @@ fn build_linear(
         result.base.definition_point = result.definition_point;
         result.base.text_middle_point = world(plane, first_line.lerp(second_line, 0.5));
         result.base.insertion_point = result.base.text_middle_point;
+        crate::entities::dimension::reset_automatic_text_position(&mut result.base);
         Some(Dimension::Linear(result))
     }
 }

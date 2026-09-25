@@ -92,6 +92,7 @@ pub(crate) fn aligned_dimension_entity(
     let (d1, d2) = dim_line_endpoints(first, second, point);
     dim.base.text_middle_point = v3((d1 + d2) * 0.5);
     dim.base.insertion_point = dim.base.text_middle_point;
+    crate::entities::dimension::reset_automatic_text_position(&mut dim.base);
     dim.base.actual_measurement = dim.measurement();
     crate::entities::dimension::set_dimension_text_override(&mut dim.base, text_override);
     EntityType::Dimension(Dimension::Aligned(dim))

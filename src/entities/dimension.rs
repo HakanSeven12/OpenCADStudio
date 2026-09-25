@@ -373,6 +373,7 @@ fn apply_base_prop(base: &mut DimensionBase, field: &str, value: &str) -> bool {
         }
         "style_name" => {
             base.style_name = value.to_string();
+            reset_automatic_text_position(base);
             true
         }
         // Editing the text position in the properties panel pins it to a
@@ -7618,6 +7619,16 @@ fn text_on_single_arrow_dim_line(
 fn stored_text_point(dim: &Dimension) -> Option<Vector3> {
     let p = dim.base().text_middle_point;
     (p.x * p.x + p.y * p.y + p.z * p.z > 1e-16).then_some(p)
+}
+
+/// Clear an automatic text position so the dimension is laid out from its
+/// current settings again. A loaded point is kept so a drawing looks as it
+/// was drawn; a new dimension, or one whose style or overrides just changed,
+/// has no valid one. Text the user placed keeps its point (#1412).
+pub(crate) fn reset_automatic_text_position(base: &mut DimensionBase) {
+    if !base.text_user_positioned {
+        base.text_middle_point = Vector3::new(0.0, 0.0, 0.0);
+    }
 }
 
 /// The point on the circle a radial leader leaves from: the arc point of a

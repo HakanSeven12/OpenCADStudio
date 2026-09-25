@@ -201,6 +201,7 @@ impl QdimCommand {
         dimension.base.definition_point = v3(definition);
         dimension.base.text_middle_point = v3(text);
         dimension.base.insertion_point = v3(text);
+        crate::entities::dimension::reset_automatic_text_position(&mut dimension.base);
         dimension.base.actual_measurement = dimension.measurement();
         let association = DimensionAssociationInput::Explicit(vec![first.sources.first().copied(), second.sources.first().copied()]);
         (self.plane.place_entity(EntityType::Dimension(Dimension::Linear(dimension))), association)

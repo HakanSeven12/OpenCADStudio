@@ -453,6 +453,7 @@ fn build_linear(
     result.base.definition_point = result.definition_point;
     result.base.text_middle_point = world(plane, first_line.lerp(second_line, 0.5));
     result.base.insertion_point = result.base.text_middle_point;
+    crate::entities::dimension::reset_automatic_text_position(&mut result.base);
     Dimension::Linear(result)
 }
 
@@ -565,7 +566,8 @@ fn preview_for_dimension(dimension: &Dimension) -> WireModel {
                 project(&plane, value.second_point),
                 value.rotation,
                 project(&plane, value.definition_point),
-                project(&plane, value.base.text_middle_point),
+                (value.base.text_middle_point != Vector3::ZERO)
+                    .then(|| project(&plane, value.base.text_middle_point)),
                 value.base.actual_measurement,
             );
         }
@@ -634,7 +636,7 @@ fn linear_preview(
     second: Vec2,
     rotation: f64,
     definition: Vec2,
-    text: Vec2,
+    text: Option<Vec2>,
     measurement: f64,
 ) {
     let axis = Vec2::new(rotation.cos(), rotation.sin());
@@ -642,6 +644,8 @@ fn linear_preview(
     let coordinate = definition.dot(perpendicular);
     let first_line = project_to_line(first, perpendicular, coordinate);
     let second_line = project_to_line(second, perpendicular, coordinate);
+    // Automatic text stores no point; mark the middle of the dimension line.
+    let text = text.unwrap_or_else(|| first_line.lerp(second_line, 0.5));
     segment(points, plane, first, first_line);
     segment(points, plane, second, second_line);
     segment(points, plane, first_line, second_line);

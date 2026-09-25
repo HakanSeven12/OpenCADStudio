@@ -140,6 +140,7 @@ pub(crate) fn linear_dimension_entity(
     dim.base.definition_point = dim.definition_point;
     dim.base.text_middle_point = v3(linear_text_pos(first, second, point, axis));
     dim.base.insertion_point = dim.base.text_middle_point;
+    crate::entities::dimension::reset_automatic_text_position(&mut dim.base);
     dim.base.actual_measurement = dim.measurement();
     crate::entities::dimension::set_dimension_text_override(&mut dim.base, text_override);
     EntityType::Dimension(Dimension::Linear(dim))

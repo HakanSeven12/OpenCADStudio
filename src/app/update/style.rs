@@ -479,6 +479,11 @@ impl OpenCADStudio {
             })
             .collect();
         for handle in stale {
+            if let Some(codec::EntityType::Dimension(dimension)) =
+                self.tabs[tab].scene.document.get_entity_mut(handle)
+            {
+                crate::entities::dimension::reset_automatic_text_position(dimension.base_mut());
+            }
             self.tabs[tab].scene.invalidate_dim_block_recorded(handle);
         }
 

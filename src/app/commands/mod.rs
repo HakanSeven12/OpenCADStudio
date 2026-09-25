@@ -622,6 +622,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "PDFIMPORTMODE",
         "PDFIMPORTFILTER",
         "PDFIMPORTLAYERS",
+        "PDFIMPORTIMAGEPATH",
         "XDWGFADECTL",
         "POINTCLOUDCLIPFRAME",
         "XCLIPFRAME",

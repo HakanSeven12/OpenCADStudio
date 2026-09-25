@@ -252,8 +252,6 @@ pub fn adjusted_pixels(path: &str, page: &str, raster: &PdfPage, adjust: PageAdj
             // (plus 20/255, capped at full), hue and saturation kept: black
             // becomes white, dark red light pink. On a light background the
             // colours stay as drawn.
-            // ponytail: offset and the light-background rule measured on the
-            // default backgrounds only (pure white on paper not measured).
             let (h, s, l) = rgb_to_hsl(rgb);
             rgb = hsl_to_rgb(h, s, (1.0 - l + 20.0 / 255.0).min(1.0));
         }

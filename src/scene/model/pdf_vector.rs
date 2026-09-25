@@ -89,6 +89,16 @@ pub struct PageVectors {
     pub texts: Vec<PdfText>,
     /// Filled only when images are asked for (`page_content`).
     pub images: Vec<PdfImage>,
+    /// Paths, texts and images in the order the page draws them.
+    pub order: Vec<Drawn>,
+}
+
+/// One drawn item: an index into `paths`, `texts` or `images`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Drawn {
+    Path(usize),
+    Text(usize),
+    Image(usize),
 }
 
 type Key = (String, String);
@@ -168,8 +178,52 @@ pub fn page_content_by_layer(
         only.images.retain(|i| !base.images.contains(i));
         out.push((Some(layer.name.clone()), only));
     }
+    let mut base = base;
+    images_to_last_layer(path, page, &mut base, &mut out);
     out.insert(0, (None, base));
     Some(out)
+}
+
+/// An image that no layer holds goes with the layer drawn last before it
+/// (with none before it, it stays unlayered): the page is read with every
+/// layer on for the drawing order.
+fn images_to_last_layer(
+    path: &str,
+    page: &str,
+    base: &mut PageVectors,
+    layered: &mut [(Option<String>, PageVectors)],
+) {
+    if base.images.is_empty() || layered.is_empty() {
+        return;
+    }
+    let Some(full) = page_content(&super::pdf_layers::source_with_layers(path, &[]), page) else {
+        return;
+    };
+    let key = |s: &dyn std::fmt::Debug| format!("{s:?}");
+    let owner = |item: String| {
+        layered.iter().position(|(_, pv)| {
+            pv.paths.iter().any(|p| key(p) == item) || pv.texts.iter().any(|t| key(t) == item)
+        })
+    };
+    let mut last: Option<usize> = None;
+    let mut moves: Vec<(usize, PdfImage)> = Vec::new();
+    for drawn in &full.order {
+        match *drawn {
+            Drawn::Path(i) => last = owner(key(&full.paths[i])).or(last),
+            Drawn::Text(i) => last = owner(key(&full.texts[i])).or(last),
+            Drawn::Image(i) => {
+                let image = &full.images[i];
+                if let Some(n) = layered.iter().position(|(_, pv)| pv.images.contains(image)) {
+                    last = Some(n);
+                } else if let (Some(n), Some(at)) = (last, base.images.iter().position(|b| b == image)) {
+                    moves.push((n, base.images.remove(at)));
+                }
+            }
+        }
+    }
+    for (n, image) in moves {
+        layered[n].1.images.push(image);
+    }
 }
 
 fn read_page(path: &str, page: &str) -> Option<PageVectors> {
@@ -229,6 +283,7 @@ fn read_page_with(path: &str, page: &str, images: bool) -> Option<PageVectors> {
         paths: device.paths,
         texts: texts.into_iter().map(|t| t.text).collect(),
         images: device.images,
+        order: device.order,
     })
 }
 
@@ -250,12 +305,14 @@ struct Collector {
     font_order: Vec<u128>,
     want_images: bool,
     images: Vec<PdfImage>,
+    order: Vec<Drawn>,
 }
 
 impl Collector {
     fn finish_text(&mut self) {
         if let Some(text) = self.current.take() {
             if !text.text.text.trim().is_empty() {
+                self.order.push(Drawn::Text(self.texts.len()));
                 self.texts.push(text);
             }
         }
@@ -351,6 +408,7 @@ impl<'a> Device<'a> for Collector {
             }
             PathDrawMode::Fill(_) => (None, Some(rgb(paint))),
         };
+        self.order.push(Drawn::Path(self.paths.len()));
         self.paths.push(PdfPath { subpaths, stroke, fill });
     }
     fn push_clip_path(&mut self, _: &ClipPath) {}
@@ -482,7 +540,10 @@ impl<'a> Device<'a> for Collector {
             },
             None,
         );
-        self.images.extend(decoded);
+        if let Some(image) = decoded {
+            self.order.push(Drawn::Image(self.images.len()));
+            self.images.push(image);
+        }
     }
     fn pop_clip_path(&mut self) {}
     fn pop_transparency_group(&mut self) {}
@@ -605,13 +666,21 @@ pub fn underlay_snap_points(
 // ponytail: flat cap; a spatial index over page segments for huge drawings.
 const MAX_GEOMETRY_POINTS: usize = 200_000;
 
-/// The underlay's PDF geometry as world polylines (NaN-separated, curves
-/// flattened) for nearest, intersection and perpendicular snaps. Empty when
+/// One piece of an underlay's PDF geometry for snapping: a world polyline
+/// (curves flattened), and for a circle its centre and radius.
+pub struct SnapPiece {
+    pub points: Vec<[f64; 3]>,
+    pub circle: Option<([f64; 3], f64)>,
+}
+
+/// The underlay's PDF geometry for nearest, intersection, perpendicular and
+/// centre snaps: each straight segment, each curve and each circle its own
+/// piece, so pieces cross each other as separate objects do. Empty when
 /// PDFOSNAP is off or the page is not shown.
 pub fn underlay_snap_geometry(
     u: &codec::entities::Underlay,
     document: &codec::CadDocument,
-) -> Vec<[f64; 3]> {
+) -> Vec<SnapPiece> {
     if !pdf_osnap() || !u.flags.contains(codec::entities::UnderlayDisplayFlags::ON) {
         return Vec::new();
     }
@@ -626,21 +695,35 @@ pub fn underlay_snap_geometry(
         return Vec::new();
     };
     let world = |p: [f64; 2]| crate::entities::underlay::local_to_world(u, p);
-    let mut out: Vec<[f64; 3]> = Vec::new();
+    // A circle stays one only while the placement scales both axes alike.
+    let uniform = (u.x_scale.abs() - u.y_scale.abs()).abs() <= 1e-9 * u.x_scale.abs().max(1e-12);
+    let flatten = |seg: &Segment, points: &mut Vec<[f64; 3]>| {
+        let steps = if matches!(seg, Segment::Cubic(..)) { 12 } else { 1 };
+        for k in 1..=steps {
+            points.push(world(bezier(seg, k as f64 / steps as f64)));
+        }
+    };
+    let mut out: Vec<SnapPiece> = Vec::new();
+    let mut total = 0usize;
     for path in &vectors.paths {
         for sp in &path.subpaths {
-            if out.len() >= MAX_GEOMETRY_POINTS {
+            if total >= MAX_GEOMETRY_POINTS {
                 return out;
             }
-            if !out.is_empty() {
-                out.push([f64::NAN; 3]);
-            }
-            out.push(world(sp.segments[0].start()));
-            for seg in &sp.segments {
-                let steps = if matches!(seg, Segment::Cubic(..)) { 12 } else { 1 };
-                for k in 1..=steps {
-                    out.push(world(bezier(seg, k as f64 / steps as f64)));
+            if let (Some((c, r)), true) = (circle_of(sp), uniform) {
+                let mut points = vec![world(sp.segments[0].start())];
+                for seg in &sp.segments {
+                    flatten(seg, &mut points);
                 }
+                total += points.len();
+                out.push(SnapPiece { points, circle: Some((world(c), r * u.x_scale.abs())) });
+                continue;
+            }
+            for seg in &sp.segments {
+                let mut points = vec![world(seg.start())];
+                flatten(seg, &mut points);
+                total += points.len();
+                out.push(SnapPiece { points, circle: None });
             }
         }
     }

@@ -9,13 +9,14 @@
 // Content of a PDF layer goes to PDF_<layer>; the rest to PDF_Geometry,
 // PDF_Solid Fills, PDF_Text and PDF_Images (or those alone, or the current
 // layer, per the settings). Straight strokes that meet become polylines, a
-// closed four-arc Bézier loop that is a circle a CIRCLE, other curves
-// splines, filled triangles and quadrilaterals SOLIDs at 50% transparency
+// Bézier that is a circular arc an arc segment of them (with "Join" on) or
+// an ARC (off), a closed four-arc Bézier loop that is a circle a CIRCLE,
+// other curves splines, filled triangles and quadrilaterals SOLIDs at 50% transparency
 // (other fills solid hatches), text runs MTEXT in a "PDF <font>" style and
 // raster images PNG files referenced by IMAGE objects.
 
 use codec::entities::{
-    AttachmentPoint, BoundaryEdge, BoundaryPath, Circle, Hatch, LwPolyline, MText, PolylineEdge,
+    Arc, AttachmentPoint, BoundaryEdge, BoundaryPath, Circle, Hatch, LwPolyline, MText, PolylineEdge,
     Solid, Spline, Underlay, UnderlayType,
 };
 use codec::types::{Color, Handle, LineWeight, Vector2, Vector3};
@@ -131,6 +132,35 @@ pub fn set_import_settings(settings: PdfImportSettings) {
     if let Ok(mut s) = SETTINGS.lock() {
         *s = Some(settings);
     }
+}
+
+static IMAGE_PATH: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// PDFIMPORTIMAGEPATH: the folder raster images are extracted to — relative
+/// to the folder of the PDF, absolute as given, empty for that folder itself.
+pub fn image_path() -> String {
+    IMAGE_PATH
+        .lock()
+        .ok()
+        .and_then(|p| p.clone())
+        .unwrap_or_else(|| "PDF Images".to_string())
+}
+
+pub fn set_image_path(path: String) {
+    if let Ok(mut p) = IMAGE_PATH.lock() {
+        *p = Some(path);
+    }
+}
+
+/// The extraction folder for the PDF at `pdf`.
+pub fn image_dir(pdf: &str) -> Option<std::path::PathBuf> {
+    let setting = image_path();
+    let folder = std::path::Path::new(&setting);
+    if folder.is_absolute() {
+        return Some(folder.to_path_buf());
+    }
+    let parent = std::path::Path::new(pdf).parent()?;
+    Some(if setting.is_empty() { parent.to_path_buf() } else { parent.join(folder) })
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -557,27 +587,75 @@ pub struct ImageImport {
 /// space 0.2, scaled per object to the dash length.
 pub const DASH_LINETYPE: &str = "PDF_IMPORT";
 
-/// A stroke before it becomes an object: straight chains can still be joined
-/// or read as dashes.
+/// A stroke before it becomes an object: chains can still be joined or read
+/// as dashes. `bulges[i]` bends the segment from point i to the next (the
+/// closing one on a closed stroke; 0 after an open stroke's last point).
 struct Stroke {
     layer: String,
     color: Color,
     weight: LineWeight,
     points: Vec<[f64; 2]>,
+    bulges: Vec<f64>,
     closed: bool,
+}
+
+impl Stroke {
+    fn straight(&self) -> bool {
+        self.bulges.iter().all(|b| *b == 0.0)
+    }
+
+    fn reverse(&mut self) {
+        self.points.reverse();
+        let n = self.bulges.len();
+        let mut bulges: Vec<f64> = self.bulges[..n - 1].iter().rev().map(|b| -b).collect();
+        bulges.push(0.0);
+        self.bulges = bulges;
+    }
+}
+
+/// The bulge of a Bézier that is a circular arc (its quarter, half and
+/// three-quarter points on the circle through its ends and midpoint), from
+/// its midpoint's height over the chord; positive counter-clockwise.
+fn arc_bulge(seg: &Segment) -> Option<f64> {
+    let Segment::Cubic(p0, _, _, p3) = seg else {
+        return None;
+    };
+    let m = bezier(seg, 0.5);
+    let (ax, ay) = (m[0] - p0[0], m[1] - p0[1]);
+    let (bx, by) = (p3[0] - p0[0], p3[1] - p0[1]);
+    let d = 2.0 * (ax * by - ay * bx);
+    let chord = bx.hypot(by);
+    if d.abs() < 1e-12 || chord < 1e-9 {
+        return None;
+    }
+    // Circle through p0, m, p3 (relative to p0).
+    let (a2, b2) = (ax * ax + ay * ay, bx * bx + by * by);
+    let c = [(by * a2 - ay * b2) / d, (ax * b2 - bx * a2) / d];
+    let r = c[0].hypot(c[1]);
+    let tol = r * 2e-3;
+    let on = [0.25, 0.75].iter().all(|t| {
+        let q = bezier(seg, *t);
+        ((q[0] - p0[0] - c[0]).hypot(q[1] - p0[1] - c[1]) - r).abs() <= tol
+    });
+    if !on {
+        return None;
+    }
+    let h = (ax * by - ay * bx) / chord;
+    Some(2.0 * h / chord)
 }
 
 fn same_point(a: [f64; 2], b: [f64; 2]) -> bool {
     (a[0] - b[0]).abs() < 1e-7 && (a[1] - b[1]).abs() < 1e-7
 }
 
-/// Open straight strokes of one layer, colour and weight that meet end to
-/// end become one polyline (closed when the chain returns to its start).
-fn join_strokes(strokes: Vec<Stroke>) -> Vec<Stroke> {
+/// Open strokes of one layer, colour and weight that meet end to end become
+/// one polyline (closed when the chain returns to its start). Straight ones
+/// always do; ones with arcs only with `join` (off, their arcs stay apart).
+fn join_strokes(strokes: Vec<Stroke>, join: bool) -> Vec<Stroke> {
     let mut out: Vec<Stroke> = Vec::new();
     let mut open: Vec<Stroke> = Vec::new();
     for s in strokes {
-        if s.closed {
+        if s.closed || (!join && !s.straight()) {
             out.push(s);
         } else {
             open.push(s);
@@ -597,29 +675,67 @@ fn join_strokes(strokes: Vec<Stroke>) -> Vec<Stroke> {
             }) {
                 let mut next = open.remove(i);
                 if !same_point(next.points[0], end) {
-                    next.points.reverse();
+                    next.reverse();
                 }
                 chain.points.extend(next.points.into_iter().skip(1));
+                chain.bulges.pop();
+                chain.bulges.extend(next.bulges);
             } else if let Some(i) = open.iter().position(|o| {
                 fits(o)
                     && (same_point(*o.points.last().unwrap(), start) || same_point(o.points[0], start))
             }) {
                 let mut prev = open.remove(i);
                 if !same_point(*prev.points.last().unwrap(), start) {
-                    prev.points.reverse();
+                    prev.reverse();
                 }
                 prev.points.pop();
                 prev.points.extend(chain.points);
                 chain.points = prev.points;
+                prev.bulges.pop();
+                prev.bulges.extend(chain.bulges);
+                chain.bulges = prev.bulges;
             } else {
                 break;
             }
         }
         if chain.points.len() > 3 && same_point(chain.points[0], *chain.points.last().unwrap()) {
             chain.points.pop();
+            chain.bulges.pop();
             chain.closed = true;
         }
         out.push(chain);
+    }
+    out
+}
+
+/// An open stroke cut into its straight runs and one stroke per arc.
+fn split_at_arcs(stroke: Stroke) -> Vec<Stroke> {
+    let mut out = Vec::new();
+    let piece = |points: Vec<[f64; 2]>, bulges: Vec<f64>| Stroke {
+        layer: stroke.layer.clone(),
+        color: stroke.color,
+        weight: stroke.weight,
+        points,
+        bulges,
+        closed: false,
+    };
+    let mut run: Vec<[f64; 2]> = vec![stroke.points[0]];
+    for i in 0..stroke.points.len() - 1 {
+        let (a, b, bulge) = (stroke.points[i], stroke.points[i + 1], stroke.bulges[i]);
+        if bulge == 0.0 {
+            run.push(b);
+            continue;
+        }
+        if run.len() > 1 {
+            let n = run.len();
+            out.push(piece(std::mem::take(&mut run), vec![0.0; n]));
+        }
+        out.push(piece(vec![a, b], vec![bulge, 0.0]));
+        run = vec![b];
+    }
+    if run.len() > 1 {
+        let n = run.len();
+        out.push(piece(run, vec![0.0; n]));
     }
     out
 }
@@ -630,7 +746,7 @@ fn join_strokes(strokes: Vec<Stroke>) -> Vec<Stroke> {
 // ponytail: dashes are matched along one direction at a time in drawing
 // order; patterns of mixed dash lengths stay separate lines.
 fn infer_dashes(strokes: Vec<Stroke>) -> Vec<(Stroke, Option<f64>)> {
-    let is_dash = |s: &Stroke| !s.closed && s.points.len() == 2;
+    let is_dash = |s: &Stroke| !s.closed && s.points.len() == 2 && s.straight();
     let len = |s: &Stroke| {
         let (a, b) = (s.points[0], s.points[1]);
         (b[0] - a[0]).hypot(b[1] - a[1])
@@ -777,19 +893,36 @@ pub fn convert(
                                 (common.layer, common.color, common.line_weight) =
                                     (layer.clone(), color, weight);
                                 curves.push(circle);
-                            } else if sp.segments.iter().all(|s| matches!(s, Segment::Line(..))) {
+                            } else if let Some(mut bulges) = sp
+                                .segments
+                                .iter()
+                                .map(|s| match s {
+                                    Segment::Line(..) => Some(0.0),
+                                    cubic => arc_bulge(cubic),
+                                })
+                                .collect::<Option<Vec<f64>>>()
+                            {
                                 let mut points = vec![sp.segments[0].start()];
                                 points.extend(sp.segments.iter().map(|s| s.end()));
                                 if sp.closed && points.len() > 2 {
                                     points.pop();
+                                } else {
+                                    bulges.push(0.0);
                                 }
-                                strokes.push(Stroke {
+                                let stroke = Stroke {
                                     layer: layer.clone(),
                                     color,
                                     weight,
                                     points,
+                                    bulges,
                                     closed: sp.closed,
-                                });
+                                };
+                                if settings.join || stroke.straight() || stroke.closed {
+                                    strokes.push(stroke);
+                                } else {
+                                    // Join off: each arc apart, straight runs between them.
+                                    strokes.extend(split_at_arcs(stroke));
+                                }
                             } else {
                                 let mut spline = EntityType::Spline(spline_of(sp, &world3));
                                 let common = spline.common_mut();
@@ -873,14 +1006,42 @@ pub fn convert(
     }
 
     // The joined strokes, then (when asked) dashes read as one dashed line.
-    let strokes = join_strokes(strokes);
+    let strokes = join_strokes(strokes, settings.join);
     let strokes: Vec<(Stroke, Option<f64>)> = if settings.linetypes {
         infer_dashes(strokes)
     } else {
         strokes.into_iter().map(|s| (s, None)).collect()
     };
+    // A mirrored placement turns arcs the other way.
+    let turn = (underlay.x_scale * underlay.y_scale).signum();
     for (stroke, dash) in strokes {
+        // A lone arc is an ARC.
+        if !stroke.closed && stroke.points.len() == 2 && stroke.bulges[0] != 0.0 {
+            let (a, b) = (world2(stroke.points[0]), world2(stroke.points[1]));
+            let bulge = stroke.bulges[0] * turn;
+            if let Some(ba) = crate::entities::common::BulgeArc::from_bulge([a.x, a.y], [b.x, b.y], bulge) {
+                let (start, end) = if bulge > 0.0 {
+                    (ba.start_angle, ba.end_angle)
+                } else {
+                    (ba.end_angle, ba.start_angle)
+                };
+                let tau = std::f64::consts::TAU;
+                let mut arc = Arc::from_center_radius_angles(
+                    Vector3::new(ba.center[0], ba.center[1], z),
+                    ba.radius,
+                    start.rem_euclid(tau),
+                    end.rem_euclid(tau),
+                );
+                (arc.common.layer, arc.common.color, arc.common.line_weight) =
+                    (stroke.layer, stroke.color, stroke.weight);
+                result.entities.push(EntityType::Arc(arc));
+                continue;
+            }
+        }
         let mut pl = LwPolyline::from_points(stroke.points.iter().map(|p| world2(*p)).collect());
+        for (vertex, bulge) in pl.vertices.iter_mut().zip(&stroke.bulges) {
+            vertex.bulge = bulge * turn;
+        }
         pl.is_closed = stroke.closed;
         pl.elevation = z;
         (pl.common.layer, pl.common.color, pl.common.line_weight) =

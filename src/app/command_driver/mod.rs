@@ -471,8 +471,11 @@ impl OpenCADStudio {
             CmdResult::MviewCreateClipped {
                 boundary,
                 boundary_handle,
+                target,
             } => {
-                if let Some(task) = self.handle_mview_create_clipped(boundary, boundary_handle) {
+                if !target.is_null() {
+                    self.handle_vpclip(target, boundary, boundary_handle);
+                } else if let Some(task) = self.handle_mview_create_clipped(boundary, boundary_handle) {
                     return task;
                 }
             }

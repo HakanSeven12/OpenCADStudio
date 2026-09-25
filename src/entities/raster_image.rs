@@ -63,6 +63,53 @@ fn image_wire(corners: [[f64; 3]; 4], with_x: bool) -> Vec<[f64; 3]> {
     pts
 }
 
+/// The clip boundary of a raster image in drawing pixel units (x along the
+/// u-vector, y along the v-vector, 0 at the insertion corner), or `None`
+/// when the image shows unclipped. The stored boundary is in raster space:
+/// pixel centres at whole numbers, row 0 at the top — the frame edge is at
+/// -0.5, so a stored `(x, y)` sits at `(x + 0.5, h - y - 0.5)`. Clipping
+/// shows only while both the clip state and the display flag are on (the
+/// OFF option clears the flag and keeps the state).
+pub(crate) fn image_clip_polygon(img: &RasterImage) -> Option<Vec<[f64; 2]>> {
+    use codec::entities::{ClipType, ImageDisplayFlags};
+    if !img.clipping_enabled || !img.flags.contains(ImageDisplayFlags::USE_CLIPPING_BOUNDARY) {
+        return None;
+    }
+    let h = img.size.y;
+    let at = |x: f64, y: f64| [x + 0.5, h - y - 0.5];
+    let cb = &img.clip_boundary;
+    match cb.clip_type {
+        ClipType::Rectangular if cb.vertices.len() >= 2 => {
+            let (a, b) = (cb.vertices[0], cb.vertices[1]);
+            Some(vec![at(a.x, a.y), at(b.x, a.y), at(b.x, b.y), at(a.x, b.y)])
+        }
+        ClipType::Polygonal if cb.vertices.len() >= 3 => {
+            let mut poly: Vec<[f64; 2]> = cb.vertices.iter().map(|v| at(v.x, v.y)).collect();
+            // The stored polygon repeats its first vertex at the end.
+            if poly.len() > 3 && poly.first() == poly.last() {
+                poly.pop();
+            }
+            Some(poly)
+        }
+        _ => None,
+    }
+}
+
+/// World point → raster clip space (the inverse of `image_clip_polygon`'s
+/// mapping), for the clip commands.
+pub(crate) fn image_world_to_clip(img: &RasterImage, p: [f64; 3]) -> codec::types::Vector2 {
+    let (u, v) = (&img.u_vector, &img.v_vector);
+    let d = [p[0] - img.insertion_point.x, p[1] - img.insertion_point.y];
+    // Solve d = a·u + b·v in the image plane (x/y components).
+    let det = u.x * v.y - u.y * v.x;
+    let (a, b) = if det.abs() > 1e-300 {
+        ((d[0] * v.y - d[1] * v.x) / det, (u.x * d[1] - u.y * d[0]) / det)
+    } else {
+        (0.0, 0.0)
+    };
+    codec::types::Vector2::new(a - 0.5, img.size.y - b - 0.5)
+}
+
 fn reflect_vec3(vx: &mut f64, vy: &mut f64, ax: f64, ay: f64, len2: f64) {
     let dot = *vx * ax + *vy * ay;
     *vx = 2.0 * dot * ax / len2 - *vx;
@@ -93,43 +140,28 @@ impl RenderConvertible for RasterImage {
             ]
         };
 
-        // Clip-boundary Y is in image raster space (row 0 = top, Y down); the
-        // image's v-vector points up, so flip each vertex's Y (`ih - y`) to
-        // place the boundary where AutoCAD draws it. Must match the raster's
-        // own clip triangulation in `ImageModel` so outline and pixels align.
-        let ih = self.size.y;
         // Diagonals are the BROKEN-reference placeholder; a resolvable image
         // draws its pixels inside the frame, so the X would scribble over it.
         let path_probe = self.file_path.trim();
         let resolvable = path_probe.is_empty()
             || crate::scene::model::image_model::resolve_image(path_probe).is_some();
-        let pts = if self.clipping_enabled {
-            let cb = &self.clip_boundary;
-            match cb.clip_type {
-                codec::entities::ClipType::Polygonal if cb.vertices.len() >= 3 => {
-                    let mut poly: Vec<[f64; 3]> =
-                        cb.vertices.iter().map(|v| px_to_world(v.x, ih - v.y)).collect();
-                    if let Some(&first) = poly.first() {
-                        poly.push(first);
-                    }
-                    poly
+        // Outline: the clip boundary, or — when it hides its inside — the
+        // frame with the boundary as a hole. Must match the raster's own clip
+        // triangulation in `ImageModel` so outline and pixels align.
+        let pts = match image_clip_polygon(self) {
+            Some(poly) => {
+                let mut ring: Vec<[f64; 3]> = poly.iter().map(|p| px_to_world(p[0], p[1])).collect();
+                ring.push(ring[0]);
+                if self.clip_boundary.clip_mode == codec::entities::ClipMode::Inside {
+                    let mut frame = image_wire(corners, false);
+                    frame.push([f64::NAN; 3]);
+                    frame.extend(ring);
+                    frame
+                } else {
+                    ring
                 }
-                codec::entities::ClipType::Rectangular if cb.vertices.len() >= 2 => {
-                    let v0 = &cb.vertices[0];
-                    let v1 = &cb.vertices[1];
-                    let (xa, xb) = (v0.x.min(v1.x), v0.x.max(v1.x));
-                    let (y0, y1) = (ih - v0.y, ih - v1.y);
-                    let (ya, yb) = (y0.min(y1), y0.max(y1));
-                    let c0 = px_to_world(xa, ya);
-                    let c1 = px_to_world(xb, ya);
-                    let c2 = px_to_world(xb, yb);
-                    let c3 = px_to_world(xa, yb);
-                    vec![c0, c1, c2, c3, c0]
-                }
-                _ => image_wire(corners, !resolvable),
             }
-        } else {
-            image_wire(corners, !resolvable)
+            None => image_wire(corners, !resolvable),
         };
 
         // A raster OCS can display renders its pixels (built separately) inside

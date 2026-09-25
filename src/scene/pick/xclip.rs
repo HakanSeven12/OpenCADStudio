@@ -169,13 +169,22 @@ pub fn set_insert_clip_enabled(doc: &mut CadDocument, insert: Handle, on: bool) 
 }
 
 /// Front and back clipping planes (None = off) of an insert's clip.
-pub fn set_insert_clip_depth(doc: &mut CadDocument, insert: Handle, front: Option<f64>, back: Option<f64>) -> bool {
+pub fn set_insert_clip_depth(
+    doc: &mut CadDocument,
+    insert: Handle,
+    front: Option<Option<f64>>,
+    back: Option<Option<f64>>,
+) -> bool {
     let Some(spatial) = filter_handle(doc, insert) else {
         return false;
     };
     if let Some(ObjectType::SpatialFilter(f)) = doc.objects.get_mut(&spatial) {
-        f.front_clip = front;
-        f.back_clip = back;
+        if let Some(front) = front {
+            f.front_clip = front;
+        }
+        if let Some(back) = back {
+            f.back_clip = back;
+        }
     }
     true
 }

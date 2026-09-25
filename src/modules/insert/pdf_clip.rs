@@ -1,17 +1,23 @@
-// PDFCLIP — clip a PDF underlay to a boundary (CLIP continues here for a
-// PDF underlay).
+// PDFCLIP / IMAGECLIP — clip a PDF underlay or a raster image to a boundary
+// (CLIP continues here for either).
 //
-//   Select PDF to clip:
+//   Select PDF to clip:                      (Select image to clip:)
 //   Enter PDF clipping option [ON/OFF/Delete/New boundary] <New boundary>:
-//   Delete old boundary? [Yes/No] <Yes>:     (when one exists)
+//   (Enter image clipping option [ON/OFF/Delete/New boundary] <New>:)
+//   Delete old boundary? [Yes/No] <Yes>:     (when one exists; [No/Yes] for
+//                                             an image)
 //   Outside mode - Objects outside boundary will be hidden.
 //   Specify clipping boundary or select invert option:
 //   [Select polyline/Polygonal/Rectangular/Invert clip] <Rectangular>:
 //
-// The boundary is stored in underlay units; the clip-inside bit follows the
-// Invert choice.
+// The boundary is stored in underlay units (image: raster pixels, a
+// rectangle as its two corners); the clip-inside bit follows the Invert
+// choice.
 
-use codec::entities::{Underlay, UnderlayDisplayFlags, UnderlayType};
+use codec::entities::{
+    ClipBoundary, ClipMode, ImageDisplayFlags, RasterImage, Underlay, UnderlayDisplayFlags,
+    UnderlayType,
+};
 use codec::types::{Handle, Vector2};
 use codec::EntityType;
 use glam::DVec3;
@@ -35,6 +41,9 @@ pub struct PdfClipCommand {
     step: Step,
     handle: Handle,
     underlay: Option<Underlay>,
+    /// IMAGECLIP: the image being clipped (`underlay` stays empty).
+    image: Option<RasterImage>,
+    image_mode: bool,
     picked: Option<EntityType>,
     inverted: bool,
     points: Vec<DVec3>,
@@ -50,10 +59,88 @@ impl PdfClipCommand {
             step: Step::Select,
             handle: Handle::NULL,
             underlay: None,
+            image: None,
+            image_mode: false,
             picked: None,
             inverted: false,
             points: Vec::new(),
         }
+    }
+
+    /// IMAGECLIP: asks for an image.
+    pub fn image() -> Self {
+        Self { image_mode: true, ..Self::new() }
+    }
+
+    /// An image CLIP picked: straight to the clipping option.
+    pub fn for_image(handle: Handle, image: RasterImage) -> Self {
+        let mut command = Self::image();
+        command.handle = handle;
+        command.image = Some(image);
+        command.step = Step::Option;
+        command
+    }
+
+    fn finish_image(&self, image: RasterImage) -> CmdResult {
+        CmdResult::UpdateEntityAndFinish {
+            handle: self.handle,
+            entity: EntityType::RasterImage(image),
+        }
+    }
+
+    /// Image options: ON / OFF switch only the display flag (the boundary
+    /// stays), Delete drops the boundary back to the whole image, New asks
+    /// to replace a boundary that exists.
+    fn image_option(&mut self, token: &str) -> CmdResult {
+        let Some(mut image) = self.image.clone() else {
+            return CmdResult::Cancel;
+        };
+        match token {
+            "ON" => image.flags |= ImageDisplayFlags::USE_CLIPPING_BOUNDARY,
+            "OFF" => image.flags -= ImageDisplayFlags::USE_CLIPPING_BOUNDARY,
+            "D" | "DELETE" => {
+                let mode = image.clip_boundary.clip_mode;
+                image.clip_boundary = ClipBoundary::full_image(image.size.x, image.size.y);
+                image.clip_boundary.clip_mode = mode;
+                image.clipping_enabled = false;
+            }
+            "" | "N" | "NEW" | "NEW BOUNDARY" if image.clipping_enabled => {
+                self.step = Step::DeleteOld;
+                return CmdResult::NeedPoint;
+            }
+            "" | "N" | "NEW" | "NEW BOUNDARY" => return self.enter_mode(),
+            _ => return CmdResult::ReportError("Invalid option keyword.".to_string()),
+        }
+        self.finish_image(image)
+    }
+
+    /// A rectangle keeps its two corners (lowest and highest raster
+    /// coordinates); a polygon is closed by repeating its first vertex.
+    fn apply_image_boundary(&self, world: &[DVec3], rectangle: bool) -> CmdResult {
+        let Some(mut image) = self.image.clone() else {
+            return CmdResult::Cancel;
+        };
+        let raster: Vec<Vector2> = world
+            .iter()
+            .map(|p| crate::entities::raster_image::image_world_to_clip(&image, p.to_array()))
+            .collect();
+        let mut boundary = if rectangle {
+            let (mut lo, mut hi) = (raster[0], raster[0]);
+            for p in &raster {
+                lo = Vector2::new(lo.x.min(p.x), lo.y.min(p.y));
+                hi = Vector2::new(hi.x.max(p.x), hi.y.max(p.y));
+            }
+            ClipBoundary::rectangular(lo, hi)
+        } else {
+            let mut ring = raster;
+            ring.push(ring[0]);
+            ClipBoundary::polygonal(ring)
+        };
+        boundary.clip_mode = if self.inverted { ClipMode::Inside } else { ClipMode::Outside };
+        image.clip_boundary = boundary;
+        image.clipping_enabled = true;
+        image.flags |= ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
+        self.finish_image(image)
     }
 
     /// A new boundary for an underlay already chosen (the underlay tab's
@@ -99,7 +186,10 @@ impl PdfClipCommand {
         Vector2::new((dx * c + dy * s) / sx, (-dx * s + dy * c) / sy)
     }
 
-    fn apply_boundary(&self, world: &[DVec3]) -> CmdResult {
+    fn apply_boundary(&self, world: &[DVec3], rectangle: bool) -> CmdResult {
+        if self.image.is_some() {
+            return self.apply_image_boundary(world, rectangle);
+        }
         let Some(mut underlay) = self.underlay.clone() else {
             return CmdResult::Cancel;
         };
@@ -110,6 +200,9 @@ impl PdfClipCommand {
     }
 
     fn option(&mut self, text: &str) -> CmdResult {
+        if self.image.is_some() {
+            return self.image_option(&text.trim().to_ascii_uppercase());
+        }
         let Some(mut underlay) = self.underlay.clone() else {
             return CmdResult::Cancel;
         };
@@ -174,15 +267,20 @@ impl PdfClipCommand {
 
 impl CadCommand for PdfClipCommand {
     fn name(&self) -> &'static str {
-        "PDFCLIP"
+        if self.image_mode { "IMAGECLIP" } else { "PDFCLIP" }
     }
 
     fn prompt(&self) -> String {
         match self.step {
+            Step::Select if self.image_mode => "Select image to clip:".to_string(),
             Step::Select => "Select PDF to clip:".to_string(),
+            Step::Option if self.image_mode => {
+                "Enter image clipping option [ON/OFF/Delete/New boundary] <New>:".to_string()
+            }
             Step::Option => {
                 "Enter PDF clipping option [ON/OFF/Delete/New boundary] <New boundary>:".to_string()
             }
+            Step::DeleteOld if self.image_mode => "Delete old boundary? [No/Yes] <Yes>:".to_string(),
             Step::DeleteOld => "Delete old boundary? [Yes/No] <Yes>:".to_string(),
             Step::Mode => {
                 "[Select polyline/Polygonal/Rectangular/Invert clip] <Rectangular>:".to_string()
@@ -206,6 +304,9 @@ impl CadCommand for PdfClipCommand {
                 CmdOption::new("Delete", "D"),
                 CmdOption::new("New boundary", "N"),
             ],
+            Step::DeleteOld if self.image_mode => {
+                vec![CmdOption::new("No", "N"), CmdOption::new("Yes", "Y")]
+            }
             Step::DeleteOld => vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")],
             Step::Mode => vec![
                 CmdOption::new("Select polyline", "S"),
@@ -247,6 +348,16 @@ impl CadCommand for PdfClipCommand {
     fn on_entity_pick(&mut self, handle: Handle, _pt: DVec3) -> CmdResult {
         let picked = self.picked.take();
         match self.step {
+            Step::Select if self.image_mode => match picked {
+                Some(EntityType::RasterImage(image)) => {
+                    self.handle = handle;
+                    self.image = Some(image);
+                    self.step = Step::Option;
+                    CmdResult::NeedPoint
+                }
+                // Anything else: the prompt again, as the reference does.
+                _ => CmdResult::NeedPoint,
+            },
             Step::Select => match picked {
                 Some(EntityType::Underlay(u)) if u.underlay_type == UnderlayType::Pdf => {
                     self.handle = handle;
@@ -264,7 +375,7 @@ impl CadCommand for PdfClipCommand {
                         .iter()
                         .map(|v| DVec3::new(v.location.x, v.location.y, z))
                         .collect();
-                    self.apply_boundary(&world)
+                    self.apply_boundary(&world, false)
                 }
                 _ => CmdResult::ReportError("Invalid object selected.".to_string()),
             },
@@ -281,7 +392,7 @@ impl CadCommand for PdfClipCommand {
             }
             Step::RectSecond => {
                 let first = self.points[0];
-                self.apply_boundary(&Self::rectangle(first, pt))
+                self.apply_boundary(&Self::rectangle(first, pt), true)
             }
             Step::PolyPoints => {
                 self.points.push(pt);
@@ -296,9 +407,10 @@ impl CadCommand for PdfClipCommand {
             Step::Option => self.option(text),
             Step::DeleteOld => match text.trim().to_ascii_uppercase().as_str() {
                 "" | "Y" | "YES" => self.enter_mode(),
-                "N" | "NO" => match self.underlay.clone() {
-                    Some(underlay) => self.finish(underlay),
-                    None => CmdResult::Cancel,
+                "N" | "NO" => match (self.image.clone(), self.underlay.clone()) {
+                    (Some(image), _) => self.finish_image(image),
+                    (None, Some(underlay)) => self.finish(underlay),
+                    _ => CmdResult::Cancel,
                 },
                 _ => CmdResult::ReportError("Invalid option keyword.".to_string()),
             },
@@ -310,7 +422,7 @@ impl CadCommand for PdfClipCommand {
                 }
                 "C" | "CLOSE" if self.points.len() >= 3 => {
                     let points = self.points.clone();
-                    self.apply_boundary(&points)
+                    self.apply_boundary(&points, false)
                 }
                 _ => return None,
             },
@@ -325,7 +437,7 @@ impl CadCommand for PdfClipCommand {
             Step::Mode => self.mode(""),
             Step::PolyPoints if self.points.len() >= 3 => {
                 let points = self.points.clone();
-                self.apply_boundary(&points)
+                self.apply_boundary(&points, false)
             }
             Step::PolyPoints => CmdResult::NeedPoint,
             _ => CmdResult::Cancel,
@@ -349,5 +461,5 @@ impl CadCommand for PdfClipCommand {
 }
 
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["PDFCLIP"]
+    names: &["PDFCLIP", "IMAGECLIP"]
 });

@@ -1,4 +1,16 @@
 // MVIEW — interactive paper-space viewport creation.
+//
+// VPCLIP (and CLIP on a layout viewport) reuses the polygon and object
+// steps to clip an existing viewport:
+//   Select viewport to clip:
+//   Select clipping object or [Polygonal] <Polygonal>:   (Delete also taken
+//                                                         when clipped)
+//   Specify start point:
+//   Specify next point or [Arc/Length/Undo]:
+//   Specify next point or [Arc/Close/Length/Undo]:
+//   Enter an arc boundary option
+//   [Angle/CEnter/CLose/Direction/Line/Radius/Second pt/Undo/Endpoint of arc] <Endpoint>:
+//   Specify length of line:
 
 use codec::entities::{LwPolyline, LwVertex, Viewport};
 use codec::tables::View;
@@ -37,6 +49,12 @@ enum Step {
     DefineNewFirst,
     DefineNewSecond,
     PlaceView,
+    /// VPCLIP: the viewport to clip.
+    ClipSelect,
+    /// VPCLIP: a clipping object, or Polygonal / Delete.
+    ClipChoice,
+    /// VPCLIP Length: a line of that length along the last direction.
+    ClipLength,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -56,6 +74,10 @@ pub struct MviewCommand {
     views: Vec<View>,
     paper_bounds: ((f64, f64), (f64, f64)),
     original_layout: String,
+    /// VPCLIP: the viewport being clipped (NULL until chosen) and whether it
+    /// already has a boundary.
+    clip: Option<(Handle, bool)>,
+    picked: Option<EntityType>,
 }
 
 impl MviewCommand {
@@ -75,6 +97,77 @@ impl MviewCommand {
             views,
             paper_bounds,
             original_layout,
+            clip: None,
+            picked: None,
+        }
+    }
+
+    /// VPCLIP asking for the viewport.
+    pub fn vpclip_select() -> Self {
+        let mut command = Self::new(String::new(), ((0.0, 0.0), (0.0, 0.0)), Vec::new());
+        command.clip = Some((Handle::NULL, false));
+        command.step = Step::ClipSelect;
+        command
+    }
+
+    /// VPCLIP on a chosen viewport.
+    pub fn vpclip(viewport: Handle, clipped: bool) -> Self {
+        let mut command = Self::vpclip_select();
+        command.clip = Some((viewport, clipped));
+        command.step = Step::ClipChoice;
+        command
+    }
+
+    fn clip_target(&self) -> Handle {
+        self.clip.map_or(Handle::NULL, |(handle, _)| handle)
+    }
+
+    fn clip_text(&mut self, upper: &str) -> Option<CmdResult> {
+        match self.step {
+            Step::ClipChoice => match upper {
+                "" | "P" | "POLYGONAL" => {
+                    self.step = Step::Polygon;
+                    Some(CmdResult::NeedPoint)
+                }
+                "D" | "DELETE" if self.clip.is_some_and(|(_, clipped)| clipped) => {
+                    Some(CmdResult::MviewCreateClipped {
+                        boundary: None,
+                        boundary_handle: Handle::NULL,
+                        target: self.clip_target(),
+                    })
+                }
+                _ => None,
+            },
+            Step::ClipLength => {
+                let length = upper.parse::<f64>().ok()?;
+                let last = *self.polygon.last()?;
+                let direction = self.polygon_last_tangent.map_or(DVec2::X, |t| t.as_dvec2());
+                self.step = Step::Polygon;
+                Some(self.on_point(last + DVec3::new(direction.x, direction.y, 0.0) * length))
+            }
+            Step::Polygon if self.polygon_mode == PolygonMode::Arc => match upper {
+                "CL" | "CLOSE" if self.polygon.len() >= 2 => Some(self.finish_polygon()),
+                "L" | "LINE" => {
+                    self.polygon_mode = PolygonMode::Line;
+                    Some(CmdResult::NeedPoint)
+                }
+                "U" | "UNDO" if !self.polygon.is_empty() => Some(self.undo_polygon()),
+                _ => None,
+            },
+            Step::Polygon => match upper {
+                "A" | "ARC" if !self.polygon.is_empty() => {
+                    self.polygon_mode = PolygonMode::Arc;
+                    Some(CmdResult::NeedPoint)
+                }
+                "C" | "CLOSE" if self.polygon.len() >= 3 => Some(self.finish_polygon()),
+                "L" | "LENGTH" if !self.polygon.is_empty() => {
+                    self.step = Step::ClipLength;
+                    Some(CmdResult::NeedPoint)
+                }
+                "U" | "UNDO" if !self.polygon.is_empty() => Some(self.undo_polygon()),
+                _ => None,
+            },
+            _ => None,
         }
     }
 
@@ -158,6 +251,7 @@ impl MviewCommand {
             Some(boundary) => CmdResult::MviewCreateClipped {
                 boundary: Some(boundary),
                 boundary_handle: Handle::NULL,
+                target: self.clip_target(),
             },
             None => CmdResult::Cancel,
         }
@@ -263,10 +357,24 @@ impl MviewCommand {
 
 impl CadCommand for MviewCommand {
     fn name(&self) -> &'static str {
-        "MVIEW"
+        if self.clip.is_some() { "VPCLIP" } else { "MVIEW" }
     }
 
     fn prompt(&self) -> String {
+        if self.clip.is_some() {
+            return match self.step {
+                Step::ClipSelect => "Select viewport to clip:",
+                Step::ClipChoice => "Select clipping object or [Polygonal] <Polygonal>:",
+                Step::ClipLength => "Specify length of line:",
+                Step::Polygon if self.polygon.is_empty() => "Specify start point:",
+                Step::Polygon if self.polygon_mode == PolygonMode::Arc => {
+                    "Enter an arc boundary option\n[Angle/CEnter/CLose/Direction/Line/Radius/Second pt/Undo/Endpoint of arc] <Endpoint>:"
+                }
+                Step::Polygon if self.polygon.len() < 3 => "Specify next point or [Arc/Length/Undo]:",
+                _ => "Specify next point or [Arc/Close/Length/Undo]:",
+            }
+            .to_string();
+        }
         match self.step {
             Step::RectangleFirst => t!(
                 "MVIEW  Specify corner of viewport or [Polygonal/Object/Fit/Insert view]:"
@@ -302,10 +410,31 @@ impl CadCommand for MviewCommand {
                 t!("MVIEW New view  Specify opposite model-space corner:").into_owned()
             }
             Step::PlaceView => t!("MVIEW Insert view  Specify placement point:").into_owned(),
+            Step::ClipSelect | Step::ClipChoice | Step::ClipLength => String::new(),
         }
     }
 
     fn options(&self) -> Vec<CmdOption> {
+        if self.clip.is_some() {
+            return match self.step {
+                Step::ClipChoice => vec![CmdOption::new("Polygonal", "P")],
+                Step::Polygon if self.polygon_mode == PolygonMode::Arc => vec![
+                    CmdOption::new("CLose", "CL"),
+                    CmdOption::new("Line", "L"),
+                    CmdOption::new("Undo", "U"),
+                ],
+                Step::Polygon if !self.polygon.is_empty() => {
+                    let mut options = vec![CmdOption::new("Arc", "A")];
+                    if self.polygon.len() >= 3 {
+                        options.push(CmdOption::new("Close", "C"));
+                    }
+                    options.push(CmdOption::new("Length", "L"));
+                    options.push(CmdOption::new("Undo", "U"));
+                    options
+                }
+                _ => Vec::new(),
+            };
+        }
         match self.step {
             Step::RectangleFirst => vec![
                 CmdOption::new(t!("Polygonal").as_ref(), "POLYGONAL"),
@@ -427,12 +556,19 @@ impl CadCommand for MviewCommand {
                 },
                 None => CmdResult::Cancel,
             },
-            Step::Object | Step::ChooseView => CmdResult::NeedPoint,
+            Step::Object | Step::ChooseView | Step::ClipSelect | Step::ClipChoice => {
+                CmdResult::NeedPoint
+            }
+            Step::ClipLength => CmdResult::NeedPoint,
         }
     }
 
     fn on_enter(&mut self) -> CmdResult {
         match self.step {
+            Step::ClipChoice => {
+                self.step = Step::Polygon;
+                CmdResult::NeedPoint
+            }
             Step::Polygon if self.polygon.len() >= 3 => self.finish_polygon(),
             Step::DefineNewFirst | Step::DefineNewSecond => {
                 CmdResult::MviewCancelToLayout(self.original_layout.clone())
@@ -451,23 +587,45 @@ impl CadCommand for MviewCommand {
     }
 
     fn needs_entity_pick(&self) -> bool {
-        self.step == Step::Object
+        matches!(self.step, Step::Object | Step::ClipSelect | Step::ClipChoice)
+    }
+
+    fn inject_before_entity_pick(&self) -> bool {
+        self.clip.is_some()
+    }
+
+    fn inject_picked_entity(&mut self, entity: EntityType) {
+        self.picked = Some(entity);
     }
 
     fn on_entity_pick(&mut self, handle: Handle, _pt: DVec3) -> CmdResult {
         if handle.is_null() {
             return CmdResult::NeedPoint;
         }
+        if self.step == Step::ClipSelect {
+            return match self.picked.take() {
+                Some(EntityType::Viewport(vp)) if vp.id != 1 => {
+                    self.clip = Some((handle, !vp.clip_boundary_handle.is_null()));
+                    self.step = Step::ClipChoice;
+                    CmdResult::NeedPoint
+                }
+                _ => CmdResult::ReportError("Object selected was not a viewport\n.".to_string()),
+            };
+        }
         CmdResult::MviewCreateClipped {
             boundary: None,
             boundary_handle: handle,
+            target: self.clip_target(),
         }
     }
 
     fn input_kind(&self) -> InputKind {
-        if self.step == Step::ChooseView {
+        if self.step == Step::ClipLength {
+            InputKind::FreeText
+        } else if self.step == Step::ChooseView {
             InputKind::FreeText
         } else if self.step == Step::RectangleFirst
+            || self.step == Step::ClipChoice
             || (self.step == Step::Polygon && !self.polygon.is_empty())
         {
             InputKind::SingleToken
@@ -478,6 +636,7 @@ impl CadCommand for MviewCommand {
 
     fn point_step_accepts_keywords(&self) -> bool {
         self.step == Step::RectangleFirst
+            || self.step == Step::ClipChoice
             || (self.step == Step::Polygon && !self.polygon.is_empty())
     }
 
@@ -492,6 +651,9 @@ impl CadCommand for MviewCommand {
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let keyword = text.trim();
         let upper = keyword.to_ascii_uppercase();
+        if self.clip.is_some() {
+            return self.clip_text(&upper);
+        }
         match self.step {
             Step::RectangleFirst => match upper.as_str() {
                 "P" | "POLYGONAL" => {
@@ -541,6 +703,10 @@ impl CadCommand for MviewCommand {
     }
 
     fn on_undo_step(&mut self) -> Option<CmdResult> {
+        if self.clip.is_some() && self.step == Step::ClipLength {
+            self.step = Step::Polygon;
+            return Some(CmdResult::NeedPoint);
+        }
         if self.step == Step::Polygon && !self.polygon.is_empty() {
             Some(self.undo_polygon())
         } else {
@@ -580,4 +746,4 @@ impl CadCommand for MviewCommand {
 
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["MVIEW"] });  // MviewCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["MVIEW", "VPCLIP"] });  // MviewCommand

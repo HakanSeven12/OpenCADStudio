@@ -8,21 +8,21 @@
 use crate::scene::model::hatch_model::HatchModel;
 use crate::scene::model::wire_model::WireModel;
 use crate::scene::Scene;
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 #[derive(Clone, Debug)]
 pub enum HatchEditOperation {
     Appearance {
-        color: Option<acadrust::types::Color>,
+        color: Option<codec::types::Color>,
         layer: Option<String>,
-        transparency: Option<acadrust::types::Transparency>,
+        transparency: Option<codec::types::Transparency>,
     },
     Update {
         origin: Option<(f64, f64)>,
         store_origin: bool,
         disassociate: bool,
-        style: Option<acadrust::entities::HatchStyleType>,
+        style: Option<codec::entities::HatchStyleType>,
         annotative: Option<bool>,
     },
     RecreateBoundary {
@@ -30,7 +30,7 @@ pub enum HatchEditOperation {
         region: bool,
     },
     BeginAssociate,
-    AssociatePaths(Vec<acadrust::entities::BoundaryPath>),
+    AssociatePaths(Vec<codec::entities::BoundaryPath>),
     DrawOrderBoundary {
         above: bool,
     },
@@ -110,8 +110,8 @@ impl WorkingPlane {
         (direction.x.hypot(direction.y) > f64::EPSILON).then(|| direction.y.atan2(direction.x))
     }
 
-    pub fn to_world_transform(self) -> acadrust::types::Transform {
-        use acadrust::types::{Matrix4, Transform};
+    pub fn to_world_transform(self) -> codec::types::Transform {
+        use codec::types::{Matrix4, Transform};
         Transform::from_matrix(Matrix4 {
             m: [
                 [self.x.x, self.y.x, self.z.x, self.origin.x],
@@ -122,8 +122,8 @@ impl WorkingPlane {
         })
     }
 
-    pub fn to_local_transform(self) -> acadrust::types::Transform {
-        use acadrust::types::{Matrix4, Transform};
+    pub fn to_local_transform(self) -> codec::types::Transform {
+        use codec::types::{Matrix4, Transform};
         Transform::from_matrix(Matrix4 {
             m: [
                 [self.x.x, self.x.y, self.x.z, -self.origin.dot(self.x)],
@@ -249,7 +249,7 @@ pub enum EntityTransform {
     },
     /// General affine transform. Used when a complete UCS basis must be baked
     /// into block-local geometry instead of stored as drawing UCS state.
-    Affine(acadrust::types::Transform),
+    Affine(codec::types::Transform),
 }
 
 // ── Tangent object ─────────────────────────────────────────────────────────
@@ -1459,13 +1459,13 @@ pub enum CmdResult {
     InterimWire(WireModel),
     /// Update the in-progress (cyan) preview wire in the viewport.
     Preview(WireModel),
-    /// Commit an acadrust entity to the document; keep the command active.
+    /// Commit an opencadcodec entity to the document; keep the command active.
     CommitEntity(EntityType),
-    /// Commit several acadrust entities in one undo step; keep the command active.
+    /// Commit several opencadcodec entities in one undo step; keep the command active.
     CommitEntities(Vec<EntityType>),
     /// Commit several entities in one undo step and end the command.
     CommitEntitiesAndExit(Vec<EntityType>),
-    /// Commit an acadrust entity to the document and end the command.
+    /// Commit an opencadcodec entity to the document and end the command.
     CommitAndExit(EntityType),
     /// Commit a dimension using the drawing's association mode.
     CommitDimension {
@@ -1494,16 +1494,16 @@ pub enum CmdResult {
         handles: Vec<Handle>,
         point: DVec3,
     },
-    /// Commit a Model-tab 3D solid: the acadrust entity (for selection /
+    /// Commit a Model-tab 3D solid: the opencadcodec entity (for selection /
     /// persistence) plus its B-rep (cached for boolean ops + shaded
     /// rendering). Ends the command.
     CommitSolid {
         entity: EntityType,
-        solid: Box<cadkernel::brep::Body>,
-        history: acadrust::objects::SolidHistoryOperation,
+        solid: Box<kernel::brep::Body>,
+        history: codec::objects::SolidHistoryOperation,
         erase_source: Option<Handle>,
     },
-    /// Commit an acadrust entity, end the command, and open the in-place text
+    /// Commit an opencadcodec entity, end the command, and open the in-place text
     /// editor on it (used by MLEADER to type the annotation after placement).
     CommitAndEditText(EntityType),
     /// Commit several entities, end the command, and open the in-place text
@@ -1538,19 +1538,19 @@ pub enum CmdResult {
     /// Commit a hatch with the selected hatch's entity colour and transparency.
     CommitStyledHatch {
         hatch: HatchModel,
-        color: acadrust::types::Color,
-        transparency: acadrust::types::Transparency,
+        color: codec::types::Color,
+        transparency: codec::types::Transparency,
     },
     /// Commit a hatch and retain each boundary ring as an entity.
     CommitHatchWithBoundaries {
         hatch: HatchModel,
         boundaries: Vec<EntityType>,
-        entity_style: Option<(acadrust::types::Color, acadrust::types::Transparency)>,
+        entity_style: Option<(codec::types::Color, codec::types::Transparency)>,
     },
     /// Commit independently editable hatch entities for every selected region.
     CommitHatches {
         hatches: Vec<HatchModel>,
-        entity_style: Option<(acadrust::types::Color, acadrust::types::Transparency)>,
+        entity_style: Option<(codec::types::Color, codec::types::Transparency)>,
     },
     /// Copy selected entities with multiple transforms (e.g. rectangular array); end command.
     BatchCopy(Vec<Handle>, Vec<EntityTransform>),
@@ -1611,7 +1611,7 @@ pub enum CmdResult {
     AddHorizontalConstraint {
         kind: crate::scene::parametric_constraints::ConstraintKind,
         selection: HorizontalConstraintSelection,
-        direction: acadrust::types::Vector3,
+        direction: codec::types::Vector3,
         label: &'static str,
     },
     /// Resolves the first 2Points pick of a Horizontal or Vertical constraint
@@ -1930,7 +1930,7 @@ pub enum CmdResult {
     /// Create a paper-space viewport. `preserve_view` keeps an explicitly
     /// selected/defined view instead of applying the normal model-extents fit.
     MviewCreate {
-        viewport: acadrust::entities::Viewport,
+        viewport: codec::entities::Viewport,
         preserve_view: bool,
     },
     /// Create a viewport clipped by either a new polygon boundary or an
@@ -1979,7 +1979,7 @@ pub enum CmdResult {
         /// command (boundary, rotation, attachment, spacing and columns).
         /// Existing-entity edits leave this as `None` and load the document
         /// entity instead.
-        template: Option<Box<acadrust::MText>>,
+        template: Option<Box<codec::MText>>,
     },
     /// Collect rich text without creating an MText entity.
     SuspendForMTextInput {
@@ -2002,7 +2002,7 @@ pub enum CmdResult {
     /// the command resumes so another line can be placed directly below it.
     SuspendForTextInput {
         pos: DVec3,
-        entity: acadrust::entities::Text,
+        entity: codec::entities::Text,
     },
     /// Apply new pattern/scale/angle to an existing hatch entity.
     HatcheditApply {
@@ -2085,8 +2085,8 @@ pub enum CmdResult {
     /// Round or bevel one or more resolved B-rep edges on a solid.
     SolidEdgeBlend {
         handle: Handle,
-        edges: Vec<cadkernel::brep::EdgeKey>,
-        base_face: Option<cadkernel::brep::FaceKey>,
+        edges: Vec<kernel::brep::EdgeKey>,
+        base_face: Option<kernel::brep::FaceKey>,
         value: f64,
         other_value: f64,
         fillet: bool,
@@ -2107,13 +2107,13 @@ pub enum CmdResult {
     /// containing that WCS point.
     SliceEntities {
         targets: Vec<Handle>,
-        plane: cadkernel::space::Plane,
+        plane: kernel::space::Plane,
         keep_point: Option<DVec3>,
     },
     /// Split selected solids or surfaces with one selected analytic sheet.
     SliceSurfaceEntities {
         targets: Vec<Handle>,
-        cutter: Box<cadkernel::brep::Body>,
+        cutter: Box<kernel::brep::Body>,
         keep_point: Option<DVec3>,
     },
     /// INSERT landed on a block that has AttributeDefinitions.
@@ -2404,7 +2404,7 @@ pub trait CadCommand: Send {
         None
     }
     /// Symbol localization is committed together with the extracted entities.
-    fn nested_copy_symbol_names(&self) -> Option<&acadrust::nested_copy::NestedCopySymbolNames> {
+    fn nested_copy_symbol_names(&self) -> Option<&codec::nested_copy::NestedCopySymbolNames> {
         None
     }
     /// Keep the layer already carried by entities committed by this command
@@ -2874,22 +2874,22 @@ pub trait CadCommand: Send {
 
     /// The block reference an ATTEDIT pick has resolved to, awaiting the
     /// attribute editor dialog; else None.
-    fn attedit_pending_handle(&self) -> Option<acadrust::Handle> {
+    fn attedit_pending_handle(&self) -> Option<codec::Handle> {
         None
     }
 
     /// Inject block attribute definitions after the INSERT point is picked.
     fn attreq_set_attdefs(
         &mut self,
-        _attdefs: Vec<acadrust::entities::AttributeDefinition>,
-    ) -> Option<acadrust::EntityType> {
+        _attdefs: Vec<codec::entities::AttributeDefinition>,
+    ) -> Option<codec::EntityType> {
         None
     }
 
     /// Returns the INSERT entity built so far (pending attr fill) if this is an
     /// ATTREQ-aware INSERT command waiting for attdef injection.
     /// Called by the host after `AttreqNeeded` to commit the completed Insert.
-    fn attreq_take_insert(&mut self) -> Option<acadrust::EntityType> {
+    fn attreq_take_insert(&mut self) -> Option<codec::EntityType> {
         None
     }
 
@@ -2932,13 +2932,13 @@ pub trait CadCommand: Send {
     /// Called by update.rs to inject the cloned entity into commands
     /// that need to read/modify it (e.g. DIMTEDIT, MLEADERADD, MLEADERREMOVE).
     /// Default: no-op.
-    fn inject_picked_entity(&mut self, _entity: acadrust::EntityType) {}
+    fn inject_picked_entity(&mut self, _entity: codec::EntityType) {}
 
     /// The host undid one document step on the command's behalf
     /// (`CmdResult::UndoDocument`) and the command stays active. Commands
     /// that cache document entities (FILLET, CHAMFER) refresh them here so
     /// the next pick sees the restored geometry. Default: no-op.
-    fn on_document_undone(&mut self, _document: &acadrust::CadDocument) {}
+    fn on_document_undone(&mut self, _document: &codec::CadDocument) {}
 
     /// Supply the tessellated surface area associated with the picked entity.
     /// Commands that measure mesh-backed objects can opt in without owning the

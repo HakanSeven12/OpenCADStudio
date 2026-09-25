@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 
-use acadrust::xdata::ExtendedDataRecord;
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::xdata::ExtendedDataRecord;
+use codec::{CadDocument, EntityType, Handle};
 use interprocess::local_socket::traits::Stream as StreamTrait;
 use interprocess::local_socket::{GenericNamespaced, Stream, ToNsName};
 
@@ -589,8 +589,8 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::thread;
 
-    use acadrust::entities::Point;
-    use acadrust::{EntityType, Handle};
+    use codec::entities::Point;
+    use codec::{EntityType, Handle};
     use interprocess::local_socket::{
         traits::{Listener, Stream as StreamTrait},
         GenericNamespaced, ListenerOptions, Stream, ToNsName,

@@ -8,11 +8,11 @@
 //   BREAK @ (at-sign as second point) → Break at a single point (splits without gap).
 
 use crate::modules::draw::modify::spline_ops::{spline_cut, spline_nearest_t, spline_range};
-use acadrust::entities::{
+use codec::entities::{
     Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline, Spline as SplineEnt,
 };
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
 use glam::DVec3;
 use crate::t;
 
@@ -88,12 +88,12 @@ fn break_line(line: &LineEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     result
 }
 
-fn picked_spans(curve: &cadkernel::space::PlanarCurve, p1: DVec3, p2: DVec3) -> Option<Vec<[f64; 2]>> {
+fn picked_spans(curve: &kernel::space::PlanarCurve, p1: DVec3, p2: DVec3) -> Option<Vec<[f64; 2]>> {
     let first = curve.plane.project(p1.to_array())?;
     let second = curve.plane.project(p2.to_array())?;
-    let a = cadkernel::geom2d::closest_point(&curve.curve, first).t;
-    let b = cadkernel::geom2d::closest_point(&curve.curve, second).t;
-    cadkernel::geom2d::break_spans(&curve.curve, a, b, cadkernel::geom2d::Tolerance::new(1e-9))
+    let a = kernel::geom2d::closest_point(&curve.curve, first).t;
+    let b = kernel::geom2d::closest_point(&curve.curve, second).t;
+    kernel::geom2d::break_spans(&curve.curve, a, b, kernel::geom2d::Tolerance::new(1e-9))
 }
 
 fn break_arc(arc: &ArcEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
@@ -101,7 +101,7 @@ fn break_arc(arc: &ArcEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     let Some(spans) = picked_spans(&curve, p1, p2) else {
         return vec![EntityType::Arc(arc.clone())];
     };
-    let cadkernel::geom2d::Curve::Arc(geometry) = &curve.curve else { unreachable!() };
+    let kernel::geom2d::Curve::Arc(geometry) = &curve.curve else { unreachable!() };
     spans.into_iter().map(|[from, to]| {
         let mut result = arc.clone();
         result.common.handle = Handle::NULL;
@@ -111,7 +111,7 @@ fn break_arc(arc: &ArcEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     }).collect()
 }
 
-fn break_circle(circle: &acadrust::entities::Circle, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
+fn break_circle(circle: &codec::entities::Circle, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     let curve = crate::entities::curve::circle_curve(circle);
     let Some(spans) = picked_spans(&curve, p1, p2) else {
         return vec![EntityType::Circle(circle.clone())];
@@ -133,7 +133,7 @@ fn break_lwpolyline(p: &LwPolyline, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     let unchanged = || vec![EntityType::LwPolyline(p.clone())];
     let Some(curve) = crate::entities::curve::lwpolyline_curve(p) else { return unchanged(); };
     let Some(spans) = picked_spans(&curve, p1, p2) else { return unchanged(); };
-    let cadkernel::geom2d::Curve::Polyline(geometry) = &curve.curve else { unreachable!() };
+    let kernel::geom2d::Curve::Polyline(geometry) = &curve.curve else { unreachable!() };
     let mut result = Vec::with_capacity(spans.len());
     for [from, to] in spans {
         let Some(range) = geometry.ranged(from, to) else { return unchanged(); };
@@ -172,7 +172,7 @@ fn break_ellipse(ell: &EllipseEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     let Some(spans) = picked_spans(&curve, p1, p2) else {
         return vec![EntityType::Ellipse(ell.clone())];
     };
-    let cadkernel::geom2d::Curve::Ellipse(geometry) = &curve.curve else { unreachable!() };
+    let kernel::geom2d::Curve::Ellipse(geometry) = &curve.curve else { unreachable!() };
     spans.into_iter().map(|[from, to]| {
         let mut result = ell.clone();
         result.common.handle = Handle::NULL;
@@ -387,8 +387,8 @@ inventory::submit!(crate::command::CommandRegistration { names: &["BREAK"] });  
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::LwVertex;
-    use acadrust::types::Vector2;
+    use codec::entities::LwVertex;
+    use codec::types::Vector2;
 
     #[test]
     fn first_option_replaces_the_selection_point_and_at_reuses_it() {

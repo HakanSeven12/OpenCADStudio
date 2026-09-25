@@ -1,15 +1,15 @@
 //! Host-side glue for dynamic text field evaluation.
 //!
 //! The field language (DIESEL + AcVar), the field structure/linkage, and all
-//! date math live in the reader library ([`acadrust::fields`]). OCS only
+//! date math live in the reader library ([`codec::fields`]). OCS only
 //! supplies the **environment** — the current clock, OS login and environment
 //! variables — through [`FieldContext`]. A DWG library must stay deterministic
 //! and platform-neutral, so the one genuinely system-specific bit (reading the
 //! clock / OS user) lives here in the app instead.
 
-use acadrust::fields::FieldContext;
-use acadrust::types::Handle;
-use acadrust::CadDocument;
+use codec::fields::FieldContext;
+use codec::types::Handle;
+use codec::CadDocument;
 
 /// OCS's environment provider for field evaluation.
 struct OcsFieldContext;
@@ -50,7 +50,7 @@ impl FieldContext for OcsFieldContext {
 /// Re-evaluate the field hosted by entity `host` (usually an MTEXT), or `None`
 /// to keep the cached text. Thin wrapper over the library engine.
 pub fn resolve(document: &CadDocument, host: Handle) -> Option<String> {
-    acadrust::fields::resolve(document, host, &OcsFieldContext)
+    codec::fields::resolve(document, host, &OcsFieldContext)
 }
 
 pub fn resolve_handle(
@@ -58,7 +58,7 @@ pub fn resolve_handle(
     field: Handle,
     host: Handle,
 ) -> Option<String> {
-    acadrust::fields::resolve_handle(document, field, host, &OcsFieldContext)
+    codec::fields::resolve_handle(document, field, host, &OcsFieldContext)
 }
 
 /// Seconds since the Unix epoch. Native uses the system clock; wasm uses the JS

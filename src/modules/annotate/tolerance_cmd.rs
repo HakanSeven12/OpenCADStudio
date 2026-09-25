@@ -2,9 +2,9 @@
 //
 // The structured editor prepares the frame; this command places it.
 
-use acadrust::entities::Tolerance;
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::Tolerance;
+use codec::types::Vector3;
+use codec::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};

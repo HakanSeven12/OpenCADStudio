@@ -125,7 +125,7 @@ as `{"type": "overflow", "dropped": n}`. Tokens are bound to the tab that asked.
 ## Known limits
 
 - Twelve of the 43 canvas kinds are not yet `Complete`; each has a named blocker in the
-  ledger. Seven are cadcodec DXF bugs whose fixes are submitted upstream but not yet adopted.
+  ledger. Seven are opencadcodec DXF bugs whose fixes are submitted upstream but not yet adopted.
 - The DXF codec also drops some table properties (text style generation flags, block
   descriptions, a dimension style's text-style name) and mis-scales one angle; these are
   pinned by canaries and listed in `cadcodec-reader-gaps.md`.

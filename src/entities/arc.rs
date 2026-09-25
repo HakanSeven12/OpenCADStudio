@@ -1,4 +1,4 @@
-use acadrust::entities::Arc;
+use codec::entities::Arc;
 use crate::t;
 
 use crate::command::EntityTransform;
@@ -136,7 +136,7 @@ pub(crate) fn refit_grips(
     let Some(c) = plane.project(points[2].to_array()) else {
         return false;
     };
-    let Some(fit) = cadkernel::geom2d::arc_through_points(a, b, c) else {
+    let Some(fit) = kernel::geom2d::arc_through_points(a, b, c) else {
         return false;
     };
 
@@ -246,7 +246,7 @@ fn apply_geom_prop(arc: &mut Arc, field: &str, value: &str) {
         "end_angle" => arc.end_angle = v.to_radians(),
         "normal_x" | "normal_y" | "normal_z" => {
             let center = arc.center_wcs();
-            let mut normal = cadkernel::space::Vec3::new(arc.normal.x, arc.normal.y, arc.normal.z);
+            let mut normal = kernel::space::Vec3::new(arc.normal.x, arc.normal.y, arc.normal.z);
             match field {
                 "normal_x" => normal.x = v,
                 "normal_y" => normal.y = v,
@@ -254,12 +254,12 @@ fn apply_geom_prop(arc: &mut Arc, field: &str, value: &str) {
                 _ => {}
             }
             if let Some(normal) = normal.normalize() {
-                arc.normal = acadrust::types::Vector3::new(normal.x, normal.y, normal.z);
+                arc.normal = codec::types::Vector3::new(normal.x, normal.y, normal.z);
                 let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs(
                     (center.x, center.y, center.z),
                     (normal.x, normal.y, normal.z),
                 );
-                arc.center = acadrust::types::Vector3::new(x, y, z);
+                arc.center = codec::types::Vector3::new(x, y, z);
             }
         }
         _ => {}
@@ -312,7 +312,7 @@ fn apply_transform(arc: &mut Arc, t: &EntityTransform) {
 }
 
 impl RenderConvertible for Arc {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(to_render(self))
     }
 }
@@ -382,7 +382,7 @@ impl crate::entities::traits::Grippable for Arc {
         action: crate::scene::model::object::GripMenuAction,
         point: glam::DVec3,
     ) -> Option<f64> {
-        use cadkernel::geom2d::{Circle as KernelCircle, Curve as KernelCurve, Vec2};
+        use kernel::geom2d::{Circle as KernelCircle, Curve as KernelCurve, Vec2};
         use crate::scene::model::object::GripMenuAction as A;
         if self.radius <= 1.0e-9 {
             return None;
@@ -484,7 +484,7 @@ impl crate::entities::traits::Transformable for Arc {
     }
 }
 
-impl crate::entities::traits::MassPropsCalc for acadrust::entities::Arc {
+impl crate::entities::traits::MassPropsCalc for codec::entities::Arc {
     fn mass_props(&self) -> crate::entities::traits::MassProps {
         let curve = crate::entities::curve::arc_curve(self);
         let area = curve.curve.chord_closed_area().unwrap_or(0.0).abs();
@@ -511,8 +511,8 @@ mod tests {
     #[test]
     fn midpoint_grip_drives_radius_and_arc_length_in_entity_plane() {
         let mut arc = Arc::default();
-        arc.center = acadrust::types::Vector3::new(1.0, 2.0, 3.0);
-        arc.normal = acadrust::types::Vector3::new(0.0, 1.0, 0.0);
+        arc.center = codec::types::Vector3::new(1.0, 2.0, 3.0);
+        arc.normal = codec::types::Vector3::new(0.0, 1.0, 0.0);
         arc.radius = 2.0;
         arc.start_angle = 0.0;
         arc.end_angle = std::f64::consts::FRAC_PI_2;

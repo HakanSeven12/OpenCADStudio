@@ -231,7 +231,7 @@ impl PlotStyleTable {
             "grayscale.ctb" => {
                 let mut table = Self::identity(GRAYSCALE_PLOT_STYLE);
                 for aci in 1..=255u8 {
-                    if let Some((r, g, b)) = acadrust::types::aci_to_rgb(aci) {
+                    if let Some((r, g, b)) = codec::types::aci_to_rgb(aci) {
                         let gray = if aci == 7 {
                             0
                         } else {
@@ -332,7 +332,7 @@ impl PlotStyleTable {
                 if aci == 7 {
                     Some([0.0; 3])
                 } else {
-                    acadrust::types::aci_to_rgb(aci).map(|(r, g, b)| {
+                    codec::types::aci_to_rgb(aci).map(|(r, g, b)| {
                         [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
                     })
                 }

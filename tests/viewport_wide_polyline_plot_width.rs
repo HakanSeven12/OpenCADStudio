@@ -6,9 +6,9 @@
 //! 0.15 mm): every single-line diagram plotted as black blobs.
 #![cfg(not(target_arch = "wasm32"))]
 
-use acadrust::entities::{LwPolyline, LwVertex, Viewport};
-use acadrust::types::{Vector2, Vector3};
-use acadrust::EntityType;
+use codec::entities::{LwPolyline, LwVertex, Viewport};
+use codec::types::{Vector2, Vector3};
+use codec::EntityType;
 use OpenCADStudio::scene::Scene;
 
 #[test]

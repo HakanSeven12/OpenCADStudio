@@ -10,10 +10,10 @@
 // The scene mirrors the real-world shape of the bug: a block whose children
 // are [wipeout, line, text], inserted into a drawing big enough that the
 // insert's child band is as fine-grained as a real one.
-use acadrust::entities::{Insert, Text, Wipeout};
-use acadrust::tables::BlockRecord;
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::{Insert, Text, Wipeout};
+use codec::tables::BlockRecord;
+use codec::types::Vector3;
+use codec::EntityType;
 use OpenCADStudio::scene::cache::block_cache::{expand_insert, BlockCache};
 use OpenCADStudio::scene::view::render::InheritStyle;
 use OpenCADStudio::scene::Scene;
@@ -26,7 +26,7 @@ const DEPTH_QUANTA: f32 = 16_777_216.0; // 2^24 (Depth24Plus)
 fn block_text_depth_composes_through_the_instance_path() {
     let mut scene = Scene::new();
 
-    let br_h = acadrust::Handle::new(scene.document.next_handle());
+    let br_h = codec::Handle::new(scene.document.next_handle());
     let mut br = BlockRecord::new("MARK");
     br.handle = br_h;
     scene.document.block_records.add(br).unwrap();
@@ -42,7 +42,7 @@ fn block_text_depth_composes_through_the_instance_path() {
 
     // Child 1: a spacer so the text sits two sibling steps above the wipe,
     // the same gap as the real BS33-11 mark blocks.
-    let mut spacer = acadrust::entities::Line::default();
+    let mut spacer = codec::entities::Line::default();
     spacer.start = Vector3::new(-10.0, -10.0, 0.0);
     spacer.end = Vector3::new(10.0, 10.0, 0.0);
     let mut spacer_e = EntityType::Line(spacer);
@@ -63,7 +63,7 @@ fn block_text_depth_composes_through_the_instance_path() {
     // per-sibling spacing at a handful of 24-bit quanta, where an oversized
     // wipeout depth bias would swallow it).
     for i in 0..600 {
-        let mut line = acadrust::entities::Line::default();
+        let mut line = codec::entities::Line::default();
         line.start = Vector3::new(f64::from(i) * 10.0 - 3000.0, -50.0, 0.0);
         line.end = Vector3::new(f64::from(i) * 10.0 - 3000.0, 50.0, 0.0);
         let _ = scene.document.add_entity(EntityType::Line(line));

@@ -1,8 +1,8 @@
 //! Associative centre-line construction from lines and linear polyline segments.
 
-use acadrust::entities::{CenterLineAssociation, CenterLineSource};
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
+use codec::entities::{CenterLineAssociation, CenterLineSource};
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};

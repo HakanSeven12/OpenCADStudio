@@ -13,9 +13,9 @@
 // Bulge is stored per vertex (segment i→i+1); positive = CCW, negative = CW.
 // Widths are stored per segment as (start, end).
 
-use acadrust::entities::LwVertex;
-use acadrust::types::Vector2;
-use acadrust::{EntityType, Handle, LwPolyline};
+use codec::entities::LwVertex;
+use codec::types::Vector2;
+use codec::{EntityType, Handle, LwPolyline};
 use glam::{DVec2, DVec3, Vec2, Vec3};
 use crate::t;
 

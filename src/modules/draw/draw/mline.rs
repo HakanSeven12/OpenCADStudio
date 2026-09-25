@@ -1,9 +1,9 @@
 // MLINE command — create a styled group of parallel lines.
 
-use acadrust::entities::{MLine, MLineFlags, MLineJustification, MLineSegment, MLineVertex};
-use acadrust::objects::MLineStyle;
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
+use codec::entities::{MLine, MLineFlags, MLineJustification, MLineSegment, MLineVertex};
+use codec::objects::MLineStyle;
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, WorkingPlane};

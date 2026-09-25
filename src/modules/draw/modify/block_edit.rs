@@ -15,7 +15,7 @@
 // block record in place, so there is no copy-back and no transform — the space
 // render filter (`current_layout_block_handle`) already draws only the block.
 
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -66,7 +66,7 @@ pub struct BlockEditSession {
     /// Rebasing the origin moves them with the definition; Discard restores
     /// their exact on-entry state.
     pub reference_attributes:
-        Vec<(Handle, Vec<acadrust::entities::AttributeEntity>)>,
+        Vec<(Handle, Vec<codec::entities::AttributeEntity>)>,
     /// Camera state of the space that was active when BEDIT began, restored
     /// on Save/Discard so the view returns exactly where it was (#425).
     pub return_camera: crate::scene::view::camera::Camera,
@@ -75,7 +75,7 @@ pub struct BlockEditSession {
     pub editor_camera: crate::scene::view::camera::Camera,
     /// Transient UCS being manipulated in this block tab. On commit its full
     /// frame is baked into the definition and this returns to `None`.
-    pub editor_ucs: Option<acadrust::tables::Ucs>,
+    pub editor_ucs: Option<codec::tables::Ucs>,
 }
 
 // ── BEDIT pick command ─────────────────────────────────────────────────────

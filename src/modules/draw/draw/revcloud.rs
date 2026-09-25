@@ -2,10 +2,10 @@
 
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
-use cadkernel::geom2d::{distance_to, Curve, Polyline, PolylineVertex, Vec2};
-use cadkernel::space::{PlanarCurve, Plane, Vec3};
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
+use kernel::geom2d::{distance_to, Curve, Polyline, PolylineVertex, Vec2};
+use kernel::space::{PlanarCurve, Plane, Vec3};
 use glam::DVec3;
 use rustc_hash::FxHashMap;
 

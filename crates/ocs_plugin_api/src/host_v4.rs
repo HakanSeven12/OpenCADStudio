@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use acadrust::CadDocument;
+use codec::CadDocument;
 
 use crate::shm::{DocumentSnapshotStore, DocumentViewDataV4, DocumentViewInfo};
 

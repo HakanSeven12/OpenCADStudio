@@ -526,7 +526,7 @@ pub fn view_attach<'a>(
 #[derive(Clone)]
 pub struct LayerTarget {
     pub name: String,
-    pub handle: acadrust::Handle,
+    pub handle: codec::Handle,
     pub layers: Vec<String>,
     pub hidden: Vec<String>,
 }

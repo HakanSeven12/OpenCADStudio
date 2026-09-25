@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use cadkernel::geom2d::{
+use kernel::geom2d::{
     inside_spans, Curve as KernelCurve, Line as KernelLine, Tolerance, XLine as KernelXLine,
 };
 
@@ -244,11 +244,11 @@ pub struct HatchModel {
     /// Per-ring DXF role, aligned with the NaN-separated boundary paths.
     pub boundary_exterior: Option<Arc<Vec<bool>>>,
     /// Source entity handles for each boundary ring.
-    pub boundary_sources: Option<Arc<Vec<Vec<acadrust::Handle>>>>,
+    pub boundary_sources: Option<Arc<Vec<Vec<codec::Handle>>>>,
     /// Exact boundary paths retained for persistence and editing.
-    pub boundary_paths: Option<Arc<Vec<acadrust::entities::BoundaryPath>>>,
+    pub boundary_paths: Option<Arc<Vec<codec::entities::BoundaryPath>>>,
     /// Island handling used by the persisted hatch entity.
-    pub style: acadrust::entities::HatchStyleType,
+    pub style: codec::entities::HatchStyleType,
     /// Fill pattern.
     pub pattern: HatchPattern,
     /// Catalog name for this pattern (e.g. "ANSI31", "SOLID", "LINEAR").
@@ -277,14 +277,14 @@ impl HatchModel {
         &self,
         angle_deg: f32,
         shift: f32,
-    ) -> Option<cadkernel::geom2d::GradientFrame> {
+    ) -> Option<kernel::geom2d::GradientFrame> {
         let boundary: Vec<[f64; 2]> = self
             .boundary
             .iter()
             .filter(|point| point[0].is_finite() && point[1].is_finite())
             .map(|point| [point[0] as f64, point[1] as f64])
             .collect();
-        cadkernel::geom2d::gradient_frame(
+        kernel::geom2d::gradient_frame(
             &boundary,
             (angle_deg as f64).to_radians(),
             shift as f64,
@@ -309,7 +309,7 @@ impl HatchModel {
             rings.push(ring);
         }
 
-        let (points, triangles) = cadkernel::geom2d::triangulate_rings(&rings);
+        let (points, triangles) = kernel::geom2d::triangulate_rings(&rings);
         let vertices = points
             .into_iter()
             .map(|[x, y]| [x as f32, y as f32])

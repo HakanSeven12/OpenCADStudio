@@ -1,4 +1,4 @@
-use acadrust::Handle;
+use codec::Handle;
 use glam::DVec3;
 use crate::command::{CadCommand, CmdOption, CmdResult};
 
@@ -6,10 +6,10 @@ static MODE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(255)
 pub fn mode() -> u8 { MODE.load(std::sync::atomic::Ordering::Relaxed) }
 pub fn set_mode(value: u8) { MODE.store(value, std::sync::atomic::Ordering::Relaxed); }
 
-pub fn apply_mask(common: &mut acadrust::entities::EntityCommon, mask: u8, change_byblock: bool) -> bool {
+pub fn apply_mask(common: &mut codec::entities::EntityCommon, mask: u8, change_byblock: bool) -> bool {
     let before = common.clone();
-    if mask & 1 != 0 && (change_byblock || common.color != acadrust::types::Color::ByBlock) {
-        common.color = acadrust::types::Color::ByLayer;
+    if mask & 1 != 0 && (change_byblock || common.color != codec::types::Color::ByBlock) {
+        common.color = codec::types::Color::ByLayer;
         common.color_name = None;
         common.color_book_handle = None;
     }
@@ -17,8 +17,8 @@ pub fn apply_mask(common: &mut acadrust::entities::EntityCommon, mask: u8, chang
         common.linetype = "ByLayer".to_string();
         common.linetype_handle = None;
     }
-    if mask & 4 != 0 && (change_byblock || common.line_weight != acadrust::types::LineWeight::ByBlock) {
-        common.line_weight = acadrust::types::LineWeight::ByLayer;
+    if mask & 4 != 0 && (change_byblock || common.line_weight != codec::types::LineWeight::ByBlock) {
+        common.line_weight = codec::types::LineWeight::ByLayer;
     }
     if mask & 8 != 0 && (change_byblock || common.material_flags != 1) {
         common.material_flags = 0;
@@ -28,8 +28,8 @@ pub fn apply_mask(common: &mut acadrust::entities::EntityCommon, mask: u8, chang
         common.plotstyle_flags = 0;
         common.plotstyle_handle = None;
     }
-    if mask & 128 != 0 && (change_byblock || common.transparency != acadrust::types::Transparency::BY_BLOCK) {
-        common.transparency = acadrust::types::Transparency::BY_LAYER;
+    if mask & 128 != 0 && (change_byblock || common.transparency != codec::types::Transparency::BY_BLOCK) {
+        common.transparency = codec::types::Transparency::BY_LAYER;
     }
     *common != before
 }
@@ -155,8 +155,8 @@ inventory::submit!(crate::command::CommandRegistration { names: &["SETBYLAYERMOD
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::EntityCommon;
-    use acadrust::types::{Color, Transparency};
+    use codec::entities::EntityCommon;
+    use codec::types::{Color, Transparency};
 
     #[test]
     fn mask_changes_only_requested_properties() {

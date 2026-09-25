@@ -8,9 +8,9 @@
 //!
 //! Lift and tessellation failures are reported as an incomplete result.
 
-use cadkernel::acis::lift;
-use acadrust::entities::acis::SatDocument;
-use cadkernel::brep;
+use kernel::acis::lift;
+use codec::entities::acis::SatDocument;
+use kernel::brep;
 
 use crate::scene::convert::solid3d_tess::{body_transform, finalize_mesh};
 use crate::scene::model::mesh_model::{CurvedGen, MeshLodSet};
@@ -56,8 +56,8 @@ pub fn tessellate_sat(
         1.0
     };
     let max_angle = chordal_deflection.map_or_else(
-        || cadkernel::tessellation::angle_for_resolution(resolution),
-        |_| cadkernel::tessellation::display_angle_for_resolution(resolution),
+        || kernel::tessellation::angle_for_resolution(resolution),
+        |_| kernel::tessellation::display_angle_for_resolution(resolution),
     );
 
     // Positions stay f64 until `finalize_mesh` splits them into the coarse
@@ -69,7 +69,7 @@ pub fn tessellate_sat(
     let mut triangle_materials = Vec::new();
     let mut triangle_colors = Vec::new();
     let mut curved_gens = Vec::new();
-    let face_materials: std::collections::HashMap<i32, acadrust::Handle> = document
+    let face_materials: std::collections::HashMap<i32, codec::Handle> = document
         .records
         .iter()
         .filter(|record| record.entity_type == "material-adesk-attrib")
@@ -77,7 +77,7 @@ pub fn tessellate_sat(
             let owner = record.token_pointer(2)?.0;
             let handle = record.token(3)?.as_integer()?;
             (owner >= 0 && handle > 0)
-                .then(|| (owner, acadrust::Handle::new(handle as u64)))
+                .then(|| (owner, codec::Handle::new(handle as u64)))
         })
         .collect();
     let face_colors: std::collections::HashMap<i32, [f32; 4]> = document
@@ -88,9 +88,9 @@ pub fn tessellate_sat(
             let owner = record.token_pointer(2)?.0;
             let value = record.token(3)?.as_integer()?;
             let source = if (1..=255).contains(&value) {
-                acadrust::Color::from_index(value as i16)
+                codec::Color::from_index(value as i16)
             } else if value > 257 {
-                acadrust::Color::from_true_color_value(value as i32)
+                codec::Color::from_true_color_value(value as i32)
             } else {
                 return None;
             };

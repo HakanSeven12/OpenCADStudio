@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use acadrust::entities::{table::CellRange, TableBuilder};
-use acadrust::objects::{ClassObject, ClassObjectData, DataLink, DataLinkCustomData, ObjectType};
-use acadrust::types::{Handle, Vector3};
-use acadrust::{CadDocument, EntityType};
+use codec::entities::{table::CellRange, TableBuilder};
+use codec::objects::{ClassObject, ClassObjectData, DataLink, DataLinkCustomData, ObjectType};
+use codec::types::{Handle, Vector3};
+use codec::{CadDocument, EntityType};
 use iced::Task;
 
 use super::{Message, ModalKind, OpenCADStudio};
@@ -269,7 +269,7 @@ fn table_style_handle(doc: &CadDocument, name: &str) -> Option<Handle> {
     })
 }
 
-fn build_table(rows: &[Vec<String>], style: Option<Handle>, title: Option<&str>) -> acadrust::entities::Table {
+fn build_table(rows: &[Vec<String>], style: Option<Handle>, title: Option<&str>) -> codec::entities::Table {
     let columns = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
     let title_rows = usize::from(title.is_some_and(|value| !value.trim().is_empty()));
     let mut table = TableBuilder::new(rows.len().max(1) + title_rows, columns)
@@ -1029,7 +1029,7 @@ impl OpenCADStudio {
                             cell.has_linked_data = false;
                             cell.data_link_rows = 0;
                             cell.data_link_columns = 0;
-                            cell.state.remove(acadrust::entities::table::CellStateFlags::LINKED | acadrust::entities::table::CellStateFlags::CONTENT_LOCKED | acadrust::entities::table::CellStateFlags::FORMAT_LOCKED);
+                            cell.state.remove(codec::entities::table::CellStateFlags::LINKED | codec::entities::table::CellStateFlags::CONTENT_LOCKED | codec::entities::table::CellStateFlags::FORMAT_LOCKED);
                         }
                     }
                 }

@@ -1,10 +1,10 @@
 // XREF resolution — scan a loaded document for external-reference blocks and
 // populate them with geometry from the referenced DWG/DXF files.
 
-use acadrust::entities::{Block, BlockEnd};
-use acadrust::tables::TableEntry;
-use acadrust::types::{Handle, Vector3};
-use acadrust::{CadDocument, EntityType};
+use codec::entities::{Block, BlockEnd};
+use codec::tables::TableEntry;
+use codec::types::{Handle, Vector3};
+use codec::{CadDocument, EntityType};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::path::{Path, PathBuf};
 
@@ -40,7 +40,7 @@ pub struct XrefInfo {
     pub status: XrefStatus,
     /// Reader diagnostics retained for the recovery report.
     pub diagnostics: Vec<String>,
-    pub read_stats: Option<acadrust::ReadStats>,
+    pub read_stats: Option<codec::ReadStats>,
     pub source_sha256: Option<String>,
 }
 
@@ -119,7 +119,7 @@ fn resolve_xrefs_with_filter(
         String,
         Handle,
         Option<PathBuf>,
-        Option<Result<acadrust::ReadOutcome, String>>,
+        Option<Result<codec::ReadOutcome, String>>,
         Option<String>,
         Option<SourceFingerprint>,
     )> = xref_entries
@@ -217,7 +217,7 @@ fn resolve_xrefs_with_filter(
                     || outcome.stats.skipped_source_records > 0
                     || !outcome.stats.stream_completed
                     || outcome.document.notifications.iter().any(|item| {
-                    item.notification_type == acadrust::notification::NotificationType::Error
+                    item.notification_type == codec::notification::NotificationType::Error
                 });
                 let mut diagnostics: Vec<String> = outcome
                     .document
@@ -311,7 +311,7 @@ fn resolve_xrefs_with_filter(
 #[cfg(not(target_arch = "wasm32"))]
 pub fn register_underlay_sources(doc: &CadDocument, base_dir: &Path) {
     for object in doc.objects.values() {
-        let acadrust::objects::ObjectType::UnderlayDefinition(def) = object else {
+        let codec::objects::ObjectType::UnderlayDefinition(def) = object else {
             continue;
         };
         let stored = def.file_path.as_str();
@@ -328,9 +328,9 @@ pub fn register_underlay_sources(doc: &CadDocument, base_dir: &Path) {
 /// "Layer property overrides" row.
 #[derive(Clone, PartialEq)]
 struct LayerLook {
-    color: acadrust::types::Color,
+    color: codec::types::Color,
     line_type: String,
-    line_weight: acadrust::types::LineWeight,
+    line_weight: codec::types::LineWeight,
     off: bool,
     frozen: bool,
     locked: bool,
@@ -338,7 +338,7 @@ struct LayerLook {
 }
 
 impl LayerLook {
-    fn of(layer: &acadrust::tables::Layer) -> Self {
+    fn of(layer: &codec::tables::Layer) -> Self {
         Self {
             color: layer.color.clone(),
             line_type: layer.line_type.to_uppercase(),
@@ -726,7 +726,7 @@ fn import_xref_symbols(
     // so without an import every bound image loses its file link. Fresh
     // handle, detached owner; the path stays verbatim here.
     {
-        use acadrust::objects::ObjectType;
+        use codec::objects::ObjectType;
         for (handle, obj) in xref_doc.objects.iter() {
             match obj {
                 ObjectType::ImageDefinition(def) => {
@@ -798,7 +798,7 @@ fn remap_xref_entity(
     }
 
     // ── Text-style names (incl. embedded MText in attributes) ──
-    let remap_mtext_style = |mtext: &mut acadrust::entities::MText, maps: &XrefSymbolMaps| {
+    let remap_mtext_style = |mtext: &mut codec::entities::MText, maps: &XrefSymbolMaps| {
         rename(&maps.text_styles, &mut mtext.style);
     };
     match entity {
@@ -862,7 +862,7 @@ fn remap_xref_entity(
                     img.definition_handle = Some(new);
                     // Keep the entity path in sync with its definition (bind
                     // COLLECT retargets the definition before merging).
-                    use acadrust::objects::ObjectType;
+                    use codec::objects::ObjectType;
                     if let Some(ObjectType::ImageDefinition(def)) = host.objects.get(&new) {
                         img.file_path = def.file_name.clone();
                     }
@@ -889,7 +889,7 @@ fn copy_xref_sortents(
     br_handle_map: &HashMap<Handle, Handle>,
     entity_handle_map: &HashMap<Handle, Handle>,
 ) {
-    use acadrust::objects::{ObjectType, SortEntitiesTable};
+    use codec::objects::{ObjectType, SortEntitiesTable};
     let xref_ms_handle = xref_doc.header.model_space_block_handle;
     for obj in xref_doc.objects.values() {
         let ObjectType::SortEntitiesTable(t) = obj else {
@@ -1052,7 +1052,7 @@ fn merge_source_entities(
             continue;
         };
         entity.common_mut().owner_handle = new_owner;
-        // Clear the foreign handle so acadrust assigns a new one.
+        // Clear the foreign handle so opencadcodec assigns a new one.
         set_handle(&mut entity, Handle::NULL);
         if let Ok(new_h) = target.add_entity(entity) {
             entity_handle_map.insert(old_h, new_h);
@@ -1106,7 +1106,7 @@ pub use crate::io::xref_model::child_key;
 /// nested file that fails to parse is skipped silently. Synchronous by
 /// design; async stat is Task 8.
 pub fn collect_entries(
-    doc: &acadrust::CadDocument,
+    doc: &codec::CadDocument,
     base_dir: &Path,
     unloaded: &std::collections::HashSet<crate::io::xref_model::UnloadKey>,
 ) -> Vec<crate::io::xref_model::ReferenceEntry> {
@@ -1116,13 +1116,13 @@ pub fn collect_entries(
 /// [`collect_entries`] with a load-time mtime baseline for `Stale` detection.
 /// See [`collect_entries`] for the full contract.
 pub fn collect_entries_with_prev(
-    doc: &acadrust::CadDocument,
+    doc: &codec::CadDocument,
     base_dir: &Path,
     unloaded: &std::collections::HashSet<crate::io::xref_model::UnloadKey>,
     prev: &std::collections::HashMap<u64, std::time::SystemTime>,
 ) -> Vec<crate::io::xref_model::ReferenceEntry> {
-    use acadrust::entities::UnderlayType;
-    use acadrust::objects::ObjectType;
+    use codec::entities::UnderlayType;
+    use codec::objects::ObjectType;
     use crate::io::xref_model::{
         child_key, decide_status, normalize_lexical, RefKind, RefStatus, RefType,
         ReferenceEntry, UnloadKey,
@@ -1385,7 +1385,7 @@ fn find_target(doc: &CadDocument, key: u64) -> Option<RefTarget> {
         }
     }
     for (handle, obj) in doc.objects.iter() {
-        use acadrust::objects::ObjectType;
+        use codec::objects::ObjectType;
         match obj {
             ObjectType::ImageDefinition(def) if handle.value() == key => {
                 return Some(RefTarget::Image {
@@ -1437,7 +1437,7 @@ pub fn unload_reference(doc: &mut CadDocument, key: u64) -> Result<String, Strin
             }
             // Drop draw-order overrides owned by the unloaded block.
             {
-                use acadrust::objects::ObjectType;
+                use codec::objects::ObjectType;
                 let dead: Vec<Handle> = doc
                     .objects
                     .iter()
@@ -1459,7 +1459,7 @@ pub fn unload_reference(doc: &mut CadDocument, key: u64) -> Result<String, Strin
         RefTarget::Image { name, .. } => Ok(name),
         // A PDF keeps its unloaded state on the definition (saved with it).
         RefTarget::Pdf { handle, name } => {
-            if let Some(acadrust::objects::ObjectType::UnderlayDefinition(def)) =
+            if let Some(codec::objects::ObjectType::UnderlayDefinition(def)) =
                 doc.objects.get_mut(&handle)
             {
                 def.unloaded = true;
@@ -1513,7 +1513,7 @@ pub fn detach_reference(doc: &mut CadDocument, key: u64) -> Result<String, Strin
             remove_pipe_symbols(doc, &name);
             // Draw-order tables owned by the detached block.
             {
-                use acadrust::objects::ObjectType;
+                use codec::objects::ObjectType;
                 let dead: Vec<Handle> = doc
                     .objects
                     .iter()
@@ -1682,8 +1682,8 @@ fn load_bind_source(ref_name: &str, found: &Path) -> Result<CadDocument, String>
 /// Reject PDF underlays anywhere in a bind closure: vector import is
 /// unavailable, and silently dropping them would lose data.
 fn check_no_pdf_underlays(source: &CadDocument) -> Result<(), String> {
-    use acadrust::entities::UnderlayType;
-    use acadrust::objects::ObjectType;
+    use codec::entities::UnderlayType;
+    use codec::objects::ObjectType;
     let has_pdf = source.objects.values().any(|o| {
         matches!(o, ObjectType::UnderlayDefinition(d) if d.underlay_type == UnderlayType::Pdf)
     });
@@ -1794,7 +1794,7 @@ fn collect_bind_images(
     host_dir: &Path,
     only: Option<Handle>,
 ) -> Result<(), String> {
-    use acadrust::objects::ObjectType;
+    use codec::objects::ObjectType;
     let defs: Vec<(Handle, String)> = source
         .objects
         .iter()
@@ -1973,7 +1973,7 @@ fn remove_dependent_symbols(doc: &mut CadDocument, name: &str, layers_too: bool)
         doc.remove_entity(h);
     }
     {
-        use acadrust::objects::ObjectType;
+        use codec::objects::ObjectType;
         let dead: Vec<Handle> = doc
             .objects
             .iter()
@@ -2060,7 +2060,7 @@ fn remove_dependent_symbols(doc: &mut CadDocument, name: &str, layers_too: bool)
 fn snapshot_dependent_layers(
     doc: &CadDocument,
     name: &str,
-) -> HashMap<String, acadrust::tables::Layer> {
+) -> HashMap<String, codec::tables::Layer> {
     let prefix = format!("{}|", name.to_uppercase());
     doc.layers
         .names()
@@ -2082,7 +2082,7 @@ fn snapshot_dependent_layers(
 fn restore_dependent_layers(
     doc: &mut CadDocument,
     name: &str,
-    kept: HashMap<String, acadrust::tables::Layer>,
+    kept: HashMap<String, codec::tables::Layer>,
 ) {
     if kept.is_empty() {
         return;
@@ -2131,7 +2131,7 @@ pub fn set_ref_path(
             Err(crate::t!("XREF: no loaded reference with that key.").to_string())
         }
         RefTarget::Image { handle, name } => {
-            use acadrust::objects::ObjectType;
+            use codec::objects::ObjectType;
             match doc.objects.get_mut(&handle) {
                 Some(ObjectType::ImageDefinition(def)) => {
                     def.file_name = new_raw.to_string();
@@ -2141,7 +2141,7 @@ pub fn set_ref_path(
             }
         }
         RefTarget::Pdf { handle, name } => {
-            use acadrust::objects::ObjectType;
+            use codec::objects::ObjectType;
             match doc.objects.get_mut(&handle) {
                 Some(ObjectType::UnderlayDefinition(def)) => {
                     def.file_path = new_raw.to_string();
@@ -2168,14 +2168,14 @@ pub fn apply_pathtype(
             .map(|b| b.xref_path.clone())
             .unwrap_or_default(),
         Some(RefTarget::Image { handle, .. }) => {
-            use acadrust::objects::ObjectType;
+            use codec::objects::ObjectType;
             match doc.objects.get(&handle) {
                 Some(ObjectType::ImageDefinition(def)) => def.file_name.clone(),
                 _ => String::new(),
             }
         }
         Some(RefTarget::Pdf { handle, .. }) => {
-            use acadrust::objects::ObjectType;
+            use codec::objects::ObjectType;
             match doc.objects.get(&handle) {
                 Some(ObjectType::UnderlayDefinition(def)) => def.file_path.clone(),
                 _ => String::new(),
@@ -2260,7 +2260,7 @@ pub fn replace_path_prefix(doc: &mut CadDocument, old: &str, new: &str) -> usize
         }
     }
     {
-        use acadrust::objects::ObjectType;
+        use codec::objects::ObjectType;
         for obj in doc.objects.values_mut() {
             match obj {
                 ObjectType::ImageDefinition(def) if !def.file_name.is_empty() => {
@@ -2366,7 +2366,7 @@ pub fn rebase_relative_paths_for_save_as(
         rebase(&mut br.xref_path);
     }
     {
-        use acadrust::objects::ObjectType;
+        use codec::objects::ObjectType;
         for obj in doc.objects.values_mut() {
             match obj {
                 ObjectType::ImageDefinition(def) if !def.file_name.is_empty() => {
@@ -2408,8 +2408,8 @@ mod tests {
         std::fs::write(&tmp, b"").unwrap();
         let saved = tmp.to_string_lossy().into_owned();
 
-        let mut doc = acadrust::CadDocument::new();
-        let mut br = acadrust::tables::BlockRecord::new("PLAN");
+        let mut doc = codec::CadDocument::new();
+        let mut br = codec::tables::BlockRecord::new("PLAN");
         br.flags.is_xref = true;
         br.xref_path = saved.clone();
         br.handle = doc.allocate_handle();
@@ -2426,9 +2426,9 @@ mod tests {
         assert_eq!(entries[0].kind, RefKind::DwgXref);
     }
 
-    fn xref_doc_with(name: &str, saved: &str) -> (acadrust::CadDocument, u64) {
-        let mut doc = acadrust::CadDocument::new();
-        let mut br = acadrust::tables::BlockRecord::new(name);
+    fn xref_doc_with(name: &str, saved: &str) -> (codec::CadDocument, u64) {
+        let mut doc = codec::CadDocument::new();
+        let mut br = codec::tables::BlockRecord::new(name);
         br.flags.is_xref = true;
         br.xref_path = saved.to_string();
         br.handle = doc.allocate_handle();
@@ -2454,8 +2454,8 @@ mod tests {
         // mid.dwgxrefs inner.dwg; both must parse (enumeration reads the
         // mid file's block-record table). Returns (mid, inner) abs paths.
         std::fs::write(dir.join("inner.dwg"), b"inner-bytes").unwrap();
-        let mut mid = acadrust::CadDocument::new();
-        let mut br = acadrust::tables::BlockRecord::new("INNER");
+        let mut mid = codec::CadDocument::new();
+        let mut br = codec::tables::BlockRecord::new("INNER");
         br.flags.is_xref = true;
         br.xref_path = dir.join("inner.dwg").to_string_lossy().into_owned();
         mid.block_records.add(br).unwrap();
@@ -2503,7 +2503,7 @@ mod tests {
         // referenced image + unreferenced PDF): attach-equivalent list →
         // unload → targeted reload → detach. Catches integration skew that
         // unit tests on single ops cannot.
-        use acadrust::objects::{ImageDefinition, ObjectType, UnderlayDefinition};
+        use codec::objects::{ImageDefinition, ObjectType, UnderlayDefinition};
         let dir = xref_tmpdir("e2e");
         let (mid_path, _) = write_nested_fixture(&dir);
         std::fs::write(dir.join("img.png"), b"fake-png").unwrap();
@@ -2514,14 +2514,14 @@ mod tests {
         let mut img_def = ImageDefinition::with_dimensions("img.png", 8, 8);
         img_def.handle = img_h;
         doc.objects.insert(img_h, ObjectType::ImageDefinition(img_def));
-        let mut img = acadrust::entities::RasterImage::new(
+        let mut img = codec::entities::RasterImage::new(
             "img.png",
-            acadrust::types::Vector3::ZERO,
+            codec::types::Vector3::ZERO,
             8.0,
             8.0,
         );
         img.definition_handle = Some(img_h);
-        doc.add_entity(acadrust::EntityType::RasterImage(img)).unwrap();
+        doc.add_entity(codec::EntityType::RasterImage(img)).unwrap();
         // Unreferenced PDF definition → listed, never merged.
         let pdf_h = doc.allocate_handle();
         let mut pdf_def = UnderlayDefinition::pdf("doc.pdf", "1");
@@ -2594,8 +2594,8 @@ mod tests {
 
     #[test]
     fn overlay_on_image_errors() {
-        use acadrust::objects::{ImageDefinition, ObjectType};
-        let mut doc = acadrust::CadDocument::new();
+        use codec::objects::{ImageDefinition, ObjectType};
+        let mut doc = codec::CadDocument::new();
         let h = doc.allocate_handle();
         let mut def = ImageDefinition::with_dimensions("img.png", 8, 8);
         def.handle = h;
@@ -2621,10 +2621,10 @@ mod tests {
     fn unload_drops_merged_entities_keeps_definition() {
         let (mut doc, key) = xref_doc_with("PLAN", "missing.dwg");
         let br_h = doc.block_records.get("PLAN").unwrap().handle;
-        let mut line = acadrust::entities::Line::new();
-        line.common.handle = acadrust::types::Handle::NULL;
+        let mut line = codec::entities::Line::new();
+        line.common.handle = codec::types::Handle::NULL;
         line.common.owner_handle = br_h;
-        doc.add_entity(acadrust::EntityType::Line(line)).unwrap();
+        doc.add_entity(codec::EntityType::Line(line)).unwrap();
         assert_eq!(doc.block_records.get("PLAN").unwrap().entity_handles.len(), 1);
         unload_reference(&mut doc, key).expect("unload");
         assert!(doc.block_records.get("PLAN").is_some());
@@ -2638,13 +2638,13 @@ mod tests {
     #[test]
     fn detach_erases_inserts_and_definition() {
         let (mut doc, key) = xref_doc_with("PLAN", "missing.dwg");
-        let ins = acadrust::entities::Insert::new("PLAN", acadrust::types::Vector3::ZERO);
-        doc.add_entity(acadrust::EntityType::Insert(ins)).unwrap();
+        let ins = codec::entities::Insert::new("PLAN", codec::types::Vector3::ZERO);
+        doc.add_entity(codec::EntityType::Insert(ins)).unwrap();
         detach_reference(&mut doc, key).expect("detach");
         assert!(doc.block_records.get("PLAN").is_none());
         assert!(!doc.entities().any(|e| matches!(
             e,
-            acadrust::EntityType::Insert(i) if i.block_name.eq_ignore_ascii_case("PLAN")
+            codec::EntityType::Insert(i) if i.block_name.eq_ignore_ascii_case("PLAN")
         )));
     }
 
@@ -2654,22 +2654,22 @@ mod tests {
         // must survive purge + re-merge. Exercises the mechanism directly:
         // snapshot → mutate to defaults → restore → overrides back.
         let (mut doc, _) = xref_doc_with("PLAN", "plan.dwg");
-        let mut layer = acadrust::tables::Layer::new("PLAN|WALLS");
+        let mut layer = codec::tables::Layer::new("PLAN|WALLS");
         layer.flags.off = true;
         layer.flags.frozen = true;
-        layer.color = acadrust::types::Color::from_index(1);
+        layer.color = codec::types::Color::from_index(1);
         doc.layers.add_or_replace(layer);
         let kept = snapshot_dependent_layers(&doc, "PLAN");
         assert!(kept.contains_key("PLAN|WALLS"));
         // Simulate the purge + file-default re-merge.
         doc.layers.remove("PLAN|WALLS");
-        doc.layers.add_or_replace(acadrust::tables::Layer::new("PLAN|WALLS"));
+        doc.layers.add_or_replace(codec::tables::Layer::new("PLAN|WALLS"));
         assert!(!doc.layers.get("PLAN|WALLS").unwrap().flags.off);
         restore_dependent_layers(&mut doc, "PLAN", kept);
         let back = doc.layers.get("PLAN|WALLS").unwrap();
         assert!(back.flags.off, "off override restored");
         assert!(back.flags.frozen, "frozen override restored");
-        assert_eq!(back.color, acadrust::types::Color::from_index(1));
+        assert_eq!(back.color, codec::types::Color::from_index(1));
     }
 
     #[test]
@@ -2677,7 +2677,7 @@ mod tests {
         // Layers gone from the new file version stay gone — restore only
         // touches entries present post-merge, never resurrects.
         let (mut doc, _) = xref_doc_with("PLAN", "plan.dwg");
-        let mut layer = acadrust::tables::Layer::new("PLAN|GONE");
+        let mut layer = codec::tables::Layer::new("PLAN|GONE");
         layer.flags.off = true;
         doc.layers.add_or_replace(layer);
         let kept = snapshot_dependent_layers(&doc, "PLAN");
@@ -2789,9 +2789,9 @@ mod tests {
         fn write_xref_file(
             dir: &std::path::Path,
             name: &str,
-            build: impl FnOnce(&mut acadrust::CadDocument),
+            build: impl FnOnce(&mut codec::CadDocument),
         ) -> String {
-            let mut doc = acadrust::CadDocument::new();
+            let mut doc = codec::CadDocument::new();
             build(&mut doc);
             let bytes = crate::io::save_to_bytes(&doc, "dwg", doc.version).expect("save xref");
             let path = dir.join(name);
@@ -2799,15 +2799,15 @@ mod tests {
             path.to_string_lossy().into_owned()
         }
 
-        fn line_on(layer: &str) -> acadrust::EntityType {
-            let mut line = acadrust::entities::Line::new();
+        fn line_on(layer: &str) -> codec::EntityType {
+            let mut line = codec::entities::Line::new();
             line.common.layer = layer.to_string();
-            acadrust::EntityType::Line(line)
+            codec::EntityType::Line(line)
         }
 
-        fn add_layer(doc: &mut acadrust::CadDocument, name: &str) {
+        fn add_layer(doc: &mut codec::CadDocument, name: &str) {
             doc.layers
-                .add(acadrust::tables::Layer::new(name))
+                .add(codec::tables::Layer::new(name))
                 .expect("add layer");
         }
 
@@ -2868,7 +2868,7 @@ mod tests {
             let plan_path = write_xref_file(&dir, "plan.dwg", |doc| {
                 add_layer(doc, "PLANLAYER");
                 doc.add_entity(line_on("PLANLAYER")).unwrap();
-                let mut br = acadrust::tables::BlockRecord::new("DETAIL");
+                let mut br = codec::tables::BlockRecord::new("DETAIL");
                 br.flags.is_xref = true;
                 br.xref_path = detail_path.clone();
                 doc.block_records.add(br).expect("add nested xref");
@@ -2893,30 +2893,30 @@ mod tests {
             let xref_path = write_xref_file(&dir, "plan.dwg", |doc| {
                 add_layer(doc, "WALLS");
                 // Nested block with content + a model-space INSERT of it.
-                let mut door = acadrust::tables::BlockRecord::new("DOOR");
+                let mut door = codec::tables::BlockRecord::new("DOOR");
                 door.handle = doc.allocate_handle();
                 let door_h = door.handle;
                 doc.block_records.add(door).expect("add door");
-                let mut inner = acadrust::entities::Line::new();
+                let mut inner = codec::entities::Line::new();
                 inner.common.layer = "WALLS".to_string();
                 inner.common.owner_handle = door_h;
-                doc.add_entity(acadrust::EntityType::Line(inner)).unwrap();
-                let ins = acadrust::entities::Insert::new(
+                doc.add_entity(codec::EntityType::Line(inner)).unwrap();
+                let ins = codec::entities::Insert::new(
                     "DOOR",
-                    acadrust::types::Vector3::ZERO,
+                    codec::types::Vector3::ZERO,
                 );
-                doc.add_entity(acadrust::EntityType::Insert(ins)).unwrap();
+                doc.add_entity(codec::EntityType::Insert(ins)).unwrap();
                 // Hatch (pattern names have no table — preserved verbatim).
-                let mut hatch = acadrust::entities::Hatch::new();
+                let mut hatch = codec::entities::Hatch::new();
                 hatch.pattern.name = "ANSI31".to_string();
-                doc.add_entity(acadrust::EntityType::Hatch(hatch)).unwrap();
+                doc.add_entity(codec::EntityType::Hatch(hatch)).unwrap();
                 // Dim-style reference via a tolerance entity.
                 doc.dim_styles
-                    .add(acadrust::tables::DimStyle::new("ARCH"))
+                    .add(codec::tables::DimStyle::new("ARCH"))
                     .expect("add dimstyle");
-                let mut tol = acadrust::entities::Tolerance::new();
+                let mut tol = codec::entities::Tolerance::new();
                 tol.dimension_style_name = "ARCH".to_string();
-                doc.add_entity(acadrust::EntityType::Tolerance(tol)).unwrap();
+                doc.add_entity(codec::EntityType::Tolerance(tol)).unwrap();
             });
             let (mut host, key) = xref_doc_with("PLAN", &xref_path);
             bind_reference(&mut host, key, &dir, &dir).expect("bind");
@@ -2925,7 +2925,7 @@ mod tests {
             let inserts: Vec<_> = host
                 .entities()
                 .filter_map(|e| match e {
-                    acadrust::EntityType::Insert(i) => Some(i.block_name.clone()),
+                    codec::EntityType::Insert(i) => Some(i.block_name.clone()),
                     _ => None,
                 })
                 .collect();
@@ -2941,7 +2941,7 @@ mod tests {
                 .entities()
                 .filter(|e| {
                     e.common().owner_handle == br.handle
-                        && matches!(e, acadrust::EntityType::Hatch(_))
+                        && matches!(e, codec::EntityType::Hatch(_))
                 })
                 .collect();
             assert_eq!(hatches.len(), 1);
@@ -2949,7 +2949,7 @@ mod tests {
             let tols: Vec<_> = host
                 .entities()
                 .filter_map(|e| match e {
-                    acadrust::EntityType::Tolerance(t) => Some(t.dimension_style_name.clone()),
+                    codec::EntityType::Tolerance(t) => Some(t.dimension_style_name.clone()),
                     _ => None,
                 })
                 .collect();
@@ -2962,22 +2962,22 @@ mod tests {
             let dir = bind_dir("styles");
             let xref_path = write_xref_file(&dir, "plan.dwg", |doc| {
                 doc.text_styles
-                    .add(acadrust::tables::TextStyle::new("NOTE"))
+                    .add(codec::tables::TextStyle::new("NOTE"))
                     .expect("add text style");
-                let mut text = acadrust::entities::Text::new();
+                let mut text = codec::entities::Text::new();
                 text.style = "NOTE".to_string();
-                doc.add_entity(acadrust::EntityType::Text(text)).unwrap();
+                doc.add_entity(codec::EntityType::Text(text)).unwrap();
                 // Two foreign handles that cannot be remapped (plotstyle_flags
                 // set as a real writer would — otherwise the round-trip
                 // drops the handle).
-                let mut line = acadrust::entities::Line::new();
+                let mut line = codec::entities::Line::new();
                 line.common.plotstyle_flags = 0b11;
                 line.common.plotstyle_handle = Some(doc.allocate_handle());
-                doc.add_entity(acadrust::EntityType::Line(line)).unwrap();
-                let mut mline = acadrust::entities::MLine::new();
+                doc.add_entity(codec::EntityType::Line(line)).unwrap();
+                let mut mline = codec::entities::MLine::new();
                 mline.style_name = "STD".to_string();
                 mline.style_handle = Some(doc.allocate_handle());
-                doc.add_entity(acadrust::EntityType::MLine(mline)).unwrap();
+                doc.add_entity(codec::EntityType::MLine(mline)).unwrap();
             });
             let (mut host, key) = xref_doc_with("PLAN", &xref_path);
             let outcome = bind_reference(&mut host, key, &dir, &dir).expect("bind");
@@ -2986,7 +2986,7 @@ mod tests {
             let styles: Vec<_> = host
                 .entities()
                 .filter_map(|e| match e {
-                    acadrust::EntityType::Text(t) => Some(t.style.clone()),
+                    codec::EntityType::Text(t) => Some(t.style.clone()),
                     _ => None,
                 })
                 .collect();
@@ -2996,7 +2996,7 @@ mod tests {
                 .entities()
                 .filter(|e| {
                     e.common().owner_handle == br.handle
-                        && matches!(e, acadrust::EntityType::Line(_))
+                        && matches!(e, codec::EntityType::Line(_))
                 })
                 .collect();
             assert_eq!(lines.len(), 1);
@@ -3004,7 +3004,7 @@ mod tests {
             let mlines: Vec<_> = host
                 .entities()
                 .filter_map(|e| match e {
-                    acadrust::EntityType::MLine(m) => Some(m.style_handle),
+                    codec::EntityType::MLine(m) => Some(m.style_handle),
                     _ => None,
                 })
                 .collect();
@@ -3014,7 +3014,7 @@ mod tests {
 
         #[test]
         fn bind_image_collect_copies_file() {
-            use acadrust::objects::{ImageDefinition, ObjectType};
+            use codec::objects::{ImageDefinition, ObjectType};
             let src_dir = bind_dir("imgsrc");
             let host_dir = bind_dir("imghost");
             std::fs::write(src_dir.join("pixel.png"), b"fakepng").unwrap();
@@ -3023,14 +3023,14 @@ mod tests {
                 let mut def = ImageDefinition::with_dimensions("pixel.png", 8, 8);
                 def.handle = h;
                 doc.objects.insert(h, ObjectType::ImageDefinition(def));
-                let mut img = acadrust::entities::RasterImage::new(
+                let mut img = codec::entities::RasterImage::new(
                     "pixel.png",
-                    acadrust::types::Vector3::ZERO,
+                    codec::types::Vector3::ZERO,
                     8.0,
                     8.0,
                 );
                 img.definition_handle = Some(h);
-                doc.add_entity(acadrust::EntityType::RasterImage(img)).unwrap();
+                doc.add_entity(codec::EntityType::RasterImage(img)).unwrap();
             });
             let (mut host, key) = xref_doc_with("PLAN", &xref_path);
             bind_reference(&mut host, key, &src_dir, &host_dir).expect("bind");
@@ -3052,21 +3052,21 @@ mod tests {
 
         #[test]
         fn bind_image_missing_errors_without_partial_state() {
-            use acadrust::objects::{ImageDefinition, ObjectType};
+            use codec::objects::{ImageDefinition, ObjectType};
             let dir = bind_dir("imgmissing");
             let xref_path = write_xref_file(&dir, "plan.dwg", |doc| {
                 let h = doc.allocate_handle();
                 let mut def = ImageDefinition::with_dimensions("ghost.png", 8, 8);
                 def.handle = h;
                 doc.objects.insert(h, ObjectType::ImageDefinition(def));
-                let mut img = acadrust::entities::RasterImage::new(
+                let mut img = codec::entities::RasterImage::new(
                     "ghost.png",
-                    acadrust::types::Vector3::ZERO,
+                    codec::types::Vector3::ZERO,
                     8.0,
                     8.0,
                 );
                 img.definition_handle = Some(h);
-                doc.add_entity(acadrust::EntityType::RasterImage(img)).unwrap();
+                doc.add_entity(codec::EntityType::RasterImage(img)).unwrap();
             });
             let (mut host, key) = xref_doc_with("PLAN", &xref_path);
             let err = bind_reference(&mut host, key, &dir, &dir).unwrap_err();
@@ -3081,8 +3081,8 @@ mod tests {
 
         #[test]
         fn bind_pdf_errors() {
-            use acadrust::objects::{ObjectType, UnderlayDefinition};
-            let mut host = acadrust::CadDocument::new();
+            use codec::objects::{ObjectType, UnderlayDefinition};
+            let mut host = codec::CadDocument::new();
             let h = host.allocate_handle();
             let mut def = UnderlayDefinition::pdf("doc.pdf", "1");
             def.handle = h;

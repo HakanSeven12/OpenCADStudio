@@ -1,9 +1,9 @@
-use acadrust::entities::{
+use codec::entities::{
     BlockContentConnectionType, FlowDirectionType, LeaderContentType, LineSpacingStyle,
     MultiLeader, MultiLeaderPathType, MultiLeaderPropertyOverrideFlags, TextAlignmentType,
     TextAttachmentDirectionType, TextAttachmentType,
 };
-use cadkernel::geom2d::Transform;
+use kernel::geom2d::Transform;
 
 use crate::entities::text_support::{
     layout_mtext, resolve_text_style, MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
@@ -36,7 +36,7 @@ use glam::DVec3;
 /// vertically-attached leaders (picked by which side the leader comes from),
 /// the left attachment otherwise. Shared by the render and the grips.
 pub(crate) fn active_vertical_attachment(ml: &MultiLeader) -> TextAttachmentType {
-    use acadrust::entities::multileader::TextAttachmentDirectionType;
+    use codec::entities::multileader::TextAttachmentDirectionType;
     match ml.text_attachment_direction {
         TextAttachmentDirectionType::Vertical => {
             let from_top = ml
@@ -95,9 +95,9 @@ pub(crate) fn catmull_rom_pts(ctrl: &[[f64; 3]], segs_per_span: u32) -> Vec<[f64
     out
 }
 
-fn to_render(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+fn to_render(ml: &MultiLeader, document: &codec::CadDocument) -> Option<RenderEntity> {
     let nan = [f64::NAN; 3];
-    let p3 = |v: &acadrust::types::Vector3| -> [f64; 3] { [v.x, v.y, v.z] };
+    let p3 = |v: &codec::types::Vector3| -> [f64; 3] { [v.x, v.y, v.z] };
 
     let arrow_size = ml.context.arrowhead_size;
     let draw_arrow = arrow_size > 0.0;
@@ -185,9 +185,9 @@ fn to_render(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<Rende
                 // Side-anchored on the leader-facing edge so the text reads
                 // outward; flips live with the leader/text side.
                 attach_h_anchor: match ctx.text_attachment_point {
-                    acadrust::entities::multileader::TextAttachmentPointType::Left => 0.0,
-                    acadrust::entities::multileader::TextAttachmentPointType::Center => 0.5,
-                    acadrust::entities::multileader::TextAttachmentPointType::Right => 1.0,
+                    codec::entities::multileader::TextAttachmentPointType::Left => 0.0,
+                    codec::entities::multileader::TextAttachmentPointType::Center => 0.5,
+                    codec::entities::multileader::TextAttachmentPointType::Right => 1.0,
                 },
                 v_anchor: mleader_v_anchor(
                     if text_sign >= 0.0 {
@@ -199,7 +199,7 @@ fn to_render(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<Rende
                 line_spacing_factor: ctx.line_spacing_factor as f32,
                 exact_line_spacing: matches!(
                     ctx.line_spacing_style,
-                    acadrust::entities::LineSpacingStyle::Exactly
+                    codec::entities::LineSpacingStyle::Exactly
                 ),
                 rectangle_height: 0.0,
                 vertical_text: false,
@@ -391,12 +391,12 @@ fn text_box_geom(ml: &MultiLeader) -> ([f64; 2], [f64; 3]) {
     }
     let vertical = matches!(
         ctx.text_flow_direction,
-        acadrust::entities::multileader::FlowDirectionType::Vertical
+        codec::entities::multileader::FlowDirectionType::Vertical
     );
     let h_anchor: f32 = match ctx.text_attachment_point {
-        acadrust::entities::multileader::TextAttachmentPointType::Left => 0.0,
-        acadrust::entities::multileader::TextAttachmentPointType::Center => 0.5,
-        acadrust::entities::multileader::TextAttachmentPointType::Right => 1.0,
+        codec::entities::multileader::TextAttachmentPointType::Left => 0.0,
+        codec::entities::multileader::TextAttachmentPointType::Center => 0.5,
+        codec::entities::multileader::TextAttachmentPointType::Right => 1.0,
     };
     let (dir_v, k) = crate::entities::text_support::flow_grip_axis(
         rot,
@@ -434,7 +434,7 @@ fn text_box_geom(ml: &MultiLeader) -> ([f64; 2], [f64; 3]) {
             line_spacing_factor: ctx.line_spacing_factor as f32,
             exact_line_spacing: matches!(
                 ctx.line_spacing_style,
-                acadrust::entities::LineSpacingStyle::Exactly
+                codec::entities::LineSpacingStyle::Exactly
             ),
             rectangle_height: 0.0,
             vertical_text: vertical,
@@ -534,7 +534,7 @@ fn mleader_landing_geom(
 }
 
 fn set_mleader_text_location(ml: &mut MultiLeader, location: DVec3) {
-    let location = acadrust::types::Vector3::new(location.x, location.y, location.z);
+    let location = codec::types::Vector3::new(location.x, location.y, location.z);
     ml.context.text_location = location;
     ml.context.content_base_point = location;
 }
@@ -704,9 +704,9 @@ fn apply_grip(
                 old_sign
             };
             ml.context.text_attachment_point = if new_sign >= 0.0 {
-                acadrust::entities::multileader::TextAttachmentPointType::Left
+                codec::entities::multileader::TextAttachmentPointType::Left
             } else {
-                acadrust::entities::multileader::TextAttachmentPointType::Right
+                codec::entities::multileader::TextAttachmentPointType::Right
             };
             set_mleader_text_location(ml, target + axis * (new_sign * (dogleg + gap)));
 
@@ -872,7 +872,7 @@ fn choice(label: &str, field: &'static str, selected: &str, opts: &[&str]) -> Pr
     }
 }
 
-fn hexh(h: Option<acadrust::Handle>) -> String {
+fn hexh(h: Option<codec::Handle>) -> String {
     match h {
         Some(h) if !h.is_null() => format!("{:X}", h.value()),
         _ => "(none)".to_string(),
@@ -1135,7 +1135,7 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
                 for line in &mut root.lines {
                     line.path_type = ml.path_type;
                     line.override_flags.insert(
-                        acadrust::entities::LeaderLinePropertyOverrideFlags::PATH_TYPE,
+                        codec::entities::LeaderLinePropertyOverrideFlags::PATH_TYPE,
                     );
                 }
             }
@@ -1215,7 +1215,7 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
                     for line in &mut root.lines {
                         line.arrowhead_size = v;
                         line.override_flags.insert(
-                            acadrust::entities::LeaderLinePropertyOverrideFlags::ARROWHEAD_SIZE,
+                            codec::entities::LeaderLinePropertyOverrideFlags::ARROWHEAD_SIZE,
                         );
                     }
                 }
@@ -1288,7 +1288,7 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
         "block_scale" => {
             if let Some(v) = f64(value) {
                 if v > 0.0 {
-                    ml.block_scale = acadrust::types::Vector3::new(v, v, v);
+                    ml.block_scale = codec::types::Vector3::new(v, v, v);
                     ml.context.block_content_scale = ml.block_scale;
                     ml.property_override_flags
                         .insert(MultiLeaderPropertyOverrideFlags::BLOCK_CONTENT_SCALE);
@@ -1395,7 +1395,7 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
         "text_rotation" => {
             if let Some(v) = f64(value) {
                 ml.context.text_rotation = v.to_radians();
-                ml.context.text_direction = acadrust::types::Vector3::new(
+                ml.context.text_direction = codec::types::Vector3::new(
                     ml.context.text_rotation.cos(),
                     ml.context.text_rotation.sin(),
                     0.0,
@@ -1434,7 +1434,7 @@ fn place_content_after_landing(ml: &mut MultiLeader) {
         (1.0, 0.0)
     };
     let distance = root.landing_distance.max(0.0) + ml.context.landing_gap.max(0.0);
-    let location = acadrust::types::Vector3::new(
+    let location = codec::types::Vector3::new(
         root.connection_point.x + ux * distance,
         root.connection_point.y + uy * distance,
         root.connection_point.z,
@@ -1546,7 +1546,7 @@ fn reflect_xy_direction(dx: &mut f64, dy: &mut f64, p1: DVec3, p2: DVec3) {
 // ── Trait impls ────────────────────────────────────────────────────────────
 
 impl RenderConvertible for MultiLeader {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         to_render(self, document)
     }
 }
@@ -1640,7 +1640,7 @@ impl crate::entities::traits::Grippable for MultiLeader {
         use crate::scene::model::object::GripMenuAction as A;
         // Locate the (root, line) and vertex position owning this grip id.
         let mut idx = 0usize;
-        let mut loc: Option<(usize, usize, acadrust::types::Vector3)> = None;
+        let mut loc: Option<(usize, usize, codec::types::Vector3)> = None;
         'find: for (ri, root) in self.context.leader_roots.iter().enumerate() {
             for (li, line) in root.lines.iter().enumerate() {
                 let n = line.points.len();
@@ -1675,7 +1675,7 @@ impl crate::entities::traits::Grippable for MultiLeader {
                 // below the picked vertex; the user drags it to the final spot.
                 let _ = ri;
                 let off = self.text_height.max(1.0) * 4.0;
-                let arrow = acadrust::types::Vector3::new(vpos.x, vpos.y - off, vpos.z);
+                let arrow = codec::types::Vector3::new(vpos.x, vpos.y - off, vpos.z);
                 if let Some(root) = self.context.leader_roots.last_mut() {
                     root.create_line(vec![arrow]);
                 }
@@ -1701,9 +1701,9 @@ impl crate::entities::traits::Transformable for MultiLeader {
 }
 
 pub(crate) fn block_content_insert(
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     ml: &MultiLeader,
-) -> Option<acadrust::entities::Insert> {
+) -> Option<codec::entities::Insert> {
     if ml.content_type != LeaderContentType::Block || !ml.context.has_block_contents {
         return None;
     }
@@ -1742,7 +1742,7 @@ pub(crate) fn block_content_insert(
             insertion.y -= rotated[1];
         }
     }
-    let mut insert = acadrust::entities::Insert::new(record.name.clone(), insertion);
+    let mut insert = codec::entities::Insert::new(record.name.clone(), insertion);
     insert.set_x_scale(ml.block_scale.x);
     insert.set_y_scale(ml.block_scale.y);
     insert.set_z_scale(ml.block_scale.z);
@@ -1762,14 +1762,14 @@ pub(crate) fn block_content_insert(
 pub trait MultiLeaderTess {
     fn tessellate(
         &self,
-        document: &acadrust::CadDocument,
-        handle: acadrust::Handle,
+        document: &codec::CadDocument,
+        handle: codec::Handle,
         selected: bool,
         entity_color: [f32; 4],
         line_weight_px: f32,
         anno_scale: f32,
-        active_viewport: Option<acadrust::Handle>,
-        annotation_scale_handle: Option<acadrust::Handle>,
+        active_viewport: Option<codec::Handle>,
+        annotation_scale_handle: Option<codec::Handle>,
         block_cache: Option<&crate::scene::cache::block_cache::BlockCache>,
         view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
@@ -1780,14 +1780,14 @@ pub trait MultiLeaderTess {
 impl MultiLeaderTess for MultiLeader {
     fn tessellate(
         &self,
-        document: &acadrust::CadDocument,
-        handle: acadrust::Handle,
+        document: &codec::CadDocument,
+        handle: codec::Handle,
         selected: bool,
         entity_color: [f32; 4],
         line_weight_px: f32,
         anno_scale: f32,
-        active_viewport: Option<acadrust::Handle>,
-        annotation_scale_handle: Option<acadrust::Handle>,
+        active_viewport: Option<codec::Handle>,
+        annotation_scale_handle: Option<codec::Handle>,
         block_cache: Option<&crate::scene::cache::block_cache::BlockCache>,
         view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
@@ -1810,7 +1810,7 @@ impl MultiLeaderTess for MultiLeader {
         // (ByLayer/ByBlock/Default) fall through to the entity's already-resolved
         // pixel width.
         let leader_lw_px = match ml.line_weight {
-            acadrust::types::LineWeight::Value(v) if v >= 0 => (v as f32 / 100.0) * (96.0 / 25.4),
+            codec::types::LineWeight::Value(v) if v >= 0 => (v as f32 / 100.0) * (96.0 / 25.4),
             _ => line_weight_px,
         };
         // ml.line_type_handle — resolve via line_types table by handle and apply
@@ -1835,7 +1835,7 @@ impl MultiLeaderTess for MultiLeader {
 
         let name = handle.value().to_string();
         let nan = [f32::NAN; 3];
-        let p3 = |v: &acadrust::types::Vector3| -> [f32; 3] {
+        let p3 = |v: &codec::types::Vector3| -> [f32; 3] {
             [(v.x) as f32, (v.y) as f32, (v.z) as f32]
         };
 
@@ -1909,7 +1909,7 @@ impl MultiLeaderTess for MultiLeader {
                 let anchor = root.connection_point;
                 let k = context_scale_correction as f64;
 
-                text_loc_w = acadrust::types::Vector3::new(
+                text_loc_w = codec::types::Vector3::new(
                     anchor.x
                         + (text_loc_w.x - anchor.x) * k,
                     anchor.y
@@ -2014,7 +2014,7 @@ impl MultiLeaderTess for MultiLeader {
             // Vertically attached leaders meet the text edge directly.
             let vertical_attach = matches!(
                 ml.text_attachment_direction,
-                acadrust::entities::multileader::TextAttachmentDirectionType::Vertical
+                codec::entities::multileader::TextAttachmentDirectionType::Vertical
             );
             if ml.enable_landing
                 && ml.enable_dogleg
@@ -2107,7 +2107,7 @@ impl MultiLeaderTess for MultiLeader {
             fill_tris_low: Vec::new(),
         });
 
-        let host = acadrust::EntityType::MultiLeader(ml.clone());
+        let host = codec::EntityType::MultiLeader(ml.clone());
         for block_use in crate::scene::render_graph::entity_render_block_uses(document, &host, 1.0)
             .into_iter()
             .filter(|block_use| {
@@ -2218,7 +2218,7 @@ impl MultiLeaderTess for MultiLeader {
             // The stored text attachment point is the insertion's horizontal
             // anchor within the text block (Left/Center/Right) — honour it
             // instead of guessing from the leader side.
-            use acadrust::entities::multileader::{
+            use codec::entities::multileader::{
                 TextAttachmentDirectionType,
             };
             // The context's attachment point exists in every DWG version;
@@ -2258,13 +2258,13 @@ impl MultiLeaderTess for MultiLeader {
                 line_spacing_factor: ctx.line_spacing_factor as f32,
                 exact_line_spacing: matches!(
                     ctx.line_spacing_style,
-                    acadrust::entities::LineSpacingStyle::Exactly
+                    codec::entities::LineSpacingStyle::Exactly
                 ),
                 rectangle_height: 0.0,
                 // Vertical flow (top-to-bottom) is stored per-context.
                 vertical_text: matches!(
                     ctx.text_flow_direction,
-                    acadrust::entities::multileader::FlowDirectionType::Vertical
+                    codec::entities::multileader::FlowDirectionType::Vertical
                 ),
                 want_glyph_boxes: false,
             });
@@ -2425,7 +2425,7 @@ impl MultiLeaderTess for MultiLeader {
             // the leader visually continues under the text, so draw a rule the
             // full text width at the attached line, in the leader's colour.
             {
-                use acadrust::entities::multileader::TextAttachmentType as TA;
+                use codec::entities::multileader::TextAttachmentType as TA;
                 let ul_lines: Option<Vec<usize>> = match vertical_attach {
                     TA::BottomOfTopLineUnderlineTopLine => Some(vec![0]),
                     TA::BottomOfTopLineUnderlineAll => {
@@ -2636,7 +2636,7 @@ impl MultiLeaderTess for MultiLeader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::CadDocument;
+    use codec::CadDocument;
 
     #[test]
     fn test_mleader_arabic_text_tessellation() {
@@ -2649,7 +2649,7 @@ mod tests {
 
         let wires = ml.tessellate(
             &doc,
-            acadrust::Handle::default(),
+            codec::Handle::default(),
             false,
             [1.0, 1.0, 1.0, 1.0],
             1.0,

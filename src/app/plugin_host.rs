@@ -2,8 +2,8 @@
 
 use std::any::Any;
 
-use acadrust::tables::AppId;
-use acadrust::xdata::ExtendedDataRecord;
+use codec::tables::AppId;
+use codec::xdata::ExtendedDataRecord;
 use ocs_plugin_api::host::{CadDocument, EntityType, Handle, HostApi, HostSettingValue};
 use ocs_plugin_api::shm::{DocumentSnapshotStore, DocumentViewData};
 
@@ -90,7 +90,7 @@ impl<'a> HostSession<'a> {
             .or_else(|| self.nested_attribute(handle))
     }
 
-    fn replace_nested_attribute(&mut self, attribute: acadrust::entities::AttributeEntity) -> bool {
+    fn replace_nested_attribute(&mut self, attribute: codec::entities::AttributeEntity) -> bool {
         let owner = attribute.common.owner_handle;
         let handle = attribute.common.handle;
         let Some(EntityType::Insert(mut insert)) = self.document().get_entity(owner).cloned()
@@ -223,7 +223,7 @@ impl<'a> HostSession<'a> {
     /// The `ACAD_IMAGE_DICT` dictionary under the named-objects root, created
     /// when the drawing has none. `None` when the drawing has no root dictionary.
     fn ensure_image_dictionary(&mut self) -> Option<Handle> {
-        use acadrust::objects::{Dictionary, ObjectType};
+        use codec::objects::{Dictionary, ObjectType};
         let root = self.document().header.named_objects_dict_handle;
         let Some(ObjectType::Dictionary(root_dictionary)) = self.document().objects.get(&root) else {
             return None;
@@ -257,7 +257,7 @@ impl<'a> HostSession<'a> {
             .map_err(|error| format!("cannot read image {:?}: {error}", image.file_path))?;
         // One definition per file, as AutoCAD keeps it: reuse an existing one.
         let existing = self.document().objects.iter().find_map(|(handle, object)| match object {
-            acadrust::objects::ObjectType::ImageDefinition(definition)
+            codec::objects::ObjectType::ImageDefinition(definition)
                 if definition.file_name == image.file_path => Some(*handle),
             _ => None,
         });
@@ -265,7 +265,7 @@ impl<'a> HostSession<'a> {
             Some(handle) => handle,
             None => {
                 let handle = self.document_mut().allocate_handle();
-                let mut definition = acadrust::objects::ImageDefinition::with_dimensions(
+                let mut definition = codec::objects::ImageDefinition::with_dimensions(
                     image.file_path.clone(),
                     width,
                     height,
@@ -282,7 +282,7 @@ impl<'a> HostSession<'a> {
                     .to_owned();
                 if let Some(dictionary) = self.ensure_image_dictionary() {
                     definition.owner = dictionary;
-                    if let Some(acadrust::objects::ObjectType::Dictionary(entries)) =
+                    if let Some(codec::objects::ObjectType::Dictionary(entries)) =
                         self.document_mut().objects.get_mut(&dictionary)
                     {
                         let mut key = stem.clone();
@@ -296,7 +296,7 @@ impl<'a> HostSession<'a> {
                 }
                 self.document_mut()
                     .objects
-                    .insert(handle, acadrust::objects::ObjectType::ImageDefinition(definition));
+                    .insert(handle, codec::objects::ObjectType::ImageDefinition(definition));
                 handle
             }
         };
@@ -304,10 +304,10 @@ impl<'a> HostSession<'a> {
         // `size` is the image's pixel size, and an untouched clip boundary
         // covers the whole image, so both follow the file.
         let untouched_clip = image.clip_boundary
-            == acadrust::entities::ClipBoundary::full_image(image.size.x, image.size.y);
-        image.size = acadrust::types::Vector2::new(f64::from(width), f64::from(height));
+            == codec::entities::ClipBoundary::full_image(image.size.x, image.size.y);
+        image.size = codec::types::Vector2::new(f64::from(width), f64::from(height));
         if untouched_clip {
-            image.clip_boundary = acadrust::entities::ClipBoundary::full_image(
+            image.clip_boundary = codec::entities::ClipBoundary::full_image(
                 f64::from(width),
                 f64::from(height),
             );
@@ -522,7 +522,7 @@ impl<'a> HostSession<'a> {
 
     // ── XDATA convenience ──────────────────────────────────────────────────
     // Plugins persist domain data as XDATA on plain entities so it round-trips
-    // through DWG/DXF. These wrap the `acadrust::xdata` API keyed by entity
+    // through DWG/DXF. These wrap the `codec::xdata` API keyed by entity
     // handle and keep the APPID table in sync.
 
     /// Read the XDATA record for `app_name` attached to entity `handle`, if any.
@@ -704,7 +704,7 @@ impl<'a> HostSession<'a> {
                 .ok_or("the geometry kernel refused these dimensions")?;
                 let sat = crate::scene::convert::acis_export::solid_to_sat(&body)
                     .ok_or("the solid could not be exported losslessly")?;
-                let mut solid = acadrust::entities::Solid3D::new();
+                let mut solid = codec::entities::Solid3D::new();
                 solid.wires = model::edge_wires(&body);
                 solid.set_sat_document(&sat);
                 if let Some(layer) = layer {
@@ -728,13 +728,13 @@ impl<'a> HostSession<'a> {
                 if !closed {
                     return Err("the profile must be closed".into());
                 }
-                let body = cadkernel::brep::planar_region(plane, &loops)
+                let body = kernel::brep::planar_region(plane, &loops)
                     .ok_or("the geometry kernel could not build a region from this profile")?;
                 let sat = crate::scene::convert::acis_export::solid_to_sat(&body)
                     .ok_or("the region could not be exported losslessly")?;
-                let mut region = acadrust::entities::Region::new();
+                let mut region = codec::entities::Region::new();
                 region.point_of_reference =
-                    acadrust::types::Vector3::new(plane.origin[0], plane.origin[1], plane.origin[2]);
+                    codec::types::Vector3::new(plane.origin[0], plane.origin[1], plane.origin[2]);
                 region.wires = model::edge_wires(&body);
                 region.set_sat_document(&sat);
                 region.common.layer = layer;
@@ -748,15 +748,15 @@ impl<'a> HostSession<'a> {
                 if !closed {
                     return Err("the profile must be closed".into());
                 }
-                let body = cadkernel::brep::planar_region(plane, &loops)
+                let body = kernel::brep::planar_region(plane, &loops)
                     .ok_or("the geometry kernel could not build a surface from this profile")?;
                 let sat = crate::scene::convert::acis_export::solid_to_sat(&body)
                     .ok_or("the surface could not be exported losslessly")?;
-                let mut surface = acadrust::entities::Surface::new(acadrust::entities::SurfaceKind::Plane);
+                let mut surface = codec::entities::Surface::new(codec::entities::SurfaceKind::Plane);
                 surface.point_of_reference =
-                    acadrust::types::Vector3::new(plane.origin[0], plane.origin[1], plane.origin[2]);
+                    codec::types::Vector3::new(plane.origin[0], plane.origin[1], plane.origin[2]);
                 surface.wires = model::edge_wires(&body);
-                surface.acis_data = acadrust::entities::AcisData::from_sat(&sat.to_sat_string());
+                surface.acis_data = codec::entities::AcisData::from_sat(&sat.to_sat_string());
                 surface.common.layer = layer;
                 self.commit_profile_result(EntityType::Surface(surface), source, delete_source, "Create surface")
             }
@@ -776,7 +776,7 @@ impl<'a> HostSession<'a> {
                 let sat = crate::scene::convert::acis_export::solid_to_sat(&body)
                     .ok_or("the extrusion could not be exported losslessly")?;
                 let result = if closed {
-                    let mut solid = acadrust::entities::Solid3D::new();
+                    let mut solid = codec::entities::Solid3D::new();
                     solid.wires = model::edge_wires(&body);
                     solid.set_sat_document(&sat);
                     solid.common.layer = layer;
@@ -784,9 +784,9 @@ impl<'a> HostSession<'a> {
                 } else {
                     // An open profile sweeps to a surface. The generic kind
                     // carries only the payload, as OCS does after a boolean.
-                    let mut surface = acadrust::entities::Surface::new(acadrust::entities::SurfaceKind::Generic);
+                    let mut surface = codec::entities::Surface::new(codec::entities::SurfaceKind::Generic);
                     surface.wires = model::edge_wires(&body);
-                    surface.acis_data = acadrust::entities::AcisData::from_sat(&sat.to_sat_string());
+                    surface.acis_data = codec::entities::AcisData::from_sat(&sat.to_sat_string());
                     surface.common.layer = layer;
                     EntityType::Surface(surface)
                 };
@@ -801,7 +801,7 @@ impl<'a> HostSession<'a> {
                 let picture = crate::io::ole_embed::EmbeddedImage::from_file(std::path::Path::new(&path))
                     .map_err(|error| format!("cannot read the picture {path:?}: {error}"))?;
                 let (upper_left, lower_right) = crate::io::ole_embed::corners_from_placement(
-                    acadrust::types::Vector3::new(origin[0], origin[1], origin[2]),
+                    codec::types::Vector3::new(origin[0], origin[1], origin[2]),
                     width,
                     picture.aspect(),
                 );
@@ -824,7 +824,7 @@ impl<'a> HostSession<'a> {
                 if layer.as_ref().is_some_and(|name| name.trim().is_empty()) {
                     return Err("layer name is empty".into());
                 }
-                let operand = |host: &Self, handle: Handle, which: &str| -> Result<acadrust::entities::Solid3D, String> {
+                let operand = |host: &Self, handle: Handle, which: &str| -> Result<codec::entities::Solid3D, String> {
                     match host.document().get_entity(handle) {
                         Some(EntityType::Solid3D(solid)) => Ok(solid.clone()),
                         Some(_) => Err(format!("the {which} operand must be a Solid3D")),
@@ -840,7 +840,7 @@ impl<'a> HostSession<'a> {
                         }
                     }
                 }
-                let lift = |solid: &acadrust::entities::Solid3D, which: &str| {
+                let lift = |solid: &codec::entities::Solid3D, which: &str| {
                     crate::scene::convert::solid3d_tess::kernel_acis_body(&solid.acis_data).ok_or_else(|| {
                         format!("the {which} solid's payload cannot be lifted losslessly, so nothing was changed")
                     })
@@ -853,15 +853,15 @@ impl<'a> HostSession<'a> {
                 };
                 let combined = model::boolean_result(kind, &body_a, &body_b).map_err(|snag| {
                     let reason = match snag {
-                        cadkernel::brep::Snag::Coincident => "two faces lie on the same surface, which the kernel cannot resolve",
-                        cadkernel::brep::Snag::CutRefused => "a face could not be cut along the intersection curve",
-                        cadkernel::brep::Snag::NoClosedForm => "the surfaces meet along a curve the kernel has no closed form for",
+                        kernel::brep::Snag::Coincident => "two faces lie on the same surface, which the kernel cannot resolve",
+                        kernel::brep::Snag::CutRefused => "a face could not be cut along the intersection curve",
+                        kernel::brep::Snag::NoClosedForm => "the surfaces meet along a curve the kernel has no closed form for",
                     };
                     format!("the geometry kernel refused this {operation:?} ({snag:?}): {reason}; nothing was changed")
                 })?;
                 let sat = crate::scene::convert::acis_export::solid_to_sat(&combined)
                     .ok_or("the result could not be exported losslessly, so nothing was changed")?;
-                let mut solid = acadrust::entities::Solid3D::new();
+                let mut solid = codec::entities::Solid3D::new();
                 solid.common = a.common.clone();
                 solid.common.handle = Handle::NULL;
                 solid.common.owner_handle = Handle::NULL;
@@ -935,12 +935,12 @@ impl<'a> HostSession<'a> {
                         value.wires = model::edge_wires(&moved);
                         value.silhouettes.clear();
                         value.history_handle = None;
-                        value.acis_data = acadrust::entities::AcisData::from_sat(&sat.to_sat_string());
+                        value.acis_data = codec::entities::AcisData::from_sat(&sat.to_sat_string());
                         // A moved plane is still a plane; a swept surface no longer
                         // matches its stored sweep parameters, so it becomes generic.
-                        if value.kind != acadrust::entities::SurfaceKind::Plane {
-                            value.kind = acadrust::entities::SurfaceKind::Generic;
-                            value.surface_data = acadrust::entities::SurfaceData::Generic;
+                        if value.kind != codec::entities::SurfaceKind::Plane {
+                            value.kind = codec::entities::SurfaceKind::Generic;
+                            value.surface_data = codec::entities::SurfaceData::Generic;
                         }
                     }
                     _ => return Err("transform applies to Solid3D, Body, Region and Surface entities".into()),
@@ -963,7 +963,7 @@ impl<'a> HostSession<'a> {
         source: Handle,
         layer: Option<String>,
         delete_source: bool,
-    ) -> Result<(EntityType, cadkernel::space::Plane, Vec<Vec<cadkernel::geom2d::Curve>>, bool, String), String> {
+    ) -> Result<(EntityType, kernel::space::Plane, Vec<Vec<kernel::geom2d::Curve>>, bool, String), String> {
         if layer.as_ref().is_some_and(|name| name.trim().is_empty()) {
             return Err("layer name is empty".into());
         }
@@ -1080,12 +1080,12 @@ impl<'a> HostSession<'a> {
             None => "Continuous".to_string(),
         };
 
-        let mut layer = acadrust::tables::Layer::new(trimmed);
+        let mut layer = codec::tables::Layer::new(trimmed);
         let handle = doc.allocate_handle();
         layer.handle = handle;
-        layer.color = config.color.unwrap_or(acadrust::types::Color::Index(7));
+        layer.color = config.color.unwrap_or(codec::types::Color::Index(7));
         layer.line_type = resolved_lt;
-        layer.line_weight = config.lineweight.unwrap_or(acadrust::types::LineWeight::ByLayer);
+        layer.line_weight = config.lineweight.unwrap_or(codec::types::LineWeight::ByLayer);
         layer.flags.off = config.off.unwrap_or(false);
         if let Some(frz) = config.frozen {
             if frz {
@@ -1096,7 +1096,7 @@ impl<'a> HostSession<'a> {
         }
         layer.flags.locked = config.locked.unwrap_or(false);
         layer.is_plottable = config.plottable.unwrap_or(true);
-        layer.transparency = config.transparency.unwrap_or(acadrust::types::Transparency::ByLayer);
+        layer.transparency = config.transparency.unwrap_or(codec::types::Transparency::ByLayer);
         layer.description = config.description.unwrap_or_default();
 
         let _ = doc.layers.add(layer);
@@ -1129,18 +1129,18 @@ impl<'a> HostSession<'a> {
             name == "0" || name.eq_ignore_ascii_case("Defpoints")
         };
         let same_name = |a: &str, b: &str| a.trim().to_uppercase() == b.trim().to_uppercase();
-        let check_color = |color: &acadrust::types::Color| match color {
-            acadrust::types::Color::ByLayer
-            | acadrust::types::Color::ByBlock
-            | acadrust::types::Color::None => Err("a layer color must be an index 1-255 or an RGB value".to_owned()),
-            acadrust::types::Color::Index(0) => Err("a layer color index must be 1-255".to_owned()),
+        let check_color = |color: &codec::types::Color| match color {
+            codec::types::Color::ByLayer
+            | codec::types::Color::ByBlock
+            | codec::types::Color::None => Err("a layer color must be an index 1-255 or an RGB value".to_owned()),
+            codec::types::Color::Index(0) => Err("a layer color index must be 1-255".to_owned()),
             _ => Ok(()),
         };
         let check_config = |config: &ocs_plugin_api::host::LayerConfig| -> Result<(), String> {
             if let Some(color) = &config.color {
                 check_color(color)?;
             }
-            if let Some(acadrust::types::LineWeight::Value(value)) = config.lineweight {
+            if let Some(codec::types::LineWeight::Value(value)) = config.lineweight {
                 if !(0..=211).contains(&value) {
                     return Err("a layer lineweight must be between 0 and 211 (1/100 mm)".to_owned());
                 }
@@ -1495,10 +1495,10 @@ impl<'a> HostSession<'a> {
             }
             Ok(())
         };
-        let build = |lt: &mut acadrust::tables::LineType, pattern: &[f64]| {
+        let build = |lt: &mut codec::tables::LineType, pattern: &[f64]| {
             lt.elements = pattern
                 .iter()
-                .map(|length| acadrust::tables::linetype::LineTypeElement { length: *length, complex: None })
+                .map(|length| codec::tables::linetype::LineTypeElement { length: *length, complex: None })
                 .collect();
             lt.pattern_length = pattern.iter().map(|v| v.abs()).sum();
         };
@@ -1521,7 +1521,7 @@ impl<'a> HostSession<'a> {
                 check_pattern(&pattern)?;
                 check_description(&description)?;
                 self.push_undo("Create linetype");
-                let mut lt = acadrust::tables::LineType::new(name.clone());
+                let mut lt = codec::tables::LineType::new(name.clone());
                 lt.description = description;
                 build(&mut lt, &pattern);
                 let handle = self.document_mut().allocate_handle();
@@ -1647,7 +1647,7 @@ impl<'a> HostSession<'a> {
     /// They act on the active document because switching layouts drives the
     /// application's view state.
     fn layout_operation(&mut self, operation: ocs_plugin_api::host::TableOperation) -> Result<Handle, String> {
-        use acadrust::objects::ObjectType;
+        use codec::objects::ObjectType;
         use ocs_plugin_api::host::TableOperation;
         if self.tab != self.app.active_tab {
             return Err("layout operations act on the active document; switch to it first".to_owned());
@@ -1773,10 +1773,10 @@ impl<'a> HostSession<'a> {
                 }
                 let rotation_code = match rotation {
                     None => None,
-                    Some(0) => Some(acadrust::objects::PlotRotation::None),
-                    Some(90) => Some(acadrust::objects::PlotRotation::Degrees90),
-                    Some(180) => Some(acadrust::objects::PlotRotation::Degrees180),
-                    Some(270) => Some(acadrust::objects::PlotRotation::Degrees270),
+                    Some(0) => Some(codec::objects::PlotRotation::None),
+                    Some(90) => Some(codec::objects::PlotRotation::Degrees90),
+                    Some(180) => Some(codec::objects::PlotRotation::Degrees180),
+                    Some(270) => Some(codec::objects::PlotRotation::Degrees270),
                     Some(_) => return Err("the plot rotation must be 0, 90, 180 or 270 degrees".to_owned()),
                 };
                 if let Some([numerator, denominator]) = scale {
@@ -1802,11 +1802,11 @@ impl<'a> HostSession<'a> {
                         layout.plot_scale_numerator = numerator;
                         layout.plot_scale_denominator = denominator;
                         layout.plot_scale_factor = numerator / denominator;
-                        layout.plot_scale_type = acadrust::objects::ScaledType::CustomScale.to_code();
+                        layout.plot_scale_type = codec::objects::ScaledType::CustomScale.to_code();
                         layout.plot_flags.use_standard_scale = false;
                     }
-                    let quarter_turn = layout.plot_rotation == acadrust::objects::PlotRotation::Degrees90.to_code()
-                        || layout.plot_rotation == acadrust::objects::PlotRotation::Degrees270.to_code();
+                    let quarter_turn = layout.plot_rotation == codec::objects::PlotRotation::Degrees90.to_code()
+                        || layout.plot_rotation == codec::objects::PlotRotation::Degrees270.to_code();
                     let (x, y) = if quarter_turn {
                         (layout.paper_height, layout.paper_width)
                     } else {
@@ -1835,7 +1835,7 @@ impl<'a> HostSession<'a> {
     /// Block definition operations: create from entities, modify settings,
     /// rename (inserts follow) and delete an unreferenced definition.
     fn block_operation(&mut self, operation: ocs_plugin_api::host::TableOperation) -> Result<Handle, String> {
-        use acadrust::entities::EntityType as E;
+        use codec::entities::EntityType as E;
         use ocs_plugin_api::host::TableOperation;
         let editable_block = |doc: &CadDocument, name: &str| -> Result<(String, Handle), String> {
             let record = doc
@@ -1898,7 +1898,7 @@ impl<'a> HostSession<'a> {
                     .define_block_from_owned_entities(sources, &name, base)?;
                 let (stored, handle) = editable_block(self.document(), &name)?;
                 if let Some(record) = self.document_mut().block_records.get_mut(&stored) {
-                    record.base_point = acadrust::types::Vector3::new(base_point[0], base_point[1], base_point[2]);
+                    record.base_point = codec::types::Vector3::new(base_point[0], base_point[1], base_point[2]);
                     if let Some(text) = description {
                         record.description = text;
                     }
@@ -1906,7 +1906,7 @@ impl<'a> HostSession<'a> {
                 let marker = self.document().block_records.get(&stored).map(|r| r.block_entity_handle);
                 if let Some(marker) = marker {
                     if let Some(E::Block(block)) = self.document_mut().get_entity_mut(marker) {
-                        block.base_point = acadrust::types::Vector3::new(base_point[0], base_point[1], base_point[2]);
+                        block.base_point = codec::types::Vector3::new(base_point[0], base_point[1], base_point[2]);
                     }
                 }
                 if erase_originals {
@@ -2029,7 +2029,7 @@ impl<'a> HostSession<'a> {
                     doc.objects
                         .iter()
                         .filter_map(|(h, object)| match object {
-                            acadrust::objects::ObjectType::SortEntitiesTable(table) if !live.contains(&table.block_owner_handle) => Some(*h),
+                            codec::objects::ObjectType::SortEntitiesTable(table) if !live.contains(&table.block_owner_handle) => Some(*h),
                             _ => None,
                         })
                         .collect()
@@ -2080,7 +2080,7 @@ impl<'a> HostSession<'a> {
                 if self.app.style_exists(StyleKind::Text, &name) {
                     return Err(format!("text style {name:?} already exists"));
                 }
-                let mut style = acadrust::tables::TextStyle::new(name.clone());
+                let mut style = codec::tables::TextStyle::new(name.clone());
                 apply_text_style_config(&mut style, &config)?;
                 self.push_undo("Create text style");
                 let handle = self.document_mut().allocate_handle();
@@ -2117,7 +2117,7 @@ impl<'a> HostSession<'a> {
                         let (source, _) = stored(self.document(), TableStyleKind::Dim, source.trim())?;
                         self.document().dim_styles.get(&source).cloned().expect("checked above")
                     }
-                    None => acadrust::tables::DimStyle::new(name.clone()),
+                    None => codec::tables::DimStyle::new(name.clone()),
                 };
                 let mut style = apply_dim_style_json(self.document(), &base, &properties)?;
                 self.push_undo("Create dimension style");
@@ -2409,7 +2409,7 @@ fn validated_symbol_name(raw: &str, what: &str) -> Result<String, String> {
 }
 
 fn apply_text_style_config(
-    style: &mut acadrust::tables::TextStyle,
+    style: &mut codec::tables::TextStyle,
     config: &ocs_plugin_api::host::TextStyleConfig,
 ) -> Result<(), String> {
     let text = |what: &str, value: &str| {
@@ -2470,9 +2470,9 @@ fn apply_text_style_config(
 /// must name an existing text style, whose handle is linked here.
 fn apply_dim_style_json(
     doc: &CadDocument,
-    base: &acadrust::tables::DimStyle,
+    base: &codec::tables::DimStyle,
     properties: &str,
-) -> Result<acadrust::tables::DimStyle, String> {
+) -> Result<codec::tables::DimStyle, String> {
     let patch: serde_json::Value = serde_json::from_str(properties)
         .map_err(|e| format!("dimension style properties are not valid JSON: {e}"))?;
     let serde_json::Value::Object(patch) = patch else {
@@ -2489,7 +2489,7 @@ fn apply_dim_style_json(
         }
         object.insert(key, new);
     }
-    let mut style: acadrust::tables::DimStyle = serde_json::from_value(value)
+    let mut style: codec::tables::DimStyle = serde_json::from_value(value)
         .map_err(|e| format!("invalid dimension style value: {e}"))?;
     if !(style.dimscale.is_finite() && style.dimscale > 0.0) {
         return Err("dimscale must be greater than zero".to_owned());
@@ -2511,8 +2511,8 @@ fn apply_dim_style_json(
 /// The stored spelling of `name` in the drawing's linetype table, loading the
 /// standard linetypes first when it is not there yet. `None` when the drawing
 /// cannot supply it: a layer must not reference a linetype that does not exist.
-fn resolve_linetype(doc: &mut acadrust::CadDocument, name: &str) -> Option<String> {
-    let stored = |doc: &acadrust::CadDocument| doc.line_types.get(name).map(|lt| lt.name.clone());
+fn resolve_linetype(doc: &mut codec::CadDocument, name: &str) -> Option<String> {
+    let stored = |doc: &codec::CadDocument| doc.line_types.get(name).map(|lt| lt.name.clone());
     stored(doc).or_else(|| {
         crate::io::linetypes::populate_document(doc);
         stored(doc)
@@ -2948,8 +2948,8 @@ mod tests {
     use super::*;
     use crate::app::OpenCADStudio;
     use crate::entities::traits::RenderConvertible;
-    use acadrust::entities::{Line, Point};
-    use acadrust::xdata::XDataValue;
+    use codec::entities::{Line, Point};
+    use codec::xdata::XDataValue;
     use ocs_plugin_api::host::DocumentReader;
 
     #[test]
@@ -2980,25 +2980,25 @@ mod tests {
             let record_handle = Handle::new(next);
             let block_handle = Handle::new(next + 1);
             let block_end_handle = Handle::new(next + 2);
-            let mut record = acadrust::tables::BlockRecord::new("TAGBLOCK");
+            let mut record = codec::tables::BlockRecord::new("TAGBLOCK");
             record.handle = record_handle;
             record.block_entity_handle = block_handle;
             record.block_end_handle = block_end_handle;
             host.document_mut().block_records.add(record).unwrap();
             let mut block =
-                acadrust::entities::Block::new("TAGBLOCK", acadrust::types::Vector3::ZERO);
+                codec::entities::Block::new("TAGBLOCK", codec::types::Vector3::ZERO);
             block.common.handle = block_handle;
             block.common.owner_handle = record_handle;
             host.document_mut()
                 .add_entity(EntityType::Block(block))
                 .unwrap();
-            let mut end = acadrust::entities::BlockEnd::new();
+            let mut end = codec::entities::BlockEnd::new();
             end.common.handle = block_end_handle;
             end.common.owner_handle = record_handle;
             host.document_mut()
                 .add_entity(EntityType::BlockEnd(end))
                 .unwrap();
-            let mut definition = acadrust::entities::AttributeDefinition::new(
+            let mut definition = codec::entities::AttributeDefinition::new(
                 "PART_NO".into(),
                 "Part number".into(),
                 "PN-001".into(),
@@ -3010,17 +3010,17 @@ mod tests {
                 .unwrap();
             insert_handle = host
                 .document_mut()
-                .add_entity(EntityType::Insert(acadrust::entities::Insert::new(
+                .add_entity(EntityType::Insert(codec::entities::Insert::new(
                     "TAGBLOCK",
-                    acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+                    codec::types::Vector3::new(10.0, 0.0, 0.0),
                 )))
                 .unwrap();
 
             let mut attribute =
-                acadrust::entities::AttributeEntity::new("PART_NO".into(), "PN-101".into());
+                codec::entities::AttributeEntity::new("PART_NO".into(), "PN-101".into());
             attribute.common.owner_handle = insert_handle;
             attribute.attdef_handle = definition_handle;
-            attribute.insertion_point = acadrust::types::Vector3::new(10.0, 2.0, 0.0);
+            attribute.insertion_point = codec::types::Vector3::new(10.0, 2.0, 0.0);
             host.push_undo("Create attribute");
             attribute_handle = host.add_entity(EntityType::AttributeEntity(attribute));
             assert!(!attribute_handle.is_null());
@@ -3082,8 +3082,8 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
-        let annotation = host.add_entity(EntityType::Text(acadrust::entities::Text::default()));
-        let mut leader = acadrust::entities::Leader::default();
+        let annotation = host.add_entity(EntityType::Text(codec::entities::Text::default()));
+        let mut leader = codec::entities::Leader::default();
         leader.annotation_handle = annotation;
         let leader_handle = host.add_entity(EntityType::Leader(leader));
         host.set_selection(&[leader_handle]).unwrap();
@@ -3097,10 +3097,10 @@ mod tests {
         let (first, second);
         {
             let mut host = HostSession::new(&mut app, 0);
-            first = host.add_entity(EntityType::Point(Point::at(acadrust::types::Vector3::new(
+            first = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
                 1.0, 0.0, 0.0,
             ))));
-            second = host.add_entity(EntityType::Point(Point::at(acadrust::types::Vector3::new(
+            second = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
                 2.0, 0.0, 0.0,
             ))));
             let mut a = host.document().get_entity(first).unwrap().clone();
@@ -3245,17 +3245,17 @@ mod tests {
             "rejected batch changed the line"
         );
         let dwg_bytes =
-            acadrust::DwgWriter::write_to_vec(host.document()).expect("write edited DWG");
-        let dwg_doc = acadrust::DwgReader::from_stream(std::io::Cursor::new(dwg_bytes))
+            codec::DwgWriter::write_to_vec(host.document()).expect("write edited DWG");
+        let dwg_doc = codec::DwgReader::from_stream(std::io::Cursor::new(dwg_bytes))
             .read()
             .expect("reopen edited DWG");
         assert!(
             matches!(dwg_doc.get_entity(handle), Some(EntityType::Line(line)) if line.end.x == 5.0)
         );
-        let dxf_bytes = acadrust::DxfWriter::new(host.document())
+        let dxf_bytes = codec::DxfWriter::new(host.document())
             .write_to_vec()
             .expect("write edited DXF");
-        let dxf_doc = acadrust::DxfReader::from_reader(std::io::Cursor::new(dxf_bytes))
+        let dxf_doc = codec::DxfReader::from_reader(std::io::Cursor::new(dxf_bytes))
             .expect("open edited DXF")
             .read()
             .expect("reopen edited DXF");
@@ -3337,7 +3337,7 @@ mod tests {
         };
         assert_eq!(
             created.insertion_point,
-            acadrust::types::Vector3::new(1.0, 2.0, 0.0)
+            codec::types::Vector3::new(1.0, 2.0, 0.0)
         );
         assert_eq!(created.dimension_style_name, "Standard");
         let created = created.clone();
@@ -3385,9 +3385,9 @@ mod tests {
         };
         assert_eq!(
             edited.insertion_point,
-            acadrust::types::Vector3::new(4.0, 5.0, 0.0)
+            codec::types::Vector3::new(4.0, 5.0, 0.0)
         );
-        assert_eq!(edited.direction, acadrust::types::Vector3::UNIT_Y);
+        assert_eq!(edited.direction, codec::types::Vector3::UNIT_Y);
         assert_eq!(edited.text, "POSITION%%v0.2");
         assert_eq!(edited.common, created.common);
         assert_eq!(edited.normal, created.normal);
@@ -3430,18 +3430,18 @@ mod tests {
             .text
             .contains("does not exist"));
 
-        let dwg_bytes = acadrust::DwgWriter::write_to_vec(host.document()).unwrap();
-        let dwg_doc = acadrust::DwgReader::from_stream(std::io::Cursor::new(dwg_bytes))
+        let dwg_bytes = codec::DwgWriter::write_to_vec(host.document()).unwrap();
+        let dwg_doc = codec::DwgReader::from_stream(std::io::Cursor::new(dwg_bytes))
             .read()
             .unwrap();
         assert!(
             matches!(dwg_doc.get_entity(handle), Some(EntityType::Tolerance(value))
             if value.insertion_point.x == 4.0 && value.text == "POSITION%%v0.2")
         );
-        let dxf_bytes = acadrust::DxfWriter::new(host.document())
+        let dxf_bytes = codec::DxfWriter::new(host.document())
             .write_to_vec()
             .unwrap();
-        let dxf_doc = acadrust::DxfReader::from_reader(std::io::Cursor::new(dxf_bytes))
+        let dxf_doc = codec::DxfReader::from_reader(std::io::Cursor::new(dxf_bytes))
             .unwrap()
             .read()
             .unwrap();
@@ -3500,7 +3500,7 @@ mod tests {
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
         let style_handle = host.document_mut().allocate_handle();
-        let mut style = acadrust::tables::TextStyle::new("TestShapes");
+        let mut style = codec::tables::TextStyle::new("TestShapes");
         style.handle = style_handle;
         style.is_shape_file = true;
         style.font_file = shx_path.to_string_lossy().into_owned();
@@ -3582,7 +3582,7 @@ mod tests {
         };
         assert_eq!(
             edited.insertion_point,
-            acadrust::types::Vector3::new(4.0, 5.0, 0.0)
+            codec::types::Vector3::new(4.0, 5.0, 0.0)
         );
         assert_eq!(edited.size, 3.0);
         assert_eq!(edited.rotation, 0.5);
@@ -3639,13 +3639,13 @@ mod tests {
             .text
             .contains("does not exist"));
 
-        let dwg_bytes = acadrust::DwgWriter::write_to_vec(host.document()).unwrap();
+        let dwg_bytes = codec::DwgWriter::write_to_vec(host.document()).unwrap();
         let dwg_doc = crate::io::load_bytes("shape.dwg", dwg_bytes).unwrap();
         let dwg_entity = dwg_doc.get_entity(handle).expect("Shape survives DWG");
         assert!(matches!(dwg_entity, EntityType::Shape(value)
             if value.shape_number == 1 && value.size == 3.0 && value.rotation == 0.5));
         assert_real_glyph(dwg_entity, &dwg_doc);
-        let dxf_bytes = acadrust::DxfWriter::new(host.document())
+        let dxf_bytes = codec::DxfWriter::new(host.document())
             .write_to_vec()
             .unwrap();
         let dxf_doc = crate::io::load_bytes("shape.dxf", dxf_bytes).unwrap();
@@ -3699,26 +3699,26 @@ mod tests {
         let block_record_handle = Handle::new(next);
         let block_handle = Handle::new(next + 1);
         let block_end_handle = Handle::new(next + 2);
-        let mut block_record = acadrust::tables::BlockRecord::new("TAGBLOCK");
+        let mut block_record = codec::tables::BlockRecord::new("TAGBLOCK");
         block_record.handle = block_record_handle;
         block_record.block_entity_handle = block_handle;
         block_record.block_end_handle = block_end_handle;
         host.document_mut().block_records.add(block_record).unwrap();
-        let mut block = acadrust::entities::Block::new("TAGBLOCK", acadrust::types::Vector3::ZERO);
+        let mut block = codec::entities::Block::new("TAGBLOCK", codec::types::Vector3::ZERO);
         block.common.handle = block_handle;
         block.common.owner_handle = block_record_handle;
         host.document_mut()
             .add_entity(EntityType::Block(block))
             .unwrap();
-        let mut block_end = acadrust::entities::BlockEnd::new();
+        let mut block_end = codec::entities::BlockEnd::new();
         block_end.common.handle = block_end_handle;
         block_end.common.owner_handle = block_record_handle;
         host.document_mut()
             .add_entity(EntityType::BlockEnd(block_end))
             .unwrap();
-        let insert = acadrust::entities::Insert::new(
+        let insert = codec::entities::Insert::new(
             "TAGBLOCK",
-            acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+            codec::types::Vector3::new(10.0, 0.0, 0.0),
         );
         let insert_handle = host
             .document_mut()
@@ -3807,7 +3807,7 @@ mod tests {
         };
         assert_eq!(
             edited.insertion_point,
-            acadrust::types::Vector3::new(4.0, 5.0, 0.0)
+            codec::types::Vector3::new(4.0, 5.0, 0.0)
         );
         assert_eq!(edited.default_value, "PN-002");
         assert_eq!(edited.rotation, 0.25);
@@ -3867,7 +3867,7 @@ mod tests {
                 matches!(actual, Some(EntityType::AttributeDefinition(value))
                 if value.common.owner_handle == block_record_handle
                     && value.tag == "PART_NO" && value.default_value == "PN-002"
-                    && value.insertion_point == acadrust::types::Vector3::new(4.0, 5.0, 0.0)
+                    && value.insertion_point == codec::types::Vector3::new(4.0, 5.0, 0.0)
                     && (value.rotation - 0.25).abs() < 1e-12),
                 "{label}: {actual:?}"
             );
@@ -3890,14 +3890,14 @@ mod tests {
                 if value.block_name == "TAGBLOCK")
             );
         };
-        let dwg_bytes = acadrust::DwgWriter::write_to_vec(host.document()).unwrap();
+        let dwg_bytes = codec::DwgWriter::write_to_vec(host.document()).unwrap();
         let dwg_doc = crate::io::load_bytes("attribute-definition.dwg", dwg_bytes).unwrap();
         assert_persisted("DWG", &dwg_doc, true);
-        let dxf_bytes = acadrust::DxfWriter::new(host.document())
+        let dxf_bytes = codec::DxfWriter::new(host.document())
             .write_to_vec()
             .unwrap();
         let dxf_doc = crate::io::load_bytes("attribute-definition.dxf", dxf_bytes).unwrap();
-        // The pinned cadcodec DXF ATTDEF reader retains identity, placement,
+        // The pinned opencadcodec DXF ATTDEF reader retains identity, placement,
         // height, value, prompt and rotation, but currently drops several
         // optional AcDbText fields such as width factor. Keep that external
         // codec gap explicit in the coverage ledger rather than claiming a
@@ -3915,14 +3915,14 @@ mod tests {
         // CadDocument intentionally leaves the block membership slot in place
         // so delta undo can restore the shared entity without rewriting the
         // record. Writers must still omit the absent entity.
-        let deleted_dwg = acadrust::DwgWriter::write_to_vec(host.document()).unwrap();
+        let deleted_dwg = codec::DwgWriter::write_to_vec(host.document()).unwrap();
         assert!(
             crate::io::load_bytes("attribute-definition-deleted.dwg", deleted_dwg)
                 .unwrap()
                 .get_entity(handle)
                 .is_none()
         );
-        let deleted_dxf = acadrust::DxfWriter::new(host.document())
+        let deleted_dxf = codec::DxfWriter::new(host.document())
             .write_to_vec()
             .unwrap();
         assert!(
@@ -3965,39 +3965,39 @@ mod tests {
         let record_handle = Handle::new(next);
         let block_handle = Handle::new(next + 1);
         let end_handle = Handle::new(next + 2);
-        let mut record = acadrust::tables::BlockRecord::new("TAGBLOCK");
+        let mut record = codec::tables::BlockRecord::new("TAGBLOCK");
         record.handle = record_handle;
         record.block_entity_handle = block_handle;
         record.block_end_handle = end_handle;
         host.document_mut().block_records.add(record).unwrap();
-        let mut block = acadrust::entities::Block::new("TAGBLOCK", acadrust::types::Vector3::ZERO);
+        let mut block = codec::entities::Block::new("TAGBLOCK", codec::types::Vector3::ZERO);
         block.common.handle = block_handle;
         block.common.owner_handle = record_handle;
         host.document_mut()
             .add_entity(EntityType::Block(block))
             .unwrap();
-        let mut end = acadrust::entities::BlockEnd::new();
+        let mut end = codec::entities::BlockEnd::new();
         end.common.handle = end_handle;
         end.common.owner_handle = record_handle;
         host.document_mut()
             .add_entity(EntityType::BlockEnd(end))
             .unwrap();
-        let mut definition = acadrust::entities::AttributeDefinition::new(
+        let mut definition = codec::entities::AttributeDefinition::new(
             "PART_NO".into(),
             "Part number".into(),
             "PN-001".into(),
         );
         definition.common.owner_handle = record_handle;
-        definition.insertion_point = acadrust::types::Vector3::new(0.0, 2.0, 0.0);
+        definition.insertion_point = codec::types::Vector3::new(0.0, 2.0, 0.0);
         let definition_handle = host
             .document_mut()
             .add_entity(EntityType::AttributeDefinition(definition))
             .unwrap();
         let insert_handle = host
             .document_mut()
-            .add_entity(EntityType::Insert(acadrust::entities::Insert::new(
+            .add_entity(EntityType::Insert(codec::entities::Insert::new(
                 "TAGBLOCK",
-                acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+                codec::types::Vector3::new(10.0, 0.0, 0.0),
             )))
             .unwrap();
 
@@ -4072,7 +4072,7 @@ mod tests {
         assert_eq!(edited.value, "PN-102");
         assert_eq!(
             edited.insertion_point,
-            acadrust::types::Vector3::new(12.0, 3.0, 0.0)
+            codec::types::Vector3::new(12.0, 3.0, 0.0)
         );
         assert_eq!(edited.common, created.common);
         assert_eq!(edited.attdef_handle, definition_handle);
@@ -4120,14 +4120,14 @@ mod tests {
         assert_saved(
             &crate::io::load_bytes(
                 "attribute.dwg",
-                acadrust::DwgWriter::write_to_vec(host.document()).unwrap(),
+                codec::DwgWriter::write_to_vec(host.document()).unwrap(),
             )
             .unwrap(),
         );
         assert_saved(
             &crate::io::load_bytes(
                 "attribute.dxf",
-                acadrust::DxfWriter::new(host.document())
+                codec::DxfWriter::new(host.document())
                     .write_to_vec()
                     .unwrap(),
             )
@@ -4151,14 +4151,14 @@ mod tests {
         assert_deleted(
             &crate::io::load_bytes(
                 "attribute-deleted.dwg",
-                acadrust::DwgWriter::write_to_vec(host.document()).unwrap(),
+                codec::DwgWriter::write_to_vec(host.document()).unwrap(),
             )
             .unwrap(),
         );
         assert_deleted(
             &crate::io::load_bytes(
                 "attribute-deleted.dxf",
-                acadrust::DxfWriter::new(host.document())
+                codec::DxfWriter::new(host.document())
                     .write_to_vec()
                     .unwrap(),
             )
@@ -4290,9 +4290,9 @@ mod tests {
                     && (hatch.pattern_scale - 2.0).abs() < 1e-12));
         };
         let reopened_dwg = crate::io::load_bytes("hatch.dwg",
-            acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+            codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
         let reopened_dxf = crate::io::load_bytes("hatch.dxf",
-            acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+            codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         assert_saved(&reopened_dwg);
         assert_saved(&reopened_dxf);
         for (name, mut document) in [("hatch-reedit.dwg", reopened_dwg),
@@ -4304,9 +4304,9 @@ mod tests {
             ocs_plugin_api::entity_coverage::validate_entity_mutation(&before, &after).unwrap();
             *document.get_entity_mut(hatch_handle).unwrap() = after;
             let bytes = if name.ends_with("dwg") {
-                acadrust::DwgWriter::write_to_vec(&document).unwrap()
+                codec::DwgWriter::write_to_vec(&document).unwrap()
             } else {
-                acadrust::DxfWriter::new(&document).write_to_vec().unwrap()
+                codec::DxfWriter::new(&document).write_to_vec().unwrap()
             };
             assert!(matches!(crate::io::load_bytes(name, bytes).unwrap().get_entity(hatch_handle),
                 Some(EntityType::Hatch(hatch)) if (hatch.elevation - 3.0).abs() < 1e-12));
@@ -4315,8 +4315,8 @@ mod tests {
             "PY_EVAL ocs.active_document.delete_entity({})", hatch_handle.value()));
         assert!(host.document().get_entity(hatch_handle).is_none());
         for (name, bytes) in [
-            ("hatch-deleted.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()),
-            ("hatch-deleted.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()),
+            ("hatch-deleted.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()),
+            ("hatch-deleted.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()),
         ] {
             assert!(crate::io::load_bytes(name, bytes).unwrap().get_entity(hatch_handle).is_none());
         }
@@ -4424,14 +4424,14 @@ mod tests {
         assert_eq!(edited.vertices.len(), 4, "edit failed: {}", last_output(&host));
         assert_eq!(edited.text_height, 4.0);
         assert!(!edited.arrow_enabled);
-        assert_eq!(edited.annotation_offset, acadrust::types::Vector3::new(1.0, 2.0, 0.0));
+        assert_eq!(edited.annotation_offset, codec::types::Vector3::new(1.0, 2.0, 0.0));
         assert_eq!(edited.annotation_handle, text_handle);
         assert_eq!(edited.common, created_leader.common);
         assert_eq!(edited.dimension_style, created_leader.dimension_style);
         assert_eq!(edited.hookline_enabled, created_leader.hookline_enabled);
         assert_eq!(edited.normal, created_leader.normal);
         assert_eq!(edited.origin, created_leader.origin);
-        assert_eq!(edited.override_color, acadrust::types::Color::Rgb { r: 255, g: 0, b: 0 });
+        assert_eq!(edited.override_color, codec::types::Color::Rgb { r: 255, g: 0, b: 0 });
         assert_eq!(host.selection(), vec![leader_handle]);
         assert_geometry(&expected, host.document());
 
@@ -4459,7 +4459,7 @@ mod tests {
 
         // Both formats keep the path, annotation link, arrow flag and offset.
         // DWG R2010+ derives text_height/text_width/hookline_enabled instead of
-        // storing them (acadrust writes them for R13-R2007/R13-R14 only), so
+        // storing them (opencadcodec writes them for R13-R2007/R13-R14 only), so
         // only DXF must round-trip those three.
         let assert_saved = |document: &CadDocument, is_dxf: bool| {
             let Some(EntityType::Leader(leader)) = document.get_entity(leader_handle) else {
@@ -4470,11 +4470,11 @@ mod tests {
             assert!(!leader.arrow_enabled);
             // The script sets a true colour. DXF's LEADER group 77 holds an ACI
             // index only, so it cannot carry one, and the DWG writer does not
-            // store `override_color` at all (BLOCKER, cadcodec): it reopens as
+            // store `override_color` at all (BLOCKER, opencadcodec): it reopens as
             // ByLayer in both formats.
-            assert_eq!(leader.override_color, acadrust::types::Color::ByLayer,
-                "acadrust now persists a true-colour Leader.override_color; drop the blocker");
-            assert_eq!(leader.annotation_offset, acadrust::types::Vector3::new(1.0, 2.0, 0.0));
+            assert_eq!(leader.override_color, codec::types::Color::ByLayer,
+                "opencadcodec now persists a true-colour Leader.override_color; drop the blocker");
+            assert_eq!(leader.annotation_offset, codec::types::Vector3::new(1.0, 2.0, 0.0));
             assert_eq!(leader.dimension_style, "Standard");
             if is_dxf {
                 assert!((leader.text_height - 4.0).abs() < 1e-12);
@@ -4486,9 +4486,9 @@ mod tests {
             assert!(matches!(document.get_entity(text_handle), Some(EntityType::Text(_))));
         };
         let reopened_dwg = crate::io::load_bytes("leader.dwg",
-            acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+            codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
         let reopened_dxf = crate::io::load_bytes("leader.dxf",
-            acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+            codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         assert_saved(&reopened_dwg, false);
         assert_saved(&reopened_dxf, true);
         for (name, mut document) in [("leader-reedit.dwg", reopened_dwg),
@@ -4497,14 +4497,14 @@ mod tests {
             let before = document.get_entity(leader_handle).unwrap().clone();
             let mut after = before.clone();
             let EntityType::Leader(leader) = &mut after else { unreachable!() };
-            leader.vertices[3] = acadrust::types::Vector3::new(35.0, 12.0, 0.0);
+            leader.vertices[3] = codec::types::Vector3::new(35.0, 12.0, 0.0);
             ocs_plugin_api::entity_coverage::validate_entity_mutation(&before, &after).unwrap();
             ocs_plugin_api::entity_coverage::validate_canvas_entity_references(&document, &after).unwrap();
             *document.get_entity_mut(leader_handle).unwrap() = after;
             let bytes = if name.ends_with("dwg") {
-                acadrust::DwgWriter::write_to_vec(&document).unwrap()
+                codec::DwgWriter::write_to_vec(&document).unwrap()
             } else {
-                acadrust::DxfWriter::new(&document).write_to_vec().unwrap()
+                codec::DxfWriter::new(&document).write_to_vec().unwrap()
             };
             assert!(matches!(crate::io::load_bytes(name, bytes).unwrap().get_entity(leader_handle),
                 Some(EntityType::Leader(leader)) if (leader.vertices[3].x - 35.0).abs() < 1e-9));
@@ -4516,8 +4516,8 @@ mod tests {
         assert!(host.document().get_entity(leader_handle).is_none());
         assert!(host.document().get_entity(text_handle).is_none());
         for (name, bytes) in [
-            ("leader-deleted.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()),
-            ("leader-deleted.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()),
+            ("leader-deleted.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()),
+            ("leader-deleted.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()),
         ] {
             let document = crate::io::load_bytes(name, bytes).unwrap();
             assert!(document.get_entity(leader_handle).is_none());
@@ -4565,7 +4565,7 @@ mod tests {
         };
         let last_output = |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
         let style_handle = host.document().objects.iter().find_map(|(handle, object)| match object {
-            acadrust::objects::ObjectType::MLineStyle(style) if style.name == "Standard" => Some(*handle),
+            codec::objects::ObjectType::MLineStyle(style) if style.name == "Standard" => Some(*handle),
             _ => None,
         }).expect("document carries the Standard MLineStyle");
 
@@ -4585,8 +4585,8 @@ mod tests {
         let EntityType::MLine(created_mline) = &created else { unreachable!() };
         assert_eq!(created_mline.style_handle, Some(style_handle));
         assert_eq!(created_mline.style_element_count, 2);
-        assert_eq!(created_mline.start_point, acadrust::types::Vector3::ZERO);
-        let first_parameters = |mline: &acadrust::entities::MLine, vertex: usize| -> Vec<f64> {
+        assert_eq!(created_mline.start_point, codec::types::Vector3::ZERO);
+        let first_parameters = |mline: &codec::entities::MLine, vertex: usize| -> Vec<f64> {
             mline.vertices[vertex].segments.iter().map(|segment| segment.parameters[0]).collect()
         };
         assert_eq!(first_parameters(created_mline, 0), vec![0.5, -0.5]);
@@ -4619,7 +4619,7 @@ mod tests {
         let EntityType::MLine(edited) = &expected else { unreachable!() };
         assert_eq!(edited.vertices.len(), 3, "edit failed: {}", last_output(&host));
         assert_eq!(edited.scale_factor, 2.0);
-        assert_eq!(edited.justification, acadrust::entities::MLineJustification::Top);
+        assert_eq!(edited.justification, codec::entities::MLineJustification::Top);
         assert_eq!(edited.style_handle, created_mline.style_handle);
         assert_eq!(edited.common, created_mline.common);
         assert_eq!(edited.normal, created_mline.normal);
@@ -4662,24 +4662,24 @@ mod tests {
             };
             assert_eq!(mline.vertices.len(), 3);
             assert_eq!(mline.scale_factor, 2.0);
-            assert_eq!(mline.justification, acadrust::entities::MLineJustification::Top);
+            assert_eq!(mline.justification, codec::entities::MLineJustification::Top);
             assert_eq!(mline.style_name, "Standard");
-            assert_eq!(mline.vertices[2].position, acadrust::types::Vector3::new(10.0, 10.0, 0.0));
+            assert_eq!(mline.vertices[2].position, codec::types::Vector3::new(10.0, 10.0, 0.0));
             let (a, b) = (first_parameters(mline, 1), first_parameters(edited, 1));
             assert!(a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 1e-9), "{a:?} vs {b:?}");
             assert_lines(&document.get_entity(handle).unwrap().clone(), document, 3);
         };
         let reopened_dwg = crate::io::load_bytes("mline.dwg",
-            acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+            codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
         let reopened_dxf = crate::io::load_bytes("mline.dxf",
-            acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+            codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         assert_saved(&reopened_dwg);
         assert_saved(&reopened_dxf);
         for (name, mut document) in [("mline-reedit.dwg", reopened_dwg), ("mline-reedit.dxf", reopened_dxf)] {
             let before = document.get_entity(handle).unwrap().clone();
             let mut after = before.clone();
             let EntityType::MLine(mline) = &mut after else { unreachable!() };
-            mline.vertices[2].position = acadrust::types::Vector3::new(10.0, 12.0, 0.0);
+            mline.vertices[2].position = codec::types::Vector3::new(10.0, 12.0, 0.0);
             ocs_plugin_api::entity_coverage::validate_entity_mutation(&before, &after).unwrap();
             ocs_plugin_api::entity_coverage::validate_canvas_entity_references(&document, &after).unwrap();
             let EntityType::MLine(mline) = &mut after else { unreachable!() };
@@ -4687,9 +4687,9 @@ mod tests {
             crate::entities::mline::normalize_scripted_mline(Some(old), mline, &document).unwrap();
             *document.get_entity_mut(handle).unwrap() = after;
             let bytes = if name.ends_with("dwg") {
-                acadrust::DwgWriter::write_to_vec(&document).unwrap()
+                codec::DwgWriter::write_to_vec(&document).unwrap()
             } else {
-                acadrust::DxfWriter::new(&document).write_to_vec().unwrap()
+                codec::DxfWriter::new(&document).write_to_vec().unwrap()
             };
             assert!(matches!(crate::io::load_bytes(name, bytes).unwrap().get_entity(handle),
                 Some(EntityType::MLine(mline)) if (mline.vertices[2].position.y - 12.0).abs() < 1e-9));
@@ -4698,8 +4698,8 @@ mod tests {
         dispatch(&mut host, &format!("PY_EVAL ocs.active_document.delete_entity({})", handle.value()));
         assert!(host.document().get_entity(handle).is_none());
         for (name, bytes) in [
-            ("mline-deleted.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()),
-            ("mline-deleted.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()),
+            ("mline-deleted.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()),
+            ("mline-deleted.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()),
         ] {
             assert!(crate::io::load_bytes(name, bytes).unwrap().get_entity(handle).is_none());
         }
@@ -4759,8 +4759,8 @@ mod tests {
         std::fs::write(&path, script).unwrap();
         dispatch(&mut host, &format!("PY_RUN {}", path.display()));
         let _ = std::fs::remove_file(&path);
-        let subtype_of = |dimension: &acadrust::entities::Dimension| -> &'static str {
-            use acadrust::entities::Dimension as D;
+        let subtype_of = |dimension: &codec::entities::Dimension| -> &'static str {
+            use codec::entities::Dimension as D;
             match dimension {
                 D::Aligned(_) => "Aligned", D::Linear(_) => "Linear", D::Radius(_) => "Radius",
                 D::Diameter(_) => "Diameter", D::Angular2Ln(_) => "Angular2Ln",
@@ -4818,7 +4818,7 @@ mod tests {
         assert!((edited.base().actual_measurement - 20.0).abs() < 1e-9, "edit failed: {}", last_output(&host));
         assert!((measured(host.document(), handles["Radius"]) - 8.0).abs() < 1e-9);
         assert_eq!(edited.base().text, "<> mm");
-        assert_eq!(edited.base().attachment_point, acadrust::entities::AttachmentPointType::TopCenter);
+        assert_eq!(edited.base().attachment_point, codec::entities::AttachmentPointType::TopCenter);
         assert_eq!(edited.base().common, before.base().common);
         assert_eq!(edited.base().style_name, before.base().style_name);
         assert_eq!(edited.base().normal, before.base().normal);
@@ -4862,8 +4862,8 @@ mod tests {
 
         // DWG and DXF: every subtype is recorded separately.
         let mut failures = Vec::new();
-        let dwg = crate::io::load_bytes("dimension.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
-        let dxf = crate::io::load_bytes("dimension.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+        let dwg = crate::io::load_bytes("dimension.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+        let dxf = crate::io::load_bytes("dimension.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         for (format, document) in [("DWG", &dwg), ("DXF", &dxf)] {
             let reopened = handles_by_subtype(document);
             for (subtype, _, expected) in &fixtures {
@@ -4889,16 +4889,16 @@ mod tests {
             let before = document.get_entity(linear).unwrap().clone();
             let mut after = before.clone();
             let EntityType::Dimension(dimension) = &mut after else { unreachable!() };
-            if let acadrust::entities::Dimension::Linear(value) = dimension { value.second_point.x = 30.0; }
+            if let codec::entities::Dimension::Linear(value) = dimension { value.second_point.x = 30.0; }
             ocs_plugin_api::entity_coverage::validate_entity_mutation(&before, &after).unwrap();
             ocs_plugin_api::entity_coverage::validate_canvas_entity_references(&document, &after).unwrap();
             let EntityType::Dimension(dimension) = &mut after else { unreachable!() };
             crate::entities::dimension::normalize_scripted_dimension(dimension);
             *document.get_entity_mut(linear).unwrap() = after;
             let bytes = if name.ends_with("dwg") {
-                acadrust::DwgWriter::write_to_vec(&document).unwrap()
+                codec::DwgWriter::write_to_vec(&document).unwrap()
             } else {
-                acadrust::DxfWriter::new(&document).write_to_vec().unwrap()
+                codec::DxfWriter::new(&document).write_to_vec().unwrap()
             };
             let reopened = crate::io::load_bytes(name, bytes).unwrap();
             assert!((measured(&reopened, linear) - 30.0).abs() < 1e-6, "{name}");
@@ -4986,7 +4986,7 @@ mod tests {
         assert_eq!(edited.dogleg_length, 3.0);
         assert_eq!(edited.context.text_height, 3.0);
         assert_eq!(edited.text_height, created_ml.text_height);
-        assert_eq!(edited.line_color, acadrust::types::Color::Rgb { r: 0, g: 128, b: 255 });
+        assert_eq!(edited.line_color, codec::types::Color::Rgb { r: 0, g: 128, b: 255 });
         // Untouched context fields and the entity identity survive a partial patch.
         assert_eq!(edited.common, created_ml.common);
         assert_eq!(edited.context.scale_factor, created_ml.context.scale_factor);
@@ -5020,8 +5020,8 @@ mod tests {
         assert_eq!(host.document().get_entity(handle), Some(&expected));
 
         let mut gaps = Vec::new();
-        let dwg = crate::io::load_bytes("mleader.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
-        let dxf = crate::io::load_bytes("mleader.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+        let dwg = crate::io::load_bytes("mleader.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+        let dxf = crate::io::load_bytes("mleader.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         for (format, document) in [("DWG", &dwg), ("DXF", &dxf)] {
             let Some(EntityType::MultiLeader(value)) = document.get_entity(handle) else {
                 gaps.push(format!("{format}: MultiLeader missing"));
@@ -5044,9 +5044,9 @@ mod tests {
             ocs_plugin_api::entity_coverage::validate_canvas_entity_references(&document, &after).unwrap();
             *document.get_entity_mut(handle).unwrap() = after;
             let bytes = if name.ends_with("dwg") {
-                acadrust::DwgWriter::write_to_vec(&document).unwrap()
+                codec::DwgWriter::write_to_vec(&document).unwrap()
             } else {
-                acadrust::DxfWriter::new(&document).write_to_vec().unwrap()
+                codec::DxfWriter::new(&document).write_to_vec().unwrap()
             };
             assert!(matches!(crate::io::load_bytes(name, bytes).unwrap().get_entity(handle),
                 Some(EntityType::MultiLeader(value)) if value.dogleg_length == 4.5), "{name}");
@@ -5055,8 +5055,8 @@ mod tests {
         dispatch(&mut host, &format!("PY_EVAL ocs.active_document.delete_entity({})", handle.value()));
         assert!(host.document().get_entity(handle).is_none());
         for (name, bytes) in [
-            ("mleader-deleted.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()),
-            ("mleader-deleted.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()),
+            ("mleader-deleted.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()),
+            ("mleader-deleted.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()),
         ] {
             assert!(crate::io::load_bytes(name, bytes).unwrap().get_entity(handle).is_none());
         }
@@ -5104,7 +5104,7 @@ mod tests {
         let created = host.document().get_entity(handle).unwrap().clone();
         let EntityType::Table(created_table) = &created else { unreachable!() };
         assert_eq!((created_table.rows.len(), created_table.columns.len()), (3, 3));
-        assert_eq!(created_table.insertion_point, acadrust::types::Vector3::new(5.0, 5.0, 0.0));
+        assert_eq!(created_table.insertion_point, codec::types::Vector3::new(5.0, 5.0, 0.0));
         assert!(!host.app.tabs[0].scene.wire_models_for(&[handle]).is_empty(), "no canvas geometry");
 
         let script = std::env::temp_dir().join(format!("ocs_table_edit_{}.py", std::process::id()));
@@ -5166,8 +5166,8 @@ mod tests {
         assert_eq!(host.document().get_entity(handle), Some(&expected));
 
         let mut gaps = Vec::new();
-        let dwg = crate::io::load_bytes("table.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
-        let dxf = crate::io::load_bytes("table.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+        let dwg = crate::io::load_bytes("table.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+        let dxf = crate::io::load_bytes("table.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         for (format, document) in [("DWG", &dwg), ("DXF", &dxf)] {
             let Some(EntityType::Table(value)) = document.get_entity(handle) else {
                 gaps.push(format!("{format}: Table missing"));
@@ -5199,9 +5199,9 @@ mod tests {
             ocs_plugin_api::entity_coverage::validate_canvas_entity_references(&document, &after).unwrap();
             *document.get_entity_mut(handle).unwrap() = after;
             let bytes = if name.ends_with("dwg") {
-                acadrust::DwgWriter::write_to_vec(&document).unwrap()
+                codec::DwgWriter::write_to_vec(&document).unwrap()
             } else {
-                acadrust::DxfWriter::new(&document).write_to_vec().unwrap()
+                codec::DxfWriter::new(&document).write_to_vec().unwrap()
             };
             assert!(matches!(crate::io::load_bytes(name, bytes).unwrap().get_entity(handle),
                 Some(EntityType::Table(value)) if value.columns[1].width == 12.0), "{name}");
@@ -5210,8 +5210,8 @@ mod tests {
         dispatch(&mut host, &format!("PY_EVAL ocs.active_document.delete_entity({})", handle.value()));
         assert!(host.document().get_entity(handle).is_none());
         for (name, bytes) in [
-            ("table-deleted.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()),
-            ("table-deleted.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()),
+            ("table-deleted.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()),
+            ("table-deleted.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()),
         ] {
             assert!(crate::io::load_bytes(name, bytes).unwrap().get_entity(handle).is_none());
         }
@@ -5288,8 +5288,8 @@ mod tests {
         if make_polyline {
             // The legacy Polyline is update-only: the host makes one to edit.
             let points = [(0.0, 0.0, 0.0), (10.0, 0.0, 2.0), (10.0, 5.0, 4.0)]
-                .map(|(x, y, z)| acadrust::types::Vector3::new(x, y, z));
-            host.add_entity(EntityType::Polyline(acadrust::entities::Polyline::from_points(points.to_vec())));
+                .map(|(x, y, z)| codec::types::Vector3::new(x, y, z));
+            host.add_entity(EntityType::Polyline(codec::entities::Polyline::from_points(points.to_vec())));
         }
         let make_ole = create_script.contains("MAKEOLE");
         if make_ole {
@@ -5307,7 +5307,7 @@ mod tests {
             crate::io::ole_embed::add_embedded_image(
                 host.document_mut(),
                 &picture,
-                acadrust::types::Vector3::new(10.0, 10.0, 0.0),
+                codec::types::Vector3::new(10.0, 10.0, 0.0),
                 20.0,
             )
             .unwrap();
@@ -5316,21 +5316,21 @@ mod tests {
         if update_only || create_script.contains("MAKEBLOCK") {
             let next = host.document().next_handle();
             let (record_handle, block_handle, end_handle) = (Handle::new(next), Handle::new(next + 1), Handle::new(next + 2));
-            let mut record = acadrust::tables::BlockRecord::new("AUDITBLK");
+            let mut record = codec::tables::BlockRecord::new("AUDITBLK");
             record.handle = record_handle;
             record.block_entity_handle = block_handle;
             record.block_end_handle = end_handle;
             host.document_mut().block_records.add(record).unwrap();
-            let mut block = acadrust::entities::Block::new("AUDITBLK", acadrust::types::Vector3::ZERO);
+            let mut block = codec::entities::Block::new("AUDITBLK", codec::types::Vector3::ZERO);
             block.common.handle = block_handle;
             block.common.owner_handle = record_handle;
             host.document_mut().add_entity(EntityType::Block(block)).unwrap();
-            let mut end = acadrust::entities::BlockEnd::new();
+            let mut end = codec::entities::BlockEnd::new();
             end.common.handle = end_handle;
             end.common.owner_handle = record_handle;
             host.document_mut().add_entity(EntityType::BlockEnd(end)).unwrap();
             if update_only {
-                let insert = acadrust::entities::Insert::new("AUDITBLK", acadrust::types::Vector3::new(1.0, 2.0, 0.0));
+                let insert = codec::entities::Insert::new("AUDITBLK", codec::types::Vector3::new(1.0, 2.0, 0.0));
                 host.add_entity(EntityType::Insert(insert));
             }
             create_script = create_script.replace("BLOCKRECORD", &record_handle.value().to_string());
@@ -5340,13 +5340,13 @@ mod tests {
         if create_script.contains("VIEWPORTHANDLE") || create_script.contains("SCALEHANDLE") {
             // A view border ties to an existing viewport and scale.
             let owner = host.document().block_records.iter().find(|r| r.is_paper_space()).map(|r| r.handle).unwrap();
-            let mut viewport = acadrust::entities::Viewport::new();
+            let mut viewport = codec::entities::Viewport::new();
             viewport.common.owner_handle = owner;
             let viewport_handle = host.add_entity(EntityType::Viewport(viewport));
             let scale_handle = host.document_mut().allocate_handle();
-            let mut scale = acadrust::objects::Scale::new("1:1", 1.0, 1.0);
+            let mut scale = codec::objects::Scale::new("1:1", 1.0, 1.0);
             scale.handle = scale_handle;
-            host.document_mut().objects.insert(scale_handle, acadrust::objects::ObjectType::Scale(scale));
+            host.document_mut().objects.insert(scale_handle, codec::objects::ObjectType::Scale(scale));
             create_script = create_script
                 .replace("VIEWPORTHANDLE", &viewport_handle.value().to_string())
                 .replace("SCALEHANDLE", &scale_handle.value().to_string());
@@ -5357,9 +5357,9 @@ mod tests {
         if create_script.contains("DEFHANDLE") {
             // Scripts reference an underlay definition that the drawing owns.
             let handle = host.document_mut().allocate_handle();
-            let mut definition = acadrust::objects::UnderlayDefinition::pdf("plan.pdf", "1");
+            let mut definition = codec::objects::UnderlayDefinition::pdf("plan.pdf", "1");
             definition.handle = handle;
-            host.document_mut().objects.insert(handle, acadrust::objects::ObjectType::UnderlayDefinition(definition));
+            host.document_mut().objects.insert(handle, codec::objects::ObjectType::UnderlayDefinition(definition));
             create_script = create_script.replace("DEFHANDLE", &handle.value().to_string());
         }
         run_script(&mut host, "create", &create_script);
@@ -5373,7 +5373,7 @@ mod tests {
         if matches!(created, EntityType::Viewport(_)) {
             let owner = created.common().owner_handle;
             let layout = host.document().objects.values().find_map(|object| match object {
-                acadrust::objects::ObjectType::Layout(l) if l.block_record == owner => Some(l.name.clone()),
+                codec::objects::ObjectType::Layout(l) if l.block_record == owner => Some(l.name.clone()),
                 _ => None,
             }).expect("the viewport's owner is a layout block");
             host.app.tabs[0].scene.set_current_layout(layout);
@@ -5402,8 +5402,8 @@ mod tests {
             h = handle.value()));
         assert_eq!(host.document().get_entity(handle), Some(&expected));
 
-        let dwg = crate::io::load_bytes("mesh.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
-        let dxf = crate::io::load_bytes("mesh.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+        let dwg = crate::io::load_bytes("mesh.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+        let dxf = crate::io::load_bytes("mesh.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         let mut gaps = Vec::new();
         for (format, document) in [("DWG", &dwg), ("DXF", &dxf)] {
             let expected_digest = if format == "DXF" && !case.expect_edited_dxf.is_empty() {
@@ -5428,9 +5428,9 @@ mod tests {
             ocs_plugin_api::entity_coverage::validate_canvas_entity_references(&document, &after).unwrap();
             *document.get_entity_mut(handle).unwrap() = after;
             let bytes = if name.ends_with("dwg") {
-                acadrust::DwgWriter::write_to_vec(&document).unwrap()
+                codec::DwgWriter::write_to_vec(&document).unwrap()
             } else {
-                acadrust::DxfWriter::new(&document).write_to_vec().unwrap()
+                codec::DxfWriter::new(&document).write_to_vec().unwrap()
             };
             let reopened = crate::io::load_bytes(name, bytes).unwrap();
             let expected_digest = if name.ends_with("dxf") && !case.expect_reedited_dxf.is_empty() {
@@ -5446,8 +5446,8 @@ mod tests {
         dispatch(&mut host, &format!("PY_EVAL ocs.active_document.delete_entity({})", handle.value()));
         assert!(host.document().get_entity(handle).is_none());
         for (name, bytes) in [
-            ("mesh-deleted.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()),
-            ("mesh-deleted.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()),
+            ("mesh-deleted.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()),
+            ("mesh-deleted.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()),
         ] {
             assert!(crate::io::load_bytes(name, bytes).unwrap().get_entity(handle).is_none());
         }
@@ -6405,10 +6405,10 @@ mod tests {
             expect_created: "PART_NO|Part number|PN-001 ins1.0,2.0 al3.0,4.0 h2.5 r0.25 wf1.25 ob0.10 Center/Top f1010 fl12 tg2 lock1",
             expect_edited: "PART_NO|Serial|PN-002 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
             expect_reedited: "PART_NO|Serial|PN-003 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
-            // BLOCKER (cadcodec): the DXF ATTDEF writer emits no group 280 at
+            // BLOCKER (opencadcodec): the DXF ATTDEF writer emits no group 280 at
             // all — neither the version byte nor the lock-position flag the
             // reader looks for after it — so `lock_position` reopens false. Every
-            // other field round-trips since cadcodec dd1d7bf.
+            // other field round-trips since opencadcodec dd1d7bf.
             expect_edited_dxf: "PART_NO|Serial|PN-002 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock0",
             expect_reedited_dxf: "PART_NO|Serial|PN-003 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock0",
             expect_edited_dwg: "",
@@ -6428,16 +6428,16 @@ mod tests {
         for name in ["OUTER", "INNER"] {
             let next = host.document().next_handle();
             let (record_handle, block_handle, end_handle) = (Handle::new(next), Handle::new(next + 1), Handle::new(next + 2));
-            let mut record = acadrust::tables::BlockRecord::new(name);
+            let mut record = codec::tables::BlockRecord::new(name);
             record.handle = record_handle;
             record.block_entity_handle = block_handle;
             record.block_end_handle = end_handle;
             host.document_mut().block_records.add(record).unwrap();
-            let mut block = acadrust::entities::Block::new(name, acadrust::types::Vector3::ZERO);
+            let mut block = codec::entities::Block::new(name, codec::types::Vector3::ZERO);
             block.common.handle = block_handle;
             block.common.owner_handle = record_handle;
             host.document_mut().add_entity(EntityType::Block(block)).unwrap();
-            let mut end = acadrust::entities::BlockEnd::new();
+            let mut end = codec::entities::BlockEnd::new();
             end.common.handle = end_handle;
             end.common.owner_handle = record_handle;
             host.document_mut().add_entity(EntityType::BlockEnd(end)).unwrap();
@@ -6508,8 +6508,8 @@ mod tests {
             is_kind: |entity| matches!(entity, EntityType::Ole2Frame(_)),
             digest: |entity| match entity {
                 EntityType::Ole2Frame(v) => {
-                    let picture = match acadrust::entities::extract_presentation(&v.encoded_payload()) {
-                        Some(acadrust::entities::OlePresentation::Raster(bytes)) => bytes.len(),
+                    let picture = match codec::entities::extract_presentation(&v.encoded_payload()) {
+                        Some(codec::entities::OlePresentation::Raster(bytes)) => bytes.len(),
                         _ => 0,
                     };
                     format!("ul{:.1},{:.1} lr{:.1},{:.1} lock{} picture{}", v.upper_left_corner.x, v.upper_left_corner.y,
@@ -6536,14 +6536,14 @@ mod tests {
     fn spike_kernel_body_round_trip() {
         use crate::scene::model::solid_model as sm;
         use crate::scene::convert::solid3d_tess::{kernel_acis_body, kernel_body};
-        let make = |body: &cadkernel::brep::Body| -> acadrust::entities::Solid3D {
+        let make = |body: &kernel::brep::Body| -> codec::entities::Solid3D {
             let sat = crate::scene::convert::acis_export::solid_to_sat(body).expect("solid_to_sat");
-            let mut solid = acadrust::entities::Solid3D::new();
+            let mut solid = codec::entities::Solid3D::new();
             solid.wires = sm::edge_wires(body);
             solid.set_sat_document(&sat);
             solid
         };
-        let report = |label: &str, solid: &acadrust::entities::Solid3D| {
+        let report = |label: &str, solid: &codec::entities::Solid3D| {
             let body = kernel_body(solid);
             eprintln!("SPIKE {label}: lift={} volume={:?} wires={} sat_bytes={} binary={}",
                 body.is_some(), body.as_ref().map(sm::volume), solid.wires.len(),
@@ -6551,14 +6551,14 @@ mod tests {
             body
         };
         let boxed = sm::box_solid([0.0, 0.0, 0.0], 10.0, 6.0, 4.0).unwrap();
-        let mut doc = acadrust::CadDocument::new();
+        let mut doc = codec::CadDocument::new();
         let solid = make(&boxed);
         report("created box", &solid);
         let handle = doc.add_entity(EntityType::Solid3D(solid.clone())).unwrap();
 
         // Round trip both formats and compare payloads.
-        let dwg = crate::io::load_bytes("s.dwg", acadrust::DwgWriter::write_to_vec(&doc).unwrap()).unwrap();
-        let dxf = crate::io::load_bytes("s.dxf", acadrust::DxfWriter::new(&doc).write_to_vec().unwrap()).unwrap();
+        let dwg = crate::io::load_bytes("s.dwg", codec::DwgWriter::write_to_vec(&doc).unwrap()).unwrap();
+        let dxf = crate::io::load_bytes("s.dxf", codec::DxfWriter::new(&doc).write_to_vec().unwrap()).unwrap();
         for (label, reopened) in [("DWG", &dwg), ("DXF", &dxf)] {
             let Some(EntityType::Solid3D(back)) = reopened.get_entity(handle) else { panic!("{label} lost the solid") };
             report(&format!("{label} reopen"), back);
@@ -6595,13 +6595,13 @@ mod tests {
         }
 
         // The same payload inside a Body entity and a Region-like container.
-        let mut body_entity = acadrust::entities::Body::new();
+        let mut body_entity = codec::entities::Body::new();
         body_entity.set_sat_document(&crate::scene::convert::acis_export::solid_to_sat(&boxed).unwrap());
         let lifted = kernel_acis_body(&body_entity.acis_data);
         eprintln!("SPIKE Body entity: lift={} volume={:?}", lifted.is_some(), lifted.as_ref().map(sm::volume));
         let bh = doc.add_entity(EntityType::Body(body_entity)).unwrap();
-        let dwg = crate::io::load_bytes("b.dwg", acadrust::DwgWriter::write_to_vec(&doc).unwrap()).unwrap();
-        let dxf = crate::io::load_bytes("b.dxf", acadrust::DxfWriter::new(&doc).write_to_vec().unwrap()).unwrap();
+        let dwg = crate::io::load_bytes("b.dwg", codec::DwgWriter::write_to_vec(&doc).unwrap()).unwrap();
+        let dxf = crate::io::load_bytes("b.dxf", codec::DxfWriter::new(&doc).write_to_vec().unwrap()).unwrap();
         for (label, reopened) in [("DWG", &dwg), ("DXF", &dxf)] {
             match reopened.get_entity(bh) {
                 Some(EntityType::Body(back)) => eprintln!("SPIKE Body {label}: lift={}", kernel_acis_body(&back.acis_data).is_some()),
@@ -6724,7 +6724,7 @@ mod tests {
         let snapshot = host.document().get_entity(box_handle).unwrap().clone();
         let count_before = solids(&host).len();
         let undo_now = host.app.tabs[0].history.undo_stack.len();
-        let empty_payload = acadrust::entities::Solid3D::new();
+        let empty_payload = codec::entities::Solid3D::new();
         let unliftable = host.add_entity(EntityType::Solid3D(empty_payload.clone()));
         let unliftable_before = host.document().get_entity(unliftable).unwrap().clone();
         for (command, message) in [
@@ -6750,8 +6750,8 @@ mod tests {
         assert_eq!(solids(&host).len(), count_before + 1, "only the fixture was added");
         assert_eq!(host.app.tabs[0].history.undo_stack.len(), undo_now, "refusals record no undo step");
         // Transforming a non-solid is refused.
-        let line = host.add_entity(EntityType::Line(acadrust::entities::Line::from_points(
-            acadrust::types::Vector3::ZERO, acadrust::types::Vector3::new(1.0, 0.0, 0.0))));
+        let line = host.add_entity(EntityType::Line(codec::entities::Line::from_points(
+            codec::types::Vector3::ZERO, codec::types::Vector3::new(1.0, 0.0, 0.0))));
         dispatch(&mut host, &format!("PY_EVAL ocs.active_document.solids.translate({}, (1, 0, 0))", line.value()));
         assert!(last(&host).contains("outside the Python schema") || last(&host).contains("applies to Solid3D"), "{}", last(&host));
 
@@ -6759,8 +6759,8 @@ mod tests {
         // payload can be moved again.
         let moved_volume = volume(&host, box_handle);
         let moved_extent = extent(&host, box_handle);
-        let dwg = crate::io::load_bytes("solid.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
-        let dxf = crate::io::load_bytes("solid.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+        let dwg = crate::io::load_bytes("solid.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+        let dxf = crate::io::load_bytes("solid.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         for (format, document) in [("DWG", &dwg), ("DXF", &dxf)] {
             let Some(EntityType::Solid3D(back)) = document.get_entity(box_handle) else { panic!("{format} lost the solid") };
             let body = kernel_body(back).unwrap_or_else(|| panic!("{format} payload does not lift"));
@@ -6801,7 +6801,7 @@ mod tests {
         let mut host = HostSession::new(&mut app, 0);
         // A Body entity carrying a kernel box; scripts cannot create one.
         let boxed = sm::box_solid([0.0; 3], 4.0, 4.0, 4.0).unwrap();
-        let mut body = acadrust::entities::Body::new();
+        let mut body = codec::entities::Body::new();
         body.set_sat_document(&crate::scene::convert::acis_export::solid_to_sat(&boxed).unwrap());
         body.wires = sm::edge_wires(&boxed);
         let handle = host.add_entity(EntityType::Body(body));
@@ -6820,7 +6820,7 @@ mod tests {
         assert!(host.app.command_line.history.last().unwrap().text.contains("Body"));
         dispatch(&mut host, &format!("PY_EVAL ocs.active_document.solids.translate({}, (10, 0, 0)).handle", handle.value()));
         assert!((extent(&host).0[0] - 8.0).abs() < 1e-6, "{:?}", extent(&host));
-        let bytes = acadrust::DwgWriter::write_to_vec(host.document()).unwrap();
+        let bytes = codec::DwgWriter::write_to_vec(host.document()).unwrap();
         let reopened = crate::io::load_bytes("body.dwg", bytes).unwrap();
         let Some(EntityType::Body(back)) = reopened.get_entity(handle) else { panic!("DWG lost the body") };
         let lifted = crate::scene::convert::solid3d_tess::kernel_acis_body(&back.acis_data).expect("DWG body lifts");
@@ -6893,16 +6893,16 @@ mod tests {
         assert!(last(&host).contains("Region"));
 
         // V: refusals change nothing and leave no undo step.
-        let open_line = host.add_entity(EntityType::Line(acadrust::entities::Line::from_points(
-            acadrust::types::Vector3::ZERO, acadrust::types::Vector3::new(5.0, 0.0, 0.0))));
-        let mut open_poly = acadrust::entities::LwPolyline::new();
+        let open_line = host.add_entity(EntityType::Line(codec::entities::Line::from_points(
+            codec::types::Vector3::ZERO, codec::types::Vector3::new(5.0, 0.0, 0.0))));
+        let mut open_poly = codec::entities::LwPolyline::new();
         open_poly.vertices = vec![
-            acadrust::entities::LwVertex::new(acadrust::types::Vector2::new(0.0, 0.0)),
-            acadrust::entities::LwVertex::new(acadrust::types::Vector2::new(4.0, 0.0)),
-            acadrust::entities::LwVertex::new(acadrust::types::Vector2::new(4.0, 4.0)),
+            codec::entities::LwVertex::new(codec::types::Vector2::new(0.0, 0.0)),
+            codec::entities::LwVertex::new(codec::types::Vector2::new(4.0, 0.0)),
+            codec::entities::LwVertex::new(codec::types::Vector2::new(4.0, 4.0)),
         ];
         let open_poly = host.add_entity(EntityType::LwPolyline(open_poly));
-        let ray = host.add_entity(EntityType::Ray(acadrust::entities::Ray::default()));
+        let ray = host.add_entity(EntityType::Ray(codec::entities::Ray::default()));
         let entity_count = host.document().entities().count();
         let undo_now = host.app.tabs[0].history.undo_stack.len();
         for (command, message) in [
@@ -6927,8 +6927,8 @@ mod tests {
 
         // W: both formats reopen a region that lifts with the same extent, and
         // a reopened region moves again.
-        let dwg = crate::io::load_bytes("region.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
-        let dxf = crate::io::load_bytes("region.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+        let dwg = crate::io::load_bytes("region.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+        let dxf = crate::io::load_bytes("region.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         let moved = extent_in(host.document(), list[0]);
         for (format, document) in [("DWG", &dwg), ("DXF", &dxf)] {
             assert_eq!(regions_in(document).len(), 3, "{format}");
@@ -6962,7 +6962,7 @@ mod tests {
     fn audit_python_surface_lifecycle_over_real_ipc() {
         use crate::scene::convert::solid3d_tess::kernel_acis_body;
         use crate::scene::model::solid_model as sm;
-        use acadrust::entities::SurfaceKind;
+        use codec::entities::SurfaceKind;
         let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
             return;
         };
@@ -7032,7 +7032,7 @@ mod tests {
         assert!(last(&host).contains("Surface"));
 
         // V: refusals change nothing and leave no undo step.
-        let ray = host.add_entity(EntityType::Ray(acadrust::entities::Ray::default()));
+        let ray = host.add_entity(EntityType::Ray(codec::entities::Ray::default()));
         let circle = host.document().entities().find_map(|e| match e { EntityType::Circle(c) => Some(c.common.handle), _ => None }).unwrap();
         let counts = (host.document().entities().count(), host.app.tabs[0].history.undo_stack.len());
         for (command, message) in [
@@ -7085,8 +7085,8 @@ mod tests {
 
         // W: both formats reopen surfaces that lift with the same extents, keep
         // the isolines, and a reopened surface moves again.
-        let dwg = crate::io::load_bytes("surface.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
-        let dxf = crate::io::load_bytes("surface.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+        let dwg = crate::io::load_bytes("surface.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+        let dxf = crate::io::load_bytes("surface.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         let moved = extent_in(host.document(), plane);
         for (format, document) in [("DWG", &dwg), ("DXF", &dxf)] {
             assert_eq!((surfaces_in(document).len(), solids_in(document).len()), (3, 3), "{format}");
@@ -7194,11 +7194,11 @@ mod tests {
         assert!(close(volume_in(host.document(), drilled), 104.0), "120 minus a 2x2x4 hole is 104");
 
         // V: refusals change nothing and leave no undo step.
-        let line = host.add_entity(EntityType::Line(acadrust::entities::Line::from_points(
-            acadrust::types::Vector3::ZERO, acadrust::types::Vector3::new(1.0, 0.0, 0.0))));
-        let unliftable = host.add_entity(EntityType::Solid3D(acadrust::entities::Solid3D::new()));
-        let mut plane = acadrust::entities::Surface::new(acadrust::entities::SurfaceKind::Plane);
-        plane.acis_data = acadrust::entities::AcisData::new();
+        let line = host.add_entity(EntityType::Line(codec::entities::Line::from_points(
+            codec::types::Vector3::ZERO, codec::types::Vector3::new(1.0, 0.0, 0.0))));
+        let unliftable = host.add_entity(EntityType::Solid3D(codec::entities::Solid3D::new()));
+        let mut plane = codec::entities::Surface::new(codec::entities::SurfaceKind::Plane);
+        plane.acis_data = codec::entities::AcisData::new();
         let surface = host.add_entity(EntityType::Surface(plane));
         let far = { dispatch(&mut host, "PY_EVAL ocs.active_document.solids.box(center=(500, 500, 500), size=(1, 1, 1)).handle");
             *solids_in(host.document()).last().unwrap() };
@@ -7223,8 +7223,8 @@ mod tests {
         // W: both formats reopen the drilled result losslessly; it moves again.
         let expected_volume = volume_in(host.document(), drilled);
         let expected_extent = extent_in(host.document(), drilled);
-        let dwg = crate::io::load_bytes("boolean.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
-        let dxf = crate::io::load_bytes("boolean.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+        let dwg = crate::io::load_bytes("boolean.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+        let dxf = crate::io::load_bytes("boolean.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         for (format, document) in [("DWG", &dwg), ("DXF", &dxf)] {
             assert!(close(volume_in(document, drilled), expected_volume), "{format} volume");
             let reopened = extent_in(document, drilled);
@@ -7327,7 +7327,7 @@ mod tests {
 
     #[test]
     fn audit_python_section_symbol_references_over_real_ipc() {
-        use acadrust::objects::{ClassObject, ClassObjectData, ObjectType};
+        use codec::objects::{ClassObject, ClassObjectData, ObjectType};
         let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
             return;
         };
@@ -7344,7 +7344,7 @@ mod tests {
         let style = object(&mut host, ClassObjectData::SectionViewStyle(Default::default()));
         let view_rep = object(&mut host, ClassObjectData::ViewRep(Default::default()));
         let scale = host.document_mut().allocate_handle();
-        let mut scale_object = acadrust::objects::Scale::new("1:1", 1.0, 1.0);
+        let mut scale_object = codec::objects::Scale::new("1:1", 1.0, 1.0);
         scale_object.handle = scale;
         host.document_mut().objects.insert(scale, ObjectType::Scale(scale_object));
         let process = ocs_plugin_api::process::PluginProcess::spawn(
@@ -7409,8 +7409,8 @@ mod tests {
             let mut all: Vec<_> = host.document().entities().filter_map(|e| match e {
                 EntityType::Ole2Frame(f) => Some(f.clone()), _ => None }).collect();
             all.sort_by_key(|f| f.common.handle.value());
-            match acadrust::entities::extract_presentation(&all[index].encoded_payload()) {
-                Some(acadrust::entities::OlePresentation::Raster(bytes)) => bytes,
+            match codec::entities::extract_presentation(&all[index].encoded_payload()) {
+                Some(codec::entities::OlePresentation::Raster(bytes)) => bytes,
                 other => panic!("no embedded raster: {other:?}"),
             }
         };
@@ -7467,7 +7467,7 @@ mod tests {
         let mut host = HostSession::new(&mut app, 0);
         let paper = host.document().block_records.iter().find(|r| r.is_paper_space()).map(|r| r.handle).unwrap();
         let layout = host.document().objects.values().find_map(|o| match o {
-            acadrust::objects::ObjectType::Layout(l) if l.block_record == paper => Some(l.name.clone()), _ => None }).unwrap();
+            codec::objects::ObjectType::Layout(l) if l.block_record == paper => Some(l.name.clone()), _ => None }).unwrap();
         host.app.tabs[0].scene.set_current_layout(layout);
         let process = ocs_plugin_api::process::PluginProcess::spawn(
             std::path::Path::new(&plugin_path), &mut host, crate::plugin::v4_support::notification_handler(),
@@ -7512,7 +7512,7 @@ mod tests {
         // Control: the engine's default id 0 is not invisible here (there is no
         // sheet viewport to confuse it with), so the derived id matters for
         // uniqueness, not for visibility.
-        let mut bare = acadrust::entities::Viewport::new();
+        let mut bare = codec::entities::Viewport::new();
         bare.common.owner_handle = paper;
         bare.width = 40.0;
         bare.height = 30.0;
@@ -7530,25 +7530,25 @@ mod tests {
         let path = dir.join("ocs_spike_image.png").to_string_lossy().into_owned();
         image::RgbaImage::from_pixel(8, 4, image::Rgba([1, 2, 3, 255])).save(&path).unwrap();
         for linked in [false, true] {
-            let mut doc = acadrust::CadDocument::new();
-            let mut img = acadrust::entities::RasterImage::with_size(&path, acadrust::types::Vector3::ZERO, 8.0, 4.0, 16.0, 8.0);
+            let mut doc = codec::CadDocument::new();
+            let mut img = codec::entities::RasterImage::with_size(&path, codec::types::Vector3::ZERO, 8.0, 4.0, 16.0, 8.0);
             if linked {
                 let h = doc.allocate_handle();
-                let mut def = acadrust::objects::ImageDefinition::with_dimensions(path.clone(), 8, 4);
+                let mut def = codec::objects::ImageDefinition::with_dimensions(path.clone(), 8, 4);
                 def.handle = h;
                 def.is_loaded = true;
-                doc.objects.insert(h, acadrust::objects::ObjectType::ImageDefinition(def));
+                doc.objects.insert(h, codec::objects::ObjectType::ImageDefinition(def));
                 img.definition_handle = Some(h);
             }
             let handle = doc.add_entity(EntityType::RasterImage(img)).unwrap();
             for (label, document) in [
-                ("DWG", crate::io::load_bytes("i.dwg", acadrust::DwgWriter::write_to_vec(&doc).unwrap()).unwrap()),
-                ("DXF", crate::io::load_bytes("i.dxf", acadrust::DxfWriter::new(&doc).write_to_vec().unwrap()).unwrap()),
+                ("DWG", crate::io::load_bytes("i.dwg", codec::DwgWriter::write_to_vec(&doc).unwrap()).unwrap()),
+                ("DXF", crate::io::load_bytes("i.dxf", codec::DxfWriter::new(&doc).write_to_vec().unwrap()).unwrap()),
             ] {
                 let entity = document.get_entity(handle);
-                let defs = document.objects.values().filter(|o| matches!(o, acadrust::objects::ObjectType::ImageDefinition(_))).count();
-                let reactors = document.objects.values().filter(|o| matches!(o, acadrust::objects::ObjectType::ImageDefinitionReactor(_))).count();
-                let dicts = document.objects.values().filter(|o| matches!(o, acadrust::objects::ObjectType::Dictionary(d) if d.entries.iter().any(|(k, _)| k.contains("IMAGE")))).count();
+                let defs = document.objects.values().filter(|o| matches!(o, codec::objects::ObjectType::ImageDefinition(_))).count();
+                let reactors = document.objects.values().filter(|o| matches!(o, codec::objects::ObjectType::ImageDefinitionReactor(_))).count();
+                let dicts = document.objects.values().filter(|o| matches!(o, codec::objects::ObjectType::Dictionary(d) if d.entries.iter().any(|(k, _)| k.contains("IMAGE")))).count();
                 match entity {
                     Some(EntityType::RasterImage(i)) => eprintln!("SPIKE linked={linked} {label}: file_path_ok={} definition={:?} reactor={:?} defs={defs} reactors={reactors} image_dicts={dicts}",
                         i.file_path == path, i.definition_handle.map(|h| h.value()), i.definition_reactor_handle.map(|h| h.value())),
@@ -7563,7 +7563,7 @@ mod tests {
     /// one undo step per change, and DWG/DXF persistence of every property.
     #[test]
     fn audit_python_layer_table_over_real_ipc() {
-        use acadrust::types::{Color, LineWeight};
+        use codec::types::{Color, LineWeight};
         let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
             return;
         };
@@ -7639,7 +7639,7 @@ check('currentmissing', lambda: L.set_current('Nope'))
             assert_eq!(structure.line_weight, LineWeight::Value(50), "{label}");
             assert!(structure.flags.locked, "{label}");
             assert_eq!(structure.description, "load bearing", "{label}");
-            assert_ne!(structure.transparency, acadrust::types::Transparency::ByLayer, "{label}: transparency");
+            assert_ne!(structure.transparency, codec::types::Transparency::ByLayer, "{label}: transparency");
             let grid = document.layers.get("Grid").unwrap_or_else(|| panic!("{label}: Grid missing"));
             assert_eq!(grid.color, Color::Rgb { r: 10, g: 200, b: 30 }, "{label}");
             assert!(grid.flags.off && !grid.is_plottable, "{label}");
@@ -7649,8 +7649,8 @@ check('currentmissing', lambda: L.set_current('Nope'))
             assert_eq!(line.common.layer, "Structure", "{label}: entity followed the rename");
         };
         check_state("live", host.document());
-        let dwg = crate::io::load_bytes("layers.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
-        let dxf = crate::io::load_bytes("layers.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+        let dwg = crate::io::load_bytes("layers.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+        let dxf = crate::io::load_bytes("layers.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         check_state("DWG", &dwg);
         check_state("DXF", &dxf);
 
@@ -7787,8 +7787,8 @@ check('d_modmissing', lambda: D.modify('Nope', dimscale=2))
         let live_title = host.document().text_styles.get("Heading").unwrap().clone();
         assert!(live_title.annotative, "annotative is kept in the live style");
         assert_eq!(host.document().dim_styles.get("Metric").unwrap().dimtxsty_handle, live_title.handle, "dim style links the text style handle");
-        let dwg = crate::io::load_bytes("styles.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
-        let dxf = crate::io::load_bytes("styles.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+        let dwg = crate::io::load_bytes("styles.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+        let dxf = crate::io::load_bytes("styles.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         check_state("DWG", &dwg);
         check_state("DXF", &dxf);
 
@@ -7930,8 +7930,8 @@ check('modify_missing', lambda: B.modify('Nope', description='x'))
         };
         check_state("live", host.document());
         assert_eq!(host.document().block_records.get("Gadget").unwrap().description, "a gadget");
-        let dwg = crate::io::load_bytes("blocks.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
-        let dxf = crate::io::load_bytes("blocks.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+        let dwg = crate::io::load_bytes("blocks.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+        let dxf = crate::io::load_bytes("blocks.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         check_state("DWG", &dwg);
         check_state("DXF", &dxf);
 
@@ -8044,8 +8044,8 @@ check('unknown_insert_block', lambda: doc.create_entity('Insert', block_name='Gh
             assert!(nested, "{label}: Part is inserted inside Outer");
         };
         check_state("live", host.document());
-        let dwg = crate::io::load_bytes("bc.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
-        let dxf = crate::io::load_bytes("bc.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+        let dwg = crate::io::load_bytes("bc.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+        let dxf = crate::io::load_bytes("bc.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         check_state("DWG", &dwg);
         check_state("DXF", &dxf);
 
@@ -8174,7 +8174,7 @@ check('ly_badscale', lambda: LY.set_page('Sheet1', scale=(0, 1)))
             assert_eq!(document.layers.get("Dotted2").unwrap().line_type, "Sparse", "{label}: layer followed the rename");
             assert_eq!(document.layers.get("Hidden2").unwrap().line_type, "Bracket", "{label}");
             let layouts = |name: &str| document.objects.values().find_map(|o| match o {
-                acadrust::objects::ObjectType::Layout(l) if l.name == name && !l.block_record.is_null() => Some(l.clone()),
+                codec::objects::ObjectType::Layout(l) if l.name == name && !l.block_record.is_null() => Some(l.clone()),
                 _ => None,
             });
             assert!(layouts("Sheet2").is_none(), "{label}: old layout name gone");
@@ -8190,8 +8190,8 @@ check('ly_badscale', lambda: LY.set_page('Sheet1', scale=(0, 1)))
         };
         check_state("live", host.document());
         assert_eq!(host.app.tabs[0].scene.current_layout, "Model", "the script switched back to Model");
-        let dwg = crate::io::load_bytes("ltl.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
-        let dxf = crate::io::load_bytes("ltl.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+        let dwg = crate::io::load_bytes("ltl.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+        let dxf = crate::io::load_bytes("ltl.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         check_state("DWG", &dwg);
         check_state("DXF", &dxf);
 
@@ -8206,7 +8206,7 @@ LT.delete('Temp')
         assert_eq!(refused, 0);
         let document = host.document();
         assert!(document.line_types.get("Temp").is_none());
-        assert!(!document.objects.values().any(|o| matches!(o, acadrust::objects::ObjectType::Layout(l) if l.name == "Sheet1" || l.name == "Details")));
+        assert!(!document.objects.values().any(|o| matches!(o, codec::objects::ObjectType::Layout(l) if l.name == "Sheet1" || l.name == "Details")));
         assert!(!document.entities().any(|e| matches!(e, EntityType::Circle(_))), "the sheet's circle went with its layout");
         assert_eq!(host.app.tabs[0].scene.current_layout, "Model", "deleting the current layout fell back to Model");
 
@@ -8352,9 +8352,9 @@ check('bad_point', lambda: ocs.command_step('point', {'point': [0, 0, 0]}))
         assert!(failed.is_empty(), "wrapper failures: {failed:?}");
         assert_eq!(refused, 9);
 
-        let lines: Vec<acadrust::entities::Line> = host.document().entities().filter_map(|e| match e { EntityType::Line(l) => Some(l.clone()), _ => None }).collect();
-        let circles: Vec<acadrust::entities::Circle> = host.document().entities().filter_map(|e| match e { EntityType::Circle(c) => Some(c.clone()), _ => None }).collect();
-        let arcs: Vec<acadrust::entities::Arc> = host.document().entities().filter_map(|e| match e { EntityType::Arc(a) => Some(a.clone()), _ => None }).collect();
+        let lines: Vec<codec::entities::Line> = host.document().entities().filter_map(|e| match e { EntityType::Line(l) => Some(l.clone()), _ => None }).collect();
+        let circles: Vec<codec::entities::Circle> = host.document().entities().filter_map(|e| match e { EntityType::Circle(c) => Some(c.clone()), _ => None }).collect();
+        let arcs: Vec<codec::entities::Arc> = host.document().entities().filter_map(|e| match e { EntityType::Arc(a) => Some(a.clone()), _ => None }).collect();
         let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
         let has_line = |x1: f64, y1: f64, x2: f64, y2: f64| lines.iter().any(|l| {
             (near(l.start.x, x1) && near(l.start.y, y1) && near(l.end.x, x2) && near(l.end.y, y2))
@@ -8385,7 +8385,7 @@ check('bad_point', lambda: ocs.command_step('point', {'point': [0, 0, 0]}))
         assert!(has_line(1800.0, 0.0, 1802.0, 0.0) && has_line(1805.0, 0.0, 1810.0, 0.0) && !has_line(1800.0, 0.0, 1810.0, 0.0), "break: {:?}", describe());
         assert!(has_line(1900.0, 0.0, 1915.0, 0.0), "stretch: {:?}", describe());
         assert!(has_line(2000.0, 0.0, 2015.0, 0.0), "lengthen: {:?}", describe());
-        let polylines: Vec<acadrust::entities::LwPolyline> = host.document().entities().filter_map(|e| match e { EntityType::LwPolyline(p) => Some(p.clone()), _ => None }).collect();
+        let polylines: Vec<codec::entities::LwPolyline> = host.document().entities().filter_map(|e| match e { EntityType::LwPolyline(p) => Some(p.clone()), _ => None }).collect();
         let at = |x: f64| polylines.iter().find(|p| p.vertices.iter().any(|v| near(v.location.x, x)));
         let pc = at(2100.0).expect("closed polyline");
         assert!(pc.is_closed, "polyline_close");
@@ -8552,7 +8552,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
 
     #[test]
     fn audit_python_raster_image_definition_linkage_over_real_ipc() {
-        use acadrust::objects::ObjectType;
+        use codec::objects::ObjectType;
         let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
             return;
         };
@@ -8611,8 +8611,8 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             }
         };
         check("live", host.document());
-        let dwg = crate::io::load_bytes("link.dwg", acadrust::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
-        let dxf = crate::io::load_bytes("link.dxf", acadrust::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
+        let dwg = crate::io::load_bytes("link.dwg", codec::DwgWriter::write_to_vec(host.document()).unwrap()).unwrap();
+        let dxf = crate::io::load_bytes("link.dxf", codec::DxfWriter::new(host.document()).write_to_vec().unwrap()).unwrap();
         check("DWG", &dwg);
         check("DXF", &dxf);
 
@@ -8711,8 +8711,8 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let target = {
             let mut host = HostSession::new(&mut app, 0);
             host.add_entity(EntityType::Line(Line::from_points(
-                acadrust::types::Vector3::new(6.0, 7.0, 0.0),
-                acadrust::types::Vector3::new(9.0, 7.0, 0.0),
+                codec::types::Vector3::new(6.0, 7.0, 0.0),
+                codec::types::Vector3::new(9.0, 7.0, 0.0),
             )))
         };
         let entity_token = request(&mut app, "Pick an entity", true);
@@ -9002,7 +9002,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let handle;
         {
             let mut host = HostSession::new(&mut app, 0);
-            handle = host.add_entity(EntityType::MLine(acadrust::entities::MLine::default()));
+            handle = host.add_entity(EntityType::MLine(codec::entities::MLine::default()));
             let original = host.document().get_entity(handle).unwrap();
             let changed =
                 ocs_plugin_api::entity_coverage::patch_canvas_layer(original, "HATCHES").unwrap();
@@ -9035,9 +9035,9 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let handle;
         {
             let mut host = HostSession::new(&mut app, 0);
-            let insert = acadrust::entities::Insert::new(
+            let insert = codec::entities::Insert::new(
                 "DOOR",
-                acadrust::types::Vector3::new(1.0, 2.0, 0.0),
+                codec::types::Vector3::new(1.0, 2.0, 0.0),
             );
             handle = host.add_entity(EntityType::Insert(insert));
             let mut changed = host.document().get_entity(handle).unwrap().clone();
@@ -9177,7 +9177,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
 
         let pts: Vec<EntityType> = (0..5)
             .map(|i| {
-                EntityType::Point(Point::at(acadrust::types::Vector3::new(
+                EntityType::Point(Point::at(codec::types::Vector3::new(
                     i as f64, i as f64, 0.0,
                 )))
             })
@@ -9202,7 +9202,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
-        let h = host.add_entity(EntityType::Point(Point::at(acadrust::types::Vector3::new(
+        let h = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
             1.0, 1.0, 0.0,
         ))));
         let epoch_before = host.app.tabs[0].scene.geometry_epoch;
@@ -9239,7 +9239,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let mut host = HostSession::new(&mut app, 0);
 
         assert!(!host.document().layers.contains("PLUGIN-LAYER"));
-        let mut pt = Point::at(acadrust::types::Vector3::new(3.0, 3.0, 0.0));
+        let mut pt = Point::at(codec::types::Vector3::new(3.0, 3.0, 0.0));
         pt.common.layer = "PLUGIN-LAYER".to_string();
         host.add_entity(EntityType::Point(pt));
 
@@ -9275,7 +9275,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
-        let h = host.add_entity(EntityType::Point(Point::at(acadrust::types::Vector3::new(
+        let h = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
             2.0, 2.0, 0.0,
         ))));
         assert!(host.document().get_entity(h).is_some());
@@ -9300,10 +9300,10 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         fn on_point(&mut self, pt: [f64; 3]) -> ocs_plugin_api::host::CommandStep {
             use ocs_plugin_api::host::CommandStep;
             if self.got_first {
-                let p = acadrust::entities::Point::at(acadrust::types::Vector3::new(
+                let p = codec::entities::Point::at(codec::types::Vector3::new(
                     pt[0], pt[1], pt[2],
                 ));
-                CommandStep::CommitAndEnd(acadrust::EntityType::Point(p))
+                CommandStep::CommitAndEnd(codec::EntityType::Point(p))
             } else {
                 self.got_first = true;
                 CommandStep::NeedPoint
@@ -9482,12 +9482,12 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         }
         fn on_object_pick(
             &mut self,
-            _handle: acadrust::Handle,
+            _handle: codec::Handle,
             pt: [f64; 3],
         ) -> ocs_plugin_api::host::CommandStep {
             let p =
-                acadrust::entities::Point::at(acadrust::types::Vector3::new(pt[0], pt[1], pt[2]));
-            ocs_plugin_api::host::CommandStep::CommitAndEnd(acadrust::EntityType::Point(p))
+                codec::entities::Point::at(codec::types::Vector3::new(pt[0], pt[1], pt[2]));
+            ocs_plugin_api::host::CommandStep::CommitAndEnd(codec::EntityType::Point(p))
         }
     }
 
@@ -9497,8 +9497,8 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         app.tabs[0].is_start = false;
         let target = {
             let mut host = HostSession::new(&mut app, 0);
-            let h = host.add_entity(acadrust::EntityType::Point(acadrust::entities::Point::at(
-                acadrust::types::Vector3::new(3.0, 4.0, 0.0),
+            let h = host.add_entity(codec::EntityType::Point(codec::entities::Point::at(
+                codec::types::Vector3::new(3.0, 4.0, 0.0),
             )));
             host.start_interactive(Box::new(PickThenMark));
             h
@@ -9521,8 +9521,8 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
-        host.add_entity(acadrust::EntityType::Point(acadrust::entities::Point::at(
-            acadrust::types::Vector3::new(7.0, 8.0, 0.0),
+        host.add_entity(codec::EntityType::Point(codec::entities::Point::at(
+            codec::types::Vector3::new(7.0, 8.0, 0.0),
         )));
         let reader = host.document_reader();
         assert_eq!(reader.entity_count(), 1);
@@ -9543,8 +9543,8 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
                 .unwrap();
         assert_eq!(reader.entity_count(), 0);
 
-        host.add_entity(acadrust::EntityType::Point(acadrust::entities::Point::at(
-            acadrust::types::Vector3::new(1.0, 2.0, 0.0),
+        host.add_entity(codec::EntityType::Point(codec::entities::Point::at(
+            codec::types::Vector3::new(1.0, 2.0, 0.0),
         )));
 
         assert_eq!(reader.entity_count(), 1);
@@ -9557,7 +9557,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
-        let h = host.add_entity(EntityType::Point(Point::at(acadrust::types::Vector3::new(
+        let h = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
             7.0, 8.0, 0.0,
         ))));
 
@@ -9594,7 +9594,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         >::open(std::path::Path::new(&info.path))
                 .unwrap();
 
-        let h = host.add_entity(EntityType::Point(Point::at(acadrust::types::Vector3::new(
+        let h = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
             1.0, 2.0, 0.0,
         ))));
         assert_eq!(reader.entity_count(), 1);
@@ -9628,13 +9628,13 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             ..Default::default()
         };
         let handle = host.add_layer(config).expect("should create layer");
-        assert_ne!(handle, acadrust::Handle::NULL);
+        assert_ne!(handle, codec::Handle::NULL);
 
         // Verify defaults were applied
         let layer = host.document().layers.get("ELECTRICAL").expect("layer should exist");
-        assert_eq!(layer.color, acadrust::types::Color::Index(7));
+        assert_eq!(layer.color, codec::types::Color::Index(7));
         assert_eq!(layer.line_type, "Continuous");
-        assert_eq!(layer.line_weight, acadrust::types::LineWeight::ByLayer);
+        assert_eq!(layer.line_weight, codec::types::LineWeight::ByLayer);
         assert!(!layer.flags.off);
         assert!(!layer.flags.frozen);
         assert!(!layer.flags.locked);
@@ -9643,7 +9643,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         // 2. Duplicate add_layer should be rejected (return None)
         let dup_config = LayerConfig {
             name: "ELECTRICAL".to_string(),
-            color: Some(acadrust::types::Color::Index(1)),
+            color: Some(codec::types::Color::Index(1)),
             ..Default::default()
         };
         assert!(host.add_layer(dup_config).is_none(), "duplicate layer should return None");
@@ -9651,23 +9651,23 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         // 3. Modify only color and locked; other properties should remain untouched
         let mod_config = LayerConfig {
             name: "ELECTRICAL".to_string(),
-            color: Some(acadrust::types::Color::Index(1)),
+            color: Some(codec::types::Color::Index(1)),
             locked: Some(true),
             ..Default::default()
         };
         assert!(host.modify_layer(mod_config));
 
         let updated = host.document().layers.get("ELECTRICAL").expect("layer should exist");
-        assert_eq!(updated.color, acadrust::types::Color::Index(1)); // Modified to red
+        assert_eq!(updated.color, codec::types::Color::Index(1)); // Modified to red
         assert!(updated.flags.locked);                               // Modified to locked
         assert_eq!(updated.line_type, "Continuous");                 // Kept as-is
-        assert_eq!(updated.line_weight, acadrust::types::LineWeight::ByLayer); // Kept as-is
+        assert_eq!(updated.line_weight, codec::types::LineWeight::ByLayer); // Kept as-is
         assert!(!updated.flags.off);                                 // Kept as-is
 
         // 4. Modify nonexistent layer returns false
         let non_existent = LayerConfig {
             name: "DOES_NOT_EXIST".to_string(),
-            color: Some(acadrust::types::Color::Index(2)),
+            color: Some(codec::types::Color::Index(2)),
             ..Default::default()
         };
         assert!(!host.modify_layer(non_existent));
@@ -9760,7 +9760,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         assert!(host.execute_command("VSCURRENT FLATSHADED\n"));
         assert_eq!(
             host.app.tabs[0].render_mode,
-            ocs_plugin_api::host::acadrust::entities::ViewportRenderMode::FlatShaded
+            ocs_plugin_api::host::codec::entities::ViewportRenderMode::FlatShaded
         );
 
         // 12. Drafting aids toggle via drive_headless_task

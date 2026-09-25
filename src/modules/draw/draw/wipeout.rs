@@ -1,10 +1,10 @@
 // WIPEOUT command — draw a polygonal mask or derive one from a closed polyline.
 
-use acadrust::entities::{Wipeout, WipeoutClipType};
-use acadrust::types::{Vector2, Vector3};
-use acadrust::{CadDocument, EntityType, Handle};
-use cadkernel::geom2d::{polygon_frame, Tolerance};
-use cadkernel::space::Plane;
+use codec::entities::{Wipeout, WipeoutClipType};
+use codec::types::{Vector2, Vector3};
+use codec::{CadDocument, EntityType, Handle};
+use kernel::geom2d::{polygon_frame, Tolerance};
+use kernel::space::Plane;
 use glam::DVec3;
 use crate::t;
 
@@ -184,8 +184,8 @@ impl CadCommand for WipeoutCommand {
                 if let Some(first) = self.points.first() {
                     let first = self.plane.to_local(*first);
                     let point = self.plane.to_local(point);
-                    let distance = cadkernel::geom2d::Vec2::new(point.x, point.y)
-                        .distance(cadkernel::geom2d::Vec2::new(first.x, first.y));
+                    let distance = kernel::geom2d::Vec2::new(point.x, point.y)
+                        .distance(kernel::geom2d::Vec2::new(first.x, first.y));
                     if self.points.len() >= 3
                         && distance <= Tolerance::default().linear()
                     {
@@ -445,8 +445,8 @@ fn make_poly_wipeout(points: &[[f64; 2]], plane: Plane) -> Option<EntityType> {
 
 fn explicitly_closed(points: &[[f64; 2]]) -> bool {
     points.len() >= 4
-        && cadkernel::geom2d::Vec2::from(points[0])
-            .distance(cadkernel::geom2d::Vec2::from(*points.last().unwrap()))
+        && kernel::geom2d::Vec2::from(points[0])
+            .distance(kernel::geom2d::Vec2::from(*points.last().unwrap()))
             <= Tolerance::default().linear()
 }
 
@@ -501,7 +501,7 @@ inventory::submit!(crate::command::CommandRegistration { names: &["WIPEOUT"] });
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::LwPolyline;
+    use codec::entities::LwPolyline;
 
     #[test]
     fn command_undo_never_removes_the_first_point() {

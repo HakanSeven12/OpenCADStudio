@@ -48,7 +48,7 @@ impl OpenCADStudio {
         let i = self.active_tab;
         let mut existing: Vec<(String, String)> = Vec::new();
         for object in self.tabs[i].scene.document.objects.values() {
-            if let acadrust::objects::ObjectType::UnderlayDefinition(def) = object {
+            if let codec::objects::ObjectType::UnderlayDefinition(def) = object {
                 let name = file_stem(&def.file_path);
                 if !existing.iter().any(|(n, _)| *n == name) {
                     existing.push((name, def.file_path.clone()));
@@ -77,7 +77,7 @@ impl OpenCADStudio {
     /// shown.
     pub(in crate::app) fn open_underlay_layers_dialog(&mut self, i: usize) {
         let document = &self.tabs[i].scene.document;
-        let selected: Vec<acadrust::Handle> = self.tabs[i]
+        let selected: Vec<codec::Handle> = self.tabs[i]
             .scene
             .selected_entities()
             .iter()
@@ -85,10 +85,10 @@ impl OpenCADStudio {
             .collect();
         let mut targets: Vec<LayerTarget> = Vec::new();
         for entity in document.entities() {
-            let acadrust::EntityType::Underlay(u) = entity else {
+            let codec::EntityType::Underlay(u) = entity else {
                 continue;
             };
-            if u.underlay_type != acadrust::entities::UnderlayType::Pdf {
+            if u.underlay_type != codec::entities::UnderlayType::Pdf {
                 continue;
             }
             let Some(def) = crate::entities::underlay::definition(u, document) else {
@@ -156,7 +156,7 @@ impl OpenCADStudio {
         let changed: Vec<LayerTarget> = targets
             .into_iter()
             .filter(|t| match self.tabs[i].scene.document.get_entity(t.handle) {
-                Some(acadrust::EntityType::Underlay(u)) => hidden_layers(u) != t.hidden,
+                Some(codec::EntityType::Underlay(u)) => hidden_layers(u) != t.hidden,
                 _ => false,
             })
             .collect();
@@ -172,7 +172,7 @@ impl OpenCADStudio {
             .get(LAYER_OVERRIDE_APP)
             .map(|a| a.handle.value());
         for target in &changed {
-            if let Some(acadrust::EntityType::Underlay(u)) =
+            if let Some(codec::EntityType::Underlay(u)) =
                 self.tabs[i].scene.document.get_entity_mut(target.handle)
             {
                 let data = &mut u.common.extended_data;
@@ -181,9 +181,9 @@ impl OpenCADStudio {
                 }
                 data.remove_record(LAYER_OVERRIDE_APP);
                 if !target.hidden.is_empty() {
-                    let mut record = acadrust::xdata::ExtendedDataRecord::new(LAYER_OVERRIDE_APP);
+                    let mut record = codec::xdata::ExtendedDataRecord::new(LAYER_OVERRIDE_APP);
                     for name in &target.hidden {
-                        record.add_value(acadrust::xdata::XDataValue::String(name.clone()));
+                        record.add_value(codec::xdata::XDataValue::String(name.clone()));
                     }
                     data.add_record(record);
                 }

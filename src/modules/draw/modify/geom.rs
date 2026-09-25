@@ -1,4 +1,4 @@
-//! Adapters between the editing commands and `cadkernel`'s plane geometry.
+//! Adapters between the editing commands and `opencadkernel`'s plane geometry.
 //!
 //! The kernel takes points as `[f64; 2]` and hands tessellation back as
 //! `[f64; 3]`. The commands here grew up passing loose `x, y` scalars and
@@ -11,11 +11,11 @@
 //! resident render path splits the `f64` into a high/low pair instead. Only a
 //! caller knows which of the two it is.
 
-use cadkernel::geom2d::{self, Ellipse};
+use kernel::geom2d::{self, Ellipse};
 
 /// Re-exported unchanged: these already speak in plain `f64`, so there is no
 /// call-shape difference for this module to absorb.
-pub use cadkernel::geom2d::{arc_parameter, lerp, normalize_angle};
+pub use kernel::geom2d::{arc_parameter, lerp, normalize_angle};
 
 /// Preview geometry keeps the density the commands have always used.
 const SEGMENTS_PER_RADIAN: f64 = geom2d::DEFAULT_SEGMENTS_PER_RADIAN;

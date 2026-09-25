@@ -1,8 +1,8 @@
 // Circle creation commands.
 
-use acadrust::types::Vector3;
-use acadrust::{Circle, EntityType};
-use cadkernel::geom2d::{
+use codec::types::Vector3;
+use codec::{Circle, EntityType};
+use kernel::geom2d::{
     fillets_between, Circle as KernelCircle, Curve as KernelCurve, Line as KernelLine,
     Tolerance,
 };
@@ -91,7 +91,7 @@ fn circumcircle(
     plane: WorkingPlane,
 ) -> Option<(DVec3, f64)> {
     let (a, b, c) = (plane.to_local(a), plane.to_local(b), plane.to_local(c));
-    let circle = cadkernel::geom2d::arc_through_points(
+    let circle = kernel::geom2d::arc_through_points(
         [a.x, a.y],
         [b.x, b.y],
         [c.x, c.y],

@@ -1,17 +1,17 @@
 //! SWEEP command data mapped to the shared kernel history reconstruction.
 
-use acadrust::entities::{Surface, SurfaceData, SurfaceKind, SurfaceSweepOptions};
-use acadrust::objects::{SolidHistoryNodeBase, SolidHistorySweep};
-use acadrust::types::Vector3;
-use acadrust::EntityType;
-use cadkernel::brep::Body;
+use codec::entities::{Surface, SurfaceData, SurfaceKind, SurfaceSweepOptions};
+use codec::objects::{SolidHistoryNodeBase, SolidHistorySweep};
+use codec::types::Vector3;
+use codec::EntityType;
+use kernel::brep::Body;
 
 use crate::command::{ExtrudeMode, SweepOptions};
 use super::sweep_model::{embedded_path, embedded_revolve_profile};
 
-fn embedded_sweep_profile(entity: &EntityType) -> Option<(acadrust::entities::EmbeddedEntity, [f64; 16])> {
+fn embedded_sweep_profile(entity: &EntityType) -> Option<(codec::entities::EmbeddedEntity, [f64; 16])> {
     if let EntityType::Region(region) = entity {
-        Some((acadrust::entities::EmbeddedEntity::Region(region.clone()), glam::DMat4::IDENTITY.to_cols_array()))
+        Some((codec::entities::EmbeddedEntity::Region(region.clone()), glam::DMat4::IDENTITY.to_cols_array()))
     } else {
         embedded_revolve_profile(entity)
     }
@@ -19,13 +19,13 @@ fn embedded_sweep_profile(entity: &EntityType) -> Option<(acadrust::entities::Em
 
 pub fn is_sweep_profile(entity: &EntityType) -> bool {
     embedded_sweep_profile(entity).is_some_and(|(profile, transform)| {
-        cadkernel::acis::sweep_profile_geometry(&profile, transform).is_ok()
+        kernel::acis::sweep_profile_geometry(&profile, transform).is_ok()
     })
 }
 
 pub fn is_sweep_path(entity: &EntityType) -> bool {
     match embedded_path(entity) {
-        Some(acadrust::entities::EmbeddedEntity::Spline(value)) => {
+        Some(codec::entities::EmbeddedEntity::Spline(value)) => {
             value.degree > 0 && (value.control_points.len() > value.degree as usize
                 || value.fit_points.len() >= 2)
         }
@@ -42,21 +42,21 @@ pub fn sweep_selection_options(profiles: &[EntityType], mut options: SweepOption
     }
     let geometry = profiles.iter().map(|profile| {
         let (entity, transform) = embedded_sweep_profile(profile)?;
-        let (plane, wires, _) = cadkernel::acis::sweep_profile_geometry(&entity, transform).ok()?;
+        let (plane, wires, _) = kernel::acis::sweep_profile_geometry(&entity, transform).ok()?;
         Some((plane, wires))
     }).collect::<Option<Vec<_>>>()?;
     options.base_point = Some(glam::DVec3::from_array(
-        cadkernel::brep::sweep_profile_group_base(&geometry)?,
+        kernel::brep::sweep_profile_group_base(&geometry)?,
     ));
     Some(options)
 }
 
 pub fn sweep_record(profile: &EntityType, path: &EntityType, options: SweepOptions) -> Option<SolidHistorySweep> {
     let (sweep_entity, sweep_entity_transform) = embedded_sweep_profile(profile)?;
-    let (plane, wires, _) = cadkernel::acis::sweep_profile_geometry(&sweep_entity, sweep_entity_transform).ok()?;
+    let (plane, wires, _) = kernel::acis::sweep_profile_geometry(&sweep_entity, sweep_entity_transform).ok()?;
     let base_point = match options.base_point {
         Some(point) => point.to_array(),
-        None => cadkernel::brep::sweep_profile_base(plane, &wires)?,
+        None => kernel::brep::sweep_profile_base(plane, &wires)?,
     };
     let mut base = SolidHistoryNodeBase::new(1);
     base.transform = glam::DMat4::IDENTITY.to_cols_array();
@@ -79,13 +79,13 @@ pub fn sweep_record(profile: &EntityType, path: &EntityType, options: SweepOptio
 
 pub fn swept_with_options(profile: &EntityType, path: &EntityType, mode: ExtrudeMode, options: SweepOptions) -> Option<Body> {
     let record = sweep_record(profile, path, options)?;
-    cadkernel::acis::rebuild_sweep_with_mode(&record, mode == ExtrudeMode::Surface).ok()
+    kernel::acis::rebuild_sweep_with_mode(&record, mode == ExtrudeMode::Surface).ok()
 }
 
 /// Preserve native construction parameters alongside the sheet's saved B-rep.
 pub fn swept_surface_entity(record: &SolidHistorySweep) -> EntityType {
     let mut surface = Surface::new(SurfaceKind::Swept);
-    if let Ok(point) = cadkernel::acis::sweep_history_reference_point(record) {
+    if let Ok(point) = kernel::acis::sweep_history_reference_point(record) {
         surface.point_of_reference = Vector3::new(point[0], point[1], point[2]);
     }
     surface.surface_data = SurfaceData::Swept {

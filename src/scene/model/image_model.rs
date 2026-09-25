@@ -35,8 +35,8 @@ fn quad_verts(corners: &[[f32; 3]; 4], corners_low: &[[f32; 3]; 4]) -> Vec<Image
 /// image rectangle when unclipped, else the clip rectangle or the triangulated
 /// clip polygon. An inverted (show-outside) boundary isn't a simple filled
 /// region, so it falls back to the whole image rather than mis-clip.
-fn clip_triangles_px(img: &acadrust::entities::RasterImage) -> Vec<[f64; 2]> {
-    use acadrust::entities::{ClipMode, ClipType};
+fn clip_triangles_px(img: &codec::entities::RasterImage) -> Vec<[f64; 2]> {
+    use codec::entities::{ClipMode, ClipType};
     let w = img.size.x;
     let h = img.size.y;
     let quad = || {
@@ -115,7 +115,7 @@ impl ImageModel {
     /// Build an ImageModel from a DXF RasterImage entity.
     /// Returns `None` if the image file cannot be opened or decoded.
     pub fn from_raster_image(
-        img: &acadrust::entities::RasterImage,
+        img: &codec::entities::RasterImage,
     ) -> Option<Self> {
         let w = img.size.x;
         let h = img.size.y;
@@ -196,11 +196,11 @@ impl ImageModel {
     /// inverted. `None` when the underlay is off, non-PDF, or the page can't
     /// be rendered (caller keeps the outline placeholder).
     pub fn from_underlay(
-        u: &acadrust::entities::Underlay,
-        def: &acadrust::entities::UnderlayDefinition,
+        u: &codec::entities::Underlay,
+        def: &codec::entities::UnderlayDefinition,
         background: [f32; 4],
     ) -> Option<Self> {
-        use acadrust::entities::{UnderlayDisplayFlags, UnderlayType};
+        use codec::entities::{UnderlayDisplayFlags, UnderlayType};
         use super::pdf_raster::{self, PageAdjust};
         if !u.flags.contains(UnderlayDisplayFlags::ON) {
             return None;
@@ -290,8 +290,8 @@ impl ImageModel {
 /// Visible region of an underlay page as triangles in page UV (0..1, y up):
 /// the whole page, the clip polygon, or — for an inverted clip — the page
 /// with the polygon cut out.
-fn underlay_visible_uv(u: &acadrust::entities::Underlay, page_w: f64, page_h: f64) -> Vec<[f64; 2]> {
-    use acadrust::entities::UnderlayDisplayFlags;
+fn underlay_visible_uv(u: &codec::entities::Underlay, page_w: f64, page_h: f64) -> Vec<[f64; 2]> {
+    use codec::entities::UnderlayDisplayFlags;
     let page = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
     let whole = || vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
     let clip = crate::entities::underlay::clip_polygon_local(u);
@@ -300,9 +300,9 @@ fn underlay_visible_uv(u: &acadrust::entities::Underlay, page_w: f64, page_h: f6
     }
     let ring: Vec<[f64; 2]> = clip.iter().map(|p| [p[0] / page_w, p[1] / page_h]).collect();
     let (points, triangles) = if u.clip_inverted {
-        cadkernel::geom2d::triangulate(&page, &[ring])
+        kernel::geom2d::triangulate(&page, &[ring])
     } else {
-        cadkernel::geom2d::triangulate(&ring, &[])
+        kernel::geom2d::triangulate(&ring, &[])
     };
     triangles
         .into_iter()
@@ -316,7 +316,7 @@ impl ImageModel {
     /// metafile picture (rasterized by the `gdi` player); returns `None` when
     /// the frame is degenerate or nothing in the blob decodes, so the caller
     /// falls back to the frame placeholder.
-    pub fn from_ole2frame(ole: &acadrust::entities::Ole2Frame) -> Option<Self> {
+    pub fn from_ole2frame(ole: &codec::entities::Ole2Frame) -> Option<Self> {
         let payload = ole.encoded_payload();
         let (pixels, width, height) = super::ole_pres::decode(&payload)?;
 

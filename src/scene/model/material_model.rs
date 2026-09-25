@@ -1,6 +1,6 @@
-use acadrust::objects::{Material, MaterialColor, MaterialMap, ObjectType};
-use acadrust::xdata::XDataValue;
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::objects::{Material, MaterialColor, MaterialMap, ObjectType};
+use codec::xdata::XDataValue;
+use codec::{CadDocument, EntityType, Handle};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -581,10 +581,10 @@ fn load_map_image(_map: &MaterialMap, _base_dir: Option<&Path>) -> Option<Arc<Ma
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::Line;
-    use acadrust::objects::MaterialTexture;
-    use acadrust::types::Vector3;
-    use acadrust::xdata::{ExtendedDataRecord, XDataValue};
+    use codec::entities::Line;
+    use codec::objects::MaterialTexture;
+    use codec::types::Vector3;
+    use codec::xdata::{ExtendedDataRecord, XDataValue};
 
     #[test]
     fn procedural_checker_is_one_repeatable_two_by_two_tile() {

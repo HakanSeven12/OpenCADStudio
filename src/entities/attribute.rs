@@ -1,8 +1,8 @@
-use acadrust::entities::attribute_definition::{
+use codec::entities::attribute_definition::{
     HorizontalAlignment as AHA, MTextFlag, VerticalAlignment as AVA,
 };
-use acadrust::entities::{AttributeDefinition, AttributeEntity};
-use acadrust::types::Vector3;
+use codec::entities::{AttributeDefinition, AttributeEntity};
+use codec::types::Vector3;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_angle_prop as edit_angle, edit_prop as edit, parse_f64, ro_prop as ro, square_grip};
@@ -101,7 +101,7 @@ fn mtext_flag_str(f: MTextFlag) -> &'static str {
 /// Render text strokes for an attribute, honouring alignment, oblique angle,
 /// width factor, generation flags (backward / upside-down), text-style
 /// resolution, and basic multiline splitting on `\n` / `\\P`.
-fn build_attr_render(input: AttrTextInputs<'_>, document: &acadrust::CadDocument) -> RenderEntity {
+fn build_attr_render(input: AttrTextInputs<'_>, document: &codec::CadDocument) -> RenderEntity {
     let normal = (input.normal.x, input.normal.y, input.normal.z);
     let (wsx, wsy, wsz) = transform::ocs_point_to_wcs(
         (
@@ -290,7 +290,7 @@ fn build_attr_render(input: AttrTextInputs<'_>, document: &acadrust::CadDocument
             anchor_f64[0] - (anchor_local_x as f64 * cos_r - local_y_for_line as f64 * sin_r),
             anchor_f64[1] - (anchor_local_x as f64 * sin_r + local_y_for_line as f64 * cos_r),
         ];
-        // Parse `%%` codes through acadrust (same as TEXT), re-encoded for the
+        // Parse `%%` codes through opencadcodec (same as TEXT), re-encoded for the
         // stroke tessellator, so attribute text shares the one parser.
         let encoded = crate::entities::text::acad_text_encode(line);
         let (strokes, fill_tris) = lff::tessellate_text_ex(
@@ -338,7 +338,7 @@ fn build_attr_render(input: AttrTextInputs<'_>, document: &acadrust::CadDocument
 // ── AttributeDefinition ───────────────────────────────────────────────────────
 
 impl RenderConvertible for AttributeDefinition {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         // An attribute definition previews its tag when it has no default
         // value, so the placeholder is visible where a block will prompt for
         // input. (Passed as a non-empty value, so it renders as-is.)
@@ -627,7 +627,7 @@ impl Transformable for AttributeDefinition {
 // ── AttributeEntity ───────────────────────────────────────────────────────────
 
 impl RenderConvertible for AttributeEntity {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(build_attr_render(
             AttrTextInputs {
                 value: &self.value,
@@ -874,7 +874,7 @@ impl Transformable for AttributeEntity {
     }
 }
 
-impl crate::entities::traits::TextContent for acadrust::entities::AttributeDefinition {
+impl crate::entities::traits::TextContent for codec::entities::AttributeDefinition {
     fn text_content(&self) -> Option<String> {
         Some(self.default_value.clone())
     }
@@ -886,7 +886,7 @@ impl crate::entities::traits::TextContent for acadrust::entities::AttributeDefin
     }
 }
 
-impl crate::entities::traits::TextContent for acadrust::entities::AttributeEntity {
+impl crate::entities::traits::TextContent for codec::entities::AttributeEntity {
     fn text_content(&self) -> Option<String> {
         Some(self.get_value().to_string())
     }

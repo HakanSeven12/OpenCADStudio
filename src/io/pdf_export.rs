@@ -1093,7 +1093,7 @@ fn emit_wire_fills(
                     boundary_exterior: None,
                     boundary_sources: None,
                     boundary_paths: None,
-                    style: acadrust::entities::HatchStyleType::Normal,
+                    style: codec::entities::HatchStyleType::Normal,
                     pattern: pattern.clone(),
                     name: "PLOTSTYLE".to_string(),
                     color: wire.color,

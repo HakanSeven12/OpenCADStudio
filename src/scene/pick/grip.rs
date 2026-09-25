@@ -1,6 +1,6 @@
 //! OpenCADStudio-style grip editing.
 
-use acadrust::Handle;
+use codec::Handle;
 use glam::{DVec3, Mat4, Vec2};
 use iced::{Point, Rectangle};
 

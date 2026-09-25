@@ -1,9 +1,9 @@
 // DIVIDE and MEASURE place points or block references along a curve.
 
-use acadrust::entities::{Insert, Point as PointEnt};
-use acadrust::types::Vector3;
-use acadrust::{Entity, EntityType, Handle};
-use cadkernel::space::PlanarCurve;
+use codec::entities::{Insert, Point as PointEnt};
+use codec::types::Vector3;
+use codec::{Entity, EntityType, Handle};
+use kernel::space::PlanarCurve;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, CurveMarker, WorkingPlane};
@@ -198,7 +198,7 @@ impl<const MEASURE: bool> CadCommand for CurveMarkerCommand<MEASURE> {
             return None;
         }
         let origin = self.value_origin?;
-        let distance = cadkernel::space::Vec3::from(cursor.to_array())
+        let distance = kernel::space::Vec3::from(cursor.to_array())
             .distance(origin.to_array().into());
         (distance.is_finite() && distance > 0.0).then_some(distance)
     }
@@ -308,7 +308,7 @@ fn make_marker(
 
 enum MeasuredCurve {
     Planar(PlanarCurve),
-    Spatial(cadkernel::space::ArcLengthCurve3),
+    Spatial(kernel::space::ArcLengthCurve3),
 }
 
 impl MeasuredCurve {
@@ -359,7 +359,7 @@ inventory::submit!(crate::command::CommandRegistration { names: &["MEASURE"] });
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::{Circle, Line};
+    use codec::entities::{Circle, Line};
 
     fn point(entity: &EntityType) -> DVec3 {
         let EntityType::Point(point) = entity else { panic!("expected point") };

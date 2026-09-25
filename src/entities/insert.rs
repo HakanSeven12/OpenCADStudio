@@ -1,6 +1,6 @@
-use acadrust::entities::Insert;
-use acadrust::types::{Matrix3, Transform, Vector3};
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::entities::Insert;
+use codec::types::{Matrix3, Transform, Vector3};
+use codec::{CadDocument, EntityType, Handle};
 use glam::Vec3;
 
 use crate::command::EntityTransform;
@@ -23,7 +23,7 @@ const ATTRIBUTE_GRIP_BASE: usize = 1;
 /// attribute belongs to the block definition rather than this insert, and a
 /// locked position cannot be dragged. Visibility is a separate question: an
 /// invisible attribute that ATTMODE 2 displays is grippable while it shows.
-fn attribute_is_movable(att: &acadrust::entities::AttributeEntity) -> bool {
+fn attribute_is_movable(att: &codec::entities::AttributeEntity) -> bool {
     !att.flags.constant && !att.lock_position && !att.flags.locked_position
 }
 
@@ -58,7 +58,7 @@ pub(crate) fn unscale_attribute_grip(
 fn attribute_is_render_visible(
     document: &CadDocument,
     visibility: i16,
-    attribute: &acadrust::entities::AttributeEntity,
+    attribute: &codec::entities::AttributeEntity,
 ) -> bool {
     let layer_visible = document
         .layers
@@ -89,7 +89,7 @@ fn insert_attribute_block_scale(
 
 fn scale_attribute_for_insert(
     insert: &Insert,
-    attribute: &mut acadrust::entities::AttributeEntity,
+    attribute: &mut codec::entities::AttributeEntity,
     block_scale: f64,
 ) {
     if (block_scale - 1.0).abs() <= 1.0e-6 {
@@ -241,7 +241,7 @@ fn apply_geom_prop(ins: &mut Insert, field: &str, value: &str) {
             }
             let delta = ocs * ins.insert_point - old_world;
             for att in &mut ins.attributes {
-                acadrust::Entity::translate(att, delta);
+                codec::Entity::translate(att, delta);
             }
         }
         // Single Scale row shown while "Uniform scale" is checked (#427).
@@ -281,7 +281,7 @@ fn apply_grip(ins: &mut Insert, grip_id: usize, apply: GripApply) {
     // world delta — otherwise a grip-drag leaves the attribute text behind (#255).
     let delta = world - old_world;
     for att in &mut ins.attributes {
-        acadrust::Entity::translate(att, delta);
+        codec::Entity::translate(att, delta);
     }
 }
 
@@ -296,7 +296,7 @@ fn apply_transform(ins: &mut Insert, t: &EntityTransform) {
 
         let ux = dx / len;
         let uy = dy / len;
-        let mirror = acadrust::types::Matrix4 {
+        let mirror = codec::types::Matrix4 {
             m: [
                 [2.0 * ux * ux - 1.0, 2.0 * ux * uy, 0.0, 0.0],
                 [2.0 * ux * uy, 2.0 * uy * uy - 1.0, 0.0, 0.0],
@@ -311,7 +311,7 @@ fn apply_transform(ins: &mut Insert, t: &EntityTransform) {
                 p1.y as f64,
                 0.0,
             )));
-        acadrust::Entity::apply_transform(entity, &t);
+        codec::Entity::apply_transform(entity, &t);
     });
 }
 
@@ -343,8 +343,8 @@ impl crate::entities::traits::FallbackTess for Insert {
     }
 }
 pub(crate) fn insert_attribute_entities(
-    document: &acadrust::CadDocument,
-    insert: &acadrust::entities::Insert,
+    document: &codec::CadDocument,
+    insert: &codec::entities::Insert,
     annotation_scale: f32,
     scale_policy: crate::scene::BlockScalePolicy,
 ) -> Vec<EntityType> {
@@ -367,8 +367,8 @@ pub(crate) fn insert_attribute_entities(
 
 pub(crate) fn append_insert_attribute_wires(
     wires: &mut Vec<WireModel>,
-    document: &acadrust::CadDocument,
-    ins: &acadrust::entities::Insert,
+    document: &codec::CadDocument,
+    ins: &codec::entities::Insert,
     insert_handle: Handle,
     sel: bool,
     ins_color: [f32; 4],
@@ -458,9 +458,9 @@ pub(crate) fn append_insert_attribute_wires(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::AttributeEntity;
-    use acadrust::tables::Layer;
-    use acadrust::xdata::ExtendedDataRecord;
+    use codec::entities::AttributeEntity;
+    use codec::tables::Layer;
+    use codec::xdata::ExtendedDataRecord;
 
     fn attribute(tag: &str, x: f64, y: f64) -> AttributeEntity {
         let mut att = AttributeEntity::new(tag.to_string(), format!("{tag}-value"));

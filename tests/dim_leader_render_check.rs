@@ -1,9 +1,9 @@
 //! Check DIMTMOVE through the scene's actual dimension tessellation.
 
-use acadrust::entities::{Dimension, DimensionAligned, DimensionLinear};
-use acadrust::types::Vector3;
-use acadrust::xdata::XDataValue;
-use acadrust::EntityType;
+use codec::entities::{Dimension, DimensionAligned, DimensionLinear};
+use codec::types::Vector3;
+use codec::xdata::XDataValue;
+use codec::EntityType;
 use OpenCADStudio::entities::dim_override as ov;
 use OpenCADStudio::scene::Scene;
 

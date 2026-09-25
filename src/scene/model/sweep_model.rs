@@ -1,15 +1,15 @@
 // Exact profile sweeps stored as kernel B-reps and ACIS.
 
-use cadkernel::brep::{self, Body};
-use cadkernel::geom2d::{Arc, Curve, EllipseArc, Line};
-use cadkernel::space::{PlanarCurve, Plane, Vec3};
-use acadrust::entities::{EmbeddedEntity, LwPolyline, LwVertex, Spline};
-use acadrust::objects::{
+use kernel::brep::{self, Body};
+use kernel::geom2d::{Arc, Curve, EllipseArc, Line};
+use kernel::space::{PlanarCurve, Plane, Vec3};
+use codec::entities::{EmbeddedEntity, LwPolyline, LwVertex, Spline};
+use codec::objects::{
     SolidHistoryLoft, SolidHistoryNodeBase, SolidHistoryOperation, SolidHistoryRevolve,
     SolidHistorySweep,
 };
-use acadrust::types::{Vector2, Vector3};
-use acadrust::EntityType;
+use codec::types::{Vector2, Vector3};
+use codec::EntityType;
 
 use crate::entities::curve::entity_curve;
 pub use super::sweep_command_model::{
@@ -148,7 +148,7 @@ fn planar_polygon_entity(entity: &EntityType) -> Option<PlanarCurve> {
     let vertices = points
         .iter()
         .map(|point| {
-            plane.project(*point).map(|position| cadkernel::geom2d::PolylineVertex {
+            plane.project(*point).map(|position| kernel::geom2d::PolylineVertex {
                 position,
                 bulge: 0.0,
             })
@@ -156,7 +156,7 @@ fn planar_polygon_entity(entity: &EntityType) -> Option<PlanarCurve> {
         .collect::<Option<Vec<_>>>()?;
     Some(PlanarCurve::new(
         plane,
-        Curve::Polyline(cadkernel::geom2d::Polyline { vertices, closed }),
+        Curve::Polyline(kernel::geom2d::Polyline { vertices, closed }),
     ))
 }
 
@@ -194,14 +194,14 @@ fn region_profiles(entity: &EntityType) -> Option<(Plane, Vec<Vec<Curve>>)> {
             .map(|point| {
                 plane
                     .project(*point)
-                    .map(|position| cadkernel::geom2d::PolylineVertex {
+                    .map(|position| kernel::geom2d::PolylineVertex {
                         position,
                         bulge: 0.0,
                     })
             })
             .collect::<Option<Vec<_>>>()?;
         profiles.push(
-            Curve::Polyline(cadkernel::geom2d::Polyline {
+            Curve::Polyline(kernel::geom2d::Polyline {
                 vertices,
                 closed: true,
             })
@@ -810,7 +810,7 @@ pub fn polysolid(
         reference_point: Vector3::new(start.x, start.y, start.z),
         ..SolidHistorySweep::default()
     });
-    let body = cadkernel::acis::rebuild_body(&operation).ok()?;
+    let body = kernel::acis::rebuild_body(&operation).ok()?;
     Some((body, operation))
 }
 
@@ -892,8 +892,8 @@ fn circular_loft(profiles: &[EntityType]) -> Option<Body> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::{Circle, LwPolyline, LwVertex};
-    use acadrust::types::{Vector2, Vector3};
+    use codec::entities::{Circle, LwPolyline, LwVertex};
+    use codec::types::{Vector2, Vector3};
 
     fn square(size: f64) -> EntityType {
         let mut polyline = LwPolyline::new();

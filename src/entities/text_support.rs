@@ -1,5 +1,5 @@
-use acadrust::types::aci_table::aci_to_rgb;
-use acadrust::CadDocument;
+use codec::types::aci_table::aci_to_rgb;
+use codec::CadDocument;
 
 use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke};
 use crate::scene::text::font_face::Face;
@@ -488,24 +488,24 @@ fn font_stem(name: &str) -> String {
         .to_string()
 }
 
-/// Parse an MTEXT string into the layout's `Vec<MTextLine>`, using acadrust's
+/// Parse an MTEXT string into the layout's `Vec<MTextLine>`, using opencadcodec's
 /// structured `mtext_format::parse_mtext` — OCS keeps only the layout engine
 /// (`layout_mtext` and callers read `MTextLine`/`RunState`), not a second MTEXT
 /// inline parser.
 ///
 /// Representation notes:
-///  - DXF `%%d`/`%%p`/`%%c` arrive already resolved to Unicode from acadrust;
+///  - DXF `%%d`/`%%p`/`%%c` arrive already resolved to Unicode from opencadcodec;
 ///    the stroke tokenizer treats those as ordinary glyphs.
 ///  - Stacking (`\S`) is flattened inline to `num<sep>den` (`^` for limit, else
 ///    `/`) since the stroke path has no fraction layout.
 ///  - `\H`: a relative factor (`\Hx`) applies directly; an absolute height is
-///    divided by the entity height. See `acadrust::…::MTextScalar`.
+///    divided by the entity height. See `codec::…::MTextScalar`.
 pub fn adapt_mtext_paragraphs(
     s: &str,
     entity_height: f32,
     trim_blank_edges: bool,
 ) -> Vec<MTextLine> {
-    use acadrust::entities::mtext_format::{
+    use codec::entities::mtext_format::{
         parse_mtext, MTextColor, MTextLineAlignment, MTextLineSpacing, MTextParagraphAlignment,
         MTextScalar, ParagraphProperties, SpanProperties, StackingType,
     };
@@ -598,7 +598,7 @@ pub fn adapt_mtext_paragraphs(
                         .tab_stops
                         .iter()
                         .map(|ts| {
-                            use acadrust::entities::mtext_format::TabStop as ATab;
+                            use codec::entities::mtext_format::TabStop as ATab;
                             let kind = match ts {
                                 ATab::Left(_) => TabKind::Left,
                                 ATab::Center(_) => TabKind::Center,
@@ -719,7 +719,7 @@ pub fn adapt_mtext_paragraphs(
 // `measure_mtext_chars`, `word_wrap`) were removed when every text-bearing
 // entity switched to the run-aware pipeline below. The pipeline now owns
 // per-run width measurement and word-wrap; MTEXT inline parsing now comes from
-// acadrust via `adapt_mtext_paragraphs`. The supported surface for callers is
+// opencadcodec via `adapt_mtext_paragraphs`. The supported surface for callers is
 // `adapt_mtext_paragraphs`, `layout_mtext`, `mtext_line_count`,
 // `text_local_bounds`, and `resolve_dxf_special_chars`.
 
@@ -733,7 +733,7 @@ pub fn adapt_mtext_paragraphs(
 // it carries inline codes).
 //
 // The pipeline mirrors the MTEXT renderer:
-//   1. Parse — via `adapt_mtext_paragraphs` (acadrust `parse_mtext`).
+//   1. Parse — via `adapt_mtext_paragraphs` (opencadcodec `parse_mtext`).
 //   2. Atomise — turn each MTextLine.runs into a flat sequence of atoms
 //      (Word / Space / Tab) so the wrapper operates at break boundaries
 //      while keeping per-character formatting state.
@@ -1431,7 +1431,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                     char_offset: word_start,
                                 });
                             }
-                            // A literal tab (acadrust keeps `^I` / `\t` as a tab
+                            // A literal tab (opencadcodec keeps `^I` / `\t` as a tab
                             // char in the span) advances to the paragraph's next
                             // tab stop, aligning the field that follows it.
                             atoms.push(LayoutAtom {
@@ -2822,7 +2822,7 @@ mod adapter_tests {
     #[test]
     fn relative_height_is_a_factor() {
         // `\H2x;` multiplies the current height → height_mul 2.0, independent of
-        // the entity height. (This is the case that needed acadrust's MTextScalar.)
+        // the entity height. (This is the case that needed opencadcodec's MTextScalar.)
         let (_, st) = first_run(&adapt_mtext_paragraphs("\\H2x;big", 2.5, true));
         assert!((st.height_mul - 2.0).abs() < 1e-4, "got {}", st.height_mul);
     }

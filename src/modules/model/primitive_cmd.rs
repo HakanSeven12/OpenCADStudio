@@ -1,10 +1,10 @@
 // Interactive kernel primitives stored as ACIS Solid3D entities.
 
-use acadrust::entities::Solid3D;
-use acadrust::objects::SolidHistoryOperation;
-use acadrust::EntityType;
-use cadkernel::brep::Body;
-use cadkernel::geom2d::{
+use codec::entities::Solid3D;
+use codec::objects::SolidHistoryOperation;
+use codec::EntityType;
+use kernel::brep::Body;
+use kernel::geom2d::{
     fillets_between, Circle as KernelCircle, Curve as KernelCurve, Line as KernelLine,
     Tolerance,
 };
@@ -318,7 +318,7 @@ fn sphere_through_three_points(
     second: DVec3,
     third: DVec3,
 ) -> Option<(DVec3, f64)> {
-    let circle = cadkernel::geom2d::arc_through_points(
+    let circle = kernel::geom2d::arc_through_points(
         [first.x, first.y],
         [second.x, second.y],
         [third.x, third.y],
@@ -640,7 +640,7 @@ impl PrimitiveCommand {
         let plane = WorkingPlane::new(a, first_axis, second_axis);
         let local_b = plane.to_local(b);
         let local_c = plane.to_local(c);
-        let circle = cadkernel::geom2d::arc_through_points(
+        let circle = kernel::geom2d::arc_through_points(
             [0.0, 0.0],
             [local_b.x, local_b.y],
             [local_c.x, local_c.y],

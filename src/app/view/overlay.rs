@@ -489,7 +489,7 @@ fn mtext_editor_content<'a>(
     // Same colour picker as the Properties panel (named swatches + "More…" full
     // palette), applied to the selection or the whole text.
     let color_pl = iced::widget::container(crate::ui::color_select::color_selector(
-        acadrust::types::Color::from_index(ed.color_aci as i16),
+        codec::types::Color::from_index(ed.color_aci as i16),
         ed.color_picker_open,
         crate::ui::color_select::ColorExtras {
             by_layer: true,
@@ -500,7 +500,7 @@ fn mtext_editor_content<'a>(
         Message::MTextColorPickerToggle,
         Message::OpenColorWindow(
             crate::app::ColorPickTarget::MText,
-            acadrust::types::Color::from_index(ed.color_aci as i16),
+            codec::types::Color::from_index(ed.color_aci as i16),
         ),
     ))
     .width(iced::Length::Fixed(150.0));

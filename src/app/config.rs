@@ -356,7 +356,7 @@ impl ModelSpaceThemeConfig {
     pub fn resolve_selection_color(&self) -> [f32; 4] {
         if self.selection_highlight_color == 0 {
             crate::scene::model::wire_model::WireModel::SELECTED
-        } else if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(self.selection_highlight_color) {
+        } else if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(self.selection_highlight_color) {
             [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
         } else {
             crate::scene::model::wire_model::WireModel::SELECTED

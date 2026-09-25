@@ -1,8 +1,8 @@
-use acadrust::entities::Ellipse;
-use cadkernel::geom2d::{
+use codec::entities::Ellipse;
+use kernel::geom2d::{
     Curve as KernelCurve, EllipseArc as KernelEllipseArc, Tolerance, Vec2 as KernelVec2,
 };
-use cadkernel::space::PlanarCurve;
+use kernel::space::PlanarCurve;
 
 use crate::entities::curve::CurveSnap;
 use crate::t;
@@ -228,17 +228,17 @@ fn apply_geom_prop(ell: &mut Ellipse, field: &str, value: &str) {
                 "normal_z" => normal[2] = v,
                 _ => {}
             }
-            let Some(normal) = cadkernel::space::Vec3::from(normal).normalize() else {
+            let Some(normal) = kernel::space::Vec3::from(normal).normalize() else {
                 return;
             };
-            let Some(major) = cadkernel::space::reorient_axis_to_plane(
+            let Some(major) = kernel::space::reorient_axis_to_plane(
                 [ell.major_axis.x, ell.major_axis.y, ell.major_axis.z],
                 normal.to_array(),
             ) else {
                 return;
             };
-            ell.normal = acadrust::types::Vector3::new(normal.x, normal.y, normal.z);
-            ell.major_axis = acadrust::types::Vector3::new(major[0], major[1], major[2]);
+            ell.normal = codec::types::Vector3::new(normal.x, normal.y, normal.z);
+            ell.major_axis = codec::types::Vector3::new(major[0], major[1], major[2]);
         }
         _ => {}
     }
@@ -356,14 +356,14 @@ fn apply_transform(ell: &mut Ellipse, t: &EntityTransform) {
 }
 
 impl RenderConvertible for Ellipse {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(to_render(self))
     }
 }
 
 crate::impl_entity_basics!(Ellipse);
 
-impl crate::entities::traits::MassPropsCalc for acadrust::entities::Ellipse {
+impl crate::entities::traits::MassPropsCalc for codec::entities::Ellipse {
     fn mass_props(&self) -> crate::entities::traits::MassProps {
         use std::f64::consts::{PI, TAU};
         let e = self;
@@ -440,7 +440,7 @@ mod grip_tests {
         e.minor_axis_ratio = ratio;
         e
     }
-    fn xy_len(v: &acadrust::entities::Ellipse) -> f64 {
+    fn xy_len(v: &codec::entities::Ellipse) -> f64 {
         (v.major_axis.x * v.major_axis.x + v.major_axis.y * v.major_axis.y).sqrt()
     }
 

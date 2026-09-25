@@ -5,8 +5,8 @@
 //! dictionary + objects consistent so the result round-trips through DWG/DXF.
 
 use super::Scene;
-use acadrust::objects::{Dictionary, Layout, ObjectType, PlotSettings};
-use acadrust::{CadDocument, Handle};
+use codec::objects::{Dictionary, Layout, ObjectType, PlotSettings};
+use codec::{CadDocument, Handle};
 
 /// Give a freshly created paper layout the page setup a new drawing starts
 /// with — ISO A4 landscape on no plotter, plotted 1:1 as a layout — stored the
@@ -14,7 +14,7 @@ use acadrust::{CadDocument, Handle};
 /// name with the orientation in the rotation code. `plot_style` names the
 /// plot style table to attach, or is empty.
 pub fn apply_default_page_setup(layout: &mut Layout, plot_style: &str) {
-    use acadrust::objects::{PlotPaperUnits, PlotRotation, PlotType, ScaledType};
+    use codec::objects::{PlotPaperUnits, PlotRotation, PlotType, ScaledType};
     let a4 = crate::io::paper_catalog::default_paper();
     let (paper_width, paper_height) = a4.portrait_mm();
     layout.min_limits = (0.0, 0.0);

@@ -21,8 +21,8 @@
 // `CmdResult::NeedPoint` and keeps prompting so nothing is corrupted.
 
 use crate::t;
-use acadrust::entities::Spline;
-use acadrust::{EntityType, Handle};
+use codec::entities::Spline;
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -104,7 +104,7 @@ impl ReverseCommand {
 /// starting at original vertex `(n-1-i-1).rem_euclid(n)`. The widths follow the
 /// Widths are segment-relative. Reversing a segment swaps its start and end
 /// widths in addition to moving them to the corresponding reversed segment.
-fn reverse_lwpolyline(pl: &acadrust::LwPolyline) -> acadrust::LwPolyline {
+fn reverse_lwpolyline(pl: &codec::LwPolyline) -> codec::LwPolyline {
     let mut out = pl.clone();
     let n = pl.vertices.len();
     if n < 2 {
@@ -141,7 +141,7 @@ fn reverse_lwpolyline(pl: &acadrust::LwPolyline) -> acadrust::LwPolyline {
 }
 
 /// Reverse a heavy 2D polyline with the same segment semantics as LWPolyline.
-fn reverse_polyline2d(pl: &acadrust::entities::Polyline2D) -> acadrust::entities::Polyline2D {
+fn reverse_polyline2d(pl: &codec::entities::Polyline2D) -> codec::entities::Polyline2D {
     let mut out = pl.clone();
     let n = pl.vertices.len();
     if n < 2 {
@@ -152,7 +152,7 @@ fn reverse_polyline2d(pl: &acadrust::entities::Polyline2D) -> acadrust::entities
     out.start_width = pl.end_width;
     out.end_width = pl.start_width;
     for vertex in &mut out.vertices {
-        let tangent_flag = acadrust::entities::VertexFlags::CURVE_FIT_TANGENT.bits();
+        let tangent_flag = codec::entities::VertexFlags::CURVE_FIT_TANGENT.bits();
         if vertex.flags.bits() & tangent_flag != 0 {
             vertex.curve_tangent =
                 (vertex.curve_tangent + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
@@ -190,8 +190,8 @@ pub(super) fn reverse_spline(sp: &Spline) -> Spline {
         out.knots = curve.reversed().knots().to_vec();
     }
     out.begin_tangent =
-        acadrust::types::Vector3::new(-sp.end_tangent.x, -sp.end_tangent.y, -sp.end_tangent.z);
-    out.end_tangent = acadrust::types::Vector3::new(
+        codec::types::Vector3::new(-sp.end_tangent.x, -sp.end_tangent.y, -sp.end_tangent.z);
+    out.end_tangent = codec::types::Vector3::new(
         -sp.begin_tangent.x,
         -sp.begin_tangent.y,
         -sp.begin_tangent.z,
@@ -252,7 +252,7 @@ inventory::submit!(crate::command::CommandRegistration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::types::Vector3;
+    use codec::types::Vector3;
 
     #[test]
     fn spline_reversal_preserves_knot_spacing_weights_and_tangents() {

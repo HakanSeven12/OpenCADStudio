@@ -1,6 +1,6 @@
-use acadrust::entities::{Dimension, DimensionLargeRadial};
-use acadrust::types::{Handle, Vector3};
-use acadrust::EntityType;
+use codec::entities::{Dimension, DimensionLargeRadial};
+use codec::types::{Handle, Vector3};
+use codec::EntityType;
 use glam::{DVec3, Vec3};
 
 use crate::command::{

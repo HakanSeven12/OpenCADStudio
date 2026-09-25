@@ -3,7 +3,7 @@
 //
 // Cross-entity rendering helpers live here.
 
-use acadrust::types::Color as AcadColor;
+use codec::types::Color as AcadColor;
 use glam::Vec3;
 
 use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
@@ -28,7 +28,7 @@ pub type FallbackGeometry = (
 
 // ── Colour helper ──────────────────────────────────────────────────────────
 
-/// Convert an acadrust Color (ACI index or true-color) to a GPU RGBA value.
+/// Convert an opencadcodec Color (ACI index or true-color) to a GPU RGBA value.
 pub fn aci_to_rgba(color: &AcadColor) -> [f32; 4] {
     if let Some((r, g, b)) = color.rgb() {
         [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]

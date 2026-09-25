@@ -8,8 +8,8 @@
 /// strings, block names) or placement (positions, rotations of the object
 /// itself). Text formatting crosses TEXT ↔ MTEXT; the dimension style crosses
 /// Dimension / Leader / Tolerance.
-pub fn match_special_props(src: &acadrust::EntityType, dst: &mut acadrust::EntityType) {
-    use acadrust::EntityType as E;
+pub fn match_special_props(src: &codec::EntityType, dst: &mut codec::EntityType) {
+    use codec::EntityType as E;
 
     // Text-ish source formatting.
     let text_fmt = match src {
@@ -290,8 +290,8 @@ pub struct PolylineMatchStyle {
 }
 
 impl PolylineMatchStyle {
-    pub fn from_entity(entity: &acadrust::EntityType) -> Option<Self> {
-        use acadrust::EntityType as E;
+    pub fn from_entity(entity: &codec::EntityType) -> Option<Self> {
+        use codec::EntityType as E;
 
         match entity {
             E::LwPolyline(poly) => {
@@ -329,7 +329,7 @@ impl PolylineMatchStyle {
                 };
                 Some(Self {
                     plinegen: poly.flags.bits()
-                        & acadrust::entities::PolylineFlags::LINETYPE_CONTINUOUS.bits()
+                        & codec::entities::PolylineFlags::LINETYPE_CONTINUOUS.bits()
                         != 0,
                     widths,
                 })
@@ -338,8 +338,8 @@ impl PolylineMatchStyle {
         }
     }
 
-    pub fn apply_to(&self, entity: &mut acadrust::EntityType) {
-        use acadrust::EntityType as E;
+    pub fn apply_to(&self, entity: &mut codec::EntityType) {
+        use codec::EntityType as E;
 
         match entity {
             E::LwPolyline(poly) => {
@@ -360,13 +360,13 @@ impl PolylineMatchStyle {
             }
             E::Polyline2D(poly) => {
                 let mut bits = poly.flags.bits();
-                let flag = acadrust::entities::PolylineFlags::LINETYPE_CONTINUOUS.bits();
+                let flag = codec::entities::PolylineFlags::LINETYPE_CONTINUOUS.bits();
                 if self.plinegen {
                     bits |= flag;
                 } else {
                     bits &= !flag;
                 }
-                poly.flags = acadrust::entities::PolylineFlags::from_bits(bits);
+                poly.flags = codec::entities::PolylineFlags::from_bits(bits);
                 let sampled = resample_widths(&self.widths, poly.vertices.len());
                 let first = sampled.first().copied().unwrap_or((0.0, 0.0));
                 let can_use_defaults = widths_are_same(&sampled);
@@ -440,9 +440,9 @@ pub enum MatchLayerError {
 /// that resolve to nothing are skipped. Lock-filtering, undo, dirty-state and
 /// command-line echo stay caller-side in `handle_match_entity_layer`.
 pub fn match_layer_kernel(
-    doc: &mut acadrust::CadDocument,
-    dest: &[acadrust::Handle],
-    src: acadrust::Handle,
+    doc: &mut codec::CadDocument,
+    dest: &[codec::Handle],
+    src: codec::Handle,
 ) -> Result<usize, MatchLayerError> {
     let layer = doc
         .get_entity(src)
@@ -508,8 +508,8 @@ impl Default for MatchOpts {
 /// stay caller-side; lock-filtering, undo, dirty-state, selection and echo
 /// stay caller-side too.
 pub fn match_properties_kernel(
-    src: &acadrust::EntityType,
-    dst: &mut acadrust::EntityType,
+    src: &codec::EntityType,
+    dst: &mut codec::EntityType,
     opts: &MatchOpts,
 ) {
     if opts.copy_common {
@@ -553,19 +553,19 @@ pub fn match_properties_kernel(
 mod match_layer_kernel_tests {
     use super::{MatchLayerError, match_layer_kernel};
 
-    fn line_on(layer: &str) -> acadrust::EntityType {
-        let mut line = acadrust::entities::Line::new();
+    fn line_on(layer: &str) -> codec::EntityType {
+        let mut line = codec::entities::Line::new();
         line.common.layer = layer.to_string();
-        acadrust::EntityType::Line(line)
+        codec::EntityType::Line(line)
     }
 
-    fn layer_of(doc: &acadrust::CadDocument, handle: acadrust::Handle) -> String {
+    fn layer_of(doc: &codec::CadDocument, handle: codec::Handle) -> String {
         doc.get_entity(handle).unwrap().common().layer.clone()
     }
 
     #[test]
     fn copies_src_layer_onto_every_dest_and_returns_count() {
-        let mut doc = acadrust::CadDocument::new();
+        let mut doc = codec::CadDocument::new();
         let src = doc.add_entity(line_on("WALLS")).unwrap();
         let a = doc.add_entity(line_on("0")).unwrap();
         let b = doc.add_entity(line_on("0")).unwrap();
@@ -580,7 +580,7 @@ mod match_layer_kernel_tests {
 
     #[test]
     fn missing_src_errors_and_leaves_dest_untouched() {
-        let mut doc = acadrust::CadDocument::new();
+        let mut doc = codec::CadDocument::new();
         let dest = doc.add_entity(line_on("0")).unwrap();
         let missing = doc.allocate_handle();
 
@@ -592,7 +592,7 @@ mod match_layer_kernel_tests {
 
     #[test]
     fn skips_missing_dest_handles_but_counts_the_rest() {
-        let mut doc = acadrust::CadDocument::new();
+        let mut doc = codec::CadDocument::new();
         let src = doc.add_entity(line_on("WALLS")).unwrap();
         let dest = doc.add_entity(line_on("0")).unwrap();
         let missing = doc.allocate_handle();
@@ -607,10 +607,10 @@ mod match_layer_kernel_tests {
 #[cfg(test)]
 mod match_properties_kernel_tests {
     use super::{MatchOpts, match_properties_kernel};
-    use acadrust::EntityType;
+    use codec::EntityType;
 
     fn line_src() -> EntityType {
-        let mut line = acadrust::entities::Line::new();
+        let mut line = codec::entities::Line::new();
         line.common.layer = "WALLS".to_string();
         line.common.linetype_scale = 2.5;
         line.thickness = 1.25;
@@ -618,7 +618,7 @@ mod match_properties_kernel_tests {
     }
 
     fn line_dst() -> EntityType {
-        let mut line = acadrust::entities::Line::new();
+        let mut line = codec::entities::Line::new();
         line.common.layer = "0".to_string();
         line.common.linetype_scale = 1.0;
         line.thickness = 0.0;
@@ -643,12 +643,12 @@ mod match_properties_kernel_tests {
 
     #[test]
     fn transfers_text_style_via_special_props_flag() {
-        let mut src_text = acadrust::entities::Text::new();
+        let mut src_text = codec::entities::Text::new();
         src_text.value = "SRC".into();
         src_text.style = "BIG".into();
         src_text.height = 5.0;
         let src = EntityType::Text(src_text);
-        let mut dst_text = acadrust::entities::Text::new();
+        let mut dst_text = codec::entities::Text::new();
         dst_text.value = "DST".into();
         let mut dst = EntityType::Text(dst_text);
 

@@ -13,10 +13,10 @@
 
 use std::sync::Mutex;
 
-use acadrust::entities::{Underlay, UnderlayDisplayFlags};
-use acadrust::objects::{Dictionary, ObjectType, UnderlayDefinition};
-use acadrust::types::{Handle, Vector3};
-use acadrust::{CadDocument, EntityType};
+use codec::entities::{Underlay, UnderlayDisplayFlags};
+use codec::objects::{Dictionary, ObjectType, UnderlayDefinition};
+use codec::types::{Handle, Vector3};
+use codec::{CadDocument, EntityType};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, WorkingPlane};
@@ -493,7 +493,7 @@ fn same_path(a: &str, b: &str) -> bool {
 pub fn ensure_pdf_definition(document: &mut CadDocument, path: &str, page: &str) -> Handle {
     let existing = document.objects.iter().find_map(|(handle, object)| match object {
         ObjectType::UnderlayDefinition(def)
-            if matches!(def.underlay_type, acadrust::entities::UnderlayType::Pdf)
+            if matches!(def.underlay_type, codec::entities::UnderlayType::Pdf)
                 && same_path(&def.file_path, path)
                 && crate::entities::underlay::page_of(def) == page =>
         {

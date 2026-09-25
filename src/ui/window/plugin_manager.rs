@@ -1033,7 +1033,7 @@ mod tests {
                 tag: "v1.4.0".to_string(),
                 api_version: 4,
                 acadrust_source: Some(
-                    "git+https://github.com/HakanSeven12/cadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd".to_string(),
+                    "git+https://github.com/HakanSeven12/opencadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd".to_string(),
                 ),
                 acadrust_declared: true,
                 acadrust_compatible: true,
@@ -1045,7 +1045,7 @@ mod tests {
                 tag: "v2.0.0".to_string(),
                 api_version: 4,
                 acadrust_source: Some(
-                    "git+https://github.com/HakanSeven12/cadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb".to_string(),
+                    "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb".to_string(),
                 ),
                 acadrust_declared: true,
                 acadrust_compatible: false,

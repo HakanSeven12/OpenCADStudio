@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use acadrust::types::Handle;
+use codec::types::Handle;
 use iced::widget::{button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space};
 use iced::{Border, Element, Fill, Length, Theme};
 

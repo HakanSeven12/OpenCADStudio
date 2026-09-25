@@ -61,6 +61,7 @@ pub static CLOSE: &[u8] = include_bytes!("../../assets/icons/ui/close.svg");
 pub static PLUS: &[u8] = include_bytes!("../../assets/icons/ui/plus.svg");
 pub static MINUS: &[u8] = include_bytes!("../../assets/icons/ui/minus.svg");
 pub static TRASH: &[u8] = include_bytes!("../../assets/icons/ui/trash.svg");
+pub static NODE_GRAPH: &[u8] = include_bytes!("../../assets/icons/ui/node_graph.svg");
 pub static COPY: &[u8] = include_bytes!("../../assets/icons/ui/copy.svg");
 pub static MENU: &[u8] = include_bytes!("../../assets/icons/ui/menu.svg");
 pub static MOVE: &[u8] = include_bytes!("../../assets/icons/ui/move.svg");

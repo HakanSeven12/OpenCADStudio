@@ -1,4 +1,4 @@
-use acadrust::entities::Table;
+use codec::entities::Table;
 use glam::Vec3;
 
 use crate::command::EntityTransform;
@@ -34,7 +34,7 @@ fn prop_current_cell_active() -> bool {
     PROPERTY_CELL_ACTIVE.with(std::cell::Cell::get)
 }
 
-fn v3(v: &acadrust::types::Vector3) -> Vec3 {
+fn v3(v: &codec::types::Vector3) -> Vec3 {
     Vec3::new(v.x as f32, v.y as f32, v.z as f32)
 }
 
@@ -89,11 +89,11 @@ fn merged_owner_and_span(
 
 pub(crate) fn style_for_property<'a>(
     table: &'a Table,
-    row: &'a acadrust::entities::table::TableRow,
+    row: &'a codec::entities::table::TableRow,
     column: usize,
-    cell: &'a acadrust::entities::table::TableCell,
-    property: acadrust::entities::table::CellStylePropertyFlags,
-) -> Option<&'a acadrust::entities::table::CellStyle> {
+    cell: &'a codec::entities::table::TableCell,
+    property: codec::entities::table::CellStylePropertyFlags,
+) -> Option<&'a codec::entities::table::CellStyle> {
     let column_style = table
         .columns
         .get(column)
@@ -116,11 +116,11 @@ pub(crate) fn style_for_property<'a>(
 
 fn style_for_border<'a>(
     table: &'a Table,
-    row: &'a acadrust::entities::table::TableRow,
+    row: &'a codec::entities::table::TableRow,
     column: usize,
-    cell: &'a acadrust::entities::table::TableCell,
-    edge: acadrust::entities::table::CellEdgeFlags,
-) -> Option<&'a acadrust::entities::table::CellStyle> {
+    cell: &'a codec::entities::table::TableCell,
+    edge: codec::entities::table::CellEdgeFlags,
+) -> Option<&'a codec::entities::table::CellStyle> {
     let column_style = table
         .columns
         .get(column)
@@ -138,7 +138,7 @@ fn style_for_border<'a>(
 
 pub(crate) fn resolved_title_suppressed(
     table: &Table,
-    table_style: Option<&acadrust::objects::TableStyle>,
+    table_style: Option<&codec::objects::TableStyle>,
 ) -> bool {
     table
         .legacy_style_override
@@ -150,7 +150,7 @@ pub(crate) fn resolved_title_suppressed(
 
 pub(crate) fn resolved_header_suppressed(
     table: &Table,
-    table_style: Option<&acadrust::objects::TableStyle>,
+    table_style: Option<&codec::objects::TableStyle>,
 ) -> bool {
     table
         .legacy_style_override
@@ -162,9 +162,9 @@ pub(crate) fn resolved_header_suppressed(
 
 pub(crate) fn resolved_flow_up(
     table: &Table,
-    table_style: Option<&acadrust::objects::TableStyle>,
+    table_style: Option<&codec::objects::TableStyle>,
 ) -> bool {
-    use acadrust::entities::table::CellStylePropertyFlags;
+    use codec::entities::table::CellStylePropertyFlags;
 
     table
         .legacy_style_override
@@ -182,14 +182,14 @@ pub(crate) fn resolved_flow_up(
         .unwrap_or_else(|| {
             matches!(
                 table_style.map(|style| style.flow_direction),
-                Some(acadrust::objects::TableFlowDirection::Up)
+                Some(codec::objects::TableFlowDirection::Up)
             )
         })
 }
 
 pub(crate) fn resolved_table_margins(
     table: &Table,
-    table_style: Option<&acadrust::objects::TableStyle>,
+    table_style: Option<&codec::objects::TableStyle>,
 ) -> (f64, f64) {
     let horizontal = table
         .legacy_style_override
@@ -235,7 +235,7 @@ fn table_break_segments(
     row_offsets: &[f32],
     scale: f32,
 ) -> Vec<TableBreakSegment> {
-    use acadrust::entities::table::BreakOptionFlags;
+    use codec::entities::table::BreakOptionFlags;
 
     let insertion = v3(&table.insertion_point);
     if table.rows.is_empty() {
@@ -249,7 +249,7 @@ fn table_break_segments(
         }];
     }
 
-    let offset_to_world = |offset: &acadrust::types::Vector3| insertion + v3(offset);
+    let offset_to_world = |offset: &codec::types::Vector3| insertion + v3(offset);
     let mut cached: Vec<_> = table
         .break_ranges
         .iter()
@@ -319,13 +319,13 @@ fn table_break_segments(
                 table.total_height() as f32 * scale + spacing
             };
             match table.break_flow_direction {
-                acadrust::entities::table::BreakFlowDirection::Left => {
+                codec::entities::table::BreakFlowDirection::Left => {
                     insertion - h * segment as f32 * horizontal_step
                 }
-                acadrust::entities::table::BreakFlowDirection::Vertical => {
+                codec::entities::table::BreakFlowDirection::Vertical => {
                     insertion + down * segment as f32 * vertical_step
                 }
-                acadrust::entities::table::BreakFlowDirection::Right => {
+                codec::entities::table::BreakFlowDirection::Right => {
                     insertion + h * segment as f32 * horizontal_step
                 }
             }
@@ -378,7 +378,7 @@ fn break_frames_for_row(
     top_label_rows: usize,
     bottom_label_rows: usize,
 ) -> Vec<(Vec3, f32)> {
-    use acadrust::entities::table::BreakOptionFlags;
+    use codec::entities::table::BreakOptionFlags;
 
     let segments = table_break_segments(table, h, down, row_offsets, scale);
     let Some((segment_index, segment)) = segments
@@ -450,12 +450,12 @@ fn break_frames_for_row(
     frames
 }
 
-fn format_cell_value(value: &acadrust::entities::table::CellValue) -> String {
+fn format_cell_value(value: &codec::entities::table::CellValue) -> String {
     let display = value.display();
     if !display.is_empty() {
         return display.to_string();
     }
-    use acadrust::entities::table::CellValueType;
+    use codec::entities::table::CellValueType;
     match value.value_type {
         CellValueType::Long => format!("{}", value.numeric_value as i64),
         CellValueType::Double | CellValueType::Date => format!("{}", value.numeric_value),
@@ -542,7 +542,7 @@ fn evaluate_table_formula(table: &Table, expression: &str) -> Option<String> {
 fn fallback_content_centers(
     bounds: [f32; 4],
     sizes: &[(f32, f32)],
-    layout: acadrust::entities::table::ContentLayoutFlags,
+    layout: codec::entities::table::ContentLayoutFlags,
     alignment: i32,
     horizontal_spacing: f32,
     vertical_spacing: f32,
@@ -556,13 +556,13 @@ fn fallback_content_centers(
     let vert = ((alignment - 1) / 3) + 1;
     let mut rows: Vec<Vec<usize>> = Vec::new();
     if layout.contains(
-        acadrust::entities::table::ContentLayoutFlags::STACKED_VERTICAL,
+        codec::entities::table::ContentLayoutFlags::STACKED_VERTICAL,
     ) {
         for index in 0..sizes.len() {
             rows.push(vec![index]);
         }
     } else if layout.contains(
-        acadrust::entities::table::ContentLayoutFlags::STACKED_HORIZONTAL,
+        codec::entities::table::ContentLayoutFlags::STACKED_HORIZONTAL,
     ) {
         rows.push((0..sizes.len()).collect());
     } else {
@@ -623,9 +623,9 @@ fn fallback_content_centers(
 }
 
 fn content_display_value(
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     table: &Table,
-    content: &acadrust::entities::table::CellContent,
+    content: &codec::entities::table::CellContent,
 ) -> String {
     if let Some(handle) = content.field_handle {
         if let Some(value) =
@@ -633,7 +633,7 @@ fn content_display_value(
         {
             return value;
         }
-        if let Some(acadrust::objects::ObjectType::Field(field)) = document.objects.get(&handle) {
+        if let Some(codec::objects::ObjectType::Field(field)) = document.objects.get(&handle) {
             if !field.value_string.is_empty() {
                 return field.value_string.clone();
             }
@@ -648,13 +648,13 @@ fn content_display_value(
 }
 
 fn resolved_content_geometry(
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     table: &Table,
     row: usize,
     column: usize,
-    cell: &acadrust::entities::table::TableCell,
+    cell: &codec::entities::table::TableCell,
     content_index: usize,
-) -> Option<acadrust::entities::table::CellContentGeometry> {
+) -> Option<codec::entities::table::CellContentGeometry> {
     if let Some(geometry) = cell
         .contents
         .get(content_index)
@@ -669,10 +669,10 @@ fn resolved_content_geometry(
     let flat_index = row
         .saturating_mul(table.columns.len())
         .saturating_add(column);
-    if let Some(acadrust::objects::ObjectType::DataObject(object)) =
+    if let Some(codec::objects::ObjectType::DataObject(object)) =
         document.objects.get(&handle)
     {
-        if let acadrust::objects::DataObjectData::TableGeometry(geometry) =
+        if let codec::objects::DataObjectData::TableGeometry(geometry) =
             &object.data
         {
             return geometry
@@ -683,10 +683,10 @@ fn resolved_content_geometry(
         }
     }
     document.objects.values().find_map(|object| {
-        let acadrust::objects::ObjectType::DataObject(object) = object else {
+        let codec::objects::ObjectType::DataObject(object) = object else {
             return None;
         };
-        let acadrust::objects::DataObjectData::TableGeometry(geometry) =
+        let codec::objects::DataObjectData::TableGeometry(geometry) =
             &object.data
         else {
             return None;
@@ -702,12 +702,12 @@ fn resolved_content_geometry(
 
 pub(crate) fn block_cell_inserts(
     table: &Table,
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     anno_scale: f32,
-) -> Vec<acadrust::entities::Insert> {
-    use acadrust::entities::table::ContentLayoutFlags;
-    use acadrust::entities::{AttributeEntity, EntityType, Insert};
-    use acadrust::types::Vector3;
+) -> Vec<codec::entities::Insert> {
+    use codec::entities::table::ContentLayoutFlags;
+    use codec::entities::{AttributeEntity, EntityType, Insert};
+    use codec::types::Vector3;
 
     if table.rows.is_empty() || table.columns.is_empty() {
         return Vec::new();
@@ -715,7 +715,7 @@ pub(crate) fn block_cell_inserts(
     let (h, down) = table_axes(table);
     let table_style = table.table_style_handle.and_then(|handle| {
         document.objects.get(&handle).and_then(|object| match object {
-            acadrust::objects::ObjectType::TableStyle(style) => Some(style),
+            codec::objects::ObjectType::TableStyle(style) => Some(style),
             _ => None,
         })
     });
@@ -771,7 +771,7 @@ pub(crate) fn block_cell_inserts(
                 row,
                 column_index,
                 cell,
-                acadrust::entities::table::CellStylePropertyFlags::CONTENT_LAYOUT,
+                codec::entities::table::CellStylePropertyFlags::CONTENT_LAYOUT,
             );
             let layout = layout_style
                 .map(|style| style.layout_flags)
@@ -822,14 +822,14 @@ pub(crate) fn block_cell_inserts(
                     row,
                     column_index,
                     cell,
-                    acadrust::entities::table::CellStylePropertyFlags::BLOCK_SCALE,
+                    codec::entities::table::CellStylePropertyFlags::BLOCK_SCALE,
                 );
                 let style_scale = scale_style
                     .map(|style| style.scale)
                     .filter(|scale| scale.abs() > 1e-9)
                     .unwrap_or(1.0);
                 let content_scale = if content.format_property_flags
-                    & acadrust::entities::table::CellStylePropertyFlags::BLOCK_SCALE.bits() as i32
+                    & codec::entities::table::CellStylePropertyFlags::BLOCK_SCALE.bits() as i32
                     != 0
                     && content.scale.abs() > 1e-9
                 {
@@ -840,7 +840,7 @@ pub(crate) fn block_cell_inserts(
                     1.0
                 };
                 let mut scale = if content.format_property_flags
-                    & acadrust::entities::table::CellStylePropertyFlags::BLOCK_SCALE.bits() as i32
+                    & codec::entities::table::CellStylePropertyFlags::BLOCK_SCALE.bits() as i32
                     != 0
                 {
                     content_scale
@@ -853,12 +853,12 @@ pub(crate) fn block_cell_inserts(
                         row,
                         column_index,
                         cell,
-                        acadrust::entities::table::CellStylePropertyFlags::AUTO_SCALE,
+                        codec::entities::table::CellStylePropertyFlags::AUTO_SCALE,
                     )
                     .is_some_and(|style| {
                         style
                             .property_flags
-                            .contains(acadrust::entities::table::CellStylePropertyFlags::AUTO_SCALE)
+                            .contains(codec::entities::table::CellStylePropertyFlags::AUTO_SCALE)
                     });
                 let mut block_min =
                     Vector3::new(f64::MAX, f64::MAX, f64::MAX);
@@ -894,7 +894,7 @@ pub(crate) fn block_cell_inserts(
                             row,
                             column_index,
                             cell,
-                            acadrust::entities::table::CellStylePropertyFlags::MARGIN_LEFT,
+                            codec::entities::table::CellStylePropertyFlags::MARGIN_LEFT,
                         )
                         .map(|style| style.margin_left)
                         .unwrap_or(0.0);
@@ -903,7 +903,7 @@ pub(crate) fn block_cell_inserts(
                             row,
                             column_index,
                             cell,
-                            acadrust::entities::table::CellStylePropertyFlags::MARGIN_RIGHT,
+                            codec::entities::table::CellStylePropertyFlags::MARGIN_RIGHT,
                         )
                         .map(|style| style.margin_right)
                         .unwrap_or(0.0);
@@ -912,7 +912,7 @@ pub(crate) fn block_cell_inserts(
                             row,
                             column_index,
                             cell,
-                            acadrust::entities::table::CellStylePropertyFlags::MARGIN_TOP,
+                            codec::entities::table::CellStylePropertyFlags::MARGIN_TOP,
                         )
                         .map(|style| style.margin_top)
                         .unwrap_or(0.0);
@@ -921,7 +921,7 @@ pub(crate) fn block_cell_inserts(
                             row,
                             column_index,
                             cell,
-                            acadrust::entities::table::CellStylePropertyFlags::MARGIN_BOTTOM,
+                            codec::entities::table::CellStylePropertyFlags::MARGIN_BOTTOM,
                         )
                         .map(|style| style.margin_bottom)
                         .unwrap_or(0.0);
@@ -940,10 +940,10 @@ pub(crate) fn block_cell_inserts(
                     row,
                     column_index,
                     cell,
-                    acadrust::entities::table::CellStylePropertyFlags::ROTATION,
+                    codec::entities::table::CellStylePropertyFlags::ROTATION,
                 );
                 let content_rotation_explicit = content.format_property_flags
-                    & acadrust::entities::table::CellStylePropertyFlags::ROTATION.bits() as i32
+                    & codec::entities::table::CellStylePropertyFlags::ROTATION.bits() as i32
                     != 0;
                 let content_rotation = if content_rotation_explicit {
                     content.rotation
@@ -1005,7 +1005,7 @@ pub(crate) fn block_cell_inserts(
                     };
                     let mut entity =
                         AttributeEntity::from_definition(definition, Some(attribute.value.clone()));
-                    acadrust::Entity::apply_transform(
+                    codec::Entity::apply_transform(
                         &mut entity,
                         &crate::scene::render_graph::insert_transform(document, &insert),
                     );
@@ -1020,7 +1020,7 @@ pub(crate) fn block_cell_inserts(
 }
 
 impl RenderConvertible for Table {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         if self.rows.is_empty() || self.columns.is_empty() {
             return None;
         }
@@ -1143,20 +1143,20 @@ impl RenderConvertible for Table {
         // Row classification: row 0 is Title (when not suppressed), row 1 is
         // Header (when not suppressed), everything else is Data. The two
         // suppressed flags shift the leading rows down to Data.
-        let lookup_style = |h: acadrust::Handle| -> Option<&acadrust::tables::TextStyle> {
+        let lookup_style = |h: codec::Handle| -> Option<&codec::tables::TextStyle> {
             document.text_styles.iter().find(|s| s.handle == h)
         };
-        let table_style: Option<&acadrust::objects::TableStyle> =
+        let table_style: Option<&codec::objects::TableStyle> =
             self.table_style_handle.and_then(|h| {
                 document.objects.get(&h).and_then(|obj| match obj {
-                    acadrust::objects::ObjectType::TableStyle(ts) => Some(ts),
+                    codec::objects::ObjectType::TableStyle(ts) => Some(ts),
                     _ => None,
                 })
             });
         let title_suppressed = resolved_title_suppressed(self, table_style);
         let header_suppressed = resolved_header_suppressed(self, table_style);
 
-        let font_for_handle = |handle: Option<acadrust::Handle>| -> Option<String> {
+        let font_for_handle = |handle: Option<codec::Handle>| -> Option<String> {
             handle.and_then(|h| lookup_style(h)).and_then(|s| {
                 let mut font_name = if !s.true_type_font.trim().is_empty() {
                     s.true_type_font.trim().to_string()
@@ -1185,7 +1185,7 @@ impl RenderConvertible for Table {
         // Build a ResolvedTextStyle for the cell — needed by the shared MText
         // pipeline so inline `\W`, `\Q`, etc. compose with the style baseline.
         let resolved_style_for_handle =
-            |handle: Option<acadrust::Handle>, font_name: String| -> ResolvedTextStyle {
+            |handle: Option<codec::Handle>, font_name: String| -> ResolvedTextStyle {
                 let style = handle.and_then(|h| lookup_style(h));
                 ResolvedTextStyle {
                     font_name,
@@ -1206,7 +1206,7 @@ impl RenderConvertible for Table {
             let row_mid = (row_top + row_bot) * 0.5;
 
             // Pick the appropriate row_style from TableStyle for this row's role.
-            let row_style: Option<&acadrust::objects::RowCellStyle> = table_style.map(|ts| {
+            let row_style: Option<&codec::objects::RowCellStyle> = table_style.map(|ts| {
                 let kind = match (title_suppressed, header_suppressed, ri) {
                     (false, _, 0) => 0,     // title
                     (false, false, 1) => 1, // header
@@ -1359,7 +1359,7 @@ impl RenderConvertible for Table {
 /// Builds colored geometry for tables without a stored display block.
 pub fn tessellate_table(
     tab: &Table,
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     selected: bool,
     entity_color: [f32; 4],
     line_weight_px: f32,
@@ -1370,7 +1370,7 @@ pub fn tessellate_table(
 ) -> Vec<crate::scene::model::wire_model::WireModel> {
     use crate::scene::convert::tess_util::aci_to_rgba;
     use crate::scene::model::wire_model::WireModel;
-    use acadrust::types::Color;
+    use codec::types::Color;
     use rustc_hash::FxHashMap as HashMap;
 
     if tab.rows.is_empty() || tab.columns.is_empty() {
@@ -1398,19 +1398,19 @@ pub fn tessellate_table(
             (c[3] * 255.0) as u8,
         ]
     };
-    let lw_px = |w: &acadrust::types::LineWeight| -> f32 {
+    let lw_px = |w: &codec::types::LineWeight| -> f32 {
         match w {
-            acadrust::types::LineWeight::Value(v) if *v >= 0 => (*v as f32 / 100.0) * (96.0 / 25.4),
+            codec::types::LineWeight::Value(v) if *v >= 0 => (*v as f32 / 100.0) * (96.0 / 25.4),
             _ => line_weight_px,
         }
     };
 
     let (h, v_down) = table_axes(tab);
     // Flow direction: `Up` stacks rows upward instead of downward.
-    let table_style: Option<&acadrust::objects::TableStyle> =
+    let table_style: Option<&codec::objects::TableStyle> =
         tab.table_style_handle.and_then(|h| {
             document.objects.get(&h).and_then(|obj| match obj {
-                acadrust::objects::ObjectType::TableStyle(ts) => Some(ts),
+                codec::objects::ObjectType::TableStyle(ts) => Some(ts),
                 _ => None,
             })
         });
@@ -1428,10 +1428,10 @@ pub fn tessellate_table(
     let h_margin = horizontal_margin as f32 * anno_scale;
     let v_margin = vertical_margin as f32 * anno_scale;
 
-    let lookup_style = |hh: acadrust::Handle| -> Option<&acadrust::tables::TextStyle> {
+    let lookup_style = |hh: codec::Handle| -> Option<&codec::tables::TextStyle> {
         document.text_styles.iter().find(|s| s.handle == hh)
     };
-    let font_for_handle = |handle: Option<acadrust::Handle>| -> Option<String> {
+    let font_for_handle = |handle: Option<codec::Handle>| -> Option<String> {
         handle.and_then(lookup_style).and_then(|s| {
             let mut font_name = if !s.true_type_font.trim().is_empty() {
                 s.true_type_font.trim().to_string()
@@ -1454,7 +1454,7 @@ pub fn tessellate_table(
         })
     };
     let resolved_style_for_handle =
-        |handle: Option<acadrust::Handle>, font_name: String| -> ResolvedTextStyle {
+        |handle: Option<codec::Handle>, font_name: String| -> ResolvedTextStyle {
             let style = handle.and_then(lookup_style);
             ResolvedTextStyle {
                 font_name,
@@ -1506,7 +1506,7 @@ pub fn tessellate_table(
 
     let normal = v3(&tab.normal).normalize_or(Vec3::Z);
     for (ri, row) in tab.rows.iter().enumerate() {
-        let row_style: Option<&acadrust::objects::RowCellStyle> = table_style.map(|ts| {
+        let row_style: Option<&codec::objects::RowCellStyle> = table_style.map(|ts| {
             let kind = match (title_suppressed, header_suppressed, ri) {
                 (false, _, 0) => 0,
                 (false, false, 1) => 1,
@@ -1560,7 +1560,7 @@ pub fn tessellate_table(
                 row,
                 ci,
                 cell,
-                acadrust::entities::table::CellStylePropertyFlags::BACKGROUND_COLOR,
+                codec::entities::table::CellStylePropertyFlags::BACKGROUND_COLOR,
             );
             let (fill_on, fill_color) = if let Some(cs) = fill_style {
                 (cs.fill_enabled, cs.background_color)
@@ -1584,10 +1584,10 @@ pub fn tessellate_table(
             // (top, right, bottom, left)
             let edge = |which: u8| -> (bool, [f32; 4], f32) {
                 let edge_flag = match which {
-                    0 => acadrust::entities::table::CellEdgeFlags::TOP,
-                    1 => acadrust::entities::table::CellEdgeFlags::RIGHT,
-                    2 => acadrust::entities::table::CellEdgeFlags::BOTTOM,
-                    _ => acadrust::entities::table::CellEdgeFlags::LEFT,
+                    0 => codec::entities::table::CellEdgeFlags::TOP,
+                    1 => codec::entities::table::CellEdgeFlags::RIGHT,
+                    2 => codec::entities::table::CellEdgeFlags::BOTTOM,
+                    _ => codec::entities::table::CellEdgeFlags::LEFT,
                 };
                 if let Some(cs) = style_for_border(tab, row, ci, cell, edge_flag) {
                     let b = match which {
@@ -1660,7 +1660,7 @@ pub fn tessellate_table(
                 row,
                 ci,
                 cell,
-                acadrust::entities::table::CellStylePropertyFlags::TEXT_HEIGHT,
+                codec::entities::table::CellStylePropertyFlags::TEXT_HEIGHT,
             )
             .map(|style| style.text_height as f32)
             .or_else(|| row_style.map(|style| style.text_height as f32))
@@ -1672,7 +1672,7 @@ pub fn tessellate_table(
                 row,
                 ci,
                 cell,
-                acadrust::entities::table::CellStylePropertyFlags::MARGIN_LEFT,
+                codec::entities::table::CellStylePropertyFlags::MARGIN_LEFT,
             )
             .map(|style| style.margin_left as f32 * anno_scale)
             .unwrap_or(h_margin.max(fallback_text_height * 0.5));
@@ -1681,7 +1681,7 @@ pub fn tessellate_table(
                 row,
                 ci,
                 cell,
-                acadrust::entities::table::CellStylePropertyFlags::MARGIN_RIGHT,
+                codec::entities::table::CellStylePropertyFlags::MARGIN_RIGHT,
             )
             .map(|style| style.margin_right as f32 * anno_scale)
             .unwrap_or(h_margin.max(fallback_text_height * 0.5));
@@ -1690,7 +1690,7 @@ pub fn tessellate_table(
                 row,
                 ci,
                 cell,
-                acadrust::entities::table::CellStylePropertyFlags::MARGIN_TOP,
+                codec::entities::table::CellStylePropertyFlags::MARGIN_TOP,
             )
             .map(|style| style.margin_top as f32 * anno_scale)
             .unwrap_or(v_margin.max(fallback_text_height * 0.5));
@@ -1699,7 +1699,7 @@ pub fn tessellate_table(
                 row,
                 ci,
                 cell,
-                acadrust::entities::table::CellStylePropertyFlags::MARGIN_BOTTOM,
+                codec::entities::table::CellStylePropertyFlags::MARGIN_BOTTOM,
             )
             .map(|style| style.margin_bottom as f32 * anno_scale)
             .unwrap_or(v_margin.max(fallback_text_height * 0.5));
@@ -1708,16 +1708,16 @@ pub fn tessellate_table(
                 row,
                 ci,
                 cell,
-                acadrust::entities::table::CellStylePropertyFlags::CONTENT_LAYOUT,
+                codec::entities::table::CellStylePropertyFlags::CONTENT_LAYOUT,
             )
             .map(|style| style.layout_flags)
-            .unwrap_or(acadrust::entities::table::ContentLayoutFlags::FLOW);
+            .unwrap_or(codec::entities::table::ContentLayoutFlags::FLOW);
             let fallback_alignment = style_for_property(
                 tab,
                 row,
                 ci,
                 cell,
-                acadrust::entities::table::CellStylePropertyFlags::ALIGNMENT,
+                codec::entities::table::CellStylePropertyFlags::ALIGNMENT,
             )
             .map(|style| style.alignment)
             .or_else(|| row_style.map(|style| style.alignment as i32))
@@ -1727,7 +1727,7 @@ pub fn tessellate_table(
                 row,
                 ci,
                 cell,
-                acadrust::entities::table::CellStylePropertyFlags::MARGIN_HORIZONTAL_SPACING,
+                codec::entities::table::CellStylePropertyFlags::MARGIN_HORIZONTAL_SPACING,
             )
             .map(|style| style.horizontal_spacing as f32 * anno_scale)
             .unwrap_or(0.0);
@@ -1736,7 +1736,7 @@ pub fn tessellate_table(
                 row,
                 ci,
                 cell,
-                acadrust::entities::table::CellStylePropertyFlags::MARGIN_VERTICAL_SPACING,
+                codec::entities::table::CellStylePropertyFlags::MARGIN_VERTICAL_SPACING,
             )
             .map(|style| style.vertical_spacing as f32 * anno_scale)
             .unwrap_or(0.0);
@@ -1781,7 +1781,7 @@ pub fn tessellate_table(
                     row,
                     ci,
                     cell,
-                    acadrust::entities::table::CellStylePropertyFlags::TEXT_HEIGHT,
+                    codec::entities::table::CellStylePropertyFlags::TEXT_HEIGHT,
                 );
                 let cell_h = (content.text_height > 1e-6)
                     .then_some(content.text_height)
@@ -1803,7 +1803,7 @@ pub fn tessellate_table(
                     row,
                     ci,
                     cell,
-                    acadrust::entities::table::CellStylePropertyFlags::MARGIN_LEFT,
+                    codec::entities::table::CellStylePropertyFlags::MARGIN_LEFT,
                 )
                     .map(|style| style.margin_left as f32 * anno_scale)
                     .filter(|margin| *margin > 1e-6)
@@ -1813,7 +1813,7 @@ pub fn tessellate_table(
                     row,
                     ci,
                     cell,
-                    acadrust::entities::table::CellStylePropertyFlags::MARGIN_RIGHT,
+                    codec::entities::table::CellStylePropertyFlags::MARGIN_RIGHT,
                 )
                     .map(|style| style.margin_right as f32 * anno_scale)
                     .filter(|margin| *margin > 1e-6)
@@ -1823,7 +1823,7 @@ pub fn tessellate_table(
                     row,
                     ci,
                     cell,
-                    acadrust::entities::table::CellStylePropertyFlags::MARGIN_TOP,
+                    codec::entities::table::CellStylePropertyFlags::MARGIN_TOP,
                 )
                     .map(|style| style.margin_top as f32 * anno_scale)
                     .filter(|margin| *margin > 1e-6)
@@ -1833,7 +1833,7 @@ pub fn tessellate_table(
                     row,
                     ci,
                     cell,
-                    acadrust::entities::table::CellStylePropertyFlags::MARGIN_BOTTOM,
+                    codec::entities::table::CellStylePropertyFlags::MARGIN_BOTTOM,
                 )
                     .map(|style| style.margin_bottom as f32 * anno_scale)
                     .filter(|margin| *margin > 1e-6)
@@ -1844,7 +1844,7 @@ pub fn tessellate_table(
                         row,
                         ci,
                         cell,
-                        acadrust::entities::table::CellStylePropertyFlags::TEXT_STYLE,
+                        codec::entities::table::CellStylePropertyFlags::TEXT_STYLE,
                     )
                     .and_then(|style| style.text_style_handle)
                 })
@@ -1860,7 +1860,7 @@ pub fn tessellate_table(
                             row,
                             ci,
                             cell,
-                            acadrust::entities::table::CellStylePropertyFlags::ALIGNMENT,
+                            codec::entities::table::CellStylePropertyFlags::ALIGNMENT,
                         )
                             .map(|style| style.alignment)
                             .filter(|alignment| *alignment != 0)
@@ -1908,7 +1908,7 @@ pub fn tessellate_table(
                     + v_flow * y_offset
                     + normal * z_offset;
                 let content_rotation_explicit = content.format_property_flags
-                    & acadrust::entities::table::CellStylePropertyFlags::ROTATION.bits() as i32
+                    & codec::entities::table::CellStylePropertyFlags::ROTATION.bits() as i32
                     != 0;
                 let rot = if content_rotation_explicit {
                     content.rotation as f32
@@ -1918,7 +1918,7 @@ pub fn tessellate_table(
                         row,
                         ci,
                         cell,
-                        acadrust::entities::table::CellStylePropertyFlags::ROTATION,
+                        codec::entities::table::CellStylePropertyFlags::ROTATION,
                     )
                     .map(|style| style.rotation as f32)
                     .unwrap_or(cell.rotation as f32)
@@ -1951,7 +1951,7 @@ pub fn tessellate_table(
                     row,
                     ci,
                     cell,
-                    acadrust::entities::table::CellStylePropertyFlags::CONTENT_COLOR,
+                    codec::entities::table::CellStylePropertyFlags::CONTENT_COLOR,
                 ) {
                     resolve_col(&style.content_color, entity_color)
                 } else if let Some(style) = row_style {
@@ -2216,7 +2216,7 @@ impl Grippable for Table {
         } else if grip_id >= 2000 {
             if let Some(data) = self.break_data.get_mut(grip_id - 2000) {
                 let offset = point - origin;
-                data.position = acadrust::types::Vector3::new(offset.x, offset.y, offset.z);
+                data.position = codec::types::Vector3::new(offset.x, offset.y, offset.z);
             }
         }
     }
@@ -2225,7 +2225,7 @@ impl Grippable for Table {
 impl PropertyEditable for Table {
     fn geometry_properties(&self, text_style_names: &[String]) -> Vec<PropSection> {
         use crate::entities::common::edit_prop as edit;
-        use acadrust::entities::table::{BreakOptionFlags, CellStateFlags, CellStylePropertyFlags};
+        use codec::entities::table::{BreakOptionFlags, CellStateFlags, CellStylePropertyFlags};
         let bool_text = |value: bool| if value { t!("Yes") } else { t!("No") }.into_owned();
         let toggle = |label: &str, field: &'static str, value: bool, enabled: bool| -> Property {
             Property {
@@ -2272,16 +2272,16 @@ impl PropertyEditable for Table {
                 },
             }
         };
-        let color_text = |color: acadrust::types::Color| match color {
-            acadrust::types::Color::None => "None".to_string(),
-            acadrust::types::Color::ByLayer => "ByLayer".to_string(),
-            acadrust::types::Color::ByBlock => "ByBlock".to_string(),
-            acadrust::types::Color::Index(index) => index.to_string(),
-            acadrust::types::Color::Rgb { r, g, b } => format!("{r},{g},{b}"),
+        let color_text = |color: codec::types::Color| match color {
+            codec::types::Color::None => "None".to_string(),
+            codec::types::Color::ByLayer => "ByLayer".to_string(),
+            codec::types::Color::ByBlock => "ByBlock".to_string(),
+            codec::types::Color::Index(index) => index.to_string(),
+            codec::types::Color::Rgb { r, g, b } => format!("{r},{g},{b}"),
         };
         let color = |label: &str,
                      field: &'static str,
-                     value: acadrust::types::Color,
+                     value: codec::types::Color,
                      enabled: bool|
          -> Property {
             Property {
@@ -2506,18 +2506,18 @@ impl PropertyEditable for Table {
 
         if prop_current_cell_active() {
             let cell_type = match cell.map(|cell| cell.cell_type) {
-                Some(acadrust::entities::table::CellType::Block) => "Block",
+                Some(codec::entities::table::CellType::Block) => "Block",
                 _ => "Text",
             };
             let data_type = cell
                 .and_then(|cell| cell.contents.first())
                 .map(|content| match content.value.value_type {
-                    acadrust::entities::table::CellValueType::Long => "Integer",
-                    acadrust::entities::table::CellValueType::Double => "Decimal",
-                    acadrust::entities::table::CellValueType::Date => "Date",
-                    acadrust::entities::table::CellValueType::Point2D => "Point 2D",
-                    acadrust::entities::table::CellValueType::Point3D => "Point 3D",
-                    acadrust::entities::table::CellValueType::Handle => "Handle",
+                    codec::entities::table::CellValueType::Long => "Integer",
+                    codec::entities::table::CellValueType::Double => "Decimal",
+                    codec::entities::table::CellValueType::Date => "Date",
+                    codec::entities::table::CellValueType::Point2D => "Point 2D",
+                    codec::entities::table::CellValueType::Point3D => "Point 3D",
+                    codec::entities::table::CellValueType::Handle => "Handle",
                     _ => "Text",
                 })
                 .unwrap_or("Text");
@@ -2627,7 +2627,7 @@ impl PropertyEditable for Table {
                         "tbl_cell_content_color",
                         style_for(CellStylePropertyFlags::CONTENT_COLOR)
                             .map(|style| style.content_color)
-                            .unwrap_or(acadrust::types::Color::ByBlock),
+                            .unwrap_or(codec::types::Color::ByBlock),
                         format_editable,
                     ),
                     color(
@@ -2635,7 +2635,7 @@ impl PropertyEditable for Table {
                         "tbl_cell_background_color",
                         style_for(CellStylePropertyFlags::BACKGROUND_COLOR)
                             .map(|style| style.background_color)
-                            .unwrap_or(acadrust::types::Color::ByBlock),
+                            .unwrap_or(codec::types::Color::ByBlock),
                         format_editable,
                     ),
                     choice(
@@ -2711,7 +2711,7 @@ impl PropertyEditable for Table {
                                         row,
                                         cell_column,
                                         cell,
-                                        acadrust::entities::table::CellEdgeFlags::TOP,
+                                        codec::entities::table::CellEdgeFlags::TOP,
                                     )
                                 })
                             })
@@ -2729,7 +2729,7 @@ impl PropertyEditable for Table {
                                         row,
                                         cell_column,
                                         cell,
-                                        acadrust::entities::table::CellEdgeFlags::RIGHT,
+                                        codec::entities::table::CellEdgeFlags::RIGHT,
                                     )
                                 })
                             })
@@ -2747,7 +2747,7 @@ impl PropertyEditable for Table {
                                         row,
                                         cell_column,
                                         cell,
-                                        acadrust::entities::table::CellEdgeFlags::BOTTOM,
+                                        codec::entities::table::CellEdgeFlags::BOTTOM,
                                     )
                                 })
                             })
@@ -2765,7 +2765,7 @@ impl PropertyEditable for Table {
                                         row,
                                         cell_column,
                                         cell,
-                                        acadrust::entities::table::CellEdgeFlags::LEFT,
+                                        codec::entities::table::CellEdgeFlags::LEFT,
                                     )
                                 })
                             })
@@ -2796,9 +2796,9 @@ impl PropertyEditable for Table {
                         t!("Direction").as_ref(),
                         "tbl_break_direction",
                         match self.break_flow_direction {
-                            acadrust::entities::table::BreakFlowDirection::Right => "Right",
-                            acadrust::entities::table::BreakFlowDirection::Left => "Left",
-                            acadrust::entities::table::BreakFlowDirection::Vertical => "Down",
+                            codec::entities::table::BreakFlowDirection::Right => "Right",
+                            codec::entities::table::BreakFlowDirection::Left => "Left",
+                            codec::entities::table::BreakFlowDirection::Vertical => "Down",
                         }
                         .to_string(),
                         vec!["Right".into(), "Left".into(), "Down".into()],
@@ -2851,7 +2851,7 @@ impl PropertyEditable for Table {
 
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
         use crate::entities::common::parse_f64;
-        use acadrust::entities::table::{
+        use codec::entities::table::{
             BreakOptionFlags, CellStateFlags, CellStyle, CellStylePropertyFlags,
         };
         let flag = match field {
@@ -2950,9 +2950,9 @@ impl PropertyEditable for Table {
                     }
                     if let Some(cell) = self.cell_mut(row, column) {
                         cell.cell_type = if value.trim().eq_ignore_ascii_case("block") {
-                            acadrust::entities::table::CellType::Block
+                            codec::entities::table::CellType::Block
                         } else {
-                            acadrust::entities::table::CellType::Text
+                            codec::entities::table::CellType::Text
                         };
                     }
                     return;
@@ -2976,7 +2976,7 @@ impl PropertyEditable for Table {
                         let style = cell.style.get_or_insert_with(CellStyle::new);
                         style.alignment = alignment;
                         style.property_flags.insert(
-                            acadrust::entities::table::CellStylePropertyFlags::ALIGNMENT,
+                            codec::entities::table::CellStylePropertyFlags::ALIGNMENT,
                         );
                     }
                     return;
@@ -3019,13 +3019,13 @@ impl PropertyEditable for Table {
                         }
                         if let Some(content) = cell.contents.first_mut() {
                             content.value.value_type = match value.trim().to_ascii_uppercase().as_str() {
-                                "INTEGER" => acadrust::entities::table::CellValueType::Long,
-                                "DECIMAL" => acadrust::entities::table::CellValueType::Double,
-                                "DATE" => acadrust::entities::table::CellValueType::Date,
-                                "POINT 2D" => acadrust::entities::table::CellValueType::Point2D,
-                                "POINT 3D" => acadrust::entities::table::CellValueType::Point3D,
-                                "HANDLE" => acadrust::entities::table::CellValueType::Handle,
-                                _ => acadrust::entities::table::CellValueType::String,
+                                "INTEGER" => codec::entities::table::CellValueType::Long,
+                                "DECIMAL" => codec::entities::table::CellValueType::Double,
+                                "DATE" => codec::entities::table::CellValueType::Date,
+                                "POINT 2D" => codec::entities::table::CellValueType::Point2D,
+                                "POINT 3D" => codec::entities::table::CellValueType::Point3D,
+                                "HANDLE" => codec::entities::table::CellValueType::Handle,
+                                _ => codec::entities::table::CellValueType::String,
                             };
                             content.value.raw_type_code = content.value.value_type as i32;
                         }
@@ -3044,7 +3044,7 @@ impl PropertyEditable for Table {
                         let style = cell.style.get_or_insert_with(CellStyle::new);
                         style.value_format = value.to_string();
                         style.property_flags.insert(
-                            acadrust::entities::table::CellStylePropertyFlags::DATA_FORMAT,
+                            codec::entities::table::CellStylePropertyFlags::DATA_FORMAT,
                         );
                     }
                     return;
@@ -3061,7 +3061,7 @@ impl PropertyEditable for Table {
                             value == "true"
                         };
                         style.property_flags.insert(
-                            acadrust::entities::table::CellStylePropertyFlags::BACKGROUND_COLOR,
+                            codec::entities::table::CellStylePropertyFlags::BACKGROUND_COLOR,
                         );
                     }
                     return;
@@ -3074,7 +3074,7 @@ impl PropertyEditable for Table {
                         return;
                     }
                     if let Some(cell) = self.cell_mut(row, column) {
-                        use acadrust::entities::table::{
+                        use codec::entities::table::{
                             BorderPropertyFlags, CellEdgeFlags,
                         };
                         let style = cell.style.get_or_insert_with(CellStyle::new);
@@ -3131,11 +3131,11 @@ impl PropertyEditable for Table {
                     return;
                 }
                 self.break_flow_direction = match value.trim().to_ascii_uppercase().as_str() {
-                    "LEFT" => acadrust::entities::table::BreakFlowDirection::Left,
+                    "LEFT" => codec::entities::table::BreakFlowDirection::Left,
                     "DOWN" | "VERTICAL" => {
-                        acadrust::entities::table::BreakFlowDirection::Vertical
+                        codec::entities::table::BreakFlowDirection::Vertical
                     }
-                    _ => acadrust::entities::table::BreakFlowDirection::Right,
+                    _ => codec::entities::table::BreakFlowDirection::Right,
                 };
                 self.break_ranges.clear();
             }
@@ -3241,7 +3241,7 @@ impl PropertyEditable for Table {
                         let style = cell.style.get_or_insert_with(CellStyle::new);
                         style.text_height = number;
                         style.property_flags.insert(
-                            acadrust::entities::table::CellStylePropertyFlags::TEXT_HEIGHT,
+                            codec::entities::table::CellStylePropertyFlags::TEXT_HEIGHT,
                         );
                     }
                 }
@@ -3294,8 +3294,8 @@ impl PropertyEditable for Table {
                         .contains(BreakOptionFlags::ALLOW_MANUAL_HEIGHTS) =>
             {
                 if self.break_data.is_empty() {
-                    self.break_data.push(acadrust::entities::table::TableBreakData {
-                        position: acadrust::types::Vector3::ZERO,
+                    self.break_data.push(codec::entities::table::TableBreakData {
+                        position: codec::types::Vector3::ZERO,
                         height: number,
                         flags: 0,
                     });

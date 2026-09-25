@@ -2,16 +2,16 @@
 //! underlays, its buttons edit them.
 
 use super::*;
-use acadrust::entities::{Underlay, UnderlayDisplayFlags, UnderlayType};
+use codec::entities::{Underlay, UnderlayDisplayFlags, UnderlayType};
 use crate::ui::ribbon::{UnderlayContext, UnderlayTabMsg};
 
 impl OpenCADStudio {
     /// The selected PDF underlays, or nothing when anything else is selected.
-    fn selected_pdf_underlays(&self, i: usize) -> Vec<(acadrust::Handle, Underlay)> {
+    fn selected_pdf_underlays(&self, i: usize) -> Vec<(codec::Handle, Underlay)> {
         let mut out = Vec::new();
         for (handle, entity) in self.tabs[i].scene.selected_entities() {
             match entity {
-                acadrust::EntityType::Underlay(u) if u.underlay_type == UnderlayType::Pdf => {
+                codec::EntityType::Underlay(u) if u.underlay_type == UnderlayType::Pdf => {
                     out.push((handle, u.clone()));
                 }
                 _ => return Vec::new(),
@@ -52,7 +52,7 @@ impl OpenCADStudio {
         }
         self.push_undo_snapshot(i, label);
         for handle in &handles {
-            if let Some(acadrust::EntityType::Underlay(u)) =
+            if let Some(codec::EntityType::Underlay(u)) =
                 self.tabs[i].scene.document.get_entity_mut(*handle)
             {
                 edit(u);

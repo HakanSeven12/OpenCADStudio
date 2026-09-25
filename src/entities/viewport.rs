@@ -1,4 +1,4 @@
-use acadrust::entities::{Viewport, ViewportRenderMode};
+use codec::entities::{Viewport, ViewportRenderMode};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
@@ -180,7 +180,7 @@ fn properties(vp: &Viewport) -> Vec<PropSection> {
 }
 
 fn apply_geom_prop(vp: &mut Viewport, field: &str, value: &str) {
-    use acadrust::types::Vector3;
+    use codec::types::Vector3;
 
     // Boolean / toggle fields handled first (value = "toggle" or "true"/"false").
     match field {

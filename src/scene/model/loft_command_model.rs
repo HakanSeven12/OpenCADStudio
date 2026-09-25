@@ -1,9 +1,9 @@
 //! LOFT command/history integration. Geometry and validation live in the kernel.
 
-use acadrust::entities::{EmbeddedEntity, Point, Surface, SurfaceData, SurfaceKind};
-use acadrust::objects::{SolidHistoryLoft, SolidHistoryLoftParameters, SolidHistoryNodeBase};
-use acadrust::{EntityType, Handle};
-use cadkernel::brep::Body;
+use codec::entities::{EmbeddedEntity, Point, Surface, SurfaceData, SurfaceKind};
+use codec::objects::{SolidHistoryLoft, SolidHistoryLoftParameters, SolidHistoryNodeBase};
+use codec::{EntityType, Handle};
+use kernel::brep::Body;
 use crate::command::{ExtrudeMode, LoftOptions, LoftSectionSelection};
 use super::sweep_model::embedded_path;
 
@@ -17,11 +17,11 @@ fn embedded_section(entity: &EntityType) -> Option<EmbeddedEntity> {
 
 pub fn is_section(entity: &EntityType) -> bool {
     embedded_section(entity).is_some_and(|entity|
-        cadkernel::acis::loft_section_geometry(&[entity]).is_ok())
+        kernel::acis::loft_section_geometry(&[entity]).is_ok())
 }
 
 pub fn is_guide_or_path(entity: &EntityType) -> bool {
-    embedded_path(entity).is_some_and(|entity| cadkernel::acis::loft_path_geometry(&entity).is_ok())
+    embedded_path(entity).is_some_and(|entity| kernel::acis::loft_path_geometry(&entity).is_ok())
 }
 
 pub fn record(
@@ -42,7 +42,7 @@ pub fn record(
                 embedded_section(find(*handle)?).ok_or_else(|| "Unsupported joined loft edge.".to_string())
             }).collect::<Result<Vec<_>, _>>()?,
         };
-        if let cadkernel::brep::LoftSection::Profile { closed, .. } = cadkernel::acis::loft_section_geometry(&members)? {
+        if let kernel::brep::LoftSection::Profile { closed, .. } = kernel::acis::loft_section_geometry(&members)? {
             surface |= !closed;
         }
         section_counts.push(members.len());
@@ -71,7 +71,7 @@ pub fn build_body(
     sections: &[LoftSectionSelection], guides: &[Handle], path: Option<Handle>,
     available: &[(Handle, EntityType)], mode: ExtrudeMode, options: LoftOptions,
 ) -> Result<Body, String> {
-    cadkernel::acis::rebuild_loft_with_options(&record(sections, guides, path, available, mode, options)?)
+    kernel::acis::rebuild_loft_with_options(&record(sections, guides, path, available, mode, options)?)
 }
 
 pub fn surface_entity(record: &SolidHistoryLoft) -> EntityType {

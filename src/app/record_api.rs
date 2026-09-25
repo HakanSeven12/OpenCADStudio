@@ -1,4 +1,4 @@
-use acadrust::tables::{Table, TableEntry};
+use codec::tables::{Table, TableEntry};
 use iced::Task;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value, json};
@@ -191,7 +191,7 @@ fn decode_enum<T: DeserializeOwned>(kind: &str, properties: Value) -> Result<T, 
     serde_json::from_value(Value::Object(wrapper)).map_err(|error| error.to_string())
 }
 
-fn handle_text(handle: acadrust::Handle) -> String {
+fn handle_text(handle: codec::Handle) -> String {
     format!("{:X}", handle.value())
 }
 
@@ -205,7 +205,7 @@ fn without_hex_prefix(value: &str) -> &str {
 fn record(
     collection: &str,
     kind: &str,
-    handle: Option<acadrust::Handle>,
+    handle: Option<codec::Handle>,
     name: Option<&str>,
     mutable: bool,
     properties: Value,
@@ -226,7 +226,7 @@ fn record(
     value
 }
 
-fn entity_record(entity: &acadrust::EntityType) -> Result<Value, String> {
+fn entity_record(entity: &codec::EntityType) -> Result<Value, String> {
     let (kind, properties) = enum_parts(entity)?;
     let mut value = record(
         "entities",
@@ -249,8 +249,8 @@ fn entity_record(entity: &acadrust::EntityType) -> Result<Value, String> {
 }
 
 fn object_record(
-    handle: acadrust::Handle,
-    object: &acadrust::objects::ObjectType,
+    handle: codec::Handle,
+    object: &codec::objects::ObjectType,
 ) -> Result<Value, String> {
     let (kind, properties) = enum_parts(object)?;
     Ok(record(
@@ -286,7 +286,7 @@ fn table_records<T: Serialize + TableEntry>(
 fn map_records<T: Serialize>(
     collection: &str,
     kind: &str,
-    values: &std::collections::HashMap<acadrust::Handle, T>,
+    values: &std::collections::HashMap<codec::Handle, T>,
 ) -> Result<Vec<Value>, String> {
     let mut entries: Vec<_> = values.iter().collect();
     entries.sort_by_key(|(handle, _)| handle.value());
@@ -306,7 +306,7 @@ fn map_records<T: Serialize>(
 }
 
 fn collection_records(
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     collection: &str,
 ) -> Result<Vec<Value>, String> {
     match collection {
@@ -469,7 +469,7 @@ fn collection_records(
     }
 }
 
-fn collection_count(document: &acadrust::CadDocument, collection: &str) -> usize {
+fn collection_count(document: &codec::CadDocument, collection: &str) -> usize {
     match collection {
         "entities" => document.entities().count(),
         "objects" => document.objects.len(),
@@ -1096,11 +1096,11 @@ fn collection_record_types(collection: &str) -> Vec<Value> {
     })]
 }
 
-fn requested_handle(request: &Value) -> Result<acadrust::Handle, String> {
+fn requested_handle(request: &Value) -> Result<codec::Handle, String> {
     request["handle"]
         .as_str()
         .and_then(|value| u64::from_str_radix(without_hex_prefix(value), 16).ok())
-        .map(acadrust::Handle::new)
+        .map(codec::Handle::new)
         .ok_or_else(|| "set_properties requires a hexadecimal handle".to_string())
 }
 
@@ -1183,7 +1183,7 @@ where
     let requested = request["handle"].as_str().and_then(|value| {
         u64::from_str_radix(without_hex_prefix(value), 16)
             .ok()
-            .map(acadrust::Handle::new)
+            .map(codec::Handle::new)
     });
     let name = request["name"].as_str();
     let source = table
@@ -1203,7 +1203,7 @@ where
     Ok((source, edited, paths))
 }
 
-fn replace_table_entry<T: TableEntry>(table: &mut Table<T>, handle: acadrust::Handle, edited: T) {
+fn replace_table_entry<T: TableEntry>(table: &mut Table<T>, handle: codec::Handle, edited: T) {
     let target = table
         .iter_mut()
         .find(|entry| entry.handle() == handle)
@@ -1494,7 +1494,7 @@ impl OpenCADStudio {
                     enum_parts(&source).map_err(|error| failure("serialization_failed", error))?;
                 paths = apply_updates(&mut properties, request, collection)
                     .map_err(|error| failure("invalid_update", error))?;
-                let mut edited: acadrust::EntityType = decode_enum(&kind, properties)
+                let mut edited: codec::EntityType = decode_enum(&kind, properties)
                     .map_err(|error| failure("invalid_value", error))?;
                 if edited.common().handle != handle {
                     return Err(failure("identity_changed", "entity identity is read-only"));
@@ -1525,7 +1525,7 @@ impl OpenCADStudio {
                     enum_parts(&source).map_err(|error| failure("serialization_failed", error))?;
                 paths = apply_updates(&mut properties, request, collection)
                     .map_err(|error| failure("invalid_update", error))?;
-                let mut edited: acadrust::objects::ObjectType = decode_enum(&kind, properties)
+                let mut edited: codec::objects::ObjectType = decode_enum(&kind, properties)
                     .map_err(|error| failure("invalid_value", error))?;
                 edited.preserve_storage_data_from(&source);
                 changed = edited != source;
@@ -1633,9 +1633,9 @@ impl OpenCADStudio {
 
 #[cfg(test)]
 mod tests {
-    use acadrust::entities::{AttributeEntity, EntityType, Insert};
-    use acadrust::objects::{Dictionary, ObjectType};
-    use acadrust::types::{Handle, Vector3};
+    use codec::entities::{AttributeEntity, EntityType, Insert};
+    use codec::objects::{Dictionary, ObjectType};
+    use codec::types::{Handle, Vector3};
     use serde_json::{Value, json};
 
     use super::OpenCADStudio;

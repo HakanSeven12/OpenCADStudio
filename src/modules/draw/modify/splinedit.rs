@@ -9,8 +9,8 @@
 //
 // Control-point dragging is already supported via the grip editing system.
 
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::types::Vector3;
+use codec::EntityType;
 use glam::DVec3;
 
 
@@ -53,16 +53,16 @@ enum Step {
 
 pub struct SplineditCommand {
     step: Step,
-    handle: acadrust::Handle,
-    spline: Option<acadrust::entities::Spline>,
-    pending: Option<acadrust::entities::Spline>,
-    history: Vec<(acadrust::Handle, acadrust::entities::Spline)>,
+    handle: codec::Handle,
+    spline: Option<codec::entities::Spline>,
+    pending: Option<codec::entities::Spline>,
+    history: Vec<(codec::Handle, codec::entities::Spline)>,
     pick_context: Option<crate::command::PointPickContext>,
     join_candidates: Vec<crate::command::SelectionEntity>,
     delete_source: bool,
 }
 
-fn clear_fit_method(spline: &mut acadrust::entities::Spline) {
+fn clear_fit_method(spline: &mut codec::entities::Spline) {
     spline.fit_points.clear();
     spline.begin_tangent = Vector3::ZERO;
     spline.end_tangent = Vector3::ZERO;
@@ -80,7 +80,7 @@ fn weights_are_rational(weights: &[f64]) -> bool {
 
 impl SplineditCommand {
     pub fn new() -> Self {
-        Self { step: Step::SelectSpline, handle: acadrust::Handle::NULL, spline: None, pending: None, history: Vec::new(), pick_context: None, join_candidates: Vec::new(), delete_source: true }
+        Self { step: Step::SelectSpline, handle: codec::Handle::NULL, spline: None, pending: None, history: Vec::new(), pick_context: None, join_candidates: Vec::new(), delete_source: true }
     }
 
     pub fn with_delete_source(mut self, delete: bool) -> Self { self.delete_source = delete; self }
@@ -97,19 +97,19 @@ impl SplineditCommand {
             if points.len() < 2 { return None; }
             let entity = if let Some(planar) = crate::entities::curve::entity_curve(&EntityType::Spline(source.clone())) {
                 let normal = planar.plane.normal()?;
-                let elevation = cadkernel::space::Vec3::from(points[0]).dot(cadkernel::space::Vec3::from(normal));
+                let elevation = kernel::space::Vec3::from(points[0]).dot(kernel::space::Vec3::from(normal));
                 let normal = Vector3::new(normal[0], normal[1], normal[2]);
                 let plane = crate::entities::curve::ocs_plane(normal.clone(), elevation);
-                let mut polyline = acadrust::LwPolyline::new();
+                let mut polyline = codec::LwPolyline::new();
                 polyline.common = source.common.clone();
                 polyline.elevation = elevation; polyline.normal = normal; polyline.is_closed = self.closed();
                 polyline.vertices = points.iter().map(|point| {
                     let uv = plane.project(*point)?;
-                    Some(acadrust::entities::LwVertex::new(acadrust::types::Vector2::new(uv[0], uv[1])))
+                    Some(codec::entities::LwVertex::new(codec::types::Vector2::new(uv[0], uv[1])))
                 }).collect::<Option<Vec<_>>>()?;
                 EntityType::LwPolyline(polyline)
             } else {
-                let mut polyline = acadrust::entities::Polyline3D::from_points(points.iter().map(|p| Vector3::new(p[0],p[1],p[2])).collect());
+                let mut polyline = codec::entities::Polyline3D::from_points(points.iter().map(|p| Vector3::new(p[0],p[1],p[2])).collect());
                 polyline.common = source.common.clone(); polyline.flags.closed = self.closed();
                 EntityType::Polyline3D(polyline)
             };
@@ -117,7 +117,7 @@ impl SplineditCommand {
         });
         let Some(mut entity) = result else { return CmdResult::ReportError(crate::t!("Spline cannot be converted within the requested precision.").into_owned()); };
         if self.delete_source { CmdResult::ReplaceMany(vec![(self.handle,vec![entity])], Vec::new()) }
-        else { entity.common_mut().handle = acadrust::Handle::NULL; CmdResult::ReplaceMany(Vec::new(), vec![entity]) }
+        else { entity.common_mut().handle = codec::Handle::NULL; CmdResult::ReplaceMany(Vec::new(), vec![entity]) }
     }
 
     fn picked_vertex(&self, point: DVec3) -> Option<usize> { self.picked_from_points(point, &self.spline.as_ref()?.control_points) }
@@ -132,7 +132,7 @@ impl SplineditCommand {
         self.rebuild_fit(result)
     }
 
-    fn rebuild_fit(&mut self, mut result: acadrust::entities::Spline) -> CmdResult {
+    fn rebuild_fit(&mut self, mut result: codec::entities::Spline) -> CmdResult {
         let Some(source) = self.spline.as_ref() else { return CmdResult::NeedPoint; };
         if source.fit_tolerance != 0.0 || source.weights.windows(2).any(|w| w[0] != w[1]) {
             return CmdResult::ReportError(crate::t!("Editing weighted or tolerance-fitted interpolation data is not supported.").into_owned());
@@ -201,7 +201,7 @@ impl SplineditCommand {
         self.spline.as_ref().is_some_and(|spline| spline.flags.closed || spline.flags.periodic)
     }
 
-    fn replace(&mut self, spline: acadrust::entities::Spline) -> CmdResult {
+    fn replace(&mut self, spline: codec::entities::Spline) -> CmdResult {
         self.pending = Some(spline.clone());
         CmdResult::ReplaceManyContinue(vec![(self.handle, vec![EntityType::Spline(spline)])])
     }
@@ -224,7 +224,7 @@ impl SplineditCommand {
         CmdResult::ReplaceManyContinue(replacements)
     }
 
-    fn refined(&self, point: Option<DVec3>, degree: Option<usize>) -> Option<acadrust::entities::Spline> {
+    fn refined(&self, point: Option<DVec3>, degree: Option<usize>) -> Option<codec::entities::Spline> {
         let source = self.spline.as_ref()?;
         if let Some(degree) = degree {
             let current = usize::try_from(source.degree).ok()?;
@@ -244,10 +244,10 @@ impl SplineditCommand {
             return Some(result);
         }
         let planar = crate::entities::curve::entity_curve(&EntityType::Spline(source.clone()))?;
-        let cadkernel::geom2d::Curve::Nurbs(mut curve) = planar.curve else { return None; };
+        let kernel::geom2d::Curve::Nurbs(mut curve) = planar.curve else { return None; };
         if let Some(point) = point {
             let projected = planar.plane.project([point.x, point.y, point.z])?;
-            let nearest = cadkernel::geom2d::closest_point(&cadkernel::geom2d::Curve::Nurbs(curve.clone()), projected);
+            let nearest = kernel::geom2d::closest_point(&kernel::geom2d::Curve::Nurbs(curve.clone()), projected);
             let (start, end) = curve.domain();
             let parameter = start + nearest.t * (end - start);
             if parameter <= start || parameter >= end { return None; }
@@ -321,7 +321,7 @@ impl CadCommand for SplineditCommand {
     fn inject_selection_entities(&mut self, entities: Vec<crate::command::SelectionEntity>) {
         if matches!(self.step, Step::Join) { self.join_candidates = entities; }
     }
-    fn on_selection_complete(&mut self, handles: Vec<acadrust::Handle>) -> CmdResult {
+    fn on_selection_complete(&mut self, handles: Vec<codec::Handle>) -> CmdResult {
         self.join_candidates.retain(|item| handles.contains(&item.handle) && item.handle != self.handle);
         CmdResult::NeedPoint
     }
@@ -330,13 +330,13 @@ impl CadCommand for SplineditCommand {
     fn inject_picked_entity(&mut self, entity: EntityType) {
         self.spline = match entity { EntityType::Spline(spline) => Some(spline), _ => None };
     }
-    fn on_entity_pick(&mut self, handle: acadrust::Handle, _pt: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: codec::Handle, _pt: DVec3) -> CmdResult {
         if handle.is_null() || self.spline.is_none() { return CmdResult::NeedPoint; }
         self.handle = handle;
         self.step = Step::Options;
         CmdResult::NeedPoint
     }
-    fn on_entity_replaced(&mut self, old: acadrust::Handle, new: &[acadrust::Handle]) {
+    fn on_entity_replaced(&mut self, old: codec::Handle, new: &[codec::Handle]) {
         if old == self.handle {
             if let (Some(&handle), Some(replacement)) = (new.first(), self.pending.take()) {
                 if let Some(previous) = self.spline.replace(replacement) { self.history.push((old, previous)); }
@@ -514,7 +514,7 @@ impl CadCommand for SplineditCommand {
                 let controls = source.control_points.iter().map(|point| [point.x, point.y, point.z]).collect();
                 let weights = if source.weights.is_empty() { vec![1.0; source.control_points.len()] }
                     else { source.weights.clone() };
-                let curve = cadkernel::space::NurbsCurve3::new_strict(source.degree as usize, controls,
+                let curve = kernel::space::NurbsCurve3::new_strict(source.degree as usize, controls,
                     source.knots.clone(), weights).map(|curve| curve.with_periodicity(source.flags.periodic || source.flags.closed));
                 let Some(curve) = curve.and_then(|curve| curve.without_control_vertex(index)) else { return CmdResult::NeedPoint; };
                 let mut spline = source.clone();
@@ -576,14 +576,14 @@ impl CadCommand for SplineditCommand {
 }
 /// Apply a spline operation (CLOSE/OPEN/REVERSE) to a spline entity.
 /// Called from `cmd_result.rs` when the ReplaceEntity sentinel is detected.
-pub fn apply_spline_op(doc: &mut acadrust::CadDocument, handle: acadrust::Handle, op: &str) {
+pub fn apply_spline_op(doc: &mut codec::CadDocument, handle: codec::Handle, op: &str) {
     let Some(EntityType::Spline(spline)) = doc.get_entity_mut(handle) else {
         return;
     };
     apply_to_spline(spline, op);
 }
 
-fn apply_to_spline(spline: &mut acadrust::entities::Spline, op: &str) {
+fn apply_to_spline(spline: &mut codec::entities::Spline, op: &str) {
     let result = match op {
         "__SPLINEDIT_CLOSE__" => change_closure(spline, true),
         "__SPLINEDIT_OPEN__" => change_closure(spline, false),
@@ -593,8 +593,8 @@ fn apply_to_spline(spline: &mut acadrust::entities::Spline, op: &str) {
     if let Some(result) = result { *spline = result; }
 }
 
-fn change_closure(source: &acadrust::entities::Spline, closed: bool) -> Option<acadrust::entities::Spline> {
-    use cadkernel::space::{NurbsCurve3, Parameterization};
+fn change_closure(source: &codec::entities::Spline, closed: bool) -> Option<codec::entities::Spline> {
+    use kernel::space::{NurbsCurve3, Parameterization};
     if (source.flags.closed || source.flags.periodic) == closed { return None; }
     let fit_method = !source.fit_points.is_empty() || source.dwg_flags1 & 1 != 0 || source.dxf_flags & 32 != 0;
     let parameterization = match source.knot_parameterization {
@@ -654,8 +654,8 @@ fn change_closure(source: &acadrust::entities::Spline, closed: bool) -> Option<a
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::Spline;
-    use acadrust::Handle;
+    use codec::entities::Spline;
+    use codec::Handle;
     use iced::Rectangle;
 
     fn control_spline(points: &[[f64; 3]], degree: usize) -> Spline {
@@ -665,7 +665,7 @@ mod tests {
             .iter()
             .map(|point| Vector3::new(point[0], point[1], point[2]))
             .collect();
-        spline.knots = cadkernel::space::clamped_uniform_knots(degree, points.len());
+        spline.knots = kernel::space::clamped_uniform_knots(degree, points.len());
         spline
     }
 
@@ -785,7 +785,7 @@ mod tests {
 
     #[test]
     fn a_closed_weighted_control_curve_can_be_opened() {
-        let curve = cadkernel::space::NurbsCurve3::from_weighted_control_polygon(
+        let curve = kernel::space::NurbsCurve3::from_weighted_control_polygon(
             2,
             &[
                 [0.0, 0.0, 0.0],
@@ -806,7 +806,7 @@ mod tests {
         let opened = change_closure(&spline, false).expect("closed control curve opens");
         assert!(!opened.flags.closed);
         assert!(!opened.flags.periodic);
-        assert!(cadkernel::space::NurbsCurve3::new_strict(
+        assert!(kernel::space::NurbsCurve3::new_strict(
             opened.degree as usize,
             opened
                 .control_points
@@ -888,7 +888,7 @@ mod tests {
 
     #[test]
     fn closed_conversion_closes_once_and_invalid_precision_retries() {
-        let curve = cadkernel::space::NurbsCurve3::from_control_polygon(
+        let curve = kernel::space::NurbsCurve3::from_control_polygon(
             2,
             &[
                 [0.0, 0.0, 0.0],
@@ -964,13 +964,13 @@ mod tests {
 // ── Autocomplete registry ─────────────────────────────────
 inventory::submit!(crate::command::CommandRegistration { names: &["SPLINEDIT"] });  // SplineditCommand
 
-fn spatial_spline(source: &acadrust::entities::Spline) -> Option<cadkernel::space::NurbsCurve3> {
+fn spatial_spline(source: &codec::entities::Spline) -> Option<kernel::space::NurbsCurve3> {
     let curve = if crate::entities::spline::uses_fit_method(source) {
         crate::entities::spline::fit_nurbs3(source)?
     } else {
         let current = usize::try_from(source.degree).ok()?;
         let weights = if source.weights.is_empty() { vec![1.0; source.control_points.len()] } else { source.weights.clone() };
-        cadkernel::space::NurbsCurve3::new_strict(current,
+        kernel::space::NurbsCurve3::new_strict(current,
             source.control_points.iter().map(|point| [point.x, point.y, point.z]).collect(),
             source.knots.clone(), weights)?
     };

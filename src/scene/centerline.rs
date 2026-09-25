@@ -1,10 +1,10 @@
 use super::*;
-use acadrust::entities::{
+use codec::entities::{
     CenterLineAssociation, CenterLineSource, CenterLineSourceKind,
 };
-use acadrust::objects::{XRecordEntry, XRecordValue};
-use acadrust::types::Vector3;
-use cadkernel::geom2d::{centerline_between, closest_point, Curve, Line as KernelLine};
+use codec::objects::{XRecordEntry, XRecordValue};
+use codec::types::Vector3;
+use kernel::geom2d::{centerline_between, closest_point, Curve, Line as KernelLine};
 use glam::DVec3;
 use crate::command::WorkingPlane;
 
@@ -151,7 +151,7 @@ pub(crate) fn picked_source(
     }
 }
 
-fn resolve_source(document: &acadrust::CadDocument, source: &CenterLineSource) -> Option<(DVec3, DVec3)> {
+fn resolve_source(document: &codec::CadDocument, source: &CenterLineSource) -> Option<(DVec3, DVec3)> {
     let entity = document.get_entity(source.handle)?;
     let (_, start, end) = picked_source(entity, source.handle, dvec(source.pick_point))?;
     match source.kind {
@@ -184,9 +184,9 @@ fn resolve_source(document: &acadrust::CadDocument, source: &CenterLineSource) -
 }
 
 fn rebuild_line(
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     association: &CenterLineAssociation,
-) -> Option<acadrust::Line> {
+) -> Option<codec::Line> {
     let first = resolve_source(document, &association.first)?;
     let second = resolve_source(document, &association.second)?;
     construct_line(first, second, association)
@@ -196,7 +196,7 @@ pub(crate) fn construct_line(
     first: (DVec3, DVec3),
     second: (DVec3, DVec3),
     association: &CenterLineAssociation,
-) -> Option<acadrust::Line> {
+) -> Option<codec::Line> {
     let plane = WorkingPlane::new(
         dvec(association.plane_origin),
         dvec(association.plane_x),
@@ -219,7 +219,7 @@ pub(crate) fn construct_line(
     let elevation = (first_start.z + first_end.z + second_start.z + second_end.z) * 0.25;
     let start = plane.to_world(DVec3::new(geometry.start[0], geometry.start[1], elevation));
     let end = plane.to_world(DVec3::new(geometry.end[0], geometry.end[1], elevation));
-    Some(acadrust::Line::from_points(vector(start), vector(end)))
+    Some(codec::Line::from_points(vector(start), vector(end)))
 }
 
 impl Scene {

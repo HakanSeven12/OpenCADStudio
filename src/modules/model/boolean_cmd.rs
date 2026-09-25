@@ -1,4 +1,4 @@
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, SelectionEntity};

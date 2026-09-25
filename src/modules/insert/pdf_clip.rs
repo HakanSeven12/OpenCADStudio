@@ -11,9 +11,9 @@
 // The boundary is stored in underlay units; the clip-inside bit follows the
 // Invert choice.
 
-use acadrust::entities::{Underlay, UnderlayDisplayFlags, UnderlayType};
-use acadrust::types::{Handle, Vector2};
-use acadrust::EntityType;
+use codec::entities::{Underlay, UnderlayDisplayFlags, UnderlayType};
+use codec::types::{Handle, Vector2};
+use codec::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};

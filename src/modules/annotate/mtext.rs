@@ -1,6 +1,6 @@
-use acadrust::entities::mtext::AttachmentPoint;
-use acadrust::types::Vector3;
-use acadrust::MText;
+use codec::entities::mtext::AttachmentPoint;
+use codec::types::Vector3;
+use codec::MText;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, DynField, InputKind, WorkingPlane};

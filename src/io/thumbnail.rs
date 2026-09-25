@@ -1,13 +1,13 @@
 //! DWG preview thumbnails.
 //!
 //! - [`from_screenshot`] crops the visible drawing area into a small
-//!   [`acadrust::Preview`] embedded on save.
+//!   [`codec::Preview`] embedded on save.
 //! - [`read_handle`] / [`extract_to_png`] read a DWG's *embedded* preview back
 //!   for the Start page and the OS file-manager thumbnailer. Extraction lives in
 //!   the shared [`dwg_thumbnailer`] core crate (also used by the Windows/macOS
 //!   thumbnail handlers).
 
-use acadrust::{Preview, PreviewFormat};
+use codec::{Preview, PreviewFormat};
 use iced::Rectangle;
 use image::{ImageFormat, RgbImage};
 use std::io::Cursor;

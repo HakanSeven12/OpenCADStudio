@@ -6,9 +6,9 @@
 //! draw order, and clip boundaries. Leaf entities remain responsible for
 //! producing their normal wire, hatch, image, wipeout, or mesh model.
 
-use acadrust::entities::Insert;
-use acadrust::types::{Color, Matrix3, Matrix4, Transform, Vector3};
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::entities::Insert;
+use codec::types::{Color, Matrix3, Matrix4, Transform, Vector3};
+use codec::{CadDocument, EntityType, Handle};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::scene::view::render::{
@@ -98,12 +98,12 @@ impl InsertStyleSpec {
             linetype_bylayer: linetype.is_empty() || linetype.eq_ignore_ascii_case("bylayer"),
             lineweight_byblock: matches!(
                 common.line_weight,
-                acadrust::types::LineWeight::ByBlock
+                codec::types::LineWeight::ByBlock
             ),
             lineweight_bylayer: matches!(
                 common.line_weight,
-                acadrust::types::LineWeight::ByLayer
-                    | acadrust::types::LineWeight::Default
+                codec::types::LineWeight::ByLayer
+                    | codec::types::LineWeight::Default
             ),
             layer0: is_effective_layer_zero(&common.layer),
         }
@@ -714,7 +714,7 @@ pub struct BlockUse {
 pub(crate) fn block_record_by_name<'a>(
     document: &'a CadDocument,
     name: &str,
-) -> Option<&'a acadrust::tables::BlockRecord> {
+) -> Option<&'a codec::tables::BlockRecord> {
     document.block_records.get(name).or_else(|| {
         document
             .block_records
@@ -1018,7 +1018,7 @@ pub fn document_block_uses(document: &CadDocument) -> Vec<BlockUse> {
         }
     }
     for object in document.objects.values() {
-        let acadrust::objects::ObjectType::MultiLeaderStyle(style) = object else {
+        let codec::objects::ObjectType::MultiLeaderStyle(style) = object else {
             continue;
         };
         if let Some(handle) = style.arrowhead_handle {
@@ -1155,7 +1155,7 @@ pub fn block_contains_hatch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::xdata::ExtendedDataRecord;
+    use codec::xdata::ExtendedDataRecord;
 
     #[test]
     fn applied_block_scale_skips_annotative_rescaling() {

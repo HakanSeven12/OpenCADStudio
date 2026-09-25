@@ -4,8 +4,8 @@ use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
-use acadrust::entities::Table;
-use acadrust::EntityType;
+use codec::entities::Table;
+use codec::EntityType;
 use glam::DVec3;
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/data_link.svg"));
@@ -38,8 +38,8 @@ impl DataLinkPlaceCommand {
     /// Place a table that references a data-link object already stored in the
     /// drawing. Every populated cell is locked and points at the same link so
     /// update and save/reopen keep one stable relationship.
-    pub fn existing(mut table: Table, link: acadrust::Handle) -> Self {
-        use acadrust::entities::table::CellStateFlags;
+    pub fn existing(mut table: Table, link: codec::Handle) -> Self {
+        use codec::entities::table::CellStateFlags;
         let rows = table.row_count() as i32;
         let columns = table.column_count() as i32;
         for row in &mut table.rows {
@@ -156,7 +156,7 @@ impl CadCommand for DataLinkPlaceCommand {
 
     fn on_point(&mut self, point: DVec3) -> CmdResult {
         let point = self.plane.to_local(point);
-        self.table.insertion_point = acadrust::types::Vector3::new(point.x, point.y, point.z);
+        self.table.insertion_point = codec::types::Vector3::new(point.x, point.y, point.z);
         CmdResult::CommitAndExit(
             self.plane
                 .place_entity(EntityType::Table(self.table.clone())),

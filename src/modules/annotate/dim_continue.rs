@@ -1,14 +1,14 @@
-use acadrust::entities::{
+use codec::entities::{
     Dimension, DimensionAngular2Ln, DimensionAngular3Pt, DimensionBase, DimensionLinear,
     DimensionOrdinate,
 };
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
-use cadkernel::geom2d::{
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
+use kernel::geom2d::{
     arc_span, closest_point, intersect, nearest_of, Arc, Curve, Ray, Tolerance, Transform, Vec2,
     XLine,
 };
-use cadkernel::space::Plane;
+use kernel::space::Plane;
 use glam::DVec3;
 
 use crate::command::{

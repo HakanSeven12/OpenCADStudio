@@ -148,7 +148,7 @@ impl OpenCADStudio {
         // The filter only gates the answer, not the user's gestures: anything
         // that does not match is deselected (and reported) at confirm time.
         let picked = self.tabs[i].scene.selected_handles_in_order();
-        let mut handles: Vec<acadrust::Handle> = Vec::new();
+        let mut handles: Vec<codec::Handle> = Vec::new();
         let mut ignored = 0usize;
         for handle in picked {
             let matches = self.tabs[i]

@@ -1,9 +1,9 @@
 use super::*;
 use crate::scene::model::object::PropValue;
 
-fn control_color(value: &Value) -> Result<acadrust::types::Color, Value> {
+fn control_color(value: &Value) -> Result<codec::types::Color, Value> {
     if let Some(index) = value.as_i64().and_then(|v| i16::try_from(v).ok()) {
-        return Ok(acadrust::types::Color::from_index(index));
+        return Ok(codec::types::Color::from_index(index));
     }
     if let Some(rgb) = value
         .get("rgb")
@@ -12,7 +12,7 @@ fn control_color(value: &Value) -> Result<acadrust::types::Color, Value> {
     {
         let component = |i: usize| rgb[i].as_u64().and_then(|v| u8::try_from(v).ok());
         return match (component(0), component(1), component(2)) {
-            (Some(r), Some(g), Some(b)) => Ok(acadrust::types::Color::from_rgb(r, g, b)),
+            (Some(r), Some(g), Some(b)) => Ok(codec::types::Color::from_rgb(r, g, b)),
             _ => Err(failure(
                 "invalid_color",
                 "RGB components must be 0 through 255",
@@ -25,12 +25,12 @@ fn control_color(value: &Value) -> Result<acadrust::types::Color, Value> {
     ))
 }
 
-fn control_lineweight(value: &Value) -> Result<acadrust::types::LineWeight, Value> {
+fn control_lineweight(value: &Value) -> Result<codec::types::LineWeight, Value> {
     let raw = value
         .as_i64()
         .and_then(|v| i16::try_from(v).ok())
         .ok_or_else(|| failure("invalid_lineweight", "Use the raw lineweight value"))?;
-    let candidate = acadrust::types::LineWeight::from_value(raw);
+    let candidate = codec::types::LineWeight::from_value(raw);
     crate::ui::properties::lw_options()
         .iter()
         .any(|v| v.0 == candidate)
@@ -38,12 +38,34 @@ fn control_lineweight(value: &Value) -> Result<acadrust::types::LineWeight, Valu
         .ok_or_else(|| failure("invalid_lineweight", "Value is not a standard lineweight"))
 }
 
-fn color_value(color: acadrust::types::Color) -> Value {
+fn color_value(color: codec::types::Color) -> Value {
     if let Some((r, g, b)) = color.rgb() {
         json!({"rgb":[r,g,b]})
     } else {
         json!(color.index())
     }
+}
+/// One Properties-panel row as the control protocol's JSON (`id`, `label`,
+/// `kind`, `value`, `options`). The node graph moves values in this form too,
+/// so a port's value round-trips through [`OpenCADStudio::set_property_value`].
+pub(crate) fn property_json(p: &crate::scene::model::object::Property) -> Value {
+    let (kind,value,options)=match &p.value{
+                PropValue::ReadOnly(v)|PropValue::ReadOnlyWithTooltip{value:v,..}=>("readonly",json!(v),Value::Null),
+                PropValue::EditText(v)=>("number",json!(v),Value::Null),
+                PropValue::PlainText(v)=>("text",json!(v),Value::Null),
+                PropValue::Hyperlink(v)=>("hyperlink",json!(v),Value::Null),
+                PropValue::Choice{selected,options}=>("choice",json!(selected),json!(options)),
+                PropValue::EditChoice{value,options}=>("editable_choice",json!(value),json!(options)),
+                PropValue::LayerChoice(v)=>("layer",json!(v),Value::Null),
+                PropValue::LinetypeChoice(v)=>("linetype",json!(v),Value::Null),
+                PropValue::BoolToggle{value,..}=>("bool",json!(value),Value::Null),
+                PropValue::ColorChoice(value)|PropValue::NamedColorChoice{color:value,..}=>("color",color_value(*value),Value::Null),
+                PropValue::ColorVaries=>("color",Value::Null,Value::Null),
+                PropValue::LwChoice(value)|PropValue::FieldLwChoice{value,..}=>("lineweight",json!(value.value()),json!(crate::ui::properties::lw_options().iter().map(|v|v.0.value()).collect::<Vec<_>>())),
+                PropValue::LwVaries|PropValue::FieldLwVaries{..}=>("lineweight",Value::Null,json!(crate::ui::properties::lw_options().iter().map(|v|v.0.value()).collect::<Vec<_>>())),
+                PropValue::AttrText{tag,value}=>("attribute",json!({"tag":tag,"value":value}),Value::Null),
+                other=>("specialized",json!(format!("{other:?}")),Value::Null),
+    };json!({"id":p.field,"label":p.label,"kind":kind,"value":value,"options":options})
 }
 pub(super) const NAMES: &[&str] = &[
     "close_modal",
@@ -75,7 +97,7 @@ pub(super) const NAMES: &[&str] = &[
 ];
 
 /// Parse the `at` placement point for `embed_image`: `[x,y]` or `[x,y,z]`.
-fn embed_point(req: &Value) -> Result<acadrust::types::Vector3, Value> {
+fn embed_point(req: &Value) -> Result<codec::types::Vector3, Value> {
     let values = req["at"]
         .as_array()
         .filter(|v| (2..=3).contains(&v.len()))
@@ -87,7 +109,7 @@ fn embed_point(req: &Value) -> Result<acadrust::types::Vector3, Value> {
             .filter(|v| v.is_finite())
             .ok_or_else(|| failure("invalid_point", "Expected finite coordinates"))?;
     }
-    Ok(acadrust::types::Vector3::new(p[0], p[1], p[2]))
+    Ok(codec::types::Vector3::new(p[0], p[1], p[2]))
 }
 impl OpenCADStudio {
     /// `embed_image` — pack the picture at `path` into an OLE2FRAME placed
@@ -112,7 +134,7 @@ impl OpenCADStudio {
             let handle = {
                 let document = &mut self.tabs[i].scene.document;
                 let definition_handle = document.allocate_handle();
-                let mut definition = acadrust::objects::ImageDefinition::with_dimensions(
+                let mut definition = codec::objects::ImageDefinition::with_dimensions(
                     path,
                     image.pixel_width,
                     image.pixel_height,
@@ -120,9 +142,9 @@ impl OpenCADStudio {
                 definition.handle = definition_handle;
                 document.objects.insert(
                     definition_handle,
-                    acadrust::objects::ObjectType::ImageDefinition(definition),
+                    codec::objects::ObjectType::ImageDefinition(definition),
                 );
-                let mut entity = acadrust::entities::RasterImage::with_size(
+                let mut entity = codec::entities::RasterImage::with_size(
                     path,
                     at,
                     image.pixel_width as f64,
@@ -132,7 +154,7 @@ impl OpenCADStudio {
                 );
                 entity.definition_handle = Some(definition_handle);
                 document
-                    .add_entity(acadrust::EntityType::RasterImage(entity))
+                    .add_entity(codec::EntityType::RasterImage(entity))
                     .map_err(|e| failure("embed_failed", e))?
             };
             self.tabs[i].scene.populate_images_from_document();
@@ -191,7 +213,7 @@ impl OpenCADStudio {
                 None => crate::modules::insert::wblock::extract_block_to_doc(document, block),
             }
         } else if let Some(listed) = req["handles"].as_array() {
-            let handles: Result<Vec<acadrust::Handle>, Value> = listed
+            let handles: Result<Vec<codec::Handle>, Value> = listed
                 .iter()
                 .map(|v| {
                     u64::from_str_radix(
@@ -201,7 +223,7 @@ impl OpenCADStudio {
                             .trim_start_matches("0X"),
                         16,
                     )
-                    .map(acadrust::Handle::new)
+                    .map(codec::Handle::new)
                     .map_err(|_| {
                         failure(
                             "invalid_handle",
@@ -531,25 +553,7 @@ impl OpenCADStudio {
 
     pub(super) fn control_properties(&mut self) -> Value {
         self.refresh_properties();
-        json!({"ok":true,"sections":self.tabs[self.active_tab].properties.sections.iter().map(|s|json!({"title":s.title,"properties":s.props.iter().map(|p|{
-            let (kind,value,options)=match &p.value{
-                PropValue::ReadOnly(v)|PropValue::ReadOnlyWithTooltip{value:v,..}=>("readonly",json!(v),Value::Null),
-                PropValue::EditText(v)=>("number",json!(v),Value::Null),
-                PropValue::PlainText(v)=>("text",json!(v),Value::Null),
-                PropValue::Hyperlink(v)=>("hyperlink",json!(v),Value::Null),
-                PropValue::Choice{selected,options}=>("choice",json!(selected),json!(options)),
-                PropValue::EditChoice{value,options}=>("editable_choice",json!(value),json!(options)),
-                PropValue::LayerChoice(v)=>("layer",json!(v),Value::Null),
-                PropValue::LinetypeChoice(v)=>("linetype",json!(v),Value::Null),
-                PropValue::BoolToggle{value,..}=>("bool",json!(value),Value::Null),
-                PropValue::ColorChoice(value)|PropValue::NamedColorChoice{color:value,..}=>("color",color_value(*value),Value::Null),
-                PropValue::ColorVaries=>("color",Value::Null,Value::Null),
-                PropValue::LwChoice(value)|PropValue::FieldLwChoice{value,..}=>("lineweight",json!(value.value()),json!(crate::ui::properties::lw_options().iter().map(|v|v.0.value()).collect::<Vec<_>>())),
-                PropValue::LwVaries|PropValue::FieldLwVaries{..}=>("lineweight",Value::Null,json!(crate::ui::properties::lw_options().iter().map(|v|v.0.value()).collect::<Vec<_>>())),
-                PropValue::AttrText{tag,value}=>("attribute",json!({"tag":tag,"value":value}),Value::Null),
-                other=>("specialized",json!(format!("{other:?}")),Value::Null),
-            };json!({"id":p.field,"label":p.label,"kind":kind,"value":value,"options":options})
-        }).collect::<Vec<_>>()})).collect::<Vec<_>>()})
+        json!({"ok":true,"sections":self.tabs[self.active_tab].properties.sections.iter().map(|s|json!({"title":s.title,"properties":s.props.iter().map(property_json).collect::<Vec<_>>()})).collect::<Vec<_>>()})
     }
     pub(super) fn control_set_property(&mut self, req: &Value) -> Result<Task<Message>, Value> {
         self.refresh_properties();
@@ -567,10 +571,20 @@ impl OpenCADStudio {
                     "Read properties for the current selection",
                 )
             })?;
-        let value = req["value"]
+        self.set_property_value(p, &req["value"])
+    }
+
+    /// Write `raw` (protocol JSON, see [`property_json`]) into one Properties
+    /// row through the panel's own messages, on the current property targets.
+    pub(crate) fn set_property_value(
+        &mut self,
+        p: crate::scene::model::object::Property,
+        raw: &Value,
+    ) -> Result<Task<Message>, Value> {
+        let value = raw
             .as_str()
             .map(str::to_owned)
-            .unwrap_or_else(|| req["value"].to_string());
+            .unwrap_or_else(|| raw.to_string());
         Ok(match p.value {
             PropValue::EditText(_)
             | PropValue::PlainText(_)
@@ -601,7 +615,7 @@ impl OpenCADStudio {
                 self.update(Message::PropHatchPatternChanged(value))
             }
             PropValue::BoolToggle { field, value: old } => {
-                let v = req["value"]
+                let v = raw
                     .as_bool()
                     .ok_or_else(|| failure("invalid_value", "Expected boolean"))?;
                 if old != v {
@@ -621,7 +635,7 @@ impl OpenCADStudio {
             PropValue::ColorChoice(_)
             | PropValue::NamedColorChoice { .. }
             | PropValue::ColorVaries => {
-                let color = control_color(&req["value"])?;
+                let color = control_color(raw)?;
                 if p.field == "background_color" {
                     self.update(Message::PropBgColorChanged(color))
                 } else if matches!(
@@ -647,12 +661,12 @@ impl OpenCADStudio {
                 }
             }
             PropValue::LwChoice(_) | PropValue::LwVaries => {
-                self.update(Message::PropLwChanged(control_lineweight(&req["value"])?))
+                self.update(Message::PropLwChanged(control_lineweight(raw)?))
             }
             PropValue::FieldLwChoice { field, .. } | PropValue::FieldLwVaries { field } => self
                 .update(Message::PropFieldLwChanged {
                     field,
-                    value: control_lineweight(&req["value"])?,
+                    value: control_lineweight(raw)?,
                 }),
             PropValue::ReadOnly(_) | PropValue::ReadOnlyWithTooltip { .. } => {
                 return Err(failure("readonly_property", "Property cannot be edited"))

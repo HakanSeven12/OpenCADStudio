@@ -23,7 +23,7 @@ pub fn entity_snapshot(
 }
 
 #[cfg(feature = "host")]
-fn finite_vector(name: &str, value: &crate::host::acadrust::types::Vector3) -> Result<(), String> {
+fn finite_vector(name: &str, value: &crate::host::codec::types::Vector3) -> Result<(), String> {
     if value.x.is_finite() && value.y.is_finite() && value.z.is_finite() {
         Ok(())
     } else {
@@ -32,7 +32,7 @@ fn finite_vector(name: &str, value: &crate::host::acadrust::types::Vector3) -> R
 }
 
 #[cfg(feature = "host")]
-fn unit_direction(name: &str, value: &crate::host::acadrust::types::Vector3) -> Result<(), String> {
+fn unit_direction(name: &str, value: &crate::host::codec::types::Vector3) -> Result<(), String> {
     finite_vector(name, value)?;
     let length = value.x.hypot(value.y).hypot(value.z);
     if (length - 1.0).abs() <= 1e-6 {
@@ -43,7 +43,7 @@ fn unit_direction(name: &str, value: &crate::host::acadrust::types::Vector3) -> 
 }
 
 #[cfg(feature = "host")]
-fn solid_normal(name: &str, value: &crate::host::acadrust::types::Vector3) -> Result<(), String> {
+fn solid_normal(name: &str, value: &crate::host::codec::types::Vector3) -> Result<(), String> {
     finite_vector(name, value)?;
     if value.x.hypot(value.y).hypot(value.z) > 0.0 {
         Ok(())
@@ -62,9 +62,9 @@ fn insert_scale(name: &str, value: f64) -> Result<(), String> {
 }
 
 #[cfg(feature = "host")]
-fn validate_hatch_paths(paths: &[crate::host::acadrust::entities::BoundaryPath]) -> Result<(), String> {
-    use crate::host::acadrust::entities::BoundaryEdge;
-    use crate::host::acadrust::types::Vector2;
+fn validate_hatch_paths(paths: &[crate::host::codec::entities::BoundaryPath]) -> Result<(), String> {
+    use crate::host::codec::entities::BoundaryEdge;
+    use crate::host::codec::types::Vector2;
     let close = |a: Vector2, b: Vector2| (a.x - b.x).hypot(a.y - b.y) <= 1e-8;
     let ellipse_point = |center: Vector2, major: Vector2, ratio: f64, angle: f64| {
         Vector2::new(
@@ -200,7 +200,7 @@ fn validate_hatch_paths(paths: &[crate::host::acadrust::entities::BoundaryPath])
 }
 
 #[cfg(feature = "host")]
-fn validate_hatch_pattern(value: &crate::host::acadrust::entities::Hatch) -> Result<(), String> {
+fn validate_hatch_pattern(value: &crate::host::codec::entities::Hatch) -> Result<(), String> {
     if value.pattern.name.trim().is_empty() {
         return Err("Hatch.pattern.name is empty".into());
     }
@@ -235,12 +235,12 @@ fn validate_hatch_pattern(value: &crate::host::acadrust::entities::Hatch) -> Res
 /// checks to fields the edit touched so legacy DWG leaders stay editable.
 #[cfg(feature = "host")]
 fn validate_leader(
-    old: Option<&crate::host::acadrust::entities::Leader>,
-    new: &crate::host::acadrust::entities::Leader,
+    old: Option<&crate::host::codec::entities::Leader>,
+    new: &crate::host::codec::entities::Leader,
 ) -> Result<(), String> {
-    use crate::host::acadrust::entities::LeaderCreationType;
-    let vec_changed = |a: &crate::host::acadrust::types::Vector3,
-                       b: &crate::host::acadrust::types::Vector3| {
+    use crate::host::codec::entities::LeaderCreationType;
+    let vec_changed = |a: &crate::host::codec::types::Vector3,
+                       b: &crate::host::codec::types::Vector3| {
         old.is_none()
             || a.x.to_bits() != b.x.to_bits()
             || a.y.to_bits() != b.y.to_bits()
@@ -323,8 +323,8 @@ fn validate_leader(
 /// finiteness is checked here.
 #[cfg(feature = "host")]
 fn validate_mline(
-    old: Option<&crate::host::acadrust::entities::MLine>,
-    new: &crate::host::acadrust::entities::MLine,
+    old: Option<&crate::host::codec::entities::MLine>,
+    new: &crate::host::codec::entities::MLine,
 ) -> Result<(), String> {
     if old.is_none_or(|old| old.flags != new.flags) && new.flags.bits() & !0x0f != 0 {
         return Err("MLine.flags has unknown bits".into());
@@ -369,7 +369,7 @@ fn validate_mline(
             return Err("MLine.vertices must not all coincide".into());
         }
     }
-    if new.flags.contains(crate::host::acadrust::entities::MLineFlags::CLOSED)
+    if new.flags.contains(crate::host::codec::entities::MLineFlags::CLOSED)
         && new.vertices.len() < 3
     {
         return Err("closed MLine requires at least 3 vertices".into());
@@ -382,10 +382,10 @@ fn validate_mline(
 /// validated as inputs; the measurement the geometry implies must be finite.
 #[cfg(feature = "host")]
 fn validate_dimension(
-    old: Option<&crate::host::acadrust::entities::Dimension>,
-    new: &crate::host::acadrust::entities::Dimension,
+    old: Option<&crate::host::codec::entities::Dimension>,
+    new: &crate::host::codec::entities::Dimension,
 ) -> Result<(), String> {
-    use crate::host::acadrust::entities::Dimension as D;
+    use crate::host::codec::entities::Dimension as D;
     if old == Some(new) {
         return Ok(());
     }
@@ -398,7 +398,7 @@ fn validate_dimension(
     if base.style_name.trim().is_empty() {
         return Err("Dimension.style_name is empty".into());
     }
-    let (points, scalars, distinct): (Vec<(&str, &crate::host::acadrust::types::Vector3)>, Vec<(&str, f64)>, Vec<(&str, &str)>) = match new {
+    let (points, scalars, distinct): (Vec<(&str, &crate::host::codec::types::Vector3)>, Vec<(&str, f64)>, Vec<(&str, &str)>) = match new {
         D::Aligned(d) => (
             vec![("definition_point", &d.definition_point), ("first_point", &d.first_point), ("second_point", &d.second_point)],
             vec![("ext_line_rotation", d.ext_line_rotation)],
@@ -468,10 +468,10 @@ fn validate_dimension(
 /// Field checks shared by MultiLeader creation and mutation.
 #[cfg(feature = "host")]
 fn validate_multileader(
-    old: Option<&crate::host::acadrust::entities::MultiLeader>,
-    new: &crate::host::acadrust::entities::MultiLeader,
+    old: Option<&crate::host::codec::entities::MultiLeader>,
+    new: &crate::host::codec::entities::MultiLeader,
 ) -> Result<(), String> {
-    use crate::host::acadrust::entities::LeaderContentType;
+    use crate::host::codec::entities::LeaderContentType;
     if old == Some(new) {
         return Ok(());
     }
@@ -551,8 +551,8 @@ fn validate_multileader(
 /// Field checks shared by Table creation and mutation.
 #[cfg(feature = "host")]
 fn validate_table(
-    old: Option<&crate::host::acadrust::entities::Table>,
-    new: &crate::host::acadrust::entities::Table,
+    old: Option<&crate::host::codec::entities::Table>,
+    new: &crate::host::codec::entities::Table,
 ) -> Result<(), String> {
     if old == Some(new) {
         return Ok(());
@@ -625,8 +625,8 @@ fn validate_table(
 /// PolygonMesh: an M x N grid; the vertex list must match exactly.
 #[cfg(feature = "host")]
 fn validate_polygon_mesh(
-    old: Option<&crate::host::acadrust::entities::PolygonMeshEntity>,
-    new: &crate::host::acadrust::entities::PolygonMeshEntity,
+    old: Option<&crate::host::codec::entities::PolygonMeshEntity>,
+    new: &crate::host::codec::entities::PolygonMeshEntity,
 ) -> Result<(), String> {
     if old == Some(new) {
         return Ok(());
@@ -660,8 +660,8 @@ fn validate_polygon_mesh(
 /// that edge; 0 marks an unused corner).
 #[cfg(feature = "host")]
 fn validate_polyface_mesh(
-    old: Option<&crate::host::acadrust::entities::PolyfaceMesh>,
-    new: &crate::host::acadrust::entities::PolyfaceMesh,
+    old: Option<&crate::host::codec::entities::PolyfaceMesh>,
+    new: &crate::host::codec::entities::PolyfaceMesh,
 ) -> Result<(), String> {
     if old == Some(new) {
         return Ok(());
@@ -703,8 +703,8 @@ fn validate_polyface_mesh(
 /// Mesh (subdivision): faces and edges index the vertex list (0-based).
 #[cfg(feature = "host")]
 fn validate_mesh(
-    old: Option<&crate::host::acadrust::entities::Mesh>,
-    new: &crate::host::acadrust::entities::Mesh,
+    old: Option<&crate::host::codec::entities::Mesh>,
+    new: &crate::host::codec::entities::Mesh,
 ) -> Result<(), String> {
     if old == Some(new) {
         return Ok(());
@@ -747,8 +747,8 @@ fn validate_mesh(
 /// the parameters are validated.
 #[cfg(feature = "host")]
 fn validate_helix(
-    old: Option<&crate::host::acadrust::entities::Helix>,
-    new: &crate::host::acadrust::entities::Helix,
+    old: Option<&crate::host::codec::entities::Helix>,
+    new: &crate::host::codec::entities::Helix,
 ) -> Result<(), String> {
     if old.is_some_and(|old| {
         old.axis_base_point == new.axis_base_point
@@ -785,8 +785,8 @@ fn validate_helix(
 /// by the host; a script supplies the file and the placement.
 #[cfg(feature = "host")]
 fn validate_raster_image(
-    old: Option<&crate::host::acadrust::entities::RasterImage>,
-    new: &crate::host::acadrust::entities::RasterImage,
+    old: Option<&crate::host::codec::entities::RasterImage>,
+    new: &crate::host::codec::entities::RasterImage,
 ) -> Result<(), String> {
     if old == Some(new) {
         return Ok(());
@@ -833,10 +833,10 @@ fn validate_raster_image(
 /// normalized image coordinates) defines the masked area.
 #[cfg(feature = "host")]
 fn validate_wipeout(
-    old: Option<&crate::host::acadrust::entities::Wipeout>,
-    new: &crate::host::acadrust::entities::Wipeout,
+    old: Option<&crate::host::codec::entities::Wipeout>,
+    new: &crate::host::codec::entities::Wipeout,
 ) -> Result<(), String> {
-    use crate::host::acadrust::entities::WipeoutClipType;
+    use crate::host::codec::entities::WipeoutClipType;
     if old == Some(new) {
         return Ok(());
     }
@@ -878,8 +878,8 @@ fn validate_wipeout(
 /// `UnderlayDefinition`, which a script names by handle at creation.
 #[cfg(feature = "host")]
 fn validate_underlay(
-    old: Option<&crate::host::acadrust::entities::Underlay>,
-    new: &crate::host::acadrust::entities::Underlay,
+    old: Option<&crate::host::codec::entities::Underlay>,
+    new: &crate::host::codec::entities::Underlay,
 ) -> Result<(), String> {
     if old == Some(new) {
         return Ok(());
@@ -923,8 +923,8 @@ fn validate_underlay(
 /// other references; this validates the numbers.
 #[cfg(feature = "host")]
 fn validate_viewport(
-    old: Option<&crate::host::acadrust::entities::Viewport>,
-    new: &crate::host::acadrust::entities::Viewport,
+    old: Option<&crate::host::codec::entities::Viewport>,
+    new: &crate::host::codec::entities::Viewport,
 ) -> Result<(), String> {
     if old == Some(new) {
         return Ok(());
@@ -952,8 +952,8 @@ fn validate_viewport(
 /// ViewBorder: the frame of a drawing view, tied to a viewport and a scale.
 #[cfg(feature = "host")]
 fn validate_view_border(
-    old: Option<&crate::host::acadrust::entities::ViewBorder>,
-    new: &crate::host::acadrust::entities::ViewBorder,
+    old: Option<&crate::host::codec::entities::ViewBorder>,
+    new: &crate::host::codec::entities::ViewBorder,
 ) -> Result<(), String> {
     if old == Some(new) {
         return Ok(());
@@ -978,8 +978,8 @@ fn validate_view_border(
 /// Light: type, placement, intensity, attenuation and shadow settings.
 #[cfg(feature = "host")]
 fn validate_light(
-    old: Option<&crate::host::acadrust::entities::Light>,
-    new: &crate::host::acadrust::entities::Light,
+    old: Option<&crate::host::codec::entities::Light>,
+    new: &crate::host::codec::entities::Light,
 ) -> Result<(), String> {
     if old == Some(new) {
         return Ok(());
@@ -1227,8 +1227,8 @@ fn validate_basic_entity(
 /// storage is never rewritten.
 #[cfg(feature = "host")]
 fn validate_ole_frame(
-    old: Option<&crate::host::acadrust::entities::Ole2Frame>,
-    new: &crate::host::acadrust::entities::Ole2Frame,
+    old: Option<&crate::host::codec::entities::Ole2Frame>,
+    new: &crate::host::codec::entities::Ole2Frame,
 ) -> Result<(), String> {
     if old == Some(new) {
         return Ok(());
@@ -1249,8 +1249,8 @@ fn validate_ole_frame(
 /// in the ACIS payload that the geometry kernel owns.
 #[cfg(feature = "host")]
 fn validate_surface(
-    old: Option<&crate::host::acadrust::entities::Surface>,
-    new: &crate::host::acadrust::entities::Surface,
+    old: Option<&crate::host::codec::entities::Surface>,
+    new: &crate::host::codec::entities::Surface,
 ) -> Result<(), String> {
     if old.is_some_and(|old| old.u_isolines == new.u_isolines && old.v_isolines == new.v_isolines) {
         return Ok(());
@@ -1268,8 +1268,8 @@ fn validate_surface(
 /// derived by the host, so only the inputs are validated.
 #[cfg(feature = "host")]
 fn validate_section_symbol(
-    old: Option<&crate::host::acadrust::entities::SectionSymbol>,
-    new: &crate::host::acadrust::entities::SectionSymbol,
+    old: Option<&crate::host::codec::entities::SectionSymbol>,
+    new: &crate::host::codec::entities::SectionSymbol,
 ) -> Result<(), String> {
     if old.is_some_and(|old| old.points == new.points && old.symbol_scale.to_bits() == new.symbol_scale.to_bits()) {
         return Ok(());
@@ -1553,8 +1553,8 @@ pub fn validate_entity_mutation(
             Err(format!("{name} must contain finite coordinates"))
         }
     };
-    let same3 = |a: &crate::host::acadrust::types::Vector3,
-                 b: &crate::host::acadrust::types::Vector3| {
+    let same3 = |a: &crate::host::codec::types::Vector3,
+                 b: &crate::host::codec::types::Vector3| {
         a.x.to_bits() == b.x.to_bits()
             && a.y.to_bits() == b.y.to_bits()
             && a.z.to_bits() == b.z.to_bits()
@@ -1567,8 +1567,8 @@ pub fn validate_entity_mutation(
         }
     };
     let changed3 = |name: &str,
-                    old: &crate::host::acadrust::types::Vector3,
-                    new: &crate::host::acadrust::types::Vector3| {
+                    old: &crate::host::codec::types::Vector3,
+                    new: &crate::host::codec::types::Vector3| {
         if !same3(old, new) {
             finite_vector(name, new)
         } else {
@@ -2060,7 +2060,7 @@ pub fn validate_canvas_entity_references(
     // An edit that keeps the block name is left alone so a legacy insert of a
     // missing block stays editable; creation and renames must name a real,
     // ordinary block that does not create a cycle.
-    let insert_is_unchanged_edit = |value: &crate::host::acadrust::entities::Insert| {
+    let insert_is_unchanged_edit = |value: &crate::host::codec::entities::Insert| {
         matches!(document.get_entity(value.common.handle),
             Some(EntityType::Insert(existing)) if existing.block_name == value.block_name)
     };
@@ -2105,7 +2105,7 @@ pub fn validate_canvas_entity_references(
         }
     }
     if let EntityType::SectionSymbol(value) = entity {
-        use crate::host::acadrust::objects::{ClassObjectData, ObjectType};
+        use crate::host::codec::objects::{ClassObjectData, ObjectType};
         for (name, handle, wanted) in [
             ("style", value.style_handle, "SectionViewStyle"),
             ("view representation", value.view_rep_handle, "ViewRep"),
@@ -2132,7 +2132,7 @@ pub fn validate_canvas_entity_references(
         }
         if !matches!(
             document.objects.get(&value.scale_handle),
-            Some(crate::host::acadrust::objects::ObjectType::Scale(_))
+            Some(crate::host::codec::objects::ObjectType::Scale(_))
         ) {
             return Err(format!("ViewBorder scale {:?} does not exist", value.scale_handle));
         }
@@ -2155,7 +2155,7 @@ pub fn validate_canvas_entity_references(
     }
     if let EntityType::Underlay(value) = entity {
         match document.objects.get(&value.definition_handle) {
-            Some(crate::host::acadrust::objects::ObjectType::UnderlayDefinition(definition)) => {
+            Some(crate::host::codec::objects::ObjectType::UnderlayDefinition(definition)) => {
                 if definition.underlay_type != value.underlay_type {
                     return Err(format!(
                         "Underlay type {:?} does not match its definition ({:?})",
@@ -2175,7 +2175,7 @@ pub fn validate_canvas_entity_references(
         if let Some(handle) = value.definition_handle.filter(|handle| !handle.is_null()) {
             if !matches!(
                 document.objects.get(&handle),
-                Some(crate::host::acadrust::objects::ObjectType::ImageDefinition(_))
+                Some(crate::host::codec::objects::ObjectType::ImageDefinition(_))
             ) {
                 return Err(format!("RasterImage image definition {handle:?} does not exist"));
             }
@@ -2185,7 +2185,7 @@ pub fn validate_canvas_entity_references(
         if let Some(handle) = value.table_style_handle.filter(|handle| !handle.is_null()) {
             if !matches!(
                 document.objects.get(&handle),
-                Some(crate::host::acadrust::objects::ObjectType::TableStyle(_))
+                Some(crate::host::codec::objects::ObjectType::TableStyle(_))
             ) {
                 return Err(format!("Table style handle {handle:?} does not exist"));
             }
@@ -2208,8 +2208,8 @@ pub fn validate_canvas_entity_references(
         }
     }
     if let EntityType::MultiLeader(value) = entity {
-        use crate::host::acadrust::objects::ObjectType;
-        let handle_exists = |handle: Option<crate::host::acadrust::Handle>, what: &str, ok: &dyn Fn(crate::host::acadrust::Handle) -> bool| {
+        use crate::host::codec::objects::ObjectType;
+        let handle_exists = |handle: Option<crate::host::codec::Handle>, what: &str, ok: &dyn Fn(crate::host::codec::Handle) -> bool| {
             match handle.filter(|handle| !handle.is_null()) {
                 Some(handle) if !ok(handle) => Err(format!("MultiLeader {what} handle {handle:?} does not exist")),
                 _ => Ok(()),
@@ -2252,7 +2252,7 @@ pub fn validate_canvas_entity_references(
         }
     }
     if let EntityType::Leader(value) = entity {
-        use crate::host::acadrust::entities::LeaderCreationType;
+        use crate::host::codec::entities::LeaderCreationType;
         if !document
             .dim_styles
             .iter()
@@ -2376,9 +2376,9 @@ pub fn validate_canvas_entity_references(
 #[cfg(feature = "host")]
 fn resolve_mline_style<'a>(
     document: &'a crate::host::CadDocument,
-    mline: &crate::host::acadrust::entities::MLine,
-) -> Option<&'a crate::host::acadrust::objects::MLineStyle> {
-    use crate::host::acadrust::objects::ObjectType;
+    mline: &crate::host::codec::entities::MLine,
+) -> Option<&'a crate::host::codec::objects::MLineStyle> {
+    use crate::host::codec::objects::ObjectType;
     mline
         .style_handle
         .filter(|handle| !handle.is_null())
@@ -2980,18 +2980,18 @@ mod tests {
     #[cfg(feature = "host")]
     #[test]
     fn tolerance_geometry_and_style_references_are_validated() {
-        use crate::host::acadrust::{self, types::Vector3};
-        let document = acadrust::CadDocument::new();
-        let mut tolerance = acadrust::entities::Tolerance::with_text(
+        use crate::host::codec::{self, types::Vector3};
+        let document = codec::CadDocument::new();
+        let mut tolerance = codec::entities::Tolerance::with_text(
             Vector3::new(1.0, 2.0, 0.0),
             "{\\Fgdt;p}%%v0.1",
         );
-        let entity = acadrust::EntityType::Tolerance(tolerance.clone());
+        let entity = codec::EntityType::Tolerance(tolerance.clone());
         validate_new_canvas_entity(&entity).unwrap();
         validate_canvas_entity_references(&document, &entity).unwrap();
         tolerance.direction = Vector3::new(2.0, 0.0, 0.0);
         assert!(
-            validate_new_canvas_entity(&acadrust::EntityType::Tolerance(tolerance.clone()))
+            validate_new_canvas_entity(&codec::EntityType::Tolerance(tolerance.clone()))
                 .unwrap_err()
                 .contains("unit vector")
         );
@@ -2999,7 +2999,7 @@ mod tests {
         tolerance.dimension_style_name = "Missing".into();
         assert!(validate_canvas_entity_references(
             &document,
-            &acadrust::EntityType::Tolerance(tolerance)
+            &codec::EntityType::Tolerance(tolerance)
         )
         .unwrap_err()
         .contains("does not exist"));
@@ -3008,18 +3008,18 @@ mod tests {
     #[cfg(feature = "host")]
     #[test]
     fn leader_geometry_and_annotation_references_are_validated() {
-        use crate::host::acadrust::{self, entities::LeaderCreationType, types::Vector3};
-        let mut document = acadrust::CadDocument::new();
-        let mut text = acadrust::entities::Text::new();
+        use crate::host::codec::{self, entities::LeaderCreationType, types::Vector3};
+        let mut document = codec::CadDocument::new();
+        let mut text = codec::entities::Text::new();
         text.common.handle = document.allocate_handle();
         let text_handle = text.common.handle;
-        document.add_entity(acadrust::EntityType::Text(text)).unwrap();
-        let mut leader = acadrust::entities::Leader::two_point(
+        document.add_entity(codec::EntityType::Text(text)).unwrap();
+        let mut leader = codec::entities::Leader::two_point(
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(10.0, 5.0, 0.0),
         );
         leader.annotation_handle = text_handle;
-        let entity = acadrust::EntityType::Leader(leader.clone());
+        let entity = codec::EntityType::Leader(leader.clone());
         validate_new_canvas_entity(&entity).unwrap();
         validate_canvas_entity_references(&document, &entity).unwrap();
 
@@ -3027,33 +3027,33 @@ mod tests {
         wrong_kind.creation_type = LeaderCreationType::WithTolerance;
         assert!(validate_canvas_entity_references(
             &document,
-            &acadrust::EntityType::Leader(wrong_kind)
+            &codec::EntityType::Leader(wrong_kind)
         )
         .unwrap_err()
         .contains("does not match"));
         let mut missing = leader.clone();
-        missing.annotation_handle = acadrust::Handle::new(0xdead);
+        missing.annotation_handle = codec::Handle::new(0xdead);
         assert!(validate_canvas_entity_references(
             &document,
-            &acadrust::EntityType::Leader(missing)
+            &codec::EntityType::Leader(missing)
         )
         .unwrap_err()
         .contains("does not exist"));
         let mut none_with_handle = leader.clone();
         none_with_handle.creation_type = LeaderCreationType::NoAnnotation;
-        assert!(validate_new_canvas_entity(&acadrust::EntityType::Leader(none_with_handle))
+        assert!(validate_new_canvas_entity(&codec::EntityType::Leader(none_with_handle))
             .unwrap_err()
             .contains("no annotation"));
         let mut one_point = leader.clone();
         one_point.vertices.truncate(1);
-        assert!(validate_new_canvas_entity(&acadrust::EntityType::Leader(one_point))
+        assert!(validate_new_canvas_entity(&codec::EntityType::Leader(one_point))
             .unwrap_err()
             .contains("at least 2"));
         let mut bad_style = leader.clone();
         bad_style.dimension_style = "Missing".into();
         assert!(validate_canvas_entity_references(
             &document,
-            &acadrust::EntityType::Leader(bad_style)
+            &codec::EntityType::Leader(bad_style)
         )
         .unwrap_err()
         .contains("dimension style"));
@@ -3061,8 +3061,8 @@ mod tests {
         let mut edited = leader.clone();
         edited.vertices[1] = Vector3::new(f64::NAN, 0.0, 0.0);
         assert!(validate_entity_mutation(
-            &acadrust::EntityType::Leader(leader.clone()),
-            &acadrust::EntityType::Leader(edited)
+            &codec::EntityType::Leader(leader.clone()),
+            &codec::EntityType::Leader(edited)
         )
         .unwrap_err()
         .contains("finite"));
@@ -3071,48 +3071,48 @@ mod tests {
     #[cfg(feature = "host")]
     #[test]
     fn mline_geometry_and_style_references_are_validated_and_bound() {
-        use crate::host::acadrust::{self, entities::MLineVertex, types::Vector3};
-        let document = acadrust::CadDocument::new();
-        let mut mline = acadrust::entities::MLine::new();
+        use crate::host::codec::{self, entities::MLineVertex, types::Vector3};
+        let document = codec::CadDocument::new();
+        let mut mline = codec::entities::MLine::new();
         for x in [0.0, 5.0] {
             mline.vertices.push(MLineVertex::new(Vector3::new(x, 0.0, 0.0)));
         }
-        let mut entity = acadrust::EntityType::MLine(mline.clone());
+        let mut entity = codec::EntityType::MLine(mline.clone());
         validate_new_canvas_entity(&entity).unwrap();
         bind_canvas_entity_references(&document, &mut entity).unwrap();
-        assert!(matches!(&entity, acadrust::EntityType::MLine(value) if value.style_handle.is_some()));
+        assert!(matches!(&entity, codec::EntityType::MLine(value) if value.style_handle.is_some()));
 
         let mut missing = mline.clone();
         missing.style_name = "Missing".into();
-        assert!(bind_canvas_entity_references(&document, &mut acadrust::EntityType::MLine(missing))
+        assert!(bind_canvas_entity_references(&document, &mut codec::EntityType::MLine(missing))
             .unwrap_err().contains("does not exist"));
         let mut wrong_segments = mline.clone();
         wrong_segments.vertices[0].init_segments(3);
-        assert!(bind_canvas_entity_references(&document, &mut acadrust::EntityType::MLine(wrong_segments))
+        assert!(bind_canvas_entity_references(&document, &mut codec::EntityType::MLine(wrong_segments))
             .unwrap_err().contains("segments but style"));
         let mut one = mline.clone();
         one.vertices.truncate(1);
-        assert!(validate_new_canvas_entity(&acadrust::EntityType::MLine(one)).unwrap_err().contains("at least 2"));
+        assert!(validate_new_canvas_entity(&codec::EntityType::MLine(one)).unwrap_err().contains("at least 2"));
         let mut closed = mline.clone();
-        closed.flags |= acadrust::entities::MLineFlags::CLOSED;
-        assert!(validate_new_canvas_entity(&acadrust::EntityType::MLine(closed)).unwrap_err().contains("at least 3"));
+        closed.flags |= codec::entities::MLineFlags::CLOSED;
+        assert!(validate_new_canvas_entity(&codec::EntityType::MLine(closed)).unwrap_err().contains("at least 3"));
         let mut scale = mline.clone();
         scale.scale_factor = 0.0;
-        assert!(validate_new_canvas_entity(&acadrust::EntityType::MLine(scale)).unwrap_err().contains("nonzero"));
+        assert!(validate_new_canvas_entity(&codec::EntityType::MLine(scale)).unwrap_err().contains("nonzero"));
     }
 
     #[cfg(feature = "host")]
     #[test]
     fn shape_geometry_and_shape_file_style_are_validated_and_bound() {
-        use crate::host::acadrust::{self, tables::TableEntry, types::Vector3};
-        let mut document = acadrust::CadDocument::new();
-        let mut style = acadrust::tables::TextStyle::new("Symbols");
+        use crate::host::codec::{self, tables::TableEntry, types::Vector3};
+        let mut document = codec::CadDocument::new();
+        let mut style = codec::tables::TextStyle::new("Symbols");
         style.set_handle(document.allocate_handle());
         style.is_shape_file = true;
         style.font_file = "symbols.shx".into();
         let style_handle = style.handle;
         document.text_styles.add(style).unwrap();
-        let mut shape = acadrust::entities::Shape::with_style(
+        let mut shape = codec::entities::Shape::with_style(
             Vector3::new(1.0, 2.0, 0.0),
             "ARROW",
             "Symbols",
@@ -3120,17 +3120,17 @@ mod tests {
             0.5,
         );
         shape.shape_number = 1;
-        let mut entity = acadrust::EntityType::Shape(shape);
+        let mut entity = codec::EntityType::Shape(shape);
         validate_new_canvas_entity(&entity).unwrap();
         bind_canvas_entity_references(&document, &mut entity).unwrap();
-        assert!(matches!(entity, acadrust::EntityType::Shape(ref value)
+        assert!(matches!(entity, codec::EntityType::Shape(ref value)
             if value.style_handle == Some(style_handle)));
-        let acadrust::EntityType::Shape(mut bad) = entity else {
+        let codec::EntityType::Shape(mut bad) = entity else {
             unreachable!()
         };
         bad.size = 0.0;
         assert!(
-            validate_new_canvas_entity(&acadrust::EntityType::Shape(bad))
+            validate_new_canvas_entity(&codec::EntityType::Shape(bad))
                 .unwrap_err()
                 .contains("greater than zero")
         );
@@ -3204,8 +3204,8 @@ mod tests {
     #[cfg(feature = "host")]
     #[test]
     fn unsupported_canvas_kind_has_typed_snapshot_fields() {
-        use crate::host::acadrust;
-        let hatch = acadrust::EntityType::Hatch(acadrust::entities::Hatch::default());
+        use crate::host::codec;
+        let hatch = codec::EntityType::Hatch(codec::entities::Hatch::default());
         let snapshot = entity_snapshot(&hatch).unwrap();
         let fields = snapshot
             .get("Hatch")
@@ -3218,21 +3218,21 @@ mod tests {
     #[cfg(feature = "host")]
     #[test]
     fn changed_geometry_is_validated_without_rejecting_untouched_legacy_values() {
-        use crate::host::acadrust;
-        let mut before = acadrust::entities::Circle::default();
+        use crate::host::codec;
+        let mut before = codec::entities::Circle::default();
         before.radius = f64::NAN;
         let mut layer_only = before.clone();
         layer_only.common.layer = "OTHER".into();
         assert!(validate_entity_mutation(
-            &acadrust::EntityType::Circle(before.clone()),
-            &acadrust::EntityType::Circle(layer_only),
+            &codec::EntityType::Circle(before.clone()),
+            &codec::EntityType::Circle(layer_only),
         )
         .is_ok());
         let mut bad_radius = before.clone();
         bad_radius.radius = -1.0;
         assert!(validate_entity_mutation(
-            &acadrust::EntityType::Circle(before),
-            &acadrust::EntityType::Circle(bad_radius),
+            &codec::EntityType::Circle(before),
+            &codec::EntityType::Circle(bad_radius),
         )
         .unwrap_err()
         .contains("Circle.radius"));
@@ -3241,29 +3241,29 @@ mod tests {
     #[cfg(feature = "host")]
     #[test]
     fn new_phase_seven_shapes_reject_invalid_geometry_and_keep_legacy_fields() {
-        use crate::host::acadrust::{self, types::Vector3};
-        let mut ray = acadrust::entities::Ray::default();
+        use crate::host::codec::{self, types::Vector3};
+        let mut ray = codec::entities::Ray::default();
         ray.direction = Vector3::new(2.0, 0.0, 0.0);
         assert!(
-            validate_new_canvas_entity(&acadrust::EntityType::Ray(ray.clone()))
+            validate_new_canvas_entity(&codec::EntityType::Ray(ray.clone()))
                 .unwrap_err()
                 .contains("Ray.direction")
         );
-        let before = acadrust::EntityType::Ray(ray.clone());
+        let before = codec::EntityType::Ray(ray.clone());
         ray.common.layer = "CONSTRUCTION".into();
-        assert!(validate_entity_mutation(&before, &acadrust::EntityType::Ray(ray.clone())).is_ok());
+        assert!(validate_entity_mutation(&before, &codec::EntityType::Ray(ray.clone())).is_ok());
         ray.direction = Vector3::new(0.0, 1.0, 0.0);
-        assert!(validate_entity_mutation(&before, &acadrust::EntityType::Ray(ray)).is_ok());
+        assert!(validate_entity_mutation(&before, &codec::EntityType::Ray(ray)).is_ok());
 
-        let mut xline = acadrust::entities::XLine::default();
+        let mut xline = codec::entities::XLine::default();
         xline.base_point.x = f64::NAN;
         assert!(
-            validate_new_canvas_entity(&acadrust::EntityType::XLine(xline))
+            validate_new_canvas_entity(&codec::EntityType::XLine(xline))
                 .unwrap_err()
                 .contains("XLine.base_point")
         );
 
-        let solid = acadrust::entities::Solid::new(
+        let solid = codec::entities::Solid::new(
             Vector3::ZERO,
             Vector3::UNIT_X,
             Vector3::UNIT_Y,
@@ -3272,23 +3272,23 @@ mod tests {
         let mut changed = solid.clone();
         changed.thickness = f64::INFINITY;
         assert!(validate_entity_mutation(
-            &acadrust::EntityType::Solid(solid),
-            &acadrust::EntityType::Solid(changed)
+            &codec::EntityType::Solid(solid),
+            &codec::EntityType::Solid(changed)
         )
         .unwrap_err()
         .contains("Solid.thickness"));
 
-        let face = acadrust::entities::Face3D::new(
+        let face = codec::entities::Face3D::new(
             Vector3::ZERO,
             Vector3::UNIT_X,
             Vector3::UNIT_Y,
             Vector3::ZERO,
         );
         let mut changed = face.clone();
-        changed.invisible_edges = acadrust::entities::InvisibleEdgeFlags::from_bits(0x10);
+        changed.invisible_edges = codec::entities::InvisibleEdgeFlags::from_bits(0x10);
         assert!(validate_entity_mutation(
-            &acadrust::EntityType::Face3D(face),
-            &acadrust::EntityType::Face3D(changed)
+            &codec::EntityType::Face3D(face),
+            &codec::EntityType::Face3D(changed)
         )
         .unwrap_err()
         .contains("Face3D.invisible_edges"));
@@ -3297,37 +3297,37 @@ mod tests {
     #[cfg(feature = "host")]
     #[test]
     fn insert_transaction_checks_transforms_and_protects_references() {
-        use crate::host::acadrust::{self, types::Vector3};
-        let before = acadrust::entities::Insert::new("DOOR", Vector3::new(1.0, 2.0, 0.0));
+        use crate::host::codec::{self, types::Vector3};
+        let before = codec::entities::Insert::new("DOOR", Vector3::new(1.0, 2.0, 0.0));
         let mut moved = before.clone();
         moved.insert_point = Vector3::new(5.0, 6.0, 0.0);
         moved.set_x_scale(2.0);
         assert!(validate_entity_mutation(
-            &acadrust::EntityType::Insert(before.clone()),
-            &acadrust::EntityType::Insert(moved)
+            &codec::EntityType::Insert(before.clone()),
+            &codec::EntityType::Insert(moved)
         )
         .is_ok());
         let mut bad = before.clone();
         bad.set_y_scale(f64::NAN);
         assert!(validate_entity_mutation(
-            &acadrust::EntityType::Insert(before.clone()),
-            &acadrust::EntityType::Insert(bad)
+            &codec::EntityType::Insert(before.clone()),
+            &codec::EntityType::Insert(bad)
         )
         .unwrap_err()
         .contains("Insert.y_scale"));
         let mut bad = before.clone();
         bad.column_count = 0;
         assert!(validate_entity_mutation(
-            &acadrust::EntityType::Insert(before.clone()),
-            &acadrust::EntityType::Insert(bad)
+            &codec::EntityType::Insert(before.clone()),
+            &codec::EntityType::Insert(bad)
         )
         .unwrap_err()
         .contains("array counts"));
         let mut bad = before.clone();
         bad.block_name = "OTHER".into();
         assert!(validate_entity_mutation(
-            &acadrust::EntityType::Insert(before),
-            &acadrust::EntityType::Insert(bad)
+            &codec::EntityType::Insert(before),
+            &codec::EntityType::Insert(bad)
         )
         .unwrap_err()
         .contains("block identity"));
@@ -3336,8 +3336,8 @@ mod tests {
     #[cfg(feature = "host")]
     #[test]
     fn canvas_layer_patch_preserves_unmapped_hatch_fields() {
-        use crate::host::acadrust;
-        let hatch = acadrust::EntityType::Hatch(acadrust::entities::Hatch::default());
+        use crate::host::codec;
+        let hatch = codec::EntityType::Hatch(codec::entities::Hatch::default());
         let patched = patch_canvas_layer(&hatch, "HATCHES").unwrap();
         assert_eq!(patched.common().layer, "HATCHES");
         assert_eq!(hatch.common().layer, "0");
@@ -3350,17 +3350,17 @@ mod tests {
     #[cfg(feature = "host")]
     #[test]
     fn attribute_definition_requires_a_block_owner_and_text_style() {
-        use crate::host::acadrust::{
+        use crate::host::codec::{
             self,
             entities::{Block, BlockEnd},
             types::{Handle, Vector3},
         };
-        let mut document = acadrust::CadDocument::new();
+        let mut document = codec::CadDocument::new();
         let next = document.next_handle();
         let record_handle = Handle::new(next);
         let block_handle = Handle::new(next + 1);
         let end_handle = Handle::new(next + 2);
-        let mut record = acadrust::tables::BlockRecord::new("TAGBLOCK");
+        let mut record = codec::tables::BlockRecord::new("TAGBLOCK");
         record.handle = record_handle;
         record.block_entity_handle = block_handle;
         record.block_end_handle = end_handle;
@@ -3369,30 +3369,30 @@ mod tests {
         block.common.handle = block_handle;
         block.common.owner_handle = record_handle;
         document
-            .add_entity(acadrust::EntityType::Block(block))
+            .add_entity(codec::EntityType::Block(block))
             .unwrap();
         let mut end = BlockEnd::new();
         end.common.handle = end_handle;
         end.common.owner_handle = record_handle;
         document
-            .add_entity(acadrust::EntityType::BlockEnd(end))
+            .add_entity(codec::EntityType::BlockEnd(end))
             .unwrap();
 
-        let mut definition = acadrust::entities::AttributeDefinition::new(
+        let mut definition = codec::entities::AttributeDefinition::new(
             "PART_NO".into(),
             "Part number".into(),
             "PN-001".into(),
         );
         definition.common.owner_handle = record_handle;
         definition.insertion_point = Vector3::new(1.0, 2.0, 0.0);
-        let entity = acadrust::EntityType::AttributeDefinition(definition.clone());
+        let entity = codec::EntityType::AttributeDefinition(definition.clone());
         validate_new_canvas_entity(&entity).unwrap();
         validate_canvas_entity_references(&document, &entity).unwrap();
 
         definition.common.owner_handle = Handle::NULL;
         assert!(validate_canvas_entity_references(
             &document,
-            &acadrust::EntityType::AttributeDefinition(definition.clone())
+            &codec::EntityType::AttributeDefinition(definition.clone())
         )
         .unwrap_err()
         .contains("block-record owner"));
@@ -3400,22 +3400,22 @@ mod tests {
         definition.text_style = "Missing".into();
         assert!(validate_canvas_entity_references(
             &document,
-            &acadrust::EntityType::AttributeDefinition(definition.clone())
+            &codec::EntityType::AttributeDefinition(definition.clone())
         )
         .unwrap_err()
         .contains("does not exist"));
         definition.text_style = "Standard".into();
         definition.tag = "BAD TAG".into();
         assert!(
-            validate_new_canvas_entity(&acadrust::EntityType::AttributeDefinition(definition))
+            validate_new_canvas_entity(&codec::EntityType::AttributeDefinition(definition))
                 .unwrap_err()
                 .contains("no whitespace")
         );
     }
     #[test]
     fn hatch_geometry_and_boundaries_are_validated() {
-        use acadrust::entities::hatch::{BoundaryEdge, BoundaryPath, LineEdge};
-        let mut hatch = acadrust::entities::Hatch::new();
+        use codec::entities::hatch::{BoundaryEdge, BoundaryPath, LineEdge};
+        let mut hatch = codec::entities::Hatch::new();
         let mut path = BoundaryPath::new();
         for (start, end) in [
             ((0.0, 0.0), (10.0, 0.0)),
@@ -3424,32 +3424,32 @@ mod tests {
             ((0.0, 10.0), (0.0, 0.0)),
         ] {
             path.edges.push(BoundaryEdge::Line(LineEdge {
-                start: acadrust::types::Vector2::new(start.0, start.1),
-                end: acadrust::types::Vector2::new(end.0, end.1),
+                start: codec::types::Vector2::new(start.0, start.1),
+                end: codec::types::Vector2::new(end.0, end.1),
             }));
         }
         hatch.paths.push(path);
-        let entity = acadrust::EntityType::Hatch(hatch.clone());
+        let entity = codec::EntityType::Hatch(hatch.clone());
         validate_new_canvas_entity(&entity).unwrap();
 
         let mut invalid = hatch.clone();
         invalid.paths.clear();
-        assert!(validate_new_canvas_entity(&acadrust::EntityType::Hatch(invalid))
+        assert!(validate_new_canvas_entity(&codec::EntityType::Hatch(invalid))
             .unwrap_err()
             .contains("at least one boundary path"));
 
         let mut invalid = hatch.clone();
         invalid.is_solid = false;
         invalid.pattern_scale = 0.0;
-        assert!(validate_new_canvas_entity(&acadrust::EntityType::Hatch(invalid))
+        assert!(validate_new_canvas_entity(&codec::EntityType::Hatch(invalid))
             .unwrap_err()
             .contains("greater than zero"));
 
-        let mut document = acadrust::CadDocument::new();
-        let boundary = document.add_entity(acadrust::EntityType::Line(
-            acadrust::entities::Line::from_points(
-                acadrust::types::Vector3::ZERO,
-                acadrust::types::Vector3::UNIT_X,
+        let mut document = codec::CadDocument::new();
+        let boundary = document.add_entity(codec::EntityType::Line(
+            codec::entities::Line::from_points(
+                codec::types::Vector3::ZERO,
+                codec::types::Vector3::UNIT_X,
             ),
         )).unwrap();
         let mut associative = hatch.clone();
@@ -3457,12 +3457,12 @@ mod tests {
         associative.paths[0].boundary_handles.push(boundary);
         validate_canvas_entity_references(
             &document,
-            &acadrust::EntityType::Hatch(associative.clone()),
+            &codec::EntityType::Hatch(associative.clone()),
         ).unwrap();
-        associative.paths[0].boundary_handles[0] = acadrust::Handle::new(u64::MAX);
+        associative.paths[0].boundary_handles[0] = codec::Handle::new(u64::MAX);
         assert!(validate_canvas_entity_references(
             &document,
-            &acadrust::EntityType::Hatch(associative),
+            &codec::EntityType::Hatch(associative),
         ).unwrap_err().contains("does not exist"));
     }
 }

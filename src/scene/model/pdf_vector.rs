@@ -555,11 +555,11 @@ const MAX_SNAP_POINTS: usize = 20_000;
 /// Endpoint and midpoint snaps of the underlay's PDF geometry, in world
 /// space, when PDFOSNAP is on and the page is shown.
 pub fn underlay_snap_points(
-    u: &acadrust::entities::Underlay,
-    document: &acadrust::CadDocument,
+    u: &codec::entities::Underlay,
+    document: &codec::CadDocument,
 ) -> Vec<(glam::DVec3, crate::scene::model::wire_model::SnapHint)> {
     use crate::scene::model::wire_model::SnapHint;
-    if !pdf_osnap() || !u.flags.contains(acadrust::entities::UnderlayDisplayFlags::ON) {
+    if !pdf_osnap() || !u.flags.contains(codec::entities::UnderlayDisplayFlags::ON) {
         return Vec::new();
     }
     let Some(def) = crate::entities::underlay::definition(u, document) else {
@@ -609,10 +609,10 @@ const MAX_GEOMETRY_POINTS: usize = 200_000;
 /// flattened) for nearest, intersection and perpendicular snaps. Empty when
 /// PDFOSNAP is off or the page is not shown.
 pub fn underlay_snap_geometry(
-    u: &acadrust::entities::Underlay,
-    document: &acadrust::CadDocument,
+    u: &codec::entities::Underlay,
+    document: &codec::CadDocument,
 ) -> Vec<[f64; 3]> {
-    if !pdf_osnap() || !u.flags.contains(acadrust::entities::UnderlayDisplayFlags::ON) {
+    if !pdf_osnap() || !u.flags.contains(codec::entities::UnderlayDisplayFlags::ON) {
         return Vec::new();
     }
     let Some(def) = crate::entities::underlay::definition(u, document) else {

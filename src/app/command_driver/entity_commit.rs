@@ -3,7 +3,7 @@ use super::*;
 impl OpenCADStudio {
     pub(super) fn handle_commit_entity(
         &mut self,
-        entity: acadrust::EntityType,
+        entity: codec::EntityType,
         preserve_commit_layer: bool,
     ) -> Option<Task<Message>> {
         let i = self.active_tab;
@@ -25,10 +25,10 @@ impl OpenCADStudio {
         // leave the anchor untouched. (#327)
         if matches!(
             entity,
-            acadrust::EntityType::Line(_)
-                | acadrust::EntityType::Arc(_)
-                | acadrust::EntityType::LwPolyline(_)
-                | acadrust::EntityType::Polyline2D(_)
+            codec::EntityType::Line(_)
+                | codec::EntityType::Arc(_)
+                | codec::EntityType::LwPolyline(_)
+                | codec::EntityType::Polyline2D(_)
         ) {
             self.update_cont_anchor(&entity);
         }
@@ -40,9 +40,9 @@ impl OpenCADStudio {
         let pending = self.begin_undo(i, label, 1, delta_safe);
         let is_associative_dimension = matches!(
             entity,
-            acadrust::EntityType::Dimension(
-                acadrust::entities::Dimension::Linear(_)
-                    | acadrust::entities::Dimension::Aligned(_)
+            codec::EntityType::Dimension(
+                codec::entities::Dimension::Linear(_)
+                    | codec::entities::Dimension::Aligned(_)
             )
         );
         let association_enabled =
@@ -76,7 +76,7 @@ impl OpenCADStudio {
 
     pub(super) fn handle_commit_entities(
         &mut self,
-        mut entities: Vec<acadrust::EntityType>,
+        mut entities: Vec<codec::EntityType>,
         preserve_commit_style: bool,
         preserve_commit_layer: bool,
     ) -> Option<Task<Message>> {
@@ -137,7 +137,7 @@ impl OpenCADStudio {
 
     pub(super) fn handle_commit_entities_and_exit(
         &mut self,
-        mut entities: Vec<acadrust::EntityType>,
+        mut entities: Vec<codec::EntityType>,
         preserve_commit_style: bool,
         preserve_commit_layer: bool,
     ) {
@@ -185,7 +185,7 @@ impl OpenCADStudio {
 
     pub(super) fn handle_commit_and_exit(
         &mut self,
-        entity: acadrust::EntityType,
+        entity: codec::EntityType,
     ) -> Option<Task<Message>> {
         let i = self.active_tab;
         // XATTACH: the definition and its INSERT are created together
@@ -200,7 +200,7 @@ impl OpenCADStudio {
             return Some(Task::none());
         }
         let insert_block_name = match &entity {
-            acadrust::EntityType::Insert(ins) => Some(ins.block_name.clone()),
+            codec::EntityType::Insert(ins) => Some(ins.block_name.clone()),
             _ => None,
         };
         // Record where this draw ended so ARC_CONT can continue from it
@@ -211,9 +211,9 @@ impl OpenCADStudio {
         let pending = self.begin_undo(i, label, 1, delta_safe);
         let is_associative_dimension = matches!(
             entity,
-            acadrust::EntityType::Dimension(
-                acadrust::entities::Dimension::Linear(_)
-                    | acadrust::entities::Dimension::Aligned(_)
+            codec::EntityType::Dimension(
+                codec::entities::Dimension::Linear(_)
+                    | codec::entities::Dimension::Aligned(_)
             )
         );
         let association_enabled =
@@ -259,7 +259,7 @@ impl OpenCADStudio {
         let association_mode = self.tabs[i].scene.document.header.dimension_associativity;
         let single_source_dimension = matches!(
             &entity,
-            acadrust::EntityType::Dimension(acadrust::entities::Dimension::Ordinate(_))
+            codec::EntityType::Dimension(codec::entities::Dimension::Ordinate(_))
         );
         // A dimension placed on the sheet but measuring model geometry
         // through a viewport carries the compensation as a negative
@@ -277,7 +277,7 @@ impl OpenCADStudio {
         let association_allowed = self.dimension_association_allowed(i);
         let inherited_dimension = if preserve_base_style {
             match &entity {
-                acadrust::EntityType::Dimension(dimension) => Some((
+                codec::EntityType::Dimension(dimension) => Some((
                     dimension.base().common.layer.clone(),
                     dimension.base().style_name.clone(),
                 )),
@@ -316,7 +316,7 @@ impl OpenCADStudio {
                 &self.tabs[i].scene.document,
                 &mut entity,
             );
-            if let (Some((layer, style_name)), acadrust::EntityType::Dimension(dimension)) =
+            if let (Some((layer, style_name)), codec::EntityType::Dimension(dimension)) =
                 (inherited_dimension, &mut entity)
             {
                 dimension.base_mut().common.layer = layer;
@@ -399,7 +399,7 @@ impl OpenCADStudio {
     pub(super) fn handle_commit_dimensions_and_exit(
         &mut self,
         dimensions: Vec<(
-            acadrust::EntityType,
+            codec::EntityType,
             crate::command::DimensionAssociationInput,
         )>,
     ) {
@@ -557,12 +557,12 @@ impl OpenCADStudio {
 
     pub(super) fn handle_commit_and_edit_text(
         &mut self,
-        entity: acadrust::EntityType,
+        entity: codec::EntityType,
     ) -> Option<Task<Message>> {
         let i = self.active_tab;
         let annotative_mleader = matches!(
             &entity,
-            acadrust::EntityType::MultiLeader(ml) if ml.enable_annotation_scale
+            codec::EntityType::MultiLeader(ml) if ml.enable_annotation_scale
         );
         let label = self.history_label_from_active_cmd(i, "ENTITY");
         let delta_safe = self.delta_add_safe(i, &entity) && !annotative_mleader;
@@ -600,7 +600,7 @@ impl OpenCADStudio {
 
     pub(super) fn handle_commit_many_and_edit_text(
         &mut self,
-        entities: Vec<acadrust::EntityType>,
+        entities: Vec<codec::EntityType>,
         edit_index: usize,
         open_editor: bool,
     ) -> Option<Task<Message>> {
@@ -611,7 +611,7 @@ impl OpenCADStudio {
         let mut edit_handle = None;
         let mut leader_handle = None;
         for (idx, entity) in entities.into_iter().enumerate() {
-            let is_leader = matches!(entity, acadrust::EntityType::Leader(_));
+            let is_leader = matches!(entity, codec::EntityType::Leader(_));
             let h = self.commit_entity_handle(entity);
             if idx == edit_index {
                 edit_handle = h;
@@ -623,7 +623,7 @@ impl OpenCADStudio {
         // Link the leader to its annotation so the pair edits as a unit
         // (double-click on the leader resolves to the text entity).
         if let (Some(lh), Some(ah)) = (leader_handle, edit_handle) {
-            let linked = if let Some(acadrust::EntityType::Leader(l)) =
+            let linked = if let Some(codec::EntityType::Leader(l)) =
                 self.tabs[i].scene.document.get_entity_mut(lh)
             {
                 l.annotation_handle = ah;
@@ -767,8 +767,8 @@ impl OpenCADStudio {
     pub(super) fn handle_commit_styled_hatch(
         &mut self,
         hatch: crate::scene::HatchModel,
-        color: acadrust::types::Color,
-        transparency: acadrust::types::Transparency,
+        color: codec::types::Color,
+        transparency: codec::types::Transparency,
     ) {
         let i = self.active_tab;
         let label = self.history_label_from_active_cmd(i, "HATCH");
@@ -795,8 +795,8 @@ impl OpenCADStudio {
     pub(super) fn handle_commit_hatch_with_boundaries(
         &mut self,
         mut hatch: crate::scene::HatchModel,
-        boundaries: Vec<acadrust::EntityType>,
-        entity_style: Option<(acadrust::types::Color, acadrust::types::Transparency)>,
+        boundaries: Vec<codec::EntityType>,
+        entity_style: Option<(codec::types::Color, codec::types::Transparency)>,
     ) {
         let i = self.active_tab;
         let label = self.history_label_from_active_cmd(i, "HATCH");
@@ -838,7 +838,7 @@ impl OpenCADStudio {
     pub(super) fn handle_commit_hatches(
         &mut self,
         hatches: Vec<crate::scene::HatchModel>,
-        entity_style: Option<(acadrust::types::Color, acadrust::types::Transparency)>,
+        entity_style: Option<(codec::types::Color, codec::types::Transparency)>,
     ) {
         let i = self.active_tab;
         let label = self.history_label_from_active_cmd(i, "HATCH");
@@ -867,7 +867,7 @@ impl OpenCADStudio {
     pub(super) fn handle_update_entity_and_finish(
         &mut self,
         handle: Handle,
-        entity: acadrust::EntityType,
+        entity: codec::EntityType,
     ) -> Option<Task<Message>> {
         let i = self.active_tab;
         if self.reject_locked_edit(i, handle) {
@@ -876,7 +876,7 @@ impl OpenCADStudio {
         }
         let label = self.history_label_from_active_cmd(i, "EDIT");
         self.push_undo_snapshot(i, label);
-        let is_dimension = matches!(entity, acadrust::EntityType::Dimension(_));
+        let is_dimension = matches!(entity, codec::EntityType::Dimension(_));
         if let Some(current) = self.tabs[i].scene.document.get_entity_mut(handle) {
             *current = entity;
             if is_dimension {
@@ -934,13 +934,13 @@ impl OpenCADStudio {
         let i = self.active_tab;
         // Collect the full AttributeDefinitions owned by this block
         // record so each created attribute keeps its geometry (#255).
-        let attdefs: Vec<acadrust::entities::AttributeDefinition> = {
+        let attdefs: Vec<codec::entities::AttributeDefinition> = {
             let doc = &self.tabs[i].scene.document;
             if let Some(br) = doc.block_records.get(&block_name) {
                 br.entity_handles
                     .iter()
                     .filter_map(|&h| {
-                        if let Some(acadrust::EntityType::AttributeDefinition(ad)) =
+                        if let Some(codec::EntityType::AttributeDefinition(ad)) =
                             doc.get_entity(h)
                         {
                             Some(ad.clone())
@@ -962,7 +962,7 @@ impl OpenCADStudio {
                 .and_then(|c| c.attreq_take_insert());
             if let Some(entity) = entity {
                 let insert_name = match &entity {
-                    acadrust::EntityType::Insert(ins) => Some(ins.block_name.clone()),
+                    codec::EntityType::Insert(ins) => Some(ins.block_name.clone()),
                     _ => None,
                 };
                 let label = self.history_label_from_active_cmd(i, "INSERT");
@@ -997,7 +997,7 @@ impl OpenCADStudio {
         None
     }
 
-    pub(super) fn handle_commit_live_entity(&mut self, entity: acadrust::EntityType) {
+    pub(super) fn handle_commit_live_entity(&mut self, entity: codec::EntityType) {
         let i = self.active_tab;
         let label = self.history_label_from_active_cmd(i, "ENTITY");
         let delta_safe = self.delta_add_safe(i, &entity);
@@ -1026,18 +1026,18 @@ impl OpenCADStudio {
     pub(super) fn handle_update_live_entity(
         &mut self,
         handle: Handle,
-        entity: acadrust::EntityType,
+        entity: codec::EntityType,
         finish: bool,
     ) {
         let i = self.active_tab;
         let tracks_draw_anchor = matches!(
             &entity,
-            acadrust::EntityType::Line(_)
-                | acadrust::EntityType::Arc(_)
-                | acadrust::EntityType::LwPolyline(_)
-                | acadrust::EntityType::Polyline(_)
-                | acadrust::EntityType::Polyline2D(_)
-                | acadrust::EntityType::Polyline3D(_)
+            codec::EntityType::Line(_)
+                | codec::EntityType::Arc(_)
+                | codec::EntityType::LwPolyline(_)
+                | codec::EntityType::Polyline(_)
+                | codec::EntityType::Polyline2D(_)
+                | codec::EntityType::Polyline3D(_)
         );
         // Replace the live entity's geometry in place, preserving its
         // handle and layer (the fresh entity from the command carries

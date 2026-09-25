@@ -235,7 +235,7 @@ pub fn bigfont_glyph(path: &str, ch: char) -> Option<Arc<crate::scene::text::lff
     let mut buf = [0u8; 4];
     let s = ch.encode_utf8(&mut buf);
     for page in bigfont_code_pages(path) {
-        let Some(enc) = acadrust::io::dxf::code_page::encoding_from_code_page(page) else {
+        let Some(enc) = codec::io::dxf::code_page::encoding_from_code_page(page) else {
             continue;
         };
         let (bytes, _, unmappable) = enc.encode(s);

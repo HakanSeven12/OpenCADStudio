@@ -4,11 +4,11 @@
 //! transformed through their block instances. The caller projects viewport
 //! references onto the sheet. All arithmetic uses `f64`.
 
-use acadrust::objects::AssocDimensionReference;
-use acadrust::types::{Handle, Matrix4, Transform, Vector3};
-use acadrust::{CadDocument, EntityType};
-use cadkernel::geom2d::{closest_point, Curve as KernelCurve};
-use cadkernel::space::Plane;
+use codec::objects::AssocDimensionReference;
+use codec::types::{Handle, Matrix4, Transform, Vector3};
+use codec::{CadDocument, EntityType};
+use kernel::geom2d::{closest_point, Curve as KernelCurve};
+use kernel::space::Plane;
 
 use crate::entities::curve::entity_curve;
 
@@ -319,14 +319,14 @@ fn quadrant_point(
     };
     let valid_angle = |angle: f64| match &planar.curve {
         KernelCurve::Arc(arc) => {
-            cadkernel::geom2d::angle_within_arc(angle, arc.start_angle, arc.end_angle)
+            kernel::geom2d::angle_within_arc(angle, arc.start_angle, arc.end_angle)
         }
         _ => true,
     };
     let at_angle = |angle: f64| {
         lift(
             &planar.plane,
-            KernelCurve::Circle(cadkernel::geom2d::Circle { centre, radius })
+            KernelCurve::Circle(kernel::geom2d::Circle { centre, radius })
                 .point_at(angle.rem_euclid(std::f64::consts::TAU) / std::f64::consts::TAU),
         )
     };
@@ -359,7 +359,7 @@ fn node_point(entity: &EntityType) -> Option<Vector3> {
 fn perpendicular_point(entity: &EntityType, from: Vector3) -> Option<Vector3> {
     let planar = entity_curve(entity)?;
     let uv = planar.plane.project(dpoint(from))?;
-    cadkernel::geom2d::snap::perpendicular_from(&planar.curve, uv)
+    kernel::geom2d::snap::perpendicular_from(&planar.curve, uv)
         .into_iter()
         .map(|candidate| lift(&planar.plane, candidate.point))
         .min_by(|a, b| distance_squared(*a, from).total_cmp(&distance_squared(*b, from)))
@@ -384,13 +384,13 @@ pub(crate) fn perpendicular_in_model(
     let normal = x.cross(y).try_normalize()?;
     let axis_y = normal.cross(axis_x);
     let plane = Plane::from_axes(dpoint(origin), axis_x.to_array(), axis_y.to_array());
-    let curve = source.curve.transformed(&cadkernel::geom2d::Transform {
+    let curve = source.curve.transformed(&kernel::geom2d::Transform {
         origin: [0.0, 0.0].into(),
         x_axis: [x.dot(axis_x), x.dot(axis_y)].into(),
         y_axis: [y.dot(axis_x), y.dot(axis_y)].into(),
     })?;
     let uv = plane.project(dpoint(from))?;
-    cadkernel::geom2d::snap::perpendicular_from(&curve, uv)
+    kernel::geom2d::snap::perpendicular_from(&curve, uv)
         .into_iter()
         .map(|candidate| lift(&plane, candidate.point))
         .min_by(|a, b| distance_squared(*a, from).total_cmp(&distance_squared(*b, from)))
@@ -436,7 +436,7 @@ fn tangent_point(
     let planar = entity_curve(entity)?;
     let from = context.from?;
     let uv = planar.plane.project(dpoint(from))?;
-    cadkernel::geom2d::snap::tangent_from(&planar.curve, uv)
+    kernel::geom2d::snap::tangent_from(&planar.curve, uv)
         .into_iter()
         .map(|candidate| lift(&planar.plane, candidate.point))
         .min_by(|a, b| {
@@ -446,7 +446,7 @@ fn tangent_point(
 }
 
 fn spline_tangent_point(
-    spline: &acadrust::entities::Spline,
+    spline: &codec::entities::Spline,
     reference: &AssocDimensionReference,
     context: FeatureContext,
 ) -> Option<Vector3> {
@@ -497,16 +497,16 @@ fn intersection_point(
     let origin = glam::DVec2::from_array(map([0.0, 0.0])?);
     let x = glam::DVec2::from_array(map([1.0, 0.0])?) - origin;
     let y = glam::DVec2::from_array(map([0.0, 1.0])?) - origin;
-    let second = second.curve.transformed(&cadkernel::geom2d::Transform {
+    let second = second.curve.transformed(&kernel::geom2d::Transform {
         origin: origin.to_array().into(),
         x_axis: x.to_array().into(),
         y_axis: y.to_array().into(),
     })?;
     let hint_uv = first.plane.project(dpoint(hint))?;
-    let mut points: Vec<_> = cadkernel::geom2d::intersect(
+    let mut points: Vec<_> = kernel::geom2d::intersect(
         &first.curve,
         &second,
-        cadkernel::geom2d::Tolerance::new(1e-9),
+        kernel::geom2d::Tolerance::new(1e-9),
     )
     .into_iter()
     .map(|hit| hit.point)
@@ -515,17 +515,17 @@ fn intersection_point(
         // Extended apparent intersections are meaningful for straight lines.
         // Curved geometry must actually cross after projection.
         if let (KernelCurve::Line(a), KernelCurve::Line(b)) = (&first.curve, &second) {
-            let extend = |line: &cadkernel::geom2d::Line| {
-                KernelCurve::XLine(cadkernel::geom2d::XLine {
+            let extend = |line: &kernel::geom2d::Line| {
+                KernelCurve::XLine(kernel::geom2d::XLine {
                     base: line.start,
                     direction: [line.end[0] - line.start[0], line.end[1] - line.start[1]],
                 })
             };
             points.extend(
-                cadkernel::geom2d::intersect(
+                kernel::geom2d::intersect(
                     &extend(a),
                     &extend(b),
-                    cadkernel::geom2d::Tolerance::new(1e-9),
+                    kernel::geom2d::Tolerance::new(1e-9),
                 )
                 .into_iter()
                 .map(|hit| hit.point),

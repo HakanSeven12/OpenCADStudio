@@ -338,7 +338,7 @@ mod tests {
     use crate::ipc::protocol::{HostResponse, PluginRequest, PluginResponse};
     use crate::ipc::transport::recv;
     use crate::ipc::v4::protocol::{HostToPluginV4, PluginToHostV4};
-    use acadrust::{CadDocument, Handle};
+    use codec::{CadDocument, Handle};
     use interprocess::local_socket::{
         traits::{Listener, Stream as StreamTrait},
         GenericNamespaced, ListenerOptions, ToNsName,
@@ -386,7 +386,7 @@ mod tests {
 
     struct DummyHost {
         push_info_messages: StdMutex<Vec<String>>,
-        transactions: StdMutex<Vec<(String, Vec<acadrust::EntityType>)>>,
+        transactions: StdMutex<Vec<(String, Vec<codec::EntityType>)>>,
     }
     impl DummyHost {
         fn new() -> Self {
@@ -398,7 +398,7 @@ mod tests {
         fn take_push_info(&self) -> Vec<String> {
             std::mem::take(&mut *self.push_info_messages.lock().unwrap())
         }
-        fn take_transactions(&self) -> Vec<(String, Vec<acadrust::EntityType>)> {
+        fn take_transactions(&self) -> Vec<(String, Vec<codec::EntityType>)> {
             std::mem::take(&mut *self.transactions.lock().unwrap())
         }
     }
@@ -415,7 +415,7 @@ mod tests {
         fn document_reader(&self) -> Box<dyn DocumentReader + '_> {
             Box::new(EmptyReader)
         }
-        fn add_entity(&mut self, _entity: acadrust::EntityType) -> Handle {
+        fn add_entity(&mut self, _entity: codec::EntityType) -> Handle {
             panic!("not used")
         }
         fn bump_geometry(&mut self) {}
@@ -423,13 +423,13 @@ mod tests {
             &self,
             _handle: Handle,
             _app_name: &str,
-        ) -> Option<&acadrust::xdata::ExtendedDataRecord> {
+        ) -> Option<&codec::xdata::ExtendedDataRecord> {
             None
         }
         fn write_record(
             &mut self,
             _handle: Handle,
-            _record: acadrust::xdata::ExtendedDataRecord,
+            _record: codec::xdata::ExtendedDataRecord,
         ) -> bool {
             false
         }
@@ -440,7 +440,7 @@ mod tests {
         fn update_entities_transaction(
             &mut self,
             label: &str,
-            entities: Vec<acadrust::EntityType>,
+            entities: Vec<codec::EntityType>,
         ) -> Result<(), String> {
             self.transactions.lock().unwrap().push((label.to_owned(), entities));
             Ok(())
@@ -624,10 +624,10 @@ mod tests {
         let handler: Arc<dyn Fn(Option<u64>, PluginNotification) + Send + Sync> =
             Arc::new(|_, _| {});
         let conn = V4Connection::new(host_stream, handler).unwrap();
-        let mut point = acadrust::entities::Point::new();
+        let mut point = codec::entities::Point::new();
         point.common.handle = Handle::new(42);
         point.location.x = 7.0;
-        let expected = acadrust::EntityType::Point(point);
+        let expected = codec::EntityType::Point(point);
         let sent = expected.clone();
 
         let runner = thread::spawn(move || {

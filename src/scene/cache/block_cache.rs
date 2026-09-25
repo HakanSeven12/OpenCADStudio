@@ -18,9 +18,9 @@
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::sync::Arc;
 
-use acadrust::types::{Color as AcadColor, LineWeight, Transform, Vector3};
-use acadrust::{CadDocument, EntityType, Handle};
-use cadkernel::space::{Plane as KernelPlane, Vec3 as KernelVec3};
+use codec::types::{Color as AcadColor, LineWeight, Transform, Vector3};
+use codec::{CadDocument, EntityType, Handle};
+use kernel::space::{Plane as KernelPlane, Vec3 as KernelVec3};
 
 use crate::scene::convert::tessellate;
 use crate::scene::model::wire_model::{
@@ -653,7 +653,7 @@ fn inline_wire_point_cost(wire: &LocalWire) -> Option<usize> {
 }
 
 fn build_nested_ref(
-    nested_ins: &acadrust::entities::Insert,
+    nested_ins: &codec::entities::Insert,
     scale_policy: crate::scene::BlockScalePolicy,
     doc: &CadDocument,
     anno_scale: f32,
@@ -1001,7 +1001,7 @@ pub fn aabb_disjoint_xy(a: [f32; 4], b: [f32; 4]) -> bool {
 pub fn expand_insert(
     doc: &CadDocument,
     cache: &BlockCache,
-    ins: &acadrust::entities::Insert,
+    ins: &codec::entities::Insert,
     ins_handle: Handle,
     ins_resolved_color: [f32; 4],
     ins_aci: u8,
@@ -1238,7 +1238,7 @@ fn transform_translation(transform: &Transform) -> [f64; 3] {
 
 #[allow(clippy::too_many_arguments)]
 fn expansion_prototype_key(
-    ins: &acadrust::entities::Insert,
+    ins: &codec::entities::Insert,
     transform: &Transform,
     ins_color: [f32; 4],
     ins_pat_len: f32,
@@ -3154,8 +3154,8 @@ mod bg_resolution_tests {
 mod compact_nested_tests {
     use super::*;
     use crate::scene::view::render::InheritStyle;
-    use acadrust::entities::{Insert, Line};
-    use acadrust::tables::BlockRecord;
+    use codec::entities::{Insert, Line};
+    use codec::tables::BlockRecord;
 
     fn add_block(document: &mut CadDocument, name: &str) -> Handle {
         let mut block = BlockRecord::new(name);

@@ -1,4 +1,4 @@
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -169,8 +169,8 @@ impl CadCommand for TangentConstraintCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::{Circle, Line};
-    use acadrust::types::Vector3;
+    use codec::entities::{Circle, Line};
+    use codec::types::Vector3;
 
     #[test]
     fn command_preserves_pick_order_for_the_initial_anchor() {

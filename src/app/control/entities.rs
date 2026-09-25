@@ -9,7 +9,7 @@ use crate::command::EntityTransform;
 type Parsed<T> = Result<T, Value>;
 
 /// `[x,y]` or `[x,y,z]` (missing z = 0) from `req[key]`.
-fn point_field(req: &Value, key: &str) -> Parsed<acadrust::types::Vector3> {
+fn point_field(req: &Value, key: &str) -> Parsed<codec::types::Vector3> {
     let values = req[key]
         .as_array()
         .filter(|v| (2..=3).contains(&v.len()))
@@ -20,14 +20,14 @@ fn point_field(req: &Value, key: &str) -> Parsed<acadrust::types::Vector3> {
             .filter(|v| v.is_finite())
             .ok_or_else(|| failure("invalid_point", format!("{key} needs finite coordinates")))
     };
-    Ok(acadrust::types::Vector3::new(coord(0)?, coord(1)?, values.get(2).and_then(Value::as_f64).unwrap_or(0.0)))
+    Ok(codec::types::Vector3::new(coord(0)?, coord(1)?, values.get(2).and_then(Value::as_f64).unwrap_or(0.0)))
 }
 
 fn deg_field(req: &Value, key: &str) -> f64 {
     req[key].as_f64().unwrap_or(0.0).to_radians()
 }
 
-pub(super) fn hex_handles(req: &Value, key: &str) -> Parsed<Vec<acadrust::Handle>> {
+pub(super) fn hex_handles(req: &Value, key: &str) -> Parsed<Vec<codec::Handle>> {
     let list = req[key]
         .as_array()
         .filter(|v| !v.is_empty())
@@ -41,7 +41,7 @@ pub(super) fn hex_handles(req: &Value, key: &str) -> Parsed<Vec<acadrust::Handle
                     .trim_start_matches("0X"),
                 16,
             )
-            .map(acadrust::Handle::new)
+            .map(codec::Handle::new)
             .map_err(|_| {
                 failure(
                     "invalid_handle",
@@ -54,7 +54,7 @@ pub(super) fn hex_handles(req: &Value, key: &str) -> Parsed<Vec<acadrust::Handle
 
 /// Every handle must exist in the document; otherwise `entity_absent` naming
 /// the missing ones so the caller can refresh instead of guessing.
-pub(super) fn require_existing(document: &acadrust::CadDocument, handles: &[acadrust::Handle]) -> Parsed<()> {
+pub(super) fn require_existing(document: &codec::CadDocument, handles: &[codec::Handle]) -> Parsed<()> {
     let missing: Vec<String> = handles
         .iter()
         .filter(|h| document.get_entity(**h).is_none())
@@ -70,28 +70,28 @@ pub(super) fn require_existing(document: &acadrust::CadDocument, handles: &[acad
     }
 }
 
-fn apply_common_properties(spec: &Value, entity: &mut acadrust::EntityType) -> Parsed<()> {
+fn apply_common_properties(spec: &Value, entity: &mut codec::EntityType) -> Parsed<()> {
     if let Some(layer) = spec["layer"].as_str() {
         if !layer.is_empty()
             && !matches!(
                 entity,
-                acadrust::EntityType::Block(_) | acadrust::EntityType::BlockEnd(_)
+                codec::EntityType::Block(_) | codec::EntityType::BlockEnd(_)
             )
         {
             entity.common_mut().layer = layer.to_owned();
         }
     }
     if let Some(index) = spec["color"].as_i64().and_then(|v| i16::try_from(v).ok()) {
-        entity.common_mut().color = acadrust::types::Color::from_index(index);
+        entity.common_mut().color = codec::types::Color::from_index(index);
     }
     Ok(())
 }
 
 /// One `entities` array entry → a real entity. Geometry validation happens
 /// here so a bad definition aborts the whole batch before anything commits.
-fn build_entity(spec: &Value) -> Parsed<acadrust::EntityType> {
-    use acadrust::entities::*;
-    use acadrust::types::Vector3;
+fn build_entity(spec: &Value) -> Parsed<codec::EntityType> {
+    use codec::entities::*;
+    use codec::types::Vector3;
     let kind = spec["type"].as_str().unwrap_or("").to_ascii_uppercase();
     let entity = match kind.as_str() {
         "LINE" => {
@@ -133,7 +133,7 @@ fn build_entity(spec: &Value) -> Parsed<acadrust::EntityType> {
                 let y = point[1].as_f64().filter(|v| v.is_finite()).ok_or_else(|| {
                     failure("invalid_vertices", "polyline vertices must be finite [x,y]")
                 })?;
-                pline.add_point(acadrust::types::Vector2::new(x, y));
+                pline.add_point(codec::types::Vector2::new(x, y));
             }
             if spec["closed"].as_bool().unwrap_or(false) {
                 pline.close();
@@ -230,7 +230,7 @@ fn build_entity(spec: &Value) -> Parsed<acadrust::EntityType> {
                 let y = point[1].as_f64().filter(|v| v.is_finite()).ok_or_else(|| {
                     failure("invalid_boundary", "hatch boundary must be finite [x,y]")
                 })?;
-                vertices.push(acadrust::types::Vector2::new(x, y));
+                vertices.push(codec::types::Vector2::new(x, y));
             }
             let mut hatch = Hatch::new();
             if spec["solid"].as_bool().unwrap_or(false) {
@@ -271,7 +271,7 @@ impl OpenCADStudio {
             .as_array()
             .filter(|v| !v.is_empty())
             .ok_or_else(|| failure("entities_required", "Supply entities:[{type:…},…]"))?;
-        let built: Vec<acadrust::EntityType> = list.iter().map(build_entity).collect::<Parsed<_>>()?;
+        let built: Vec<codec::EntityType> = list.iter().map(build_entity).collect::<Parsed<_>>()?;
 
         let i = self.active_tab;
         self.push_undo_snapshot(i, "ENTITIESCREATE");
@@ -286,7 +286,7 @@ impl OpenCADStudio {
                 if layer.is_empty() || document.layers.contains(&layer) {
                     continue;
                 }
-                let mut layer_record = acadrust::tables::Layer::new(layer.clone());
+                let mut layer_record = codec::tables::Layer::new(layer.clone());
                 layer_record.handle = document.allocate_handle();
                 document
                     .layers
@@ -572,11 +572,11 @@ impl OpenCADStudio {
 
         // World → block space translates `base` onto the block origin; the
         // inverse places the Insert so entities keep their world position.
-        let world_to_block = acadrust::types::Transform::from_translation(
-            acadrust::types::Vector3::new(-base.x, -base.y, -base.z),
+        let world_to_block = codec::types::Transform::from_translation(
+            codec::types::Vector3::new(-base.x, -base.y, -base.z),
         );
         let block_to_world =
-            acadrust::types::Transform::from_translation(insert_at);
+            codec::types::Transform::from_translation(insert_at);
         self.push_undo_snapshot(i, "BLOCKDEFINE");
         // CF-01.3 (barcode re-import): `replace:true` drops the previous
         // definition — its children, markers and inserts — inside the same
@@ -660,14 +660,14 @@ fn erase_block_definition(scene: &mut crate::scene::Scene, name: &str) -> usize 
     };
     let owner = record.handle;
     let block_markers = [record.block_entity_handle, record.block_end_handle];
-    let mut victims: Vec<acadrust::Handle> = scene
+    let mut victims: Vec<codec::Handle> = scene
         .document
         .entities()
         .filter(|entity| {
             entity.common().owner_handle == owner
                 || matches!(
                     entity,
-                    acadrust::EntityType::Insert(insert)
+                    codec::EntityType::Insert(insert)
                         if insert.block_name.eq_ignore_ascii_case(name)
                 )
         })
@@ -681,8 +681,8 @@ fn erase_block_definition(scene: &mut crate::scene::Scene, name: &str) -> usize 
 
 /// `data:[{code,value},…]` → typed XData values; an absent or empty list
 /// means "remove this application's record".
-fn parse_xdata_values(req: &Value) -> Parsed<Option<Vec<acadrust::xdata::XDataValue>>> {
-    use acadrust::xdata::XDataValue;
+fn parse_xdata_values(req: &Value) -> Parsed<Option<Vec<codec::xdata::XDataValue>>> {
+    use codec::xdata::XDataValue;
     let Some(list) = req["data"].as_array() else {
         return Ok(None);
     };
@@ -728,14 +728,14 @@ fn parse_xdata_values(req: &Value) -> Parsed<Option<Vec<acadrust::xdata::XDataVa
                 let raw = raw.trim_start_matches("0x").trim_start_matches("0X");
                 let handle = u64::from_str_radix(raw, 16)
                     .map_err(|_| failure("invalid_xdata", "code 1005 needs a valid hex handle"))?;
-                XDataValue::Handle(acadrust::Handle::new(handle))
+                XDataValue::Handle(codec::Handle::new(handle))
             }
             1010..=1013 => {
                 let point = value.as_array().filter(|v| !v.is_empty()).ok_or_else(|| {
                     failure("invalid_xdata", "codes 1010-1013 need [x,y,z]")
                 })?;
                 let coord = |k: usize| point.get(k).and_then(Value::as_f64).unwrap_or(0.0);
-                let point = acadrust::types::Vector3::new(coord(0), coord(1), coord(2));
+                let point = codec::types::Vector3::new(coord(0), coord(1), coord(2));
                 match code {
                     1010 => XDataValue::Point3D(point),
                     1011 => XDataValue::Position3D(point),
@@ -773,8 +773,8 @@ fn parse_xdata_values(req: &Value) -> Parsed<Option<Vec<acadrust::xdata::XDataVa
 }
 
 /// JSON shape for one stored XData value.
-fn xdata_value_json(value: &acadrust::xdata::XDataValue) -> Value {
-    use acadrust::xdata::XDataValue;
+fn xdata_value_json(value: &codec::xdata::XDataValue) -> Value {
+    use codec::xdata::XDataValue;
     match value {
         XDataValue::String(text)
         | XDataValue::ControlString(text)

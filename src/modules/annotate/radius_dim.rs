@@ -1,6 +1,6 @@
-use acadrust::entities::{Dimension, DimensionRadius};
-use acadrust::types::{Handle, Vector3};
-use acadrust::EntityType;
+use codec::entities::{Dimension, DimensionRadius};
+use codec::types::{Handle, Vector3};
+use codec::EntityType;
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview, InputKind,

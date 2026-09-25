@@ -725,7 +725,7 @@ impl OpenCADStudio {
                     };
                     if annotational {
                         entity.as_entity_mut().set_layer(active_layer.clone());
-                        entity.common_mut().color = acadrust::types::Color::ByLayer;
+                        entity.common_mut().color = codec::types::Color::ByLayer;
                         // The dynamic form's screen-size and horizontal-text
                         // overrides go; the style draws it.
                         for code in [
@@ -744,7 +744,7 @@ impl OpenCADStudio {
                         entity
                             .as_entity_mut()
                             .set_layer(DYNAMIC_DIMENSION_LAYER.to_string());
-                        entity.common_mut().color = acadrust::types::Color::Rgb {
+                        entity.common_mut().color = codec::types::Color::Rgb {
                             r: 103,
                             g: 109,
                             b: 118,
@@ -899,7 +899,7 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    pub(super) fn apply_continuous_constraints(&mut self, i: usize, new_handles: &[acadrust::Handle]) {
+    pub(super) fn apply_continuous_constraints(&mut self, i: usize, new_handles: &[codec::Handle]) {
         let supported_creation = self.tabs[i]
             .active_cmd
             .as_ref()
@@ -924,7 +924,7 @@ impl OpenCADStudio {
     pub(in crate::app) fn apply_inferred_constraints(
         &mut self,
         i: usize,
-        changed_handles: &[acadrust::Handle],
+        changed_handles: &[codec::Handle],
     ) {
         if !self.constraint_infer || changed_handles.is_empty() {
             return;

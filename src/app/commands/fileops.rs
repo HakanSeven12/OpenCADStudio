@@ -173,7 +173,7 @@ impl OpenCADStudio {
                                 }
                             }
                             for e in self.tabs[i].scene.document.entities() {
-                                if let acadrust::EntityType::RasterImage(img) = e {
+                                if let codec::EntityType::RasterImage(img) = e {
                                     if !img.file_path.trim().is_empty() {
                                         deps.push(img.file_path.clone());
                                     }

@@ -91,7 +91,7 @@ fn block_entity_transform(
     target: Handle,
     visited: &mut Vec<String>,
     annotation_scale: f32,
-) -> Option<acadrust::types::Transform> {
+) -> Option<codec::types::Transform> {
     if visited
         .iter()
         .any(|name| name.eq_ignore_ascii_case(block_name))
@@ -103,7 +103,7 @@ fn block_entity_transform(
         .iter()
         .find(|record| record.name.eq_ignore_ascii_case(block_name))?;
     if record.entity_handles.contains(&target) {
-        return Some(acadrust::types::Transform::identity());
+        return Some(codec::types::Transform::identity());
     }
 
     visited.push(record.name.clone());
@@ -165,7 +165,7 @@ impl Scene {
     }
 
     /// Restore camera to a named view from the document view table.
-    pub fn restore_named_view(&mut self, view: &acadrust::tables::View) {
+    pub fn restore_named_view(&mut self, view: &codec::tables::View) {
         use glam::Vec3;
         let cam = &mut *self.camera.borrow_mut();
         // The stored direction points from the target toward the eye.
@@ -199,13 +199,13 @@ impl Scene {
 
     /// Save the current camera state into a new named view entry.
     /// Returns the view; caller must push it into document.views.
-    pub fn current_as_named_view(&self, name: &str) -> acadrust::tables::View {
-        use acadrust::types::Vector3;
+    pub fn current_as_named_view(&self, name: &str) -> codec::tables::View {
+        use codec::types::Vector3;
         let cam = self.camera.borrow();
         let eye_dir = cam.rotation * glam::Vec3::Z;
         let height = cam.ortho_size() * 2.0;
         let width = height; // caller can adjust; rough square
-        let mut view = acadrust::tables::View::new(name);
+        let mut view = codec::tables::View::new(name);
         view.center = Vector3 {
             x: cam.target.x as f64,
             y: cam.target.y as f64,
@@ -539,7 +539,7 @@ impl Scene {
         let Some(local_center) = rendered_wire_center(&wires, fallback_z) else {
             return false;
         };
-        let world = transform.apply(acadrust::types::Vector3::new(
+        let world = transform.apply(codec::types::Vector3::new(
             local_center.x,
             local_center.y,
             local_center.z,
@@ -575,20 +575,20 @@ impl Scene {
         true
     }
 
-    /// Apply camera state from an acadrust View table entry, through the shared
+    /// Apply camera state from an opencadcodec View table entry, through the shared
     /// `camera_from_view` decoder so the twist round-trips like every other
     /// saved view. `model_space`: if true, subtracts world_offset from target
     /// (wire-space); paper-space entries carry no offset.
     fn apply_camera_from_view_entry(
         &mut self,
-        view: &acadrust::tables::View,
+        view: &codec::tables::View,
         model_space: bool,
     ) -> bool {
         let _ = model_space;
         let Some(cam) = self.camera_from_view_mode(
             view.direction,
             view.target,
-            acadrust::types::Vector2 {
+            codec::types::Vector2 {
                 x: view.center.x,
                 y: view.center.y,
             },
@@ -647,9 +647,9 @@ impl Scene {
     /// Returns `None` for a zero `view_height` (an uninitialised entry).
     pub(super) fn camera_from_view_mode(
         &self,
-        view_direction: acadrust::types::Vector3,
-        view_target: acadrust::types::Vector3,
-        view_center: acadrust::types::Vector2,
+        view_direction: codec::types::Vector3,
+        view_target: codec::types::Vector3,
+        view_center: codec::types::Vector2,
         view_height: f64,
         twist: f64,
         perspective: bool,
@@ -732,7 +732,7 @@ impl Scene {
     }
 
     /// Decode a VPort table entry (model-space tiled view) into a `Camera`.
-    fn camera_from_vport(&self, vp: &acadrust::tables::VPort) -> Option<Camera> {
+    fn camera_from_vport(&self, vp: &codec::tables::VPort) -> Option<Camera> {
         self.camera_from_view_mode(
             vp.view_direction,
             vp.view_target,
@@ -746,14 +746,14 @@ impl Scene {
 
     fn apply_camera_to_vport(
         &self,
-        entry: &mut acadrust::tables::VPort,
+        entry: &mut codec::tables::VPort,
         cam: &Camera,
-        lower_left: acadrust::types::Vector2,
-        upper_right: acadrust::types::Vector2,
+        lower_left: codec::types::Vector2,
+        upper_right: codec::types::Vector2,
     ) {
         let view_dir = cam.rotation * glam::Vec3::Z;
         let view_height = cam.ortho_size() * 2.0;
-        let target_wcs = acadrust::types::Vector3 {
+        let target_wcs = codec::types::Vector3 {
             x: cam.target.x,
             y: cam.target.y,
             z: cam.target.z,
@@ -761,7 +761,7 @@ impl Scene {
         entry.lower_left = lower_left;
         entry.upper_right = upper_right;
         entry.view_target = target_wcs;
-        entry.view_direction = acadrust::types::Vector3 {
+        entry.view_direction = codec::types::Vector3 {
             x: view_dir.x as f64,
             y: view_dir.y as f64,
             z: view_dir.z as f64,
@@ -775,15 +775,15 @@ impl Scene {
         }
         entry.perspective = cam.projection == view::camera::Projection::Perspective;
         entry.lens_length = (12.0 / (cam.fov_y * 0.5).tan().max(1e-6)) as f64;
-        entry.view_center = acadrust::types::Vector2::ZERO;
+        entry.view_center = codec::types::Vector2::ZERO;
         // Stored twist = -roll, matching the decoder (roll = -twist).
         entry.view_twist = -cam.roll() as f64;
     }
 
     fn vport_rect_matches(
-        entry: &acadrust::tables::VPort,
-        lower_left: acadrust::types::Vector2,
-        upper_right: acadrust::types::Vector2,
+        entry: &codec::tables::VPort,
+        lower_left: codec::types::Vector2,
+        upper_right: codec::types::Vector2,
     ) -> bool {
         const EPSILON: f64 = 1e-5;
         (entry.lower_left.x - lower_left.x).abs() <= EPSILON
@@ -793,9 +793,9 @@ impl Scene {
     }
 
     fn vport_contains_rect_center(
-        entry: &acadrust::tables::VPort,
-        lower_left: acadrust::types::Vector2,
-        upper_right: acadrust::types::Vector2,
+        entry: &codec::tables::VPort,
+        lower_left: codec::types::Vector2,
+        upper_right: codec::types::Vector2,
     ) -> bool {
         const EPSILON: f64 = 1e-5;
         let center_x = (lower_left.x + upper_right.x) * 0.5;
@@ -809,12 +809,12 @@ impl Scene {
     /// Convert a `ModelTile`'s normalized iced rectangle (top-left origin) to
     /// the (lower_left, upper_right) pair the VPort table uses (bottom-left
     /// origin).
-    fn tile_rect_to_vport(rect: iced::Rectangle) -> (acadrust::types::Vector2, acadrust::types::Vector2) {
-        let lower_left = acadrust::types::Vector2 {
+    fn tile_rect_to_vport(rect: iced::Rectangle) -> (codec::types::Vector2, codec::types::Vector2) {
+        let lower_left = codec::types::Vector2 {
             x: rect.x as f64,
             y: (1.0 - rect.y - rect.height) as f64,
         };
-        let upper_right = acadrust::types::Vector2 {
+        let upper_right = codec::types::Vector2 {
             x: (rect.x + rect.width) as f64,
             y: (1.0 - rect.y) as f64,
         };
@@ -822,7 +822,7 @@ impl Scene {
     }
 
     /// Inverse of `tile_rect_to_vport`.
-    fn vport_to_tile_rect(lower_left: acadrust::types::Vector2, upper_right: acadrust::types::Vector2) -> iced::Rectangle {
+    fn vport_to_tile_rect(lower_left: codec::types::Vector2, upper_right: codec::types::Vector2) -> iced::Rectangle {
         iced::Rectangle {
             x: lower_left.x as f32,
             y: (1.0 - upper_right.y) as f32,
@@ -836,7 +836,7 @@ impl Scene {
     /// in that case because the active tile's camera has already been loaded
     /// into `self.camera`.
     fn restore_model_tiles_from_vports(&mut self) -> bool {
-        let active_vports: Vec<acadrust::tables::VPort> = self
+        let active_vports: Vec<codec::tables::VPort> = self
             .document
             .vports
             .iter()
@@ -891,7 +891,7 @@ impl Scene {
         }
 
         let table_handle = self.document.vports.handle();
-        let mut active_vports: Vec<acadrust::tables::VPort> = self
+        let mut active_vports: Vec<codec::tables::VPort> = self
             .document
             .vports
             .iter()
@@ -900,14 +900,14 @@ impl Scene {
             .collect();
         let source_vports = active_vports.clone();
         let inherited_vport = active_vports.first().cloned();
-        let preserved_vps: Vec<acadrust::tables::VPort> = self
+        let preserved_vps: Vec<codec::tables::VPort> = self
             .document
             .vports
             .iter()
             .filter(|v| !is_active_vport_name(&v.name))
             .cloned()
             .collect();
-        let mut new_vports = acadrust::tables::Table::with_handle(table_handle);
+        let mut new_vports = codec::tables::Table::with_handle(table_handle);
         for vp in preserved_vps {
             new_vports.add_or_replace(vp);
         }
@@ -963,10 +963,10 @@ impl Scene {
                         .cloned()
                 })
                 .or_else(|| inherited_vport.clone())
-                .unwrap_or_else(|| acadrust::tables::VPort::new("*Active"));
+                .unwrap_or_else(|| codec::tables::VPort::new("*Active"));
             let cloned = inherited.is_none();
             if cloned {
-                entry.handle = acadrust::Handle::NULL;
+                entry.handle = codec::Handle::NULL;
             }
             entry.name = "*Active".to_string();
             self.apply_camera_to_vport(&mut entry, &tile.camera, ll, ur);
@@ -980,10 +980,10 @@ impl Scene {
             if cloned && entry.sun_handle.is_valid() {
                 let source_sun = self.document.objects.get(&entry.sun_handle).and_then(|object| {
                     match object {
-                        acadrust::objects::ObjectType::ClassObject(value)
+                        codec::objects::ObjectType::ClassObject(value)
                             if matches!(
                                 &value.data,
-                                acadrust::objects::ClassObjectData::Sun(_)
+                                codec::objects::ClassObjectData::Sun(_)
                             ) => Some(value.clone()),
                         _ => None,
                     }
@@ -996,7 +996,7 @@ impl Scene {
                     sun.xdictionary_handle = None;
                     self.document.objects.insert(
                         handle,
-                        acadrust::objects::ObjectType::ClassObject(sun),
+                        codec::objects::ObjectType::ClassObject(sun),
                     );
                     entry.sun_handle = handle;
                     scene_objects_changed = true;
@@ -1097,7 +1097,7 @@ impl Scene {
         let Some(cam) = self.camera_from_view_mode(
             vp.view_direction,
             vp.view_target,
-            acadrust::types::Vector2 {
+            codec::types::Vector2 {
                 x: vp.view_center.x,
                 y: vp.view_center.y,
             },
@@ -1122,7 +1122,7 @@ impl Scene {
         // Stored twist is the negative of the camera roll (the decoder applies
         // roll = -twist), so the saved view round-trips square.
         let twist = -cam.roll() as f64;
-        let vd3 = acadrust::types::Vector3 {
+        let vd3 = codec::types::Vector3 {
             x: view_dir.x as f64,
             y: view_dir.y as f64,
             z: view_dir.z as f64,
@@ -1132,7 +1132,7 @@ impl Scene {
             self.save_model_tiles_to_vports();
             true
         } else {
-            let target_wcs = acadrust::types::Vector3 {
+            let target_wcs = codec::types::Vector3 {
                 x: cam.target.x as f64,
                 y: cam.target.y as f64,
                 z: cam.target.z as f64,
@@ -1146,8 +1146,8 @@ impl Scene {
             {
                 // Paper-space position is stored in view_center (DCS).
                 vp.view_center =
-                    acadrust::types::Vector3::new(target_wcs.x, target_wcs.y, 0.0);
-                vp.view_target = acadrust::types::Vector3::ZERO;
+                    codec::types::Vector3::new(target_wcs.x, target_wcs.y, 0.0);
+                vp.view_target = codec::types::Vector3::ZERO;
                 vp.view_direction = vd3;
                 vp.view_height = view_height as f64;
                 vp.twist_angle = twist;

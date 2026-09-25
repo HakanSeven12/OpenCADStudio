@@ -10,11 +10,11 @@
 //! case. The clip is performed in 2D (XY) after the INSERT transform has been
 //! applied, matching the space the block wires are already emitted in.
 
-use acadrust::entities::Insert;
-use acadrust::objects::{ObjectType, SpatialFilter};
-use acadrust::types::{Handle, Transform, Vector3};
-use acadrust::CadDocument;
-use cadkernel::geom2d::{contains, Curve, Line, Tolerance};
+use codec::entities::Insert;
+use codec::objects::{ObjectType, SpatialFilter};
+use codec::types::{Handle, Transform, Vector3};
+use codec::CadDocument;
+use kernel::geom2d::{contains, Curve, Line, Tolerance};
 
 use crate::scene::model::wire_model::{
     decode_pattern_station_map, encode_pattern_stations, pattern_station_values, WireModel,
@@ -49,7 +49,7 @@ pub fn insert_spatial_filter<'a>(
 
 /// The filter's handle, when the insert has one (enabled or not).
 pub fn filter_handle(doc: &CadDocument, insert: Handle) -> Option<Handle> {
-    let Some(acadrust::EntityType::Insert(ins)) = doc.get_entity(insert) else {
+    let Some(codec::EntityType::Insert(ins)) = doc.get_entity(insert) else {
         return None;
     };
     let acad_filter = dict_entry(doc, ins.common.xdictionary_handle?, "ACAD_FILTER")?;
@@ -69,10 +69,10 @@ pub fn inverted_boundary(doc: &CadDocument, filter: &SpatialFilter) -> Option<Ve
     let mut inside = false;
     for entry in &x.entries {
         match &entry.value {
-            acadrust::objects::XRecordValue::String(s) if entry.code == 102 => {
+            codec::objects::XRecordValue::String(s) if entry.code == 102 => {
                 inside = s == INVERTED;
             }
-            acadrust::objects::XRecordValue::Point3D(px, py, _) if inside && entry.code == 10 => {
+            codec::objects::XRecordValue::Point3D(px, py, _) if inside && entry.code == 10 => {
                 points.push([*px, *py]);
             }
             _ => {}
@@ -90,7 +90,7 @@ pub fn clip_outline_world(doc: &CadDocument, filter: &SpatialFilter, xform: &Tra
             let mut outline = filter.clone();
             outline.boundary_points = points
                 .iter()
-                .map(|p| acadrust::types::Vector2::new(p[0], p[1]))
+                .map(|p| codec::types::Vector2::new(p[0], p[1]))
                 .collect();
             world_clip_polygon_for_transform(&outline, xform)
         }
@@ -190,9 +190,9 @@ pub fn set_insert_clip(
     inverted: bool,
     extents: ([f64; 2], [f64; 2]),
 ) -> bool {
-    use acadrust::objects::{Dictionary, XRecord, XRecordEntry, XRecordValue};
-    use acadrust::types::{Matrix4, Vector2};
-    let Some(acadrust::EntityType::Insert(ins)) = doc.get_entity(insert) else {
+    use codec::objects::{Dictionary, XRecord, XRecordEntry, XRecordValue};
+    use codec::types::{Matrix4, Vector2};
+    let Some(codec::EntityType::Insert(ins)) = doc.get_entity(insert) else {
         return false;
     };
     let t = ins.get_transform().matrix.m;
@@ -270,7 +270,7 @@ pub fn set_insert_clip(
         }
         let mut x = XRecord::new();
         (x.handle, x.owner) = (record, fdict);
-        x.cloning_flags = acadrust::objects::DictionaryCloningFlags::KeepExisting;
+        x.cloning_flags = codec::objects::DictionaryCloningFlags::KeepExisting;
         let point = |p: &[f64; 2]| XRecordEntry::new(10, XRecordValue::Point3D(p[0], p[1], 0.0));
         x.entries.push(XRecordEntry::string(102, INVERTED));
         x.entries.extend(boundary.iter().map(point));
@@ -999,8 +999,8 @@ mod tests {
 
     #[test]
     fn resolves_filter_and_clips_block_geometry() {
-        use acadrust::objects::Dictionary;
-        use acadrust::types::Vector2;
+        use codec::objects::Dictionary;
+        use codec::types::Vector2;
 
         // Handles: insert, xdict, acad_filter dict, spatial filter.
         let (h_ins, h_xdict, h_filter, h_spatial) = (
@@ -1088,7 +1088,7 @@ mod tests {
 
     #[test]
     fn world_polygon_applies_inverse_block_then_insert() {
-        use acadrust::types::{Matrix4, Vector2};
+        use codec::types::{Matrix4, Vector2};
         // Clip stored against a normalized space: inverse_block_transform scales
         // the small boundary points up by 1000 into block space, then the insert
         // (scale 0.1 + translation) maps them to world.

@@ -15,7 +15,7 @@ pub const MENU_ITEMS: &[(&str, &str, IconKind)] = &[
 
 // ── CadCommand implementation ─────────────────────────────────────────────
 
-use acadrust::Handle;
+use codec::Handle;
 use glam::{DVec3, Vec3};
 use crate::t;
 

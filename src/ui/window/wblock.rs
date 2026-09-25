@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use acadrust::Handle;
+use codec::Handle;
 use iced::widget::{
     button, column, combo_box, container, pick_list, row, text, text_input, Space,
 };

@@ -7,8 +7,8 @@ use crate::scene::{ObjectIsolationState, Scene};
 use crate::snap::SnapResult;
 use crate::t;
 use crate::ui::{LayerPanel, PropertiesPanel};
-use acadrust::tables::{normalize_name, Ucs};
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::tables::{normalize_name, Ucs};
+use codec::{CadDocument, EntityType, Handle};
 use iced;
 use std::any::Any;
 use std::collections::HashMap;
@@ -118,7 +118,7 @@ pub(super) struct SketchSession {
     /// with snapping off gets that back rather than silently keeping it.
     pub(super) previous_snap_enabled: bool,
     /// Entity handles already present when the sketch opened.
-    pub(super) opened_with: std::collections::HashSet<acadrust::Handle>,
+    pub(super) opened_with: std::collections::HashSet<codec::Handle>,
 }
 
 // ── Per-document tab state ─────────────────────────────────────────────────
@@ -156,7 +156,7 @@ pub(super) struct DocumentTab {
     /// The selection set the most recent command worked on, captured when a
     /// finishing command drops the live selection — re-selectable with the
     /// "Previous" keyword at any Select objects prompt (#426).
-    pub(super) prev_selection: Vec<acadrust::Handle>,
+    pub(super) prev_selection: Vec<codec::Handle>,
     pub(super) last_cmd: Option<String>,
     /// Most recently created path drawable. A fresh LINE/PLINE can accept its
     /// current final endpoint with Enter before the first click.
@@ -178,7 +178,7 @@ pub(super) struct DocumentTab {
     /// Dynamic-block visibility grip for the current single selection.
     pub(super) visibility_grip: Option<super::visibility::VisibilityGrip>,
     pub(super) wireframe: bool,
-    pub(super) render_mode: acadrust::entities::ViewportRenderMode,
+    pub(super) render_mode: codec::entities::ViewportRenderMode,
     pub(super) visual_style: String,
     pub(super) last_cursor_world: glam::DVec3,
     pub(super) last_cursor_screen: iced::Point,
@@ -206,6 +206,8 @@ pub(super) struct DocumentTab {
     pub(super) dyn_active: usize,
     pub(super) history: HistoryState,
     pub(super) active_layer: String,
+    /// Node graph shown by the command line's graph button.
+    pub(super) graph: crate::ui::node_graph::Graph,
     /// Currently active UCS. `None` means WCS (identity transform).
     pub(super) active_ucs: Option<Ucs>,
     /// Open sketch, if CREATESKETCH is in effect. `None` is the normal
@@ -356,7 +358,7 @@ impl DocumentTab {
     /// when the viewport uses world coordinates or the handle is not a viewport.
     pub(super) fn ucs_from_viewport(&self, h: Handle) -> Option<Ucs> {
         let vp = match self.scene.document.get_entity(h) {
-            Some(acadrust::EntityType::Viewport(vp)) => vp,
+            Some(codec::EntityType::Viewport(vp)) => vp,
             _ => return None,
         };
         if !vp.ucs_per_viewport {
@@ -385,7 +387,7 @@ impl DocumentTab {
 
     pub(super) fn ucs_from_layout(&self) -> Option<Ucs> {
         let layout = self.scene.document.objects.values().find_map(|object| {
-            let acadrust::objects::ObjectType::Layout(layout) = object else {
+            let codec::objects::ObjectType::Layout(layout) = object else {
                 return None;
             };
             (layout.name == self.scene.current_layout).then_some(layout)
@@ -398,17 +400,17 @@ impl DocumentTab {
             .find(|ucs| ucs.handle == layout.named_ucs)
             .cloned()
             .unwrap_or_else(|| Ucs::new("*PAPERUCS*"));
-        ucs.origin = acadrust::types::Vector3::new(
+        ucs.origin = codec::types::Vector3::new(
             layout.ucs_origin.0,
             layout.ucs_origin.1,
             layout.ucs_origin.2,
         );
-        ucs.x_axis = acadrust::types::Vector3::new(
+        ucs.x_axis = codec::types::Vector3::new(
             layout.ucs_x_axis.0,
             layout.ucs_x_axis.1,
             layout.ucs_x_axis.2,
         );
-        ucs.y_axis = acadrust::types::Vector3::new(
+        ucs.y_axis = codec::types::Vector3::new(
             layout.ucs_y_axis.0,
             layout.ucs_y_axis.1,
             layout.ucs_y_axis.2,
@@ -450,7 +452,7 @@ impl DocumentTab {
     }
 
     fn sync_paper_ucs_header(&mut self) {
-        use acadrust::types::Vector3;
+        use codec::types::Vector3;
         let header = &mut self.scene.document.header;
         match &self.active_ucs {
             Some(ucs) => {
@@ -485,7 +487,7 @@ impl DocumentTab {
     /// entered viewport's per-viewport UCS fields, or the document header's
     /// model-space UCS in the Model tab, or the layout UCS. Call after a change.
     pub(super) fn persist_active_ucs(&mut self) {
-        use acadrust::types::Vector3;
+        use codec::types::Vector3;
         if let Some(index) = self.active_block_edit {
             let active_ucs = self.active_ucs.clone();
             if let Some(session) = self.block_edits.get_mut(index) {
@@ -502,7 +504,7 @@ impl DocumentTab {
                     false,
                 ),
             };
-            if let Some(acadrust::EntityType::Viewport(vp)) = self.scene.document.get_entity_mut(h)
+            if let Some(codec::EntityType::Viewport(vp)) = self.scene.document.get_entity_mut(h)
             {
                 vp.ucs_origin = o;
                 vp.ucs_x_axis = x;
@@ -552,7 +554,7 @@ impl DocumentTab {
                 ),
             };
             for object in self.scene.document.objects.values_mut() {
-                let acadrust::objects::ObjectType::Layout(layout) = object else {
+                let codec::objects::ObjectType::Layout(layout) = object else {
                     continue;
                 };
                 if layout.name == self.scene.current_layout {
@@ -629,7 +631,7 @@ impl DocumentTab {
             selected_handle: None,
             visibility_grip: None,
             wireframe: false,
-            render_mode: acadrust::entities::ViewportRenderMode::Wireframe2D,
+            render_mode: codec::entities::ViewportRenderMode::Wireframe2D,
             visual_style: "Wireframe 2D".into(),
             last_cursor_world: glam::DVec3::ZERO,
             last_cursor_screen: iced::Point::ORIGIN,
@@ -642,6 +644,7 @@ impl DocumentTab {
             dyn_active: 0,
             history: HistoryState::default(),
             active_layer: "0".to_string(),
+            graph: Default::default(),
             active_ucs: None,
             sketch_session: None,
             sketch_count: 0,
@@ -815,11 +818,11 @@ pub(super) enum StructureSnapshot {
     /// Compatibility fallback for genuinely broad structural commands.
     Full(CadDocument),
     /// Exact layer-table entries touched by one command.
-    Layers(Vec<TableEntryDelta<acadrust::tables::Layer>>),
+    Layers(Vec<TableEntryDelta<codec::tables::Layer>>),
     /// Exact text-style entries touched by one command.
-    TextStyles(Vec<TableEntryDelta<acadrust::tables::TextStyle>>),
+    TextStyles(Vec<TableEntryDelta<codec::tables::TextStyle>>),
     /// Exact dimension-style entries touched by one command.
-    DimStyles(Vec<TableEntryDelta<acadrust::tables::DimStyle>>),
+    DimStyles(Vec<TableEntryDelta<codec::tables::DimStyle>>),
     /// Exact object-map entries touched by one command. This supports commands
     /// such as groups/dictionaries without retaining every unrelated object.
     Objects(Vec<ObjectEntryDelta>),
@@ -863,8 +866,8 @@ pub(super) struct TableEntryDelta<T> {
 #[derive(Clone)]
 pub(super) struct ObjectEntryDelta {
     pub(super) handle: Handle,
-    pub(super) before: Option<acadrust::objects::ObjectType>,
-    pub(super) after: Option<acadrust::objects::ObjectType>,
+    pub(super) before: Option<codec::objects::ObjectType>,
+    pub(super) after: Option<codec::objects::ObjectType>,
 }
 
 /// One parametric-constraint scope's before/after image within an entity delta.
@@ -890,5 +893,5 @@ pub(super) struct PendingHistorySnapshot {
     pub(super) selected_before: Vec<Handle>,
     pub(super) dirty_before: bool,
     pub(super) structure_before: CadDocument,
-    pub(super) recorder: Arc<acadrust::document::EntityChangeRecorder>,
+    pub(super) recorder: Arc<codec::document::EntityChangeRecorder>,
 }

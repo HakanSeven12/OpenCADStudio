@@ -17,8 +17,8 @@
 
 use crate::app::Message;
 use crate::ui::dock::{DockMsg, PanelId};
-use acadrust::objects::SolidHistoryOperation;
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::objects::SolidHistoryOperation;
+use codec::{CadDocument, EntityType, Handle};
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text, tooltip};
 use iced::{Background, Border, Element, Fill, Length, Theme};
 

@@ -259,7 +259,7 @@ impl OpenCADStudio {
         let structural = handles.iter().any(|handle| {
             matches!(
                 self.tabs[i].scene.document.get_entity(*handle),
-                Some(acadrust::EntityType::Dimension(_))
+                Some(codec::EntityType::Dimension(_))
             )
         });
         let pending = self.begin_undo(i, "STRETCH", handles.len(), !structural);
@@ -281,13 +281,13 @@ impl OpenCADStudio {
 
         // Dimensions whose points moved — their baked *D block is
         // stale afterwards and must be dropped (see #398 / #372).
-        let mut stretched_dims: Vec<acadrust::Handle> = Vec::new();
+        let mut stretched_dims: Vec<codec::Handle> = Vec::new();
         for handle in &handles {
             let before = self.tabs[i].scene.document.get_entity_arc(*handle);
             if let Some(entity) = before.as_deref() {
                 use crate::scene::parametric_constraints::ParametricRef;
                 match entity {
-                    acadrust::EntityType::Line(line) => {
+                    codec::EntityType::Line(line) => {
                         if in_win(line.start.x, line.start.y) {
                             driven_refs.push(ParametricRef::point(*handle, 0));
                         }
@@ -295,7 +295,7 @@ impl OpenCADStudio {
                             driven_refs.push(ParametricRef::point(*handle, 1));
                         }
                     }
-                    acadrust::EntityType::LwPolyline(polyline) => {
+                    codec::EntityType::LwPolyline(polyline) => {
                         if let Some(world) =
                             crate::entities::curve::lwpolyline_world_xy(polyline)
                         {
@@ -309,7 +309,7 @@ impl OpenCADStudio {
                             }
                         }
                     }
-                    acadrust::EntityType::Polyline2D(polyline) => {
+                    codec::EntityType::Polyline2D(polyline) => {
                         for (index, vertex) in polyline.vertices.iter().enumerate() {
                             if in_win(vertex.location.x, vertex.location.y) {
                                 driven_refs.push(ParametricRef::point(
@@ -319,12 +319,12 @@ impl OpenCADStudio {
                             }
                         }
                     }
-                    acadrust::EntityType::Circle(circle)
+                    codec::EntityType::Circle(circle)
                         if in_win(circle.center.x, circle.center.y) =>
                     {
                         driven_refs.push(ParametricRef::center(*handle));
                     }
-                    acadrust::EntityType::Arc(arc)
+                    codec::EntityType::Arc(arc)
                         if in_win(arc.center.x, arc.center.y) =>
                     {
                         driven_refs.push(ParametricRef::center(*handle));
@@ -337,7 +337,7 @@ impl OpenCADStudio {
             };
             let mut stretched = false;
             match entity {
-                acadrust::EntityType::Line(l) => {
+                codec::EntityType::Line(l) => {
                     let s_in = in_win(l.start.x, l.start.y);
                     let e_in = in_win(l.end.x, l.end.y);
                     if s_in {
@@ -353,7 +353,7 @@ impl OpenCADStudio {
                         stretched = true;
                     }
                 }
-                acadrust::EntityType::LwPolyline(p) => {
+                codec::EntityType::LwPolyline(p) => {
                     let Some(mut world) = crate::entities::curve::lwpolyline_world_xy(p)
                     else {
                         continue;
@@ -369,7 +369,7 @@ impl OpenCADStudio {
                         *p = world;
                     }
                 }
-                acadrust::EntityType::Polyline2D(p) => {
+                codec::EntityType::Polyline2D(p) => {
                     for v in &mut p.vertices {
                         if in_win(v.location.x, v.location.y) {
                             v.location.x += dx;
@@ -378,7 +378,7 @@ impl OpenCADStudio {
                         }
                     }
                 }
-                acadrust::EntityType::Polyline(p) => {
+                codec::EntityType::Polyline(p) => {
                     for v in &mut p.vertices {
                         if in_win(v.location.x, v.location.z) {
                             v.location.x += dx;
@@ -387,7 +387,7 @@ impl OpenCADStudio {
                         }
                     }
                 }
-                acadrust::EntityType::Arc(a) => {
+                codec::EntityType::Arc(a) => {
                     if in_win(a.center.x, a.center.y) {
                         a.center.x += dx;
                         a.center.y += dy;
@@ -395,7 +395,7 @@ impl OpenCADStudio {
                         stretched = true;
                     }
                 }
-                acadrust::EntityType::Circle(c) => {
+                codec::EntityType::Circle(c) => {
                     if in_win(c.center.x, c.center.y) {
                         c.center.x += dx;
                         c.center.y += dy;
@@ -403,7 +403,7 @@ impl OpenCADStudio {
                         stretched = true;
                     }
                 }
-                acadrust::EntityType::Ellipse(e) => {
+                codec::EntityType::Ellipse(e) => {
                     if in_win(e.center.x, e.center.y) {
                         e.center.x += dx;
                         e.center.y += dy;
@@ -411,7 +411,7 @@ impl OpenCADStudio {
                         stretched = true;
                     }
                 }
-                acadrust::EntityType::Insert(ins) => {
+                codec::EntityType::Insert(ins) => {
                     if in_win(ins.insert_point.x, ins.insert_point.y) {
                         ins.insert_point.x += dx;
                         ins.insert_point.y += dy;
@@ -419,7 +419,7 @@ impl OpenCADStudio {
                         stretched = true;
                     }
                 }
-                acadrust::EntityType::Text(t) => {
+                codec::EntityType::Text(t) => {
                     if in_win(t.insertion_point.x, t.insertion_point.y) {
                         t.insertion_point.x += dx;
                         t.insertion_point.y += dy;
@@ -427,7 +427,7 @@ impl OpenCADStudio {
                         stretched = true;
                     }
                 }
-                acadrust::EntityType::MText(t) => {
+                codec::EntityType::MText(t) => {
                     if in_win(t.insertion_point.x, t.insertion_point.y) {
                         t.insertion_point.x += dx;
                         t.insertion_point.y += dy;
@@ -435,18 +435,18 @@ impl OpenCADStudio {
                         stretched = true;
                     }
                 }
-                acadrust::EntityType::Viewport(vp) => {
+                codec::EntityType::Viewport(vp) => {
                     stretched = windows.iter().any(|(win_min, win_max)| {
                         crate::entities::viewport::stretch(vp, *win_min, *win_max, delta)
                     });
                 }
-                acadrust::EntityType::Dimension(dim) => {
-                    use acadrust::entities::Dimension;
+                codec::EntityType::Dimension(dim) => {
+                    use codec::entities::Dimension;
                     // Move every definition point that falls inside the
                     // window — the same points the grips expose — then
                     // refresh the stored measurement so the value tracks
                     // the stretched geometry.
-                    let mv = |p: &mut acadrust::types::Vector3| {
+                    let mv = |p: &mut codec::types::Vector3| {
                         if in_win(p.x, p.y) {
                             p.x += dx;
                             p.y += dy;

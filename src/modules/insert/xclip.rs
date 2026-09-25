@@ -15,9 +15,9 @@
 // CLIP asks for one object: a block reference continues as XCLIP, a PDF
 // underlay as PDFCLIP, anything else is "*Invalid selection*".
 
-use acadrust::entities::UnderlayType;
-use acadrust::types::Handle;
-use acadrust::EntityType;
+use codec::entities::UnderlayType;
+use codec::types::Handle;
+use codec::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};

@@ -9,8 +9,8 @@ struct TextOrient {
     x_scale: f64,
 }
 
-fn inverse_affine(transform: &acadrust::types::Transform) -> Option<acadrust::types::Transform> {
-    use acadrust::types::{Matrix3, Matrix4, Transform, Vector3};
+fn inverse_affine(transform: &codec::types::Transform) -> Option<codec::types::Transform> {
+    use codec::types::{Matrix3, Matrix4, Transform, Vector3};
     let matrix = &transform.matrix.m;
     let linear = Matrix3::from_rows(
         [matrix[0][0], matrix[0][1], matrix[0][2]],
@@ -74,7 +74,7 @@ fn restore_text_orient(e: &mut EntityType, o: &TextOrient) {
         EntityType::Text(t) => {
             t.rotation = o.rotation;
             t.oblique_angle = o.oblique;
-            use acadrust::entities::TextHorizontalAlignment as HA;
+            use codec::entities::TextHorizontalAlignment as HA;
             t.horizontal_alignment = match t.horizontal_alignment {
                 HA::Left => HA::Right,
                 HA::Right => HA::Left,
@@ -421,7 +421,7 @@ impl Scene {
     pub fn reframe_block_definition(
         &mut self,
         block_record: Handle,
-        local_from_old: &acadrust::types::Transform,
+        local_from_old: &codec::types::Transform,
     ) -> usize {
         let Some(record) = self
             .document
@@ -439,8 +439,8 @@ impl Scene {
         let owned: HashSet<Handle> = handles.iter().copied().collect();
         let transform = EntityTransform::Affine(*local_from_old);
         let matrix = &local_from_old.matrix.m;
-        let dependent_transform = EntityTransform::Affine(acadrust::types::Transform::from_matrix(
-            acadrust::types::Matrix4 {
+        let dependent_transform = EntityTransform::Affine(codec::types::Transform::from_matrix(
+            codec::types::Matrix4 {
                 m: [
                     [matrix[0][0], matrix[0][1], matrix[0][2], 0.0],
                     [matrix[1][0], matrix[1][1], matrix[1][2], 0.0],
@@ -481,7 +481,7 @@ impl Scene {
         // ATTRIBs live inline on each INSERT in that reference's owner space.
         // Conjugate the block-local reframe through the INSERT transform:
         // owner' = M · local_from_old · M⁻¹ · owner.
-        let references: Vec<(Handle, acadrust::types::Transform)> = self
+        let references: Vec<(Handle, codec::types::Transform)> = self
             .document
             .entities()
             .filter_map(|entity| match entity {
@@ -494,7 +494,7 @@ impl Scene {
                     let inverse = inverse_affine(&insertion)?;
                     Some((
                         reference.common.handle,
-                        acadrust::types::Transform::from_matrix(
+                        codec::types::Transform::from_matrix(
                             insertion.matrix * local_from_old.matrix * inverse.matrix,
                         ),
                     ))
@@ -509,7 +509,7 @@ impl Scene {
             }
             if let Some(EntityType::Insert(reference)) = self.document.get_entity_mut(handle) {
                 for attribute in &mut reference.attributes {
-                    acadrust::Entity::apply_transform(attribute, &attribute_transform);
+                    codec::Entity::apply_transform(attribute, &attribute_transform);
                 }
                 changed.push(handle);
             }
@@ -531,7 +531,7 @@ impl Scene {
     /// the saved DWG (file won't reopen in other CAD apps). Vertices that don't
     /// store a handle (LwPolyline / heavy 2D polyline) get one from the writer,
     /// so they need no fix-up here. (#129)
-    pub(super) fn reset_clone_subhandles(doc: &mut acadrust::CadDocument, entity: &mut EntityType) {
+    pub(super) fn reset_clone_subhandles(doc: &mut codec::CadDocument, entity: &mut EntityType) {
         match entity {
             EntityType::Insert(ins) => {
                 for att in ins.attributes.iter_mut() {
@@ -613,12 +613,12 @@ impl Scene {
         let br_handle = Handle::new(next);
         let block_handle = Handle::new(next + 1);
         let end_handle = Handle::new(next + 2);
-        let mut br = acadrust::tables::BlockRecord::new(&new_name);
+        let mut br = codec::tables::BlockRecord::new(&new_name);
         br.handle = br_handle;
         br.block_entity_handle = block_handle;
         br.block_end_handle = end_handle;
         self.document.block_records.add(br).ok()?;
-        let mut block = Block::new(&new_name, acadrust::types::Vector3::ZERO);
+        let mut block = Block::new(&new_name, codec::types::Vector3::ZERO);
         block.common.handle = block_handle;
         block.common.owner_handle = br_handle;
         self.document.add_entity(EntityType::Block(block)).ok()?;
@@ -829,7 +829,7 @@ impl Scene {
     pub(crate) fn solid_history_objects(
         &self,
         handle: Handle,
-    ) -> Vec<(Handle, acadrust::objects::ObjectType)> {
+    ) -> Vec<(Handle, codec::objects::ObjectType)> {
         let Some(graph) = self.document.solid_history_graph(handle) else {
             return Vec::new();
         };
@@ -857,7 +857,7 @@ impl Scene {
     pub fn create_solid_history(
         &mut self,
         handle: Handle,
-        operation: acadrust::objects::SolidHistoryOperation,
+        operation: codec::objects::SolidHistoryOperation,
     ) -> bool {
         let Some(graph) = self.document.create_solid_history(handle, operation) else {
             return false;
@@ -873,7 +873,7 @@ impl Scene {
     pub fn append_solid_history(
         &mut self,
         handle: Handle,
-        operation: acadrust::objects::SolidHistoryOperation,
+        operation: codec::objects::SolidHistoryOperation,
     ) -> bool {
         let previous = self
             .document
@@ -906,7 +906,7 @@ impl Scene {
         let Some(reference) = reference else {
             return;
         };
-        let point = acadrust::types::Vector3::new(reference.x, reference.y, reference.z);
+        let point = codec::types::Vector3::new(reference.x, reference.y, reference.z);
         match self.document.get_entity_mut(handle) {
             Some(EntityType::Solid3D(entity)) => entity.point_of_reference = point,
             Some(EntityType::Surface(entity)) => entity.point_of_reference = point,
@@ -939,16 +939,16 @@ impl Scene {
     fn rebuild_history_body(
         &self,
         handle: Handle,
-        operation: &acadrust::objects::SolidHistoryOperation,
-    ) -> Option<cadkernel::brep::Body> {
-        use acadrust::objects::SolidHistoryOperation;
+        operation: &codec::objects::SolidHistoryOperation,
+    ) -> Option<kernel::brep::Body> {
+        use codec::objects::SolidHistoryOperation;
 
         match (self.document.get_entity(handle)?, operation) {
             (EntityType::Surface(_), SolidHistoryOperation::Extrusion(value)) => {
-                cadkernel::acis::rebuild_extrusion_with_mode(value, true).ok()
+                kernel::acis::rebuild_extrusion_with_mode(value, true).ok()
             }
             (EntityType::Surface(_), SolidHistoryOperation::Loft(_)) => {
-                cadkernel::acis::rebuild_body(operation).ok()
+                kernel::acis::rebuild_body(operation).ok()
             }
             (EntityType::Solid3D(_), _) => {
                 let mut operations = self.document.solid_history_operations(handle)?;
@@ -970,7 +970,7 @@ impl Scene {
                     })
                 })?;
                 *target = operation.clone();
-                cadkernel::acis::rebuild_history(&operations).ok()
+                kernel::acis::rebuild_history(&operations).ok()
             }
             _ => None,
         }
@@ -979,9 +979,9 @@ impl Scene {
     fn history_surface_data(
         &self,
         handle: Handle,
-        operation: &acadrust::objects::SolidHistoryOperation,
-    ) -> Option<Option<acadrust::entities::SurfaceData>> {
-        use acadrust::objects::SolidHistoryOperation;
+        operation: &codec::objects::SolidHistoryOperation,
+    ) -> Option<Option<codec::entities::SurfaceData>> {
+        use codec::objects::SolidHistoryOperation;
 
         match (self.document.get_entity(handle)?, operation) {
             (EntityType::Surface(_), SolidHistoryOperation::Extrusion(value)) => {
@@ -1003,7 +1003,7 @@ impl Scene {
     pub fn rebuild_solid_history(
         &mut self,
         handle: Handle,
-        operation: acadrust::objects::SolidHistoryOperation,
+        operation: codec::objects::SolidHistoryOperation,
     ) -> bool {
         let Some(body) = self.rebuild_history_body(handle, &operation) else {
             return false;
@@ -1019,8 +1019,8 @@ impl Scene {
         };
         if matches!(
             &operation,
-            acadrust::objects::SolidHistoryOperation::Loft(_)
-                | acadrust::objects::SolidHistoryOperation::Extrusion(_)
+            codec::objects::SolidHistoryOperation::Loft(_)
+                | codec::objects::SolidHistoryOperation::Extrusion(_)
         ) && !display.0.complete
         {
             return false;
@@ -1037,10 +1037,10 @@ impl Scene {
             Some(EntityType::Solid3D(entity)) => entity.set_sat_document(&document),
             Some(EntityType::Surface(entity)) => {
                 entity.acis_data =
-                    acadrust::entities::AcisData::from_sat(&document.to_sat_string());
+                    codec::entities::AcisData::from_sat(&document.to_sat_string());
                 if let Some(data) = surface_data {
-                    if matches!(&data, acadrust::entities::SurfaceData::Extruded { .. }) {
-                        entity.kind = acadrust::entities::SurfaceKind::Extruded;
+                    if matches!(&data, codec::entities::SurfaceData::Extruded { .. }) {
+                        entity.kind = codec::entities::SurfaceKind::Extruded;
                     }
                     entity.surface_data = data;
                 }
@@ -1070,8 +1070,8 @@ impl Scene {
         };
         if matches!(
             &operation,
-            acadrust::objects::SolidHistoryOperation::Loft(_)
-                | acadrust::objects::SolidHistoryOperation::Extrusion(_)
+            codec::objects::SolidHistoryOperation::Loft(_)
+                | codec::objects::SolidHistoryOperation::Extrusion(_)
         ) && !display.0.complete
         {
             return false;
@@ -1080,10 +1080,10 @@ impl Scene {
             Some(EntityType::Solid3D(entity)) => entity.set_sat_document(&document),
             Some(EntityType::Surface(entity)) => {
                 entity.acis_data =
-                    acadrust::entities::AcisData::from_sat(&document.to_sat_string());
+                    codec::entities::AcisData::from_sat(&document.to_sat_string());
                 if let Some(data) = surface_data {
-                    if matches!(&data, acadrust::entities::SurfaceData::Extruded { .. }) {
-                        entity.kind = acadrust::entities::SurfaceKind::Extruded;
+                    if matches!(&data, codec::entities::SurfaceData::Extruded { .. }) {
+                        entity.kind = codec::entities::SurfaceKind::Extruded;
                     }
                     entity.surface_data = data;
                 }
@@ -1098,7 +1098,7 @@ impl Scene {
     fn preview_solid_history(
         &mut self,
         handle: Handle,
-        operation: acadrust::objects::SolidHistoryOperation,
+        operation: codec::objects::SolidHistoryOperation,
     ) -> bool {
         let Some(body) = self.rebuild_history_body(handle, &operation) else {
             return false;
@@ -1142,7 +1142,7 @@ impl Scene {
         if let EntityTransform::Translate(delta) = transform {
             let surface_data = match (&operation, self.document.get_entity(handle)) {
                 (
-                    acadrust::objects::SolidHistoryOperation::Extrusion(value),
+                    codec::objects::SolidHistoryOperation::Extrusion(value),
                     Some(EntityType::Surface(_)),
                 ) => {
                     let Some(data) =
@@ -1254,7 +1254,7 @@ impl Scene {
             return false;
         };
         if grip_id == crate::scene::model::solid_history::GRIP_FILLET_RADIUS {
-            let acadrust::objects::SolidHistoryOperation::Fillet(value) = &mut operation else {
+            let codec::objects::SolidHistoryOperation::Fillet(value) = &mut operation else {
                 return false;
             };
             let Some(radius) = value.radii.first().copied() else {
@@ -1287,7 +1287,7 @@ impl Scene {
                 | crate::scene::model::solid_history::GRIP_CHAMFER_DISTANCE2
         ) {
             let definitions = {
-                let acadrust::objects::SolidHistoryOperation::Chamfer(value) = &operation else {
+                let codec::objects::SolidHistoryOperation::Chamfer(value) = &operation else {
                     return false;
                 };
                 crate::scene::model::solid_history::chamfer_distance_grips(
@@ -1306,7 +1306,7 @@ impl Scene {
                 GripApply::Absolute(world) => (world - definition.world).dot(axis),
                 GripApply::Translate(delta) => delta.dot(axis),
             };
-            let acadrust::objects::SolidHistoryOperation::Chamfer(value) = &mut operation else {
+            let codec::objects::SolidHistoryOperation::Chamfer(value) = &mut operation else {
                 return false;
             };
             let distance = if grip_id == crate::scene::model::solid_history::GRIP_CHAMFER_DISTANCE1
@@ -1391,9 +1391,9 @@ impl Scene {
         if delta.iter().all(|value| value.abs() <= f64::EPSILON) {
             return;
         }
-        let placement = cadkernel::brep::Placement::at(delta);
+        let placement = kernel::brep::Placement::at(delta);
         if let Some(body) = self.solid_models.get(&handle).cloned() {
-            if let Some(moved) = cadkernel::brep::transform(&body, &placement) {
+            if let Some(moved) = kernel::brep::transform(&body, &placement) {
                 self.solid_models.insert(handle, moved);
             }
         }
@@ -1429,7 +1429,7 @@ impl Scene {
         }
         for generator in &mut set.curved_gens {
             if let Some(source) =
-                cadkernel::brep::mesh::transform_silhouette(&generator.source, &placement)
+                kernel::brep::mesh::transform_silhouette(&generator.source, &placement)
             {
                 generator.source = source;
             }

@@ -6,7 +6,7 @@
 use crate::app::Message;
 use crate::ui::properties::acad_color_display;
 use crate::ui::ROW_H;
-use acadrust::types::Color as AcadColor;
+use codec::types::Color as AcadColor;
 use iced::widget::{button, column, container, row, text};
 use iced::{Background, Border, Color, Element, Length, Theme};
 use crate::t;
@@ -47,7 +47,7 @@ pub fn nearest_aci(r: u8, g: u8, b: u8) -> u8 {
     let mut best_distance = u32::MAX;
 
     for index in 1..=255 {
-        let Some((ar, ag, ab)) = acadrust::types::aci_table::aci_to_rgb(index) else {
+        let Some((ar, ag, ab)) = codec::types::aci_table::aci_to_rgb(index) else {
             continue;
         };
         let dr = i32::from(r) - i32::from(ar);
@@ -83,7 +83,7 @@ pub fn color_display_name(c: AcadColor) -> String {
         match c {
             AcadColor::Index(i) => {
                 let (r, g, b) =
-                    acadrust::types::aci_table::aci_to_rgb(i).unwrap_or((128, 128, 128));
+                    codec::types::aci_table::aci_to_rgb(i).unwrap_or((128, 128, 128));
                 format!("{r},{g},{b}")
             }
             AcadColor::Rgb { r, g, b } => format!("{r},{g},{b}"),
@@ -462,7 +462,7 @@ pub fn index_color_page<'a>(
     let selected_text = match current {
         AcadColor::Index(i) => {
             let (r, g, b) =
-                acadrust::types::aci_table::aci_to_rgb(i).unwrap_or((128, 128, 128));
+                codec::types::aci_table::aci_to_rgb(i).unwrap_or((128, 128, 128));
             format!("ACI {i}    RGB {r}, {g}, {b}")
         }
         AcadColor::Rgb { r, g, b } => {

@@ -55,7 +55,7 @@ impl OpenCADStudio {
     pub(super) fn handle_suspend_for_text_input(
         &mut self,
         pos: glam::DVec3,
-        entity: acadrust::entities::Text,
+        entity: codec::entities::Text,
     ) {
         let i = self.active_tab;
         self.tabs[i].suspended_cmd = self.tabs[i].active_cmd.take();
@@ -126,7 +126,7 @@ impl OpenCADStudio {
             !self.tabs[i].scene.is_layer_locked(*handle)
                 && matches!(
                     self.tabs[i].scene.document.get_entity(*handle),
-                    Some(acadrust::EntityType::Dimension(_))
+                    Some(codec::EntityType::Dimension(_))
                 )
         });
         if handles.is_empty() {
@@ -135,15 +135,15 @@ impl OpenCADStudio {
         } else {
             self.push_undo_snapshot(i, "DIMEDIT");
             for handle in &handles {
-                if let Some(acadrust::EntityType::Dimension(dimension)) =
+                if let Some(codec::EntityType::Dimension(dimension)) =
                     self.tabs[i].scene.document.get_entity_mut(*handle)
                 {
                     use crate::command::DimensionEditOperation as Operation;
                     match &operation {
                         Operation::Home => {
                             let base = dimension.base_mut();
-                            base.text_middle_point = acadrust::types::Vector3::ZERO;
-                            base.insertion_point = acadrust::types::Vector3::ZERO;
+                            base.text_middle_point = codec::types::Vector3::ZERO;
+                            base.insertion_point = codec::types::Vector3::ZERO;
                             base.text_user_positioned = false;
                             base.text_rotation = 0.0;
                         }
@@ -156,10 +156,10 @@ impl OpenCADStudio {
                             dimension.base_mut().text_rotation = degrees.to_radians();
                         }
                         Operation::Oblique(degrees) => match dimension {
-                            acadrust::entities::Dimension::Linear(value) => {
+                            codec::entities::Dimension::Linear(value) => {
                                 value.ext_line_rotation = degrees.to_radians();
                             }
-                            acadrust::entities::Dimension::Aligned(value) => {
+                            codec::entities::Dimension::Aligned(value) => {
                                 value.ext_line_rotation = degrees.to_radians();
                             }
                             _ => {}
@@ -196,23 +196,23 @@ impl OpenCADStudio {
         let mut is_dim = false;
         if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
             match entity {
-                acadrust::EntityType::Text(t) => {
+                codec::EntityType::Text(t) => {
                     t.value = new_text;
                     updated = true;
                 }
-                acadrust::EntityType::MText(t) => {
+                codec::EntityType::MText(t) => {
                     t.value = new_text;
                     updated = true;
                 }
-                acadrust::EntityType::AttributeDefinition(a) => {
+                codec::EntityType::AttributeDefinition(a) => {
                     a.default_value = new_text;
                     updated = true;
                 }
-                acadrust::EntityType::AttributeEntity(a) => {
+                codec::EntityType::AttributeEntity(a) => {
                     a.set_value(new_text);
                     updated = true;
                 }
-                acadrust::EntityType::Dimension(d) => {
+                codec::EntityType::Dimension(d) => {
                     // Empty string resets to auto-measured value; otherwise set override.
                     let base = d.base_mut();
                     base.text = new_text;

@@ -1,4 +1,4 @@
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult};
@@ -198,8 +198,8 @@ inventory::submit!(crate::command::CommandRegistration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::Line;
-    use acadrust::types::Vector3;
+    use codec::entities::Line;
+    use codec::types::Vector3;
 
     fn line() -> EntityType {
         EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::new(10.0, 0.0, 0.0)))

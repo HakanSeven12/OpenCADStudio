@@ -12,7 +12,7 @@
 
 use std::f64::consts::TAU;
 
-use acadrust::objects::ObjectType;
+use codec::objects::ObjectType;
 
 use crate::scene::model::wire_model::WireModel;
 use crate::scene::Scene;

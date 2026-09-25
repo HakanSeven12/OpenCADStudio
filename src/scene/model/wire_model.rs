@@ -443,7 +443,7 @@ pub struct WireModel {
     /// Empty for tessellated curves (Circle, Arc, Ellipse) which use snap_pts instead.
     pub key_vertices: Vec<[f64; 3]>,
     /// World-space 2-D bounding box [min_x, min_y, max_x, max_y].
-    /// Set from acadrust `bounding_box()` in `tessellate_entity()`.
+    /// Set from opencadcodec `bounding_box()` in `tessellate_entity()`.
     /// Preview / interim wires use `UNBOUNDED_AABB` so they are never pre-rejected
     /// by the snap world-space filter.
     pub aabb: [f32; 4],

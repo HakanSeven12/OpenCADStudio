@@ -1,9 +1,9 @@
 // MVIEW — interactive paper-space viewport creation.
 
-use acadrust::entities::{LwPolyline, LwVertex, Viewport};
-use acadrust::tables::View;
-use acadrust::types::{Vector2, Vector3};
-use acadrust::{EntityType, Handle};
+use codec::entities::{LwPolyline, LwVertex, Viewport};
+use codec::tables::View;
+use codec::types::{Vector2, Vector3};
+use codec::{EntityType, Handle};
 use crate::t;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};

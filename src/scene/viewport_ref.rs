@@ -1,6 +1,6 @@
 //! Coordinates and feature identity shared by viewport acquisition and dimensions.
 
-use acadrust::types::Handle;
+use codec::types::Handle;
 use glam::{DMat3, DVec2, DVec3};
 
 use crate::command::DimensionAssociationSource;
@@ -196,8 +196,8 @@ impl MeasurementScale {
     /// scale. Standard DIMLFAC still carries the full factor for other readers.
     pub const APP_ID: &'static str = "OCS_VIEWPORT_MEASUREMENT";
 
-    pub fn read(data: &acadrust::xdata::ExtendedData) -> Option<Self> {
-        use acadrust::xdata::XDataValue;
+    pub fn read(data: &codec::xdata::ExtendedData) -> Option<Self> {
+        use codec::xdata::XDataValue;
         let record = data.get_record(Self::APP_ID)?;
         let [XDataValue::Integer16(1), XDataValue::Real(user), XDataValue::Real(compensation)] =
             record.values.as_slice()
@@ -213,8 +213,8 @@ impl MeasurementScale {
         })
     }
 
-    pub fn write_to_entity(self, entity: &mut acadrust::EntityType) {
-        use acadrust::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
+    pub fn write_to_entity(self, entity: &mut codec::EntityType) {
+        use codec::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
         crate::entities::dim_override::set_on_entity(
             entity,
             crate::entities::dim_override::DIMLFAC,

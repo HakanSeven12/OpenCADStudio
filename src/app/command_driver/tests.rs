@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod command_replacement_tests {
     use super::super::*;
-    use acadrust::entities::{Circle, Line};
-    use acadrust::types::Vector3;
+    use codec::entities::{Circle, Line};
+    use codec::types::Vector3;
 
     #[test]
     fn one_to_one_edits_keep_identity_but_type_changes_do_not() {
@@ -11,7 +11,7 @@ mod command_replacement_tests {
         let tab = app.active_tab;
         let handle = app.tabs[tab]
             .scene
-            .add_entity(acadrust::EntityType::Line(Line::from_points(
+            .add_entity(codec::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(1.0, 0.0, 0.0),
             )));
@@ -26,7 +26,7 @@ mod command_replacement_tests {
         let kept = app.replace_command_entity(
             tab,
             handle,
-            vec![acadrust::EntityType::Line(Line::from_points(
+            vec![codec::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(3.0, 0.0, 0.0),
             ))],
@@ -34,12 +34,12 @@ mod command_replacement_tests {
         assert_eq!(kept, vec![handle]);
         let edited = app.tabs[tab].scene.document.get_entity(handle).unwrap();
         assert_eq!(edited.common().owner_handle, owner);
-        assert!(matches!(edited, acadrust::EntityType::Line(line) if line.end.x == 3.0));
+        assert!(matches!(edited, codec::EntityType::Line(line) if line.end.x == 3.0));
 
         let allocated = app.replace_command_entity(
             tab,
             handle,
-            vec![acadrust::EntityType::Circle(Circle::from_coords(
+            vec![codec::EntityType::Circle(Circle::from_coords(
                 0.0, 0.0, 0.0, 2.0,
             ))],
         );
@@ -55,7 +55,7 @@ mod command_replacement_tests {
         let tab = app.active_tab;
         let handle = app.tabs[tab]
             .scene
-            .add_entity(acadrust::EntityType::Line(Line::from_points(
+            .add_entity(codec::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(1.0, 0.0, 0.0),
             )));
@@ -69,7 +69,7 @@ mod command_replacement_tests {
 
         let _ = app.apply_cmd_result(CmdResult::UpdateLiveEntity {
             handle,
-            entity: acadrust::EntityType::Line(Line::from_points(
+            entity: codec::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(4.0, 0.0, 0.0),
             )),
@@ -82,7 +82,7 @@ mod command_replacement_tests {
         assert_eq!(updated.common().layer, expected.layer);
         assert_eq!(updated.common().invisible, expected.invisible);
         assert_eq!(updated.common().linetype_scale, expected.linetype_scale);
-        assert!(matches!(updated, acadrust::EntityType::Line(line) if line.end.x == 4.0));
+        assert!(matches!(updated, codec::EntityType::Line(line) if line.end.x == 4.0));
     }
 }
 
@@ -94,17 +94,17 @@ mod parametric_constraint_undo_tests {
     fn add_line(app: &mut OpenCADStudio, x1: f64, y1: f64, x2: f64, y2: f64) -> Handle {
         app.tabs[app.active_tab]
             .scene
-            .add_entity(acadrust::EntityType::Line(
-                acadrust::entities::Line::from_points(
-                    acadrust::types::Vector3::new(x1, y1, 0.0),
-                    acadrust::types::Vector3::new(x2, y2, 0.0),
+            .add_entity(codec::EntityType::Line(
+                codec::entities::Line::from_points(
+                    codec::types::Vector3::new(x1, y1, 0.0),
+                    codec::types::Vector3::new(x2, y2, 0.0),
                 ),
             ))
     }
 
     fn line_angle_deg(app: &OpenCADStudio, handle: Handle) -> f64 {
         match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(acadrust::EntityType::Line(l)) => (l.end.y - l.start.y)
+            Some(codec::EntityType::Line(l)) => (l.end.y - l.start.y)
                 .atan2(l.end.x - l.start.x)
                 .to_degrees(),
             other => panic!("expected a Line, got {other:?}"),
@@ -188,14 +188,14 @@ mod parametric_constraint_undo_tests {
         });
 
         let line = |handle| match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(acadrust::EntityType::Line(line)) => line.clone(),
+            Some(codec::EntityType::Line(line)) => line.clone(),
             other => panic!("expected a Line, got {other:?}"),
         };
         let fixed = line(first);
         let moving = line(second);
-        assert_eq!(fixed.start, acadrust::types::Vector3::new(0.0, 0.0, 0.0));
-        assert_eq!(fixed.end, acadrust::types::Vector3::new(10.0, 0.0, 0.0));
-        assert!((moving.start - acadrust::types::Vector3::new(20.0, 0.0, 0.0)).length() < 1.0e-9);
+        assert_eq!(fixed.start, codec::types::Vector3::new(0.0, 0.0, 0.0));
+        assert_eq!(fixed.end, codec::types::Vector3::new(10.0, 0.0, 0.0));
+        assert!((moving.start - codec::types::Vector3::new(20.0, 0.0, 0.0)).length() < 1.0e-9);
         assert!((moving.length() - 10.0).abs() < 1.0e-7);
         assert!(
             (fixed.end - fixed.start)
@@ -216,10 +216,10 @@ mod parametric_constraint_undo_tests {
             .document
             .get_entity(handle)
         {
-            Some(acadrust::EntityType::Line(line)) => (line.start, line.end, line.length()),
+            Some(codec::EntityType::Line(line)) => (line.start, line.end, line.length()),
             other => panic!("expected a Line, got {other:?}"),
         };
-        let direction = acadrust::types::Vector3::new(3.0, 4.0, 0.0).normalize();
+        let direction = codec::types::Vector3::new(3.0, 4.0, 0.0).normalize();
 
         let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
             kind: crate::scene::parametric_constraints::ConstraintKind::Horizontal,
@@ -231,7 +231,7 @@ mod parametric_constraint_undo_tests {
         });
 
         let line = match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(acadrust::EntityType::Line(line)) => line,
+            Some(codec::EntityType::Line(line)) => line,
             other => panic!("expected a Line, got {other:?}"),
         };
         let solved = (line.end - line.start).normalize();
@@ -246,7 +246,7 @@ mod parametric_constraint_undo_tests {
 
         app.undo_steps(1);
         let line = match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(acadrust::EntityType::Line(line)) => line,
+            Some(codec::EntityType::Line(line)) => line,
             other => panic!("expected a Line after undo, got {other:?}"),
         };
         assert_eq!((line.start, line.end), (original_start, original_end));
@@ -261,7 +261,7 @@ mod parametric_constraint_undo_tests {
 
         app.redo_steps(1);
         let line = match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(acadrust::EntityType::Line(line)) => line,
+            Some(codec::EntityType::Line(line)) => line,
             other => panic!("expected a Line after redo, got {other:?}"),
         };
         assert!((line.end - line.start).normalize().cross(&direction).length() < 1.0e-7);
@@ -285,15 +285,15 @@ mod parametric_constraint_undo_tests {
                 pick(first, glam::DVec3::ZERO),
                 pick(second, glam::DVec3::new(8.0, 3.0, 0.0)),
             ),
-            direction: acadrust::types::Vector3::UNIT_X,
+            direction: codec::types::Vector3::UNIT_X,
             label: "Horizontal constraint",
         });
 
         let line = |handle| match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(acadrust::EntityType::Line(line)) => line,
+            Some(codec::EntityType::Line(line)) => line,
             other => panic!("expected a Line, got {other:?}"),
         };
-        assert_eq!(line(first).start, acadrust::types::Vector3::ZERO);
+        assert_eq!(line(first).start, codec::types::Vector3::ZERO);
         assert!(line(second).start.y.abs() < 1.0e-8);
     }
 
@@ -301,28 +301,28 @@ mod parametric_constraint_undo_tests {
     fn horizontal_minor_axis_rotates_an_ellipse_around_its_center() {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
-        let mut ellipse = acadrust::entities::Ellipse::default();
-        ellipse.center = acadrust::types::Vector3::new(3.0, 7.0, 0.0);
-        ellipse.major_axis = acadrust::types::Vector3::new(3.0, 4.0, 0.0);
+        let mut ellipse = codec::entities::Ellipse::default();
+        ellipse.center = codec::types::Vector3::new(3.0, 7.0, 0.0);
+        ellipse.major_axis = codec::types::Vector3::new(3.0, 4.0, 0.0);
         ellipse.minor_axis_ratio = 0.4;
         let handle = app.tabs[app.active_tab]
             .scene
-            .add_entity(acadrust::EntityType::Ellipse(ellipse));
+            .add_entity(codec::EntityType::Ellipse(ellipse));
 
         let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
             kind: crate::scene::parametric_constraints::ConstraintKind::Horizontal,
             selection: crate::command::HorizontalConstraintSelection::Reference(
                 ParametricRef::ellipse_minor_axis(handle),
             ),
-            direction: acadrust::types::Vector3::UNIT_X,
+            direction: codec::types::Vector3::UNIT_X,
             label: "Horizontal constraint",
         });
 
         let ellipse = match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(acadrust::EntityType::Ellipse(ellipse)) => ellipse,
+            Some(codec::EntityType::Ellipse(ellipse)) => ellipse,
             other => panic!("expected an Ellipse, got {other:?}"),
         };
-        assert!((ellipse.center - acadrust::types::Vector3::new(3.0, 7.0, 0.0)).length() < 1.0e-9);
+        assert!((ellipse.center - codec::types::Vector3::new(3.0, 7.0, 0.0)).length() < 1.0e-9);
         assert!(ellipse.major_axis.x.abs() < 1.0e-7);
         assert!((ellipse.major_axis.length() - 5.0).abs() < 1.0e-7);
         assert!((ellipse.minor_axis_ratio - 0.4).abs() < 1.0e-9);
@@ -335,9 +335,9 @@ mod parametric_constraint_undo_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let _existing = add_line(&mut app, 0.0, 0.0, 5.0, 0.0);
 
-        let new_line = acadrust::EntityType::Line(acadrust::entities::Line::from_points(
-            acadrust::types::Vector3::new(5.0, 0.0, 0.0), // exactly on `existing`'s end point
-            acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+        let new_line = codec::EntityType::Line(codec::entities::Line::from_points(
+            codec::types::Vector3::new(5.0, 0.0, 0.0), // exactly on `existing`'s end point
+            codec::types::Vector3::new(10.0, 0.0, 0.0),
         ));
         app.tabs[app.active_tab].active_cmd = Some(Box::new(
             crate::modules::draw::draw::line::LineCommand::new(),
@@ -489,7 +489,7 @@ mod parametric_constraint_undo_tests {
             Ok(8.0)
         );
         let (start, end) = match app.tabs[app.active_tab].scene.document.get_entity(line) {
-            Some(acadrust::EntityType::Line(l)) => (l.start, l.end),
+            Some(codec::EntityType::Line(l)) => (l.start, l.end),
             other => panic!("expected a Line, got {other:?}"),
         };
         let len = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
@@ -502,7 +502,7 @@ mod parametric_constraint_undo_tests {
         app.named_parameter_editor_rows[0].formula = "3".to_string();
         app.apply_named_parameter_editor_rows();
         let (start, end) = match app.tabs[app.active_tab].scene.document.get_entity(line) {
-            Some(acadrust::EntityType::Line(l)) => (l.start, l.end),
+            Some(codec::EntityType::Line(l)) => (l.start, l.end),
             other => panic!("expected a Line, got {other:?}"),
         };
         let len = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
@@ -520,7 +520,7 @@ mod parametric_constraint_undo_tests {
             Ok(8.0)
         );
         let length_after_undo = match app.tabs[app.active_tab].scene.document.get_entity(line) {
-            Some(acadrust::EntityType::Line(line)) => line.length(),
+            Some(codec::EntityType::Line(line)) => line.length(),
             other => panic!("expected a Line, got {other:?}"),
         };
         assert!((length_after_undo - 8.0).abs() < 1e-6);
@@ -650,7 +650,7 @@ mod parametric_constraint_undo_tests {
             Ok(8.0)
         );
         let (start, end) = match app.tabs[app.active_tab].scene.document.get_entity(line) {
-            Some(acadrust::EntityType::Line(l)) => (l.start, l.end),
+            Some(codec::EntityType::Line(l)) => (l.start, l.end),
             other => panic!("expected a Line, got {other:?}"),
         };
         let len = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
@@ -822,18 +822,18 @@ mod parametric_constraint_undo_tests {
             entities.contains(&a) && entities.contains(&b),
             "the constraint should reference both lines"
         );
-        let Some(acadrust::EntityType::Line(first)) =
+        let Some(codec::EntityType::Line(first)) =
             app.tabs[app.active_tab].scene.document.get_entity(a)
         else {
             panic!("expected first line");
         };
-        let Some(acadrust::EntityType::Line(second)) =
+        let Some(codec::EntityType::Line(second)) =
             app.tabs[app.active_tab].scene.document.get_entity(b)
         else {
             panic!("expected second line");
         };
         assert!(
-            (first.end - acadrust::types::Vector3::new(5.0, 0.0, 0.0)).length() < 1.0e-7
+            (first.end - codec::types::Vector3::new(5.0, 0.0, 0.0)).length() < 1.0e-7
         );
         assert!((second.start - first.end).length() < 1.0e-7);
         assert!((second.length() - 5.0).abs() < 1.0e-7);
@@ -878,21 +878,21 @@ mod parametric_constraint_undo_tests {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod delobj_tests {
     use super::super::*;
-    use acadrust::types::Vector3;
+    use codec::types::Vector3;
 
     fn sweep_source_presence(value: i16, mode: crate::command::ExtrudeMode) -> (bool, bool) {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let mut circle = acadrust::Circle::new();
+        let mut circle = codec::Circle::new();
         circle.radius = 2.0;
         let profile = app.tabs[i]
             .scene
-            .add_entity(acadrust::EntityType::Circle(circle));
+            .add_entity(codec::EntityType::Circle(circle));
         let path =
             app.tabs[i]
                 .scene
-                .add_entity(acadrust::EntityType::Line(acadrust::Line::from_points(
+                .add_entity(codec::EntityType::Line(codec::Line::from_points(
                     Vector3::new(0.0, 0.0, 0.0),
                     Vector3::new(0.0, 0.0, 5.0),
                 )));
@@ -912,10 +912,10 @@ mod delobj_tests {
             .entities()
             .any(|entity| match mode {
                 crate::command::ExtrudeMode::Solid => {
-                    matches!(entity, acadrust::EntityType::Solid3D(_))
+                    matches!(entity, codec::EntityType::Solid3D(_))
                 }
                 crate::command::ExtrudeMode::Surface => {
-                    matches!(entity, acadrust::EntityType::Surface(_))
+                    matches!(entity, codec::EntityType::Surface(_))
                 }
             });
         assert!(created, "SWEEP must produce the requested result");
@@ -948,15 +948,15 @@ mod delobj_tests {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod thicken_tests {
     use super::super::*;
-    use acadrust::entities::{Surface, SurfaceKind};
-    use cadkernel::geom2d::{Circle, Curve, NurbsCurve};
-    use cadkernel::space::{Parameterization, Plane};
+    use codec::entities::{Surface, SurfaceKind};
+    use kernel::geom2d::{Circle, Curve, NurbsCurve};
+    use kernel::space::{Parameterization, Plane};
 
     #[test]
     fn thicken_preserves_sources_and_round_trips_results_with_one_undo() {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
-        let body = cadkernel::brep::planar_region(
+        let body = kernel::brep::planar_region(
             Plane::XY,
             &[vec![Curve::Circle(Circle {
                 centre: [0.0; 2],
@@ -965,14 +965,14 @@ mod thicken_tests {
         )
         .unwrap();
         let source = app.add_surface_model(
-            acadrust::EntityType::Surface(Surface::new(SurfaceKind::Plane)),
+            codec::EntityType::Surface(Surface::new(SurfaceKind::Plane)),
             body,
         );
         assert!(!source.is_null());
         let i = app.active_tab;
         let invalid = app.tabs[i]
             .scene
-            .add_entity(acadrust::EntityType::Surface(Surface::new(
+            .add_entity(codec::EntityType::Surface(Surface::new(
                 SurfaceKind::Generic,
             )));
         let original =
@@ -993,7 +993,7 @@ mod thicken_tests {
             .document
             .entities()
             .find_map(|entity| {
-                matches!(entity, acadrust::EntityType::Solid3D(_)).then_some(entity.common().handle)
+                matches!(entity, codec::EntityType::Solid3D(_)).then_some(entity.common().handle)
             })
             .unwrap();
         assert!(app.tabs[i]
@@ -1006,7 +1006,7 @@ mod thicken_tests {
             original
         );
         let expected =
-            cadkernel::brep::analytic_mass_properties(&app.tabs[i].scene.solid_models[&result])
+            kernel::brep::analytic_mass_properties(&app.tabs[i].scene.solid_models[&result])
                 .unwrap()
                 .volume;
         let bytes = crate::io::save_to_bytes(
@@ -1019,7 +1019,7 @@ mod thicken_tests {
         let mut restored = crate::scene::Scene::new();
         restored.document = document;
         restored.restore_solid_models(&[result]);
-        let actual = cadkernel::brep::analytic_mass_properties(&restored.solid_models[&result])
+        let actual = kernel::brep::analytic_mass_properties(&restored.solid_models[&result])
             .unwrap()
             .volume;
         assert!((expected - actual).abs() < 1e-8);
@@ -1057,10 +1057,10 @@ mod thicken_tests {
         )
         .unwrap();
         let body =
-            cadkernel::brep::extrude_surface(Plane::XY, &[Curve::Nurbs(profile)], [0.0, 0.0, 2.0])
+            kernel::brep::extrude_surface(Plane::XY, &[Curve::Nurbs(profile)], [0.0, 0.0, 2.0])
                 .unwrap();
         let source = app.add_surface_model(
-            acadrust::EntityType::Surface(Surface::new(SurfaceKind::Generic)),
+            codec::EntityType::Surface(Surface::new(SurfaceKind::Generic)),
             body,
         );
         let i = app.active_tab;
@@ -1075,7 +1075,7 @@ mod thicken_tests {
             .document
             .entities()
             .filter_map(|entity| {
-                matches!(entity, acadrust::EntityType::Solid3D(_)).then_some(entity.common().handle)
+                matches!(entity, codec::EntityType::Solid3D(_)).then_some(entity.common().handle)
             })
             .collect::<Vec<_>>();
         assert_eq!(solids.len(), 1);
@@ -1095,7 +1095,7 @@ mod thicken_tests {
 mod dispatched_command_task_tests {
     use super::super::*;
     use crate::command::CmdResult;
-    use acadrust::entities::ViewportRenderMode as Mode;
+    use codec::entities::ViewportRenderMode as Mode;
 
     /// `CmdResult::Dispatch` and `CmdResult::Relaunch` run the assembled line
     /// through `dispatch_command`, and the Task it returns must reach the

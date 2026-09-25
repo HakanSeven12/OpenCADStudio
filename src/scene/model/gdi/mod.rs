@@ -337,7 +337,7 @@ pub fn render_emf(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
 }
 
 /// Rasterize a WMF picture, placeable or standard. WMFC-wrapped enhanced
-/// metafiles never reach here — acadrust's presentation extraction already
+/// metafiles never reach here — opencadcodec's presentation extraction already
 /// reassembles those to EMF.
 pub fn render_wmf(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     wmf::render(data)

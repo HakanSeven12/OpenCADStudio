@@ -1,22 +1,22 @@
 // Faz 4c-0 preserve-verify (risk #10): an *untouched* annotative file must
 // round-trip every per-object annotation-context leaf without dropping or
-// mutating it. acadrust does not model `AcDb*ObjectContextData` — it keeps each
+// mutating it. opencadcodec does not model `AcDb*ObjectContextData` — it keeps each
 // leaf verbatim as `Unknown{raw_dwg_data}` and re-emits it on same-version save,
 // while side-mapping the leaf's `340` annotation-scale handle into
 // `context_scales`. This certifies that passthrough is intact at the current
-// acadrust HEAD before any encoder work touches the save path.
+// opencadcodec HEAD before any encoder work touches the save path.
 //
 // Uses the golden reference `~/Downloads/0718-mbmdmc.dwg` (AC1032/R2018). The
 // test skips (does not fail) when that file is absent so it never breaks CI.
 
 use OpenCADStudio::io;
-use acadrust::objects::ObjectType;
+use codec::objects::ObjectType;
 
 const GOLDEN: &str = "/home/hakanseven/Downloads/0718-mbmdmc.dwg";
 
 /// Raw bytes of every annotation-context leaf, sorted so the comparison is
 /// independent of handle ordering/renumbering across the round-trip.
-fn leaf_blobs(doc: &acadrust::CadDocument) -> Vec<Vec<u8>> {
+fn leaf_blobs(doc: &codec::CadDocument) -> Vec<Vec<u8>> {
     let mut blobs: Vec<Vec<u8>> = doc
         .context_scales
         .keys()

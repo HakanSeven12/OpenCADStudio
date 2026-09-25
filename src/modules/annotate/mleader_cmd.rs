@@ -1,8 +1,8 @@
 // MLEADER: pick the arrow and elbow, then edit the text.
 
-use acadrust::entities::{LeaderContentType, MultiLeader, MultiLeaderPathType};
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::{LeaderContentType, MultiLeader, MultiLeaderPathType};
+use codec::types::Vector3;
+use codec::EntityType;
 use glam::{DVec3, Mat4, Vec3};
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, WorkingPlane};
@@ -24,7 +24,7 @@ pub fn tool() -> ToolDef {
 pub struct MLeaderCommand {
     verts: Vec<DVec3>,
     plane: WorkingPlane,
-    style: Option<acadrust::objects::MultiLeaderStyle>,
+    style: Option<codec::objects::MultiLeaderStyle>,
     display_scale: f64,
     order: CreationOrder,
     step: Step,
@@ -38,11 +38,11 @@ pub struct MLeaderCommand {
     layer: String,
     text: String,
     picked_entity: Option<EntityType>,
-    selected_mtext: Option<acadrust::entities::MText>,
-    block_sources: Vec<(String, acadrust::Handle)>,
-    block_handle: Option<acadrust::Handle>,
+    selected_mtext: Option<codec::entities::MText>,
+    block_sources: Vec<(String, codec::Handle)>,
+    block_handle: Option<codec::Handle>,
     layers: Vec<String>,
-    text_styles: Vec<(String, acadrust::Handle)>,
+    text_styles: Vec<(String, codec::Handle)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -97,7 +97,7 @@ impl MLeaderCommand {
     }
 
     pub fn with_style(
-        style: acadrust::objects::MultiLeaderStyle,
+        style: codec::objects::MultiLeaderStyle,
         annotation_multiplier: f64,
     ) -> Self {
         let display_scale = if style.is_annotative {
@@ -134,9 +134,9 @@ impl MLeaderCommand {
 
     pub fn with_drawing_resources(
         mut self,
-        block_sources: Vec<(String, acadrust::Handle)>,
+        block_sources: Vec<(String, codec::Handle)>,
         layers: Vec<String>,
-        text_styles: Vec<(String, acadrust::Handle)>,
+        text_styles: Vec<(String, codec::Handle)>,
     ) -> Self {
         self.block_sources = block_sources;
         self.layers = layers;
@@ -226,36 +226,36 @@ impl MLeaderCommand {
             ml.context.background_fill_color = source.background_color;
             ml.context.background_transparency = source.background_transparency;
             ml.context.text_flow_direction = match source.drawing_direction {
-                acadrust::entities::mtext::DrawingDirection::LeftToRight => {
-                    acadrust::entities::multileader::FlowDirectionType::Horizontal
+                codec::entities::mtext::DrawingDirection::LeftToRight => {
+                    codec::entities::multileader::FlowDirectionType::Horizontal
                 }
-                acadrust::entities::mtext::DrawingDirection::TopToBottom => {
-                    acadrust::entities::multileader::FlowDirectionType::Vertical
+                codec::entities::mtext::DrawingDirection::TopToBottom => {
+                    codec::entities::multileader::FlowDirectionType::Vertical
                 }
-                acadrust::entities::mtext::DrawingDirection::ByStyle => {
-                    acadrust::entities::multileader::FlowDirectionType::ByStyle
+                codec::entities::mtext::DrawingDirection::ByStyle => {
+                    codec::entities::multileader::FlowDirectionType::ByStyle
                 }
             };
             let (attachment, alignment) = match source.attachment_point {
-                acadrust::entities::mtext::AttachmentPoint::TopCenter
-                | acadrust::entities::mtext::AttachmentPoint::MiddleCenter
-                | acadrust::entities::mtext::AttachmentPoint::BottomCenter => {
+                codec::entities::mtext::AttachmentPoint::TopCenter
+                | codec::entities::mtext::AttachmentPoint::MiddleCenter
+                | codec::entities::mtext::AttachmentPoint::BottomCenter => {
                     (
-                        acadrust::entities::multileader::TextAttachmentPointType::Center,
-                        acadrust::entities::TextAlignmentType::Center,
+                        codec::entities::multileader::TextAttachmentPointType::Center,
+                        codec::entities::TextAlignmentType::Center,
                     )
                 }
-                acadrust::entities::mtext::AttachmentPoint::TopRight
-                | acadrust::entities::mtext::AttachmentPoint::MiddleRight
-                | acadrust::entities::mtext::AttachmentPoint::BottomRight => {
+                codec::entities::mtext::AttachmentPoint::TopRight
+                | codec::entities::mtext::AttachmentPoint::MiddleRight
+                | codec::entities::mtext::AttachmentPoint::BottomRight => {
                     (
-                        acadrust::entities::multileader::TextAttachmentPointType::Right,
-                        acadrust::entities::TextAlignmentType::Right,
+                        codec::entities::multileader::TextAttachmentPointType::Right,
+                        codec::entities::TextAlignmentType::Right,
                     )
                 }
                 _ => (
-                    acadrust::entities::multileader::TextAttachmentPointType::Left,
-                    acadrust::entities::TextAlignmentType::Left,
+                    codec::entities::multileader::TextAttachmentPointType::Left,
+                    codec::entities::TextAlignmentType::Left,
                 ),
             };
             ml.context.text_attachment_point = attachment;
@@ -625,7 +625,7 @@ impl CadCommand for MLeaderCommand {
         self.picked_entity = Some(entity);
     }
 
-    fn on_entity_pick(&mut self, _handle: acadrust::Handle, _point: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, _handle: codec::Handle, _point: DVec3) -> CmdResult {
         let Some(EntityType::MText(text)) = self.picked_entity.take() else {
             return CmdResult::NeedPoint;
         };
@@ -655,7 +655,7 @@ fn build_mleader(
     verts: &[DVec3],
     content_point: Option<DVec3>,
     ucs: Mat4,
-    style: Option<&acadrust::objects::MultiLeaderStyle>,
+    style: Option<&codec::objects::MultiLeaderStyle>,
     display_scale: f64,
 ) -> MultiLeader {
     // First point is the arrow, last point is the elbow. Intermediate points
@@ -695,9 +695,9 @@ fn build_mleader(
     let landing = ux * (sign as f32);
     ml.context.text_attachment_point =
         if to_right {
-            acadrust::entities::multileader::TextAttachmentPointType::Left
+            codec::entities::multileader::TextAttachmentPointType::Left
         } else {
-            acadrust::entities::multileader::TextAttachmentPointType::Right
+            codec::entities::multileader::TextAttachmentPointType::Right
         };
 
     ml.context.text_rotation = (ux.y as f64).atan2(ux.x as f64);

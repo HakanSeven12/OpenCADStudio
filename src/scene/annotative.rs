@@ -9,13 +9,13 @@
 //! annotation-style update is requested; changing a style alone does not
 //! retroactively scale existing text.
 
-use acadrust::entities::{EntityCommon, EntityType};
-use acadrust::objects::{
+use codec::entities::{EntityCommon, EntityType};
+use codec::objects::{
     Dictionary, DimContext, DimSubtype, EmbeddedMTextContext, HatchLoopContext, HatchScaleContext,
     MTextAttributeContext, MTextContext, ObjectContextData, ObjectContextKind, ObjectType,
 };
-use acadrust::types::{Vector2, Vector3};
-use acadrust::{CadDocument, Handle};
+use codec::types::{Vector2, Vector3};
+use codec::{CadDocument, Handle};
 use std::borrow::Cow;
 
 /// Resolve a handle to a `Dictionary` object, if it is one.
@@ -97,8 +97,8 @@ pub fn set_entity_annotative(doc: &mut CadDocument, handle: Handle, want: bool) 
 /// Derive the per-scale context payload for an entity from its current
 /// placement. Returns the concrete class name and the context kind, or `None`
 /// for entity types that do not carry a per-object annotation context.
-fn dimension_context_for(doc: &CadDocument, dimension: &acadrust::entities::Dimension) -> Option<DimContext> {
-    use acadrust::entities::Dimension;
+fn dimension_context_for(doc: &CadDocument, dimension: &codec::entities::Dimension) -> Option<DimContext> {
+    use codec::entities::Dimension;
 
     let subtype = match dimension {
         Dimension::Aligned(dim) => DimSubtype::Aligned {
@@ -156,7 +156,7 @@ fn dimension_context_for(doc: &CadDocument, dimension: &acadrust::entities::Dime
     })
 }
 
-fn mtext_context_for(m: &acadrust::entities::MText) -> MTextContext {
+fn mtext_context_for(m: &codec::entities::MText) -> MTextContext {
     MTextContext {
         attachment: m.attachment_point as i32,
         x_axis_dir: m
@@ -168,7 +168,7 @@ fn mtext_context_for(m: &acadrust::entities::MText) -> MTextContext {
         extents_width: m.extents_width,
         extents_height: m.extents_height,
         column_type: m.column_data.column_type as i32,
-        columns: (m.column_data.column_type != 0).then(|| acadrust::objects::MTextColumns {
+        columns: (m.column_data.column_type != 0).then(|| codec::objects::MTextColumns {
             num_heights: m.column_data.column_count,
             width: m.column_data.width,
             gutter: m.column_data.gutter,
@@ -184,7 +184,7 @@ fn attribute_context_for(
     alignment: Vector3,
     rotation: f64,
     horizontal_mode: i16,
-    embedded: Option<&acadrust::entities::MText>,
+    embedded: Option<&codec::entities::MText>,
     scale: Handle,
 ) -> MTextAttributeContext {
     MTextAttributeContext {
@@ -268,7 +268,7 @@ fn context_kind_for(
         )),
         EntityType::Leader(leader) => Some((
             "ACDB_LEADEROBJECTCONTEXTDATA_CLASS",
-            ObjectContextKind::Leader(acadrust::objects::LeaderContext {
+            ObjectContextKind::Leader(codec::objects::LeaderContext {
                 points: leader.vertices.clone(),
                 x_direction: leader.horizontal_direction,
                 annotation_enabled: !leader.annotation_handle.is_null(),
@@ -316,7 +316,7 @@ pub fn supports_annotation_context(entity: &EntityType) -> bool {
         | EntityType::Tolerance(_)
         | EntityType::Hatch(_) => true,
         EntityType::Dimension(dimension) => {
-            !matches!(dimension, acadrust::entities::Dimension::Arc(_))
+            !matches!(dimension, codec::entities::Dimension::Arc(_))
         }
         _ => false,
     }
@@ -334,7 +334,7 @@ fn register_context_class(doc: &mut CadDocument, dxf_name: &str) {
         "ACDB_FCFOBJECTCONTEXTDATA_CLASS" => "AcDbFcfObjectContextData",
         _ => return,
     };
-    use acadrust::classes::{DxfClass, ProxyFlags};
+    use codec::classes::{DxfClass, ProxyFlags};
     let proxy_flags = ProxyFlags(
         ProxyFlags::ERASE_ALLOWED.0
             | ProxyFlags::CLONING_ALLOWED.0
@@ -505,7 +505,7 @@ pub fn scale_handle_by_name(doc: &CadDocument, name: &str) -> Option<Handle> {
 
 pub fn ensure_scale_object(
     doc: &mut CadDocument,
-    source: &acadrust::objects::Scale,
+    source: &codec::objects::Scale,
 ) -> Handle {
     if let Some(handle) = scale_handle_by_name(doc, &source.name) {
         return handle;
@@ -775,8 +775,8 @@ pub fn effective_annotation_scale_for(
     }
 }
 
-fn text_horizontal(value: i16) -> acadrust::entities::TextHorizontalAlignment {
-    use acadrust::entities::TextHorizontalAlignment;
+fn text_horizontal(value: i16) -> codec::entities::TextHorizontalAlignment {
+    use codec::entities::TextHorizontalAlignment;
     match value {
         1 => TextHorizontalAlignment::Center,
         2 => TextHorizontalAlignment::Right,
@@ -787,8 +787,8 @@ fn text_horizontal(value: i16) -> acadrust::entities::TextHorizontalAlignment {
     }
 }
 
-fn mtext_attachment(value: i32) -> acadrust::entities::AttachmentPoint {
-    use acadrust::entities::AttachmentPoint;
+fn mtext_attachment(value: i32) -> codec::entities::AttachmentPoint {
+    use codec::entities::AttachmentPoint;
     match value {
         2 => AttachmentPoint::TopCenter,
         3 => AttachmentPoint::TopRight,
@@ -802,7 +802,7 @@ fn mtext_attachment(value: i32) -> acadrust::entities::AttachmentPoint {
     }
 }
 
-fn apply_mtext_context(entity: &mut acadrust::entities::MText, context: &MTextContext) {
+fn apply_mtext_context(entity: &mut codec::entities::MText, context: &MTextContext) {
     entity.attachment_point = mtext_attachment(context.attachment);
     entity.insertion_point = context.insertion;
     entity.rectangle_width = context.rect_width;
@@ -827,12 +827,12 @@ fn apply_mtext_context(entity: &mut acadrust::entities::MText, context: &MTextCo
 }
 
 fn apply_dimension_context(
-    dimension: &mut acadrust::entities::Dimension,
-    context: &acadrust::objects::DimContext,
+    dimension: &mut codec::entities::Dimension,
+    context: &codec::objects::DimContext,
     doc: &CadDocument,
 ) {
-    use acadrust::entities::Dimension;
-    use acadrust::objects::DimSubtype;
+    use codec::entities::Dimension;
+    use codec::objects::DimSubtype;
 
     {
         let base = dimension.base_mut();
@@ -907,9 +907,9 @@ fn apply_attribute_context(
     insertion_point: &mut Vector3,
     alignment_point: &mut Vector3,
     rotation: &mut f64,
-    horizontal_alignment: &mut acadrust::entities::HorizontalAlignment,
-    embedded_mtext: &mut Option<Box<acadrust::entities::MText>>,
-    context: &acadrust::objects::MTextAttributeContext,
+    horizontal_alignment: &mut codec::entities::HorizontalAlignment,
+    embedded_mtext: &mut Option<Box<codec::entities::MText>>,
+    context: &codec::objects::MTextAttributeContext,
 ) {
     insertion_point.x = context.insertion.x;
     insertion_point.y = context.insertion.y;
@@ -917,7 +917,7 @@ fn apply_attribute_context(
     alignment_point.y = context.alignment.y;
     *rotation = context.rotation;
     *horizontal_alignment =
-        acadrust::entities::HorizontalAlignment::from_value(context.horizontal_mode);
+        codec::entities::HorizontalAlignment::from_value(context.horizontal_mode);
     if context.enable_context {
         if let (Some(embedded), Some(mtext)) = (&context.context, embedded_mtext.as_mut()) {
             apply_mtext_context(mtext, &embedded.mtext);
@@ -925,7 +925,7 @@ fn apply_attribute_context(
     }
 }
 
-fn apply_hatch_context(hatch: &mut acadrust::entities::Hatch, context: &HatchScaleContext) {
+fn apply_hatch_context(hatch: &mut codec::entities::Hatch, context: &HatchScaleContext) {
     hatch.pattern.lines.clone_from(&context.pattern_lines);
     hatch.pattern_scale = context.pattern_scale;
     for line in &mut hatch.pattern.lines {
@@ -939,20 +939,20 @@ fn apply_hatch_context(hatch: &mut acadrust::entities::Hatch, context: &HatchSca
         .enumerate()
         .map(|(index, loop_data)| {
             let flags =
-                acadrust::entities::BoundaryPathFlags::from_bits(loop_data.loop_type as u32);
+                codec::entities::BoundaryPathFlags::from_bits(loop_data.loop_type as u32);
             let mut path = if loop_data.supports_context {
                 base_paths.get(index).cloned()
             } else {
                 loop_data.boundary.clone()
             }
-            .unwrap_or_else(|| acadrust::entities::BoundaryPath::with_flags(flags));
+            .unwrap_or_else(|| codec::entities::BoundaryPath::with_flags(flags));
             path.flags = flags;
             path
         })
         .collect();
 }
 
-fn sync_hatch_loops(loops: &mut Vec<HatchLoopContext>, paths: &[acadrust::entities::BoundaryPath]) {
+fn sync_hatch_loops(loops: &mut Vec<HatchLoopContext>, paths: &[codec::entities::BoundaryPath]) {
     let previous = std::mem::take(loops);
     *loops = paths
         .iter()
@@ -1081,7 +1081,7 @@ pub fn entity_for_annotation_context<'a>(
     Cow::Owned(placed)
 }
 
-fn sync_mtext_context(context: &mut MTextContext, entity: &acadrust::entities::MText) {
+fn sync_mtext_context(context: &mut MTextContext, entity: &codec::entities::MText) {
     context.attachment = entity.attachment_point as i32;
     context.x_axis_dir = entity.dwg_x_direction.unwrap_or_else(|| {
         Vector3::new(entity.rotation.cos(), entity.rotation.sin(), 0.0)
@@ -1097,7 +1097,7 @@ fn sync_mtext_context(context: &mut MTextContext, entity: &acadrust::entities::M
     } else {
         let columns = context
             .columns
-            .get_or_insert_with(|| acadrust::objects::MTextColumns {
+            .get_or_insert_with(|| codec::objects::MTextColumns {
                 num_heights: 0,
                 width: 0.0,
                 gutter: 0.0,
@@ -1115,12 +1115,12 @@ fn sync_mtext_context(context: &mut MTextContext, entity: &acadrust::entities::M
 }
 
 fn sync_dimension_context(
-    context: &mut acadrust::objects::DimContext,
-    dimension: &acadrust::entities::Dimension,
+    context: &mut codec::objects::DimContext,
+    dimension: &codec::entities::Dimension,
     block_handle: Option<Handle>,
 ) {
-    use acadrust::entities::Dimension;
-    use acadrust::objects::DimSubtype;
+    use codec::entities::Dimension;
+    use codec::objects::DimSubtype;
 
     let base = dimension.base();
     context.def_pt = Vector2::new(base.text_middle_point.x, base.text_middle_point.y);
@@ -1231,12 +1231,12 @@ pub fn sync_annotation_context_from_entity(
             },
         ) => {
             *horizontal_mode = match text.horizontal_alignment {
-                acadrust::entities::TextHorizontalAlignment::Left => 0,
-                acadrust::entities::TextHorizontalAlignment::Center => 1,
-                acadrust::entities::TextHorizontalAlignment::Right => 2,
-                acadrust::entities::TextHorizontalAlignment::Aligned => 3,
-                acadrust::entities::TextHorizontalAlignment::Middle => 4,
-                acadrust::entities::TextHorizontalAlignment::Fit => 5,
+                codec::entities::TextHorizontalAlignment::Left => 0,
+                codec::entities::TextHorizontalAlignment::Center => 1,
+                codec::entities::TextHorizontalAlignment::Right => 2,
+                codec::entities::TextHorizontalAlignment::Aligned => 3,
+                codec::entities::TextHorizontalAlignment::Middle => 4,
+                codec::entities::TextHorizontalAlignment::Fit => 5,
             };
             *rotation = text.rotation;
             *insertion = Vector2::new(text.insertion_point.x, text.insertion_point.y);
@@ -1534,7 +1534,7 @@ fn has_context_manager(doc: &CadDocument, common: &EntityCommon) -> bool {
 /// explicit style update, so it cannot retroactively change existing objects.
 pub fn mleader_is_annotative(
     doc: &CadDocument,
-    mleader: &acadrust::entities::MultiLeader,
+    mleader: &codec::entities::MultiLeader,
 ) -> bool {
     has_context_manager(doc, &mleader.common)
         || mleader.enable_annotation_scale
@@ -1566,10 +1566,10 @@ pub fn annotation_style_is_annotative(doc: &CadDocument, entity: &EntityType) ->
 }
 
 pub fn apply_mleader_style(
-    entity: &mut acadrust::entities::MultiLeader,
-    style: &acadrust::objects::MultiLeaderStyle,
+    entity: &mut codec::entities::MultiLeader,
+    style: &codec::objects::MultiLeaderStyle,
 ) {
-    use acadrust::entities::MultiLeaderPropertyOverrideFlags as F;
+    use codec::entities::MultiLeaderPropertyOverrideFlags as F;
 
     let flags = entity.property_override_flags;
     entity.style_handle = Some(style.handle);
@@ -1678,11 +1678,11 @@ pub fn apply_mleader_style(
     entity.context.block_content_scale = entity.block_scale;
     entity.enable_annotation_scale = style.is_annotative;
     match entity.content_type {
-        acadrust::entities::LeaderContentType::MText => {
+        codec::entities::LeaderContentType::MText => {
             entity.context.has_text_contents = true;
             entity.context.has_block_contents = false;
         }
-        acadrust::entities::LeaderContentType::Block => {
+        codec::entities::LeaderContentType::Block => {
             entity.context.has_text_contents = false;
             entity.context.has_block_contents = entity.block_content_handle.is_some();
             entity.context.block_content_location = entity.context.content_base_point;
@@ -1698,7 +1698,7 @@ pub fn apply_mleader_style(
         }
         root.text_attachment_direction = entity.text_attachment_direction;
         for line in &mut root.lines {
-            use acadrust::entities::LeaderLinePropertyOverrideFlags as F;
+            use codec::entities::LeaderLinePropertyOverrideFlags as F;
             if !line.override_flags.contains(F::PATH_TYPE) {
                 line.path_type = entity.path_type;
             }
@@ -1721,11 +1721,11 @@ pub fn apply_mleader_style(
     }
 }
 fn apply_mleader_style_at_display_scale(
-    entity: &mut acadrust::entities::MultiLeader,
-    style: &acadrust::objects::MultiLeaderStyle,
+    entity: &mut codec::entities::MultiLeader,
+    style: &codec::objects::MultiLeaderStyle,
     display_scale: f64,
 ) {
-    use acadrust::entities::MultiLeaderPropertyOverrideFlags as F;
+    use codec::entities::MultiLeaderPropertyOverrideFlags as F;
 
     let old_scale = entity.context.scale_factor.max(1.0e-12);
     let landing_gap = entity.context.landing_gap / old_scale;
@@ -1778,7 +1778,7 @@ fn apply_mleader_style_at_display_scale(
 pub fn apply_mleader_style_to_object(
     doc: &mut CadDocument,
     handle: Handle,
-    style: &acadrust::objects::MultiLeaderStyle,
+    style: &codec::objects::MultiLeaderStyle,
 ) -> bool {
     let Some(EntityType::MultiLeader(original)) =
         doc.get_entity(handle).cloned()
@@ -1893,7 +1893,7 @@ pub fn update_entity_from_annotation_style(
     enum StyleUpdate {
         Text { annotative: bool, height: f64 },
         Dimension { annotative: bool },
-        MultiLeader(acadrust::objects::MultiLeaderStyle),
+        MultiLeader(codec::objects::MultiLeaderStyle),
         ContextOnly,
     }
 
@@ -2004,7 +2004,7 @@ pub fn is_annotative(doc: &CadDocument, entity: &EntityType) -> bool {
         .get_record("AcadAnnotative")
         .and_then(|record| {
             record.values.iter().filter_map(|value| match value {
-                acadrust::xdata::XDataValue::Integer16(value) => Some(*value),
+                codec::xdata::XDataValue::Integer16(value) => Some(*value),
                 _ => None,
             }).last()
         })

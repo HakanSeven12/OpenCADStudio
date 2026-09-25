@@ -1,5 +1,5 @@
-use acadrust::{EntityType, Handle};
-use cadkernel::space::Plane;
+use codec::{EntityType, Handle};
+use kernel::space::Plane;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, SelectionEntity, WorkingPlane};
@@ -38,7 +38,7 @@ pub struct SliceCommand {
     preview_center: DVec3,
     preview_radius: f64,
     picked: Option<EntityType>,
-    surface_tool: Option<cadkernel::brep::Body>,
+    surface_tool: Option<kernel::brep::Body>,
     notice: Option<&'static str>,
 }
 
@@ -448,14 +448,14 @@ impl CadCommand for SliceCommand {
     }
 }
 
-fn planar_body_plane(body: &cadkernel::brep::Body) -> Option<Plane> {
+fn planar_body_plane(body: &kernel::brep::Body) -> Option<Plane> {
     let mut faces = body.face_keys();
-    let first = cadkernel::brep::planar_face_profile(body, faces.next()?)?.plane;
+    let first = kernel::brep::planar_face_profile(body, faces.next()?)?.plane;
     let normal = DVec3::from_array(first.normal()?);
-    let tolerance = cadkernel::brep::operation_tolerance(&[body]);
+    let tolerance = kernel::brep::operation_tolerance(&[body]);
     faces
         .all(|face| {
-            let Some(profile) = cadkernel::brep::planar_face_profile(body, face) else {
+            let Some(profile) = kernel::brep::planar_face_profile(body, face) else {
                 return false;
             };
             profile.plane.normal().is_some_and(|other| {

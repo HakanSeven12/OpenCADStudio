@@ -1,9 +1,9 @@
 use super::*;
-use acadrust::entities::{
+use codec::entities::{
     CenterMarkAssociation, CenterMarkSource, CenterMarkSourceKind,
 };
-use acadrust::types::Vector3;
-use cadkernel::geom2d::{closest_point, Arc as KernelArc, BulgeArc, Curve};
+use codec::types::Vector3;
+use kernel::geom2d::{closest_point, Arc as KernelArc, BulgeArc, Curve};
 use glam::DVec3;
 
 fn vector(point: DVec3) -> Vector3 {
@@ -167,7 +167,7 @@ pub(crate) fn picked_mark_source(
 }
 
 fn resolve_source(
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     source: &CenterMarkSource,
 ) -> Option<(DVec3, f64, DVec3, DVec3)> {
     let entity = document.get_entity(source.handle)?;
@@ -313,7 +313,7 @@ fn apply_source_geometry(
     }
 }
 
-pub(crate) fn update_carrier(line: &mut acadrust::Line, association: &CenterMarkAssociation) {
+pub(crate) fn update_carrier(line: &mut codec::Line, association: &CenterMarkAssociation) {
     let segments = mark_segments(association);
     let horizontal = segments.first().copied().unwrap_or([
         dvec(association.center),

@@ -11,8 +11,8 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::{fmt, sync::Arc};
 
 use crate::ui::ROW_H;
-use acadrust::types::{Color as AcadColor, LineWeight};
-use acadrust::Handle;
+use codec::types::{Color as AcadColor, LineWeight};
+use codec::Handle;
 use iced::widget::{
     button, canvas, column, combo_box, container, mouse_area, row, scrollable, text, text_input,
     tooltip, Space,
@@ -146,7 +146,7 @@ impl canvas::Program<Message> for HatchPatternPreview {
                     boundary_exterior: None,
                     boundary_sources: None,
                     boundary_paths: None,
-                    style: acadrust::entities::HatchStyleType::Normal,
+                    style: codec::entities::HatchStyleType::Normal,
                     pattern: self.pattern.clone(),
                     name: String::new(),
                     color: [1.0; 4],
@@ -2130,7 +2130,7 @@ pub fn acad_color_display(c: AcadColor) -> (Color, &'static str) {
             "ByBlock",
         ),
         AcadColor::Index(i) => {
-            let (r, g, b) = acadrust::types::aci_table::aci_to_rgb(i).unwrap_or((200, 200, 200));
+            let (r, g, b) = codec::types::aci_table::aci_to_rgb(i).unwrap_or((200, 200, 200));
             (
                 Color::from_rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0),
                 aci_label(i),

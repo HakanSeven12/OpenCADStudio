@@ -5,13 +5,13 @@
 // the real entity is re-tessellated into the scene's preview wires on every
 // change so the user sees the actual drawing result while typing.
 
-use acadrust::entities::mtext::AttachmentPoint;
-use acadrust::entities::mtext_format::{
+use codec::entities::mtext::AttachmentPoint;
+use codec::entities::mtext_format::{
     parse_mtext, MTextColor, MTextDocument, MTextFont, MTextParagraph, MTextParagraphAlignment,
     MTextScalar, MTextSpan, ParagraphProperties, SpanProperties, StackingData, StackingType,
 };
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle, MText};
+use codec::types::Vector3;
+use codec::{EntityType, Handle, MText};
 use glam::DVec3;
 use iced::widget::text_editor;
 
@@ -88,7 +88,7 @@ pub struct MTextEditorState {
     pub pos: DVec3,
     /// The editable text buffer (raw value with inline codes).
     pub content: text_editor::Content,
-    /// Structured mirror of `content`, parsed via acadrust `parse_mtext` — the
+    /// Structured mirror of `content`, parsed via opencadcodec `parse_mtext` — the
     /// target authority for the editor. Phase 1: passive mirror kept in sync on
     /// every rebuild, cross-checked against the rendered glyph boxes; later
     /// phases make it the source of truth and delete the raw-string path.
@@ -255,7 +255,7 @@ impl MTextEditorState {
     /// Fold the toolbar's global defaults (font / colour / oblique / width /
     /// char-spacing) onto every span that does not already override them. This
     /// replaces the old hand-built `\f;\C;…` prefix so the value is produced
-    /// purely by acadrust's `to_mtext_string`.
+    /// purely by opencadcodec's `to_mtext_string`.
     fn apply_globals(&self, doc: &mut MTextDocument) {
         let font = self.font.trim();
         let color =
@@ -288,7 +288,7 @@ impl MTextEditorState {
     }
 
     /// The committed / previewed MText value: the structured body with the
-    /// global toolbar defaults folded in, serialized by acadrust.
+    /// global toolbar defaults folded in, serialized by opencadcodec.
     fn folded_value(&self) -> String {
         let raw = self.content.text();
         let mut doc = parse_mtext(&raw, true);
@@ -1562,8 +1562,8 @@ impl super::OpenCADStudio {
     /// Apply a colour from the shared Properties-style picker: to the selection
     /// (per-run) when there is one, else the whole text via the global colour.
     /// Closes the picker popup.
-    pub(super) fn mtext_apply_color(&mut self, color: acadrust::types::Color) {
-        use acadrust::types::Color as C;
+    pub(super) fn mtext_apply_color(&mut self, color: codec::types::Color) {
+        use codec::types::Color as C;
         let (mcolor, rgb): (Option<MTextColor>, Option<(u8, u8, u8)>) = match color {
             C::Index(i) => (Some(MTextColor::Index(i as u16)), None),
             C::Rgb { r, g, b } => (None, Some((r, g, b))),
@@ -1725,7 +1725,7 @@ impl super::OpenCADStudio {
                 mt.insertion_point.y,
                 mt.insertion_point.z,
             ));
-            mt.insertion_point = acadrust::types::Vector3::new(
+            mt.insertion_point = codec::types::Vector3::new(
                 position.x,
                 position.y,
                 position.z,
@@ -1844,7 +1844,7 @@ impl super::OpenCADStudio {
                 mt.insertion_point.y,
                 mt.insertion_point.z,
             ));
-            mt.insertion_point = acadrust::types::Vector3::new(
+            mt.insertion_point = codec::types::Vector3::new(
                 position.x,
                 position.y,
                 position.z,
@@ -2038,7 +2038,7 @@ mod cell_tests {
     // round-trip so the renderer actually sees them.
     #[test]
     fn per_run_color_and_font_persist() {
-        use acadrust::entities::mtext_format::{MTextColor, MTextFont};
+        use codec::entities::mtext_format::{MTextColor, MTextFont};
         let mut p = SpanProperties::default();
         p.color = Some(MTextColor::Index(1)); // red
         p.font = Some(MTextFont::with_flags("Arial".to_string(), true, false)); // bold Arial

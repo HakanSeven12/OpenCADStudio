@@ -99,7 +99,7 @@ impl Scene {
         if !self.any_viewport_grid_on() {
             return Vec::new();
         }
-        self.active_viewports(vw, vh, acadrust::entities::ViewportRenderMode::Wireframe2D)
+        self.active_viewports(vw, vh, codec::entities::ViewportRenderMode::Wireframe2D)
             .into_iter()
             .filter(|inst| inst.grid_on)
             .map(|inst| (inst.screen_rect, inst.camera, inst.handle))
@@ -119,7 +119,7 @@ impl Scene {
         &self,
         canvas_w: f32,
         canvas_h: f32,
-        model_mode: acadrust::entities::ViewportRenderMode,
+        model_mode: codec::entities::ViewportRenderMode,
     ) -> Vec<ViewportInstance> {
         if self.current_layout == "Model" {
             let tiles = self.model_tiles.borrow();
@@ -185,7 +185,7 @@ impl Scene {
                 height: canvas_h,
             },
             camera: sheet_cam,
-            render_mode: acadrust::entities::ViewportRenderMode::Wireframe2D,
+            render_mode: codec::entities::ViewportRenderMode::Wireframe2D,
             active: false,
             grid_on: sheet_grid_on,
             paper_sheet: true,
@@ -762,7 +762,7 @@ impl Scene {
         if let Some(cam) = self.camera_from_view_mode(
             vp.view_direction,
             vp.view_target,
-            acadrust::types::Vector2 {
+            codec::types::Vector2 {
                 x: vp.view_center.x,
                 y: vp.view_center.y,
             },
@@ -795,7 +795,7 @@ impl Scene {
 
         // Auto-fit: aim at the content cluster centre, drop the stale view_center.
         let fit_h = cluster_half * 2.0 * 1.05;
-        let tgt = acadrust::types::Vector3 {
+        let tgt = codec::types::Vector3 {
             x: cx,
             y: cy,
             z: vp.view_target.z,
@@ -803,7 +803,7 @@ impl Scene {
         self.camera_from_view_mode(
             vp.view_direction,
             tgt,
-            acadrust::types::Vector2::ZERO,
+            codec::types::Vector2::ZERO,
             fit_h,
             vp.twist_angle,
             vp.status.perspective,

@@ -13,7 +13,7 @@ pub fn tool() -> ToolDef {
 
 // ── CadCommand implementation ─────────────────────────────────────────────
 
-use acadrust::Handle;
+use codec::Handle;
 use glam::DVec3;
 use crate::t;
 

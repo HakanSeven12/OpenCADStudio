@@ -2,7 +2,7 @@
 //!
 //! The stable, semver-versioned contract an add-on package targets instead of
 //! the `OpenCADStudio` binary internals. It is intentionally **dependency
-//! free** (no `iced`, no `acadrust`) so engine crates and external tooling can
+//! free** (no `iced`, no `opencadcodec`) so engine crates and external tooling can
 //! depend on it cheaply.
 //!
 //! Two pieces live here:
@@ -13,12 +13,12 @@
 //!   ([`RibbonGroup`], [`ToolDef`], …) a plugin uses to describe its tab.
 //!
 //! The runtime host surface a plugin uses at *dispatch* time (document access,
-//! command line, undo) is `acadrust`-typed and therefore lives in the `host`
-//! feature; it re-exports `acadrust` so plugins do not need to depend on it
+//! command line, undo) is `opencadcodec`-typed and therefore lives in the `host`
+//! feature; it re-exports `opencadcodec` so plugins do not need to depend on it
 //! directly and risk an ABI mismatch from a different version.
 //!
 //! For binary compatibility, the host and every plugin must resolve the same
-//! `acadrust` source. The host does this via a `[patch.crates-io]` entry in
+//! `opencadcodec` source. The host does this via a `[patch.crates-io]` entry in
 //! `Cargo.toml`; out-of-tree plugins should copy that exact patch.
 //!
 //! For internal architecture (process model, wire protocols, versioning policy,
@@ -40,7 +40,7 @@ pub mod entity_coverage;
 pub mod entity_coverage_types;
 pub mod version_info;
 
-/// Runtime host surface — only built with the `host` feature (pulls `acadrust`).
+/// Runtime host surface — only built with the `host` feature (pulls `opencadcodec`).
 #[cfg(feature = "host")]
 pub mod host;
 

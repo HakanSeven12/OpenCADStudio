@@ -6,9 +6,9 @@
 //   3. Text: Enter default value    (optional — press Enter for blank)
 //   4. Point: Click insertion point
 
-use acadrust::entities::AttributeDefinition;
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::AttributeDefinition;
+use codec::types::Vector3;
+use codec::EntityType;
 use glam::DVec3;
 use crate::t;
 

@@ -1,6 +1,6 @@
-use acadrust::entities::{EntityCommon, ExtendedEntity, ExtendedEntityData, SectionObjectData};
-use acadrust::types::{Color, Handle, Vector3};
-use acadrust::EntityType;
+use codec::entities::{EntityCommon, ExtendedEntity, ExtendedEntityData, SectionObjectData};
+use codec::types::{Color, Handle, Vector3};
+use codec::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, WorkingPlane};

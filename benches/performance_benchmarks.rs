@@ -44,9 +44,9 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
-use acadrust::entities::{Arc as AcadArc, Circle, Ellipse, Line, LwPolyline, LwVertex};
-use acadrust::types::{Vector2, Vector3};
-use acadrust::{CadDocument, DxfReader, DxfWriter, EntityType};
+use codec::entities::{Arc as AcadArc, Circle, Ellipse, Line, LwPolyline, LwVertex};
+use codec::types::{Vector2, Vector3};
+use codec::{CadDocument, DxfReader, DxfWriter, EntityType};
 use glam::{DVec3, Mat4, Vec3};
 use iced::{Color, Point, Rectangle};
 
@@ -1375,9 +1375,9 @@ fn bench_ui_plotstyle_layer_usage(runner: &mut BenchmarkRunner) {
 
     let mut doc = CadDocument::new();
     for i in 0..200 {
-        let mut layer = acadrust::tables::Layer::new(&format!("LAYER_{i:03}"));
+        let mut layer = codec::tables::Layer::new(&format!("LAYER_{i:03}"));
         layer.handle = doc.allocate_handle();
-        layer.color = acadrust::types::Color::Index((i % 8 + 1) as u8);
+        layer.color = codec::types::Color::Index((i % 8 + 1) as u8);
         let _ = doc.layers.add(layer);
     }
 
@@ -1531,8 +1531,8 @@ fn bench_ui_grip_budget(runner: &mut BenchmarkRunner) {
             axis: None,
         });
     }
-    let all_handles: Vec<acadrust::Handle> = (0..all_grips.len() as u64)
-        .map(|k| acadrust::Handle::new(k + 1))
+    let all_handles: Vec<codec::Handle> = (0..all_grips.len() as u64)
+        .map(|k| codec::Handle::new(k + 1))
         .collect();
     let n_fixture_grips = all_grips.len();
 
@@ -2213,10 +2213,10 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
 
     // Populate scene with non-graphical document objects
     for i in 0..obj_count {
-        let handle = acadrust::Handle::new(0x2000 + i as u64);
+        let handle = codec::Handle::new(0x2000 + i as u64);
         scene.document.objects.insert(
             handle,
-            acadrust::objects::ObjectType::Dictionary(acadrust::objects::Dictionary::default()),
+            codec::objects::ObjectType::Dictionary(codec::objects::Dictionary::default()),
         );
     }
     // Add lines to model space
@@ -2244,7 +2244,7 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
         let t0 = Instant::now();
         let primitive = scene.build_viewports(
             bounds,
-            acadrust::entities::ViewportRenderMode::Wireframe2D,
+            codec::entities::ViewportRenderMode::Wireframe2D,
             None,
             false,
             false,
@@ -2268,7 +2268,7 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
     // 2. Cached / After: Memoized document render environment + O(1) fast paths
     let _ = scene.build_viewports(
         bounds,
-        acadrust::entities::ViewportRenderMode::Wireframe2D,
+        codec::entities::ViewportRenderMode::Wireframe2D,
         None,
         false,
         false,
@@ -2280,7 +2280,7 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
         let t0 = Instant::now();
         let primitive = scene.build_viewports(
             bounds,
-            acadrust::entities::ViewportRenderMode::Wireframe2D,
+            codec::entities::ViewportRenderMode::Wireframe2D,
             None,
             false,
             false,

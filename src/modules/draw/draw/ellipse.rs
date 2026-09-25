@@ -5,8 +5,8 @@
 //   ELLIPSE_AXIS — Axis, End     (axis endpoint 1 → endpoint 2 → minor distance)
 //   ELLIPSE_ARC  — Ellipse Arc   (shape as above, then start/end parametric angles)
 
-use acadrust::types::Vector3;
-use acadrust::{Ellipse, EntityType};
+use codec::types::Vector3;
+use codec::{Ellipse, EntityType};
 use crate::t;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};

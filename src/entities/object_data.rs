@@ -5,11 +5,11 @@
 //! OCS is the selected entity's semantic/property view, while the evaluated
 //! entity geometry continues through the normal render pipeline.
 
-use acadrust::objects::{
+use codec::objects::{
     AssociativeData, BlockEvalValue, DynamicBlockData, ObjectType,
     SolidHistoryNodeBase, SolidHistoryOperation,
 };
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::{CadDocument, EntityType, Handle};
 
 use crate::scene::model::object::{PropSection, PropValue, Property};
 
@@ -39,16 +39,16 @@ pub fn build_cache(document: &CadDocument) -> ObjectDataCache {
             ObjectType::Associative(_) => associative_objects.push(*handle),
             ObjectType::GeoData(_) => geo_objects.push(*handle),
             ObjectType::ClassObject(value) => match &value.data {
-                acadrust::objects::ClassObjectData::LightList(list) => {
+                codec::objects::ClassObjectData::LightList(list) => {
                     ordered_lights.extend(list.lights.iter().map(|entry| entry.handle));
                 }
-                acadrust::objects::ClassObjectData::Sun(_) => sun_objects.push(*handle),
-                acadrust::objects::ClassObjectData::RenderEnvironment(_) => {
+                codec::objects::ClassObjectData::Sun(_) => sun_objects.push(*handle),
+                codec::objects::ClassObjectData::RenderEnvironment(_) => {
                     render_environments.push(*handle);
                 }
-                acadrust::objects::ClassObjectData::RenderSettings(_)
-                | acadrust::objects::ClassObjectData::MentalRayRenderSettings(_)
-                | acadrust::objects::ClassObjectData::RapidRtRenderSettings(_) => {
+                codec::objects::ClassObjectData::RenderSettings(_)
+                | codec::objects::ClassObjectData::MentalRayRenderSettings(_)
+                | codec::objects::ClassObjectData::RapidRtRenderSettings(_) => {
                     render_settings.push(*handle);
                 }
                 _ => {}
@@ -219,19 +219,19 @@ fn history_base_text(base: &SolidHistoryNodeBase) -> String {
     )
 }
 
-fn embedded_name(value: Option<&acadrust::entities::EmbeddedEntity>) -> &'static str {
+fn embedded_name(value: Option<&codec::entities::EmbeddedEntity>) -> &'static str {
     match value {
-        Some(acadrust::entities::EmbeddedEntity::Point(_)) => "Point",
-        Some(acadrust::entities::EmbeddedEntity::Line(_)) => "Line",
-        Some(acadrust::entities::EmbeddedEntity::Arc(_)) => "Arc",
-        Some(acadrust::entities::EmbeddedEntity::Circle(_)) => "Circle",
-        Some(acadrust::entities::EmbeddedEntity::Ellipse(_)) => "Ellipse",
-        Some(acadrust::entities::EmbeddedEntity::Spline(_)) => "Spline",
-        Some(acadrust::entities::EmbeddedEntity::LwPolyline(_)) => "Polyline",
-        Some(acadrust::entities::EmbeddedEntity::Region(_)) => "Region",
-        Some(acadrust::entities::EmbeddedEntity::Ray(_)) => "Ray",
-        Some(acadrust::entities::EmbeddedEntity::XLine(_)) => "XLine",
-        Some(acadrust::entities::EmbeddedEntity::Unknown { .. }) => "Unknown",
+        Some(codec::entities::EmbeddedEntity::Point(_)) => "Point",
+        Some(codec::entities::EmbeddedEntity::Line(_)) => "Line",
+        Some(codec::entities::EmbeddedEntity::Arc(_)) => "Arc",
+        Some(codec::entities::EmbeddedEntity::Circle(_)) => "Circle",
+        Some(codec::entities::EmbeddedEntity::Ellipse(_)) => "Ellipse",
+        Some(codec::entities::EmbeddedEntity::Spline(_)) => "Spline",
+        Some(codec::entities::EmbeddedEntity::LwPolyline(_)) => "Polyline",
+        Some(codec::entities::EmbeddedEntity::Region(_)) => "Region",
+        Some(codec::entities::EmbeddedEntity::Ray(_)) => "Ray",
+        Some(codec::entities::EmbeddedEntity::XLine(_)) => "XLine",
+        Some(codec::entities::EmbeddedEntity::Unknown { .. }) => "Unknown",
         None => "None",
     }
 }
@@ -1028,9 +1028,9 @@ where
 }
 
 fn class_object_section(
-    data: &acadrust::objects::ClassObjectData,
+    data: &codec::objects::ClassObjectData,
 ) -> Option<PropSection> {
-    use acadrust::objects::ClassObjectData;
+    use codec::objects::ClassObjectData;
 
     let section = match data {
         ClassObjectData::Empty => return None,
@@ -2066,9 +2066,9 @@ fn class_object_section(
 }
 
 fn semantic_property_text(
-    value: &acadrust::objects::SemanticPropertyValue,
+    value: &codec::objects::SemanticPropertyValue,
 ) -> String {
-    use acadrust::objects::SemanticPropertyValue;
+    use codec::objects::SemanticPropertyValue;
     match value {
         SemanticPropertyValue::Text(value) => preview_text(value, 512),
         SemanticPropertyValue::Bool(value) => value.to_string(),
@@ -2085,7 +2085,7 @@ fn semantic_property_text(
 fn auxiliary_object_property(
     object: &ObjectType,
 ) -> Option<Property> {
-    use acadrust::objects::DataObjectData;
+    use codec::objects::DataObjectData;
 
     let (label, value) = match object {
         ObjectType::TableContent(table) => (
@@ -2255,7 +2255,7 @@ fn auxiliary_object_property(
 
 /// Drawing-level standard object data prepared on the file-open worker.
 fn build_document_sections(document: &CadDocument) -> Vec<PropSection> {
-    use acadrust::objects::ClassObjectData;
+    use codec::objects::ClassObjectData;
 
     let mut sections = vec![PropSection {
         title: "Drawing".to_string(),

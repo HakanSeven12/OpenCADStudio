@@ -231,7 +231,7 @@ fn without_key(dict: &str, key: &str) -> Option<String> {
 /// them.
 pub const LAYER_OVERRIDE_APP: &str = "AdeskUnderlayLayerOverrideData";
 
-pub fn hidden_layers(u: &acadrust::entities::Underlay) -> Vec<String> {
+pub fn hidden_layers(u: &codec::entities::Underlay) -> Vec<String> {
     u.common
         .extended_data
         .records()
@@ -239,14 +239,14 @@ pub fn hidden_layers(u: &acadrust::entities::Underlay) -> Vec<String> {
         .filter(|r| r.application_name.eq_ignore_ascii_case(LAYER_OVERRIDE_APP))
         .flat_map(|r| r.values.iter())
         .filter_map(|v| match v {
-            acadrust::xdata::XDataValue::String(s) => Some(s.clone()),
+            codec::xdata::XDataValue::String(s) => Some(s.clone()),
             _ => None,
         })
         .collect()
 }
 
 /// The source an underlay's page is read from, with its layer overrides.
-pub fn underlay_source(u: &acadrust::entities::Underlay, file_path: &str) -> String {
+pub fn underlay_source(u: &codec::entities::Underlay, file_path: &str) -> String {
     let hidden = hidden_layers(u);
     if hidden.is_empty() {
         return file_path.to_string();

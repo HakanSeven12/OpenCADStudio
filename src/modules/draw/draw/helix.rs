@@ -1,7 +1,7 @@
-use acadrust::entities::{Helix, HelixConstraint, Spline};
-use acadrust::types::Vector3;
-use acadrust::EntityType;
-use cadkernel::space::{HelixCurve, HelixDirection, Vec3};
+use codec::entities::{Helix, HelixConstraint, Spline};
+use codec::types::Vector3;
+use codec::EntityType;
+use kernel::space::{HelixCurve, HelixDirection, Vec3};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, DynField, WorkingPlane};
@@ -159,7 +159,7 @@ impl HelixCommand {
         let points = self
             .kernel_curve(height, axis)?
             .nurbs()?
-            .tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE);
+            .tessellate_angle(kernel::tessellation::DEFAULT_ANGLE);
         Some(WireModel::solid_f64(
             "helix_preview".to_string(),
             points,

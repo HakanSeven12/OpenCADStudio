@@ -159,7 +159,7 @@ impl OpenCADStudio {
             .objects
             .values()
             .filter_map(|o| {
-                if let acadrust::objects::ObjectType::MultiLeaderStyle(mls) = o {
+                if let codec::objects::ObjectType::MultiLeaderStyle(mls) = o {
                     Some(mls.name.clone())
                 } else {
                     None
@@ -187,7 +187,7 @@ impl OpenCADStudio {
             .objects
             .values()
             .filter_map(|o| {
-                if let acadrust::objects::ObjectType::TableStyle(ts) = o {
+                if let codec::objects::ObjectType::TableStyle(ts) = o {
                     Some(ts.name.clone())
                 } else {
                     None

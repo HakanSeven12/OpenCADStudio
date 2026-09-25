@@ -164,7 +164,7 @@ impl Scene {
             boundary_exterior: None,
             boundary_sources: None,
             boundary_paths: None,
-            style: acadrust::entities::HatchStyleType::Normal,
+            style: codec::entities::HatchStyleType::Normal,
             pattern: HatchPattern::Solid,
             name: "AREA_PREVIEW".into(),
             color: [0.0; 4],
@@ -224,11 +224,11 @@ impl Scene {
                 backdrop.pattern =
                     crate::scene::model::hatch_model::HatchPattern::Solid;
                 let (background_color, background_aci) = match background {
-                    acadrust::types::Color::ByLayer => {
+                    codec::types::Color::ByLayer => {
                         let layer = self.document.layers.get(&hatch.common.layer);
                         let aci = layer
                             .and_then(|layer| match &layer.color {
-                                acadrust::types::Color::Index(index) => Some(*index),
+                                codec::types::Color::Index(index) => Some(*index),
                                 _ => None,
                             })
                             .unwrap_or(0);
@@ -241,10 +241,10 @@ impl Scene {
                             aci,
                         )
                     }
-                    acadrust::types::Color::ByBlock => (style.0, style.4),
-                    acadrust::types::Color::Index(index) => (
+                    codec::types::Color::ByBlock => (style.0, style.4),
+                    codec::types::Color::Index(index) => (
                         crate::scene::convert::tess_util::aci_to_rgba(
-                            &acadrust::types::Color::Index(index),
+                            &codec::types::Color::Index(index),
                         ),
                         index,
                     ),
@@ -284,7 +284,7 @@ impl Scene {
         self.selection.borrow_mut().preview_box = None;
     }
 
-    pub fn wire_models_for(&self, handles: &[acadrust::Handle]) -> Vec<WireModel> {
+    pub fn wire_models_for(&self, handles: &[codec::Handle]) -> Vec<WireModel> {
         handles
             .iter()
             .flat_map(|h| {
@@ -307,7 +307,7 @@ impl Scene {
     /// Current candidate geometry for a hot grip. Solid-history candidates
     /// live outside the document until placement; ordinary entities continue
     /// to use their current tessellation.
-    pub fn grip_wire_models_for(&self, handles: &[acadrust::Handle]) -> Vec<WireModel> {
+    pub fn grip_wire_models_for(&self, handles: &[codec::Handle]) -> Vec<WireModel> {
         handles
             .iter()
             .flat_map(|handle| {
@@ -425,7 +425,7 @@ impl Scene {
 
     /// Build wire models for an arbitrary slice of entities (e.g. clipboard contents).
     /// Entities need not be in the document — they are tessellated directly.
-    pub fn wires_for_entities(&self, entities: &[acadrust::EntityType]) -> Vec<WireModel> {
+    pub fn wires_for_entities(&self, entities: &[codec::EntityType]) -> Vec<WireModel> {
         entities
             .iter()
             .flat_map(|e| self.tessellate_one(e))
@@ -442,7 +442,7 @@ impl Scene {
     /// (insertion base at origin) for the block-palette thumbnail. Nested INSERTs
     /// expand through the block cache. Unknown / empty block → `vec![]`.
     pub(crate) fn block_preview_wires(&self, name: &str) -> Vec<WireModel> {
-        use acadrust::EntityType;
+        use codec::EntityType;
         let Some(br) = self.document.block_records.get(name) else {
             return vec![];
         };
@@ -463,9 +463,9 @@ impl Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::Line;
-    use acadrust::types::Vector3;
-    use acadrust::EntityType;
+    use codec::entities::Line;
+    use codec::types::Vector3;
+    use codec::EntityType;
 
     #[test]
     fn block_preview_wires_tessellates_block_entities() {

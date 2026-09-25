@@ -1,4 +1,4 @@
-# getrandom 0.3 (pulled by ahash via acadrust) needs this cfg to select its
+# getrandom 0.3 (pulled by ahash via opencadcodec) needs this cfg to select its
 # browser backend on wasm32-unknown-unknown, alongside its `wasm_js` feature
 # (enabled in Cargo.toml for the wasm target). Without it the web build fails
 # with "wasm32-unknown-unknown targets are not supported by default".

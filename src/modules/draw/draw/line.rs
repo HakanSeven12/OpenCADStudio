@@ -2,12 +2,12 @@
 //
 // Command:  LINE — OpenCADStudio behaviour:
 //   1. First click  → stores start point, prompts for next point
-//   2. Each further click → immediately commits an acadrust::Line entity
+//   2. Each further click → immediately commits an codec::Line entity
 //      (start→end) to the document; end becomes the new start point
 //   3. Enter / Escape → ends the command
 
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Line};
+use codec::types::Vector3;
+use codec::{EntityType, Line};
 use crate::t;
 
 use crate::command::{CadCommand, CmdResult, TangentObject};

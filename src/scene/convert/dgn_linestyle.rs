@@ -2,18 +2,18 @@
 //!
 //! Imported DGN linetypes store their real pattern as DGN
 //! line-style objects (`AcDbLS*`), not standard `LTYPE` dashes — the standard
-//! table entry is empty, so acadrust exposes the structure in
+//! table entry is empty, so opencadcodec exposes the structure in
 //! [`CadDocument::dgn_ls_definitions`] / `dgn_ls_components` instead. See
-//! `objects/dgn_linestyle.rs` in acadrust and `~/Documents/OCS/DGN_LINESTYLE_PLAN.md`.
+//! `objects/dgn_linestyle.rs` in opencadcodec and `~/Documents/OCS/DGN_LINESTYLE_PLAN.md`.
 //!
 //! The visible content combines **symbol components**, each of which references
 //! an anonymous block (e.g. a pipe's end circle), with typed stroke patterns.
 //! Symbols are rendered at the host polyline's endpoints and stroke dash/gap
 //! lengths are carried through to the pipe walls.
 
-use acadrust::objects::DgnLsComponentType;
-use acadrust::types::{Handle, Vector3};
-use acadrust::{CadDocument, EntityType};
+use codec::objects::DgnLsComponentType;
+use codec::types::{Handle, Vector3};
+use codec::{CadDocument, EntityType};
 use std::collections::HashSet;
 
 use crate::scene::model::wire_model::WireModel;
@@ -75,7 +75,7 @@ fn walk(doc: &CadDocument, h: Handle, out: &mut Vec<DgnSymbol>, seen: &mut HashS
 /// Signed native dash lengths in a typed stroke component: dashes are positive
 /// and gaps negative. Empty when the component has no usable stroke lengths.
 fn stroke_dashes(doc: &CadDocument, h: Handle) -> Vec<f64> {
-    use acadrust::objects::{DgnLineStyleData, DgnLsComponentData, ObjectType};
+    use codec::objects::{DgnLineStyleData, DgnLsComponentData, ObjectType};
     let Some(ObjectType::DgnLineStyle(style)) = doc.objects.get(&h)
     else {
         return Vec::new();

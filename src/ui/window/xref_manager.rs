@@ -10,7 +10,7 @@ use crate::io::xref::collect_entries_with_prev;
 use crate::io::xref_model::{normalize_lexical, Pathtype, RefKind, RefStatus, RefType, ReferenceEntry};
 use crate::ui::ROW_H;
 use crate::ui::style::common::muted_style;
-use acadrust::CadDocument;
+use codec::CadDocument;
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text, tooltip};
 use iced::Padding;
 use iced::{Background, Border, Element, Fill, Length, Theme};
@@ -1135,8 +1135,8 @@ impl XrefManagerPanel {
 /// directly — mirrors the three [`collect_entries`] scans so nested entries
 /// (foreign handles) classify correctly even on handle collisions.
 fn direct_identities(doc: &CadDocument) -> HashSet<(u64, String)> {
-    use acadrust::entities::UnderlayType;
-    use acadrust::objects::ObjectType;
+    use codec::entities::UnderlayType;
+    use codec::objects::ObjectType;
 
     let mut ids: HashSet<(u64, String)> = HashSet::new();
     for br in doc.block_records.iter() {
@@ -2175,17 +2175,17 @@ fn reference_preview(entry: &ReferenceEntry) -> Option<image::RgbaImage> {
 fn find_image_def(
     doc: &CadDocument,
     key: u64,
-) -> Option<&acadrust::objects::ImageDefinition> {
-    doc.objects.get(&acadrust::types::Handle::from(key)).and_then(|o| match o {
-        acadrust::objects::ObjectType::ImageDefinition(def) => Some(def),
+) -> Option<&codec::objects::ImageDefinition> {
+    doc.objects.get(&codec::types::Handle::from(key)).and_then(|o| match o {
+        codec::objects::ObjectType::ImageDefinition(def) => Some(def),
         _ => None,
     })
 }
 
 fn find_image_display_size(doc: &CadDocument, key: u64) -> Option<(f64, f64)> {
-    let handle = acadrust::types::Handle::from(key);
+    let handle = codec::types::Handle::from(key);
     for entity in doc.entities() {
-        if let acadrust::EntityType::RasterImage(img) = entity {
+        if let codec::EntityType::RasterImage(img) = entity {
             if img.definition_handle == Some(handle) {
                 let w = (img.u_vector.x.powi(2) + img.u_vector.y.powi(2) + img.u_vector.z.powi(2)).sqrt();
                 let h = (img.v_vector.x.powi(2) + img.v_vector.y.powi(2) + img.v_vector.z.powi(2)).sqrt();
@@ -2442,10 +2442,10 @@ mod tests {
         assert!(!panel.display_rows().iter().any(|r| r.is_nested));
     }
 
-    fn preview_doc2(dir: &std::path::Path) -> acadrust::CadDocument {
+    fn preview_doc2(dir: &std::path::Path) -> codec::CadDocument {
         // Two referenced images → genuine multi-select.
-        use acadrust::objects::{ImageDefinition, ObjectType};
-        let mut doc = acadrust::CadDocument::new();
+        use codec::objects::{ImageDefinition, ObjectType};
+        let mut doc = codec::CadDocument::new();
         for (i, name) in ["a.png", "b.png"].iter().enumerate() {
             let img = image::RgbaImage::from_pixel(8, 8, image::Rgba([9, 9, 9, 255]));
             img.save(dir.join(name)).unwrap();
@@ -2454,37 +2454,37 @@ mod tests {
             let mut def = ImageDefinition::with_dimensions(path.clone(), 8, 8);
             def.handle = h;
             doc.objects.insert(h, ObjectType::ImageDefinition(def));
-            let mut ent = acadrust::entities::RasterImage::new(
+            let mut ent = codec::entities::RasterImage::new(
                 &path,
-                acadrust::types::Vector3::ZERO,
+                codec::types::Vector3::ZERO,
                 8.0 + i as f64,
                 8.0,
             );
             ent.definition_handle = Some(h);
-            doc.add_entity(acadrust::EntityType::RasterImage(ent)).unwrap();
+            doc.add_entity(codec::EntityType::RasterImage(ent)).unwrap();
         }
         doc
     }
 
-    fn preview_doc(dir: &std::path::Path, name: &str) -> acadrust::CadDocument {
+    fn preview_doc(dir: &std::path::Path, name: &str) -> codec::CadDocument {
         // Referenced 8x8 PNG under `dir`; the entry resolves Loaded.
-        use acadrust::objects::{ImageDefinition, ObjectType};
+        use codec::objects::{ImageDefinition, ObjectType};
         let img = image::RgbaImage::from_pixel(8, 8, image::Rgba([9, 9, 9, 255]));
         img.save(dir.join(name)).unwrap();
         let img_path = dir.join(name).to_string_lossy().into_owned();
-        let mut doc = acadrust::CadDocument::new();
+        let mut doc = codec::CadDocument::new();
         let h = doc.allocate_handle();
         let mut def = ImageDefinition::with_dimensions(img_path.clone(), 8, 8);
         def.handle = h;
         doc.objects.insert(h, ObjectType::ImageDefinition(def));
-        let mut ent = acadrust::entities::RasterImage::new(
+        let mut ent = codec::entities::RasterImage::new(
             &img_path,
-            acadrust::types::Vector3::ZERO,
+            codec::types::Vector3::ZERO,
             8.0,
             8.0,
         );
         ent.definition_handle = Some(h);
-        doc.add_entity(acadrust::EntityType::RasterImage(ent)).unwrap();
+        doc.add_entity(codec::EntityType::RasterImage(ent)).unwrap();
         doc
     }
 
@@ -2558,8 +2558,8 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("plan.dwg"), b"not-a-real-dwg").unwrap();
-        let mut doc = acadrust::CadDocument::new();
-        let mut br = acadrust::tables::BlockRecord::new("PLAN");
+        let mut doc = codec::CadDocument::new();
+        let mut br = codec::tables::BlockRecord::new("PLAN");
         br.flags.is_xref = true;
         br.xref_path = dir.join("plan.dwg").to_string_lossy().into_owned();
         br.handle = doc.allocate_handle();
@@ -2596,7 +2596,7 @@ mod tests {
             .objects
             .iter()
             .find_map(|(h, o)| match o {
-                acadrust::objects::ObjectType::ImageDefinition(_) => Some(h.value()),
+                codec::objects::ObjectType::ImageDefinition(_) => Some(h.value()),
                 _ => None,
             })
             .unwrap();

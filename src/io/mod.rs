@@ -1,6 +1,6 @@
 // I/O module — open, save, and export CAD documents.
 //
-// All file reading/writing goes through acadrust.
+// All file reading/writing goes through opencadcodec.
 // Default save format: DWG (AC1032 / R2018+).
 
 pub mod file_association;
@@ -32,9 +32,9 @@ mod web_worker;
 pub(crate) mod web_recent;
 
 use crate::scene::DerivedCaches;
-use acadrust::entities::EntityType;
-use acadrust::io::dwg::DwgReader;
-use acadrust::{
+use codec::entities::EntityType;
+use codec::io::dwg::DwgReader;
+use codec::{
     CadDocument, DwgReadOptions, DwgWriter, DxfReader, DxfReaderConfiguration, DxfWriter,
 };
 use std::path::{Path, PathBuf};
@@ -114,7 +114,7 @@ fn recovery_fingerprint_needed(caches: &DerivedCaches) -> bool {
 pub struct OpenLoadError {
     pub message: String,
     pub source_sha256: Option<String>,
-    pub read_stats: Option<acadrust::ReadStats>,
+    pub read_stats: Option<codec::ReadStats>,
     pub recovery_available: bool,
 }
 
@@ -131,7 +131,7 @@ impl OpenLoadError {
     #[cfg(not(target_arch = "wasm32"))]
     fn recovery_prompt(
         message: impl Into<String>,
-        read_stats: Option<acadrust::ReadStats>,
+        read_stats: Option<codec::ReadStats>,
     ) -> Self {
         Self {
             message: message.into(),
@@ -246,7 +246,7 @@ pub async fn recover_path_with_phase(
     progress: Arc<OpenProgressState>,
     model_bg: [f32; 4],
     initial_error: String,
-    initial_stats: Option<acadrust::ReadStats>,
+    initial_stats: Option<codec::ReadStats>,
 ) -> Result<(String, PathBuf, CadDocument, DerivedCaches), OpenLoadError> {
     open_path_with_phase_attempt(
         path,
@@ -261,13 +261,13 @@ pub async fn recover_path_with_phase(
 #[derive(Debug, Clone)]
 enum OpenAttempt {
     Strict,
-    Recovery(String, Option<acadrust::ReadStats>),
+    Recovery(String, Option<codec::ReadStats>),
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 struct OpenAttemptFailure {
     message: String,
-    read_stats: Option<acadrust::ReadStats>,
+    read_stats: Option<codec::ReadStats>,
     recoverable: bool,
 }
 
@@ -586,7 +586,7 @@ pub async fn recover_web_bytes(
     bytes: Arc<[u8]>,
     progress: Arc<OpenProgressState>,
     initial_error: String,
-    initial_stats: Option<acadrust::ReadStats>,
+    initial_stats: Option<codec::ReadStats>,
 ) -> WebOpenOutcome {
     let size_bytes = bytes.len() as u64;
     let result = load_web_bytes(
@@ -671,7 +671,7 @@ async fn load_web_bytes(
     progress: Arc<OpenProgressState>,
     recovery_mode: bool,
     initial_error: &str,
-    mut initial_stats: Option<acadrust::ReadStats>,
+    mut initial_stats: Option<codec::ReadStats>,
 ) -> Result<(String, PathBuf, CadDocument, DerivedCaches), OpenLoadError> {
     progress.set(crate::app::OPEN_PHASE_PARSING, 1000, 0, 1);
     let (outcome, mut source_sha256) = match web_worker::parse_document(
@@ -831,7 +831,7 @@ pub fn load_file(_path: &Path) -> Result<CadDocument, String> {
 pub(crate) fn load_file_with_progress(
     path: &Path,
     _progress: Option<Arc<dyn Fn(u16) + Send + Sync>>,
-) -> Result<acadrust::ReadOutcome, String> {
+) -> Result<codec::ReadOutcome, String> {
     let outcome = read_file_attempt(path, _progress, false).map_err(|failure| failure.message)?;
     if !outcome.stats.has_usable_drawing_data() {
         return Err("initial read returned no source drawing records".to_string());
@@ -844,7 +844,7 @@ fn load_file_for_open(
     path: &Path,
     progress: Option<Arc<dyn Fn(u16) + Send + Sync>>,
     attempt: &OpenAttempt,
-) -> Result<acadrust::ReadOutcome, OpenAttemptFailure> {
+) -> Result<codec::ReadOutcome, OpenAttemptFailure> {
     let outcome = match attempt {
         OpenAttempt::Strict => {
             let outcome = read_file_attempt(path, progress, false).map_err(|failure| {
@@ -905,14 +905,14 @@ fn load_file_for_open(
                 });
             }
             outcome.document.notifications.notify(
-                acadrust::notification::NotificationType::Error,
+                codec::notification::NotificationType::Error,
                 format!("Initial read failed; recovery mode continued: {initial_error}"),
             );
-            acadrust::push_read_diagnostic(
+            codec::push_read_diagnostic(
                 &mut outcome.stats.diagnostics,
-                acadrust::ReadDiagnostic::new(
+                codec::ReadDiagnostic::new(
                     "strict-read-failed",
-                    acadrust::ReadStage::RecordStream,
+                    codec::ReadStage::RecordStream,
                     initial_error.clone(),
                 ),
             );
@@ -933,7 +933,7 @@ struct ReaderFailure {
 }
 
 impl ReaderFailure {
-    fn from_reader(error: acadrust::DxfError) -> Self {
+    fn from_reader(error: codec::DxfError) -> Self {
         Self {
             #[cfg(not(target_arch = "wasm32"))]
             recoverable: recoverable_reader_error(&error),
@@ -951,40 +951,40 @@ impl ReaderFailure {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn recoverable_reader_error(error: &acadrust::DxfError) -> bool {
+fn recoverable_reader_error(error: &codec::DxfError) -> bool {
     matches!(
         error,
-        acadrust::DxfError::Compression(_)
-            | acadrust::DxfError::Parse(_)
-            | acadrust::DxfError::InvalidDxfCode(_)
-            | acadrust::DxfError::InvalidHandle(_)
-            | acadrust::DxfError::ObjectNotFound(_)
-            | acadrust::DxfError::InvalidEntityType(_)
-            | acadrust::DxfError::ChecksumMismatch { .. }
-            | acadrust::DxfError::InvalidHeader(_)
-            | acadrust::DxfError::InvalidFormat(_)
-            | acadrust::DxfError::InvalidSentinel(_)
-            | acadrust::DxfError::Decompression(_)
-            | acadrust::DxfError::Encoding(_)
+        codec::DxfError::Compression(_)
+            | codec::DxfError::Parse(_)
+            | codec::DxfError::InvalidDxfCode(_)
+            | codec::DxfError::InvalidHandle(_)
+            | codec::DxfError::ObjectNotFound(_)
+            | codec::DxfError::InvalidEntityType(_)
+            | codec::DxfError::ChecksumMismatch { .. }
+            | codec::DxfError::InvalidHeader(_)
+            | codec::DxfError::InvalidFormat(_)
+            | codec::DxfError::InvalidSentinel(_)
+            | codec::DxfError::Decompression(_)
+            | codec::DxfError::Encoding(_)
     )
 }
 
 fn merge_read_diagnostics(
-    target: &mut acadrust::ReadStats,
-    source: acadrust::ReadStats,
+    target: &mut codec::ReadStats,
+    source: codec::ReadStats,
 ) {
     for diagnostic in source.diagnostics {
         if !target.diagnostics.contains(&diagnostic) {
-            acadrust::push_read_diagnostic(&mut target.diagnostics, diagnostic);
+            codec::push_read_diagnostic(&mut target.diagnostics, diagnostic);
         }
     }
 }
 
 #[cfg(target_arch = "wasm32")]
 fn merge_read_stats(
-    primary: Option<acadrust::ReadStats>,
-    fallback: Option<acadrust::ReadStats>,
-) -> Option<acadrust::ReadStats> {
+    primary: Option<codec::ReadStats>,
+    fallback: Option<codec::ReadStats>,
+) -> Option<codec::ReadStats> {
     match (primary, fallback) {
         (Some(mut primary), Some(fallback)) => {
             merge_read_diagnostics(&mut primary, fallback);
@@ -999,7 +999,7 @@ fn read_file_attempt(
     path: &Path,
     progress: Option<Arc<dyn Fn(u16) + Send + Sync>>,
     failsafe: bool,
-) -> Result<acadrust::ReadOutcome, ReaderFailure> {
+) -> Result<codec::ReadOutcome, ReaderFailure> {
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
@@ -1024,12 +1024,12 @@ fn read_file_attempt(
 
 fn finalize_loaded_outcome(
     path: &Path,
-    mut outcome: acadrust::ReadOutcome,
-) -> Result<acadrust::ReadOutcome, String> {
+    mut outcome: codec::ReadOutcome,
+) -> Result<codec::ReadOutcome, String> {
     let doc = &mut outcome.document;
     normalize_block_origins(doc);
     normalize_knotless_splines(doc);
-    if outcome.stats.source_format == Some(acadrust::SourceFormat::Dxf) {
+    if outcome.stats.source_format == Some(codec::SourceFormat::Dxf) {
         fix_dxf_dimension_rotations(doc);
         fix_dxf_layout_plot_settings(doc);
     }
@@ -1044,7 +1044,7 @@ fn read_dwg_path(
     path: &Path,
     progress: Option<Arc<dyn Fn(u16) + Send + Sync>>,
     failsafe: bool,
-) -> Result<acadrust::ReadOutcome, ReaderFailure> {
+) -> Result<codec::ReadOutcome, ReaderFailure> {
     let options = if failsafe {
         DwgReadOptions::failsafe()
     } else {
@@ -1071,7 +1071,7 @@ fn read_dwg_path(
                         // The file shrank or became unreadable mid-parse;
                         // retry from a snapshot instead of reporting a bare
                         // I/O error.
-                        Err(acadrust::DxfError::Io(_)) => {}
+                        Err(codec::DxfError::Io(_)) => {}
                         Err(error) => return Err(ReaderFailure::from_reader(error)),
                     }
                 }
@@ -1164,7 +1164,7 @@ fn read_drawing_snapshot(path: &Path) -> std::io::Result<Vec<u8>> {
     }
 }
 
-fn read_dxf_path(path: &Path, failsafe: bool) -> Result<acadrust::ReadOutcome, ReaderFailure> {
+fn read_dxf_path(path: &Path, failsafe: bool) -> Result<codec::ReadOutcome, ReaderFailure> {
     DxfReader::from_file(path)
         .map_err(ReaderFailure::from_reader)?
         .with_configuration(DxfReaderConfiguration {
@@ -1183,8 +1183,8 @@ fn read_dxf_path(path: &Path, failsafe: bool) -> Result<acadrust::ReadOutcome, R
 /// insertion can then share the ordinary zero-origin transform without each
 /// path having to reinterpret this compatibility field.
 fn normalize_block_origins(doc: &mut CadDocument) {
-    use acadrust::types::Vector3;
-    use acadrust::EntityType;
+    use codec::types::Vector3;
+    use codec::EntityType;
 
     let blocks: Vec<_> = doc
         .block_records
@@ -1237,11 +1237,11 @@ fn normalize_block_origins(doc: &mut CadDocument) {
 /// the stored path if it exists, otherwise the same file name next to the
 /// drawing — and write the result onto the entity so the renderer finds it.
 fn resolve_raster_image_paths(doc: &mut CadDocument, base_dir: Option<&Path>) {
-    use acadrust::objects::ObjectType;
-    use acadrust::EntityType;
+    use codec::objects::ObjectType;
+    use codec::EntityType;
     use std::collections::HashMap;
 
-    let defs: HashMap<acadrust::Handle, String> = doc
+    let defs: HashMap<codec::Handle, String> = doc
         .objects
         .iter()
         .filter_map(|(h, o)| match o {
@@ -1338,8 +1338,8 @@ pub fn source_is_dxf(path: Option<&Path>, document: &CadDocument) -> bool {
 
 /// Parse a format string like "DWG 2013" or "DXF 2007" into
 /// `(extension, DxfVersion)`.  Falls back to ("dwg", AC1032) for unknown strings.
-pub fn parse_save_format(format: &str) -> (&'static str, acadrust::DxfVersion) {
-    use acadrust::DxfVersion;
+pub fn parse_save_format(format: &str) -> (&'static str, codec::DxfVersion) {
+    use codec::DxfVersion;
     let f = format.to_ascii_uppercase();
     let is_dxf = f.starts_with("DXF");
     let ext = if is_dxf { "dxf" } else { "dwg" };
@@ -1364,8 +1364,8 @@ pub fn parse_save_format(format: &str) -> (&'static str, acadrust::DxfVersion) {
 /// Parse an explicit automation/CLI target version without silently falling
 /// back to a newer format. Accepts either release names (`R14`, `2000`, …)
 /// or their DXF codes (`AC1014`, `AC1015`, …).
-pub fn parse_target_version(value: &str) -> Result<acadrust::DxfVersion, String> {
-    use acadrust::DxfVersion;
+pub fn parse_target_version(value: &str) -> Result<codec::DxfVersion, String> {
+    use codec::DxfVersion;
     match value.trim().to_ascii_uppercase().as_str() {
         "R14" | "14" | "AC1014" => Ok(DxfVersion::AC1014),
         "2000" | "AC1015" => Ok(DxfVersion::AC1015),
@@ -1384,8 +1384,8 @@ pub fn parse_target_version(value: &str) -> Result<acadrust::DxfVersion, String>
 /// version + DXF/DWG choice (e.g. `AC1018, is_dxf=false` -> `"DWG 2004"`).
 /// Used to default the Save-As dropdown to the loaded file's version so a
 /// round-trip preserves it instead of silently offering "DWG 2018".
-pub fn format_for_version(version: acadrust::DxfVersion, is_dxf: bool) -> String {
-    use acadrust::DxfVersion::*;
+pub fn format_for_version(version: codec::DxfVersion, is_dxf: bool) -> String {
+    use codec::DxfVersion::*;
     let year = match version {
         AC1032 => "2018",
         AC1027 => "2013",
@@ -1405,8 +1405,8 @@ pub fn format_for_version(version: acadrust::DxfVersion, is_dxf: bool) -> String
 /// DXF). Returns 0 for a same-version DWG save, where they round-trip verbatim.
 /// Used to warn the user before a lossy Save-As.
 pub fn dropped_on_save_count(
-    doc: &acadrust::CadDocument,
-    target_version: acadrust::DxfVersion,
+    doc: &codec::CadDocument,
+    target_version: codec::DxfVersion,
     is_dxf: bool,
 ) -> usize {
     if !is_dxf && doc.dwg_source_version == Some(target_version) {
@@ -1417,7 +1417,7 @@ pub fn dropped_on_save_count(
         .objects
         .values()
         .filter(|object| match object {
-            acadrust::objects::ObjectType::Unknown {
+            codec::objects::ObjectType::Unknown {
                 raw_dxf_codes,
                 raw_dwg_data,
                 raw_dwg_version,
@@ -1435,7 +1435,7 @@ pub fn dropped_on_save_count(
         .count();
     for e in doc.entities() {
         let dropped = match e {
-            acadrust::EntityType::Unknown(entity) => {
+            codec::EntityType::Unknown(entity) => {
                 if is_dxf {
                     entity.raw_dxf_codes.is_none()
                 } else {
@@ -1586,9 +1586,9 @@ mod save_failure_tests {
         ));
 
         let error = save_as_version(
-            &acadrust::CadDocument::new(),
+            &codec::CadDocument::new(),
             &path,
-            acadrust::DxfVersion::AC1032,
+            codec::DxfVersion::AC1032,
         )
         .unwrap_err();
 
@@ -1615,9 +1615,9 @@ mod save_failure_tests {
         std::fs::write(&path, b"new").unwrap();
 
         let error = super::save_owned_as_version_atomic(
-            acadrust::CadDocument::new(),
+            codec::CadDocument::new(),
             &path,
-            acadrust::DxfVersion::AC1032,
+            codec::DxfVersion::AC1032,
             false,
             Some(expected),
             None,
@@ -1649,9 +1649,9 @@ mod save_failure_tests {
         std::fs::rename(&replacement, &path).unwrap();
 
         let error = super::save_owned_as_version_atomic(
-            acadrust::CadDocument::new(),
+            codec::CadDocument::new(),
             &path,
-            acadrust::DxfVersion::AC1032,
+            codec::DxfVersion::AC1032,
             false,
             Some(expected),
             Some(reader),
@@ -1747,7 +1747,7 @@ pub async fn pick_embedded_image_file() -> Result<ole_embed::EmbeddedImage, Stri
 pub fn save_as_version(
     doc: &CadDocument,
     path: &Path,
-    version: acadrust::DxfVersion,
+    version: codec::DxfVersion,
 ) -> Result<(), String> {
     let clone_started = iced::time::Instant::now();
     let snapshot = doc.clone();
@@ -1764,7 +1764,7 @@ pub fn save_as_version(
 pub fn save_owned_as_version_atomic(
     doc: CadDocument,
     path: &Path,
-    version: acadrust::DxfVersion,
+    version: codec::DxfVersion,
     backup: bool,
     expected_fingerprint: Option<edit_lock::FileFingerprint>,
     verify_reader: Option<std::fs::File>,
@@ -1790,7 +1790,7 @@ pub fn save_owned_as_version_atomic(
 fn save_owned_as_version_inner<F>(
     mut doc: CadDocument,
     path: &Path,
-    version: acadrust::DxfVersion,
+    version: codec::DxfVersion,
     backup: bool,
     clone_ms: f64,
     before_replace: F,
@@ -1918,7 +1918,7 @@ pub fn save(doc: &CadDocument, path: &Path) -> Result<(), String> {
 pub fn save_to_bytes(
     doc: &CadDocument,
     ext: &str,
-    version: acadrust::DxfVersion,
+    version: codec::DxfVersion,
 ) -> Result<Vec<u8>, String> {
     let perf = crate::perf::enabled();
     let total_started = iced::time::Instant::now();
@@ -1968,7 +1968,7 @@ pub fn save_to_bytes(
 // fall back to "Standard". Only overrides when the handle resolves, leaving the
 // DXF-provided names intact.
 fn fix_current_style_names(doc: &mut CadDocument) {
-    use acadrust::objects::ObjectType;
+    use codec::objects::ObjectType;
 
     let h = doc.header.current_text_style_handle;
     if h.is_valid() {
@@ -2012,8 +2012,8 @@ fn fix_current_style_names(doc: &mut CadDocument) {
 
 /// Find the handle of the `DictionaryVariable` registered under `name` in any
 /// of the document's dictionaries (the variable dictionary).
-fn vardict_handle(doc: &CadDocument, name: &str) -> Option<acadrust::Handle> {
-    use acadrust::objects::ObjectType;
+fn vardict_handle(doc: &CadDocument, name: &str) -> Option<codec::Handle> {
+    use codec::objects::ObjectType;
     doc.objects.values().find_map(|o| {
         let entries = match o {
             ObjectType::Dictionary(d) => &d.entries,
@@ -2030,7 +2030,7 @@ fn vardict_handle(doc: &CadDocument, name: &str) -> Option<acadrust::Handle> {
 /// Look up a system-variable value stored in the document's variable
 /// dictionary.
 fn vardict_value(doc: &CadDocument, name: &str) -> Option<String> {
-    use acadrust::objects::ObjectType;
+    use codec::objects::ObjectType;
     let handle = vardict_handle(doc, name)?;
     match doc.objects.get(&handle) {
         Some(ObjectType::DictionaryVariable(v)) => Some(v.value.clone()),
@@ -2071,7 +2071,7 @@ fn reflect_sketch_settings(doc: &mut CadDocument) {
 /// Write a drawing variable, creating the variable dictionary and record when
 /// needed so new drawings preserve the value too.
 pub(crate) fn set_drawing_variable(doc: &mut CadDocument, name: &str, value: &str) {
-    use acadrust::objects::{Dictionary, DictionaryVariable, ObjectType};
+    use codec::objects::{Dictionary, DictionaryVariable, ObjectType};
     if let Some(h) = vardict_handle(doc, name) {
         if let Some(ObjectType::DictionaryVariable(v)) = doc.objects.get_mut(&h) {
             v.value = value.to_string();
@@ -2163,7 +2163,7 @@ pub fn set_saved_active_layout(doc: &mut CadDocument, name: &str) {
 /// DXF additionally writes its own header vars from the names, so this keeps
 /// every representation consistent.
 fn sync_current_styles_on_save(doc: &mut CadDocument) {
-    use acadrust::objects::ObjectType;
+    use codec::objects::ObjectType;
 
     let th = doc
         .text_styles
@@ -2202,7 +2202,7 @@ fn sync_current_styles_on_save(doc: &mut CadDocument) {
 
 // ── Corrupt-entity guard ──────────────────────────────────────────────────
 //
-// acadrust's DWG parser occasionally desynchronises on certain files and
+// opencadcodec's DWG parser occasionally desynchronises on certain files and
 // produces entities with garbage fields: non-unit normals (components in
 // 1e200+), nonsensical vertex counts (e.g. 100000), or infinite/NaN
 // coordinates.  Tessellating such entities triggers huge allocations and
@@ -2214,7 +2214,7 @@ fn sync_current_styles_on_save(doc: &mut CadDocument) {
 //
 // Keep valid degenerate geometry: dropping it would trigger strict-open recovery.
 
-fn finite_unit_normal(n: &acadrust::types::Vector3) -> bool {
+fn finite_unit_normal(n: &codec::types::Vector3) -> bool {
     let (x, y, z) = (n.x, n.y, n.z);
     if !x.is_finite() || !y.is_finite() || !z.is_finite() {
         return false;
@@ -2229,13 +2229,13 @@ fn finite_coord(v: f64) -> bool {
     v.is_finite() && v.abs() < 1.0e12
 }
 
-fn finite_vec3(v: &acadrust::types::Vector3) -> bool {
+fn finite_vec3(v: &codec::types::Vector3) -> bool {
     finite_coord(v.x) && finite_coord(v.y) && finite_coord(v.z)
 }
 
 /// Returns true if the entity looks like parser garbage and should be dropped.
 pub(crate) fn is_entity_corrupt(e: &EntityType) -> bool {
-    use acadrust::entities::EntityType as E;
+    use codec::entities::EntityType as E;
     // Reject polylines at or above this vertex count. Even valid drawings
     // rarely use this many — and parser desync produces exactly-100_000-vertex
     // junk records.
@@ -2346,7 +2346,7 @@ fn normalize_knotless_splines(doc: &mut CadDocument) {
         }
         let degree = (spline.degree as usize).min(n - 1);
         spline.degree = degree as i32;
-        spline.knots = acadrust::entities::Spline::generate_clamped_knots(degree, n);
+        spline.knots = codec::entities::Spline::generate_clamped_knots(degree, n);
     }
 }
 
@@ -2358,7 +2358,7 @@ pub fn purge_corrupt_entities(doc: &mut CadDocument) -> usize {
     // entity references in one pass, test in parallel, then remove serially
     // (`remove_entity` needs `&mut doc`).
     let entities: Vec<&EntityType> = doc.entities().collect();
-    let bad: Vec<acadrust::Handle> = entities
+    let bad: Vec<codec::Handle> = entities
         .par_iter()
         .filter(|e| is_entity_corrupt(e))
         .map(|e| e.common().handle)
@@ -2370,10 +2370,10 @@ pub fn purge_corrupt_entities(doc: &mut CadDocument) -> usize {
     n
 }
 
-/// acadrust's ViewportStatusFlags::from_bits() maps bit 0 → is_on and bit 15 → locked,
+/// opencadcodec's ViewportStatusFlags::from_bits() maps bit 0 → is_on and bit 15 → locked,
 /// but the real DXF/DWG spec uses bit 15 (0x8000) → viewport on and bit 14 (0x4000) → locked.
 /// Files from AutoCAD and other tools always set bit 15 for active viewports, leaving bit 0
-/// clear, so acadrust reads every such viewport as off.  Correct that here after loading.
+/// clear, so opencadcodec reads every such viewport as off.  Correct that here after loading.
 fn fix_viewport_status_flags(doc: &mut CadDocument) {
     for entity in doc.entities_mut() {
         if let EntityType::Viewport(vp) = entity {
@@ -2388,7 +2388,7 @@ fn fix_viewport_status_flags(doc: &mut CadDocument) {
     }
 }
 
-/// The acadrust DXF reader still stores Shape rotation directly from group
+/// The opencadcodec DXF reader still stores Shape rotation directly from group
 /// code 50 in degrees, while DWG and our own creation code store radians.
 /// Dimension angles and ATTRIB/ATTDEF rotation are converted inside the
 /// reader, so arms for them here would convert twice.
@@ -2403,13 +2403,13 @@ fn fix_dxf_dimension_rotations(doc: &mut CadDocument) {
     }
 }
 
-/// Recover integer-valued AcDbPlotSettings fields that acadrust can leave at
+/// Recover integer-valued AcDbPlotSettings fields that opencadcodec can leave at
 /// their defaults when a DXF writer right-aligns the value with leading spaces.
 /// The raw pairs are preserved on Layout, so trim and parse those authoritative
 /// values after loading. In particular, losing code 73 turns a 90°/270° sheet
 /// back to 0° and makes a landscape layout render as portrait (#505).
 fn fix_dxf_layout_plot_settings(doc: &mut CadDocument) {
-    use acadrust::objects::{ObjectType, PlotFlags};
+    use codec::objects::{ObjectType, PlotFlags};
 
     for object in doc.objects.values_mut() {
         let ObjectType::Layout(layout) = object else {
@@ -2470,7 +2470,7 @@ fn fix_dxf_layout_plot_settings(doc: &mut CadDocument) {
 #[cfg(test)]
 mod layer_roundtrip_tests {
     use super::*;
-    use acadrust::tables::layer::Layer as DocLayer;
+    use codec::tables::layer::Layer as DocLayer;
 
     // Add `count` new layers the way the UI does (allocate_handle, then add),
     // round-trip through `ext`, and return whether every one survived.
@@ -2484,7 +2484,7 @@ mod layer_roundtrip_tests {
             doc.layers.add(dl).unwrap();
         }
         let path = std::env::temp_dir().join(format!("ocs_layer_rt_{count}.{ext}"));
-        save_as_version(&doc, &path, acadrust::DxfVersion::AC1032).expect("save");
+        save_as_version(&doc, &path, codec::DxfVersion::AC1032).expect("save");
         let loaded = load_file(&path).expect("load");
         let _ = std::fs::remove_file(&path);
         names.iter().all(|n| loaded.layers.contains(n))
@@ -2513,8 +2513,8 @@ mod layer_roundtrip_tests {
     // (which reopens as layer "0").
     #[test]
     fn dwg_preserves_entity_layer_auto_registered_on_add() {
-        use acadrust::entities::Point;
-        use acadrust::EntityType;
+        use codec::entities::Point;
+        use codec::EntityType;
 
         let mut scene = crate::scene::Scene::new();
         crate::io::linetypes::populate_document(&mut scene.document);
@@ -2525,7 +2525,7 @@ mod layer_roundtrip_tests {
         assert!(!h.is_null(), "entity was not added");
 
         let path = std::env::temp_dir().join("ocs_entity_layer_rt.dwg");
-        save_as_version(&scene.document, &path, acadrust::DxfVersion::AC1032).expect("save");
+        save_as_version(&scene.document, &path, codec::DxfVersion::AC1032).expect("save");
         let loaded = load_file(&path).expect("load");
         let _ = std::fs::remove_file(&path);
 
@@ -2548,8 +2548,8 @@ mod layer_roundtrip_tests {
 #[cfg(test)]
 mod corrupt_guard_tests {
     use super::*;
-    use acadrust::entities::{Arc, Circle, EntityType, Spline};
-    use acadrust::types::Vector3;
+    use codec::entities::{Arc, Circle, EntityType, Spline};
+    use codec::types::Vector3;
 
     fn knotless_spline(degree: i32, points: usize) -> Spline {
         let mut spline = Spline::new();
@@ -2583,7 +2583,7 @@ mod corrupt_guard_tests {
             "ocs_knotless_spline_{}.dwg",
             std::process::id()
         ));
-        save_as_version(&doc, &path, acadrust::DxfVersion::AC1032).expect("save");
+        save_as_version(&doc, &path, codec::DxfVersion::AC1032).expect("save");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -2608,7 +2608,7 @@ mod corrupt_guard_tests {
             .expect("spline");
         assert_eq!(spline.degree, 1);
         assert_eq!(spline.knots.len(), 4);
-        save_as_version(&doc, &target, acadrust::DxfVersion::AC1032).expect("save");
+        save_as_version(&doc, &target, codec::DxfVersion::AC1032).expect("save");
         let _ = std::fs::remove_file(&target);
     }
 
@@ -2723,7 +2723,7 @@ mod corrupt_guard_tests {
     // drive the render graph's per-instance allocation and expansion.
     #[test]
     fn preserves_large_minsert_data_while_rendering_is_bounded() {
-        let mut i = acadrust::entities::Insert::new("BLOCK", Vector3::ZERO);
+        let mut i = codec::entities::Insert::new("BLOCK", Vector3::ZERO);
         i.row_count = u16::MAX;
         i.column_count = u16::MAX;
         assert!(!is_entity_corrupt(&EntityType::Insert(i)));
@@ -2732,7 +2732,7 @@ mod corrupt_guard_tests {
     // An ordinary array insert, well under the budget, is valid source data.
     #[test]
     fn keeps_a_reasonable_minsert() {
-        let mut i = acadrust::entities::Insert::new("BLOCK", Vector3::ZERO);
+        let mut i = codec::entities::Insert::new("BLOCK", Vector3::ZERO);
         i.row_count = 10;
         i.column_count = 10;
         i.row_spacing = 5.0;
@@ -2743,7 +2743,7 @@ mod corrupt_guard_tests {
     // A plain (non-array) INSERT is never treated as a MINSERT-count problem.
     #[test]
     fn keeps_a_plain_insert() {
-        let i = acadrust::entities::Insert::new("BLOCK", Vector3::ZERO);
+        let i = codec::entities::Insert::new("BLOCK", Vector3::ZERO);
         assert!(!is_entity_corrupt(&EntityType::Insert(i)));
     }
 }

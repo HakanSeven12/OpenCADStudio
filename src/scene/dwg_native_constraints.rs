@@ -1,14 +1,14 @@
 //! Maps parametric constraints to the drawing format's associative object graph.
 
-use acadrust::objects::{
+use codec::objects::{
     Assoc2dConstraintGroup, AssocAction, AssocActionDependency, AssocConstraintNode,
     AssocConstraintNodeData, AssocDependency, AssocDimDependencyBody, AssocEvalValue,
     AssocEvalVariant,
     AssocGeomDependency, AssocNetwork, AssocPersistentSubentId, AssocValueDependency,
     AssocVariable, AssociativeData, AssociativeObject, ObjectType,
 };
-use acadrust::types::{Handle, Vector3};
-use acadrust::{CadDocument, EntityType};
+use codec::types::{Handle, Vector3};
+use codec::{CadDocument, EntityType};
 use rustc_hash::FxHashMap;
 
 use super::named_parameters::{DrivingValue, ParameterTable};
@@ -625,7 +625,7 @@ impl<'a> GroupBuilder<'a> {
                 },
             );
         } else {
-            let arc = cadkernel::geom2d::BulgeArc::from_bulge(
+            let arc = kernel::geom2d::BulgeArc::from_bulge(
                 [start.x, start.y],
                 [end.x, end.y],
                 bulge,
@@ -1459,14 +1459,14 @@ fn ensure_associative_classes_registered(document: &mut CadDocument) {
         if document.classes.get_by_name(dxf_name).is_some() {
             continue;
         }
-        document.classes.add_or_update(acadrust::classes::DxfClass {
+        document.classes.add_or_update(codec::classes::DxfClass {
             dxf_name: dxf_name.to_string(),
             cpp_class_name: cpp_class_name.to_string(),
             application_name: "ObjectDBX Classes".to_string(),
-            proxy_flags: acadrust::classes::ProxyFlags(
-                acadrust::classes::ProxyFlags::ERASE_ALLOWED.0
-                    | acadrust::classes::ProxyFlags::CLONING_ALLOWED.0
-                    | acadrust::classes::ProxyFlags::DISABLES_PROXY_WARNING_DIALOG.0,
+            proxy_flags: codec::classes::ProxyFlags(
+                codec::classes::ProxyFlags::ERASE_ALLOWED.0
+                    | codec::classes::ProxyFlags::CLONING_ALLOWED.0
+                    | codec::classes::ProxyFlags::DISABLES_PROXY_WARNING_DIALOG.0,
             ),
             instance_count: 0,
             was_zombie: false,
@@ -1539,7 +1539,7 @@ fn ensure_global_network_dictionary(document: &mut CadDocument) -> Handle {
 
     remove_dictionary_entry(document, root_handle, NETWORK_DICTIONARY_KEY);
     let dictionary_handle = document.allocate_handle();
-    let mut dictionary = acadrust::objects::Dictionary::new();
+    let mut dictionary = codec::objects::Dictionary::new();
     dictionary.handle = dictionary_handle;
     dictionary.owner = root_handle;
     dictionary.reactors.push(root_handle);
@@ -1738,14 +1738,14 @@ fn group_requires_preservation(document: &CadDocument, group: &Assoc2dConstraint
 
 fn work_plane_vector(work_plane: &[Vector3; 3], local: Vector3) -> Option<Vector3> {
     let [origin, axis_x, axis_y] = *work_plane;
-    let plane = cadkernel::space::Plane::from_axes(
+    let plane = kernel::space::Plane::from_axes(
         [origin.x, origin.y, origin.z],
         [axis_x.x, axis_x.y, axis_x.z],
         [axis_y.x, axis_y.y, axis_y.z],
     );
-    let mut world = cadkernel::space::Vec3::from(plane.vector_at([local.x, local.y]));
+    let mut world = kernel::space::Vec3::from(plane.vector_at([local.x, local.y]));
     if local.z != 0.0 {
-        world = world + cadkernel::space::Vec3::from(plane.normal()?) * local.z;
+        world = world + kernel::space::Vec3::from(plane.normal()?) * local.z;
     }
     let world = world.normalize()?;
     Some(Vector3::new(world.x, world.y, world.z))
@@ -2988,9 +2988,9 @@ mod tests {
     };
     use super::*;
     use crate::scene::ChangeKind;
-    use acadrust::entities::{Arc, Circle, Insert, Line, LwPolyline, Ray, Spline, XLine};
-    use acadrust::tables::BlockRecord;
-    use acadrust::types::Vector2;
+    use codec::entities::{Arc, Circle, Insert, Line, LwPolyline, Ray, Spline, XLine};
+    use codec::tables::BlockRecord;
+    use codec::types::Vector2;
 
     fn line_entity(scene: &mut Scene, start: (f64, f64), end: (f64, f64)) -> Handle {
         scene.add_entity(EntityType::Line(Line::from_points(
@@ -3588,7 +3588,7 @@ mod tests {
         let mut block = BlockRecord::new("fixture");
         block.handle = scene.document.allocate_handle();
         scene.document.block_records.add(block).unwrap();
-        let point = scene.add_entity(EntityType::Point(acadrust::entities::Point::at(
+        let point = scene.add_entity(EntityType::Point(codec::entities::Point::at(
             Vector3::new(1.0, 2.0, 0.0),
         )));
         let insert = scene.add_entity(EntityType::Insert(Insert::new(
@@ -4269,7 +4269,7 @@ mod tests {
         for ext in ["dxf", "dwg"] {
             let mut scene = Scene::new();
             let ellipse = scene.add_entity(EntityType::Ellipse(
-                acadrust::entities::Ellipse::from_center_axes(
+                codec::entities::Ellipse::from_center_axes(
                     Vector3::new(0.0, 0.0, 0.0),
                     Vector3::new(4.0, 0.0, 0.0),
                     0.5,

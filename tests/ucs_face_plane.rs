@@ -7,11 +7,11 @@
 //! `ucs_from_normal` in `src/app/helpers.rs`, which is `pub(crate)` and so out
 //! of reach from here.
 
-use acadrust::{entities::Circle, types::Vector3, EntityType};
+use codec::{entities::Circle, types::Vector3, EntityType};
 use OpenCADStudio::scene::model::{presspull_model, solid_model};
 
 /// Extrude a disc into a puck 10 units tall, centred on the origin.
-fn puck() -> cadkernel::brep::Body {
+fn puck() -> kernel::brep::Body {
     let entity = EntityType::Circle(Circle::from_center_radius(
         Vector3::new(0.0, 0.0, 0.0),
         100.0,

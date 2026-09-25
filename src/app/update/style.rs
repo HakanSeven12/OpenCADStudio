@@ -15,8 +15,8 @@ use crate::scene::{
     self, hover_id, CubeRegion, Scene, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX,
 };
 use crate::ui::PropertiesPanel;
-use acadrust::types::Color as AcadColor;
-use acadrust::{EntityType as AcadEntityType, Handle};
+use codec::types::Color as AcadColor;
+use codec::{EntityType as AcadEntityType, Handle};
 use iced::time::Instant;
 use iced::{mouse, Point, Task};
 
@@ -25,8 +25,8 @@ impl OpenCADStudio {
     pub(in crate::app) fn mlstyle_mut(
         &mut self,
         tab: usize,
-    ) -> Option<&mut acadrust::objects::MLineStyle> {
-        use acadrust::objects::ObjectType;
+    ) -> Option<&mut codec::objects::MLineStyle> {
+        use codec::objects::ObjectType;
         let name = self.mlstyle_selected.clone();
         self.tabs[tab]
             .scene
@@ -40,7 +40,7 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn load_mlstyle_bufs(&mut self, tab: usize) {
-        use acadrust::objects::ObjectType;
+        use codec::objects::ObjectType;
         let name = self.mlstyle_selected.clone();
         let Some((description, start_angle, end_angle, fill_color, elements)) = self.tabs[tab]
             .scene
@@ -93,22 +93,22 @@ impl OpenCADStudio {
                 style.end_angle = value.to_radians();
             }
             if let Some(value) = fill_color {
-                style.fill_color = acadrust::types::Color::from_index(value);
+                style.fill_color = codec::types::Color::from_index(value);
             }
             for (element, values) in style.elements.iter_mut().zip(elements) {
                 if let Ok(value) = values[0].trim().parse::<f64>() {
                     element.offset = value;
                 }
                 if let Ok(value) = values[1].trim().parse::<i16>() {
-                    element.color = acadrust::types::Color::from_index(value);
+                    element.color = codec::types::Color::from_index(value);
                 }
                 element.linetype = values[2].clone();
             }
         }
     }
 
-    pub(in crate::app) fn tablestyle_mut(&mut self, tab: usize) -> Option<&mut acadrust::objects::TableStyle> {
-        use acadrust::objects::ObjectType;
+    pub(in crate::app) fn tablestyle_mut(&mut self, tab: usize) -> Option<&mut codec::objects::TableStyle> {
+        use codec::objects::ObjectType;
         let name = self.tablestyle_selected.clone();
         self.tabs[tab]
             .scene
@@ -124,9 +124,9 @@ impl OpenCADStudio {
     /// Mutable access to a table style's cell style by row (0=Data,1=Header,2=Title).
 
     pub(in crate::app) fn ts_cell_of(
-        s: &mut acadrust::objects::TableStyle,
+        s: &mut codec::objects::TableStyle,
         row: u8,
-    ) -> Option<&mut acadrust::objects::RowCellStyle> {
+    ) -> Option<&mut codec::objects::RowCellStyle> {
         match row {
             0 => Some(&mut s.data_row_style),
             1 => Some(&mut s.header_row_style),
@@ -139,9 +139,9 @@ impl OpenCADStudio {
     /// (0=left 1=right 2=top 3=bottom 4=horizontal-inside 5=vertical-inside).
 
     pub(in crate::app) fn ts_border_of(
-        c: &mut acadrust::objects::RowCellStyle,
+        c: &mut codec::objects::RowCellStyle,
         border: u8,
-    ) -> Option<&mut acadrust::objects::TableCellBorder> {
+    ) -> Option<&mut codec::objects::TableCellBorder> {
         match border {
             0 => Some(&mut c.left_border),
             1 => Some(&mut c.right_border),
@@ -156,7 +156,7 @@ impl OpenCADStudio {
     /// Populate margin + per-cell edit buffers from the selected table style.
 
     pub(in crate::app) fn load_tablestyle_bufs(&mut self, tab: usize) {
-        use acadrust::objects::ObjectType;
+        use codec::objects::ObjectType;
         let name = self.tablestyle_selected.clone();
         let Some(s) = self.tabs[tab]
             .scene
@@ -211,8 +211,8 @@ impl OpenCADStudio {
 
     /// Mutable access to the currently selected multileader style.
 
-    pub(in crate::app) fn mleaderstyle_mut(&mut self, tab: usize) -> Option<&mut acadrust::objects::MultiLeaderStyle> {
-        use acadrust::objects::ObjectType;
+    pub(in crate::app) fn mleaderstyle_mut(&mut self, tab: usize) -> Option<&mut codec::objects::MultiLeaderStyle> {
+        use codec::objects::ObjectType;
         let name = self.mleaderstyle_selected.clone();
         self.tabs[tab]
             .scene
@@ -228,7 +228,7 @@ impl OpenCADStudio {
     /// Populate all edit buffers from the currently selected multileader style.
 
     pub(in crate::app) fn load_mleaderstyle_bufs(&mut self, tab: usize) {
-        use acadrust::objects::ObjectType;
+        use codec::objects::ObjectType;
         let name = self.mleaderstyle_selected.clone();
         let Some(s) = self.tabs[tab]
             .scene
@@ -363,7 +363,7 @@ impl OpenCADStudio {
             .text_styles
             .get(&self.ds_dimtxsty)
             .map(|style| style.handle)
-            .unwrap_or(acadrust::types::Handle::NULL);
+            .unwrap_or(codec::types::Handle::NULL);
         let Some(ds) = doc.dim_styles.get_mut(&self.dimstyle_selected) else {
             return;
         };
@@ -465,12 +465,12 @@ impl OpenCADStudio {
         // pictures are stale. Drop them and let each be drawn again. Without
         // this an edit here would move the numbers and leave the drawing alone.
         let edited = self.dimstyle_selected.clone();
-        let stale: Vec<acadrust::Handle> = self.tabs[tab]
+        let stale: Vec<codec::Handle> = self.tabs[tab]
             .scene
             .document
             .entities()
             .filter_map(|entity| match entity {
-                acadrust::EntityType::Dimension(dim)
+                codec::EntityType::Dimension(dim)
                     if dim.base().style_name.eq_ignore_ascii_case(&edited) =>
                 {
                     Some(entity.common().handle)
@@ -698,10 +698,10 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                         c.text_height = h;
                     }
                     if let Some(v) = tc {
-                        c.text_color = acadrust::types::Color::from_index(v);
+                        c.text_color = codec::types::Color::from_index(v);
                     }
                     if let Some(v) = fc {
-                        c.fill_color = acadrust::types::Color::from_index(v);
+                        c.fill_color = codec::types::Color::from_index(v);
                     }
                     if let Some(v) = dtype {
                         c.data_type = v;
@@ -713,10 +713,10 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                     for (b, (lw, color, spacing)) in border_vals.into_iter().enumerate() {
                         if let Some(bd) = Self::ts_border_of(c, b as u8) {
                             if let Some(v) = lw {
-                                bd.line_weight = acadrust::types::LineWeight::from_value(v);
+                                bd.line_weight = codec::types::LineWeight::from_value(v);
                             }
                             if let Some(v) = color {
-                                bd.color = acadrust::types::Color::from_index(v);
+                                bd.color = codec::types::Color::from_index(v);
                             }
                             if let Some(v) = spacing {
                                 bd.double_line_spacing = v;
@@ -728,7 +728,7 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
     }
 
     pub(super) fn on_ml_style_dialog_open(&mut self) -> Task<Message> {
-                use acadrust::objects::ObjectType;
+                use codec::objects::ObjectType;
                 let i = self.active_tab;
                 let cur = self.tabs[i].scene.document.header.multiline_style.clone();
                 let exists = self.tabs[i]
@@ -761,7 +761,7 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
     }
 
     pub(super) fn on_mleader_style_dialog_open(&mut self) -> Task<Message> {
-                use acadrust::objects::ObjectType;
+                use codec::objects::ObjectType;
                 let i = self.active_tab;
                 let cur = self.tabs[i].active_mleader_style.clone();
                 let exists = self.tabs[i]
@@ -794,7 +794,7 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
     }
 
     pub(super) fn on_mleader_style_dialog_set_current(&mut self) -> Task<Message> {
-                use acadrust::objects::ObjectType;
+                use codec::objects::ObjectType;
                 let i = self.active_tab;
                 let name = self.mleaderstyle_selected.clone();
                 let exists = self.tabs[i]
@@ -847,7 +847,7 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
     }
 
     pub(super) fn on_mleader_style_set_enum(&mut self, field: &'static str, value: String) -> Task<Message> {
-                use acadrust::objects::{
+                use codec::objects::{
                     BlockContentConnectionType, LeaderContentType, LeaderDrawOrderType,
                     MultiLeaderDrawOrderType, MultiLeaderPathType, TextAlignmentType,
                     TextAngleType, TextAttachmentDirectionType, TextAttachmentType,
@@ -945,7 +945,7 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
     pub(super) fn on_mleader_style_set_handle(&mut self, field: &'static str, value: String) -> Task<Message> {
                 let i = self.active_tab;
                 let doc = &self.tabs[i].scene.document;
-                let handle: Option<acadrust::types::Handle> = if value == "None"
+                let handle: Option<codec::types::Handle> = if value == "None"
                     || value == "ByBlock"
                     || value == "Closed filled"
                 {
@@ -1037,17 +1037,17 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                     }
                     s.default_text = dt;
                     if let Some(v) = lc {
-                        s.line_color = acadrust::types::Color::from_index(v);
+                        s.line_color = codec::types::Color::from_index(v);
                     }
                     if let Some(v) = tc {
-                        s.text_color = acadrust::types::Color::from_index(v);
+                        s.text_color = codec::types::Color::from_index(v);
                     }
                     s.description = desc;
                     if let Some(v) = align {
                         s.align_space = v;
                     }
                     if let Some(v) = bclr {
-                        s.block_content_color = acadrust::types::Color::from_index(v);
+                        s.block_content_color = codec::types::Color::from_index(v);
                     }
                     if let Some(v) = brot {
                         s.block_content_rotation = v.to_radians();
@@ -1106,7 +1106,7 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                 Task::none()
     }
 
-    pub(super) fn on_color_window_pick(&mut self, color: acadrust::types::Color) -> Task<Message> {
+    pub(super) fn on_color_window_pick(&mut self, color: codec::types::Color) -> Task<Message> {
                 if matches!(
                     self.color_pick_target.as_ref().map(|(target, _)| target),
                     Some(crate::app::ColorPickTarget::PlotStyle)
@@ -1114,9 +1114,9 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                     self.color_pick_target = None;
 
                     let rgb = match color {
-                        acadrust::types::Color::Rgb { r, g, b } => Some((r, g, b)),
-                        acadrust::types::Color::Index(index) => {
-                            acadrust::types::aci_table::aci_to_rgb(index)
+                        codec::types::Color::Rgb { r, g, b } => Some((r, g, b)),
+                        codec::types::Color::Index(index) => {
+                            codec::types::aci_table::aci_to_rgb(index)
                         }
                         _ => None,
                     };
@@ -1181,19 +1181,19 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                 );
                 let doc = &self.tabs[i].scene.document;
                 let handle = if value == "Default" || value == "ByBlock" {
-                    acadrust::types::Handle::NULL
+                    codec::types::Handle::NULL
                 } else if is_lt {
                     doc.line_types
                         .iter()
                         .find(|lt| lt.name == value)
                         .map(|lt| lt.handle)
-                        .unwrap_or(acadrust::types::Handle::NULL)
+                        .unwrap_or(codec::types::Handle::NULL)
                 } else {
                     doc.block_records
                         .iter()
                         .find(|b| b.name == value)
                         .map(|b| b.handle)
-                        .unwrap_or(acadrust::types::Handle::NULL)
+                        .unwrap_or(codec::types::Handle::NULL)
                 };
                 // Staged: persists on Apply.
                 if let Some(ds) = self.tabs[i].scene.document.dim_styles.get_mut(&name) {

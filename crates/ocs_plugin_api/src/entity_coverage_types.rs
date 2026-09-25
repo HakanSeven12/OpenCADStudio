@@ -22,7 +22,7 @@ pub enum ModelAccess {
 pub struct PropertyCoverage {
     /// Name shown in the document model, or source name when unmapped.
     pub name: String,
-    /// Field in the acadrust snapshot; `kind` is synthesized from the variant.
+    /// Field in the opencadcodec snapshot; `kind` is synthesized from the variant.
     pub source_path: String,
     pub type_id: String,
     pub optional: bool,

@@ -24,7 +24,7 @@ impl Scene {
 
     /// Create a paper-space layout. Wraps `document.add_layout` so the
     /// cached layout-name list is invalidated on insert.
-    pub fn add_layout(&mut self, name: &str) -> acadrust::Result<Handle> {
+    pub fn add_layout(&mut self, name: &str) -> codec::Result<Handle> {
         let handle = self.document.add_layout(name)?;
         self.bump_layout_epoch();
         Ok(handle)
@@ -190,7 +190,7 @@ impl Scene {
                 .get(active)
                 .map(|t| (t.render_mode, t.grid_on, t.snap_on))
                 .unwrap_or((
-                    acadrust::entities::ViewportRenderMode::Wireframe2D,
+                    codec::entities::ViewportRenderMode::Wireframe2D,
                     false,
                     false,
                 ))
@@ -320,7 +320,7 @@ impl Scene {
                     height: 1.0,
                 },
                 camera: self.camera.borrow().clone(),
-                render_mode: acadrust::entities::ViewportRenderMode::Wireframe2D,
+                render_mode: codec::entities::ViewportRenderMode::Wireframe2D,
                 grid_on: false,
                 snap_on: false,
             });

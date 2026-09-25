@@ -31,7 +31,7 @@ pub struct RegistryEntry {
 pub struct ReleaseInfo {
     pub tag: String,
     pub api_version: u32,
-    /// Full `acadrust` git source used by the release.
+    /// Full `opencadcodec` git source used by the release.
     pub acadrust_source: Option<String>,
     /// Whether `[opencad]` declares `acadrust_source`.
     pub acadrust_declared: bool,
@@ -57,7 +57,7 @@ pub struct ExternalPlugin {
     /// an older `plugin.toml` does not declare `repository`.
     pub repository: Option<String>,
     pub api_version: u32,
-    /// Full `acadrust` git source used by the plugin.
+    /// Full `opencadcodec` git source used by the plugin.
     pub acadrust_source: Option<String>,
     /// Whether `[opencad]` declares `acadrust_source`.
     pub acadrust_declared: bool,
@@ -434,7 +434,7 @@ mod loader {
                 && d.acadrust_source.is_none()
             {
                 eprintln!(
-                    "[plugin] {} declares acadrust metadata but has no fingerprint; cannot verify compatibility",
+                    "[plugin] {} declares opencadcodec metadata but has no fingerprint; cannot verify compatibility",
                     d.id
                 );
             }
@@ -450,7 +450,7 @@ mod loader {
                 out.push((
                     d.id.clone(),
                     Err(format!(
-                        "Plugin built for acadrust @{plugin_hash}, but this host uses @{host_hash}"
+                        "Plugin built for opencadcodec @{plugin_hash}, but this host uses @{host_hash}"
                     )),
                 ));
                 continue;
@@ -777,9 +777,9 @@ acadrust_source = "0123456789012345678901234567890123456789"
     fn acadrust_mismatch_detected() {
         let host = ocs_plugin_api::version_info::host_acadrust_source();
         let other = if host.contains("94df2c3") {
-            "git+https://github.com/HakanSeven12/cadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb"
+            "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb"
         } else {
-            "git+https://github.com/HakanSeven12/cadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd"
+            "git+https://github.com/HakanSeven12/opencadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd"
         };
         let toml = format!(
             r#"
@@ -795,7 +795,7 @@ acadrust_source = "{other}"
         );
         let p = parse_plugin_toml(&toml).expect("parsed");
         assert!(p.acadrust_declared);
-        assert!(!p.acadrust_compatible(), "mismatched acadrust fingerprint should be incompatible");
+        assert!(!p.acadrust_compatible(), "mismatched opencadcodec fingerprint should be incompatible");
         assert!(!p.loadable());
     }
 
@@ -816,7 +816,7 @@ acadrust_source = "{host}"
         );
         let p = parse_plugin_toml(&toml).expect("parsed");
         assert!(p.acadrust_declared);
-        assert!(p.acadrust_compatible(), "matching acadrust fingerprint should be compatible");
+        assert!(p.acadrust_compatible(), "matching opencadcodec fingerprint should be compatible");
     }
 
     #[test]
@@ -829,14 +829,14 @@ version = "0.1.0"
 api_version = 2
 
 [opencad]
-acadrust_source = "git+https://github.com/HakanSeven12/cadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb"
+acadrust_source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb"
 "#;
         let mut p = parse_plugin_toml(toml).expect("parsed");
         p.lib_present = true;
         assert!(p.acadrust_declared);
         assert!(
             p.acadrust_compatible(),
-            "API v2 plugin should bypass acadrust gate"
+            "API v2 plugin should bypass opencadcodec gate"
         );
         assert!(p.loadable());
     }

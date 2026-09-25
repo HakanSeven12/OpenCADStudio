@@ -33,9 +33,9 @@ impl OpenCADStudio {
         let i = self.active_tab;
         let valid = matches!(
             self.tabs[i].scene.document.get_entity(dimension),
-            Some(acadrust::EntityType::Dimension(
-                acadrust::entities::Dimension::Linear(_)
-                    | acadrust::entities::Dimension::Aligned(_)
+            Some(codec::EntityType::Dimension(
+                codec::entities::Dimension::Linear(_)
+                    | codec::entities::Dimension::Aligned(_)
             ))
         );
         if !valid {
@@ -45,12 +45,12 @@ impl OpenCADStudio {
         } else if !self.reject_locked_edit(i, dimension) {
             self.push_undo_snapshot(i, "DIMJOGLINE");
             let values = point.map(|point| {
-                use acadrust::xdata::XDataValue;
+                use codec::xdata::XDataValue;
                 vec![
                     XDataValue::Integer16(387),
                     XDataValue::Integer16(3),
                     XDataValue::Integer16(389),
-                    XDataValue::Point3D(acadrust::types::Vector3::new(
+                    XDataValue::Point3D(codec::types::Vector3::new(
                         point.x, point.y, point.z,
                     )),
                 ]
@@ -124,7 +124,7 @@ fn segment_intersection_xy(
     first: (glam::DVec3, glam::DVec3),
     second: (glam::DVec3, glam::DVec3),
 ) -> Option<(glam::DVec3, glam::DVec3)> {
-    let gap = cadkernel::space::segment_break_gap_xy(
+    let gap = kernel::space::segment_break_gap_xy(
         [first.0.to_array(), first.1.to_array()],
         [second.0.to_array(), second.1.to_array()],
         0.25,
@@ -135,25 +135,25 @@ fn segment_intersection_xy(
     ))
 }
 
-fn break_object_handle(document: &acadrust::CadDocument, dimension: Handle) -> Option<Handle> {
+fn break_object_handle(document: &codec::CadDocument, dimension: Handle) -> Option<Handle> {
     document.objects.iter().find_map(|(handle, object)| {
-        let acadrust::objects::ObjectType::DataObject(object) = object else {
+        let codec::objects::ObjectType::DataObject(object) = object else {
             return None;
         };
-        let acadrust::objects::DataObjectData::BreakData(data) = &object.data else {
+        let codec::objects::DataObjectData::BreakData(data) = &object.data else {
             return None;
         };
         (data.dimension_reference == dimension).then_some(*handle)
     })
 }
 
-fn remove_dimension_break_data(document: &mut acadrust::CadDocument, dimension: Handle) -> bool {
+fn remove_dimension_break_data(document: &mut codec::CadDocument, dimension: Handle) -> bool {
     let handles: Vec<_> = document
         .objects
         .iter()
         .filter_map(|(handle, object)| match object {
-            acadrust::objects::ObjectType::DataObject(object) => match &object.data {
-                acadrust::objects::DataObjectData::BreakData(data)
+            codec::objects::ObjectType::DataObject(object) => match &object.data {
+                codec::objects::DataObjectData::BreakData(data)
                     if data.dimension_reference == dimension =>
                 {
                     Some(*handle)
@@ -170,7 +170,7 @@ fn remove_dimension_break_data(document: &mut acadrust::CadDocument, dimension: 
         document.objects.remove(handle);
     }
     if let Some(dictionary_handle) = document.extension_dictionary_handle(dimension) {
-        if let Some(acadrust::objects::ObjectType::Dictionary(dictionary)) =
+        if let Some(codec::objects::ObjectType::Dictionary(dictionary)) =
             document.objects.get_mut(&dictionary_handle)
         {
             dictionary.entries.retain(|(name, handle)| {
@@ -185,12 +185,12 @@ fn remove_dimension_break_data(document: &mut acadrust::CadDocument, dimension: 
 }
 
 fn write_dimension_break_data(
-    document: &mut acadrust::CadDocument,
+    document: &mut codec::CadDocument,
     dimension: Handle,
     reserved_reference: Handle,
-    references: Vec<acadrust::objects::BreakPointReference>,
+    references: Vec<codec::objects::BreakPointReference>,
 ) -> bool {
-    use acadrust::objects::{BreakData, DataObject, DataObjectData, Dictionary, ObjectType};
+    use codec::objects::{BreakData, DataObject, DataObjectData, Dictionary, ObjectType};
 
     if references.is_empty() {
         return remove_dimension_break_data(document, dimension);
@@ -252,15 +252,15 @@ fn break_reference(
     reference_type: i32,
     first: glam::DVec3,
     second: glam::DVec3,
-) -> acadrust::objects::BreakPointReference {
-    acadrust::objects::BreakPointReference {
+) -> codec::objects::BreakPointReference {
+    codec::objects::BreakPointReference {
         version: 0,
         reserved: 0,
         reference_type,
         flags: 0,
         identifier,
-        first_point: acadrust::types::Vector3::new(first.x, first.y, first.z),
-        second_point: acadrust::types::Vector3::new(second.x, second.y, second.z),
+        first_point: codec::types::Vector3::new(first.x, first.y, first.z),
+        second_point: codec::types::Vector3::new(second.x, second.y, second.z),
         trailing_version: 0,
     }
 }
@@ -278,7 +278,7 @@ fn apply_dimbreak(
         .filter(|handle| {
             matches!(
                 scene.document.get_entity(*handle),
-                Some(acadrust::EntityType::Dimension(_))
+                Some(codec::EntityType::Dimension(_))
             ) && scene.locked_layer_name(*handle).is_none()
         })
         .collect();
@@ -326,8 +326,8 @@ fn apply_dimbreak(
         let existing: Vec<_> = break_object_handle(&scene.document, *dimension)
             .and_then(|handle| scene.document.objects.get(&handle))
             .and_then(|object| match object {
-                acadrust::objects::ObjectType::DataObject(object) => match &object.data {
-                    acadrust::objects::DataObjectData::BreakData(data) => {
+                codec::objects::ObjectType::DataObject(object) => match &object.data {
+                    codec::objects::DataObjectData::BreakData(data) => {
                         Some(data.point_references.clone())
                     }
                     _ => None,
@@ -408,9 +408,9 @@ fn apply_dimspace(
     others: &[Handle],
     requested_spacing: Option<f64>,
 ) -> bool {
-    use acadrust::entities::Dimension;
+    use codec::entities::Dimension;
     let (axis, normal, definition, auto_spacing) = match scene.document.get_entity(base_h) {
-        Some(acadrust::EntityType::Dimension(dimension @ Dimension::Linear(d))) => {
+        Some(codec::EntityType::Dimension(dimension @ Dimension::Linear(d))) => {
             let spacing = dimension_auto_spacing(
                 &scene.document,
                 dimension,
@@ -427,7 +427,7 @@ fn apply_dimspace(
                 spacing,
             )
         }
-        Some(acadrust::EntityType::Dimension(dimension @ Dimension::Aligned(d))) => {
+        Some(codec::EntityType::Dimension(dimension @ Dimension::Aligned(d))) => {
             let spacing = dimension_auto_spacing(
                 &scene.document,
                 dimension,
@@ -450,7 +450,7 @@ fn apply_dimspace(
         }
         _ => return false,
     };
-    let Some(frame) = cadkernel::space::dimension_spacing_frame(axis, normal, definition) else {
+    let Some(frame) = kernel::space::dimension_spacing_frame(axis, normal, definition) else {
         return false;
     };
 
@@ -459,11 +459,11 @@ fn apply_dimspace(
     for (idx, &h) in others.iter().enumerate() {
         let target = frame.coordinate + effective_spacing * (idx + 1) as f64;
         let mut changed = false;
-        if let Some(acadrust::EntityType::Dimension(dim)) = scene.document.get_entity_mut(h) {
-            let slide = |p: &mut acadrust::types::Vector3| {
+        if let Some(codec::EntityType::Dimension(dim)) = scene.document.get_entity_mut(h) {
+            let slide = |p: &mut codec::types::Vector3| {
                 let point =
-                    cadkernel::space::move_to_dimension_spacing([p.x, p.y, p.z], frame, target);
-                *p = acadrust::types::Vector3::new(point[0], point[1], point[2]);
+                    kernel::space::move_to_dimension_spacing([p.x, p.y, p.z], frame, target);
+                *p = codec::types::Vector3::new(point[0], point[1], point[2]);
             };
             match dim {
                 Dimension::Linear(d) => {
@@ -493,8 +493,8 @@ fn apply_dimspace(
 }
 
 fn dimension_auto_spacing(
-    document: &acadrust::CadDocument,
-    dimension: &acadrust::entities::Dimension,
+    document: &codec::CadDocument,
+    dimension: &codec::entities::Dimension,
     annotation_multiplier: f64,
 ) -> f64 {
     let style = document

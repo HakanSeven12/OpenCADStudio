@@ -92,11 +92,11 @@ fn field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
 /// unit-tested and benched without building widgets. `pub` (not
 /// `pub(crate)`) so the `cargo bench` harness (`benches/`, an external
 /// crate) can measure it as `ui_plotstyle_layer_usage`.
-pub fn build_layer_usage(document: &acadrust::CadDocument) -> Vec<Vec<String>> {
+pub fn build_layer_usage(document: &codec::CadDocument) -> Vec<Vec<String>> {
     let mut layer_usage = vec![Vec::<String>::new(); 256];
 
     for layer in document.layers.iter() {
-        if let acadrust::types::Color::Index(aci) = &layer.color {
+        if let codec::types::Color::Index(aci) = &layer.color {
             let index = *aci as usize;
 
             if index > 0 && index < layer_usage.len() {
@@ -114,7 +114,7 @@ pub fn build_layer_usage(document: &acadrust::CadDocument) -> Vec<Vec<String>> {
 }
 
 pub fn view_window<'a>(
-    document: &'a acadrust::CadDocument,
+    document: &'a codec::CadDocument,
     table: Option<&'a crate::io::plot_style::PlotStyleTable>,
     selected_aci: u8,
     color_buf: &'a str,
@@ -182,7 +182,7 @@ pub fn view_window<'a>(
                 String::new()
             };
             let (aci_color, _) = crate::ui::properties::acad_color_display(
-                acadrust::types::Color::Index(aci),
+                codec::types::Color::Index(aci),
             );
             let has_override = table
                 .and_then(|t| t.aci_entries.get(aci as usize))
@@ -379,14 +379,14 @@ pub fn view_window<'a>(
                     .strip_prefix('#')
                     .filter(|hex| hex.len() == 6)
                     .and_then(|hex| u32::from_str_radix(hex, 16).ok())
-                    .map(|rgb| acadrust::types::Color::Rgb {
+                    .map(|rgb| codec::types::Color::Rgb {
                         r: ((rgb >> 16) & 0xFF) as u8,
                         g: ((rgb >> 8) & 0xFF) as u8,
                         b: (rgb & 0xFF) as u8,
                     });
 
                 let display_color = selected_color
-                    .unwrap_or(acadrust::types::Color::Index(selected_aci));
+                    .unwrap_or(codec::types::Color::Index(selected_aci));
 
                 let (swatch_color, _) =
                     crate::ui::properties::acad_color_display(display_color);
@@ -559,19 +559,19 @@ mod layer_usage_tests {
     use super::*;
 
     fn indexed_layer(
-        doc: &mut acadrust::CadDocument,
+        doc: &mut codec::CadDocument,
         name: &str,
         aci: u8,
-    ) -> acadrust::tables::Layer {
-        let mut layer = acadrust::tables::Layer::new(name);
+    ) -> codec::tables::Layer {
+        let mut layer = codec::tables::Layer::new(name);
         layer.handle = doc.allocate_handle();
-        layer.color = acadrust::types::Color::Index(aci);
+        layer.color = codec::types::Color::Index(aci);
         layer
     }
 
     #[test]
     fn build_layer_usage_buckets_index_colors() {
-        let mut doc = acadrust::CadDocument::new();
+        let mut doc = codec::CadDocument::new();
         let a = indexed_layer(&mut doc, "WALLS", 1);
         let b = indexed_layer(&mut doc, "doors", 1);
         let c = indexed_layer(&mut doc, "ROOF", 3);
@@ -589,10 +589,10 @@ mod layer_usage_tests {
 
     #[test]
     fn build_layer_usage_ignores_non_index_colors() {
-        let mut doc = acadrust::CadDocument::new();
-        let mut truecolor = acadrust::tables::Layer::new("TRUECOLOR");
+        let mut doc = codec::CadDocument::new();
+        let mut truecolor = codec::tables::Layer::new("TRUECOLOR");
         truecolor.handle = doc.allocate_handle();
-        truecolor.color = acadrust::types::Color::Rgb {
+        truecolor.color = codec::types::Color::Rgb {
             r: 10,
             g: 20,
             b: 30,

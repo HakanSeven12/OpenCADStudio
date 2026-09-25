@@ -824,7 +824,7 @@ mod marquee_cancel_tests {
     use crate::app::{GripPendingValue, OpenCADStudio};
     use crate::scene::model::object::GripMenuAction;
     use crate::scene::pick::grip::GripEdit;
-    use acadrust::Handle;
+    use codec::Handle;
     use iced::time::Instant;
 
     fn fresh() -> OpenCADStudio {

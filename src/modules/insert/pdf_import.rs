@@ -14,12 +14,12 @@
 // (other fills solid hatches), text runs MTEXT in a "PDF <font>" style and
 // raster images PNG files referenced by IMAGE objects.
 
-use acadrust::entities::{
+use codec::entities::{
     AttachmentPoint, BoundaryEdge, BoundaryPath, Circle, Hatch, LwPolyline, MText, PolylineEdge,
     Solid, Spline, Underlay, UnderlayType,
 };
-use acadrust::types::{Color, Handle, LineWeight, Vector2, Vector3};
-use acadrust::EntityType;
+use codec::types::{Color, Handle, LineWeight, Vector2, Vector3};
+use codec::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
@@ -746,7 +746,7 @@ pub fn convert(
             color
         }
     };
-    let fill_transparency = acadrust::types::Transparency::from_alpha_value(0x0200_007F);
+    let fill_transparency = codec::types::Transparency::from_alpha_value(0x0200_007F);
     let mut strokes: Vec<Stroke> = Vec::new();
     let mut curves: Vec<EntityType> = Vec::new();
 

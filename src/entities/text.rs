@@ -1,4 +1,4 @@
-use acadrust::entities::{Text, TextHorizontalAlignment as HA, TextVerticalAlignment as VA};
+use codec::entities::{Text, TextHorizontalAlignment as HA, TextVerticalAlignment as VA};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
@@ -52,7 +52,7 @@ pub(crate) fn sync_text_alignment_point(t: &mut Text) {
                     * t.width_factor.abs().max(0.01)
                     * t.value.chars().count().max(1) as f64
                     * 0.6;
-                t.alignment_point = Some(acadrust::types::Vector3::new(
+                t.alignment_point = Some(codec::types::Vector3::new(
                     t.insertion_point.x + t.rotation.cos() * span,
                     t.insertion_point.y + t.rotation.sin() * span,
                     t.insertion_point.z,
@@ -100,13 +100,13 @@ pub struct TextPlacement {
     pub wcs_insertion: [f64; 3],
 }
 
-/// Parse a TEXT value's `%%` control codes through acadrust's `parse_plain_text`
+/// Parse a TEXT value's `%%` control codes through opencadcodec's `parse_plain_text`
 /// (the same parser MTEXT uses), then re-encode into the stroke tessellator's
 /// inline grammar: specials arrive resolved to Unicode, and `%%u`/`%%o`
 /// underline/overline become `\L…\l` / `\O…\o` decoration markers. This keeps
-/// TEXT parsing in acadrust rather than OCS's own tokenizer.
+/// TEXT parsing in opencadcodec rather than OCS's own tokenizer.
 pub(crate) fn acad_text_encode(value: &str) -> String {
-    use acadrust::entities::mtext_format::parse_plain_text;
+    use codec::entities::mtext_format::parse_plain_text;
     let doc = parse_plain_text(value);
     let mut out = String::new();
     for para in &doc.paragraphs {
@@ -132,12 +132,12 @@ pub(crate) fn acad_text_encode(value: &str) -> String {
 
 pub(crate) fn to_render_at_scale(
     t: &Text,
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     annotation_scale: f32,
 ) -> RenderEntity {
     let p = text_run_placement_at_scale(t, document, annotation_scale);
     let snap_pt = glam::DVec3::new(p.wcs_insertion[0], p.wcs_insertion[1], p.wcs_insertion[2]);
-    // Parse `%%` codes via acadrust, re-encoded for the stroke tessellator.
+    // Parse `%%` codes via opencadcodec, re-encoded for the stroke tessellator.
     let value = acad_text_encode(&p.value);
     // Strokes are in glyph-local space (origin = [0,0]).
     let (strokes, fill_tris) = lff::tessellate_text_ex(
@@ -179,7 +179,7 @@ pub(crate) fn to_render_at_scale(
 /// from `to_render` verbatim so the stroke and SDF-quad paths agree exactly.
 pub fn text_run_placement_at_scale(
     t: &Text,
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     annotation_scale: f32,
 ) -> TextPlacement {
     let annotation_scale = if annotation_scale.is_finite() && annotation_scale > 1.0e-9 {
@@ -647,7 +647,7 @@ fn apply_transform(t: &mut Text, tr: &EntityTransform) {
 }
 
 impl RenderConvertible for Text {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(to_render_at_scale(self, document, 1.0))
     }
 }
@@ -721,10 +721,10 @@ mod tests {
         let mut t = Text::default();
         t.value = "بسم الله".to_string();
         t.height = 2.5;
-        t.insertion_point = acadrust::types::Vector3::new(10.0, 20.0, 0.0);
+        t.insertion_point = codec::types::Vector3::new(10.0, 20.0, 0.0);
         t.horizontal_alignment = HA::Left;
 
-        let doc = acadrust::CadDocument::default();
+        let doc = codec::CadDocument::default();
         let placement = text_run_placement_at_scale(&t, &doc, 1.0);
 
         // For Arabic text with default HA::Left, origin should be shifted left
@@ -749,7 +749,7 @@ impl Transformable for Text {
     }
 }
 
-impl crate::entities::traits::TextContent for acadrust::entities::Text {
+impl crate::entities::traits::TextContent for codec::entities::Text {
     fn text_content(&self) -> Option<String> {
         Some(self.value.clone())
     }

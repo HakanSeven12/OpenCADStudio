@@ -7,7 +7,7 @@
 //      the rich MText editor for MText / MultiLeader. A Leader resolves to the
 //      entity it annotates.
 
-use acadrust::Handle;
+use codec::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};

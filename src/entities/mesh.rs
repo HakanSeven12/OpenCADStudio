@@ -1,6 +1,6 @@
-use acadrust::entities::{mesh::Mesh, polygon_mesh::PolygonMesh, Face3D, PolyfaceMesh};
-use cadkernel::geom2d::{triangulate, Tolerance};
-use cadkernel::space::{polygon, NurbsSurface3, Plane, Vec3 as KernelVec3};
+use codec::entities::{mesh::Mesh, polygon_mesh::PolygonMesh, Face3D, PolyfaceMesh};
+use kernel::geom2d::{triangulate, Tolerance};
+use kernel::space::{polygon, NurbsSurface3, Plane, Vec3 as KernelVec3};
 use glam::Vec3;
 
 use crate::command::EntityTransform;
@@ -57,15 +57,15 @@ pub(crate) fn triangulate_planar(poly: &[[f64; 3]]) -> Vec<[f64; 3]> {
 
 // ── Face3D ────────────────────────────────────────────────────────────────────
 
-fn v3(v: &acadrust::types::Vector3) -> [f64; 3] {
+fn v3(v: &codec::types::Vector3) -> [f64; 3] {
     [v.x, v.y, v.z]
 }
 
-fn dvec3(v: &acadrust::types::Vector3) -> glam::DVec3 {
+fn dvec3(v: &codec::types::Vector3) -> glam::DVec3 {
     glam::DVec3::new(v.x, v.y, v.z)
 }
 
-fn v3f32(v: &acadrust::types::Vector3) -> [f32; 3] {
+fn v3f32(v: &codec::types::Vector3) -> [f32; 3] {
     [v.x as f32, v.y as f32, v.z as f32]
 }
 
@@ -94,7 +94,7 @@ fn face3d_fill(corners: [[f64; 3]; 4]) -> Vec<[f64; 3]> {
 }
 
 impl RenderConvertible for Face3D {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         let p0 = v3(&self.first_corner);
         let p1 = v3(&self.second_corner);
         let p2 = v3(&self.third_corner);
@@ -292,7 +292,7 @@ impl Transformable for Face3D {
 // ── PolygonMesh (N×M grid) ────────────────────────────────────────────────────
 
 fn polygon_mesh_display(mesh: &PolygonMesh) -> (Vec<[f64; 3]>, usize, usize) {
-    use acadrust::entities::polygon_mesh::SurfaceSmoothType;
+    use codec::entities::polygon_mesh::SurfaceSmoothType;
 
     let m = mesh.m_vertex_count.max(0) as usize;
     let n = mesh.n_vertex_count.max(0) as usize;
@@ -354,7 +354,7 @@ fn polygon_mesh_display(mesh: &PolygonMesh) -> (Vec<[f64; 3]>, usize, usize) {
 }
 
 impl RenderConvertible for PolygonMesh {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         let (vertices, m, n) = polygon_mesh_display(self);
         if m == 0 || n == 0 || vertices.len() < m * n {
             return None;
@@ -439,7 +439,7 @@ impl Grippable for PolygonMesh {
 
 impl PropertyEditable for PolygonMesh {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
-        use acadrust::entities::polygon_mesh::SurfaceSmoothType;
+        use codec::entities::polygon_mesh::SurfaceSmoothType;
 
         let smooth = match self.smooth_type {
             SurfaceSmoothType::NoSmooth => "None",
@@ -523,7 +523,7 @@ impl PropertyEditable for PolygonMesh {
     }
 
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
-        use acadrust::entities::polygon_mesh::{PolygonMeshFlags, SurfaceSmoothType};
+        use codec::entities::polygon_mesh::{PolygonMeshFlags, SurfaceSmoothType};
 
         let bool_value = |current: bool| {
             if value == "toggle" {
@@ -617,7 +617,7 @@ impl Transformable for PolygonMesh {
 // ── PolyfaceMesh (arbitrary faces with 1-based vertex indices) ────────────────
 
 impl RenderConvertible for PolyfaceMesh {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         if self.vertices.is_empty() || self.faces.is_empty() {
             return None;
         }
@@ -668,10 +668,10 @@ impl Grippable for PolyfaceMesh {
 impl PropertyEditable for PolyfaceMesh {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
         let smooth = match self.smooth_surface {
-            acadrust::entities::PolyfaceSmoothType::None => "None",
-            acadrust::entities::PolyfaceSmoothType::Quadratic => "Quadratic",
-            acadrust::entities::PolyfaceSmoothType::Cubic => "Cubic",
-            acadrust::entities::PolyfaceSmoothType::Bezier => "Bezier",
+            codec::entities::PolyfaceSmoothType::None => "None",
+            codec::entities::PolyfaceSmoothType::Quadratic => "Quadratic",
+            codec::entities::PolyfaceSmoothType::Cubic => "Cubic",
+            codec::entities::PolyfaceSmoothType::Bezier => "Bezier",
         };
         let first = self.vertices.first();
         vec![
@@ -994,13 +994,13 @@ fn display_mesh(mesh: &Mesh) -> RefinedMesh {
 /// Convert a closed indexed mesh entity to an exact planar-faced B-rep.
 /// Open, non-manifold, non-planar, and degenerate meshes return `None` so a
 /// modelling command can leave the source untouched.
-pub(crate) fn closed_mesh_body(entity: &acadrust::EntityType) -> Option<cadkernel::brep::Body> {
+pub(crate) fn closed_mesh_body(entity: &codec::EntityType) -> Option<kernel::brep::Body> {
     match entity {
-        acadrust::EntityType::Mesh(mesh) => {
+        codec::EntityType::Mesh(mesh) => {
             let base = base_refined_mesh(mesh);
-            cadkernel::brep::make::faceted_solid(&base.vertices, &base.faces)
+            kernel::brep::make::faceted_solid(&base.vertices, &base.faces)
         }
-        acadrust::EntityType::PolygonMesh(mesh) => {
+        codec::EntityType::PolygonMesh(mesh) => {
             if !mesh.is_closed_m() || !mesh.is_closed_n() {
                 return None;
             }
@@ -1026,9 +1026,9 @@ pub(crate) fn closed_mesh_body(entity: &acadrust::EntityType) -> Option<cadkerne
                     ]);
                 }
             }
-            cadkernel::brep::make::faceted_solid(&vertices, &faces)
+            kernel::brep::make::faceted_solid(&vertices, &faces)
         }
-        acadrust::EntityType::PolyfaceMesh(mesh) => {
+        codec::EntityType::PolyfaceMesh(mesh) => {
             let vertices = mesh
                 .vertices
                 .iter()
@@ -1046,7 +1046,7 @@ pub(crate) fn closed_mesh_body(entity: &acadrust::EntityType) -> Option<cadkerne
                     (indices.len() >= 3).then_some(indices)
                 })
                 .collect::<Vec<_>>();
-            cadkernel::brep::make::faceted_solid(&vertices, &faces)
+            kernel::brep::make::faceted_solid(&vertices, &faces)
         }
         _ => None,
     }
@@ -1191,13 +1191,13 @@ fn make_mesh_lod_set(
 /// pipeline. The retained wire entity carries snaps/grips only; fill, normals,
 /// depth, materials and face colours live in `MeshLodSet`.
 pub(crate) fn tessellate_shaded_mesh(
-    entity: &acadrust::EntityType,
+    entity: &codec::EntityType,
     color: [f32; 4],
 ) -> Option<crate::scene::model::mesh_model::MeshLodSet> {
     use std::collections::HashSet;
 
     match entity {
-        acadrust::EntityType::Mesh(mesh) => {
+        codec::EntityType::Mesh(mesh) => {
             let display = display_mesh(mesh);
             let mut edges = HashSet::new();
             for face in &display.faces {
@@ -1214,7 +1214,7 @@ pub(crate) fn tessellate_shaded_mesh(
                 &[],
             )
         }
-        acadrust::EntityType::PolygonMesh(mesh) => {
+        codec::EntityType::PolygonMesh(mesh) => {
             let (vertices, m, n) = polygon_mesh_display(mesh);
             if m == 0 || n == 0 || vertices.len() < m.saturating_mul(n) {
                 return None;
@@ -1248,7 +1248,7 @@ pub(crate) fn tessellate_shaded_mesh(
                 &[],
             )
         }
-        acadrust::EntityType::PolyfaceMesh(mesh) => {
+        codec::EntityType::PolyfaceMesh(mesh) => {
             let vertices: Vec<[f64; 3]> = mesh
                 .vertices
                 .iter()
@@ -1296,7 +1296,7 @@ pub(crate) fn tessellate_shaded_mesh(
 }
 
 impl RenderConvertible for Mesh {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         if self.vertices.is_empty() {
             return None;
         }

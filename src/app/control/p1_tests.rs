@@ -321,7 +321,7 @@ fn group_create_and_selection_sets() {
     let objects = &app.tabs[app.active_tab].scene.document.objects;
     assert!(objects.values().any(|o| matches!(
         o,
-        acadrust::objects::ObjectType::Group(group) if group.name == "FRAME"
+        codec::objects::ObjectType::Group(group) if group.name == "FRAME"
     )));
 
     let r = app.automation_op(&format!(
@@ -405,7 +405,7 @@ fn diagnostic_layer_survives_plain_io_round_trip() {
 
     // Direct io round trip on a clone of the document.
     let doc = app.tabs[app.active_tab].scene.document.clone();
-    let bytes = crate::io::save_to_bytes(&doc, "dxf", acadrust::DxfVersion::AC1032)
+    let bytes = crate::io::save_to_bytes(&doc, "dxf", codec::DxfVersion::AC1032)
         .expect("save to bytes");
     let path = std::env::temp_dir().join(format!("ocs_diag_{}.dxf", std::process::id()));
     std::fs::write(&path, &bytes).unwrap();

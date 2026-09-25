@@ -190,13 +190,13 @@ impl OpenCADStudio {
         #[cfg(not(target_arch = "wasm32"))]
         if let Ok(source) = crate::io::load_file(std::path::Path::new(path)) {
             let owner = source.header.model_space_block_handle;
-            let entities: Vec<acadrust::EntityType> = source
+            let entities: Vec<codec::EntityType> = source
                 .entities()
                 .filter(|e| e.common().owner_handle == owner)
                 .filter(|e| {
                     !matches!(
                         e,
-                        acadrust::EntityType::Block(_) | acadrust::EntityType::BlockEnd(_)
+                        codec::EntityType::Block(_) | codec::EntityType::BlockEnd(_)
                     )
                 })
                 .take(MAX_PREVIEW_ENTITIES + 1)
@@ -219,7 +219,7 @@ impl OpenCADStudio {
         &mut self,
         i: usize,
         request: XrefAttachRequest,
-        mut entity: acadrust::EntityType,
+        mut entity: codec::EntityType,
     ) {
         let pending = self.begin_undo(i, "XATTACH", 1, false);
         let host = self.tabs[i].current_path.clone();
@@ -227,7 +227,7 @@ impl OpenCADStudio {
         if host.is_none() && request.path_type == Pathtype::Relative {
             self.tabs[i].xref_relative_on_save.insert(name.clone());
         }
-        if let acadrust::EntityType::Insert(insert) = &mut entity {
+        if let codec::EntityType::Insert(insert) = &mut entity {
             insert.block_name = name;
         }
         // Resolving merged the reference's layers and linetypes — mirror

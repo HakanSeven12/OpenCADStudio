@@ -7,9 +7,9 @@
 //! an override over the style default, so editing one of these rows writes here
 //! and the change round-trips to file.
 
-use acadrust::types::Color;
-use acadrust::xdata::{ExtendedData, XDataValue};
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::types::Color;
+use codec::xdata::{ExtendedData, XDataValue};
+use codec::{CadDocument, EntityType, Handle};
 
 // DXF group codes of the dimension variables surfaced on the leader panel.
 pub const DIMSCALE: i16 = 40; // overall scale       (real)
@@ -284,7 +284,7 @@ pub fn set_on_entity(entity: &mut EntityType, code: i16, value: Option<XDataValu
         }
     }
     if let Some(vals) = values {
-        let mut record = acadrust::xdata::ExtendedDataRecord::new(app);
+        let mut record = codec::xdata::ExtendedDataRecord::new(app);
         for v in vals {
             record.add_value(v);
         }

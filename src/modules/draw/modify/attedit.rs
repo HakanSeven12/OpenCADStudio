@@ -15,7 +15,7 @@ use crate::scene::model::wire_model::WireModel;
 
 pub struct AtteditCommand {
     /// The picked block reference, once the user clicks one.
-    picked: Option<acadrust::Handle>,
+    picked: Option<codec::Handle>,
 }
 
 impl AtteditCommand {
@@ -37,7 +37,7 @@ impl CadCommand for AtteditCommand {
         self.picked.is_none()
     }
 
-    fn on_entity_pick(&mut self, handle: acadrust::Handle, _pt: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: codec::Handle, _pt: DVec3) -> CmdResult {
         if handle.is_null() {
             return CmdResult::NeedPoint;
         }
@@ -57,7 +57,7 @@ impl CadCommand for AtteditCommand {
         vec![]
     }
 
-    fn attedit_pending_handle(&self) -> Option<acadrust::Handle> {
+    fn attedit_pending_handle(&self) -> Option<codec::Handle> {
         self.picked
     }
 }

@@ -5,10 +5,10 @@
 // MLEADERALIGN:  select multileaders → pick base alignment direction
 // MLEADERCOLLECT: select block-content multileaders → pick collection point
 
-use acadrust::entities::{LeaderLine, MultiLeader};
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
-use cadkernel::geom2d::{closest_point, Curve, Line};
+use codec::entities::{LeaderLine, MultiLeader};
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
+use kernel::geom2d::{closest_point, Curve, Line};
 use glam::{DVec3, Vec3};
 
 use crate::command::{CadCommand, CmdResult};

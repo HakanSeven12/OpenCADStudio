@@ -1,5 +1,5 @@
-use cadkernel::space::polygon;
-use acadrust::{EntityType, Handle};
+use kernel::space::polygon;
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{

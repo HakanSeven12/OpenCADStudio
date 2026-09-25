@@ -77,7 +77,7 @@
 
 use super::{Message, OpenCADStudio};
 use crate::command::{CmdResult, SelectionEntity, StepInput};
-use acadrust::Handle;
+use codec::Handle;
 use iced::Task;
 
 mod utilities;
@@ -149,7 +149,7 @@ impl OpenCADStudio {
         if let Some((scale, justification, style_name, style_handle)) = mline_settings {
             let tab = &mut self.tabs[self.active_tab];
             let header = &mut tab.scene.document.header;
-            let style_handle = style_handle.unwrap_or(acadrust::Handle::NULL);
+            let style_handle = style_handle.unwrap_or(codec::Handle::NULL);
             let changed = (header.multiline_scale - scale).abs() > f64::EPSILON
                 || header.multiline_justification != justification
                 || !header.multiline_style.eq_ignore_ascii_case(&style_name)
@@ -220,17 +220,17 @@ impl OpenCADStudio {
     pub(crate) fn begin_table_cell_edit(
         &mut self,
         i: usize,
-        handle: acadrust::Handle,
+        handle: codec::Handle,
         click: glam::DVec3,
     ) -> crate::modules::annotate::table_cmd::TableCellEditStart {
         use crate::modules::annotate::table_cmd::{table_cell_at, TableCellEditStart};
-        let target = if handle != acadrust::Handle::NULL {
+        let target = if handle != codec::Handle::NULL {
             self.tabs[i]
                 .scene
                 .document
                 .get_entity(handle)
                 .and_then(|entity| match entity {
-                    acadrust::EntityType::Table(table) => Some((handle, table.clone())),
+                    codec::EntityType::Table(table) => Some((handle, table.clone())),
                     _ => None,
                 })
         } else {
@@ -239,7 +239,7 @@ impl OpenCADStudio {
             // taking the last match selects the table on top if they overlap.
             let mut matched = None;
             for entity in self.tabs[i].scene.document.entities() {
-                if let acadrust::EntityType::Table(table) = entity {
+                if let codec::EntityType::Table(table) = entity {
                     let h = table.common.handle;
                     let style = table.table_style_handle.and_then(|style_handle| {
                         self.tabs[i]
@@ -248,7 +248,7 @@ impl OpenCADStudio {
                             .objects
                             .get(&style_handle)
                             .and_then(|object| match object {
-                                acadrust::objects::ObjectType::TableStyle(style) => Some(style),
+                                codec::objects::ObjectType::TableStyle(style) => Some(style),
                                 _ => None,
                             })
                     });
@@ -269,7 +269,7 @@ impl OpenCADStudio {
                 .objects
                 .get(&style_handle)
                 .and_then(|object| match object {
-                    acadrust::objects::ObjectType::TableStyle(style) => Some(style),
+                    codec::objects::ObjectType::TableStyle(style) => Some(style),
                     _ => None,
                 })
         });
@@ -353,7 +353,7 @@ impl OpenCADStudio {
         &mut self,
         tab: usize,
         handle: Handle,
-        mut entities: Vec<acadrust::EntityType>,
+        mut entities: Vec<codec::EntityType>,
     ) -> Vec<Handle> {
         let same_type = entities.len() == 1
             && self.tabs[tab]
@@ -394,7 +394,7 @@ impl OpenCADStudio {
         for &updated in &handles {
             if matches!(
                 self.tabs[tab].scene.document.get_entity(updated),
-                Some(acadrust::EntityType::Dimension(_))
+                Some(codec::EntityType::Dimension(_))
             ) {
                 self.tabs[tab].scene.invalidate_dim_block_recorded(updated);
             }
@@ -1350,10 +1350,10 @@ impl OpenCADStudio {
         self.tabs[i].scene.clear_preview_wire();
         self.restore_pre_cmd_tangent();
 
-        if handle == acadrust::Handle::NULL && self.selection_cycling {
+        if handle == codec::Handle::NULL && self.selection_cycling {
             let mut candidates = Vec::new();
             for entity in self.tabs[i].scene.document.entities() {
-                if let acadrust::EntityType::Table(table) = entity {
+                if let codec::EntityType::Table(table) = entity {
                     let h = table.common.handle;
                     let style = table.table_style_handle.and_then(|style_handle| {
                         self.tabs[i]
@@ -1362,7 +1362,7 @@ impl OpenCADStudio {
                             .objects
                             .get(&style_handle)
                             .and_then(|object| match object {
-                                acadrust::objects::ObjectType::TableStyle(style) => Some(style),
+                                codec::objects::ObjectType::TableStyle(style) => Some(style),
                                 _ => None,
                             })
                     });
@@ -1418,7 +1418,7 @@ impl OpenCADStudio {
             !self.tabs[i].scene.is_layer_locked(*handle)
                 && matches!(
                     self.tabs[i].scene.document.get_entity(*handle),
-                    Some(acadrust::EntityType::MultiLeader(_))
+                    Some(codec::EntityType::MultiLeader(_))
                 )
         });
         if !handles.is_empty() {
@@ -1473,7 +1473,7 @@ impl OpenCADStudio {
     /// handle from the target document so it can't collide with an existing
     /// one. No-op for same-document pastes (the records already exist). (#129)
     pub(super) fn merge_dependencies(&mut self, i: usize, deps: &crate::app::ClipboardDeps) {
-        use acadrust::TableEntry;
+        use codec::TableEntry;
         if deps.is_empty() {
             return;
         }
@@ -1538,7 +1538,7 @@ impl OpenCADStudio {
 /// the nearest planar curve of the edited space within a small share of
 /// that space's extent, the way a pick box takes the object under a click.
 fn entity_at_typed_point(
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     owner: Handle,
     point: glam::DVec3,
 ) -> Option<Handle> {
@@ -1559,9 +1559,9 @@ fn entity_at_typed_point(
             // inside it picks it.
             None if matches!(
                 entity,
-                acadrust::EntityType::Text(_)
-                    | acadrust::EntityType::MText(_)
-                    | acadrust::EntityType::Ellipse(_)
+                codec::EntityType::Text(_)
+                    | codec::EntityType::MText(_)
+                    | codec::EntityType::Ellipse(_)
             ) =>
             {
                 let dx = (bounds.min.x - point.x).max(point.x - bounds.max.x).max(0.0);
@@ -1586,11 +1586,11 @@ fn entity_at_typed_point(
 
 fn apply_mleader_align(
     scene: &mut crate::scene::Scene,
-    handles: &[acadrust::Handle],
+    handles: &[codec::Handle],
     from: glam::DVec3,
     to: glam::DVec3,
 ) -> bool {
-    use cadkernel::geom2d::{closest_point, Curve, Vec2, XLine};
+    use kernel::geom2d::{closest_point, Curve, Vec2, XLine};
 
     let Some(direction) = Vec2::new(to.x - from.x, to.y - from.y).normalize() else {
         return false;
@@ -1601,7 +1601,7 @@ fn apply_mleader_align(
     });
     let mut changed = Vec::new();
     for &handle in handles {
-        if let Some(acadrust::EntityType::MultiLeader(ml)) = scene.document.get_entity_mut(handle) {
+        if let Some(codec::EntityType::MultiLeader(ml)) = scene.document.get_entity_mut(handle) {
             let old = ml.context.content_base_point;
             let projected = closest_point(&line, [old.x, old.y]).point;
             let new_x = projected[0];
@@ -1632,16 +1632,16 @@ fn apply_mleader_align(
 
 fn compatible_mleader_collect_handles(
     scene: &crate::scene::Scene,
-    handles: &[acadrust::Handle],
-) -> Vec<acadrust::Handle> {
+    handles: &[codec::Handle],
+) -> Vec<codec::Handle> {
     let Some((base_block, base_style)) = handles.iter().find_map(|handle| {
         if scene.is_layer_locked(*handle) {
             return None;
         }
-        let acadrust::EntityType::MultiLeader(leader) = scene.document.get_entity(*handle)? else {
+        let codec::EntityType::MultiLeader(leader) = scene.document.get_entity(*handle)? else {
             return None;
         };
-        (leader.content_type == acadrust::entities::LeaderContentType::Block)
+        (leader.content_type == codec::entities::LeaderContentType::Block)
             .then_some((leader.block_content_handle, leader.style_handle))
     }) else {
         return Vec::new();
@@ -1654,8 +1654,8 @@ fn compatible_mleader_collect_handles(
         if !scene.is_layer_locked(handle)
             && matches!(
                 scene.document.get_entity(handle),
-                Some(acadrust::EntityType::MultiLeader(leader))
-                    if leader.content_type == acadrust::entities::LeaderContentType::Block
+                Some(codec::EntityType::MultiLeader(leader))
+                    if leader.content_type == codec::entities::LeaderContentType::Block
                         && leader.block_content_handle == base_block
                         && leader.style_handle == base_style
             )
@@ -1668,7 +1668,7 @@ fn compatible_mleader_collect_handles(
 
 fn apply_mleader_collect(
     scene: &mut crate::scene::Scene,
-    handles: &[acadrust::Handle],
+    handles: &[codec::Handle],
     point: glam::DVec3,
 ) -> bool {
     if handles.len() < 2 {
@@ -1676,18 +1676,18 @@ fn apply_mleader_collect(
     }
     let px = point.x;
     let py = point.y;
-    let Some(acadrust::EntityType::MultiLeader(base)) = scene.document.get_entity(handles[0])
+    let Some(codec::EntityType::MultiLeader(base)) = scene.document.get_entity(handles[0])
     else {
         return false;
     };
     let base_block = base.block_content_handle;
     let base_style = base.style_handle;
 
-    let mut extra_roots: Vec<acadrust::entities::LeaderRoot> = Vec::new();
+    let mut extra_roots: Vec<codec::entities::LeaderRoot> = Vec::new();
     let mut merged_handles = Vec::new();
     for &h in &handles[1..] {
-        if let Some(acadrust::EntityType::MultiLeader(ml)) = scene.document.get_entity(h) {
-            if ml.content_type == acadrust::entities::LeaderContentType::Block
+        if let Some(codec::EntityType::MultiLeader(ml)) = scene.document.get_entity(h) {
+            if ml.content_type == codec::entities::LeaderContentType::Block
                 && ml.block_content_handle == base_block
                 && ml.style_handle == base_style
             {
@@ -1706,7 +1706,7 @@ fn apply_mleader_collect(
         return false;
     }
 
-    if let Some(acadrust::EntityType::MultiLeader(ml)) = scene.document.get_entity_mut(handles[0]) {
+    if let Some(codec::EntityType::MultiLeader(ml)) = scene.document.get_entity_mut(handles[0]) {
         let shift_x = px - ml.context.content_base_point.x;
         let shift_y = py - ml.context.content_base_point.y;
         for root in &mut ml.context.leader_roots {

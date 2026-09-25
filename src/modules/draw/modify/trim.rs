@@ -10,7 +10,7 @@
 
 use std::f64::consts::TAU;
 
-// The plane geometry these commands run on lives in cadkernel; `geom` adapts
+// The plane geometry these commands run on lives in opencadkernel; `geom` adapts
 // its call shapes to the loose scalars and f32 render vertices used here.
 use super::geom;
 use super::geom::{
@@ -20,15 +20,15 @@ use super::geom::{
 
 use crate::modules::draw::fence::{crossing_box_preview, FencePick};
 
-use acadrust::entities::{
+use codec::entities::{
     Arc as ArcEnt, Circle as CircleEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline,
     LwVertex, Ray as RayEnt, Spline as SplineEnt, XLine as XLineEnt,
 };
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
 use glam::DVec3;
-use cadkernel::geom2d::nurbs::clamped_uniform_knots;
-use cadkernel::geom2d::{
+use kernel::geom2d::nurbs::clamped_uniform_knots;
+use kernel::geom2d::{
     intersect as kernel_intersect, trim_spans as kernel_trim_spans, Arc as KernelArc,
     BulgeArc, Circle as KernelCircle, Curve, Extent as KernelExtent,
     Ellipse as KernelEllipse, EllipseArc as KernelEllipseArc, Line as KernelLine,
@@ -77,7 +77,7 @@ const TRIM_EXTENT: f64 = 1_000_000.0;
 /// Sampling density for the plan-view point lists the fence and preview
 /// passes walk. The renderer's own figure, so a preview cut lands where the
 /// drawn geometry is rather than a chord away from it.
-const SAMPLE_SEGMENTS_PER_RADIAN: f64 = cadkernel::geom2d::DEFAULT_SEGMENTS_PER_RADIAN;
+const SAMPLE_SEGMENTS_PER_RADIAN: f64 = kernel::geom2d::DEFAULT_SEGMENTS_PER_RADIAN;
 /// If a trim interval endpoint is beyond this threshold it is treated as "infinite".
 
 #[derive(Clone)]
@@ -694,11 +694,11 @@ fn extend_spline(spl: &SplineEnt, t_click: f64, geos: &[Geo]) -> Option<EntityTy
     if extend_end {
         new_spl
             .control_points
-            .push(acadrust::types::Vector3::new(hit_x, hit_y, z));
+            .push(codec::types::Vector3::new(hit_x, hit_y, z));
     } else {
         new_spl
             .control_points
-            .insert(0, acadrust::types::Vector3::new(hit_x, hit_y, z));
+            .insert(0, codec::types::Vector3::new(hit_x, hit_y, z));
     }
     // Rebuild knots (uniform) for the extended control polygon.
     let degree = new_spl.degree as usize;
@@ -2548,7 +2548,7 @@ impl CadCommand for TrimCommand {
         }
     }
 
-    fn on_entity_replaced(&mut self, _old: Handle, new_handles: &[acadrust::Handle]) {
+    fn on_entity_replaced(&mut self, _old: Handle, new_handles: &[codec::Handle]) {
         // Batch gestures stage several NULL-handle replacement groups before
         // the document assigns real handles. The host applies them in the same
         // order, so fill the first remaining placeholders on each callback.
@@ -3227,7 +3227,7 @@ impl CadCommand for ExtendCommand {
         }
     }
 
-    fn on_entity_replaced(&mut self, _old: Handle, new_handles: &[acadrust::Handle]) {
+    fn on_entity_replaced(&mut self, _old: Handle, new_handles: &[codec::Handle]) {
         // The last new_handles.len() entries are the pieces appended with NULL
         // handles in on_entity_pick — assign their real document handles.
         let start = self.all_entities.len().saturating_sub(new_handles.len());
@@ -3816,7 +3816,7 @@ mod tests {
     /// two empty ends as equal and sliced the empty sample from index 1.
     #[test]
     fn sampling_skips_segments_with_no_plan_shape() {
-        use acadrust::entities::{Polyline3D, Vertex3DPolyline};
+        use codec::entities::{Polyline3D, Vertex3DPolyline};
 
         let mut pl = Polyline3D::new();
         pl.vertices = vec![
@@ -3842,7 +3842,7 @@ mod tests {
     /// must keep dropping the duplicated seam vertex between two of them.
     #[test]
     fn sampling_still_joins_segments_at_their_seam() {
-        use acadrust::entities::{Polyline3D, Vertex3DPolyline};
+        use codec::entities::{Polyline3D, Vertex3DPolyline};
 
         let mut pl = Polyline3D::new();
         pl.vertices = vec![
@@ -3862,7 +3862,7 @@ mod tests {
 
     #[test]
     fn preview_sampling_skips_edge_on_polyline2d_arc_segments() {
-        use acadrust::entities::{Polyline2D, Vertex2D};
+        use codec::entities::{Polyline2D, Vertex2D};
 
         let mut pl = Polyline2D::new();
         let mut start = Vertex2D::new(Vector3::new(0.0, 0.0, 0.0));

@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap as HashMap;
 use std::cell::RefCell;
 use std::time::Duration;
 
-use acadrust::types::{Color as AcadColor, LineWeight};
+use codec::types::{Color as AcadColor, LineWeight};
 use iced::advanced::{
     layout, mouse, overlay, renderer, text as advanced_text, widget, Layout, Shell, Widget,
 };

@@ -11,7 +11,7 @@ use crate::ui::popup::context_menu::{
     build_context_menu, ContextMenu, GripMenuCmd, GripMenuContext, MenuAction, MenuContext,
     SubmenuId,
 };
-use acadrust::Handle;
+use codec::Handle;
 use iced::Task;
 
 impl OpenCADStudio {
@@ -522,7 +522,7 @@ mod tests {
                     .scene
                     .document
                     .entities()
-                    .filter(|e| matches!(e, acadrust::EntityType::Line(_)))
+                    .filter(|e| matches!(e, codec::EntityType::Line(_)))
                     .count();
                 assert_eq!(lines, 3, "{mode:?}");
             }
@@ -540,7 +540,7 @@ mod tests {
             assert!(!menu_open(&app));
             assert_eq!(active(&app), None);
             let closed = app.tabs[0].scene.document.entities().any(|e| {
-                matches!(e, acadrust::EntityType::LwPolyline(p) if p.is_closed && p.vertices.len() == 3)
+                matches!(e, codec::EntityType::LwPolyline(p) if p.is_closed && p.vertices.len() == 3)
             });
             assert!(closed, "PLINE should have been closed by the menu pick");
         });
@@ -602,7 +602,7 @@ mod tests {
             assert!(!menu_open(&app));
             assert_eq!(active(&app), None);
             let closed = app.tabs[0].scene.document.entities().any(
-                |e| matches!(e, acadrust::EntityType::LwPolyline(p) if p.is_closed),
+                |e| matches!(e, codec::EntityType::LwPolyline(p) if p.is_closed),
             );
             assert!(closed);
         });
@@ -641,7 +641,7 @@ mod tests {
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, acadrust::EntityType::Line(_)))
+                .filter(|e| matches!(e, codec::EntityType::Line(_)))
                 .count();
             assert_eq!(lines, 3);
         });
@@ -658,7 +658,7 @@ mod tests {
                 .document
                 .entities()
                 .find_map(|e| match e {
-                    acadrust::EntityType::Line(l) => Some(l.common.handle),
+                    codec::EntityType::Line(l) => Some(l.common.handle),
                     _ => None,
                 })
                 .expect("a line");
@@ -673,7 +673,7 @@ mod tests {
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, acadrust::EntityType::Line(_)))
+                .filter(|e| matches!(e, codec::EntityType::Line(_)))
                 .count();
             assert_eq!(lines, 0);
         });
@@ -683,7 +683,7 @@ mod tests {
 
     /// A drawing with one line, selected, its start grip hot at the origin.
     fn grip_app() -> (OpenCADStudio, Handle) {
-        use acadrust::{entities::Line, types::Vector3, EntityType};
+        use codec::{entities::Line, types::Vector3, EntityType};
         let mut app = app();
         app.snapper.snap_enabled = false;
         app.snapper.grid_snap_on = false;
@@ -717,7 +717,7 @@ mod tests {
 
     fn line_start(app: &OpenCADStudio, handle: Handle) -> (f64, f64) {
         match app.tabs[0].scene.document.get_entity(handle) {
-            Some(acadrust::EntityType::Line(l)) => (l.start.x, l.start.y),
+            Some(codec::EntityType::Line(l)) => (l.start.x, l.start.y),
             other => panic!("{other:?}"),
         }
     }
@@ -795,7 +795,7 @@ mod tests {
                 .document
                 .entities()
                 .filter_map(|e| match e {
-                    acadrust::EntityType::Line(l) => Some((l.start.x, l.start.y)),
+                    codec::EntityType::Line(l) => Some((l.start.x, l.start.y)),
                     _ => None,
                 })
                 .collect();
@@ -810,7 +810,7 @@ mod tests {
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, acadrust::EntityType::Line(_)))
+                .filter(|e| matches!(e, codec::EntityType::Line(_)))
                 .count();
             assert_eq!(count, 1);
         });
@@ -895,7 +895,7 @@ mod transparent_tests {
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, acadrust::EntityType::Line(_)))
+                .filter(|e| matches!(e, codec::EntityType::Line(_)))
                 .count();
             assert_eq!(lines, 1);
         });
@@ -961,7 +961,7 @@ mod transparent_tests {
                 .document
                 .entities()
                 .filter_map(|e| match e {
-                    acadrust::EntityType::Line(l) => Some(l.clone()),
+                    codec::EntityType::Line(l) => Some(l.clone()),
                     _ => None,
                 })
                 .collect();
@@ -984,7 +984,7 @@ mod transparent_tests {
                 .document
                 .entities()
                 .filter_map(|e| match e {
-                    acadrust::EntityType::Line(l) => Some(l.clone()),
+                    codec::EntityType::Line(l) => Some(l.clone()),
                     _ => None,
                 })
                 .collect();
@@ -1000,7 +1000,7 @@ mod transparent_tests {
                 .document
                 .entities()
                 .filter_map(|e| match e {
-                    acadrust::EntityType::Line(l) => Some(l.clone()),
+                    codec::EntityType::Line(l) => Some(l.clone()),
                     _ => None,
                 })
                 .collect();

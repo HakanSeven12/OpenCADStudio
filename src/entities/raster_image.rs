@@ -1,4 +1,4 @@
-use acadrust::entities::{RasterImage, Wipeout};
+use codec::entities::{RasterImage, Wipeout};
 use crate::t;
 
 use crate::command::EntityTransform;
@@ -24,9 +24,9 @@ use crate::scene::text::lff;
 ///   p2 = origin + U*W + V*H
 ///   p3 = origin + V*H
 fn image_corners(
-    origin: &acadrust::types::Vector3,
-    u: &acadrust::types::Vector3,
-    v: &acadrust::types::Vector3,
+    origin: &codec::types::Vector3,
+    u: &codec::types::Vector3,
+    v: &codec::types::Vector3,
     w: f64,
     h: f64,
 ) -> [[f64; 3]; 4] {
@@ -72,7 +72,7 @@ fn reflect_vec3(vx: &mut f64, vy: &mut f64, ax: f64, ay: f64, len2: f64) {
 // ── RasterImage ───────────────────────────────────────────────────────────────
 
 impl RenderConvertible for RasterImage {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         let corners = image_corners(
             &self.insertion_point,
             &self.u_vector,
@@ -106,7 +106,7 @@ impl RenderConvertible for RasterImage {
         let pts = if self.clipping_enabled {
             let cb = &self.clip_boundary;
             match cb.clip_type {
-                acadrust::entities::ClipType::Polygonal if cb.vertices.len() >= 3 => {
+                codec::entities::ClipType::Polygonal if cb.vertices.len() >= 3 => {
                     let mut poly: Vec<[f64; 3]> =
                         cb.vertices.iter().map(|v| px_to_world(v.x, ih - v.y)).collect();
                     if let Some(&first) = poly.first() {
@@ -114,7 +114,7 @@ impl RenderConvertible for RasterImage {
                     }
                     poly
                 }
-                acadrust::entities::ClipType::Rectangular if cb.vertices.len() >= 2 => {
+                codec::entities::ClipType::Rectangular if cb.vertices.len() >= 2 => {
                     let v0 = &cb.vertices[0];
                     let v1 = &cb.vertices[1];
                     let (xa, xb) = (v0.x.min(v1.x), v0.x.max(v1.x));
@@ -288,11 +288,11 @@ impl PropertyEditable for RasterImage {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
         let rotation_deg = self.u_vector.y.atan2(self.u_vector.x).to_degrees();
         let scale = self.u_vector.length();
-        let show_image = self.flags.contains(acadrust::entities::ImageDisplayFlags::SHOW_IMAGE);
+        let show_image = self.flags.contains(codec::entities::ImageDisplayFlags::SHOW_IMAGE);
         let show_clipped = self
             .flags
-            .contains(acadrust::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY);
-        let clip_inverted = self.clip_boundary.clip_mode == acadrust::entities::ClipMode::Inside;
+            .contains(codec::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY);
+        let clip_inverted = self.clip_boundary.clip_mode == codec::entities::ClipMode::Inside;
         let transparency = self.common.transparency.to_string();
         vec![
             PropSection {
@@ -348,7 +348,7 @@ impl PropertyEditable for RasterImage {
         match field {
             "ri_show_image" => {
                 let on = if value == "toggle" {
-                    !self.flags.contains(acadrust::entities::ImageDisplayFlags::SHOW_IMAGE)
+                    !self.flags.contains(codec::entities::ImageDisplayFlags::SHOW_IMAGE)
                 } else {
                     value == "true"
                 };
@@ -359,27 +359,27 @@ impl PropertyEditable for RasterImage {
                 let on = if value == "toggle" {
                     !self
                         .flags
-                        .contains(acadrust::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY)
+                        .contains(codec::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY)
                 } else {
                     value == "true"
                 };
                 if on {
-                    self.flags |= acadrust::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
+                    self.flags |= codec::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
                 } else {
-                    self.flags &= !acadrust::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
+                    self.flags &= !codec::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
                 }
                 return;
             }
             "ri_clip_inverted" => {
                 let on = if value == "toggle" {
-                    self.clip_boundary.clip_mode != acadrust::entities::ClipMode::Inside
+                    self.clip_boundary.clip_mode != codec::entities::ClipMode::Inside
                 } else {
                     value == "true"
                 };
                 self.clip_boundary.clip_mode = if on {
-                    acadrust::entities::ClipMode::Inside
+                    codec::entities::ClipMode::Inside
                 } else {
-                    acadrust::entities::ClipMode::Outside
+                    codec::entities::ClipMode::Outside
                 };
                 return;
             }
@@ -427,18 +427,18 @@ fn wipeout_is_polygonal(wipeout: &Wipeout) -> bool {
         && wipeout.clip_boundary_vertices.len() >= 3
         && matches!(
             wipeout.clip_type,
-            acadrust::entities::WipeoutClipType::Polygonal
+            codec::entities::WipeoutClipType::Polygonal
         )
 }
 
-fn wipeout_clip_to_world(wipeout: &Wipeout, point: &acadrust::types::Vector2) -> [f64; 3] {
+fn wipeout_clip_to_world(wipeout: &Wipeout, point: &codec::types::Vector2) -> [f64; 3] {
     let x = point.x + wipeout.size.x * 0.5;
     let y = wipeout.size.y * 0.5 - point.y;
     wipeout_plane(wipeout).point_at([x, y])
 }
 
-fn wipeout_plane(wipeout: &Wipeout) -> cadkernel::space::Plane {
-    cadkernel::space::Plane::from_axes(
+fn wipeout_plane(wipeout: &Wipeout) -> kernel::space::Plane {
+    kernel::space::Plane::from_axes(
         [
             wipeout.insertion_point.x,
             wipeout.insertion_point.y,
@@ -476,7 +476,7 @@ fn wipeout_boundary(wipeout: &Wipeout) -> Vec<[f64; 3]> {
     }
 }
 
-fn wipeout_axis_length(axis: &acadrust::types::Vector3, size: f64) -> f64 {
+fn wipeout_axis_length(axis: &codec::types::Vector3, size: f64) -> f64 {
     (axis.x * axis.x + axis.y * axis.y + axis.z * axis.z).sqrt() * size.abs()
 }
 
@@ -485,7 +485,7 @@ fn wipeout_pick_rings(wipeout: &Wipeout) -> Vec<Vec<[f64; 3]>> {
     if wipeout_is_polygonal(wipeout)
         && matches!(
             wipeout.clip_mode,
-            acadrust::entities::WipeoutClipMode::Inside
+            codec::entities::WipeoutClipMode::Inside
         )
     {
         vec![
@@ -504,16 +504,16 @@ fn wipeout_pick_rings(wipeout: &Wipeout) -> Vec<Vec<[f64; 3]>> {
     }
 }
 
-fn wipeout_world_to_clip(wipeout: &Wipeout, world: [f64; 3]) -> Option<acadrust::types::Vector2> {
+fn wipeout_world_to_clip(wipeout: &Wipeout, world: [f64; 3]) -> Option<codec::types::Vector2> {
     let [x, y] = wipeout_plane(wipeout).project(world)?;
-    Some(acadrust::types::Vector2::new(
+    Some(codec::types::Vector2::new(
         x - wipeout.size.x * 0.5,
         wipeout.size.y * 0.5 - y,
     ))
 }
 
 impl RenderConvertible for Wipeout {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         let boundary = wipeout_boundary(self);
         let mut pts = boundary.clone();
         if let Some(&first) = pts.first() {
@@ -521,9 +521,9 @@ impl RenderConvertible for Wipeout {
         }
 
         Some(RenderEntity {
-            pick_tris: cadkernel::space::polygon::triangulate_rings(
+            pick_tris: kernel::space::polygon::triangulate_rings(
                 &wipeout_pick_rings(self),
-                cadkernel::geom2d::Tolerance::default(),
+                kernel::geom2d::Tolerance::default(),
             ),
             object: RenderObject::Lines(pts),
             snap_pts: boundary
@@ -602,7 +602,7 @@ impl Grippable for Wipeout {
         if u_hat == glam::DVec3::ZERO || v_hat == glam::DVec3::ZERO {
             return;
         }
-        let resize_plane = cadkernel::space::Plane::from_axes(
+        let resize_plane = kernel::space::Plane::from_axes(
             [0.0; 3],
             u_hat.to_array(),
             v_hat.to_array(),
@@ -649,19 +649,19 @@ impl Grippable for Wipeout {
             _ => return,
         };
         if width.abs() > 1e-9 && height.abs() > 1e-9 {
-            self.insertion_point = acadrust::types::Vector3::new(
+            self.insertion_point = codec::types::Vector3::new(
                 insertion.x,
                 insertion.y,
                 insertion.z,
             );
             let sx = self.size.x.abs().max(1e-9);
             let sy = self.size.y.abs().max(1e-9);
-            self.u_vector = acadrust::types::Vector3::new(
+            self.u_vector = codec::types::Vector3::new(
                 u_hat.x * width / sx,
                 u_hat.y * width / sx,
                 u_hat.z * width / sx,
             );
-            self.v_vector = acadrust::types::Vector3::new(
+            self.v_vector = codec::types::Vector3::new(
                 v_hat.x * height / sy,
                 v_hat.y * height / sy,
                 v_hat.z * height / sy,
@@ -672,13 +672,13 @@ impl Grippable for Wipeout {
 
 impl PropertyEditable for Wipeout {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
-        let show_image = self.flags.contains(acadrust::entities::WipeoutDisplayFlags::SHOW_IMAGE);
+        let show_image = self.flags.contains(codec::entities::WipeoutDisplayFlags::SHOW_IMAGE);
         let show_clipped = self
             .flags
-            .contains(acadrust::entities::WipeoutDisplayFlags::USE_CLIPPING_BOUNDARY);
+            .contains(codec::entities::WipeoutDisplayFlags::USE_CLIPPING_BOUNDARY);
         let bg_transparency = self
             .flags
-            .contains(acadrust::entities::WipeoutDisplayFlags::TRANSPARENCY_ON);
+            .contains(codec::entities::WipeoutDisplayFlags::TRANSPARENCY_ON);
         let width = wipeout_axis_length(&self.u_vector, self.size.x);
         let height = wipeout_axis_length(&self.v_vector, self.size.y);
         let rotation = self.u_vector.y.atan2(self.u_vector.x).to_degrees();
@@ -740,8 +740,8 @@ impl PropertyEditable for Wipeout {
             let rotation = glam::DQuat::from_axis_angle(normal, angle);
             let u = rotation * u;
             let v = rotation * v;
-            self.u_vector = acadrust::types::Vector3::new(u.x, u.y, u.z);
-            self.v_vector = acadrust::types::Vector3::new(v.x, v.y, v.z);
+            self.u_vector = codec::types::Vector3::new(u.x, u.y, u.z);
+            self.v_vector = codec::types::Vector3::new(v.x, v.y, v.z);
             return;
         }
 
@@ -806,8 +806,8 @@ mod wipeout_property_tests {
             ([1.0, 0.0, 1.0], [0.0, 1.0, 0.0], 45.0),
         ] {
             let mut wipeout = Wipeout::new();
-            wipeout.u_vector = acadrust::types::Vector3::new(u[0], u[1], u[2]);
-            wipeout.v_vector = acadrust::types::Vector3::new(v[0], v[1], v[2]);
+            wipeout.u_vector = codec::types::Vector3::new(u[0], u[1], u[2]);
+            wipeout.v_vector = codec::types::Vector3::new(v[0], v[1], v[2]);
             let lengths = (wipeout.u_vector.length(), wipeout.v_vector.length());
 
             wipeout.apply_geom_prop("wo_rotation", &target.to_string());

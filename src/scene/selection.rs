@@ -5,7 +5,7 @@ pub(crate) fn pe_url_of(entity: &EntityType) -> Option<&str> {
     entity.common().extended_data.get_record("PE_URL")
         .and_then(|record| {
             record.values.iter().find_map(|value| match value {
-                acadrust::xdata::XDataValue::String(text) => Some(text.trim()),
+                codec::xdata::XDataValue::String(text) => Some(text.trim()),
                 _ => None,
             })
         })
@@ -19,7 +19,7 @@ pub(crate) fn pe_url_description_of(entity: &EntityType) -> Option<&str> {
         .values
         .iter()
         .filter_map(|value| match value {
-            acadrust::xdata::XDataValue::String(text) => Some(text.trim()),
+            codec::xdata::XDataValue::String(text) => Some(text.trim()),
             _ => None,
         })
         .nth(1)
@@ -831,7 +831,7 @@ impl Scene {
     /// row's value out.
     pub fn entity_property_value(
         &self,
-        entity: &acadrust::EntityType,
+        entity: &codec::EntityType,
         field: &str,
     ) -> Option<String> {
         use crate::entities::traits::EntityTypeOps;
@@ -862,9 +862,9 @@ impl Scene {
             ),
             "lineweight" => Some(Self::format_lineweight(entity.common().line_weight)),
             "transparency" => Some(match entity.common().transparency {
-                acadrust::types::Transparency::ByLayer => "ByLayer".to_string(),
-                acadrust::types::Transparency::ByBlock => "ByBlock".to_string(),
-                acadrust::types::Transparency::Explicit(alpha) => {
+                codec::types::Transparency::ByLayer => "ByLayer".to_string(),
+                codec::types::Transparency::ByBlock => "ByBlock".to_string(),
+                codec::types::Transparency::Explicit(alpha) => {
                     ((alpha as f64 / 255.0 * 100.0).round() as u32).to_string()
                 }
             }),
@@ -927,8 +927,8 @@ impl Scene {
         }
     }
 
-    fn format_color(c: acadrust::types::Color) -> String {
-        use acadrust::types::Color;
+    fn format_color(c: codec::types::Color) -> String {
+        use codec::types::Color;
         match c {
             Color::ByLayer => "ByLayer".to_string(),
             Color::None => "None".to_string(),
@@ -938,8 +938,8 @@ impl Scene {
         }
     }
 
-    fn format_lineweight(lw: acadrust::types::LineWeight) -> String {
-        use acadrust::types::LineWeight;
+    fn format_lineweight(lw: codec::types::LineWeight) -> String {
+        use codec::types::LineWeight;
         match lw {
             LineWeight::ByLayer => "ByLayer".to_string(),
             LineWeight::ByBlock => "ByBlock".to_string(),
@@ -977,8 +977,8 @@ impl Scene {
                 continue;
             }
             let settings_handle = self.document.get_entity(h).and_then(|entity| match entity {
-                EntityType::Extended(acadrust::entities::ExtendedEntity {
-                    data: acadrust::entities::ExtendedEntityData::SectionObject(data),
+                EntityType::Extended(codec::entities::ExtendedEntity {
+                    data: codec::entities::ExtendedEntityData::SectionObject(data),
                     ..
                 }) if !data.settings_handle.is_null() => Some(data.settings_handle),
                 _ => None,
@@ -989,7 +989,7 @@ impl Scene {
                 .iter()
                 .filter_map(|(handle, object)| match object {
                     ObjectType::ClassObject(object) => match &object.data {
-                        acadrust::objects::ClassObjectData::SectionManager(manager)
+                        codec::objects::ClassObjectData::SectionManager(manager)
                             if manager.sections.contains(&h) =>
                         {
                             Some(*handle)
@@ -1020,7 +1020,7 @@ impl Scene {
                 if let Some(ObjectType::ClassObject(object)) =
                     self.document.objects.get_mut(&manager_handle)
                 {
-                    if let acadrust::objects::ClassObjectData::SectionManager(manager) =
+                    if let codec::objects::ClassObjectData::SectionManager(manager) =
                         &mut object.data
                     {
                         manager.sections.retain(|section| *section != h);
@@ -1161,8 +1161,8 @@ impl Scene {
 mod tests {
     #[test]
     fn pe_url_of_reads_standard_hyperlink_xdata() {
-        use acadrust::entities::Point;
-        use acadrust::xdata::{ExtendedDataRecord, XDataValue};
+        use codec::entities::Point;
+        use codec::xdata::{ExtendedDataRecord, XDataValue};
 
         let mut doc = CadDocument::new();
 
@@ -1201,8 +1201,8 @@ mod tests {
 
     #[test]
     fn bulk_selection_matches_selecting_one_at_a_time() {
-        use acadrust::entities::Line;
-        use acadrust::types::Vector3;
+        use codec::entities::Line;
+        use codec::types::Vector3;
 
         let build = || {
             let mut scene = Scene::new();
@@ -1256,12 +1256,12 @@ mod tests {
 
     #[test]
     fn the_leader_index_matches_a_document_walk() {
-        use acadrust::entities::Leader;
-        use acadrust::types::Vector3;
+        use codec::entities::Leader;
+        use codec::types::Vector3;
 
         let mut scene = Scene::new();
         let line = |x: f64| {
-            EntityType::Line(acadrust::entities::Line::from_points(
+            EntityType::Line(codec::entities::Line::from_points(
                 Vector3::new(x, 0.0, 0.0),
                 Vector3::new(x + 1.0, 0.0, 0.0),
             ))
@@ -1325,8 +1325,8 @@ mod tests {
 
     #[test]
     fn adding_a_type_already_present_reuses_the_list() {
-        use acadrust::entities::{Circle, EntityType, Line};
-        use acadrust::types::Vector3;
+        use codec::entities::{Circle, EntityType, Line};
+        use codec::types::Vector3;
         use std::sync::Arc;
 
         let line = || {
@@ -1361,8 +1361,8 @@ mod tests {
 
     #[test]
     fn changing_an_entity_type_rebuilds_the_type_names() {
-        use acadrust::entities::{Circle, EntityType, Line};
-        use acadrust::types::Vector3;
+        use codec::entities::{Circle, EntityType, Line};
+        use codec::types::Vector3;
 
         let mut scene = Scene::new();
         let handle = scene.add_entity(EntityType::Line(Line::from_points(
@@ -1379,8 +1379,8 @@ mod tests {
 
     #[test]
     fn layout_type_cache_reuses_and_invalidates_on_edits_undo_and_layout() {
-        use acadrust::entities::{Circle, EntityType, Line};
-        use acadrust::types::Vector3;
+        use codec::entities::{Circle, EntityType, Line};
+        use codec::types::Vector3;
         use std::sync::Arc;
 
         let mut scene = Scene::new();

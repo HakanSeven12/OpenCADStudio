@@ -1,7 +1,7 @@
-use acadrust::entities::Solid3D;
-use acadrust::objects::SolidHistoryOperation;
-use acadrust::EntityType;
-use cadkernel::brep::Body;
+use codec::entities::Solid3D;
+use codec::objects::SolidHistoryOperation;
+use codec::EntityType;
+use kernel::brep::Body;
 use glam::DVec3;
 
 use crate::command::{
@@ -134,7 +134,7 @@ impl CylinderCommand {
         let plane = WorkingPlane::new(a, first_axis, second_axis);
         let local_b = plane.to_local(b);
         let local_c = plane.to_local(c);
-        let circle = cadkernel::geom2d::arc_through_points(
+        let circle = kernel::geom2d::arc_through_points(
             [0.0, 0.0],
             [local_b.x, local_b.y],
             [local_c.x, local_c.y],

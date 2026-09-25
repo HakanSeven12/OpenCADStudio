@@ -115,8 +115,8 @@ impl OpenCADStudio {
                     .flatten();
                 let mut surface = empty_extruded_surface(direction, taper_angle);
                 if let (
-                    Some(acadrust::objects::SolidHistoryOperation::Extrusion(value)),
-                    acadrust::EntityType::Surface(entity),
+                    Some(codec::objects::SolidHistoryOperation::Extrusion(value)),
+                    codec::EntityType::Surface(entity),
                 ) = (&history, &mut surface)
                 {
                     if let Some(data) =
@@ -227,14 +227,14 @@ impl OpenCADStudio {
         let mut failed = 0usize;
         let mut self_intersections = 0usize;
         for handle in handles {
-            let Some(acadrust::EntityType::Surface(surface)) =
+            let Some(codec::EntityType::Surface(surface)) =
                 self.tabs[i].scene.document.get_entity(handle)
             else {
                 failed += 1;
                 continue;
             };
             let kernel_distance =
-                if surface.kind == acadrust::entities::SurfaceKind::Revolved {
+                if surface.kind == codec::entities::SurfaceKind::Revolved {
                     -distance
                 } else {
                     distance
@@ -251,9 +251,9 @@ impl OpenCADStudio {
                 failed += 1;
                 continue;
             };
-            let solid = match cadkernel::brep::thicken(&body, kernel_distance) {
+            let solid = match kernel::brep::thicken(&body, kernel_distance) {
                 Ok(solid) => solid,
-                Err(cadkernel::brep::ThickenError::SelfIntersection) => {
+                Err(kernel::brep::ThickenError::SelfIntersection) => {
                     failed += 1;
                     self_intersections += 1;
                     continue;
@@ -388,7 +388,7 @@ impl OpenCADStudio {
                 let result =
                     sweep_model::revolve_history(&entity, from, to, angle, start_angle)
                         .and_then(|history| {
-                            cadkernel::acis::rebuild_body(&history)
+                            kernel::acis::rebuild_body(&history)
                                 .ok()
                                 .map(|solid| (solid, history))
                         })
@@ -497,14 +497,14 @@ impl OpenCADStudio {
         for (handle, profile) in profiles {
             let result = path.as_ref().zip(options).and_then(|(path, options)| {
                 let record = sweep_model::sweep_record(&profile, path, options)?;
-                let (_, _, closed) = cadkernel::acis::sweep_profile_geometry(
+                let (_, _, closed) = kernel::acis::sweep_profile_geometry(
                     record.sweep_entity.as_ref()?,
                     record.sweep_entity_transform,
                 )
                 .ok()?;
                 let surface = mode == ExtrudeMode::Surface || !closed;
                 let body =
-                    cadkernel::acis::rebuild_sweep_with_mode(&record, surface).ok()?;
+                    kernel::acis::rebuild_sweep_with_mode(&record, surface).ok()?;
                 Some((body, record, surface))
             });
             let Some((body, record, surface)) = result else {
@@ -523,7 +523,7 @@ impl OpenCADStudio {
                 self.add_solid_model(
                     empty_solid3d(),
                     body,
-                    acadrust::objects::SolidHistoryOperation::Sweep(record),
+                    codec::objects::SolidHistoryOperation::Sweep(record),
                 )
             };
             if created.is_null() {
@@ -617,7 +617,7 @@ impl OpenCADStudio {
         } else {
             loft_command_model::record(&sections, &guides, path, &available, mode, options)
                 .and_then(|record| {
-                    cadkernel::acis::rebuild_loft_with_options(&record)
+                    kernel::acis::rebuild_loft_with_options(&record)
                         .map(|body| (body, record))
                 })
         };
@@ -651,7 +651,7 @@ impl OpenCADStudio {
                     if !handle.is_null() {
                         self.tabs[i].scene.create_solid_history(
                             handle,
-                            acadrust::objects::SolidHistoryOperation::Loft(record),
+                            codec::objects::SolidHistoryOperation::Loft(record),
                         );
                     }
                     handle
@@ -659,7 +659,7 @@ impl OpenCADStudio {
                     self.add_solid_model(
                         empty_solid3d(),
                         body,
-                        acadrust::objects::SolidHistoryOperation::Loft(record),
+                        codec::objects::SolidHistoryOperation::Loft(record),
                     )
                 };
                 if created.is_null() {
@@ -751,7 +751,7 @@ impl OpenCADStudio {
         task
     }
 
-    pub(super) fn handle_slice_entities(&mut self, targets: Vec<Handle>, plane: cadkernel::space::Plane, keep_point: Option<glam::DVec3>) -> Task<Message> {
+    pub(super) fn handle_slice_entities(&mut self, targets: Vec<Handle>, plane: kernel::space::Plane, keep_point: Option<glam::DVec3>) -> Task<Message> {
         let i = self.active_tab;
         let task = self.solid_slice(&targets, plane, keep_point);
         self.tabs[i].active_cmd = None;
@@ -761,7 +761,7 @@ impl OpenCADStudio {
         task
     }
 
-    pub(super) fn handle_slice_surface_entities(&mut self, targets: Vec<Handle>, cutter: Box<cadkernel::brep::Body>, keep_point: Option<glam::DVec3>) -> Task<Message> {
+    pub(super) fn handle_slice_surface_entities(&mut self, targets: Vec<Handle>, cutter: Box<kernel::brep::Body>, keep_point: Option<glam::DVec3>) -> Task<Message> {
         let i = self.active_tab;
         let task = self.solid_slice_surface(&targets, *cutter, keep_point);
         self.tabs[i].active_cmd = None;

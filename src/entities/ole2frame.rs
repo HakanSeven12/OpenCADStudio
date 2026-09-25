@@ -1,4 +1,4 @@
-use acadrust::entities::{Ole2Frame, OleObjectType};
+use codec::entities::{Ole2Frame, OleObjectType};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{center_grip, edit_prop as edit, ro_prop as ro, square_grip};
@@ -162,14 +162,14 @@ fn apply_transform(ole: &mut Ole2Frame, t: &EntityTransform) {
             ole.lower_right_corner.y = scale(ole.lower_right_corner.y, center.y as f64);
         }
         EntityTransform::Affine(transform) => {
-            acadrust::Entity::apply_transform(ole, transform);
+            codec::Entity::apply_transform(ole, transform);
         }
         _ => {}
     }
 }
 
 impl RenderConvertible for Ole2Frame {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(to_render(self))
     }
 }

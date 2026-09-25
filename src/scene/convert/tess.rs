@@ -5,7 +5,7 @@ use super::super::*;
 /// layer is locked, so locked objects read as non-editable (they stay visible
 /// and snappable). No-op for unlocked layers.
 fn fade_if_locked(
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     e: &EntityType,
     color: [f32; 4],
     bg: [f32; 4],
@@ -43,8 +43,8 @@ pub(crate) struct BlockObjectOptions {
 }
 
 fn block_object_style(
-    document: &acadrust::CadDocument,
-    insert: &acadrust::entities::Insert,
+    document: &codec::CadDocument,
+    insert: &codec::entities::Insert,
     active_viewport: Option<Handle>,
     bg_color: [f32; 4],
 ) -> BlockObjectStyle {
@@ -61,7 +61,7 @@ fn block_object_style(
         .layers
         .get(&insert.common.layer)
         .and_then(|layer| match &layer.color {
-            acadrust::types::Color::Index(index) => Some(*index),
+            codec::types::Color::Index(index) => Some(*index),
             _ => None,
         })
         .unwrap_or(0);
@@ -84,8 +84,8 @@ fn block_object_style(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn expand_block_object(
-    document: &acadrust::CadDocument,
-    insert: &acadrust::entities::Insert,
+    document: &codec::CadDocument,
+    insert: &codec::entities::Insert,
     owner: Handle,
     selected: bool,
     active_viewport: Option<Handle>,
@@ -208,10 +208,10 @@ pub(crate) fn expand_block_object(
 /// `None` when any link is missing (DXF files, older DWGs) — the caller then
 /// falls back to a geometric heuristic.
 fn section_arrow_dir_from_views(
-    document: &acadrust::CadDocument,
-    s: &acadrust::entities::SectionSymbol,
+    document: &codec::CadDocument,
+    s: &codec::entities::SectionSymbol,
 ) -> Option<[f64; 2]> {
-    use acadrust::types::Handle as AHandle;
+    use codec::types::Handle as AHandle;
     if s.view_rep_handle.is_null() {
         return None;
     }
@@ -289,9 +289,9 @@ fn section_arrow_dir_from_views(
 ///   ([`section_arrow_dir_from_views`]); only when that chain is unavailable
 ///   does it fall back to the 90°-CCW rotation of END-A→END-B.
 fn section_symbol_wires(
-    document: &acadrust::CadDocument,
-    s: &acadrust::entities::SectionSymbol,
-    style: Option<&acadrust::entities::SectionViewStyle>,
+    document: &codec::CadDocument,
+    s: &codec::entities::SectionSymbol,
+    style: Option<&codec::entities::SectionViewStyle>,
     h: Handle,
     color: [f32; 4],
     sel: bool,
@@ -342,7 +342,7 @@ fn section_symbol_wires(
     let arrow_kind = match style {
         Some(st) if st.arrow_start_handle != 0 => arrow_from_block(
             document,
-            acadrust::types::Handle::from(st.arrow_start_handle),
+            codec::types::Handle::from(st.arrow_start_handle),
             arrow_size as f32,
         ),
         _ => ArrowKind::Triangle {
@@ -480,7 +480,7 @@ fn section_symbol_wires(
 /// then re-color the returned wires with the dimension's resolved text colour
 /// (so DIMCLRT / DIMSTYLE colours win over the synthetic Text's defaults).
 pub(crate) fn tessellate_entity_dim_text(
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     selected: &HashSet<Handle>,
     active_viewport: Option<Handle>,
     bg_color: [f32; 4],
@@ -515,7 +515,7 @@ pub(crate) fn tessellate_entity_dim_text(
     wires
 }
 pub(crate) fn tessellate_entity(
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     selected: &HashSet<Handle>,
     active_viewport: Option<Handle>,
     bg_color: [f32; 4],
@@ -556,7 +556,7 @@ pub(crate) fn tessellate_entity(
     wires
 }
 fn tessellate_entity_inner(
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     selected: &HashSet<Handle>,
     active_viewport: Option<Handle>,
     bg_color: [f32; 4],
@@ -769,7 +769,7 @@ fn tessellate_entity_inner(
             .as_deref()
             .map(std::borrow::Cow::Borrowed),
         EntityType::Extended(entity) => match &entity.data {
-            acadrust::entities::ExtendedEntityData::Proxy(proxy) => {
+            codec::entities::ExtendedEntityData::Proxy(proxy) => {
                 Some(std::borrow::Cow::Owned(proxy.graphics.data()))
             }
             _ => None,
@@ -788,7 +788,7 @@ fn tessellate_entity_inner(
                     match pc {
                         ProxyColor::Aci(a) => (
                             view::render::adapt_to_bg(
-                                convert::tess_util::aci_to_rgba(&acadrust::types::Color::Index(a)),
+                                convert::tess_util::aci_to_rgba(&codec::types::Color::Index(a)),
                                 bg_color,
                             ),
                             a,
@@ -816,7 +816,7 @@ fn tessellate_entity_inner(
                 for ((pcolor, plw), pts64) in groups {
                     let (col, w_aci) = resolve(pcolor);
                     let lw_px = if plw >= 0 {
-                        view::render::lineweight_to_px(&acadrust::types::LineWeight::Value(plw))
+                        view::render::lineweight_to_px(&codec::types::LineWeight::Value(plw))
                     } else {
                         line_weight_px
                     };
@@ -1697,7 +1697,7 @@ pub(crate) fn wire_points_aabb(w: &WireModel) -> [f32; 4] {
 /// Assign `entity_box` as `w`'s cullable box, widened to cover the wire's
 /// actual tessellated geometry and pick-only geometry.
 ///
-/// `entity_aabb`'s box comes from acadrust's `bounding_box()`, which for a
+/// `entity_aabb`'s box comes from opencadcodec's `bounding_box()`, which for a
 /// polyline is often the box of its stored vertices — it may know nothing about
 /// bulge arcs between them, the band a width paints around them, or the wall a
 /// thickness extrudes. Hit-testing rejects on this box before it looks at the
@@ -1734,29 +1734,29 @@ pub(crate) fn set_wire_aabb(w: &mut WireModel, entity_box: [f32; 4]) {
     w.aabb = out;
 }
 
-pub(crate) fn entity_bounds(e: &acadrust::EntityType) -> ([f64; 3], [f64; 3]) {
-    if let acadrust::EntityType::Region(region) = e {
+pub(crate) fn entity_bounds(e: &codec::EntityType) -> ([f64; 3], [f64; 3]) {
+    if let codec::EntityType::Region(region) = e {
         if region.wires.is_empty() {
             if let Some(bounds) = super::solid3d_tess::kernel_region_body(region)
-                .and_then(|body| cadkernel::brep::body_bounds(&body))
+                .and_then(|body| kernel::brep::body_bounds(&body))
             {
                 return (bounds.min, bounds.max);
             }
         }
     }
-    if let acadrust::EntityType::Line(line) = e {
-        if let Some(association) = acadrust::entities::CenterMarkAssociation::read(
+    if let codec::EntityType::Line(line) = e {
+        if let Some(association) = codec::entities::CenterMarkAssociation::read(
             &line.common.extended_data,
         ) {
             return crate::scene::centermark::mark_bounds(&association);
         }
     }
-    if let acadrust::EntityType::Solid(solid) = e {
+    if let codec::EntityType::Solid(solid) = e {
         if let Some(bounds) = crate::entities::solid::wcs_bounds(solid) {
             return (bounds.min, bounds.max);
         }
     }
-    if let acadrust::EntityType::Spline(spline) = e {
+    if let codec::EntityType::Spline(spline) = e {
         if let Some(bounds) = crate::entities::spline::fit_geometry_bounds(spline) {
             return (bounds.min, bounds.max);
         }
@@ -1771,10 +1771,10 @@ pub(crate) fn entity_bounds(e: &acadrust::EntityType) -> ([f64; 3], [f64; 3]) {
 /// [`entity_bounds`] with the document, for entities whose extent is not
 /// stored on the entity: an underlay spans its page (or its clip).
 pub(crate) fn entity_bounds_in(
-    document: &acadrust::CadDocument,
-    e: &acadrust::EntityType,
+    document: &codec::CadDocument,
+    e: &codec::EntityType,
 ) -> ([f64; 3], [f64; 3]) {
-    if let acadrust::EntityType::Underlay(underlay) = e {
+    if let codec::EntityType::Underlay(underlay) = e {
         if let Some(bounds) = crate::entities::underlay::world_bounds(underlay, document) {
             return bounds;
         }
@@ -1783,8 +1783,8 @@ pub(crate) fn entity_bounds_in(
 }
 
 /// [`entity_aabb`] with the document (see [`entity_bounds_in`]).
-pub(crate) fn entity_aabb_in(document: &acadrust::CadDocument, e: &acadrust::EntityType) -> [f32; 4] {
-    if let acadrust::EntityType::Underlay(underlay) = e {
+pub(crate) fn entity_aabb_in(document: &codec::CadDocument, e: &codec::EntityType) -> [f32; 4] {
+    if let codec::EntityType::Underlay(underlay) = e {
         if let Some((min, max)) = crate::entities::underlay::world_bounds(underlay, document) {
             return [min[0] as f32, min[1] as f32, max[0] as f32, max[1] as f32];
         }
@@ -1792,7 +1792,7 @@ pub(crate) fn entity_aabb_in(document: &acadrust::CadDocument, e: &acadrust::Ent
     entity_aabb(e)
 }
 
-pub(crate) fn entity_aabb(e: &acadrust::EntityType) -> [f32; 4] {
+pub(crate) fn entity_aabb(e: &codec::EntityType) -> [f32; 4] {
     let (min, max) = entity_bounds(e);
     let min_x = min[0] as f32;
     let min_y = min[1] as f32;
@@ -1814,7 +1814,7 @@ pub(crate) fn entity_aabb(e: &acadrust::EntityType) -> [f32; 4] {
 /// (which `entity_aabb` collapses to `UNBOUNDED_AABB`). Quadtree
 /// indexing uses this so changing `world_offset` doesn't invalidate
 /// the index.
-pub(crate) fn entity_world_aabb_f64(e: &acadrust::EntityType) -> Option<[f64; 4]> {
+pub(crate) fn entity_world_aabb_f64(e: &codec::EntityType) -> Option<[f64; 4]> {
     let (min, max) = entity_bounds(e);
     let (xmin, ymin, xmax, ymax) = (min[0], min[1], max[0], max[1]);
     if xmin == xmax && ymin == ymax {
@@ -1830,8 +1830,8 @@ pub(crate) fn entity_world_aabb_f64(e: &acadrust::EntityType) -> Option<[f64; 4]
 /// `Viewport` are sized only after extra transformation; tessellation
 /// already handles them via dedicated code paths. `Block`/`BlockEnd`
 /// are block-defn sentinels with no geometry.
-pub(crate) fn is_unindexable_entity(e: &acadrust::EntityType) -> bool {
-    use acadrust::EntityType as E;
+pub(crate) fn is_unindexable_entity(e: &codec::EntityType) -> bool {
+    use codec::EntityType as E;
     matches!(
         e,
         E::Insert(_) | E::Viewport(_) | E::Block(_) | E::BlockEnd(_)

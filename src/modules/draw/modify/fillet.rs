@@ -9,19 +9,19 @@
 //   Pick two lines (line-only; arcs are not chamferable).
 //   Finds intersection, backs off dist1 along line 1 and dist2 along line 2.
 
-use acadrust::entities::{Arc as ArcEnt, Line as LineEnt, LwPolyline};
+use codec::entities::{Arc as ArcEnt, Line as LineEnt, LwPolyline};
 
-// Shared plane geometry, from cadkernel via the local adapters.
+// Shared plane geometry, from opencadkernel via the local adapters.
 use super::geom;
 use super::geom::{arc_points as arc_pts, line_line as ll, normalize_angle as norm_angle};
-use cadkernel::geom2d::{
+use kernel::geom2d::{
     circle_circle_points as circle_circle_pts, fillet_between_rays, fillets_between, line_circle,
     Arc as KernelArc, Curve as KernelCurve, Fillet as KernelFillet,
     Line as KernelLine, Tolerance,
 };
-use acadrust::entities::EntityCommon;
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
+use codec::entities::EntityCommon;
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
 use glam::DVec3;
 use crate::t;
 
@@ -1552,7 +1552,7 @@ impl CadCommand for FilletCommand {
         self.undo_last()
     }
 
-    fn on_document_undone(&mut self, document: &acadrust::CadDocument) {
+    fn on_document_undone(&mut self, document: &codec::CadDocument) {
         self.all_entities = document
             .entities()
             .map(crate::entities::curve::entity_with_lwpolyline_world_xy)
@@ -2147,7 +2147,7 @@ impl CadCommand for ChamferCommand {
         self.undo_last()
     }
 
-    fn on_document_undone(&mut self, document: &acadrust::CadDocument) {
+    fn on_document_undone(&mut self, document: &codec::CadDocument) {
         self.all_entities = document
             .entities()
             .map(crate::entities::curve::entity_with_lwpolyline_world_xy)
@@ -2377,7 +2377,7 @@ mod tests {
     /// by an infinite factor: the center becomes (inf, NaN).
     fn overflowed_arc(sweep_sign: f64) -> ArcEnt {
         let mut arc = ArcEnt::new();
-        arc.center = acadrust::types::Vector3::new(f64::INFINITY, f64::NAN, 0.0);
+        arc.center = codec::types::Vector3::new(f64::INFINITY, f64::NAN, 0.0);
         arc.radius = f64::INFINITY;
         arc.start_angle = 0.0;
         arc.end_angle = sweep_sign * std::f64::consts::PI;
@@ -2410,7 +2410,7 @@ mod tests {
         assert!(matches!(command.on_text_input("U"), Some(CmdResult::UndoDocument)));
         assert_eq!(keywords(&command), ["P", "R"]);
         // The host hands the restored document back; the cache follows it.
-        let mut doc = acadrust::CadDocument::new();
+        let mut doc = codec::CadDocument::new();
         let _ = doc.add_entity(line(0.0, 0.0, 20.0, 0.0, 7));
         command.on_document_undone(&doc);
         assert_eq!(command.all_entities.len(), 1);

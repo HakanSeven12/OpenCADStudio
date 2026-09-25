@@ -334,7 +334,7 @@ impl Camera {
                 (origin, forward)
             }
         };
-        cadkernel::space::plane::intersect_line_plane(
+        kernel::space::plane::intersect_line_plane(
             (ray_origin - (plane_point - eye)).to_array(),
             ray_dir.to_array(),
             [0.0; 3],
@@ -396,8 +396,8 @@ impl Camera {
     /// Carry the camera through a rigid model-space transform. BEDIT uses this
     /// when a transient UCS is baked into block-local geometry: the contents
     /// retain their on-screen framing while their canonical coordinates change.
-    pub fn apply_rigid_transform(&mut self, transform: &acadrust::types::Transform) {
-        let point = acadrust::types::Vector3::new(
+    pub fn apply_rigid_transform(&mut self, transform: &codec::types::Transform) {
+        let point = codec::types::Vector3::new(
             self.target.x,
             self.target.y,
             self.target.z,
@@ -428,7 +428,7 @@ impl Camera {
             let mut new_min = DVec3::splat(f64::INFINITY);
             let mut new_max = DVec3::splat(f64::NEG_INFINITY);
             for corner in corners {
-                let transformed = transform.apply(acadrust::types::Vector3::new(
+                let transformed = transform.apply(codec::types::Vector3::new(
                     corner.x,
                     corner.y,
                     corner.z,

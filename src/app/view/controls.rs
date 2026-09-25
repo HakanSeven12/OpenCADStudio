@@ -23,13 +23,13 @@ fn viewport_tooltip<'a>(
 }
 
 pub(super) fn viewport_controls<'a>(
-    render_mode: acadrust::entities::ViewportRenderMode,
+    render_mode: codec::entities::ViewportRenderMode,
     show_grid: bool,
     snap_on: bool,
     include_split: bool,
     tile_count: usize,
     render_mode_menu_open: bool,
-    render_mode_preview: Option<acadrust::entities::ViewportRenderMode>,
+    render_mode_preview: Option<codec::entities::ViewportRenderMode>,
 ) -> Element<'a, Message> {
     let render_modes: Vec<RenderModeChoice> = crate::modules::view::visual_style::VISUAL_STYLES
         .iter()
@@ -374,7 +374,7 @@ pub(super) fn dyn_component_value(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::ViewportRenderMode as M;
+    use codec::entities::ViewportRenderMode as M;
 
     #[test]
     fn test_viewport_controls_construction() {

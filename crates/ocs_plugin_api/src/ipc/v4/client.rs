@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use acadrust::xdata::ExtendedDataRecord;
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::xdata::ExtendedDataRecord;
+use codec::{CadDocument, EntityType, Handle};
 use interprocess::local_socket::traits::Stream as StreamTrait;
 use interprocess::local_socket::{GenericNamespaced, Stream, ToNsName};
 use interprocess::TryClone;
@@ -937,7 +937,7 @@ mod tests {
     use crate::ipc::transport::recv;
     use crate::ipc::v4::protocol::{HostToPluginV4, PluginToHostV4};
     use crate::test_lock::ENV_LOCK;
-    use acadrust::entities::Point;
+    use codec::entities::Point;
 
     fn unique_socket_name() -> String {
         static COUNTER: AtomicU64 = AtomicU64::new(0);

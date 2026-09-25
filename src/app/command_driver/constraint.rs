@@ -253,7 +253,7 @@ impl OpenCADStudio {
         let resolved = {
             let document = &self.tabs[i].scene.document;
             let world =
-                acadrust::types::Vector3::new(pick.point.x, pick.point.y, pick.point.z);
+                codec::types::Vector3::new(pick.point.x, pick.point.y, pick.point.z);
             let reference = match pick.handle {
                 Some(handle) => {
                     nearest_parametric_point_on_entity(document, scope, handle, world)
@@ -426,7 +426,7 @@ impl OpenCADStudio {
             entity.as_entity_mut().set_layer(
                 crate::scene::parametric_constraints::DYNAMIC_DIMENSION_LAYER.to_string(),
             );
-            entity.common_mut().color = acadrust::types::Color::Rgb {
+            entity.common_mut().color = codec::types::Color::Rgb {
                 r: 103,
                 g: 109,
                 b: 118,
@@ -614,7 +614,7 @@ impl OpenCADStudio {
             entity.as_entity_mut().set_layer(
                 crate::scene::parametric_constraints::DYNAMIC_DIMENSION_LAYER.to_string(),
             );
-            entity.common_mut().color = acadrust::types::Color::Rgb {
+            entity.common_mut().color = codec::types::Color::Rgb {
                 r: 103,
                 g: 109,
                 b: 118,
@@ -795,7 +795,7 @@ impl OpenCADStudio {
             entity.as_entity_mut().set_layer(
                 crate::scene::parametric_constraints::DYNAMIC_DIMENSION_LAYER.to_string(),
             );
-            entity.common_mut().color = acadrust::types::Color::Rgb {
+            entity.common_mut().color = codec::types::Color::Rgb {
                 r: 103,
                 g: 109,
                 b: 118,
@@ -1000,7 +1000,7 @@ impl OpenCADStudio {
         let scope = self.tabs[i].current_parametric_scope();
         let document = &self.tabs[i].scene.document;
         let world =
-            acadrust::types::Vector3::new(pick.point.x, pick.point.y, pick.point.z);
+            codec::types::Vector3::new(pick.point.x, pick.point.y, pick.point.z);
         let resolved = match (pick.whole_curve, pick.handle) {
             (true, Some(handle)) => {
                 parametric_curve_ref_for_pick(document, scope, handle, world)
@@ -1059,7 +1059,7 @@ impl OpenCADStudio {
         let found = nearest_parametric_point(
             &self.tabs[i].scene.document,
             scope,
-            acadrust::types::Vector3::new(pick.point.x, pick.point.y, pick.point.z),
+            codec::types::Vector3::new(pick.point.x, pick.point.y, pick.point.z),
             None,
         )
         .is_some();
@@ -1097,7 +1097,7 @@ impl OpenCADStudio {
         let axis = if vertical { "Vertical" } else { "Horizontal" };
         let scope = self.tabs[i].current_parametric_scope();
         let to_world = |point: glam::DVec3| {
-            acadrust::types::Vector3::new(point.x, point.y, point.z)
+            codec::types::Vector3::new(point.x, point.y, point.z)
         };
         let (refs, initial_fixed) = match selection {
             HorizontalConstraintSelection::Reference(reference) => {
@@ -1175,7 +1175,7 @@ impl OpenCADStudio {
             ));
             return Some(Task::none());
         }
-        let direction = acadrust::types::Vector3::new(
+        let direction = codec::types::Vector3::new(
             direction.x / axis_length,
             direction.y / axis_length,
             0.0,
@@ -1337,7 +1337,7 @@ impl OpenCADStudio {
 
         let scope = self.tabs[i].current_parametric_scope();
         let to_world = |point: glam::DVec3| {
-            acadrust::types::Vector3::new(point.x, point.y, point.z)
+            codec::types::Vector3::new(point.x, point.y, point.z)
         };
         let resolve_point = |pick: crate::command::CoincidentPick| {
             if let Some(handle) = pick.handle {
@@ -1692,7 +1692,7 @@ impl OpenCADStudio {
             unreachable!("router only routes the matching variant");
         };
         let scope = self.tabs[i].current_parametric_scope();
-        let to_world = |p: glam::DVec3| acadrust::types::Vector3::new(p.x, p.y, p.z);
+        let to_world = |p: glam::DVec3| codec::types::Vector3::new(p.x, p.y, p.z);
         let resolve = |pick: crate::command::CoincidentPick,
                        exclude: Option<Handle>| {
             if pick.whole_curve {
@@ -1877,7 +1877,7 @@ impl OpenCADStudio {
             unreachable!("router only routes the matching variant");
         };
         let scope = self.tabs[i].current_parametric_scope();
-        let to_world = |p: glam::DVec3| acadrust::types::Vector3::new(p.x, p.y, p.z);
+        let to_world = |p: glam::DVec3| codec::types::Vector3::new(p.x, p.y, p.z);
         let resolved = crate::scene::parametric_constraints::nearest_parametric_point(
             &self.tabs[i].scene.document,
             scope,
@@ -1922,7 +1922,7 @@ impl OpenCADStudio {
     ) -> Option<Task<Message>> {
         let i = self.active_tab;
         let scope = self.tabs[i].current_parametric_scope();
-        let to_world = |p: glam::DVec3| acadrust::types::Vector3::new(p.x, p.y, p.z);
+        let to_world = |p: glam::DVec3| codec::types::Vector3::new(p.x, p.y, p.z);
         let mut refs = Vec::with_capacity(4);
         for p in points {
             let Some(r) = crate::scene::parametric_constraints::nearest_parametric_point(

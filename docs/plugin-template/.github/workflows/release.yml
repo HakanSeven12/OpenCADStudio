@@ -44,7 +44,7 @@ jobs:
         run: |
           mkdir -p dist
           cp target/release/*.${{ matrix.ext }} "dist/${{ matrix.asset }}"
-          acadrust_source=$(grep -A3 '^name = "acadrust"' Cargo.lock | grep '^source' | head -1 | sed 's/^source = "//;s/"$//')
+          acadrust_source=$(grep -A3 '^name = "opencadcodec"' Cargo.lock | grep '^source' | head -1 | sed 's/^source = "//;s/"$//')
           sed \
             -e "s|__RUSTC_VERSION__|$(rustc --version)|" \
             -e "s|__ACADRUST_SOURCE__|$acadrust_source|" \

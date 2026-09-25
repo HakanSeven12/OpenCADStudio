@@ -1,9 +1,9 @@
 // Freehand sketch tool.
 
-use acadrust::entities::{Line, LwPolyline, LwVertex, Spline};
-use acadrust::types::{Vector2, Vector3};
-use acadrust::EntityType;
-use cadkernel::geom2d::NurbsCurve;
+use codec::entities::{Line, LwPolyline, LwVertex, Spline};
+use codec::types::{Vector2, Vector3};
+use codec::EntityType;
+use kernel::geom2d::NurbsCurve;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, WorkingPlane};

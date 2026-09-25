@@ -7,16 +7,16 @@
 //!
 //! Co-located so adding a new variant only requires updating one file.
 
-use acadrust::EntityType;
+use codec::EntityType;
 
 /// Mixed-case display name shown to the user in panels, tooltips, etc.
 pub fn ui_name(e: &EntityType) -> &'static str {
     match e {
         EntityType::Point(_) => "Point",
         EntityType::Line(line)
-            if acadrust::entities::CenterMarkAssociation::read(&line.common.extended_data).is_some() => "Center Mark",
+            if codec::entities::CenterMarkAssociation::read(&line.common.extended_data).is_some() => "Center Mark",
         EntityType::Line(line)
-            if acadrust::entities::CenterLineAssociation::read(&line.common.extended_data).is_some() => "Center Line",
+            if codec::entities::CenterLineAssociation::read(&line.common.extended_data).is_some() => "Center Line",
         EntityType::Line(_) => "Line",
         EntityType::Circle(_) => "Circle",
         EntityType::Arc(_) => "Arc",
@@ -69,7 +69,7 @@ pub fn ui_name(e: &EntityType) -> &'static str {
         EntityType::Extended(extended)
             if matches!(
                 extended.data,
-                acadrust::entities::ExtendedEntityData::SectionObject(_)
+                codec::entities::ExtendedEntityData::SectionObject(_)
             ) => "Section Plane",
         EntityType::Extended(_) => "Extended Entity",
         EntityType::Seqend(_) => "Seqend",
@@ -86,7 +86,7 @@ pub fn ui_name_or_class(e: &EntityType) -> String {
     if let EntityType::Extended(entity) = e {
         if matches!(
             entity.data,
-            acadrust::entities::ExtendedEntityData::SectionObject(_)
+            codec::entities::ExtendedEntityData::SectionObject(_)
         ) {
             return "Section Plane".to_string();
         }
@@ -163,7 +163,7 @@ pub fn dxf_name(e: &EntityType) -> &'static str {
         EntityType::Extended(extended)
             if matches!(
                 extended.data,
-                acadrust::entities::ExtendedEntityData::SectionObject(_)
+                codec::entities::ExtendedEntityData::SectionObject(_)
             ) => "SECTIONOBJECT",
         _ => "ENTITY",
     }

@@ -163,7 +163,7 @@ fn shortcut_key_name(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Opt
 /// `ViewportRenderMode` enum carries the raw DXF integers, not a label,
 /// so wrap it locally with a friendly name renderer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct RenderModeChoice(pub acadrust::entities::ViewportRenderMode);
+pub(super) struct RenderModeChoice(pub codec::entities::ViewportRenderMode);
 
 impl std::fmt::Display for RenderModeChoice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -537,12 +537,12 @@ bg={bg_ms:.1}ms n={view_count}"
                     .flatten()
                     .and_then(|h| {
                         let indexed = match tab.scene.document.get_entity(h) {
-                            Some(acadrust::EntityType::LwPolyline(_))
-                            | Some(acadrust::EntityType::Polyline2D(_))
-                            | Some(acadrust::EntityType::Polyline3D(_))
-                            | Some(acadrust::EntityType::Spline(_))
-                            | Some(acadrust::EntityType::Face3D(_))
-                            | Some(acadrust::EntityType::PolygonMesh(_)) => true,
+                            Some(codec::EntityType::LwPolyline(_))
+                            | Some(codec::EntityType::Polyline2D(_))
+                            | Some(codec::EntityType::Polyline3D(_))
+                            | Some(codec::EntityType::Spline(_))
+                            | Some(codec::EntityType::Face3D(_))
+                            | Some(codec::EntityType::PolygonMesh(_)) => true,
                             _ => false,
                         };
                         indexed.then_some(tab.properties.prop_vertex)
@@ -612,7 +612,7 @@ bg={bg_ms:.1}ms n={view_count}"
             };
             let control_polygon = tab.selected_handle.and_then(|handle| {
                 let spline = match tab.scene.document.get_entity(handle) {
-                    Some(acadrust::EntityType::Spline(spline))
+                    Some(codec::EntityType::Spline(spline))
                         if crate::entities::spline::shows_control_vertices(spline) => spline,
                     _ => return None,
                 };
@@ -1307,7 +1307,7 @@ bg={bg_ms:.1}ms n={view_count}"
             // clicks (the shader viewport sits below it). Positioned with
             // leading Spaces sized to the viewport's screen rectangle.
             mark("active_vp_rect");
-            let active_vp_rect: Option<(acadrust::Handle, iced::Rectangle)> =
+            let active_vp_rect: Option<(codec::Handle, iced::Rectangle)> =
                 if is_paper && !tab.is_start {
                     tab.scene.active_viewport.and_then(|h| {
                         let (cw, ch) = tab.scene.selection.borrow().vp_size;
@@ -1356,7 +1356,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 let vp_mode = tab
                     .scene
                     .active_viewport_render_mode()
-                    .unwrap_or(acadrust::entities::ViewportRenderMode::Wireframe2D);
+                    .unwrap_or(codec::entities::ViewportRenderMode::Wireframe2D);
                 // Adaptive (same as model): the picker measures its real width into
                 // `render_bar_w` and swaps to an empty spacer only when the viewport
                 // can't hold it; the ViewCube reads that width to decide overlap.
@@ -1828,6 +1828,11 @@ bg={bg_ms:.1}ms n={view_count}"
             }
         }
 
+        if self.show_node_graph && !tab.is_start {
+            let sections = self.graph_all_sections(self.active_tab);
+            viewport_stack = viewport_stack.push(tab.graph.view(sections));
+        }
+
         // Docked side panels (Properties, block palette, future palettes) live
         // in an ordered vertical stack on the left/right edge of the drawing
         // view. Auto-collapsing (pinned) panels that aren't being hovered
@@ -2063,6 +2068,7 @@ bg={bg_ms:.1}ms n={view_count}"
             self.control.enabled,
             self.control_busy(),
             self.pending_pick_label().is_some(),
+            self.show_node_graph,
         );
         let center_stack: Element<'_, Message> = if thumbnail_capture_clean {
             workspace

@@ -8,8 +8,8 @@
 // text-bearing entity, plus the field read/write helpers both editors use to
 // commit back to the correct entity slot.
 
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle, Text};
+use codec::types::Vector3;
+use codec::{EntityType, Handle, Text};
 use glam::DVec3;
 
 /// Which text slot of which entity an editor session reads from and writes to.
@@ -101,10 +101,10 @@ pub struct TextInlineState {
     /// Canvas-space anchor where the field is drawn (the insertion-point click).
     pub screen_anchor: iced::Point,
 }
-pub(super) fn can_edit_text(mut handle: Handle, document: &acadrust::CadDocument) -> bool {
+pub(super) fn can_edit_text(mut handle: Handle, document: &codec::CadDocument) -> bool {
     for _ in 0..8 {
         match document.get_entity(handle) {
-            Some(acadrust::EntityType::Leader(l)) => {
+            Some(codec::EntityType::Leader(l)) => {
                 let ann = l.annotation_handle;
                 if ann.is_null() || ann == handle {
                     return false;
@@ -298,7 +298,7 @@ impl super::OpenCADStudio {
             if variable_height
                 && !matches!(
                     t.horizontal_alignment,
-                    acadrust::entities::TextHorizontalAlignment::Aligned
+                    codec::entities::TextHorizontalAlignment::Aligned
                 )
             {
                 self.tabs[i].scene.document.header.text_height = t.height;

@@ -78,7 +78,7 @@ impl OpenCADStudio {
                 let Some(draft) = self.plot_dialog.import_draft.take() else {
                     return Task::none();
                 };
-                let chosen: Vec<(String, acadrust::objects::PlotSettings)> = draft
+                let chosen: Vec<(String, codec::objects::PlotSettings)> = draft
                     .selected()
                     .map(|(name, ps)| (name.to_string(), ps.clone()))
                     .collect();
@@ -113,7 +113,7 @@ impl OpenCADStudio {
     /// as one undoable step. Returns the names imported.
     pub(super) fn import_page_setups(
         &mut self,
-        setups: Vec<(String, acadrust::objects::PlotSettings)>,
+        setups: Vec<(String, codec::objects::PlotSettings)>,
     ) -> Vec<String> {
         if setups.is_empty() {
             return Vec::new();
@@ -169,7 +169,7 @@ impl OpenCADStudio {
                 return Task::none();
             }
         };
-        let chosen: Vec<(String, acadrust::objects::PlotSettings)> = if names == "*" {
+        let chosen: Vec<(String, codec::objects::PlotSettings)> = if names == "*" {
             available
         } else {
             let wanted: Vec<&str> = names.split(',').map(str::trim).collect();
@@ -218,7 +218,7 @@ mod tests {
 
     /// The fixture's page setups as the chooser would hold them, read
     /// through the same document reader the command uses.
-    fn fixture_setups() -> Vec<(String, acadrust::objects::PlotSettings)> {
+    fn fixture_setups() -> Vec<(String, codec::objects::PlotSettings)> {
         let document = crate::io::load_file(std::path::Path::new(FIXTURE)).unwrap();
         crate::scene::document_page_setups(&document)
     }
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn psetupin_imports_named_setups_from_a_saved_drawing() {
-        use acadrust::objects::PlotRotation;
+        use codec::objects::PlotRotation;
         // Author a source drawing with two named setups and save it.
         let dir = std::env::temp_dir().join(format!("ocs-psetupin-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -256,7 +256,7 @@ mod tests {
             ps.paper_width = 297.0;
             ps.paper_height = 420.0;
             ps.rotation = PlotRotation::Degrees90;
-            ps.plot_view_handle = acadrust::Handle::new(0xBEEF);
+            ps.plot_view_handle = codec::Handle::new(0xBEEF);
             app.tabs[i].scene.page_setup_save("Site", ps.clone());
             ps.paper_size = "ISO_A2_(420.00_x_594.00_MM)".into();
             app.tabs[i].scene.page_setup_save("Overview", ps);

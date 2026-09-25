@@ -2,7 +2,7 @@
 
 use std::sync::{Mutex, OnceLock};
 
-use acadrust::{entities::Solid3D, EntityType, Handle};
+use codec::{entities::Solid3D, EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{
@@ -166,16 +166,16 @@ impl ExtrudeCommand {
 }
 
 fn preview_body_wires(
-    body: &cadkernel::brep::Body,
+    body: &kernel::brep::Body,
     color: [f32; 4],
     isolines: usize,
 ) -> Vec<WireModel> {
     // This overlay only consumes curves. Do not triangulate the body's faces
     // on every cursor event just to discard the resulting surface mesh.
-    let wireframe = cadkernel::brep::mesh::tessellate_wireframe(
+    let wireframe = kernel::brep::mesh::tessellate_wireframe(
         body,
-        cadkernel::brep::mesh::TessellationTolerance::new(
-            cadkernel::tessellation::DEFAULT_ANGLE,
+        kernel::brep::mesh::TessellationTolerance::new(
+            kernel::tessellation::DEFAULT_ANGLE,
             1e-9,
         )
         .with_isolines(isolines),
@@ -899,12 +899,12 @@ impl CadCommand for PresspullCommand {
                 crate::scene::model::presspull_model::profile_geometry(&entity)
                     .map(|(plane, loops, _)| (plane, loops)),
             PresspullTargetKind::Face { body, face, .. } =>
-                cadkernel::brep::planar_face_profile(&body, face)
+                kernel::brep::planar_face_profile(&body, face)
                     .map(|profile| (profile.plane, profile.loops)),
         };
         if let Some((plane, loops)) = geometry {
             self.hover_cache = loops.into_iter().flatten().filter_map(|curve| {
-                let points = curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
+                let points = curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
                     .into_iter().map(|point| plane.point_at(point)).collect::<Vec<_>>();
                 (points.len() >= 2).then(|| {
                     let mut wire = WireModel::solid_f64(
@@ -918,7 +918,7 @@ impl CadCommand for PresspullCommand {
         self.hover_cache.clone()
     }
 
-    fn on_entity_pick(&mut self, handle: acadrust::Handle, point: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: codec::Handle, point: DVec3) -> CmdResult {
         if !self.needs_entity_pick() {
             return CmdResult::NeedPoint;
         }
@@ -1278,7 +1278,7 @@ impl RevolveCommand {
 }
 
 fn revolve_axis(entity: &EntityType) -> Option<(DVec3, DVec3)> {
-    let point = |value: &acadrust::types::Vector3| DVec3::new(value.x, value.y, value.z);
+    let point = |value: &codec::types::Vector3| DVec3::new(value.x, value.y, value.z);
     let (start, direction) = match entity {
         EntityType::Line(line) => (point(&line.start), point(&line.end) - point(&line.start)),
         EntityType::Ray(ray) => (point(&ray.base_point), point(&ray.direction)),
@@ -1346,7 +1346,7 @@ impl CadCommand for RevolveCommand {
     fn needs_entity_pick(&self) -> bool {
         self.step == RevolveStep::AxisObject
     }
-    fn on_entity_pick(&mut self, handle: acadrust::Handle, _pt: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: codec::Handle, _pt: DVec3) -> CmdResult {
         if handle.is_null() {
             return CmdResult::NeedPoint;
         }
@@ -2777,8 +2777,8 @@ pub fn empty_solid3d() -> EntityType {
 }
 
 pub fn empty_extruded_surface(direction: DVec3, taper_angle: f64) -> EntityType {
-    use acadrust::entities::{Surface, SurfaceData, SurfaceKind};
-    use acadrust::types::Vector3;
+    use codec::entities::{Surface, SurfaceData, SurfaceKind};
+    use codec::types::Vector3;
 
     let mut surface = Surface::new(SurfaceKind::Extruded);
     surface.u_isolines = 6;
@@ -2803,8 +2803,8 @@ pub fn empty_revolved_surface(
     angle: f64,
     start_angle: f64,
 ) -> EntityType {
-    use acadrust::entities::{Surface, SurfaceData, SurfaceKind};
-    use acadrust::types::Vector3;
+    use codec::entities::{Surface, SurfaceData, SurfaceKind};
+    use codec::types::Vector3;
 
     let mut surface = Surface::new(SurfaceKind::Revolved);
     let axis = (axis_end - axis_start).normalize_or(DVec3::Z);
@@ -2853,7 +2853,7 @@ mod extrude_command_tests {
         command.set_preselection(
             vec![(
                 Handle::new(1),
-                EntityType::Circle(acadrust::entities::Circle::new()),
+                EntityType::Circle(codec::entities::Circle::new()),
             )],
             DVec3::ZERO,
             Some(DVec3::Z),
@@ -2875,7 +2875,7 @@ mod revolve_tests {
 
     #[test]
     fn cursor_angle_is_measured_about_the_model_axis() {
-        let profile = EntityType::Line(acadrust::entities::Line::from_coords(
+        let profile = EntityType::Line(codec::entities::Line::from_coords(
             2.0, 0.0, 0.0, 2.0, 4.0, 0.0,
         ));
         let mut command = RevolveCommand::new([1.0; 4], 0);
@@ -2908,8 +2908,8 @@ mod thicken_command_tests {
     fn thicken_filters_selection_recovers_from_invalid_text_and_measures_two_points() {
         let handle = Handle::new(42);
         let mut command = ThickenCommand::new(vec![
-            (Handle::new(1), EntityType::Line(acadrust::entities::Line::default())),
-            (handle, EntityType::Surface(acadrust::entities::Surface::new(acadrust::entities::SurfaceKind::Plane))),
+            (Handle::new(1), EntityType::Line(codec::entities::Line::default())),
+            (handle, EntityType::Surface(codec::entities::Surface::new(codec::entities::SurfaceKind::Plane))),
         ]);
         assert!(!command.is_selection_gathering());
         assert_eq!(command.handles, vec![handle]);

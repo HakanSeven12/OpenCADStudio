@@ -5,9 +5,9 @@ use super::OpenCADStudio;
 use crate::command::{DimensionAssociationSource, DimensionPreview};
 use crate::entities::dim_override;
 use crate::scene::viewport_ref::{AcceptedSnap, MeasurementScale, SnapSourceRef, ViewportFrame};
-use acadrust::entities::Dimension;
-use acadrust::types::Handle;
-use acadrust::EntityType;
+use codec::entities::Dimension;
+use codec::types::Handle;
+use codec::EntityType;
 use glam::DVec3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -1,11 +1,11 @@
 //! PRESSPULL scene integration. Resolve first; build and validate the complete
 //! batch before recording undo or changing any persistent entity.
 
-use acadrust::entities::{AcisData, EmbeddedEntity, Solid3D, Surface, SurfaceKind, Wire};
-use acadrust::objects::{DynamicBlockData, ObjectType, SolidHistoryNodeBase, SolidHistoryOperation, SolidHistorySweep};
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
-use cadkernel::brep::{self, Body, PlanarFaceProfile, PresspullMode};
+use codec::entities::{AcisData, EmbeddedEntity, Solid3D, Surface, SurfaceKind, Wire};
+use codec::objects::{DynamicBlockData, ObjectType, SolidHistoryNodeBase, SolidHistoryOperation, SolidHistorySweep};
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
+use kernel::brep::{self, Body, PlanarFaceProfile, PresspullMode};
 use glam::DVec3;
 use crate::scene::model::{solid_history, sweep_model};
 use crate::scene::model::mesh_model::MeshLodSet;

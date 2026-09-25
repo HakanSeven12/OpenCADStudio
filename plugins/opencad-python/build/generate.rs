@@ -133,7 +133,7 @@ enum Classify {
     /// `{ "kind": "Variant", "value": ... }` so nested geometry such as
     /// hatch boundary edges remains explicit and round-trippable.
     TaggedEnum,
-    /// A struct whose only field is `bits` (an acadrust bitflags newtype,
+    /// A struct whose only field is `bits` (an opencadcodec bitflags newtype,
     /// e.g. `PolylineFlags`/`VertexFlags`). Represented in Python as a plain
     /// integer via `.bits()`/`::from_bits(..)` — the named boolean accessors
     /// some of these types have (`is_closed`/`set_closed`, ...) are exposed
@@ -163,7 +163,7 @@ fn classify<'a>(name: &str, info: &'a TypeInfo) -> Classify {
                 Classify::UnitEnum
             }
         }
-        // acadrust `bitflags!` types serialize as a newtype over their integer
+        // opencadcodec `bitflags!` types serialize as a newtype over their integer
         // bits; they convert exactly like the hand-written `bits` structs.
         TypeKind::Newtype => Classify::BitFlags,
         other => panic!("entity_manifest.json: {name} has unsupported registry kind {other:?}"),
@@ -301,12 +301,12 @@ fn native_rust_type(type_id: &str) -> &'static str {
     }
 }
 
-/// Rust path of a traced type; most live in `acadrust::entities`.
+/// Rust path of a traced type; most live in `codec::entities`.
 fn type_path(name: &str) -> String {
     match name {
-        "LineWeight" => "acadrust::types::LineWeight".to_owned(),
-        "LeaderLineBreakInfo" => "acadrust::entities::multileader::LeaderLineBreakInfo".to_owned(),
-        _ => format!("acadrust::entities::{name}"),
+        "LineWeight" => "codec::types::LineWeight".to_owned(),
+        "LeaderLineBreakInfo" => "codec::entities::multileader::LeaderLineBreakInfo".to_owned(),
+        _ => format!("codec::entities::{name}"),
     }
 }
 
@@ -356,10 +356,10 @@ fn default_expr(type_id: &str) -> String {
         "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64" => "0".to_string(),
         "bool" => "false".to_string(),
         "String" | "str" => "String::new()".to_string(),
-        "Vector3" => "acadrust::types::Vector3::ZERO".to_string(),
-        "Vector2" => "acadrust::types::Vector2::ZERO".to_string(),
-        "Handle" => "acadrust::Handle::new(0)".to_string(),
-        "Color" => "acadrust::types::Color::ByLayer".to_string(),
+        "Vector3" => "codec::types::Vector3::ZERO".to_string(),
+        "Vector2" => "codec::types::Vector2::ZERO".to_string(),
+        "Handle" => "codec::Handle::new(0)".to_string(),
+        "Color" => "codec::types::Color::ByLayer".to_string(),
         other => format!("default_{}()", snake_case(other)),
     }
 }
@@ -440,7 +440,7 @@ fn leaf_from_py(registry: &TypeRegistry, type_id: &str, value_expr: &str) -> Str
     match type_id {
         "Vector3" => format!("py_to_vector3_dict({value_expr}, vm)"),
         "Vector2" => format!("py_to_vector2({value_expr}, vm)"),
-        "Handle" => format!("{value_expr}.try_into_value::<u64>(vm).map(acadrust::Handle::new)"),
+        "Handle" => format!("{value_expr}.try_into_value::<u64>(vm).map(codec::Handle::new)"),
         "Color" => format!("py_to_color_dict({value_expr}, vm)"),
         other => {
             let info = get(registry, other)
@@ -697,7 +697,7 @@ fn gen_struct(name: &str, info: &TypeInfo, registry: &TypeRegistry, required: &[
         if f.type_id.as_str() == "EntityCommon" {
             // A sub-record's own common data (layer, XDATA, handles) is not part
             // of the scripted model; it defaults on the way in.
-            let default = "acadrust::entities::EntityCommon::default()";
+            let default = "codec::entities::EntityCommon::default()";
             from_dict_fields.push_str(&format!("        {}: {default},\n", f.name));
             default_fields.push_str(&format!("        {}: {default},\n", f.name));
             continue;
@@ -861,7 +861,7 @@ fn gen_entity_to_dict(manifest: &Manifest, registry: &TypeRegistry) -> String {
     for kind in &manifest.type_filter {
         if manifest.manual_kinds.contains(kind) {
             arms.push_str(&format!(
-                "        acadrust::EntityType::{kind}(value) => {}_to_dict(vm, value),\n",
+                "        codec::EntityType::{kind}(value) => {}_to_dict(vm, value),\n",
                 snake_case(kind)
             ));
             continue;
@@ -891,7 +891,7 @@ fn gen_entity_to_dict(manifest: &Manifest, registry: &TypeRegistry) -> String {
         }
         body.push_str("            Ok(dict.into())\n");
         arms.push_str(&format!(
-            "        acadrust::EntityType::{kind}({var}) => {{\n{body}        }}\n"
+            "        codec::EntityType::{kind}({var}) => {{\n{body}        }}\n"
         ));
     }
     format!(
@@ -899,7 +899,7 @@ fn gen_entity_to_dict(manifest: &Manifest, registry: &TypeRegistry) -> String {
 /// `"kind"` key (matching the convention every other `ocs.*` dict already
 /// uses, e.g. XDATA's `{{"kind": ..., "value": ...}}`), plus `"handle"` and
 /// `"layer"` and every entity-specific field the type registry knows about.
-pub(crate) fn entity_to_dict(vm: &VirtualMachine, entity: &acadrust::EntityType) -> PyResult<PyObjectRef> {{
+pub(crate) fn entity_to_dict(vm: &VirtualMachine, entity: &codec::EntityType) -> PyResult<PyObjectRef> {{
     match entity {{
 {arms}        _ => Err(vm.new_value_error(
             "ocs: this entity kind is not supported by the generic add/update API yet".to_owned(),
@@ -925,7 +925,7 @@ fn gen_dict_to_entity(manifest: &Manifest, registry: &TypeRegistry) -> String {
         }
         if manifest.manual_kinds.contains(kind) {
             arms.push_str(&format!(
-                "        \"{kind}\" => acadrust::EntityType::{kind}({}_from_dict(dict, vm)?),\n",
+                "        \"{kind}\" => codec::EntityType::{kind}({}_from_dict(dict, vm)?),\n",
                 snake_case(kind)
             ));
             continue;
@@ -946,23 +946,23 @@ fn gen_dict_to_entity(manifest: &Manifest, registry: &TypeRegistry) -> String {
         let constructor = manifest.overrides.get(kind)
             .and_then(|override_def| override_def.rust_constructor.as_deref())
             .map(str::to_owned)
-            .unwrap_or_else(|| format!("acadrust::entities::{kind}::default()"));
+            .unwrap_or_else(|| format!("codec::entities::{kind}::default()"));
         body.push_str(&format!("            let mut {var} = {constructor};\n"));
         body.push_str(&format!(
-            "            {var}.common.handle = acadrust::Handle::new(get_opt_u64(dict, \"handle\", vm)?);\n"
+            "            {var}.common.handle = codec::Handle::new(get_opt_u64(dict, \"handle\", vm)?);\n"
         ));
         body.push_str(&format!(
             "            {var}.common.layer = get_opt_string(dict, \"layer\", \"0\", vm)?;\n"
         ));
         if manifest.base_fields.iter().any(|field| field == "owner_handle") {
             body.push_str(&format!(
-                "            {var}.common.owner_handle = acadrust::Handle::new(get_opt_u64(dict, \"owner_handle\", vm)?);\n"
+                "            {var}.common.owner_handle = codec::Handle::new(get_opt_u64(dict, \"owner_handle\", vm)?);\n"
             ));
         }
         for f in &fields {
             body.push_str(&format!("            {}\n", f.setter));
         }
-        body.push_str(&format!("            acadrust::EntityType::{kind}({var})\n"));
+        body.push_str(&format!("            codec::EntityType::{kind}({var})\n"));
         arms.push_str(&format!("        \"{kind}\" => {{\n{body}        }}\n"));
     }
     format!(
@@ -971,8 +971,8 @@ fn gen_dict_to_entity(manifest: &Manifest, registry: &TypeRegistry) -> String {
 /// `"required"` (the geometry that actually defines the shape — a line's
 /// endpoints, a circle's center/radius, ...) error if missing rather than
 /// silently defaulting to zero; every other field defaults sensibly (what a
-/// fresh `acadrust::entities::X::default()` would already hold).
-pub(crate) fn dict_to_entity(dict: &rustpython_vm::builtins::PyDictRef, vm: &VirtualMachine) -> PyResult<acadrust::EntityType> {{
+/// fresh `codec::entities::X::default()` would already hold).
+pub(crate) fn dict_to_entity(dict: &rustpython_vm::builtins::PyDictRef, vm: &VirtualMachine) -> PyResult<codec::EntityType> {{
     let kind = dict.get_item("kind", vm)?.try_into_value::<String>(vm)?;
     Ok(match kind.as_str() {{
 {arms}        other => {{
@@ -990,7 +990,7 @@ fn gen_apply_dict_to_entity(manifest: &Manifest, registry: &TypeRegistry) -> Str
     for kind in &manifest.type_filter {
         if manifest.manual_kinds.contains(kind) {
             arms.push_str(&format!(
-                "        acadrust::EntityType::{kind}(existing_value) => acadrust::EntityType::{kind}({}_apply(existing_value, dict, vm)?),\n",
+                "        codec::EntityType::{kind}(existing_value) => codec::EntityType::{kind}({}_apply(existing_value, dict, vm)?),\n",
                 snake_case(kind)
             ));
             continue;
@@ -1032,9 +1032,9 @@ fn gen_apply_dict_to_entity(manifest: &Manifest, registry: &TypeRegistry) -> Str
         for f in &fields {
             body.push_str(&format!("            {}\n", f.setter));
         }
-        body.push_str(&format!("            acadrust::EntityType::{kind}({var})\n"));
+        body.push_str(&format!("            codec::EntityType::{kind}({var})\n"));
         arms.push_str(&format!(
-            "        acadrust::EntityType::{kind}(existing_value) => {{\n{body}        }}\n"
+            "        codec::EntityType::{kind}(existing_value) => {{\n{body}        }}\n"
         ));
     }
     format!(
@@ -1048,10 +1048,10 @@ fn gen_apply_dict_to_entity(manifest: &Manifest, registry: &TypeRegistry) -> Str
 /// `"kind"` (if present at all — round-tripped from a prior `get_entity()`)
 /// is never consulted, since an update can't change an entity's shape.
 pub(crate) fn apply_dict_to_entity(
-    existing: &acadrust::EntityType,
+    existing: &codec::EntityType,
     dict: &rustpython_vm::builtins::PyDictRef,
     vm: &VirtualMachine,
-) -> PyResult<acadrust::EntityType> {{
+) -> PyResult<codec::EntityType> {{
     Ok(match existing {{
 {arms}        _ => {{
             return Err(vm.new_value_error(

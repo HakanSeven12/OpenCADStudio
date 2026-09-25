@@ -300,21 +300,21 @@ impl OpenCADStudio {
         }
         if !matches!(
             self.tabs[i].scene.document.get_entity(handle),
-            Some(acadrust::EntityType::Hatch(_))
+            Some(codec::EntityType::Hatch(_))
         ) {
             self.command_line
                 .push_error(crate::t!("HATCHEDIT: hatch entity not found.").as_ref());
         } else {
             use crate::command::{CadCommand, HatchEditOperation};
             if matches!(&operation, HatchEditOperation::BeginAssociate) {
-                let associative = matches!(self.tabs[i].scene.document.get_entity(handle),Some(acadrust::EntityType::Hatch(h)) if h.is_associative);
+                let associative = matches!(self.tabs[i].scene.document.get_entity(handle),Some(codec::EntityType::Hatch(h)) if h.is_associative);
                 if associative {
                     self.command_line
                         .push_info("HATCHEDIT: hatch is already associative.");
                     self.tabs[i].active_cmd = None;
                 } else {
                     let plane = match self.tabs[i].scene.document.get_entity(handle) {
-                        Some(acadrust::EntityType::Hatch(h)) => {
+                        Some(codec::EntityType::Hatch(h)) => {
                             let storage =
                                 crate::entities::curve::ocs_plane(h.normal, h.elevation);
                             crate::command::WorkingPlane::new(
@@ -338,7 +338,7 @@ impl OpenCADStudio {
             if let HatchEditOperation::DrawOrderBoundary { above } = &operation {
                 let references: Vec<_> =
                     match self.tabs[i].scene.document.get_entity(handle) {
-                        Some(acadrust::EntityType::Hatch(h)) => h
+                        Some(codec::EntityType::Hatch(h)) => h
                             .paths
                             .iter()
                             .flat_map(|p| p.boundary_handles.iter())
@@ -436,7 +436,7 @@ impl OpenCADStudio {
                             }
                         }
                     }
-                    if let Some(acadrust::EntityType::Hatch(hatch)) =
+                    if let Some(codec::EntityType::Hatch(hatch)) =
                         self.tabs[i].scene.document.get_entity_mut(handle)
                     {
                         if !name.is_empty() && name != hatch.pattern.name {
@@ -467,7 +467,7 @@ impl OpenCADStudio {
                                     crate::scene::model::hatch_model::HatchPattern::Solid
                                 );
                                 hatch.pattern_type =
-                                    acadrust::entities::HatchPatternType::Predefined;
+                                    codec::entities::HatchPatternType::Predefined;
                                 hatch.gradient_color.enabled = false;
                             }
                         } else {
@@ -483,7 +483,7 @@ impl OpenCADStudio {
                         hatch.pattern_scale = scale.max(1.0e-6) as f64;
                         hatch.pattern_angle = (angle as f64).to_radians();
                         if let Some((x, y)) = origin {
-                            hatch.set_pattern_origin(acadrust::types::Vector2::new(x, y));
+                            hatch.set_pattern_origin(codec::types::Vector2::new(x, y));
                         }
                         if disassociate {
                             for path in &mut hatch.paths {
@@ -551,7 +551,7 @@ impl OpenCADStudio {
                 }
                 HatchEditOperation::RecreateBoundary { associate, region } => {
                     let source = self.tabs[i].scene.document.get_entity(handle).cloned();
-                    if let Some(acadrust::EntityType::Hatch(source)) = source {
+                    if let Some(codec::EntityType::Hatch(source)) = source {
                         let storage = crate::entities::curve::ocs_plane(
                             source.normal,
                             source.elevation,
@@ -592,10 +592,10 @@ impl OpenCADStudio {
                                         .enumerate()
                                         .map(|(outer, boundary)| {
                                             inner != outer
-                                                && cadkernel::geom2d::contains(
+                                                && kernel::geom2d::contains(
                                                     boundary,
                                                     seed,
-                                                    cadkernel::geom2d::Tolerance::new(1e-6),
+                                                    kernel::geom2d::Tolerance::new(1e-6),
                                                 )
                                         })
                                         .collect::<Vec<_>>()
@@ -670,7 +670,7 @@ impl OpenCADStudio {
                             }
                         }
                         if associate {
-                            if let Some(acadrust::EntityType::Hatch(hatch)) =
+                            if let Some(codec::EntityType::Hatch(hatch)) =
                                 self.tabs[i].scene.document.get_entity_mut(handle)
                             {
                                 for (path, boundary) in
@@ -692,12 +692,12 @@ impl OpenCADStudio {
                 }
                 HatchEditOperation::Separate => {
                     let source = self.tabs[i].scene.document.get_entity(handle).cloned();
-                    if let Some(acadrust::EntityType::Hatch(hatch)) = source {
+                    if let Some(codec::EntityType::Hatch(hatch)) = source {
                         let groups = crate::scene::separated_hatch_path_groups(&hatch);
                         if groups.len() > 1 {
                             for paths in groups {
                                 let mut separated = hatch.clone();
-                                separated.common.handle = acadrust::Handle::NULL;
+                                separated.common.handle = codec::Handle::NULL;
                                 separated.paths = paths;
                                 separated.is_associative = separated
                                     .paths
@@ -705,7 +705,7 @@ impl OpenCADStudio {
                                     .any(|path| !path.boundary_handles.is_empty());
                                 self.tabs[i]
                                     .scene
-                                    .add_entity(acadrust::EntityType::Hatch(separated));
+                                    .add_entity(codec::EntityType::Hatch(separated));
                             }
                             self.tabs[i].scene.erase_entities(&[handle]);
                         }

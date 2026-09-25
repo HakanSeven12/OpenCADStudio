@@ -10,7 +10,7 @@ impl Scene {
         only_vp: Option<Handle>,
         exclude_vp: Option<Handle>,
     ) -> Vec<WireModel> {
-        use acadrust::entities::Viewport;
+        use codec::entities::Viewport;
 
         let (_, _, viewport_handles) = self.paper_viewport_handles();
         let viewports: Vec<&Viewport> = viewport_handles
@@ -403,7 +403,7 @@ impl Scene {
     pub fn viewport_plot_fills(
         &self,
     ) -> (Vec<(WireModel, f32)>, Vec<HatchModel>, Vec<HatchModel>, Vec<crate::io::pdf_export::PlotImage>) {
-        use acadrust::entities::Viewport;
+        use codec::entities::Viewport;
         use model::hatch_model::HatchPattern;
 
         if self.current_layout == "Model" {
@@ -627,7 +627,7 @@ impl Scene {
         us: f32,
         vs: f32,
     ) -> Vec<[f32; 2]> {
-        use acadrust::entities::Viewport;
+        use codec::entities::Viewport;
         let Some(EntityType::Viewport(vp)) = self.document.get_entity(vp_handle) else {
             return vec![];
         };
@@ -879,7 +879,7 @@ where
         output.extend(clipped);
     };
     if let (Some(plane), Some(boundary)) = (fill.fill_plane, fill.fill_plane_boundary.as_deref()) {
-        let plane = cadkernel::space::Plane::from_axes(
+        let plane = kernel::space::Plane::from_axes(
             plane.origin,
             plane.x_axis,
             plane.y_axis,

@@ -8,7 +8,7 @@
 //! 2. The runner presents a pre-shared token via [`crate::ipc::protocol::PLUGIN_TOKEN_ENV`];
 //!    the host rejects the connection on mismatch.
 //! 3. The host requests the manifest, checks `api_version` and (for v4+) the
-//!    acadrust source gate, then keeps the process alive.
+//!    opencadcodec source gate, then keeps the process alive.
 //! 4. Host → plugin calls (`dispatch`, `execute_code`, interactive events) are
 //!    sent over the socket with a configurable per-call timeout.
 //! 5. Stdout/stderr of the child are drained into `PluginIoLine` records for
@@ -1171,8 +1171,8 @@ mod timeout_tests {
     use crate::ipc::transport::{recv, send};
     use crate::ribbon::owned::OwnedPluginManifest;
     use crate::test_lock::ENV_LOCK;
-    use acadrust::xdata::ExtendedDataRecord;
-    use acadrust::{CadDocument, EntityType, Handle};
+    use codec::xdata::ExtendedDataRecord;
+    use codec::{CadDocument, EntityType, Handle};
     use interprocess::local_socket::{
         traits::{Listener, Stream as StreamTrait},
         GenericNamespaced, ListenerOptions, Stream, ToNsName,

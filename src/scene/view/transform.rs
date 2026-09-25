@@ -1,4 +1,4 @@
-use acadrust::types::{Transform, Vector3};
+use codec::types::{Transform, Vector3};
 use glam::DVec3;
 
 use crate::command::EntityTransform;
@@ -10,7 +10,7 @@ fn to_v3(v: DVec3) -> Vector3 {
 
 pub fn apply_standard_transform<T>(entity: &mut T, center: DVec3, axis: DVec3, angle_rad: f64)
 where
-    T: acadrust::Entity,
+    T: codec::Entity,
 {
     let t = Transform::from_translation(to_v3(-center))
         .then(&Transform::from_rotation(to_v3(axis.normalize_or(DVec3::Z)), angle_rad))
@@ -20,7 +20,7 @@ where
 
 pub fn apply_standard_scale<T>(entity: &mut T, center: DVec3, factor: f64)
 where
-    T: acadrust::Entity,
+    T: codec::Entity,
 {
     let s = factor;
     let t = Transform::from_scaling_with_origin(Vector3::new(s, s, s), to_v3(center));
@@ -29,7 +29,7 @@ where
 
 pub fn apply_standard_entity_transform<T, F>(entity: &mut T, t: &EntityTransform, mirror: F)
 where
-    T: acadrust::Entity,
+    T: codec::Entity,
     F: FnOnce(&mut T, DVec3, DVec3),
 {
     match t {
@@ -57,11 +57,11 @@ where
     }
 }
 
-/// Reflection across the world-XY line through `p1`→`p2` as an acadrust
-/// `Transform`, for delegating MIRROR to acadrust's entity-aware
+/// Reflection across the world-XY line through `p1`→`p2` as an opencadcodec
+/// `Transform`, for delegating MIRROR to opencadcodec's entity-aware
 /// `apply_transform` paths (which handle direction flags, stored-angle
 /// conventions and bulges themselves). Degenerate line → identity.
-pub fn reflection_about_xy_line(p1: DVec3, p2: DVec3) -> acadrust::types::Transform {
+pub fn reflection_about_xy_line(p1: DVec3, p2: DVec3) -> codec::types::Transform {
     reflection_about_working_line(p1, p2, DVec3::Z)
 }
 
@@ -71,8 +71,8 @@ pub fn reflection_about_working_line(
     p1: DVec3,
     p2: DVec3,
     working_normal: DVec3,
-) -> acadrust::types::Transform {
-    use acadrust::types::{Matrix4, Transform};
+) -> codec::types::Transform {
+    use codec::types::{Matrix4, Transform};
     let line = p2 - p1;
     let plane_normal = line
         .cross(working_normal.normalize_or(DVec3::Z))
@@ -191,11 +191,11 @@ mod mirror_delegation_tests {
     use super::*;
     use crate::command::EntityTransform;
     use crate::entities::traits::Transformable;
-    use acadrust::entities::hatch::{BoundaryEdge, BoundaryPath, CircularArcEdge, LineEdge};
-    use acadrust::entities::Hatch;
-    use acadrust::types::Vector2;
+    use codec::entities::hatch::{BoundaryEdge, BoundaryPath, CircularArcEdge, LineEdge};
+    use codec::entities::Hatch;
+    use codec::types::Vector2;
 
-    // MIRROR on a hatch goes through reflection_about_xy_line + acadrust's
+    // MIRROR on a hatch goes through reflection_about_xy_line + opencadcodec's
     // transform_hatch. Mirror a Line→Arc→Line path across a vertical line and
     // assert the arc stays endpoint-continuous, flips its direction flag, and
     // keeps its sweep magnitude (the stored-angle conventions the old

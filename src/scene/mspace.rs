@@ -14,7 +14,7 @@ impl Scene {
             None => return paper_pt,
         };
         let vp = match self.document.get_entity(vp_handle) {
-            Some(acadrust::EntityType::Viewport(vp)) => vp,
+            Some(codec::EntityType::Viewport(vp)) => vp,
             _ => return paper_pt,
         };
         // Uses the viewport's own `view_target` — kept valid by
@@ -48,7 +48,7 @@ impl Scene {
             None => return model_pt,
         };
         let vp = match self.document.get_entity(vp_handle) {
-            Some(acadrust::EntityType::Viewport(vp)) => vp,
+            Some(codec::EntityType::Viewport(vp)) => vp,
             _ => return model_pt,
         };
         let scale = vp_effective_scale(vp.custom_scale, vp.view_height, vp.height);
@@ -206,10 +206,10 @@ impl Scene {
         let Some(point) = boundary.plane.project([paper.x, paper.y, vp.center.z]) else {
             return false;
         };
-        cadkernel::geom2d::contains(
+        kernel::geom2d::contains(
             &[boundary.curve],
             point,
-            cadkernel::geom2d::Tolerance::new(1e-9),
+            kernel::geom2d::Tolerance::new(1e-9),
         )
     }
 }
@@ -221,15 +221,15 @@ mod clip_tests {
     #[test]
     fn concave_clip_boundary_rejects_the_notch() {
         let mut scene = Scene::new();
-        let mut poly = acadrust::entities::LwPolyline::from_points(
+        let mut poly = codec::entities::LwPolyline::from_points(
             [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (5.0, 5.0), (5.0, 10.0), (0.0, 10.0)]
-                .map(|(x, y)| acadrust::types::Vector2::new(x, y))
+                .map(|(x, y)| codec::types::Vector2::new(x, y))
                 .to_vec(),
         );
         poly.is_closed = true;
         let clip = scene.add_entity(EntityType::LwPolyline(poly));
-        let mut viewport = acadrust::entities::Viewport::new();
-        viewport.center = acadrust::types::Vector3::new(5.0, 5.0, 0.0);
+        let mut viewport = codec::entities::Viewport::new();
+        viewport.center = codec::types::Vector3::new(5.0, 5.0, 0.0);
         viewport.width = 20.0;
         viewport.height = 20.0;
         viewport.clip_boundary_handle = clip;
@@ -261,7 +261,7 @@ impl Scene {
             return;
         };
         let eff_h = cam.ortho_size() as f64 * 2.0;
-        if let Some(acadrust::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
+        if let Some(codec::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
             vp.view_target.x = cam.target.x;
             vp.view_target.y = cam.target.y;
             vp.view_center.x = 0.0;
@@ -284,7 +284,7 @@ impl Scene {
             return false;
         };
         let (width, height, locked) = match self.document.get_entity(viewport_handle) {
-            Some(acadrust::EntityType::Viewport(viewport)) => {
+            Some(codec::EntityType::Viewport(viewport)) => {
                 (viewport.width, viewport.height, viewport.status.locked)
             }
             _ => return false,
@@ -296,7 +296,7 @@ impl Scene {
             return false;
         };
         camera.fit_to_bounds(min, max, (width / height.max(1e-9)) as f32);
-        if let Some(acadrust::EntityType::Viewport(viewport)) =
+        if let Some(codec::EntityType::Viewport(viewport)) =
             self.document.get_entity_mut(viewport_handle)
         {
             viewport.view_target.x = camera.target.x;
@@ -330,7 +330,7 @@ impl Scene {
 
         // Read viewport dims (immutable borrow ends here).
         let (view_height, vp_height, locked) = match self.document.get_entity(vp_handle) {
-            Some(acadrust::EntityType::Viewport(vp)) => {
+            Some(codec::EntityType::Viewport(vp)) => {
                 (vp.view_height as f32, vp.height as f32, vp.status.locked)
             }
             _ => return,
@@ -356,7 +356,7 @@ impl Scene {
         let cam_up = vp_cam.rotation * glam::Vec3::Y;
         let model_delta = -(cam_right * screen_dx * speed) + (cam_up * screen_dy * speed);
 
-        if let Some(acadrust::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
+        if let Some(codec::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
             vp.view_target.x += model_delta.x as f64;
             vp.view_target.y += model_delta.y as f64;
             vp.view_target.z += model_delta.z as f64;
@@ -374,7 +374,7 @@ impl Scene {
             Some(h) => h,
             None => return,
         };
-        if let Some(acadrust::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
+        if let Some(codec::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
             if vp.status.locked {
                 return;
             }
@@ -434,7 +434,7 @@ impl Scene {
         // negating Y here made each drag step read back a Y-mirrored camera,
         // flipping the model between a rotation and its opposite every frame.
         let eye = cam.rotation * glam::Vec3::Z;
-        if let Some(acadrust::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
+        if let Some(codec::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
             if vp.status.locked {
                 return;
             }
@@ -480,7 +480,7 @@ impl Scene {
             .normalize_or(glam::Vec3::Y);
         let roll = up0.cross(desired_up).dot(dir).atan2(up0.dot(desired_up));
         let twist = -roll as f64;
-        if let Some(acadrust::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
+        if let Some(codec::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
             if vp.status.locked {
                 return;
             }
@@ -519,7 +519,7 @@ impl Scene {
         let roll = up0.cross(desired_up).dot(dir).atan2(up0.dot(desired_up));
         let twist = -roll as f64;
         let mut changed = false;
-        if let Some(acadrust::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
+        if let Some(codec::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
             if vp.status.locked {
                 return false;
             }
@@ -543,10 +543,10 @@ impl Scene {
     /// viewport is active (PSPACE / model layout).
     pub fn active_viewport_render_mode(
         &self,
-    ) -> Option<acadrust::entities::ViewportRenderMode> {
+    ) -> Option<codec::entities::ViewportRenderMode> {
         let h = self.active_viewport?;
         match self.document.get_entity(h) {
-            Some(acadrust::EntityType::Viewport(vp)) => Some(vp.render_mode),
+            Some(codec::EntityType::Viewport(vp)) => Some(vp.render_mode),
             _ => None,
         }
     }
@@ -556,12 +556,12 @@ impl Scene {
     /// so the caller can fall back to the model-layout render mode.
     pub fn set_active_viewport_render_mode(
         &mut self,
-        mode: acadrust::entities::ViewportRenderMode,
+        mode: codec::entities::ViewportRenderMode,
     ) -> bool {
         let Some(h) = self.active_viewport else {
             return false;
         };
-        if let Some(acadrust::EntityType::Viewport(vp)) = self.document.get_entity_mut(h) {
+        if let Some(codec::EntityType::Viewport(vp)) = self.document.get_entity_mut(h) {
             vp.render_mode = mode;
             true
         } else {
@@ -572,19 +572,19 @@ impl Scene {
     /// Visual style of the active Model tile (for the render-mode picker).
     pub fn active_model_tile_render_mode(
         &self,
-    ) -> acadrust::entities::ViewportRenderMode {
+    ) -> codec::entities::ViewportRenderMode {
         let tiles = self.model_tiles.borrow();
         let active = self.active_model_tile.get().min(tiles.len().saturating_sub(1));
         tiles
             .get(active)
             .map(|t| t.render_mode)
-            .unwrap_or(acadrust::entities::ViewportRenderMode::Wireframe2D)
+            .unwrap_or(codec::entities::ViewportRenderMode::Wireframe2D)
     }
 
     /// Set only the active Model tile's render mode. Other tiles keep theirs.
     pub fn set_active_model_tile_render_mode(
         &self,
-        mode: acadrust::entities::ViewportRenderMode,
+        mode: codec::entities::ViewportRenderMode,
     ) {
         let mut tiles = self.model_tiles.borrow_mut();
         let active = self.active_model_tile.get().min(tiles.len().saturating_sub(1));
@@ -625,7 +625,7 @@ impl Scene {
 
     pub(crate) fn navigation_locked(&self) -> bool {
         self.active_viewport.is_some_and(|h| {
-            !matches!(self.document.get_entity(h), Some(acadrust::EntityType::Viewport(v)) if !v.status.locked)
+            !matches!(self.document.get_entity(h), Some(codec::EntityType::Viewport(v)) if !v.status.locked)
         })
     }
 
@@ -636,7 +636,7 @@ impl Scene {
             return false;
         }
         if let Some(handle) = self.active_viewport {
-            if let Some(acadrust::EntityType::Viewport(vp)) = self.document.get_entity_mut(handle) {
+            if let Some(codec::EntityType::Viewport(vp)) = self.document.get_entity_mut(handle) {
                 vp.view_target.x = camera.target.x;
                 vp.view_target.y = camera.target.y;
                 vp.view_target.z = camera.target.z;

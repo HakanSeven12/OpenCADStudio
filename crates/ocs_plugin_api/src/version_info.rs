@@ -2,13 +2,13 @@
 //!
 //! At compile time `build.rs` writes a small JSON blob to
 //! `OUT_DIR/version_info.json` containing host version, `ocs_plugin_api`
-//! version, `acadrust` version and source, API version bounds, and a build
+//! version, `opencadcodec` version and source, API version bounds, and a build
 //! timestamp. The blob is embedded via `include_str!` and is available without
 //! enabling the `host` feature.
 //!
-//! The acadrust source string is used to detect binary-incompatible plugin
+//! The opencadcodec source string is used to detect binary-incompatible plugin
 //! builds. For API v4 and later the host compares the plugin's resolved
-//! `acadrust` source with its own via [`acadrust_sources_compatible`]. Two
+//! `opencadcodec` source with its own via [`acadrust_sources_compatible`]. Two
 //! sources are considered compatible only when they resolve to the same 40
 //! character git commit hash.
 //!
@@ -60,7 +60,7 @@ fn parsed_version_info() -> &'static VersionInfo {
     })
 }
 
-/// Returns the host's full `acadrust` Cargo source.
+/// Returns the host's full `opencadcodec` Cargo source.
 pub fn host_acadrust_source() -> &'static str {
     &parsed_version_info().acadrust_source
 }
@@ -151,8 +151,8 @@ mod tests {
         assert_eq!(value["api_version_min_supported"].as_i64(), Some(2));
 
         // acadrust_version should have a patch component (e.g. "0.4.0").
-        let acadrust = value["acadrust_version"].as_str().expect("acadrust_version string");
-        assert_eq!(acadrust.split('.').count(), 3);
+        let opencadcodec = value["acadrust_version"].as_str().expect("acadrust_version string");
+        assert_eq!(opencadcodec.split('.').count(), 3);
     }
 
     #[test]
@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn extracts_full_hash_from_cargo_source() {
-        let src = "git+https://github.com/HakanSeven12/cadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
+        let src = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
         assert_eq!(
             acadrust_source_hash(src),
             Some("94df2c3f87fa051b16ffc3923f80e9247c85c5fd")
@@ -228,22 +228,22 @@ mod tests {
 
     #[test]
     fn source_comparison_matches_full_hashes() {
-        let a = "git+https://github.com/HakanSeven12/cadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
-        let b = "git+https://github.com/HakanSeven12/cadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
+        let a = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
+        let b = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
         assert!(acadrust_sources_compatible(a, b));
     }
 
     #[test]
     fn source_comparison_detects_mismatch() {
-        let a = "git+https://github.com/HakanSeven12/cadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
-        let b = "git+https://github.com/HakanSeven12/cadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb";
+        let a = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
+        let b = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb";
         assert!(!acadrust_sources_compatible(a, b));
     }
 
     #[test]
     fn source_comparison_case_insensitive() {
-        let a = "git+https://github.com/HakanSeven12/cadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
-        let b = "git+https://github.com/HakanSeven12/cadcodec.git?rev=94df2c3#94DF2C3F87FA051B16FFC3923F80E9247C85C5FD";
+        let a = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=94df2c3#94df2c3f87fa051b16ffc3923f80e9247c85c5fd";
+        let b = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=94df2c3#94DF2C3F87FA051B16FFC3923F80E9247C85C5FD";
         assert!(acadrust_sources_compatible(a, b));
     }
 }

@@ -1,7 +1,7 @@
 use super::*;
 
 impl OpenCADStudio {
-    pub(super) fn handle_mview_create(&mut self, viewport: acadrust::entities::Viewport, preserve_view: bool) {
+    pub(super) fn handle_mview_create(&mut self, viewport: codec::entities::Viewport, preserve_view: bool) {
         let i = self.active_tab;
         let saved_view = preserve_view.then(|| {
             (
@@ -17,9 +17,9 @@ impl OpenCADStudio {
         });
         let label = self.history_label_from_active_cmd(i, "MVIEW");
         let pending = self.begin_undo(i, label, 1, true);
-        let handle = self.commit_entity_handle(acadrust::EntityType::Viewport(viewport));
+        let handle = self.commit_entity_handle(codec::EntityType::Viewport(viewport));
         if let (Some(handle), Some(saved)) = (handle, saved_view) {
-            if let Some(acadrust::EntityType::Viewport(viewport)) =
+            if let Some(codec::EntityType::Viewport(viewport)) =
                 self.tabs[i].scene.document.get_entity_mut(handle)
             {
                 viewport.view_target = saved.0;
@@ -45,7 +45,7 @@ impl OpenCADStudio {
 
     pub(super) fn handle_mview_create_clipped(
         &mut self,
-        boundary: Option<acadrust::EntityType>,
+        boundary: Option<codec::EntityType>,
         boundary_handle: Handle,
     ) -> Option<Task<Message>> {
         let i = self.active_tab;
@@ -56,12 +56,12 @@ impl OpenCADStudio {
                     .document
                     .get_entity(boundary_handle)
                     .is_some_and(|entity| match entity {
-                        acadrust::EntityType::Circle(_) => true,
-                        acadrust::EntityType::Ellipse(ellipse) => ellipse.is_full(),
-                        acadrust::EntityType::LwPolyline(polyline) => polyline.is_closed,
-                        acadrust::EntityType::Polyline(polyline) => polyline.is_closed(),
-                        acadrust::EntityType::Polyline2D(polyline) => polyline.is_closed(),
-                        acadrust::EntityType::Polyline3D(polyline) => polyline.flags.closed,
+                        codec::EntityType::Circle(_) => true,
+                        codec::EntityType::Ellipse(ellipse) => ellipse.is_full(),
+                        codec::EntityType::LwPolyline(polyline) => polyline.is_closed,
+                        codec::EntityType::Polyline(polyline) => polyline.is_closed(),
+                        codec::EntityType::Polyline2D(polyline) => polyline.is_closed(),
+                        codec::EntityType::Polyline3D(polyline) => polyline.flags.closed,
                         _ => false,
                     });
             if !valid {
@@ -146,14 +146,14 @@ impl OpenCADStudio {
             return Some(Task::none());
         }
 
-        let mut viewport = acadrust::entities::Viewport::new();
+        let mut viewport = codec::entities::Viewport::new();
         viewport.center =
-            acadrust::types::Vector3::new((min_x + max_x) / 2.0, (min_y + max_y) / 2.0, 0.0);
+            codec::types::Vector3::new((min_x + max_x) / 2.0, (min_y + max_y) / 2.0, 0.0);
         viewport.width = max_x - min_x;
         viewport.height = max_y - min_y;
         viewport.id = 2;
         viewport.clip_boundary_handle = clip_handle;
-        let viewport_handle = self.commit_entity_handle(acadrust::EntityType::Viewport(viewport));
+        let viewport_handle = self.commit_entity_handle(codec::EntityType::Viewport(viewport));
         if let Some(viewport_handle) = viewport_handle {
             if !created_boundary {
                 let before = self.tabs[i]
@@ -279,7 +279,7 @@ impl OpenCADStudio {
         let mut thawed_count = 0usize;
 
         // Collect target viewport handles
-        let target_handles: Vec<Handle> = if vp_handle == acadrust::Handle::NULL {
+        let target_handles: Vec<Handle> = if vp_handle == codec::Handle::NULL {
             // All viewports in current layout block
             let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
             self.tabs[i]
@@ -288,7 +288,7 @@ impl OpenCADStudio {
                 .entities()
                 .filter(|e| {
                     e.common().owner_handle == block_handle
-                        && matches!(e, acadrust::EntityType::Viewport(_))
+                        && matches!(e, codec::EntityType::Viewport(_))
                 })
                 .map(|e| e.common().handle)
                 .collect()
@@ -297,7 +297,7 @@ impl OpenCADStudio {
         };
 
         for &target_handle in &target_handles {
-            if let Some(acadrust::EntityType::Viewport(vp)) =
+            if let Some(codec::EntityType::Viewport(vp)) =
                 self.tabs[i].scene.document.get_entity_mut(target_handle)
             {
                 for h in &freeze_handles {

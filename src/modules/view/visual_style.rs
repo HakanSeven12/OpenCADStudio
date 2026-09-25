@@ -8,7 +8,7 @@
 // command at all). Naming each style once, next to the command that applies it,
 // is what keeps the three in step. (#621)
 
-use acadrust::entities::ViewportRenderMode as Mode;
+use codec::entities::ViewportRenderMode as Mode;
 
 use crate::modules::IconKind;
 

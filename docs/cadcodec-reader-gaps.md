@@ -1,13 +1,13 @@
-# cadcodec DXF reader/writer gaps found by the OCS Python host audit
+# opencadcodec DXF reader/writer gaps found by the OCS Python host audit
 
-Reports on `HakanSeven12/cadcodec` (the `acadrust` crate). Every finding was made against
-**cadcodec revision `5b682ed`** by saving a document with `DxfWriter` or `DwgWriter`,
+Reports on `HakanSeven12/opencadcodec` (the `opencadcodec` crate). Every finding was made against
+**opencadcodec revision `5b682ed`** by saving a document with `DxfWriter` or `DwgWriter`,
 reloading it, and comparing entity fields.
 
-**Status (23 September 2026):** the fixes landed in cadcodec as
-[#48](https://github.com/HakanSeven12/cadcodec/pull/48) (issues 1-6) and
-[#51](https://github.com/HakanSeven12/cadcodec/pull/51) (the first three style findings), and
-the block description with commit `dd1d7bf` (cadcodec issue #49). OCS pins `1c3be0c`, which
+**Status (23 September 2026):** the fixes landed in opencadcodec as
+[#48](https://github.com/HakanSeven12/opencadcodec/pull/48) (issues 1-6) and
+[#51](https://github.com/HakanSeven12/opencadcodec/pull/51) (the first three style findings), and
+the block description with commit `dd1d7bf` (opencadcodec issue #49). OCS pins `1c3be0c`, which
 includes it; the canaries below were flipped against `dd1d7bf`. What is still open:
 
 - **ATTDEF `lock_position`** (issue 1): the reader is complete, but the DXF writer emits no
@@ -17,7 +17,7 @@ includes it; the canaries below were flipped against `dd1d7bf`. What is still op
 - **`TextStyle::true_type_font`** (style findings): still neither written nor read.
 
 Each report names an executable canary in OCS (`src/app/plugin_host.rs`). The
-canaries assert today's wrong result, so they fail loudly once cadcodec is
+canaries assert today's wrong result, so they fail loudly once opencadcodec is
 fixed; flip the marked expectation when that happens. To reproduce, from the
 OCS repository:
 
@@ -115,7 +115,7 @@ raw value: `50 => { if let Some(v) = pair.as_double() { underlay.rotation = v; }
 **What happens:** a rotation of `0.5` rad is written as 28.6479 degrees and
 read back as 28.6479 rad. Because the writer converts again on every save, the
 error compounds: a second save-and-reopen yields 1641.4. This silently corrupts
-existing drawings each time they pass through cadcodec.
+existing drawings each time they pass through opencadcodec.
 
 **Evidence:** `audit_python_underlay_lifecycle_over_real_ipc`; the canary
 `expect_edited_dxf` / `expect_reedited_dxf` records 28.6 then 1641.4.
@@ -210,14 +210,14 @@ These are format constraints or OCS-side issues, not reader bugs:
 ### Text and dimension style findings (2026-09-21)
 
 Found by `audit_python_text_and_dim_styles_over_real_ipc`; each is pinned by a canary. The first
-three are fixed in [HakanSeven12/cadcodec#51](https://github.com/HakanSeven12/cadcodec/pull/51)
+three are fixed in [HakanSeven12/opencadcodec#51](https://github.com/HakanSeven12/opencadcodec/pull/51)
 (independent of #48); the last two are not filed, because fixing them needs the XDATA layout
 AutoCAD expects and that cannot be checked here.
 
 - **`STYLE` generation flags:** the DXF writer hard-codes group 71 to 0, so a text
   style's `flags.backward` and `flags.upside_down` are lost on every DXF save (DWG keeps them).
 - **`STYLE` oblique angle units:** group 50 is written and read as the raw radian value, while DXF
-  defines it in degrees; it round-trips inside cadcodec but AutoCAD would read 15 degrees as 0.26.
+  defines it in degrees; it round-trips inside opencadcodec but AutoCAD would read 15 degrees as 0.26.
   DWG stores radians correctly.
 - **`DIMSTYLE` text style name:** the DXF reader keeps only the text-style handle (group 340) and never
   resolves `dimtxsty` from it, so the name reopens as `Standard` (the handle is right; DWG resolves both).
@@ -225,5 +225,5 @@ AutoCAD expects and that cannot be checked here.
 - **`BLOCK_RECORD` description:** the DXF codec did not carry `BlockRecord::description`
   (found by `audit_python_blocks_over_real_ipc`). It needs no XDATA: it is BLOCK group 4, which
   the reader parsed onto the discarded BLOCK marker and the writer never emitted. Fixed in
-  cadcodec `dd1d7bf` (cadcodec issue #49).
+  opencadcodec `dd1d7bf` (opencadcodec issue #49).
 

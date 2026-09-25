@@ -1,6 +1,6 @@
-use acadrust::entities::{AttributeDefinition, AttributeEntity, Entity, Insert};
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::{AttributeDefinition, AttributeEntity, Entity, Insert};
+use codec::types::Vector3;
+use codec::EntityType;
 use glam::{DVec3, Vec3};
 use crate::t;
 
@@ -341,7 +341,7 @@ impl CadCommand for InsertBlockCommand {
     fn attreq_set_attdefs(
         &mut self,
         attdefs: Vec<AttributeDefinition>,
-    ) -> Option<acadrust::EntityType> {
+    ) -> Option<codec::EntityType> {
         self.step = Step::FillAttr {
             attdefs,
             idx: 0,
@@ -350,7 +350,7 @@ impl CadCommand for InsertBlockCommand {
         self.advance_automatic_attributes()
     }
 
-    fn attreq_take_insert(&mut self) -> Option<acadrust::EntityType> {
+    fn attreq_take_insert(&mut self) -> Option<codec::EntityType> {
         self.pending_insert
             .take()
             .map(|ins| EntityType::Insert(ins))

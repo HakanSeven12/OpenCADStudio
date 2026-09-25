@@ -8,8 +8,8 @@
 use rustc_hash::FxHashMap as HashMap;
 use std::sync::OnceLock;
 
-use acadrust::tables::linetype::{LineType, LineTypeComplexContent, LineTypeElement};
-use acadrust::{CadDocument, TableEntry};
+use codec::tables::linetype::{LineType, LineTypeComplexContent, LineTypeElement};
+use codec::{CadDocument, TableEntry};
 
 // ── Complex linetype types ────────────────────────────────────────────────
 
@@ -612,7 +612,7 @@ fn push_lt_segment(token: &str, out: &mut Vec<LtSegment>) {
 #[cfg(test)]
 mod header_tests {
     use super::{parse, populate_document_from_source};
-    use acadrust::CadDocument;
+    use codec::CadDocument;
 
     /// A `.lin` header's description is optional, and without one the comma
     /// goes too: `*PLAIN` followed by its `A,` line is a whole definition.

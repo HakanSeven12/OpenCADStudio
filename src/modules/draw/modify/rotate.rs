@@ -9,8 +9,8 @@
 //   two points. The new absolute angle is then typed or picked from the center;
 //   the applied rotation is new-angle - reference-angle.
 
-use acadrust::Handle;
-use cadkernel::geom2d::{self, Curve as KernelCurve};
+use codec::Handle;
+use kernel::geom2d::{self, Curve as KernelCurve};
 use glam::DVec3;
 use crate::t;
 

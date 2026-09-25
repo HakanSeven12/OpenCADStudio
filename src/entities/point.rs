@@ -1,7 +1,7 @@
-use acadrust::entities::Point;
-use acadrust::EntityType;
-use cadkernel::geom2d::{Circle, Curve, Line};
-use cadkernel::space::{curve::bezier_points, PlanarCurve, Plane, Vec3};
+use codec::entities::Point;
+use codec::EntityType;
+use kernel::geom2d::{Circle, Curve, Line};
+use kernel::space::{curve::bezier_points, PlanarCurve, Plane, Vec3};
 
 use crate::t;
 use crate::command::EntityTransform;
@@ -74,7 +74,7 @@ fn point_render(pt: &Point, pdmode: i16, s: f64) -> RenderEntity {
 /// so zooming and resizing do not require retessellation.
 pub fn relative_render(
     entity: &EntityType,
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     _wpp: Option<f32>,
 ) -> Option<RenderEntity> {
     let EntityType::Point(pt) = entity else {
@@ -100,7 +100,7 @@ pub fn relative_world_size(pdsize: f64, wpp: f32, viewport_height_px: f32) -> f6
 /// viewport scaling. A zero PDSIZE means the standard five-percent size.
 pub fn relative_marker_spec(
     entity: &EntityType,
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
 ) -> Option<PointMarker> {
     let EntityType::Point(pt) = entity else {
         return None;
@@ -238,7 +238,7 @@ fn effective_pdmode(pt: &Point, pdmode: i16) -> i16 {
     }
 }
 
-fn to_render(pt: &Point, document: &acadrust::CadDocument) -> RenderEntity {
+fn to_render(pt: &Point, document: &codec::CadDocument) -> RenderEntity {
     let pdmode = effective_pdmode(pt, document.header.point_display_mode);
     let s = pdsize_world(document.header.point_display_size) * 0.5;
     point_render(pt, pdmode, s)
@@ -299,7 +299,7 @@ fn apply_transform(pt: &mut Point, t: &EntityTransform) {
 }
 
 impl RenderConvertible for Point {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(to_render(self, document))
     }
 }
@@ -313,13 +313,13 @@ mod tests {
     fn point_on(layer: &str) -> Point {
         let mut pt = Point::default();
         pt.common.layer = layer.to_string();
-        pt.location = acadrust::types::Vector3::new(1.0, 2.0, 0.0);
+        pt.location = codec::types::Vector3::new(1.0, 2.0, 0.0);
         pt
     }
 
     #[test]
     fn definition_points_ignore_the_point_style() {
-        let mut doc = acadrust::CadDocument::new();
+        let mut doc = codec::CadDocument::new();
         doc.header.point_display_mode = 34;
         doc.header.point_display_size = 2.0;
 
@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn definition_points_ignore_the_point_style_at_relative_pdsize() {
-        let mut doc = acadrust::CadDocument::new();
+        let mut doc = codec::CadDocument::new();
         doc.header.point_display_mode = 34;
         doc.header.point_display_size = -5.0;
 

@@ -286,10 +286,10 @@ mod tests {
                 0
             }
             fn for_each_entity(&self, _f: &mut dyn FnMut(crate::host::ReaderEntity<'_>)) {}
-            fn layer_name(&self, _handle: acadrust::Handle) -> Option<&str> {
+            fn layer_name(&self, _handle: codec::Handle) -> Option<&str> {
                 None
             }
-            fn app_id_name(&self, _handle: acadrust::Handle) -> Option<&str> {
+            fn app_id_name(&self, _handle: codec::Handle) -> Option<&str> {
                 None
             }
         }
@@ -299,34 +299,34 @@ mod tests {
             fn tab_index(&self) -> usize {
                 0
             }
-            fn document(&self) -> &acadrust::CadDocument {
+            fn document(&self) -> &codec::CadDocument {
                 panic!("not used")
             }
-            fn document_mut(&mut self) -> &mut acadrust::CadDocument {
+            fn document_mut(&mut self) -> &mut codec::CadDocument {
                 panic!("not used")
             }
             fn document_reader(&self) -> Box<dyn crate::host::DocumentReader + '_> {
                 Box::new(EmptyReader)
             }
-            fn add_entity(&mut self, _entity: acadrust::EntityType) -> acadrust::Handle {
+            fn add_entity(&mut self, _entity: codec::EntityType) -> codec::Handle {
                 panic!("not used")
             }
             fn bump_geometry(&mut self) {}
             fn read_record(
                 &self,
-                _handle: acadrust::Handle,
+                _handle: codec::Handle,
                 _app_name: &str,
-            ) -> Option<&acadrust::xdata::ExtendedDataRecord> {
+            ) -> Option<&codec::xdata::ExtendedDataRecord> {
                 None
             }
             fn write_record(
                 &mut self,
-                _handle: acadrust::Handle,
-                _record: acadrust::xdata::ExtendedDataRecord,
+                _handle: codec::Handle,
+                _record: codec::xdata::ExtendedDataRecord,
             ) -> bool {
                 false
             }
-            fn remove_record(&mut self, _handle: acadrust::Handle, _app_name: &str) -> bool {
+            fn remove_record(&mut self, _handle: codec::Handle, _app_name: &str) -> bool {
                 false
             }
             fn push_undo(&mut self, _label: &str) {}

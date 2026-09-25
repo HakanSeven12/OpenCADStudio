@@ -750,9 +750,9 @@ mod tests {
     // every SPIKE1 cell survived the round trip.
     #[cfg(not(target_arch = "wasm32"))]
     fn roundtrip_probe(ext: &str) {
-        use acadrust::objects::{ImageDefinition, ObjectType, UnderlayDefinition};
-        use acadrust::tables::BlockRecord;
-        use acadrust::CadDocument;
+        use codec::objects::{ImageDefinition, ObjectType, UnderlayDefinition};
+        use codec::tables::BlockRecord;
+        use codec::CadDocument;
 
         let dir = std::env::temp_dir().join(format!(
             "ocs_xref_probe_{}_{}",

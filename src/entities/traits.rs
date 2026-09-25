@@ -1,4 +1,4 @@
-use acadrust::{CadDocument, EntityType};
+use codec::{CadDocument, EntityType};
 
 use crate::command::EntityTransform;
 use crate::scene::convert::acad_to_render::RenderEntity;
@@ -112,7 +112,7 @@ pub fn entity_type_name(et: &EntityType) -> &str {
     match et {
         EntityType::Point(_) => "Point",
         EntityType::Line(line)
-            if acadrust::entities::CenterMarkAssociation::read(
+            if codec::entities::CenterMarkAssociation::read(
                 &line.common.extended_data,
             )
             .is_some() =>
@@ -120,7 +120,7 @@ pub fn entity_type_name(et: &EntityType) -> &str {
             "CenterMark"
         }
         EntityType::Line(line)
-            if acadrust::entities::CenterLineAssociation::read(
+            if codec::entities::CenterLineAssociation::read(
                 &line.common.extended_data,
             )
             .is_some() =>

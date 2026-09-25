@@ -1,7 +1,7 @@
 // Dispatch entry points for entity editing.
 
-use acadrust::types::{Color as AcadColor, LineWeight, Transparency};
-use acadrust::{EntityType, Handle};
+use codec::types::{Color as AcadColor, LineWeight, Transparency};
+use codec::{EntityType, Handle};
 
 use crate::command::EntityTransform;
 use crate::entities::traits::EntityTypeOps;
@@ -232,13 +232,13 @@ pub fn apply_common_prop(entity: &mut EntityType, field: &str, value: &str) {
 ///     stale verbatim block (matched by APPID handle) so the new value wins.
 /// Other applications' verbatim blocks are preserved for round-trip fidelity.
 pub fn set_entity_xdata(
-    doc: &mut acadrust::CadDocument,
-    handle: acadrust::Handle,
+    doc: &mut codec::CadDocument,
+    handle: codec::Handle,
     app: &str,
-    values: Option<Vec<acadrust::xdata::XDataValue>>,
+    values: Option<Vec<codec::xdata::XDataValue>>,
 ) {
     if values.is_some() && !doc.app_ids.contains(app) {
-        let mut a = acadrust::tables::AppId::new(app);
+        let mut a = codec::tables::AppId::new(app);
         a.handle = doc.allocate_handle();
         let _ = doc.app_ids.add(a);
     }
@@ -247,14 +247,14 @@ pub fn set_entity_xdata(
         return;
     };
     let common = entity.common_mut();
-    let mut rebuilt = acadrust::xdata::ExtendedData::new();
+    let mut rebuilt = codec::xdata::ExtendedData::new();
     for r in common.extended_data.records() {
         if r.application_name != app {
             rebuilt.add_record(r.clone());
         }
     }
     if let Some(vals) = values {
-        let mut rec = acadrust::xdata::ExtendedDataRecord::new(app);
+        let mut rec = codec::xdata::ExtendedDataRecord::new(app);
         for v in vals {
             rec.add_value(v);
         }
@@ -404,11 +404,11 @@ pub fn apply_transform(entity: &mut EntityType, t: &EntityTransform) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::types::Vector3;
+    use codec::types::Vector3;
 
     #[test]
     fn line_thickness_follows_the_entity_geometry_rows() {
-        let mut line = acadrust::entities::Line::from_points(Vector3::ZERO, Vector3::UNIT_X);
+        let mut line = codec::entities::Line::from_points(Vector3::ZERO, Vector3::UNIT_X);
         line.thickness = 2.5;
         let sections = properties_sectioned(Handle::NULL, &EntityType::Line(line), &[]);
 

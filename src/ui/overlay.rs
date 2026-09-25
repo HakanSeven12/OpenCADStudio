@@ -475,7 +475,7 @@ pub fn resolve_selection_base_color(
     // ACI 0 (BYBLOCK) and 256 (BYLAYER) are not explicit overrides;
     // the sysvar uses 0 as the unset sentinel; valid user picks are 1..=255.
     if custom > 0 {
-        if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(custom) {
+        if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(custom) {
             return Color::from_rgb8(r, g, b);
         }
     }
@@ -1029,7 +1029,7 @@ fn draw_grip_marker(
 
     if grip.is_hot {
         let hot_color = if visual.grip_hot > 0 {
-            if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(visual.grip_hot) {
+            if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(visual.grip_hot) {
                 Color::from_rgb8(r, g, b)
             } else {
                 theme.palette().danger.base.color
@@ -1041,7 +1041,7 @@ fn draw_grip_marker(
     } else if grip.is_hovered {
         let pair = theme.palette().primary.strong;
         let hover_color = if visual.grip_hover > 0 {
-            if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(visual.grip_hover) {
+            if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(visual.grip_hover) {
                 Color::from_rgb8(r, g, b)
             } else {
                 pair.color
@@ -1061,7 +1061,7 @@ fn draw_grip_marker(
     } else {
         let palette = theme.palette();
         let color = if visual.grip_color > 0 {
-            if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(visual.grip_color) {
+            if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(visual.grip_color) {
                 Color::from_rgb8(r, g, b)
             } else {
                 palette.primary.base.color

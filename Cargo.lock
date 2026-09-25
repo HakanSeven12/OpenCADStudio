@@ -6,14 +6,11 @@ version = 4
 name = "OpenCADStudio"
 version = "2026.38.0"
 dependencies = [
- "acadrust",
  "ashpd",
  "base64",
  "bincode",
  "block2 0.5.1",
  "bytemuck",
- "cadkernel",
- "cadkernel-constraints",
  "calamine",
  "clap",
  "console_error_panic_hook",
@@ -47,6 +44,10 @@ dependencies = [
  "objc2-foundation 0.2.2",
  "ocs_plugin_api",
  "open",
+ "opencadcodec",
+ "opencadgraph",
+ "opencadkernel",
+ "opencadkernel-constraints",
  "pollster",
  "printpdf",
  "rayon",
@@ -84,29 +85,6 @@ name = "ab_glyph_rasterizer"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
-
-[[package]]
-name = "acadrust"
-version = "0.5.5"
-source = "git+https://github.com/HakanSeven12/cadcodec.git?rev=1c3be0c#1c3be0ca296c99f2f126ba1a03c2be1998d7c64e"
-dependencies = [
- "ahash 0.8.12",
- "anyhow",
- "bitflags 2.13.1",
- "byteorder",
- "encoding_rs",
- "flate2",
- "indexmap",
- "itoa",
- "memmap2",
- "nom 7.1.3",
- "once_cell",
- "rayon",
- "ryu",
- "serde",
- "thiserror 1.0.69",
- "web-time",
-]
 
 [[package]]
 name = "adler2"
@@ -920,25 +898,6 @@ name = "bytes"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
-
-[[package]]
-name = "cadkernel"
-version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/cadkernel.git?rev=deb529b#deb529b34e677c1fedc4e316ce3f49b88f0c1361"
-dependencies = [
- "acadrust",
- "cavalier_contours",
- "rustc-hash 2.1.3",
- "spade",
-]
-
-[[package]]
-name = "cadkernel-constraints"
-version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/cadkernel.git?rev=deb529b#deb529b34e677c1fedc4e316ce3f49b88f0c1361"
-dependencies = [
- "nalgebra",
-]
 
 [[package]]
 name = "calamine"
@@ -4188,13 +4147,13 @@ dependencies = [
 name = "ocs_plugin_api"
 version = "0.2.1"
 dependencies = [
- "acadrust",
  "bincode",
  "cargo-lock",
  "getrandom 0.2.17",
  "interprocess",
  "libloading",
  "memmap2",
+ "opencadcodec",
  "rkyv",
  "serde",
  "serde-reflection",
@@ -4207,11 +4166,11 @@ dependencies = [
 name = "ocs_web_worker"
 version = "0.1.0"
 dependencies = [
- "acadrust",
  "bincode",
  "console_error_panic_hook",
  "getrandom 0.3.4",
  "js-sys",
+ "opencadcodec",
  "serde",
  "sha2 0.10.9",
  "wasm-bindgen",
@@ -4237,6 +4196,57 @@ checksum = "a0b3d059e795d52b8a72fef45658620edd4d9c359b338564aa14391ffa511ed5"
 dependencies = [
  "is-wsl",
  "libc",
+]
+
+[[package]]
+name = "opencadcodec"
+version = "0.5.5"
+source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=43a82f9#43a82f9b09ab5250fbe6a03e49c1d5a73a4152f3"
+dependencies = [
+ "ahash 0.8.12",
+ "anyhow",
+ "bitflags 2.13.1",
+ "byteorder",
+ "encoding_rs",
+ "flate2",
+ "indexmap",
+ "itoa",
+ "memmap2",
+ "nom 7.1.3",
+ "once_cell",
+ "rayon",
+ "ryu",
+ "serde",
+ "thiserror 1.0.69",
+ "web-time",
+]
+
+[[package]]
+name = "opencadgraph"
+version = "0.1.0"
+source = "git+https://github.com/HakanSeven12/opencadgraph.git?rev=0d84557#0d84557a5e8b9320272927b8a39433e3338e0473"
+dependencies = [
+ "opencadkernel",
+ "serde_json",
+]
+
+[[package]]
+name = "opencadkernel"
+version = "0.1.0"
+source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=5e24ef7#5e24ef7360fbb676c795e32f020114b3d36d3451"
+dependencies = [
+ "cavalier_contours",
+ "opencadcodec",
+ "rustc-hash 2.1.3",
+ "spade",
+]
+
+[[package]]
+name = "opencadkernel-constraints"
+version = "0.1.0"
+source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=5e24ef7#5e24ef7360fbb676c795e32f020114b3d36d3451"
+dependencies = [
+ "nalgebra",
 ]
 
 [[package]]

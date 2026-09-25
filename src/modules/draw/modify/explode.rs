@@ -8,7 +8,7 @@
 //     Polyline2D  → Lines + Arcs
 //     Polyline3D  → Lines
 //     Polyline    → Lines
-//     Insert      → constituent entities (via acadrust explode_from_document)
+//     Insert      → constituent entities (via opencadcodec explode_from_document)
 //     MLine       → Lines (spine + offset lines per miter direction)
 //     Dimension   → Lines (extension + dimension + arrows) + Text
 //
@@ -16,15 +16,15 @@
 
 use super::geom::normalize_angle as norm_angle;
 
-use acadrust::entities::EntityCommon;
-use acadrust::entities::{
+use codec::entities::EntityCommon;
+use codec::entities::{
     Arc as ArcEnt, Block, BlockEnd, Circle as CircleEnt, Dimension, Line as LineEnt, LwPolyline,
     MLine,
 };
-use acadrust::entities::{Polyline, Polyline2D};
-use acadrust::tables::BlockRecord;
-use acadrust::types::Vector3;
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::entities::{Polyline, Polyline2D};
+use codec::tables::BlockRecord;
+use codec::types::Vector3;
+use codec::{CadDocument, EntityType, Handle};
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::entities::curve::lwpolyline_world_xy;
@@ -64,7 +64,7 @@ pub fn explode_polyline_segments(entity: &EntityType) -> Vec<EntityType> {
 pub fn explode_entity(entity: &EntityType, document: &CadDocument) -> Vec<EntityType> {
     match entity {
         EntityType::Line(line) => {
-            let Some(association) = acadrust::entities::CenterMarkAssociation::read(
+            let Some(association) = codec::entities::CenterMarkAssociation::read(
                 &line.common.extended_data,
             ) else {
                 return vec![];
@@ -74,7 +74,7 @@ pub fn explode_entity(entity: &EntityType, document: &CadDocument) -> Vec<Entity
                 .map(|segment| {
                     let mut common = line.common.clone();
                     common.handle = Handle::NULL;
-                    acadrust::entities::CenterMarkAssociation::remove(&mut common.extended_data);
+                    codec::entities::CenterMarkAssociation::remove(&mut common.extended_data);
                     EntityType::Line(LineEnt {
                         common,
                         start: Vector3::new(segment[0].x, segment[0].y, segment[0].z),
@@ -141,7 +141,7 @@ fn explode_polyline(p: &Polyline) -> Vec<EntityType> {
     result
 }
 
-fn explode_polyline3d(p: &acadrust::entities::Polyline3D) -> Vec<EntityType> {
+fn explode_polyline3d(p: &codec::entities::Polyline3D) -> Vec<EntityType> {
     let n = p.vertices.len();
     if n < 2 {
         return vec![];
@@ -309,7 +309,7 @@ fn bulge_to_arc(
 ) -> Option<EntityType> {
     let ba = crate::entities::common::BulgeArc::from_bulge(p0, p1, bulge)?;
 
-    // acadrust Arc is always CCW from start_angle to end_angle. Negative
+    // opencadcodec Arc is always CCW from start_angle to end_angle. Negative
     // bulge means the polyline goes p0→p1 the CW way around the centre,
     // which is the same circular arc traversed p1→p0 the CCW way — so
     // swap endpoints when bulge < 0.
@@ -340,15 +340,15 @@ fn explode_mline(ml: &MLine) -> Vec<EntityType> {
     if n < 2 {
         return vec![];
     }
-    let closed = ml.flags.contains(acadrust::entities::MLineFlags::CLOSED);
+    let closed = ml.flags.contains(codec::entities::MLineFlags::CLOSED);
     let scale = ml.scale_factor;
     let n_segs = if closed { n } else { n - 1 };
     let mut result = Vec::new();
 
     // Helper: build a Line from two Vector3 positions.
-    let make_line = |common: &acadrust::entities::EntityCommon,
-                     s: &acadrust::types::Vector3,
-                     e: &acadrust::types::Vector3|
+    let make_line = |common: &codec::entities::EntityCommon,
+                     s: &codec::types::Vector3,
+                     e: &codec::types::Vector3|
      -> EntityType {
         let mut c = common.clone();
         c.handle = Handle::NULL;
@@ -395,7 +395,7 @@ fn explode_mline(ml: &MLine) -> Vec<EntityType> {
 
 /// Convert a Dimension entity into Lines (geometry) + Text (label).
 /// A NULL-handle line segment for a baked dimension block.
-fn dim_seg(a: Vector3, b: Vector3, common: &acadrust::entities::EntityCommon) -> EntityType {
+fn dim_seg(a: Vector3, b: Vector3, common: &codec::entities::EntityCommon) -> EntityType {
     let mut c = common.clone();
     c.handle = Handle::NULL;
     EntityType::Line(LineEnt {
@@ -408,8 +408,8 @@ fn dim_seg(a: Vector3, b: Vector3, common: &acadrust::entities::EntityCommon) ->
 
 fn dim_geom_entities(
     geometry: &crate::scene::convert::tessellate::DimGeom,
-    ext_common: &acadrust::entities::EntityCommon,
-    dim_common: &acadrust::entities::EntityCommon,
+    ext_common: &codec::entities::EntityCommon,
+    dim_common: &codec::entities::EntityCommon,
 ) -> Vec<EntityType> {
     let mut entities = Vec::new();
     let point = |value: [f32; 3]| {
@@ -426,7 +426,7 @@ fn dim_geom_entities(
         }
     }
     for triangle in geometry.arrow_fill.chunks_exact(3) {
-        let mut solid = acadrust::entities::Solid::triangle(
+        let mut solid = codec::entities::Solid::triangle(
             point(triangle[0]),
             point(triangle[1]),
             point(triangle[2]),
@@ -448,7 +448,7 @@ fn dim_terminator(
     dx: f64,
     dy: f64,
     arrow: &crate::scene::convert::tessellate::ArrowKind,
-    common: &acadrust::entities::EntityCommon,
+    common: &codec::entities::EntityCommon,
 ) -> Vec<EntityType> {
     use crate::scene::convert::tessellate::ArrowKind as A;
     let (dx, dy) = norm2(dx, dy, 1.0, 0.0);
@@ -459,7 +459,7 @@ fn dim_terminator(
     };
     let mut out: Vec<EntityType> = Vec::new();
     let tri = |a: Vector3, b: Vector3, c: Vector3, out: &mut Vec<EntityType>| {
-        let mut s = acadrust::entities::Solid::triangle(a, b, c);
+        let mut s = codec::entities::Solid::triangle(a, b, c);
         s.common = common.clone();
         s.common.handle = Handle::NULL;
         out.push(EntityType::Solid(s));
@@ -565,7 +565,7 @@ fn terminator_circle(
     center: Vector3,
     r: f64,
     filled: bool,
-    common: &acadrust::entities::EntityCommon,
+    common: &codec::entities::EntityCommon,
     out: &mut Vec<EntityType>,
 ) {
     const N: usize = 16;
@@ -580,7 +580,7 @@ fn terminator_circle(
     }
     if filled {
         for i in 0..N {
-            let mut s = acadrust::entities::Solid::triangle(center, ring[i], ring[i + 1]);
+            let mut s = codec::entities::Solid::triangle(center, ring[i], ring[i + 1]);
             s.common = common.clone();
             s.common.handle = Handle::NULL;
             out.push(EntityType::Solid(s));
@@ -593,7 +593,7 @@ fn dim_center_mark(
     center: Vector3,
     dimcen: f64,
     radius: f64,
-    common: &acadrust::entities::EntityCommon,
+    common: &codec::entities::EntityCommon,
 ) -> Vec<EntityType> {
     let mag = dimcen.abs();
     if mag < 1e-9 {
@@ -624,7 +624,7 @@ fn dim_arc_segs(
     radius: f64,
     a1: f64,
     a2: f64,
-    common: &acadrust::entities::EntityCommon,
+    common: &codec::entities::EntityCommon,
 ) -> Vec<EntityType> {
     use std::f64::consts::PI;
     let mut sweep = a2 - a1;
@@ -644,7 +644,7 @@ fn dim_arc_segs_with_sweep(
     radius: f64,
     start: f64,
     sweep: f64,
-    common: &acadrust::entities::EntityCommon,
+    common: &codec::entities::EntityCommon,
 ) -> Vec<EntityType> {
     use std::f64::consts::PI;
     let steps = 12usize.max((sweep.abs() / (PI / 36.0)).ceil() as usize);
@@ -759,25 +759,25 @@ fn dim_metrics(dim: &Dimension, doc: &CadDocument) -> DimMetrics {
 /// A DIMCLR* of 0 (ByBlock) or 256 (ByLayer) keeps the dimension's own colour
 /// so the block inherits it; a specific ACI overrides. DIMLW* < 0 (ByBlock /
 /// ByLayer) keeps the dimension's lineweight.
-fn dim_common(base: &acadrust::entities::EntityCommon, clr: i16, lw: i16) -> acadrust::entities::EntityCommon {
+fn dim_common(base: &codec::entities::EntityCommon, clr: i16, lw: i16) -> codec::entities::EntityCommon {
     let mut c = base.clone();
     c.handle = Handle::NULL;
     if clr != 0 && clr != 256 {
-        c.color = acadrust::types::Color::from_index(clr);
+        c.color = codec::types::Color::from_index(clr);
         c.color_name = None;
         c.color_book_handle = None;
     }
     if lw >= 0 {
-        c.line_weight = acadrust::types::LineWeight::from_value(lw);
+        c.line_weight = codec::types::LineWeight::from_value(lw);
     }
     c
 }
 
 fn with_dim_linetype(
-    mut common: acadrust::entities::EntityCommon,
+    mut common: codec::entities::EntityCommon,
     doc: &CadDocument,
     handle: Handle,
-) -> acadrust::entities::EntityCommon {
+) -> codec::entities::EntityCommon {
     common.linetype = doc
         .line_types
         .iter()
@@ -800,8 +800,8 @@ fn angular_block_segs(
     p2: Vector3,
     arc_loc: Vector3,
     met: &DimMetrics,
-    ext_c: &acadrust::entities::EntityCommon,
-    dim_c: &acadrust::entities::EntityCommon,
+    ext_c: &codec::entities::EntityCommon,
+    dim_c: &codec::entities::EntityCommon,
     explicit_sweep: Option<(f64, f64)>,
 ) -> Vec<EntityType> {
     use std::f64::consts::PI;
@@ -853,7 +853,7 @@ fn angular_block_segs(
 /// The text anchor for a radial leader: the saved text middle point when set,
 /// else the midpoint of `a` and `b` — mirroring the live `dimension_text_position`.
 fn dim_text_anchor(
-    base: &acadrust::entities::dimension::DimensionBase,
+    base: &codec::entities::dimension::DimensionBase,
     a: Vector3,
     b: Vector3,
 ) -> Vector3 {
@@ -1495,15 +1495,15 @@ impl CadCommand for ExplodeCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::DimensionLinear;
+    use codec::entities::DimensionLinear;
 
     #[test]
     fn minsert_too_large_to_materialize_is_left_intact() {
         let mut doc = CadDocument::new();
-        let mut block = acadrust::tables::BlockRecord::new("B1");
+        let mut block = codec::tables::BlockRecord::new("B1");
         block.handle = doc.allocate_handle();
         doc.block_records.add(block).unwrap();
-        let mut insert = acadrust::entities::Insert::new("B1", Vector3::new(0.0, 0.0, 0.0));
+        let mut insert = codec::entities::Insert::new("B1", Vector3::new(0.0, 0.0, 0.0));
         insert.row_count = u16::MAX;
         insert.column_count = u16::MAX;
         assert!(explode_entity(&EntityType::Insert(insert), &doc).is_empty());
@@ -1512,12 +1512,12 @@ mod tests {
     #[test]
     fn unexplodable_block_is_not_exploded() {
         let mut doc = CadDocument::new();
-        let mut block = acadrust::tables::BlockRecord::new("NO_EXPLODE");
+        let mut block = codec::tables::BlockRecord::new("NO_EXPLODE");
         block.handle = doc.allocate_handle();
         block.explodable = false;
         doc.block_records.add(block).unwrap();
 
-        let insert = acadrust::entities::Insert::new("NO_EXPLODE", Vector3::new(0.0, 0.0, 0.0));
+        let insert = codec::entities::Insert::new("NO_EXPLODE", Vector3::new(0.0, 0.0, 0.0));
         assert!(explode_entity(&EntityType::Insert(insert), &doc).is_empty());
     }
 
@@ -1772,7 +1772,7 @@ mod tests {
     // two extension lines plus many arc chords.
     #[test]
     fn angular_dim_bakes_an_arc() {
-        use acadrust::entities::DimensionAngular3Pt;
+        use codec::entities::DimensionAngular3Pt;
         let mut doc = CadDocument::new();
         let mut d = DimensionAngular3Pt::new(
             Vector3::new(0.0, 0.0, 0.0),
@@ -1799,7 +1799,7 @@ mod tests {
     // Diameter endpoints stay equidistant from the circle center.
     #[test]
     fn diameter_dim_bakes_through_center() {
-        use acadrust::entities::DimensionDiameter;
+        use codec::entities::DimensionDiameter;
         let mut doc = CadDocument::new();
         let center = Vector3::new(3.0, 4.0, 0.0);
         let edge = Vector3::new(8.0, 4.0, 0.0); // radius 5 along +x
@@ -1864,8 +1864,8 @@ mod tests {
     // must carry the source thickness instead of resetting to 0 (#916).
     #[test]
     fn explode_keeps_lwpolyline_thickness() {
-        use acadrust::entities::LwVertex;
-        use acadrust::types::Vector2;
+        use codec::entities::LwVertex;
+        use codec::types::Vector2;
 
         let mut pl = LwPolyline::new();
         // One straight span + one bulged span, so the result holds a Line and
@@ -1900,7 +1900,7 @@ mod tests {
 
     #[test]
     fn explode_keeps_polyline2d_extrusion() {
-        use acadrust::entities::Vertex2D;
+        use codec::entities::Vertex2D;
 
         let mut pl = Polyline2D::new();
         pl.vertices = vec![

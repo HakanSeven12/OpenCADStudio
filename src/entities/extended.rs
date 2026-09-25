@@ -1,9 +1,9 @@
-use acadrust::entities::{
+use codec::entities::{
     ArcAlignedTextData, ExtendedEntity, ExtendedEntityData, GeoPositionMarkerData,
     PointCloudData, PointCloudExData, RemoteTextData, SectionObjectData,
 };
-use acadrust::types::{Handle, Transform, Vector3};
-use acadrust::xdata::{ExtendedDataRecord, XDataValue};
+use codec::types::{Handle, Transform, Vector3};
+use codec::xdata::{ExtendedDataRecord, XDataValue};
 use crate::t;
 
 use crate::command::EntityTransform;
@@ -502,7 +502,7 @@ pub(crate) fn point_cloud_frame_lines(entity: &ExtendedEntity) -> Option<Vec<[f6
     }
 }
 
-fn camera_lines(document: &acadrust::CadDocument, view_handle: Handle) -> Vec<[f64; 3]> {
+fn camera_lines(document: &codec::CadDocument, view_handle: Handle) -> Vec<[f64; 3]> {
     let Some(view) = document.views.iter().find(|view| view.handle == view_handle) else {
         return Vec::new();
     };
@@ -536,7 +536,7 @@ fn camera_lines(document: &acadrust::CadDocument, view_handle: Handle) -> Vec<[f
     points
 }
 
-fn to_render(entity: &ExtendedEntity, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+fn to_render(entity: &ExtendedEntity, document: &codec::CadDocument) -> Option<RenderEntity> {
     let (points, snaps, keys): (
         Vec<[f64; 3]>,
         Vec<(glam::DVec3, SnapHint)>,
@@ -1165,7 +1165,7 @@ fn point_cloud_ex_properties(data: &PointCloudExData) -> Vec<PropSection> {
 }
 
 fn semantic_properties(
-    properties: &[acadrust::objects::SemanticProperty],
+    properties: &[codec::objects::SemanticProperty],
 ) -> String {
     properties
         .iter()
@@ -1180,7 +1180,7 @@ fn semantic_properties(
 }
 
 fn reference_properties(
-    references: &[acadrust::objects::ProxyObjectReference],
+    references: &[codec::objects::ProxyObjectReference],
 ) -> String {
     references
         .iter()
@@ -2019,11 +2019,11 @@ fn apply_transform(entity: &mut ExtendedEntity, requested: &EntityTransform) {
             data.radius *= scale;
             data.landing_gap *= scale;
             if let Some(text) = data.embedded_mtext.as_mut() {
-                acadrust::Entity::apply_transform(text, &transform);
+                codec::Entity::apply_transform(text, &transform);
             }
         }
         ExtendedEntityData::CoordinationModel(data) => {
-            let mut matrix = acadrust::types::Matrix4::zero();
+            let mut matrix = codec::types::Matrix4::zero();
             for row in 0..4 {
                 for column in 0..4 {
                     matrix.m[row][column] = data.transform[row * 4 + column];
@@ -2120,7 +2120,7 @@ fn apply_transform(entity: &mut ExtendedEntity, requested: &EntityTransform) {
 }
 
 impl RenderConvertible for ExtendedEntity {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         to_render(self, document)
     }
 }
@@ -2208,8 +2208,8 @@ impl Transformable for ExtendedEntity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::EntityCommon;
-    use acadrust::types::Color;
+    use codec::entities::EntityCommon;
+    use codec::types::Color;
 
     #[test]
     fn reselecting_slice_keeps_its_depth() {

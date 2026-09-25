@@ -6,7 +6,7 @@
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
-use acadrust::Handle;
+use codec::Handle;
 use glam::Mat4;
 use iced::{Point, Rectangle};
 
@@ -727,7 +727,7 @@ pub fn click_hits_all<'a, W: WireSource + ?Sized>(
 type MeshPickItem<'a> = (
     Handle,
     &'a MeshModel,
-    Option<acadrust::types::Transform>,
+    Option<codec::types::Transform>,
     [f64; 6],
 );
 
@@ -735,7 +735,7 @@ type MeshEdgePickItem<'a> = (
     Handle,
     &'a [[f32; 3]],
     &'a [[f32; 3]],
-    Option<acadrust::types::Transform>,
+    Option<codec::types::Transform>,
 );
 
 /// Return the closest solid whose actual B-rep feature edge passes through the
@@ -936,7 +936,7 @@ fn mesh_click_result<'a>(
     best
 }
 
-fn codec_transform_matrix(transform: acadrust::types::Transform) -> glam::DMat4 {
+fn codec_transform_matrix(transform: codec::types::Transform) -> glam::DMat4 {
     let matrix = transform.matrix.m;
     glam::DMat4::from_cols_array(&[
         matrix[0][0], matrix[1][0], matrix[2][0], matrix[3][0],
@@ -1018,7 +1018,7 @@ fn mesh_vert(
 /// Project a mesh's vertices to screen space.
 fn project_mesh_verts(
     mesh: &MeshModel,
-    transform: Option<acadrust::types::Transform>,
+    transform: Option<codec::types::Transform>,
     view_rot: Mat4,
     eye: glam::DVec3,
     bounds: Rectangle,
@@ -1029,7 +1029,7 @@ fn project_mesh_verts(
         .map(|(i, &w)| {
             let point = mesh_vert(w, &mesh.verts_low, i);
             let point = transform.map_or(point, |transform| {
-                let point = transform.apply(acadrust::types::Vector3::new(point.x, point.y, point.z));
+                let point = transform.apply(codec::types::Vector3::new(point.x, point.y, point.z));
                 glam::DVec3::new(point.x, point.y, point.z)
             });
             let ndc = view_rot.project_point3((point - eye).as_vec3());
@@ -1070,7 +1070,7 @@ pub fn mesh_box_hit<'a>(
         Item = (
             Handle,
             &'a MeshModel,
-            Option<acadrust::types::Transform>,
+            Option<codec::types::Transform>,
         ),
     >,
     view_rot: Mat4,
@@ -1114,7 +1114,7 @@ pub fn mesh_poly_hit<'a>(
         Item = (
             Handle,
             &'a MeshModel,
-            Option<acadrust::types::Transform>,
+            Option<codec::types::Transform>,
         ),
     >,
     view_rot: Mat4,

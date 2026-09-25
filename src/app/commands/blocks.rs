@@ -34,7 +34,7 @@ impl OpenCADStudio {
     pub(in crate::app) fn copy_entities_to_clipboard(
         &mut self,
         i: usize,
-        handles: &[acadrust::Handle],
+        handles: &[codec::Handle],
         base: glam::DVec3,
     ) -> usize {
         // Clone + dep-capture live in the shared kernel; storage stays here.
@@ -113,7 +113,7 @@ impl OpenCADStudio {
                         .collect();
                     if nums.len() >= 2 {
                         let z = nums.get(2).copied().unwrap_or(0.0);
-                        let pt = acadrust::types::Vector3::new(nums[0], nums[1], z);
+                        let pt = codec::types::Vector3::new(nums[0], nums[1], z);
                         let is_paper = self.tabs[i].scene.current_layout != "Model";
                         self.push_undo_snapshot(i, "BASE");
                         if is_paper {
@@ -576,7 +576,7 @@ impl OpenCADStudio {
                             .iter()
                             .filter_map(|h| doc.get_entity(*h))
                             .filter_map(|e| match e {
-                                acadrust::EntityType::AttributeDefinition(a) => {
+                                codec::EntityType::AttributeDefinition(a) => {
                                     Some((a.tag.clone(), a.default_value.clone()))
                                 }
                                 _ => None,
@@ -589,7 +589,7 @@ impl OpenCADStudio {
                     .document
                     .entities()
                     .filter_map(|entity| match entity {
-                        acadrust::EntityType::Insert(insert)
+                        codec::EntityType::Insert(insert)
                             if insert.block_name.eq_ignore_ascii_case(&block)
                                 && !self.tabs[i].scene.is_layer_locked(insert.common.handle) =>
                         {
@@ -607,7 +607,7 @@ impl OpenCADStudio {
                 let mut synced = 0usize;
                 let mut changes = Vec::new();
                 for handle in inserts {
-                    let Some(acadrust::EntityType::Insert(ins)) =
+                    let Some(codec::EntityType::Insert(ins)) =
                         self.tabs[i].scene.document.get_entity_mut(handle)
                     else {
                         continue;
@@ -621,7 +621,7 @@ impl OpenCADStudio {
                             .any(|a| a.tag.eq_ignore_ascii_case(tag))
                         {
                             ins.attributes
-                                .push(acadrust::entities::AttributeEntity::new(
+                                .push(codec::entities::AttributeEntity::new(
                                     tag.clone(),
                                     default.clone(),
                                 ));
@@ -726,11 +726,11 @@ impl OpenCADStudio {
             "XCLIP" => {
                 use crate::command::CadCommand;
                 use crate::modules::insert::xclip::XclipCommand;
-                let inserts: Vec<acadrust::Handle> = self.tabs[i]
+                let inserts: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
-                    .filter(|(_, e)| matches!(e, acadrust::EntityType::Insert(_)))
+                    .filter(|(_, e)| matches!(e, codec::EntityType::Insert(_)))
                     .map(|(h, _)| *h)
                     .collect();
                 let command = if inserts.is_empty() {
@@ -1017,7 +1017,7 @@ impl OpenCADStudio {
                                 self.tabs[i].xref_unloaded.remove(key);
                                 self.tabs[i].xref_stat_cache.remove(key);
                             }
-                            let handles: rustc_hash::FxHashSet<acadrust::types::Handle> = self.tabs
+                            let handles: rustc_hash::FxHashSet<codec::types::Handle> = self.tabs
                                 [i]
                                 .scene
                                 .document
@@ -1604,7 +1604,7 @@ impl OpenCADStudio {
                     .selected_entities()
                     .iter()
                     .filter_map(|(_, e)| match e {
-                        acadrust::EntityType::Insert(ins) => Some(ins.block_name.clone()),
+                        codec::EntityType::Insert(ins) => Some(ins.block_name.clone()),
                         _ => None,
                     })
                     .collect();
@@ -1717,13 +1717,13 @@ mod tests {
         let mut app = fresh_app();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let mut line = acadrust::entities::Line::new();
-        line.start = acadrust::types::Vector3::ZERO;
-        line.end = acadrust::types::Vector3::new(10.0, 0.0, 0.0);
+        let mut line = codec::entities::Line::new();
+        line.start = codec::types::Vector3::ZERO;
+        line.end = codec::types::Vector3::new(10.0, 0.0, 0.0);
         app.tabs[i]
             .scene
             .define_block_from_owned_entities(
-                vec![acadrust::EntityType::Line(line)],
+                vec![codec::EntityType::Line(line)],
                 "Widget",
                 glam::DVec3::ZERO,
             )
@@ -1742,13 +1742,13 @@ mod tests {
         app.refresh_block_palette();
         assert!(app.block_palette.blocks.is_empty());
         let i = app.active_tab;
-        let mut line = acadrust::entities::Line::new();
-        line.start = acadrust::types::Vector3::ZERO;
-        line.end = acadrust::types::Vector3::new(10.0, 0.0, 0.0);
+        let mut line = codec::entities::Line::new();
+        line.start = codec::types::Vector3::ZERO;
+        line.end = codec::types::Vector3::new(10.0, 0.0, 0.0);
         app.tabs[i]
             .scene
             .define_block_from_owned_entities(
-                vec![acadrust::EntityType::Line(line)],
+                vec![codec::EntityType::Line(line)],
                 "Widget",
                 glam::DVec3::ZERO,
             )
@@ -1813,7 +1813,7 @@ mod tests {
 
     fn add_dwg_xref(app: &mut OpenCADStudio, name: &str, saved: &str) {
         let i = app.active_tab;
-        let mut br = acadrust::tables::BlockRecord::new(name);
+        let mut br = codec::tables::BlockRecord::new(name);
         br.flags.is_xref = true;
         br.xref_path = saved.to_string();
         br.handle = app.tabs[i].scene.document.allocate_handle();
@@ -1851,7 +1851,7 @@ mod tests {
 
     #[test]
     fn xref_overlay_on_image_errors() {
-        use acadrust::objects::{ImageDefinition, ObjectType};
+        use codec::objects::{ImageDefinition, ObjectType};
         let mut app = fresh_app();
         let i = app.active_tab;
         let h = app.tabs[i].scene.document.allocate_handle();
@@ -1863,9 +1863,9 @@ mod tests {
             .objects
             .insert(h, ObjectType::ImageDefinition(def));
         // Reference it so collect_entries lists it.
-        let mut img = acadrust::entities::RasterImage::new(
+        let mut img = codec::entities::RasterImage::new(
             "img.png",
-            acadrust::types::Vector3::ZERO,
+            codec::types::Vector3::ZERO,
             8.0,
             8.0,
         );
@@ -1873,7 +1873,7 @@ mod tests {
         app.tabs[i]
             .scene
             .document
-            .add_entity(acadrust::EntityType::RasterImage(img))
+            .add_entity(codec::EntityType::RasterImage(img))
             .unwrap();
         let out = run_capture(&mut app, "XREF Overlay img.png");
         assert!(
@@ -1887,7 +1887,7 @@ mod tests {
         // CLI mirror of the palette F7 guard: reloading an image row reports
         // the drawing-only error, leaves its unloaded flag untouched, and
         // does not follow with a spurious no-match error.
-        use acadrust::objects::{ImageDefinition, ObjectType};
+        use codec::objects::{ImageDefinition, ObjectType};
         let mut app = fresh_app();
         let i = app.active_tab;
         let h = app.tabs[i].scene.document.allocate_handle();
@@ -1898,9 +1898,9 @@ mod tests {
             .document
             .objects
             .insert(h, ObjectType::ImageDefinition(def));
-        let mut img = acadrust::entities::RasterImage::new(
+        let mut img = codec::entities::RasterImage::new(
             "img.png",
-            acadrust::types::Vector3::ZERO,
+            codec::types::Vector3::ZERO,
             8.0,
             8.0,
         );
@@ -1908,7 +1908,7 @@ mod tests {
         app.tabs[i]
             .scene
             .document
-            .add_entity(acadrust::EntityType::RasterImage(img))
+            .add_entity(codec::EntityType::RasterImage(img))
             .unwrap();
         app.tabs[i].current_path = Some(std::path::PathBuf::from("C:/Drawings/host.dwg"));
         app.tabs[i].xref_unloaded.add(h.value());
@@ -1956,7 +1956,7 @@ mod tests {
 
     #[test]
     fn xref_detach_nested_guard_errors() {
-        use acadrust::tables::BlockRecord;
+        use codec::tables::BlockRecord;
         // Host file on disk containing its own xref "INNER".
         let dir = std::env::temp_dir().join(format!(
             "ocs_xref_nested_{}_{}",
@@ -1967,7 +1967,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut host_doc = acadrust::CadDocument::new();
+        let mut host_doc = codec::CadDocument::new();
         let mut inner = BlockRecord::new("INNER");
         inner.flags.is_xref = true;
         inner.xref_path = "inner.dwg".to_string();
@@ -1997,15 +1997,15 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut xref_doc = acadrust::CadDocument::new();
+        let mut xref_doc = codec::CadDocument::new();
         xref_doc
             .layers
-            .add(acadrust::tables::Layer::new("WALLS"))
+            .add(codec::tables::Layer::new("WALLS"))
             .unwrap();
-        let mut line = acadrust::entities::Line::new();
+        let mut line = codec::entities::Line::new();
         line.common.layer = "WALLS".to_string();
         xref_doc
-            .add_entity(acadrust::EntityType::Line(line))
+            .add_entity(codec::EntityType::Line(line))
             .unwrap();
         let bytes = crate::io::save_to_bytes(&xref_doc, "dwg", xref_doc.version).unwrap();
         let xref_path = dir.join("plan.dwg");
@@ -2035,12 +2035,12 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut xref_doc = acadrust::CadDocument::new();
-        let mut line = acadrust::entities::Line::new();
+        let mut xref_doc = codec::CadDocument::new();
+        let mut line = codec::entities::Line::new();
         line.common.plotstyle_flags = 0b11;
         line.common.plotstyle_handle = Some(xref_doc.allocate_handle());
         xref_doc
-            .add_entity(acadrust::EntityType::Line(line))
+            .add_entity(codec::EntityType::Line(line))
             .unwrap();
         let bytes = crate::io::save_to_bytes(&xref_doc, "dwg", xref_doc.version).unwrap();
         let xref_path = dir.join("plan.dwg");
@@ -2060,7 +2060,7 @@ mod tests {
 
     #[test]
     fn xref_bind_pdf_errors() {
-        use acadrust::objects::{ObjectType, UnderlayDefinition};
+        use codec::objects::{ObjectType, UnderlayDefinition};
         let mut app = fresh_app();
         let i = app.active_tab;
         let h = app.tabs[i].scene.document.allocate_handle();
@@ -2081,7 +2081,7 @@ mod tests {
 
     #[test]
     fn xref_bind_nested_guard_errors() {
-        use acadrust::tables::BlockRecord;
+        use codec::tables::BlockRecord;
         let dir = std::env::temp_dir().join(format!(
             "ocs_xref_bind_nested_{}_{}",
             std::process::id(),
@@ -2091,7 +2091,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut host_doc = acadrust::CadDocument::new();
+        let mut host_doc = codec::CadDocument::new();
         let mut inner = BlockRecord::new("INNER");
         inner.flags.is_xref = true;
         inner.xref_path = "inner.dwg".to_string();
@@ -2275,15 +2275,15 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut xref_doc = acadrust::CadDocument::new();
+        let mut xref_doc = codec::CadDocument::new();
         xref_doc
             .layers
-            .add(acadrust::tables::Layer::new("WALLS"))
+            .add(codec::tables::Layer::new("WALLS"))
             .unwrap();
-        let mut line = acadrust::entities::Line::new();
+        let mut line = codec::entities::Line::new();
         line.common.layer = "WALLS".to_string();
         xref_doc
-            .add_entity(acadrust::EntityType::Line(line))
+            .add_entity(codec::EntityType::Line(line))
             .unwrap();
         let bytes = crate::io::save_to_bytes(&xref_doc, "dwg", xref_doc.version).unwrap();
         let xref_path = dir.join("plan.dwg");
@@ -2333,12 +2333,12 @@ mod tests {
         let mut app = fresh_app();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let mut line = acadrust::entities::Line::new();
-        line.end = acadrust::types::Vector3::new(10.0, 0.0, 0.0);
+        let mut line = codec::entities::Line::new();
+        line.end = codec::types::Vector3::new(10.0, 0.0, 0.0);
         app.tabs[i]
             .scene
             .define_block_from_owned_entities(
-                vec![acadrust::EntityType::Line(line)],
+                vec![codec::EntityType::Line(line)],
                 "Widget",
                 glam::DVec3::ZERO,
             )
@@ -2350,12 +2350,12 @@ mod tests {
         app.tabs
             .push(crate::app::document::DocumentTab::new_drawing(99));
         let other = app.tabs.len() - 1;
-        let mut line = acadrust::entities::Line::new();
-        line.end = acadrust::types::Vector3::new(50.0, 0.0, 0.0);
+        let mut line = codec::entities::Line::new();
+        line.end = codec::types::Vector3::new(50.0, 0.0, 0.0);
         app.tabs[other]
             .scene
             .define_block_from_owned_entities(
-                vec![acadrust::EntityType::Line(line)],
+                vec![codec::EntityType::Line(line)],
                 "Widget",
                 glam::DVec3::ZERO,
             )

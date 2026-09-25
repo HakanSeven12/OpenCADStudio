@@ -3,10 +3,10 @@
 // survives a DWG save/reload — i.e. an OCS-authored annotative object carries a
 // genuine per-scale representation, interoperably, not just the native flag.
 
-use acadrust::entities::{EntityType, MText};
-use acadrust::objects::{Dictionary, ObjectContextKind, ObjectType, Scale};
-use acadrust::types::Vector3;
-use acadrust::{CadDocument, DxfVersion, Handle};
+use codec::entities::{EntityType, MText};
+use codec::objects::{Dictionary, ObjectContextKind, ObjectType, Scale};
+use codec::types::Vector3;
+use codec::{CadDocument, DxfVersion, Handle};
 use OpenCADStudio::io;
 use OpenCADStudio::scene::annotative;
 
@@ -134,7 +134,7 @@ fn ocs_synthesized_mtext_context_survives_dwg_roundtrip() {
 
 #[test]
 fn ocs_synthesized_block_context_survives_dwg_roundtrip() {
-    use acadrust::entities::Insert;
+    use codec::entities::Insert;
 
     let mut doc = CadDocument::with_version(DxfVersion::AC1032);
 

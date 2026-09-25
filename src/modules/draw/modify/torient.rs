@@ -5,13 +5,13 @@
 //   Step 1: Wait for an angle (numerical input), Enter (Most Readable), or pick first point.
 //   Step 2: If first point picked, pick second point to define angle vector.
 
-use acadrust::Handle;
+use codec::Handle;
 use glam::DVec3;
 use crate::t;
 
 use crate::command::{CadCommand, CmdResult, DynField};
 use crate::scene::model::wire_model::WireModel;
-use acadrust::EntityType;
+use codec::EntityType;
 
 // ── Command implementation ─────────────────────────────────────────────────
 

@@ -12,16 +12,16 @@
 
 use crate::entities::curve::{entity_curve, lwpolyline_world_xy};
 use crate::modules::draw::modify::spline_ops::spline_sample_xy;
-use acadrust::entities::LwVertex;
-use acadrust::entities::{
+use codec::entities::LwVertex;
+use codec::entities::{
     Arc as ArcEnt, Circle as CircleEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline,
     Spline as SplineEnt, XLine as XLineEnt,
 };
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 // Polyline offsetting, and the angle normalisation that goes with it, come
 // from the kernel; only the entity conversion stays here.
-use cadkernel::geom2d::nurbs::clamped_uniform_knots;
-use cadkernel::geom2d::{
+use kernel::geom2d::nurbs::clamped_uniform_knots;
+use kernel::geom2d::{
     offset_polyline, Polyline as KernelPolyline, PolylineVertex as KernelVertex,
 };
 use glam::{DVec3, Vec3};
@@ -269,7 +269,7 @@ fn offset_spline(spl: &SplineEnt, dist: f64, side_pt: Vec3) -> Option<EntityType
     })?;
 
     // Offset each sample point along the local normal.
-    let offset_pts: Vec<acadrust::types::Vector3> = pts
+    let offset_pts: Vec<codec::types::Vector3> = pts
         .iter()
         .enumerate()
         .map(|(i, p)| {
@@ -290,14 +290,14 @@ fn offset_spline(spl: &SplineEnt, dist: f64, side_pt: Vec3) -> Option<EntityType
             let nx = -dy / len; // left perpendicular
             let ny = dx / len;
             let z = spl.control_points.first().map(|v| v.z).unwrap_or(0.0);
-            acadrust::types::Vector3::new(p[0] + sign * nx * dist, p[1] + sign * ny * dist, z)
+            codec::types::Vector3::new(p[0] + sign * nx * dist, p[1] + sign * ny * dist, z)
         })
         .collect();
 
     let _ = ts_knot;
     // Build a new spline from the offset control points (treat sample pts as fit pts → ctrl pts).
     let degree = spl.degree.max(1) as usize;
-    let new_ctrl: Vec<acadrust::types::Vector3> = offset_pts;
+    let new_ctrl: Vec<codec::types::Vector3> = offset_pts;
     let n_ctrl = new_ctrl.len();
     let mut new_spl = spl.clone();
     new_spl.common.handle = Handle::NULL;
@@ -364,7 +364,7 @@ fn perp_distance(entity: &EntityType, pt: Vec3) -> f64 {
 // ── Wire preview points ─────────────────────────────────────────────────────
 
 /// Preview density, matching the figure the drawn wires use.
-const PREVIEW_SEGMENTS_PER_RADIAN: f64 = cadkernel::geom2d::DEFAULT_SEGMENTS_PER_RADIAN;
+const PREVIEW_SEGMENTS_PER_RADIAN: f64 = kernel::geom2d::DEFAULT_SEGMENTS_PER_RADIAN;
 
 /// Preview points for an entity, from its own curve.
 ///
@@ -989,7 +989,7 @@ inventory::submit!(crate::command::CommandRegistration { names: &["OFFSET"] }); 
 #[cfg(test)]
 mod offset_tests {
     use super::*;
-    use acadrust::types::Vector2;
+    use codec::types::Vector2;
 
     fn rect(corners: &[[f64; 2]]) -> LwPolyline {
         LwPolyline {
@@ -1049,7 +1049,7 @@ mod option_tests {
     use super::*;
 
     fn line(x1: f64, y1: f64, x2: f64, y2: f64, handle: u64) -> EntityType {
-        let mut line = acadrust::entities::Line::from_coords(x1, y1, 0.0, x2, y2, 0.0);
+        let mut line = codec::entities::Line::from_coords(x1, y1, 0.0, x2, y2, 0.0);
         line.common.handle = Handle::new(handle);
         EntityType::Line(line)
     }

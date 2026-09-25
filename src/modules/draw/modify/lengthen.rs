@@ -8,12 +8,12 @@
 // The entity is modified at whichever end is closest to the pick point.
 
 use crate::modules::draw::modify::spline_ops::{spline_cut, spline_to_nurbs};
-use acadrust::entities::{
+use codec::entities::{
     Spline as SplineEnt,
 };
-use cadkernel::geom2d::Curve;
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
+use kernel::geom2d::Curve;
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
 use glam::{DVec3, Vec3};
 use crate::t;
 
@@ -249,7 +249,7 @@ pub fn lengthen_entity(entity: &EntityType, pick_pt: Vec3, mode: &LenMode) -> Op
 }
 
 fn lengthen_entity_precise(entity: &EntityType, pick: DVec3, mode: &LenMode) -> Option<EntityType> {
-    use cadkernel::space::lengthen::{LengthChange, lengthen_line, lengthen_arc};
+    use kernel::space::lengthen::{LengthChange, lengthen_line, lengthen_arc};
     let change = match mode {
         LenMode::Delta(value) => LengthChange::Delta(*value),
         LenMode::Total(value) => LengthChange::Total(*value),
@@ -279,7 +279,7 @@ fn lengthen_entity_precise(entity: &EntityType, pick: DVec3, mode: &LenMode) -> 
         }
         EntityType::Ellipse(ellipse) => {
             let curve = crate::entities::curve::ellipse_curve(ellipse)?;
-            let (start, end) = cadkernel::space::lengthen::lengthen_ellipse(&curve, pick.to_array(), change)?;
+            let (start, end) = kernel::space::lengthen::lengthen_ellipse(&curve, pick.to_array(), change)?;
             let mut result = ellipse.clone();
             result.start_parameter = start;
             result.end_parameter = end;
@@ -288,7 +288,7 @@ fn lengthen_entity_precise(entity: &EntityType, pick: DVec3, mode: &LenMode) -> 
         EntityType::Spline(s) => lengthen_spline(s, pick.as_vec3(), mode),
         EntityType::LwPolyline(polyline) => {
             let curve = crate::entities::curve::lwpolyline_curve(polyline)?;
-            let vertices = cadkernel::space::lengthen::lengthen_polyline(&curve, pick.to_array(), change)?;
+            let vertices = kernel::space::lengthen::lengthen_polyline(&curve, pick.to_array(), change)?;
             let mut result = polyline.clone();
             result.vertices = vertices.into_iter().map(|vertex| {
                 let mut value = polyline.vertices[vertex.source].clone();
@@ -365,7 +365,7 @@ mod tests {
     use super::*;
 
     fn spatial_line() -> EntityType {
-        EntityType::Line(acadrust::entities::Line::from_points(
+        EntityType::Line(codec::entities::Line::from_points(
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(0.0, 0.0, 4.0),
         ))
@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn circular_arc_accepts_total_angle_in_radians() {
-        let arc = acadrust::entities::Arc::from_center_radius_angles(
+        let arc = codec::entities::Arc::from_center_radius_angles(
             Vector3::ZERO,
             2.0,
             0.0,
@@ -447,13 +447,13 @@ mod tests {
 
     #[test]
     fn polyline_lengthening_preserves_plane_and_interpolates_widths() {
-        let mut polyline = acadrust::entities::LwPolyline::new();
+        let mut polyline = codec::entities::LwPolyline::new();
         polyline.normal = Vector3::new(0.0, 1.0, 0.0);
         polyline.elevation = 5.0;
-        let mut start = acadrust::entities::LwVertex::from_coords(0.0, 0.0);
+        let mut start = codec::entities::LwVertex::from_coords(0.0, 0.0);
         start.start_width = 2.0;
         start.end_width = 4.0;
-        polyline.vertices = vec![start, acadrust::entities::LwVertex::from_coords(10.0, 0.0)];
+        polyline.vertices = vec![start, codec::entities::LwVertex::from_coords(10.0, 0.0)];
         let entity = EntityType::LwPolyline(polyline.clone());
         let pick = DVec3::from_array(crate::entities::curve::lwpolyline_curve(&polyline)
             .unwrap().point_at(1.0));

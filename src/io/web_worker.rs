@@ -31,14 +31,14 @@ pub(super) async fn parse_document(
     bytes: &[u8],
     recovery_mode: bool,
     initial_error: &str,
-) -> Result<(acadrust::ReadOutcome, Option<String>), super::OpenLoadError> {
+) -> Result<(codec::ReadOutcome, Option<String>), super::OpenLoadError> {
     let options = WorkerOptions::new();
     options.set_type(WorkerType::Module);
     let worker = Worker::new_with_options(WORKER_URL, &options)
         .map_err(|error| super::OpenLoadError::from(js_error(error)))?;
 
     let (sender, receiver) = iced::futures::channel::oneshot::channel::<
-        Result<(acadrust::ReadOutcome, Option<String>), super::OpenLoadError>,
+        Result<(codec::ReadOutcome, Option<String>), super::OpenLoadError>,
     >();
     let sender = Rc::new(RefCell::new(Some(sender)));
     let message_sender = sender.clone();
@@ -56,8 +56,8 @@ pub(super) async fn parse_document(
                     let payload: (
                         u16,
                         Result<
-                            acadrust::ReadOutcome,
-                            (String, Option<acadrust::ReadStats>),
+                            codec::ReadOutcome,
+                            (String, Option<codec::ReadStats>),
                         >,
                         Option<String>,
                         bool,
@@ -143,12 +143,12 @@ pub(super) async fn parse_document(
 }
 
 fn restore_entity_runtime_fields(
-    document: &mut acadrust::CadDocument,
+    document: &mut codec::CadDocument,
     fields: Vec<EntityRuntimeFields>,
 ) {
-    let handle = |value: Option<u64>| value.map(acadrust::Handle::new);
+    let handle = |value: Option<u64>| value.map(codec::Handle::new);
     for fields in fields {
-        let Some(entity) = document.get_entity_mut(acadrust::Handle::new(fields.handle)) else {
+        let Some(entity) = document.get_entity_mut(codec::Handle::new(fields.handle)) else {
             continue;
         };
         let common = entity.common_mut();

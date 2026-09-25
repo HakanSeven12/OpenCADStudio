@@ -13,7 +13,7 @@
 // with an error message — full matrix inversion for those cases would
 // require per-entity matrix transforms not yet in EntityTransform.
 
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 use crate::t;
 
@@ -53,9 +53,9 @@ pub struct RefEditSession {
     // ── INSERT placement, as full affine transforms ───────────────────
     /// Block-local → world (the INSERT's `get_transform`). Handles OCS,
     /// rotation and non-uniform / mirrored scale in one matrix.
-    pub forward: acadrust::types::Transform,
+    pub forward: codec::types::Transform,
     /// World → block-local, applied on SAVE to bring edits back.
-    pub inverse: acadrust::types::Transform,
+    pub inverse: codec::types::Transform,
     /// Handle watermark captured before the temp copies were created: every
     /// entity allocated at or above it during the session (drawn, pasted,
     /// offset, …) belongs to the working set, so Save folds it into the block

@@ -1,7 +1,7 @@
 // Spatial index for 2D entities. Each leaf holds up to `LEAF_CAPACITY`
 // items; on overflow the node splits into 4 children and re-distributes.
 //
-// Items are keyed by `acadrust::Handle`. AABBs are stored in WCS f64
+// Items are keyed by `codec::Handle`. AABBs are stored in WCS f64
 // (NOT world_offset-subtracted) so changing `world_offset` doesn't
 // invalidate the index.
 //
@@ -20,7 +20,7 @@
 // (rare in CAD workflows where most edits are local and few entities
 // move long distances).
 
-use acadrust::Handle;
+use codec::Handle;
 
 pub type Aabb = [f64; 4]; // [xmin, ymin, xmax, ymax]
 

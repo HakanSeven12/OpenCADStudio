@@ -643,6 +643,7 @@ impl CommandLine {
         control_enabled: bool,
         control_busy: bool,
         pick_pending: bool,
+        graph_open: bool,
     ) -> Element<'a, Message> {
         // Only the most recent entries pushed within COMMANDLINEFADETIME
         // show on the overlay (0 skips transient lines). The dropdown button
@@ -885,7 +886,21 @@ impl CommandLine {
                 bottom: 0.0,
                 left: 0.0,
             });
-        let input_row = row![prompt, literal_btn, input_with_history, mcp_btn]
+        let graph_btn = button(crate::ui::icons::themed(crate::ui::icons::NODE_GRAPH, 13.0))
+            .on_press(Message::Graph(crate::ui::node_graph::GraphMsg::Toggle))
+            .style(move |theme: &Theme, status| {
+                if graph_open {
+                    button::primary(theme, status)
+                } else {
+                    button::subtle(theme, status)
+                }
+            })
+            .padding([2, 6]);
+        let graph_tip = container(text(t!("Node graph")).size(11))
+            .padding([3, 6])
+            .style(container::bordered_box);
+        let graph_btn = tooltip(graph_btn, graph_tip, tooltip::Position::Top).gap(4);
+        let input_row = row![prompt, literal_btn, input_with_history, graph_btn, mcp_btn]
             .spacing(4)
             .align_y(iced::Center);
 

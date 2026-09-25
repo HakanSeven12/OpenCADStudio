@@ -1,4 +1,4 @@
-use acadrust::entities::{AttachmentPoint, DrawingDirection, MText};
+use codec::entities::{AttachmentPoint, DrawingDirection, MText};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
@@ -84,11 +84,11 @@ fn drawing_dir_str(d: &DrawingDirection) -> &'static str {
 /// so the boxes line up with the rendered glyphs.
 /// The MTEXT string to render: the live re-evaluated value when the entity
 /// hosts a dynamic field, otherwise its stored (cached) value.
-fn display_value(t: &MText, document: &acadrust::CadDocument) -> String {
+fn display_value(t: &MText, document: &codec::CadDocument) -> String {
     crate::entities::field::resolve(document, t.common.handle).unwrap_or_else(|| t.value.clone())
 }
 
-pub fn glyph_boxes(t: &MText, document: &acadrust::CadDocument) -> Vec<GlyphBox> {
+pub fn glyph_boxes(t: &MText, document: &codec::CadDocument) -> Vec<GlyphBox> {
     let resolved_style = resolve_text_style(&t.style, document);
     let attach_h_anchor: f32 = match t.attachment_point {
         AttachmentPoint::TopCenter
@@ -132,7 +132,7 @@ pub fn glyph_boxes(t: &MText, document: &acadrust::CadDocument) -> Vec<GlyphBox>
         line_spacing_factor: t.line_spacing_factor as f32,
         exact_line_spacing: matches!(
             t.line_spacing_style,
-            acadrust::entities::LineSpacingStyle::Exactly
+            codec::entities::LineSpacingStyle::Exactly
         ),
         rectangle_height: t.rectangle_height.unwrap_or(0.0) as f32,
         vertical_text: matches!(t.drawing_direction, DrawingDirection::TopToBottom)
@@ -144,7 +144,7 @@ pub fn glyph_boxes(t: &MText, document: &acadrust::CadDocument) -> Vec<GlyphBox>
     layout.glyph_boxes
 }
 
-fn to_render(t: &MText, document: &acadrust::CadDocument) -> RenderEntity {
+fn to_render(t: &MText, document: &codec::CadDocument) -> RenderEntity {
     let resolved_style = resolve_text_style(&t.style, document);
     let attach_h_anchor: f32 = match t.attachment_point {
         AttachmentPoint::TopCenter
@@ -188,7 +188,7 @@ fn to_render(t: &MText, document: &acadrust::CadDocument) -> RenderEntity {
         line_spacing_factor: t.line_spacing_factor as f32,
         exact_line_spacing: matches!(
             t.line_spacing_style,
-            acadrust::entities::LineSpacingStyle::Exactly
+            codec::entities::LineSpacingStyle::Exactly
         ),
         rectangle_height: t.rectangle_height.unwrap_or(0.0) as f32,
         vertical_text: matches!(t.drawing_direction, DrawingDirection::TopToBottom)
@@ -294,7 +294,7 @@ fn grips(t: &MText) -> Vec<GripDef> {
     result
 }
 
-fn columns_str(c: &acadrust::entities::MTextColumnData) -> &'static str {
+fn columns_str(c: &codec::entities::MTextColumnData) -> &'static str {
     match c.column_type {
         1 => "Static",
         2 => "Dynamic",
@@ -384,7 +384,7 @@ fn properties(t: &MText, text_style_names: &[String]) -> Vec<PropSection> {
                     field: "line_space_style",
                     value: PropValue::Choice {
                         selected: match t.line_spacing_style {
-                            acadrust::entities::LineSpacingStyle::Exactly => "Exactly",
+                            codec::entities::LineSpacingStyle::Exactly => "Exactly",
                             _ => "At least",
                         }
                         .to_string(),
@@ -498,8 +498,8 @@ fn apply_geom_prop(t: &mut MText, field: &str, value: &str) {
         }
         "line_space_style" => {
             t.line_spacing_style = match value {
-                "Exactly" => acadrust::entities::LineSpacingStyle::Exactly,
-                "At least" => acadrust::entities::LineSpacingStyle::AtLeast,
+                "Exactly" => codec::entities::LineSpacingStyle::Exactly,
+                "At least" => codec::entities::LineSpacingStyle::AtLeast,
                 _ => return,
             };
             return;
@@ -659,7 +659,7 @@ fn apply_transform(t: &mut MText, tr: &EntityTransform) {
 }
 
 impl RenderConvertible for MText {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(to_render(self, document))
     }
 }
@@ -746,7 +746,7 @@ impl Transformable for MText {
     }
 }
 
-impl crate::entities::traits::TextContent for acadrust::entities::MText {
+impl crate::entities::traits::TextContent for codec::entities::MText {
     fn text_content(&self) -> Option<String> {
         Some(self.value.clone())
     }

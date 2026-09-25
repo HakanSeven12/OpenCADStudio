@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use rustc_hash::FxHashMap as HashMap;
 
-use acadrust::types::{Color as AcadColor, LineWeight};
+use codec::types::{Color as AcadColor, LineWeight};
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text};
 use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 

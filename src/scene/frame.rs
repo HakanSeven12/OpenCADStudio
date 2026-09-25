@@ -1,5 +1,5 @@
-use acadrust::objects::{ObjectType, RasterVariables, WipeoutVariables};
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::objects::{ObjectType, RasterVariables, WipeoutVariables};
+use codec::{CadDocument, EntityType, Handle};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FrameKind {
@@ -179,7 +179,7 @@ pub(crate) fn entity_kind(entity: &EntityType) -> Option<FrameKind> {
     match entity {
         EntityType::RasterImage(_) => Some(FrameKind::Image),
         EntityType::Underlay(underlay)
-            if matches!(underlay.underlay_type, acadrust::entities::UnderlayType::Pdf) =>
+            if matches!(underlay.underlay_type, codec::entities::UnderlayType::Pdf) =>
         {
             Some(FrameKind::Pdf)
         }
@@ -194,7 +194,7 @@ pub(crate) fn affected(entity: &EntityType, kind: FrameKind) -> bool {
         FrameKind::Pdf => matches!(
             entity,
             EntityType::Underlay(underlay)
-                if matches!(underlay.underlay_type, acadrust::entities::UnderlayType::Pdf)
+                if matches!(underlay.underlay_type, codec::entities::UnderlayType::Pdf)
         ),
         FrameKind::Wipeout => matches!(entity, EntityType::Wipeout(_)),
         FrameKind::Xclip => matches!(entity, EntityType::Insert(_)),
@@ -203,8 +203,8 @@ pub(crate) fn affected(entity: &EntityType, kind: FrameKind) -> bool {
             EntityType::Extended(extended)
                 if matches!(
                     &extended.data,
-                    acadrust::entities::ExtendedEntityData::PointCloud(_)
-                        | acadrust::entities::ExtendedEntityData::PointCloudEx(_)
+                    codec::entities::ExtendedEntityData::PointCloud(_)
+                        | codec::entities::ExtendedEntityData::PointCloudEx(_)
                 )
         ),
     }

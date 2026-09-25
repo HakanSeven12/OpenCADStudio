@@ -29,7 +29,7 @@ impl OpenCADStudio {
                     Lock(usize, usize, bool),
                     Block(usize, usize, String),
                     Formula(usize, usize, String),
-                    Field(usize, usize, acadrust::Handle),
+                    Field(usize, usize, codec::Handle),
                 }
                 let words: Vec<&str> = rest.split_whitespace().collect();
                 let integer = |index: usize| {
@@ -120,7 +120,7 @@ impl OpenCADStudio {
                                     TableAction::Field(
                                         row,
                                         column,
-                                        acadrust::Handle::new(handle),
+                                        codec::Handle::new(handle),
                                     )
                                 })
                         }
@@ -134,7 +134,7 @@ impl OpenCADStudio {
                     );
                     return Some(Task::none());
                 };
-                let selected_handles: Vec<acadrust::Handle> = self.tabs[i]
+                let selected_handles: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
@@ -174,7 +174,7 @@ impl OpenCADStudio {
                 self.push_undo_snapshot(i, "TABLE EDIT");
                 let mut changed = false;
                 for handle in &selected_handles {
-                    let Some(acadrust::EntityType::Table(table)) =
+                    let Some(codec::EntityType::Table(table)) =
                         self.tabs[i].scene.document.get_entity_mut(*handle)
                     else {
                         continue;
@@ -182,7 +182,7 @@ impl OpenCADStudio {
                     match &action {
                         TableAction::Cell(row, column, text) => {
                             if let Some(cell) = table.cell_mut(*row, *column) {
-                                use acadrust::entities::table::CellStateFlags;
+                                use codec::entities::table::CellStateFlags;
                                 if !cell.state.intersects(
                                     CellStateFlags::CONTENT_LOCKED
                                         | CellStateFlags::CONTENT_READ_ONLY,
@@ -229,7 +229,7 @@ impl OpenCADStudio {
                                 && *c1 < table.column_count()
                                 && *c2 < table.column_count() =>
                         {
-                            table.merge_cells(acadrust::entities::table::CellRange::new(
+                            table.merge_cells(codec::entities::table::CellRange::new(
                                 (*r1).min(*r2),
                                 (*c1).min(*c2),
                                 (*r1).max(*r2),
@@ -253,7 +253,7 @@ impl OpenCADStudio {
                         }
                         TableAction::Lock(row, column, locked) => {
                             if let Some(cell) = table.cell_mut(*row, *column) {
-                                use acadrust::entities::table::CellStateFlags;
+                                use codec::entities::table::CellStateFlags;
                                 cell.state.set(CellStateFlags::CONTENT_LOCKED, *locked);
                                 cell.state.set(CellStateFlags::FORMAT_LOCKED, *locked);
                                 changed = true;
@@ -263,7 +263,7 @@ impl OpenCADStudio {
                             if let (Some(handle), Some(cell)) =
                                 (block_handle, table.cell_mut(*row, *column))
                             {
-                                use acadrust::entities::table::{
+                                use codec::entities::table::{
                                     CellContent, CellStateFlags, CellType,
                                 };
                                 if !cell.state.intersects(
@@ -279,7 +279,7 @@ impl OpenCADStudio {
                         }
                         TableAction::Formula(row, column, expression) => {
                             if let Some(cell) = table.cell_mut(*row, *column) {
-                                use acadrust::entities::table::CellStateFlags;
+                                use codec::entities::table::CellStateFlags;
                                 if !cell.state.intersects(
                                     CellStateFlags::CONTENT_LOCKED
                                         | CellStateFlags::CONTENT_READ_ONLY,
@@ -297,7 +297,7 @@ impl OpenCADStudio {
                         TableAction::Field(row, column, field_handle) => {
                             let mut attached = false;
                             if let Some(cell) = table.cell_mut(*row, *column) {
-                                use acadrust::entities::table::{
+                                use codec::entities::table::{
                                     CellContent, CellStateFlags, CellType,
                                 };
                                 if !cell.state.intersects(
@@ -371,7 +371,7 @@ impl OpenCADStudio {
                         }
                         let mut count = 0usize;
                         for entity in self.tabs[i].scene.document.entities_mut() {
-                            if let acadrust::EntityType::Viewport(vp) = entity {
+                            if let codec::EntityType::Viewport(vp) = entity {
                                 vp.status.ucs_icon_visible = visible;
                                 if sub == "NOORIGIN" || sub == "ORIGIN" {
                                     vp.status.ucs_icon_at_origin = at_origin;
@@ -391,7 +391,7 @@ impl OpenCADStudio {
                         self.show_ucs_icon = visible;
                         self.ribbon.set_ucs_icon(visible);
                         for entity in self.tabs[i].scene.document.entities_mut() {
-                            if let acadrust::EntityType::Viewport(vp) = entity {
+                            if let codec::EntityType::Viewport(vp) = entity {
                                 vp.status.ucs_icon_visible = visible;
                             }
                         }
@@ -611,11 +611,11 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
             cmd if cmd.starts_with("XDATA ") => {
-                use acadrust::xdata::{ExtendedDataRecord, XDataValue};
+                use codec::xdata::{ExtendedDataRecord, XDataValue};
                 let rest = cmd.trim_start_matches("XDATA").trim();
                 let parts: Vec<&str> = rest.splitn(3, char::is_whitespace).collect();
                 let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
-                let selected_handles: Vec<acadrust::Handle> = self.tabs[i]
+                let selected_handles: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
@@ -960,7 +960,7 @@ impl OpenCADStudio {
                     .split_once(' ')
                     .map(|(_, r)| r.trim().to_uppercase())
                     .unwrap_or_default();
-                let handles: Vec<acadrust::Handle> = self.tabs[i]
+                let handles: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
@@ -977,7 +977,7 @@ impl OpenCADStudio {
                     let mut changed = 0usize;
                     self.push_undo_snapshot(i, "UNDERLAY");
                     for h in &handles {
-                        if let Some(acadrust::EntityType::Underlay(ul)) = self.tabs[i]
+                        if let Some(codec::EntityType::Underlay(ul)) = self.tabs[i]
                             .scene
                             .document
                             .entities_mut()
@@ -1007,7 +1007,7 @@ impl OpenCADStudio {
                                 "CLIP" => match arg {
                                     "ON" => {
                                         ul.flags |=
-                                            acadrust::entities::UnderlayDisplayFlags::CLIPPING;
+                                            codec::entities::UnderlayDisplayFlags::CLIPPING;
                                         changed += 1;
                                     }
                                     "OFF" => {
@@ -1063,7 +1063,7 @@ impl OpenCADStudio {
             // annotative objects. With no preselection, gather one through the
             // regular selection engine before applying the action.
             action @ ("OBJECTSCALE ADD" | "OBJECTSCALE DELETE") => {
-                let selected: Vec<acadrust::Handle> = self.tabs[i]
+                let selected: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
@@ -1181,13 +1181,13 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
             cmd if cmd.starts_with("HYPERLINK ") => {
-                use acadrust::xdata::XDataValue;
+                use codec::xdata::XDataValue;
                 let url = cmd.strip_prefix("HYPERLINK").unwrap_or("").trim().to_string();
                 if url.is_empty() {
                     self.command_line.push_info(crate::t!("Usage: HYPERLINK <url>   (select objects first)").as_ref());
                     return Some(Task::none());
                 }
-                let handles: Vec<acadrust::Handle> = self.tabs[i]
+                let handles: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
@@ -1242,7 +1242,7 @@ impl OpenCADStudio {
                 let parts: Vec<&str> = rest.splitn(2, char::is_whitespace).collect();
                 let action = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
                 let arg = parts.get(1).copied().unwrap_or("").trim();
-                let handles: Vec<acadrust::Handle> = self.tabs[i]
+                let handles: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
@@ -1261,7 +1261,7 @@ impl OpenCADStudio {
                     let mut changed = 0usize;
                     let mut changed_handles = Vec::new();
                     for h in &handles {
-                        if let Some(acadrust::EntityType::RasterImage(img)) = self.tabs[i]
+                        if let Some(codec::EntityType::RasterImage(img)) = self.tabs[i]
                             .scene
                             .document
                             .entities_mut()
@@ -1539,7 +1539,7 @@ impl OpenCADStudio {
             // Reset every alternate scale representation to the position of
             // the representation visible at the current annotation scale.
             "ANNORESET" => {
-                let handles: Vec<acadrust::Handle> = self.tabs[i]
+                let handles: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
@@ -1627,8 +1627,8 @@ impl OpenCADStudio {
                                 .push_error(crate::t!("DATALINK: the CSV file is empty.").as_ref());
                             return Some(Task::none());
                         }
-                        use acadrust::entities::TableBuilder;
-                        use acadrust::types::Vector3;
+                        use codec::entities::TableBuilder;
+                        use codec::types::Vector3;
                         let mut table = TableBuilder::new(nrows, ncols)
                             .at(Vector3::new(0.0, 0.0, 0.0))
                             .row_height(0.5)
@@ -1643,7 +1643,7 @@ impl OpenCADStudio {
                         let current_style = doc.header.current_table_style_name.clone();
                         table.table_style_handle = doc.objects.iter().find_map(|(handle, object)| {
                             match object {
-                                acadrust::objects::ObjectType::TableStyle(style)
+                                codec::objects::ObjectType::TableStyle(style)
                                     if style.name.eq_ignore_ascii_case(&current_style) =>
                                 {
                                     Some(*handle)
@@ -1673,12 +1673,12 @@ impl OpenCADStudio {
                     .trim_start_matches("DATALINKUPDATE")
                     .trim()
                     .eq_ignore_ascii_case("WRITE");
-                let selected: Vec<acadrust::Handle> = self.tabs[i]
+                let selected: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .into_iter()
                     .filter_map(|(handle, entity)| {
-                        matches!(entity, acadrust::EntityType::Table(_)).then_some(handle)
+                        matches!(entity, codec::EntityType::Table(_)).then_some(handle)
                     })
                     .collect();
                 let table_handles = if selected.is_empty() {
@@ -1687,7 +1687,7 @@ impl OpenCADStudio {
                         .document
                         .entities()
                         .filter_map(|entity| {
-                            matches!(entity, acadrust::EntityType::Table(_))
+                            matches!(entity, codec::EntityType::Table(_))
                                 .then_some(entity.common().handle)
                         })
                         .collect::<Vec<_>>()
@@ -1696,7 +1696,7 @@ impl OpenCADStudio {
                 };
                 let mut jobs = Vec::new();
                 for handle in &table_handles {
-                    let Some(acadrust::EntityType::Table(table)) =
+                    let Some(codec::EntityType::Table(table)) =
                         self.tabs[i].scene.document.get_entity(*handle)
                     else {
                         continue;
@@ -1720,7 +1720,7 @@ impl OpenCADStudio {
                     let mut written = 0usize;
                     let mut errors = Vec::new();
                     for (table_handle, link_handle) in &jobs {
-                        let Some(acadrust::EntityType::Table(table)) =
+                        let Some(codec::EntityType::Table(table)) =
                             self.tabs[i].scene.document.get_entity(*table_handle)
                         else {
                             continue;
@@ -1764,11 +1764,11 @@ impl OpenCADStudio {
                     return Some(Task::none());
                 }
                 self.push_undo_snapshot(i, "DATALINKUPDATE");
-                use acadrust::entities::table::CellStateFlags;
+                use codec::entities::table::CellStateFlags;
                 let mut changed_handles = Vec::new();
                 for (table_handle, link_handle, rows) in updates {
                     let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
-                    let Some(acadrust::EntityType::Table(table)) =
+                    let Some(codec::EntityType::Table(table)) =
                         self.tabs[i].scene.document.get_entity_mut(table_handle)
                     else {
                         continue;
@@ -1843,11 +1843,11 @@ impl OpenCADStudio {
                         }
                         self.push_undo_snapshot(i, "LANDXMLIMPORT");
                         for [x, y, z] in &pts {
-                            let mut p = acadrust::entities::Point::new();
-                            p.location = acadrust::types::Vector3::new(*x, *y, *z);
+                            let mut p = codec::entities::Point::new();
+                            p.location = codec::types::Vector3::new(*x, *y, *z);
                             self.tabs[i]
                                 .scene
-                                .add_entity_clone(acadrust::EntityType::Point(p));
+                                .add_entity_clone(codec::EntityType::Point(p));
                         }
                         self.tabs[i].dirty = true;
                         self.command_line.push_output(crate::tf!(
@@ -1949,7 +1949,7 @@ pub(crate) fn parse_csv_table(text: &str) -> Vec<Vec<String>> {
     rows
 }
 
-pub(crate) fn table_to_csv(table: &acadrust::entities::Table) -> String {
+pub(crate) fn table_to_csv(table: &codec::entities::Table) -> String {
     fn escape(value: &str) -> String {
         if value.contains([',', '"', '\r', '\n']) {
             format!("\"{}\"", value.replace('"', "\"\""))
@@ -2040,7 +2040,7 @@ mod tests {
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
 
-        let stale = acadrust::Handle::new(0xDEAD);
+        let stale = codec::Handle::new(0xDEAD);
         app.tabs[i].scene.meshes.insert(stale, stale_mesh());
         let epoch_before = app.tabs[i].scene.geometry_epoch;
 
@@ -2065,7 +2065,7 @@ mod tests {
         let i = app.active_tab;
 
         let seed = |app: &mut OpenCADStudio, i: usize| {
-            let stale = acadrust::Handle::new(0xBEEF);
+            let stale = codec::Handle::new(0xBEEF);
             app.tabs[i].scene.meshes.insert(stale, stale_mesh());
             stale
         };

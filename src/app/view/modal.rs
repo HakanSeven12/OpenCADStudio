@@ -688,7 +688,7 @@ impl OpenCADStudio {
                 let tab = &self.tabs[self.active_tab];
                 let entity = self.anno_object_scale_target;
                 // Which scales the object currently has a representation for.
-                let members: Vec<acadrust::types::Handle> = entity
+                let members: Vec<codec::types::Handle> = entity
                     .map(|h| {
                         crate::scene::annotative::object_scale_memberships(
                             &tab.scene.document,
@@ -702,10 +702,10 @@ impl OpenCADStudio {
                 let label = entity
                     .and_then(|h| tab.scene.document.get_entity(h))
                     .map(|e| match e {
-                        acadrust::EntityType::Text(_) => "TEXT",
-                        acadrust::EntityType::MText(_) => "MTEXT",
-                        acadrust::EntityType::Insert(_) => "BLOCK",
-                        acadrust::EntityType::MultiLeader(_) => "MULTILEADER",
+                        codec::EntityType::Text(_) => "TEXT",
+                        codec::EntityType::MText(_) => "MTEXT",
+                        codec::EntityType::Insert(_) => "BLOCK",
+                        codec::EntityType::MultiLeader(_) => "MULTILEADER",
                         _ => "OBJECT",
                     })
                     .unwrap_or("—");
@@ -871,7 +871,7 @@ impl OpenCADStudio {
                 )
             }
             super::super::ModalKind::MlStyle => {
-                use acadrust::objects::ObjectType;
+                use codec::objects::ObjectType;
                 let tab = &self.tabs[self.active_tab];
                 let styles: Vec<String> = tab
                     .scene
@@ -947,7 +947,7 @@ impl OpenCADStudio {
                 )
             }
             super::super::ModalKind::TableStyle => {
-                use acadrust::objects::ObjectType;
+                use codec::objects::ObjectType;
                 let tab = &self.tabs[self.active_tab];
                 let styles: Vec<String> = tab
                     .scene
@@ -1052,7 +1052,7 @@ impl OpenCADStudio {
                 )
             }
             super::super::ModalKind::MLeaderStyle => {
-                use acadrust::objects::ObjectType;
+                use codec::objects::ObjectType;
                 let tab = &self.tabs[self.active_tab];
                 let styles: Vec<String> = tab
                     .scene
@@ -1079,7 +1079,7 @@ impl OpenCADStudio {
                 lt_opts.extend(doc.line_types.iter().map(|lt| lt.name.clone()));
                 let mut textstyle_opts: Vec<String> = vec!["None".to_string()];
                 textstyle_opts.extend(doc.text_styles.iter().map(|t| t.name.clone()));
-                let opt_block = |h: Option<acadrust::types::Handle>| -> String {
+                let opt_block = |h: Option<codec::types::Handle>| -> String {
                     match h {
                         Some(h) => doc
                             .block_records
@@ -1090,7 +1090,7 @@ impl OpenCADStudio {
                         None => "None".to_string(),
                     }
                 };
-                let opt_lt = |h: Option<acadrust::types::Handle>| -> String {
+                let opt_lt = |h: Option<codec::types::Handle>| -> String {
                     match h {
                         Some(h) => doc
                             .line_types
@@ -1101,7 +1101,7 @@ impl OpenCADStudio {
                         None => "ByBlock".to_string(),
                     }
                 };
-                let opt_ts = |h: Option<acadrust::types::Handle>| -> String {
+                let opt_ts = |h: Option<codec::types::Handle>| -> String {
                     match h {
                         Some(h) => doc
                             .text_styles
@@ -1348,7 +1348,7 @@ impl OpenCADStudio {
                 .get(&self.ds_dimtxsty)
                 .map(|style| style.height)
                 .filter(|height| *height > 0.0);
-            let blk_name = |h: acadrust::types::Handle| -> String {
+            let blk_name = |h: codec::types::Handle| -> String {
                 if h.is_null() {
                     "Default".to_string()
                 } else {
@@ -1359,7 +1359,7 @@ impl OpenCADStudio {
                         .unwrap_or_else(|| "Default".to_string())
                 }
             };
-            let lt_name = |h: acadrust::types::Handle| -> String {
+            let lt_name = |h: codec::types::Handle| -> String {
                 if h.is_null() {
                     "ByBlock".to_string()
                 } else {
@@ -1373,7 +1373,7 @@ impl OpenCADStudio {
             let ds_sel = doc.dim_styles.get(&self.dimstyle_selected);
             let read_only = false;
             let in_use = doc.entities().any(|entity| {
-                matches!(entity, acadrust::EntityType::Dimension(dimension)
+                matches!(entity, codec::EntityType::Dimension(dimension)
                     if dimension.base().style_name.eq_ignore_ascii_case(&self.dimstyle_selected))
             });
             let compare_opts: Vec<String> = styles

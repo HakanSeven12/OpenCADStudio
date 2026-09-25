@@ -1,5 +1,5 @@
-use acadrust::entities::{LwPolyline, LwVertex};
-use cadkernel::geom2d::{
+use codec::entities::{LwPolyline, LwVertex};
+use kernel::geom2d::{
     signed_area, Curve, Polyline, PolylineVertex, RectangleFrame, Tolerance, Vec2,
 };
 
@@ -149,12 +149,12 @@ fn split_bulges_from_point(
 /// ensures this placement originated from an arc, so straight-segment Add
 /// Vertex remains two straight segments when the cursor moves off the chord.
 pub(crate) fn refit_added_arc_vertex(
-    entity: &mut acadrust::EntityType,
+    entity: &mut codec::EntityType,
     vertex_id: usize,
     original_bulge: f64,
 ) {
     match entity {
-        acadrust::EntityType::LwPolyline(polyline) => {
+        codec::EntityType::LwPolyline(polyline) => {
             let n = polyline.vertices.len();
             if vertex_id == 0 || vertex_id >= n {
                 return;
@@ -179,7 +179,7 @@ pub(crate) fn refit_added_arc_vertex(
             polyline.vertices[prev].bulge = first.clamp(-1e6, 1e6);
             polyline.vertices[vertex_id].bulge = second.clamp(-1e6, 1e6);
         }
-        acadrust::EntityType::Polyline2D(polyline) => {
+        codec::EntityType::Polyline2D(polyline) => {
             let n = polyline.vertices.len();
             if vertex_id == 0 || vertex_id >= n {
                 return;
@@ -379,7 +379,7 @@ fn to_render(pline: &LwPolyline, fill_mode: bool) -> RenderEntity {
             {
                 tgs.push(crate::entities::common::bulge_arc_to_tangent(&arc, &to_wcs, normal));
                 for s in arc
-                    .tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
+                    .tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
                     .into_iter()
                     .skip(1)
                 {
@@ -479,7 +479,7 @@ fn to_render(pline: &LwPolyline, fill_mode: bool) -> RenderEntity {
                 crate::entities::common::BulgeArc::from_bulge([ox0, oy0], [ox1, oy1], bulge)
             {
                 for s in arc
-                    .tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
+                    .tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
                     .into_iter()
                     .skip(1)
                 {
@@ -592,10 +592,10 @@ fn centerline_metadata(
 /// Split at vertex `idx`: a closed polyline re-opens there (one piece); an
 /// open one splits into two (interior vertices only). `None` when invalid.
 pub(crate) fn break_at_vertex(
-    p: &acadrust::LwPolyline,
+    p: &codec::LwPolyline,
     idx: usize,
-) -> Option<Vec<acadrust::EntityType>> {
-    use acadrust::EntityType;
+) -> Option<Vec<codec::EntityType>> {
+    use codec::EntityType;
     let n = p.vertices.len();
     if n < 3 || idx >= n {
         return None;
@@ -605,7 +605,7 @@ pub(crate) fn break_at_vertex(
         verts.extend_from_slice(&p.vertices[idx..]);
         verts.extend_from_slice(&p.vertices[..=idx]);
         let mut out = p.clone();
-        out.common.handle = acadrust::Handle::NULL;
+        out.common.handle = codec::Handle::NULL;
         out.is_closed = false;
         out.vertices = verts;
         return Some(vec![EntityType::LwPolyline(out)]);
@@ -614,13 +614,13 @@ pub(crate) fn break_at_vertex(
         return None;
     }
     let mut a = p.clone();
-    a.common.handle = acadrust::Handle::NULL;
+    a.common.handle = codec::Handle::NULL;
     a.vertices = p.vertices[..=idx].to_vec();
     if let Some(last) = a.vertices.last_mut() {
         last.bulge = 0.0;
     }
     let mut b = p.clone();
-    b.common.handle = acadrust::Handle::NULL;
+    b.common.handle = codec::Handle::NULL;
     b.vertices = p.vertices[idx..].to_vec();
     Some(vec![EntityType::LwPolyline(a), EntityType::LwPolyline(b)])
 }
@@ -888,7 +888,7 @@ fn set_revision_cloud_arc_length(pline: &mut LwPolyline, requested: f64) {
 
 pub(crate) fn rectangle_frame(
     pline: &LwPolyline,
-) -> Option<(RectangleFrame, cadkernel::space::Plane)> {
+) -> Option<(RectangleFrame, kernel::space::Plane)> {
     let planar = crate::entities::curve::lwpolyline_curve(pline)?;
     let Curve::Polyline(polyline) = &planar.curve else {
         return None;
@@ -1183,7 +1183,7 @@ fn edit_polyline_geometry(
     let mut geometry = kernel_polyline(polyline);
     if edit(&mut geometry) {
         for (target, source) in polyline.vertices.iter_mut().zip(geometry.vertices) {
-            target.location = acadrust::types::Vector2::new(source.position[0], source.position[1]);
+            target.location = codec::types::Vector2::new(source.position[0], source.position[1]);
             target.bulge = source.bulge;
         }
     }
@@ -1191,7 +1191,7 @@ fn edit_polyline_geometry(
 
 fn move_segment_parallel(polyline: &mut LwPolyline, segment: usize, offset: f64) {
     edit_polyline_geometry(polyline, |geometry| {
-        cadkernel::geom2d::move_polyline_segment_parallel(geometry, segment, offset)
+        kernel::geom2d::move_polyline_segment_parallel(geometry, segment, offset)
     });
 }
 
@@ -1200,7 +1200,7 @@ fn resize_arc_concentrically(polyline: &mut LwPolyline, segment: usize, offset: 
     edit_polyline_geometry(polyline, |geometry| {
         geometry
             .segment_arc(segment)
-            .is_some_and(|arc| cadkernel::geom2d::resize_polyline_arc(
+            .is_some_and(|arc| kernel::geom2d::resize_polyline_arc(
                 geometry,
                 segment,
                 arc.radius + offset,
@@ -1210,7 +1210,7 @@ fn resize_arc_concentrically(polyline: &mut LwPolyline, segment: usize, offset: 
 
 fn resize_arc_segment_radius(polyline: &mut LwPolyline, segment: usize, radius: f64) {
     edit_polyline_geometry(polyline, |geometry| {
-        cadkernel::geom2d::resize_polyline_arc(geometry, segment, radius)
+        kernel::geom2d::resize_polyline_arc(geometry, segment, radius)
     });
 }
 fn apply_transform(pline: &mut LwPolyline, t: &EntityTransform) {
@@ -1225,7 +1225,7 @@ fn apply_transform(pline: &mut LwPolyline, t: &EntityTransform) {
 }
 
 impl RenderConvertible for LwPolyline {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(to_render(self, document.header.fill_mode))
     }
 }
@@ -1372,7 +1372,7 @@ impl crate::entities::traits::Grippable for LwPolyline {
             let seg = grip_id.checked_sub(n)?;
             let plane = crate::entities::curve::lwpolyline_curve(self)?.plane;
             let point = Vec2::from(plane.project(point.to_array())?);
-            return cadkernel::geom2d::polyline_arc_radius_from_point(
+            return kernel::geom2d::polyline_arc_radius_from_point(
                 &kernel_polyline(self),
                 seg,
                 point.into(),
@@ -1383,7 +1383,7 @@ impl crate::entities::traits::Grippable for LwPolyline {
             let seg = grip_id.checked_sub(n)?;
             let plane = crate::entities::curve::lwpolyline_curve(self)?.plane;
             let point = Vec2::from(plane.project(point.to_array())?);
-            return cadkernel::geom2d::polyline_segment_parallel_offset(
+            return kernel::geom2d::polyline_segment_parallel_offset(
                 &kernel_polyline(self),
                 seg,
                 point.into(),
@@ -1458,7 +1458,7 @@ impl crate::entities::traits::Grippable for LwPolyline {
         if signed_distance.abs() <= Tolerance::default().linear() {
             return;
         }
-        let direction = acadrust::types::Vector2::new(axis[0], axis[1])
+        let direction = codec::types::Vector2::new(axis[0], axis[1])
             * signed_distance.signum();
         self.vertices[i0].location = self.vertices[o0].location + direction * value;
         self.vertices[i1].location = self.vertices[o1].location + direction * value;
@@ -1571,7 +1571,7 @@ impl crate::entities::traits::Transformable for LwPolyline {
 /// first vertex), so the relative-to-eye hatch fill keeps sub-unit precision at
 /// UTM-scale coordinates — building them in absolute f32 collapsed the band into
 /// a string of squares far from the origin.
-pub(crate) fn wide_fills(pl: &acadrust::entities::LwPolyline) -> ([f64; 2], Vec<Vec<[f32; 2]>>) {
+pub(crate) fn wide_fills(pl: &codec::entities::LwPolyline) -> ([f64; 2], Vec<Vec<[f32; 2]>>) {
     // Codes 43 / 40 / 41 store the band's FULL width, and
     // `polyline_segment_fill` offsets ±hw about the centreline — so halve it.
     // Feeding the stored width in whole draws every wide polyline twice as wide
@@ -1616,7 +1616,7 @@ pub(crate) fn wide_fills(pl: &acadrust::entities::LwPolyline) -> ([f64; 2], Vec<
     (origin, out)
 }
 
-impl crate::entities::traits::MassPropsCalc for acadrust::entities::LwPolyline {
+impl crate::entities::traits::MassPropsCalc for codec::entities::LwPolyline {
     fn mass_props(&self) -> crate::entities::traits::MassProps {
         let p = self;
         let n = p.vertices.len();
@@ -1657,8 +1657,8 @@ mod tests {
 
     use crate::entities::traits::{Grippable, PropertyEditable};
     use crate::scene::model::object::GripMenuAction;
-    use acadrust::entities::{LwPolyline, LwVertex};
-    use acadrust::{Vector2, Vector3};
+    use codec::entities::{LwPolyline, LwVertex};
+    use codec::{Vector2, Vector3};
 
     fn make_test_lwpolyline(count: usize, constant_width: f64) -> LwPolyline {
         let mut pl = LwPolyline::default();

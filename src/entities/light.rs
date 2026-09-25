@@ -1,7 +1,7 @@
 //! Light entity display glyph (point / spot / distant).
 //!
 //! Lights are nonprint helper entities: the DWG reader decodes the source
-//! position and aim point (see `acadrust`'s `Light`); here we synthesize a
+//! position and aim point (see `opencadcodec`'s `Light`); here we synthesize a
 //! wireframe glyph so the light is visible and selectable in the editor, the
 //! same way AutoCAD shows a light symbol.
 //!
@@ -9,8 +9,8 @@
 //! zoom) via [`relative_render`], falling back to a small fixed world size when
 //! no world-per-pixel factor is available (e.g. snapshot tessellation).
 
-use acadrust::entities::Light;
-use acadrust::EntityType;
+use codec::entities::Light;
+use codec::EntityType;
 use crate::t;
 
 use crate::command::EntityTransform;
@@ -190,7 +190,7 @@ fn build(l: &Light, r: f64) -> RenderEntity {
 /// available (the caller then falls back to the fixed-world [`to_render`]).
 pub fn relative_render(
     entity: &EntityType,
-    _document: &acadrust::CadDocument,
+    _document: &codec::CadDocument,
     wpp: Option<f32>,
 ) -> Option<RenderEntity> {
     let EntityType::Light(l) = entity else {
@@ -201,7 +201,7 @@ pub fn relative_render(
 }
 
 impl RenderConvertible for Light {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(build(self, FIXED_WORLD))
     }
 }

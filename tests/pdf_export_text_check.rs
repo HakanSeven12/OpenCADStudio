@@ -8,9 +8,9 @@
 // see `emit_text`'s ops. What only an integration test can cover is that the
 // real entity -> scene.entity_wires() -> export_pdf path carries text at all,
 // per entity kind — so that is what this asserts.
-use acadrust::entities::{Dimension, DimensionLinear, Text};
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::{Dimension, DimensionLinear, Text};
+use codec::types::Vector3;
+use codec::EntityType;
 use OpenCADStudio::io::pdf_export::{
     export_pdf, PdfPageInput, PdfPlotOptions, PlotContent, PlotWire,
 };
@@ -35,7 +35,7 @@ fn text_and_dim_reach_pdf_export() {
     // regression — the actual reported bug — green.
     // Tessellation names each wire after its entity handle (see the
     // `w.name.parse::<u64>()` lookup in the render pipeline).
-    let has_text = |h: acadrust::types::Handle| {
+    let has_text = |h: codec::types::Handle| {
         let want = h.value().to_string();
         wires
             .iter()

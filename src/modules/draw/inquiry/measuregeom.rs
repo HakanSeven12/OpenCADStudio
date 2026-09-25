@@ -14,7 +14,7 @@
 // All arithmetic is kept in f64 (picked points stay full precision; downcasting
 // to f32 loses several hundredths of a unit at survey-scale coordinates).
 
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 use crate::t;
 

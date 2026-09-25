@@ -7,7 +7,7 @@
 //         a PDF underlay. Rows that need the definition (name, page, path,
 //         width, height) are filled in by the Properties panel.
 
-use acadrust::entities::{Underlay, UnderlayDisplayFlags};
+use codec::entities::{Underlay, UnderlayDisplayFlags};
 use crate::t;
 use glam::DVec3;
 
@@ -20,7 +20,7 @@ use crate::scene::model::wire_model::SnapHint;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn v3(v: &acadrust::types::Vector3) -> [f64; 3] {
+fn v3(v: &codec::types::Vector3) -> [f64; 3] {
     [v.x, v.y, v.z]
 }
 
@@ -39,16 +39,16 @@ fn cross_wire(origin: [f64; 3], size: f64) -> Vec<[f64; 3]> {
 /// The underlay's definition, when the handle resolves to one.
 pub(crate) fn definition<'a>(
     u: &Underlay,
-    document: &'a acadrust::CadDocument,
-) -> Option<&'a acadrust::entities::UnderlayDefinition> {
+    document: &'a codec::CadDocument,
+) -> Option<&'a codec::entities::UnderlayDefinition> {
     match document.objects.get(&u.definition_handle) {
-        Some(acadrust::objects::ObjectType::UnderlayDefinition(d)) => Some(d),
+        Some(codec::objects::ObjectType::UnderlayDefinition(d)) => Some(d),
         _ => None,
     }
 }
 
 /// Page number of a definition ("1" when unset).
-pub(crate) fn page_of(def: &acadrust::entities::UnderlayDefinition) -> &str {
+pub(crate) fn page_of(def: &codec::entities::UnderlayDefinition) -> &str {
     if def.page_name.trim().is_empty() {
         "1"
     } else {
@@ -58,9 +58,9 @@ pub(crate) fn page_of(def: &acadrust::entities::UnderlayDefinition) -> &str {
 
 /// Size of the referenced page in underlay units (page inches), when the
 /// definition resolves and its PDF page can be read.
-pub(crate) fn page_size(u: &Underlay, document: &acadrust::CadDocument) -> Option<(f64, f64)> {
+pub(crate) fn page_size(u: &Underlay, document: &codec::CadDocument) -> Option<(f64, f64)> {
     let def = definition(u, document)?;
-    if !matches!(def.underlay_type, acadrust::entities::UnderlayType::Pdf) {
+    if !matches!(def.underlay_type, codec::entities::UnderlayType::Pdf) {
         return None;
     }
     crate::scene::model::pdf_raster::page_size_inches(&def.file_path, page_of(def))
@@ -68,7 +68,7 @@ pub(crate) fn page_size(u: &Underlay, document: &acadrust::CadDocument) -> Optio
 
 /// The name a definition shows: its own name, or "<file> - <page>" as the
 /// reference names a PDF definition.
-pub(crate) fn definition_display_name(def: &acadrust::entities::UnderlayDefinition) -> String {
+pub(crate) fn definition_display_name(def: &codec::entities::UnderlayDefinition) -> String {
     if !def.name.trim().is_empty() {
         return def.name.clone();
     }
@@ -114,7 +114,7 @@ pub(crate) fn is_clipped(u: &Underlay) -> bool {
 }
 
 /// Page frame in world space (CCW from the insertion).
-fn page_quad(u: &Underlay, document: &acadrust::CadDocument) -> Option<[[f64; 3]; 4]> {
+fn page_quad(u: &Underlay, document: &codec::CadDocument) -> Option<[[f64; 3]; 4]> {
     let (w, h) = page_size(u, document)?;
     Some([
         local_to_world(u, [0.0, 0.0]),
@@ -126,7 +126,7 @@ fn page_quad(u: &Underlay, document: &acadrust::CadDocument) -> Option<[[f64; 3]
 
 /// Local-space extent of what is shown: the clip polygon's box when clipped
 /// to its inside, else the page.
-fn shown_local_extent(u: &Underlay, document: &acadrust::CadDocument) -> Option<(f64, f64)> {
+fn shown_local_extent(u: &Underlay, document: &codec::CadDocument) -> Option<(f64, f64)> {
     if is_clipped(u) && !u.clip_inverted {
         let clip = clip_polygon_local(u);
         let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
@@ -141,7 +141,7 @@ fn shown_local_extent(u: &Underlay, document: &acadrust::CadDocument) -> Option<
 
 /// Width and height the Properties panel shows: the shown extent times the
 /// scale (the clip's size once clipped, as the reference reports it).
-pub(crate) fn shown_size(u: &Underlay, document: &acadrust::CadDocument) -> Option<(f64, f64)> {
+pub(crate) fn shown_size(u: &Underlay, document: &codec::CadDocument) -> Option<(f64, f64)> {
     shown_local_extent(u, document).map(|(w, h)| (w * u.x_scale.abs(), h * u.y_scale.abs()))
 }
 
@@ -149,7 +149,7 @@ pub(crate) fn shown_size(u: &Underlay, document: &acadrust::CadDocument) -> Opti
 /// inside, else the page frame. `None` when the page is unknown.
 pub(crate) fn world_bounds(
     u: &Underlay,
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
 ) -> Option<([f64; 3], [f64; 3])> {
     let outline: Vec<[f64; 3]> = if is_clipped(u) && !u.clip_inverted {
         clip_polygon_local(u).into_iter().map(|p| local_to_world(u, p)).collect()
@@ -224,7 +224,7 @@ pub(crate) fn validate_property(field: &str, value: &str) -> Result<(), &'static
 /// size itself is the page (or clip) size times the scale.
 pub(crate) fn size_to_scale(
     u: &Underlay,
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     field: &str,
     value: &str,
 ) -> Option<String> {
@@ -241,7 +241,7 @@ pub(crate) fn size_to_scale(
 // ── RenderConvertible ──────────────────────────────────────────────────────────
 
 impl RenderConvertible for Underlay {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         let origin = v3(&self.insertion_point);
         let insertion_snap = (
             DVec3::new(self.insertion_point.x, self.insertion_point.y, self.insertion_point.z),
@@ -493,7 +493,7 @@ impl Transformable for Underlay {
             }
             EntityTransform::Mirror { p1, p2, working_normal } => {
                 if !working_normal.normalize_or(DVec3::Z).abs_diff_eq(DVec3::Z, 1e-10) {
-                    acadrust::Entity::apply_transform(
+                    codec::Entity::apply_transform(
                         self,
                         &crate::scene::view::transform::reflection_about_working_line(
                             *p1,
@@ -549,7 +549,7 @@ impl Transformable for Underlay {
                 self.rotation += a;
             }
             EntityTransform::Affine(transform) => {
-                acadrust::Entity::apply_transform(self, transform);
+                codec::Entity::apply_transform(self, transform);
             }
         }
     }

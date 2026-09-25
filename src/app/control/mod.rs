@@ -110,7 +110,7 @@ pub(super) struct State {
     events: VecDeque<Value>,
     pub(super) routing: bool,
     /// Session-scoped named handle sets for selection_set_save/load.
-    selection_sets: std::collections::BTreeMap<String, Vec<acadrust::Handle>>,
+    selection_sets: std::collections::BTreeMap<String, Vec<codec::Handle>>,
     /// Live `user_select` request — the client asked the person at the screen
     /// to pick entities; Some until that person answers with Enter/Escape.
     pub(super) user_select: Option<UserSelectSession>,
@@ -190,9 +190,9 @@ fn string<'a>(req: &'a Value, key: &str) -> Result<&'a str, Value> {
         .filter(|v| !v.is_empty())
         .ok_or_else(|| failure("invalid_request", format!("Missing {key}")))
 }
-fn handle(req: &Value) -> Result<acadrust::Handle, Value> {
+fn handle(req: &Value) -> Result<codec::Handle, Value> {
     u64::from_str_radix(string(req, "handle")?.trim_start_matches("0x"), 16)
-        .map(acadrust::Handle::new)
+        .map(codec::Handle::new)
         .map_err(|_| failure("invalid_handle", "Expected hexadecimal handle"))
 }
 #[cfg(not(target_arch = "wasm32"))]
@@ -923,7 +923,7 @@ impl OpenCADStudio {
                             v.as_str().unwrap_or("").trim_start_matches("0x"),
                             16,
                         )
-                        .map(acadrust::Handle::new)
+                        .map(codec::Handle::new)
                         .map_err(|_| failure("invalid_handle", "Expected hexadecimal handle"))?;
                         if self.tabs[i].scene.document.get_entity(h).is_none() {
                             return Err(failure(
@@ -1184,13 +1184,13 @@ impl OpenCADStudio {
     }
     pub(super) fn control_measure(&self, req: &Value) -> Value {
         let tab = &self.tabs[self.active_tab];
-        let requested: Vec<acadrust::Handle> = req["handles"]
+        let requested: Vec<codec::Handle> = req["handles"]
             .as_array()
             .map(|a| {
                 a.iter()
                     .filter_map(|v| v.as_str())
                     .filter_map(|v| u64::from_str_radix(v.trim_start_matches("0x"), 16).ok())
-                    .map(acadrust::Handle::new)
+                    .map(codec::Handle::new)
                     .collect()
             })
             .unwrap_or_else(|| tab.scene.selected_handles_in_order());
@@ -1311,6 +1311,7 @@ impl OpenCADStudio {
     }
 }
 mod actions;
+pub(crate) use actions::property_json;
 mod entities;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod http_bridge;
@@ -1501,7 +1502,7 @@ mod tests {
             .document
             .entities()
             .find_map(|entity| {
-                matches!(entity, acadrust::EntityType::Solid3D(_)).then(|| entity.common().handle)
+                matches!(entity, codec::EntityType::Solid3D(_)).then(|| entity.common().handle)
             })
             .unwrap();
         let handle_text = format!("{:X}", handle.value());
@@ -1527,7 +1528,7 @@ mod tests {
                 .scene
                 .document
                 .solid_history_operation(handle),
-            Some(acadrust::objects::SolidHistoryOperation::Brep(_))
+            Some(codec::objects::SolidHistoryOperation::Brep(_))
         ));
 
         assert_eq!(request(&mut app, json!({"op":"undo"}))["ok"], true);
@@ -1691,7 +1692,7 @@ mod tests {
             .document
             .entities()
             .find_map(|e| match e {
-                acadrust::EntityType::Circle(c) => Some(c.center.y),
+                codec::EntityType::Circle(c) => Some(c.center.y),
                 _ => None,
             });
         assert_eq!(circle, Some(-10.0));
@@ -1717,7 +1718,7 @@ mod tests {
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, acadrust::EntityType::Ole2Frame(_)))
+                .filter(|e| matches!(e, codec::EntityType::Ole2Frame(_)))
                 .count()
         };
         assert_eq!(ole_count(&app), 1);
@@ -1742,7 +1743,7 @@ mod tests {
         let value = u64::from_str_radix(&handle, 16).unwrap();
         app.tabs[app.active_tab]
             .scene
-            .select_entity(acadrust::Handle::new(value), false);
+            .select_entity(codec::Handle::new(value), false);
         handle
     }
 
@@ -2034,7 +2035,7 @@ mod tests {
             .unwrap()
             .to_owned();
         let value = u64::from_str_radix(&handle, 16).unwrap();
-        app.tabs[i].scene.select_entity(acadrust::Handle::new(value), false);
+        app.tabs[i].scene.select_entity(codec::Handle::new(value), false);
         let _ = app.update(Message::CommandFinalize);
         let done = user_select_result(&mut app, "us-snap");
         assert_eq!(done["status"], "completed", "{done}");
@@ -2090,19 +2091,19 @@ mod tests {
             let scene = &mut app.tabs[app.active_tab].scene;
             // Two layers set to different pen weights; entities fully ByLayer.
             for (name, weight) in [
-                ("THIN", acadrust::types::LineWeight::Value(13)),
-                ("THICK", acadrust::types::LineWeight::Value(50)),
+                ("THIN", codec::types::LineWeight::Value(13)),
+                ("THICK", codec::types::LineWeight::Value(50)),
             ] {
-                let mut layer = acadrust::tables::Layer::new(name);
+                let mut layer = codec::tables::Layer::new(name);
                 layer.line_weight = weight;
                 let _ = scene.document.layers.add(layer);
             }
             for (name, origin) in [("THIN", 0.0), ("THICK", 3000.0)] {
-                let mut line = acadrust::entities::Line::new();
+                let mut line = codec::entities::Line::new();
                 line.common.layer = name.to_string();
-                line.start = acadrust::types::Vector3::new(origin, origin, 0.0);
-                line.end = acadrust::types::Vector3::new(origin + 3000.0, origin + 2000.0, 0.0);
-                scene.add_entity(acadrust::EntityType::Line(line));
+                line.start = codec::types::Vector3::new(origin, origin, 0.0);
+                line.end = codec::types::Vector3::new(origin + 3000.0, origin + 2000.0, 0.0);
+                scene.add_entity(codec::EntityType::Line(line));
             }
         }
 
@@ -2146,28 +2147,28 @@ mod tests {
         {
             let scene = &mut app.tabs[app.active_tab].scene;
             // Frame layer carries the classic cyan ACI 4; its entity is ByLayer.
-            let mut frame = acadrust::tables::Layer::new("FRAME-CYAN");
-            frame.color = acadrust::types::Color::Index(4);
+            let mut frame = codec::tables::Layer::new("FRAME-CYAN");
+            frame.color = codec::types::Color::Index(4);
             let _ = scene.document.layers.add(frame);
-            let mut frame_line = acadrust::entities::Line::new();
+            let mut frame_line = codec::entities::Line::new();
             frame_line.common.layer = "FRAME-CYAN".to_string();
-            frame_line.start = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
-            frame_line.end = acadrust::types::Vector3::new(3000.0, 0.0, 0.0);
-            scene.add_entity(acadrust::EntityType::Line(frame_line));
+            frame_line.start = codec::types::Vector3::new(0.0, 0.0, 0.0);
+            frame_line.end = codec::types::Vector3::new(3000.0, 0.0, 0.0);
+            scene.add_entity(codec::EntityType::Line(frame_line));
 
             // An explicit red ACI 1 and a true-color green: index must map
             // through the CTB, the true color must stay RGB (aci 0).
-            let mut red = acadrust::entities::Line::new();
-            red.common.color = acadrust::types::Color::Index(1);
-            red.start = acadrust::types::Vector3::new(0.0, 1000.0, 0.0);
-            red.end = acadrust::types::Vector3::new(3000.0, 1000.0, 0.0);
-            scene.add_entity(acadrust::EntityType::Line(red));
+            let mut red = codec::entities::Line::new();
+            red.common.color = codec::types::Color::Index(1);
+            red.start = codec::types::Vector3::new(0.0, 1000.0, 0.0);
+            red.end = codec::types::Vector3::new(3000.0, 1000.0, 0.0);
+            scene.add_entity(codec::EntityType::Line(red));
 
-            let mut true_color = acadrust::entities::Line::new();
-            true_color.common.color = acadrust::types::Color::from_true_color_value(0x0000FF00);
-            true_color.start = acadrust::types::Vector3::new(0.0, 2000.0, 0.0);
-            true_color.end = acadrust::types::Vector3::new(3000.0, 2000.0, 0.0);
-            scene.add_entity(acadrust::EntityType::Line(true_color));
+            let mut true_color = codec::entities::Line::new();
+            true_color.common.color = codec::types::Color::from_true_color_value(0x0000FF00);
+            true_color.start = codec::types::Vector3::new(0.0, 2000.0, 0.0);
+            true_color.end = codec::types::Vector3::new(3000.0, 2000.0, 0.0);
+            scene.add_entity(codec::EntityType::Line(true_color));
         }
 
         let pdf = std::env::temp_dir().join(format!("ocs-plot-aci-{}.pdf", std::process::id()));

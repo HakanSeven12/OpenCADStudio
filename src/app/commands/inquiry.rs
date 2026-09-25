@@ -4,7 +4,7 @@ impl OpenCADStudio {
     /// Align every selected object or complete group by one edge or center.
     fn align_selected_bounds(&mut self, i: usize, command: &str) {
         use crate::command::EntityTransform;
-        use cadkernel::space::BoundsAlignment;
+        use kernel::space::BoundsAlignment;
         use glam::DVec3;
 
         let (alignment, label) = match command {
@@ -58,7 +58,7 @@ impl OpenCADStudio {
         }
 
         let extents: Vec<_> = bounds.iter().map(|(_, bounds)| *bounds).collect();
-        let offsets = cadkernel::space::align_aabbs_2d(&extents, alignment)
+        let offsets = kernel::space::align_aabbs_2d(&extents, alignment)
             .expect("validated at least two finite bounds");
         let pending = self.begin_undo(i, label, handles.len(), true);
         for ((unit, _), [dx, dy]) in bounds.iter().zip(offsets) {
@@ -207,7 +207,7 @@ impl OpenCADStudio {
                         *type_counts
                             .entry(crate::entities::names::dxf_name(e))
                             .or_default() += 1;
-                        if let acadrust::EntityType::Insert(ins) = e {
+                        if let codec::EntityType::Insert(ins) = e {
                             *block_counts.entry(ins.block_name.clone()).or_default() += 1;
                         }
                     }
@@ -287,7 +287,7 @@ impl OpenCADStudio {
                 use crate::modules::draw::modify::join::JoinCommand;
                 // Pickfirst: with objects already selected, join them right
                 // away instead of asking for a selection again.
-                let selected: Vec<acadrust::Handle> =
+                let selected: Vec<codec::Handle> =
                     self.tabs[i].scene.selected.iter().copied().collect();
                 if selected.len() >= 2 {
                     let task =
@@ -325,8 +325,8 @@ impl OpenCADStudio {
                     .filter_map(|e| {
                         let h = e.common().handle.value();
                         match e {
-                            acadrust::EntityType::LwPolyline(_)
-                            | acadrust::EntityType::Polyline2D(_) => Some((
+                            codec::EntityType::LwPolyline(_)
+                            | codec::EntityType::Polyline2D(_) => Some((
                                 h,
                                 PeditTarget {
                                     is_poly: true,
@@ -335,7 +335,7 @@ impl OpenCADStudio {
                                     mesh_closed: None,
                                 },
                             )),
-                            acadrust::EntityType::Line(_) | acadrust::EntityType::Arc(_) => {
+                            codec::EntityType::Line(_) | codec::EntityType::Arc(_) => {
                                 Some((
                                     h,
                                     PeditTarget {
@@ -346,7 +346,7 @@ impl OpenCADStudio {
                                     },
                                 ))
                             }
-                            acadrust::EntityType::PolygonMesh(mesh) => Some((
+                            codec::EntityType::PolygonMesh(mesh) => Some((
                                 h,
                                 PeditTarget {
                                     is_poly: true,
@@ -364,7 +364,7 @@ impl OpenCADStudio {
                     .collect();
                 // Pickfirst: an already-selected polyline (or line/arc, via
                 // the convert prompt) skips the select step.
-                let preselected: Vec<acadrust::Handle> =
+                let preselected: Vec<codec::Handle> =
                     self.tabs[i].scene.selected.iter().copied().collect();
                 let header = &self.tabs[i].scene.document.header;
                 let cmd_obj = PeditCommand::new(
@@ -387,12 +387,12 @@ impl OpenCADStudio {
                 let targets = document
                     .entities()
                     .filter_map(|entity| {
-                        let acadrust::EntityType::MLine(mline) = entity else {
+                        let codec::EntityType::MLine(mline) = entity else {
                             return None;
                         };
                         let style = crate::entities::mline::resolved_mline_style(mline, document)
                             .cloned()
-                            .unwrap_or_else(acadrust::objects::MLineStyle::standard);
+                            .unwrap_or_else(codec::objects::MLineStyle::standard);
                         Some((
                             entity.common().handle.value(),
                             MlineEditTarget {
@@ -412,7 +412,7 @@ impl OpenCADStudio {
                 let mut cmd_obj = SplineditCommand::new().with_delete_source(self.delete_objects != 0);
                 let selected: Vec<_> = self.tabs[i].scene.selected.iter().copied().collect();
                 if let [handle] = selected.as_slice() {
-                    if let Some(entity @ acadrust::EntityType::Spline(_)) =
+                    if let Some(entity @ codec::EntityType::Spline(_)) =
                         self.tabs[i].scene.document.get_entity(*handle).cloned()
                     {
                         if self.reject_locked_edit(i, *handle) { return Some(Task::none()); }
@@ -444,7 +444,7 @@ impl OpenCADStudio {
                     let selected: Vec<_> =
                         self.tabs[i].scene.selected_entities().into_iter().collect();
                     if selected.len() == 1 {
-                        if let Some(acadrust::EntityType::Insert(_)) =
+                        if let Some(codec::EntityType::Insert(_)) =
                             selected.first().map(|(_, e)| e)
                         {
                             let handle = selected[0].0;
@@ -470,7 +470,7 @@ impl OpenCADStudio {
                     let selected: Vec<_> =
                         self.tabs[i].scene.selected_entities().into_iter().collect();
                     if selected.len() == 1 {
-                        if let Some(acadrust::EntityType::Insert(_)) =
+                        if let Some(codec::EntityType::Insert(_)) =
                             selected.first().map(|(_, e)| e)
                         {
                             let handle = selected[0].0;
@@ -487,7 +487,7 @@ impl OpenCADStudio {
 
             cmd if cmd.starts_with("BEDIT_BEGIN:") => {
                 use crate::modules::draw::modify::block_edit::BlockEditSession;
-                use acadrust::Handle;
+                use codec::Handle;
 
                 let handle_u64: u64 = cmd["BEDIT_BEGIN:".len()..].parse().unwrap_or(0);
                 let insert_handle = Handle::new(handle_u64);
@@ -496,7 +496,7 @@ impl OpenCADStudio {
                 }
 
                 let block_name = match self.tabs[i].scene.document.get_entity(insert_handle) {
-                    Some(acadrust::EntityType::Insert(ins)) => ins.block_name.clone(),
+                    Some(codec::EntityType::Insert(ins)) => ins.block_name.clone(),
                     _ => {
                         self.command_line
                             .push_error(crate::t!("BEDIT: selected object is not a block reference.").as_ref());
@@ -563,7 +563,7 @@ impl OpenCADStudio {
                     .document
                     .entities()
                     .filter_map(|entity| match entity {
-                        acadrust::EntityType::Insert(reference)
+                        codec::EntityType::Insert(reference)
                             if reference.block_name.eq_ignore_ascii_case(&block_name)
                                 && !reference.attributes.is_empty() =>
                         {
@@ -735,7 +735,7 @@ impl OpenCADStudio {
                     let _ = self.tabs[i].scene.document.add_entity(entity);
                 }
                 for (handle, attributes) in session.reference_attributes {
-                    if let Some(acadrust::EntityType::Insert(reference)) =
+                    if let Some(codec::EntityType::Insert(reference)) =
                         self.tabs[i].scene.document.get_entity_mut(handle)
                     {
                         reference.attributes = attributes;
@@ -765,7 +765,7 @@ impl OpenCADStudio {
                 use crate::modules::draw::modify::refedit::{
                     apply_insert_transform, RefEditSession,
                 };
-                use acadrust::Handle;
+                use codec::Handle;
 
                 let handle_u64: u64 = cmd["REFEDIT_BEGIN:".len()..].parse().unwrap_or(0);
                 let insert_handle = Handle::new(handle_u64);
@@ -775,7 +775,7 @@ impl OpenCADStudio {
 
                 // Get INSERT entity.
                 let insert = match self.tabs[i].scene.document.get_entity(insert_handle) {
-                    Some(acadrust::EntityType::Insert(ins)) => ins.clone(),
+                    Some(codec::EntityType::Insert(ins)) => ins.clone(),
                     _ => {
                         self.command_line
                             .push_error(crate::t!("REFEDIT: selected object is not an INSERT.").as_ref());
@@ -791,7 +791,7 @@ impl OpenCADStudio {
                 let sz = insert.z_scale();
                 let forward = insert.get_transform();
                 let inverse = {
-                    use acadrust::types::{Matrix3, Matrix4, Transform};
+                    use codec::types::{Matrix3, Matrix4, Transform};
                     let ocs_t =
                         Matrix4::from_matrix3(Matrix3::arbitrary_axis(insert.normal).transpose());
                     let t_inv = Matrix4::translation(
@@ -836,9 +836,9 @@ impl OpenCADStudio {
                         .filter(|e| {
                             !matches!(
                                 e,
-                                acadrust::EntityType::Block(_)
-                                    | acadrust::EntityType::BlockEnd(_)
-                                    | acadrust::EntityType::AttributeDefinition(_)
+                                codec::EntityType::Block(_)
+                                    | codec::EntityType::BlockEnd(_)
+                                    | codec::EntityType::AttributeDefinition(_)
                             )
                         })
                         .collect()
@@ -871,8 +871,8 @@ impl OpenCADStudio {
                 let mut temp_handles = Vec::new();
                 for mut entity in block_entities {
                     apply_insert_transform(&mut entity, &session);
-                    entity.common_mut().handle = acadrust::Handle::NULL;
-                    entity.common_mut().owner_handle = acadrust::Handle::NULL;
+                    entity.common_mut().handle = codec::Handle::NULL;
+                    entity.common_mut().owner_handle = codec::Handle::NULL;
                     let h = self.tabs[i].scene.add_entity(entity);
                     temp_handles.push(h);
                 }
@@ -933,7 +933,7 @@ impl OpenCADStudio {
                 // offset entities carry handles at or above the watermark) —
                 // those must fold into the block too, not stay behind in
                 // model space (#423).
-                let working: Vec<acadrust::Handle> = {
+                let working: Vec<codec::Handle> = {
                     let space = self.tabs[i].scene.current_layout_block_handle_pub();
                     let drawn = self.tabs[i].scene.document.entities().filter(|e| {
                         let c = e.common();
@@ -950,7 +950,7 @@ impl OpenCADStudio {
                 };
 
                 // Collect the edited temp entities.
-                let new_entities: Vec<acadrust::EntityType> = working
+                let new_entities: Vec<codec::EntityType> = working
                     .iter()
                     .filter_map(|h| self.tabs[i].scene.document.get_entity(*h).cloned())
                     .collect();
@@ -964,7 +964,7 @@ impl OpenCADStudio {
                     .map(|mut entity| {
                         apply_insert_inverse_transform(&mut entity, &session);
                         let mut entity = normalize_entity_for_block(entity);
-                        entity.common_mut().handle = acadrust::Handle::NULL;
+                        entity.common_mut().handle = codec::Handle::NULL;
                         entity.common_mut().owner_handle = session.br_handle;
                         entity
                     })
@@ -1021,7 +1021,7 @@ impl OpenCADStudio {
                 };
                 // Remove the working set without modifying the block — the
                 // temp copies plus anything created during the session (#423).
-                let working: Vec<acadrust::Handle> = {
+                let working: Vec<codec::Handle> = {
                     let space = self.tabs[i].scene.current_layout_block_handle_pub();
                     let drawn = self.tabs[i].scene.document.entities().filter(|e| {
                         let c = e.common();
@@ -1047,7 +1047,7 @@ impl OpenCADStudio {
             "ALIGN" => {
                 use crate::modules::draw::modify::align::AlignCommand;
 
-                let selected: Vec<acadrust::Handle> =
+                let selected: Vec<codec::Handle> =
                     self.tabs[i].scene.selected.iter().copied().collect();
 
                 let cmd = AlignCommand::with_selection(selected);
@@ -1131,7 +1131,7 @@ impl OpenCADStudio {
 
             // ── FLATTEN — move selected (or all) entities to Z=0 ─────────────
             "FLATTEN" => {
-                let handles: Vec<acadrust::Handle> = {
+                let handles: Vec<codec::Handle> = {
                     let scene = &self.tabs[i].scene;
                     let sel = self.tabs[i].scene.selected_entities();
                     if sel.is_empty() {
@@ -1201,7 +1201,7 @@ impl OpenCADStudio {
                 let prop = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
                 let val = parts.get(1).map(|s| s.trim()).unwrap_or("").to_uppercase();
 
-                let matched: Vec<acadrust::Handle> = self.tabs[i]
+                let matched: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .document
                     .entities()
@@ -1316,7 +1316,7 @@ impl OpenCADStudio {
                 } else {
                     let search_lc = search.to_lowercase();
                     let mut count = 0usize;
-                    let handles: Vec<acadrust::Handle> = self.tabs[i]
+                    let handles: Vec<codec::Handle> = self.tabs[i]
                         .scene
                         .document
                         .entities()
@@ -1475,7 +1475,7 @@ impl OpenCADStudio {
                 // A dimension template also carries its dimension style, adopted
                 // as the current DIMSTYLE so the cloned dimension matches (#239).
                 match e {
-                    acadrust::EntityType::Dimension(d) => Some(d.base().style_name.clone()),
+                    codec::EntityType::Dimension(d) => Some(d.base().style_name.clone()),
                     _ => None,
                 },
             )
@@ -1536,7 +1536,7 @@ impl OpenCADStudio {
             .layers
             .get(&layer)
             .map(|l| l.handle)
-            .unwrap_or(acadrust::types::Handle::NULL);
+            .unwrap_or(codec::types::Handle::NULL);
         let lt_handle = self.tabs[i]
             .scene
             .document
@@ -1544,7 +1544,7 @@ impl OpenCADStudio {
             .iter()
             .find(|x| x.name.eq_ignore_ascii_case(&linetype))
             .map(|x| x.handle)
-            .unwrap_or(acadrust::types::Handle::NULL);
+            .unwrap_or(codec::types::Handle::NULL);
         {
             let header = &mut self.tabs[i].scene.document.header;
             header.current_layer_name = layer.clone();
@@ -1565,7 +1565,7 @@ impl OpenCADStudio {
                 .iter()
                 .find(|s| s.name.eq_ignore_ascii_case(ds))
                 .map(|s| s.handle)
-                .unwrap_or(acadrust::types::Handle::NULL);
+                .unwrap_or(codec::types::Handle::NULL);
             let header = &mut self.tabs[i].scene.document.header;
             header.current_dimstyle_name = ds.clone();
             header.current_dimstyle_handle = ds_handle;
@@ -1622,8 +1622,8 @@ impl OpenCADStudio {
 /// Map a template entity to the draw-command verb that creates the same kind of
 /// object, or `None` when there is no interactive creator for it. Used by
 /// ADDSELECTED (issue #239).
-fn add_selected_verb(entity: &acadrust::EntityType) -> Option<&'static str> {
-    use acadrust::EntityType;
+fn add_selected_verb(entity: &codec::EntityType) -> Option<&'static str> {
+    use codec::EntityType;
     Some(match entity {
         EntityType::Point(_) => "POINT",
         EntityType::Line(_) => "LINE",
@@ -1644,7 +1644,7 @@ fn add_selected_verb(entity: &acadrust::EntityType) -> Option<&'static str> {
         // Dimensions launch the matching dimension command by their stored type
         // (issue #239). Angular 2-line and 3-point both use DIMANGULAR.
         EntityType::Dimension(d) => {
-            use acadrust::entities::DimensionType;
+            use codec::entities::DimensionType;
             match d.base().dimension_type {
                 DimensionType::Linear => "DIMLINEAR",
                 DimensionType::Aligned => "DIMALIGNED",
@@ -1660,10 +1660,10 @@ fn add_selected_verb(entity: &acadrust::EntityType) -> Option<&'static str> {
     })
 }
 
-fn entity_list_details(entity: &acadrust::EntityType) -> String {
+fn entity_list_details(entity: &codec::EntityType) -> String {
     use std::f64::consts::PI;
     match entity {
-        acadrust::EntityType::Line(l) => crate::tf!(
+        codec::EntityType::Line(l) => crate::tf!(
             "from ({:.4},{:.4},{:.4}) to ({:.4},{:.4},{:.4})  len={:.4}",
             l.start.x,
             l.start.y,
@@ -1676,7 +1676,7 @@ fn entity_list_details(entity: &acadrust::EntityType) -> String {
                 + (l.end.z - l.start.z).powi(2))
             .sqrt()
         ).into_owned(),
-        acadrust::EntityType::Circle(c) => crate::tf!(
+        codec::EntityType::Circle(c) => crate::tf!(
             "center ({:.4},{:.4},{:.4})  r={:.4}  area={:.4}",
             c.center.x,
             c.center.y,
@@ -1684,7 +1684,7 @@ fn entity_list_details(entity: &acadrust::EntityType) -> String {
             c.radius,
             PI * c.radius * c.radius
         ).into_owned(),
-        acadrust::EntityType::Arc(a) => crate::tf!(
+        codec::EntityType::Arc(a) => crate::tf!(
             "center ({:.4},{:.4},{:.4})  r={:.4}  start={:.2}° end={:.2}°",
             a.center.x,
             a.center.y,
@@ -1693,24 +1693,24 @@ fn entity_list_details(entity: &acadrust::EntityType) -> String {
             a.start_angle.to_degrees(),
             a.end_angle.to_degrees()
         ).into_owned(),
-        acadrust::EntityType::LwPolyline(p) => crate::tf!(
+        codec::EntityType::LwPolyline(p) => crate::tf!(
             "{} vertices  closed={}  elevation={:.4}",
             p.vertices.len(),
             p.is_closed,
             p.elevation
         ).into_owned(),
-        acadrust::EntityType::Text(t) => crate::tf!(
+        codec::EntityType::Text(t) => crate::tf!(
             "\"{}\"  h={:.4}  at ({:.4},{:.4})",
             t.value, t.height, t.insertion_point.x, t.insertion_point.y
         ).into_owned(),
-        acadrust::EntityType::MText(t) => crate::tf!(
+        codec::EntityType::MText(t) => crate::tf!(
             "\"{}\"  h={:.4}  at ({:.4},{:.4})",
             t.value.chars().take(40).collect::<String>(),
             t.height,
             t.insertion_point.x,
             t.insertion_point.y
         ).into_owned(),
-        acadrust::EntityType::Insert(ins) => crate::tf!(
+        codec::EntityType::Insert(ins) => crate::tf!(
             "block=\"{}\"  at ({:.4},{:.4},{:.4})  scale=({:.4},{:.4},{:.4})  rot={:.2}°",
             ins.block_name,
             ins.insert_point.x,
@@ -1721,13 +1721,13 @@ fn entity_list_details(entity: &acadrust::EntityType) -> String {
             ins.z_scale(),
             ins.rotation.to_degrees()
         ).into_owned(),
-        acadrust::EntityType::Spline(s) => crate::tf!(
+        codec::EntityType::Spline(s) => crate::tf!(
             "{} ctrl pts  degree={}  closed={}",
             s.control_points.len(),
             s.degree,
             s.flags.closed
         ).into_owned(),
-        acadrust::EntityType::Ellipse(e) => crate::tf!(
+        codec::EntityType::Ellipse(e) => crate::tf!(
             "center ({:.4},{:.4})  major_len={:.4}  ratio={:.4}",
             e.center.x,
             e.center.y,
@@ -1738,40 +1738,40 @@ fn entity_list_details(entity: &acadrust::EntityType) -> String {
     }
 }
 
-fn flatten_entity_z(entity: &acadrust::EntityType) -> Option<acadrust::EntityType> {
-    use acadrust::types::Vector3;
+fn flatten_entity_z(entity: &codec::EntityType) -> Option<codec::EntityType> {
+    use codec::types::Vector3;
 
     let flattened = match entity {
-        acadrust::EntityType::Circle(_)
-        | acadrust::EntityType::Arc(_)
-        | acadrust::EntityType::Ellipse(_)
-        | acadrust::EntityType::LwPolyline(_)
-        | acadrust::EntityType::Polyline2D(_) => flatten_curve_entity(entity)?,
-        acadrust::EntityType::Line(source) => {
+        codec::EntityType::Circle(_)
+        | codec::EntityType::Arc(_)
+        | codec::EntityType::Ellipse(_)
+        | codec::EntityType::LwPolyline(_)
+        | codec::EntityType::Polyline2D(_) => flatten_curve_entity(entity)?,
+        codec::EntityType::Line(source) => {
             let mut line = source.clone();
             line.start = flatten_point(line.start)?;
             line.end = flatten_point(line.end)?;
             line.thickness = 0.0;
             line.normal = Vector3::UNIT_Z;
-            acadrust::EntityType::Line(line)
+            codec::EntityType::Line(line)
         }
-        acadrust::EntityType::Polyline(source) => {
+        codec::EntityType::Polyline(source) => {
             let mut polyline = source.clone();
             for vertex in &mut polyline.vertices {
                 vertex.location = flatten_point(vertex.location)?;
             }
-            acadrust::EntityType::Polyline(polyline)
+            codec::EntityType::Polyline(polyline)
         }
-        acadrust::EntityType::Polyline3D(source) => {
+        codec::EntityType::Polyline3D(source) => {
             let mut polyline = source.clone();
             polyline.elevation = 0.0;
             polyline.normal = Vector3::UNIT_Z;
             for vertex in &mut polyline.vertices {
                 vertex.position = flatten_point(vertex.position)?;
             }
-            acadrust::EntityType::Polyline3D(polyline)
+            codec::EntityType::Polyline3D(polyline)
         }
-        acadrust::EntityType::Text(source) if positive_z_normal(source.normal) => {
+        codec::EntityType::Text(source) if positive_z_normal(source.normal) => {
             let mut text = source.clone();
             text.insertion_point = flatten_point(text.insertion_point)?;
             if let Some(alignment) = text.alignment_point {
@@ -1779,22 +1779,22 @@ fn flatten_entity_z(entity: &acadrust::EntityType) -> Option<acadrust::EntityTyp
             }
             text.thickness = 0.0;
             text.normal = Vector3::UNIT_Z;
-            acadrust::EntityType::Text(text)
+            codec::EntityType::Text(text)
         }
-        acadrust::EntityType::MText(source) if positive_z_normal(source.normal) => {
+        codec::EntityType::MText(source) if positive_z_normal(source.normal) => {
             let mut text = source.clone();
             text.insertion_point = flatten_point(text.insertion_point)?;
             text.normal = Vector3::UNIT_Z;
-            acadrust::EntityType::MText(text)
+            codec::EntityType::MText(text)
         }
-        acadrust::EntityType::Point(source) => {
+        codec::EntityType::Point(source) => {
             let mut point = source.clone();
             point.location = flatten_point(point.location)?;
             point.thickness = 0.0;
             point.normal = Vector3::UNIT_Z;
-            acadrust::EntityType::Point(point)
+            codec::EntityType::Point(point)
         }
-        acadrust::EntityType::Spline(source) => {
+        codec::EntityType::Spline(source) => {
             let mut spline = source.clone();
             for point in &mut spline.control_points {
                 *point = flatten_point(*point)?;
@@ -1806,9 +1806,9 @@ fn flatten_entity_z(entity: &acadrust::EntityType) -> Option<acadrust::EntityTyp
             spline.end_tangent = flatten_vector(spline.end_tangent)?;
             spline.normal = Vector3::UNIT_Z;
             spline.flags.planar = true;
-            acadrust::EntityType::Spline(spline)
+            codec::EntityType::Spline(spline)
         }
-        acadrust::EntityType::Solid(source) => {
+        codec::EntityType::Solid(source) => {
             let corners = crate::entities::solid::wcs_corners(source);
             let mut solid = source.clone();
             solid.first_corner = flatten_array(corners[0])?;
@@ -1817,15 +1817,15 @@ fn flatten_entity_z(entity: &acadrust::EntityType) -> Option<acadrust::EntityTyp
             solid.fourth_corner = flatten_array(corners[3])?;
             solid.normal = Vector3::UNIT_Z;
             solid.thickness = 0.0;
-            acadrust::EntityType::Solid(solid)
+            codec::EntityType::Solid(solid)
         }
-        acadrust::EntityType::Face3D(source) => {
+        codec::EntityType::Face3D(source) => {
             let mut face = source.clone();
             face.first_corner = flatten_point(face.first_corner)?;
             face.second_corner = flatten_point(face.second_corner)?;
             face.third_corner = flatten_point(face.third_corner)?;
             face.fourth_corner = flatten_point(face.fourth_corner)?;
-            acadrust::EntityType::Face3D(face)
+            codec::EntityType::Face3D(face)
         }
         _ => return None,
     };
@@ -1833,19 +1833,19 @@ fn flatten_entity_z(entity: &acadrust::EntityType) -> Option<acadrust::EntityTyp
     (flattened != *entity).then_some(flattened)
 }
 
-fn flatten_curve_entity(entity: &acadrust::EntityType) -> Option<acadrust::EntityType> {
-    use acadrust::types::{Vector2, Vector3};
-    use cadkernel::geom2d::Curve;
+fn flatten_curve_entity(entity: &codec::EntityType) -> Option<codec::EntityType> {
+    use codec::types::{Vector2, Vector3};
+    use kernel::geom2d::Curve;
 
     match entity {
-        acadrust::EntityType::Ellipse(source)
+        codec::EntityType::Ellipse(source)
             if source.center.z == 0.0
                 && source.major_axis.z == 0.0
                 && source.normal == Vector3::UNIT_Z =>
         {
             return None;
         }
-        acadrust::EntityType::LwPolyline(source)
+        codec::EntityType::LwPolyline(source)
             if !z_axis_normal(source.normal)
                 && (source.constant_width != 0.0
                     || source
@@ -1855,7 +1855,7 @@ fn flatten_curve_entity(entity: &acadrust::EntityType) -> Option<acadrust::Entit
         {
             return None;
         }
-        acadrust::EntityType::Polyline2D(source)
+        codec::EntityType::Polyline2D(source)
             if !z_axis_normal(source.normal)
                 && (source.start_width != 0.0
                     || source.end_width != 0.0
@@ -1866,7 +1866,7 @@ fn flatten_curve_entity(entity: &acadrust::EntityType) -> Option<acadrust::Entit
         {
             return None;
         }
-        acadrust::EntityType::LwPolyline(source) if source.vertices.len() < 2 => {
+        codec::EntityType::LwPolyline(source) if source.vertices.len() < 2 => {
             let plane = crate::entities::curve::ocs_plane(source.normal, source.elevation);
             let mut polyline = source.clone();
             for vertex in &mut polyline.vertices {
@@ -1879,9 +1879,9 @@ fn flatten_curve_entity(entity: &acadrust::EntityType) -> Option<acadrust::Entit
             polyline.elevation = 0.0;
             polyline.thickness = 0.0;
             polyline.normal = Vector3::UNIT_Z;
-            return Some(acadrust::EntityType::LwPolyline(polyline));
+            return Some(codec::EntityType::LwPolyline(polyline));
         }
-        acadrust::EntityType::Polyline2D(source) if source.vertices.len() < 2 => {
+        codec::EntityType::Polyline2D(source) if source.vertices.len() < 2 => {
             let plane = crate::entities::curve::ocs_plane(source.normal, source.elevation);
             let mut polyline = source.clone();
             for vertex in &mut polyline.vertices {
@@ -1894,22 +1894,22 @@ fn flatten_curve_entity(entity: &acadrust::EntityType) -> Option<acadrust::Entit
             polyline.elevation = 0.0;
             polyline.thickness = 0.0;
             polyline.normal = Vector3::UNIT_Z;
-            return Some(acadrust::EntityType::Polyline2D(polyline));
+            return Some(codec::EntityType::Polyline2D(polyline));
         }
         _ => {}
     }
 
     let curve = crate::entities::curve::entity_curve_xy(entity)?;
     match (entity, curve) {
-        (acadrust::EntityType::Circle(source), Curve::Circle(curve)) => {
+        (codec::EntityType::Circle(source), Curve::Circle(curve)) => {
             let mut circle = source.clone();
             circle.center = Vector3::new(curve.centre[0], curve.centre[1], 0.0);
             circle.radius = curve.radius;
             circle.thickness = 0.0;
             circle.normal = Vector3::UNIT_Z;
-            Some(acadrust::EntityType::Circle(circle))
+            Some(codec::EntityType::Circle(circle))
         }
-        (acadrust::EntityType::Arc(source), Curve::Arc(curve)) => {
+        (codec::EntityType::Arc(source), Curve::Arc(curve)) => {
             let mut arc = source.clone();
             arc.center = Vector3::new(curve.centre[0], curve.centre[1], 0.0);
             arc.radius = curve.radius;
@@ -1917,18 +1917,18 @@ fn flatten_curve_entity(entity: &acadrust::EntityType) -> Option<acadrust::Entit
             arc.end_angle = curve.end_angle;
             arc.thickness = 0.0;
             arc.normal = Vector3::UNIT_Z;
-            Some(acadrust::EntityType::Arc(arc))
+            Some(codec::EntityType::Arc(arc))
         }
-        (acadrust::EntityType::Circle(source), Curve::Ellipse(curve)) => {
+        (codec::EntityType::Circle(source), Curve::Ellipse(curve)) => {
             flattened_ellipse(source.common.clone(), curve)
         }
-        (acadrust::EntityType::Arc(source), Curve::Ellipse(curve)) => {
+        (codec::EntityType::Arc(source), Curve::Ellipse(curve)) => {
             flattened_ellipse(source.common.clone(), curve)
         }
-        (acadrust::EntityType::Ellipse(source), Curve::Ellipse(curve)) => {
+        (codec::EntityType::Ellipse(source), Curve::Ellipse(curve)) => {
             flattened_ellipse(source.common.clone(), curve)
         }
-        (acadrust::EntityType::LwPolyline(source), Curve::Polyline(curve)) => {
+        (codec::EntityType::LwPolyline(source), Curve::Polyline(curve)) => {
             if curve.vertices.len() != source.vertices.len() {
                 return None;
             }
@@ -1940,9 +1940,9 @@ fn flatten_curve_entity(entity: &acadrust::EntityType) -> Option<acadrust::Entit
             polyline.elevation = 0.0;
             polyline.thickness = 0.0;
             polyline.normal = Vector3::UNIT_Z;
-            Some(acadrust::EntityType::LwPolyline(polyline))
+            Some(codec::EntityType::LwPolyline(polyline))
         }
-        (acadrust::EntityType::Polyline2D(source), Curve::Polyline(curve)) => {
+        (codec::EntityType::Polyline2D(source), Curve::Polyline(curve)) => {
             if curve.vertices.len() != source.vertices.len() {
                 return None;
             }
@@ -1955,23 +1955,23 @@ fn flatten_curve_entity(entity: &acadrust::EntityType) -> Option<acadrust::Entit
             polyline.elevation = 0.0;
             polyline.thickness = 0.0;
             polyline.normal = Vector3::UNIT_Z;
-            Some(acadrust::EntityType::Polyline2D(polyline))
+            Some(codec::EntityType::Polyline2D(polyline))
         }
         _ => None,
     }
 }
 
 fn flattened_ellipse(
-    common: acadrust::entities::EntityCommon,
-    curve: cadkernel::geom2d::EllipseArc,
-) -> Option<acadrust::EntityType> {
-    use acadrust::types::Vector3;
+    common: codec::entities::EntityCommon,
+    curve: kernel::geom2d::EllipseArc,
+) -> Option<codec::EntityType> {
+    use codec::types::Vector3;
 
     let geometry = curve.ellipse;
     if !geometry.major_radius.is_finite() || geometry.major_radius <= 0.0 {
         return None;
     }
-    let mut ellipse = acadrust::entities::Ellipse::new();
+    let mut ellipse = codec::entities::Ellipse::new();
     ellipse.common = common;
     ellipse.center = Vector3::new(geometry.centre[0], geometry.centre[1], 0.0);
     ellipse.major_axis = Vector3::new(
@@ -1983,36 +1983,36 @@ fn flattened_ellipse(
     ellipse.start_parameter = curve.start_parameter;
     ellipse.end_parameter = curve.end_parameter;
     ellipse.normal = Vector3::UNIT_Z;
-    Some(acadrust::EntityType::Ellipse(ellipse))
+    Some(codec::EntityType::Ellipse(ellipse))
 }
 
-fn flatten_point(point: acadrust::types::Vector3) -> Option<acadrust::types::Vector3> {
+fn flatten_point(point: codec::types::Vector3) -> Option<codec::types::Vector3> {
     flatten_array([point.x, point.y, point.z])
 }
 
-fn flatten_array(point: [f64; 3]) -> Option<acadrust::types::Vector3> {
-    use cadkernel::space::Plane;
+fn flatten_array(point: [f64; 3]) -> Option<codec::types::Vector3> {
+    use kernel::space::Plane;
 
     let point = Plane::XY.point_at(Plane::XY.project(point)?);
-    Some(acadrust::types::Vector3::new(point[0], point[1], point[2]))
+    Some(codec::types::Vector3::new(point[0], point[1], point[2]))
 }
 
-fn flatten_vector(vector: acadrust::types::Vector3) -> Option<acadrust::types::Vector3> {
-    use cadkernel::space::Plane;
+fn flatten_vector(vector: codec::types::Vector3) -> Option<codec::types::Vector3> {
+    use kernel::space::Plane;
 
     let vector = Plane::XY.vector_at(Plane::XY.project_vector([
         vector.x, vector.y, vector.z,
     ])?);
-    Some(acadrust::types::Vector3::new(
+    Some(codec::types::Vector3::new(
         vector[0], vector[1], vector[2],
     ))
 }
 
-fn positive_z_normal(normal: acadrust::types::Vector3) -> bool {
+fn positive_z_normal(normal: codec::types::Vector3) -> bool {
     normal.x == 0.0 && normal.y == 0.0 && normal.z > 0.0
 }
 
-fn z_axis_normal(normal: acadrust::types::Vector3) -> bool {
+fn z_axis_normal(normal: codec::types::Vector3) -> bool {
     normal.x == 0.0 && normal.y == 0.0 && normal.z != 0.0
 }
 
@@ -2044,7 +2044,7 @@ impl OpenCADStudio {
             if sel.len() == 1 {
                 let (h, e) = sel[0];
                 match e {
-                    acadrust::EntityType::Insert(ins) if !ins.attributes.is_empty() => Some(h),
+                    codec::EntityType::Insert(ins) if !ins.attributes.is_empty() => Some(h),
                     _ => None,
                 }
             } else {
@@ -2152,15 +2152,15 @@ impl ArithParser {
 #[cfg(test)]
 mod flatten_tests {
     use super::flatten_entity_z;
-    use acadrust::types::Vector3;
-    use acadrust::EntityType;
+    use codec::types::Vector3;
+    use codec::EntityType;
 
     #[test]
     fn flattens_3d_polyline_vertices() {
-        let mut pl = acadrust::entities::Polyline3D::new();
+        let mut pl = codec::entities::Polyline3D::new();
         for z in [5.0, -2.0, 7.5] {
             pl.vertices
-                .push(acadrust::entities::Vertex3DPolyline::new(Vector3::new(1.0, 2.0, z)));
+                .push(codec::entities::Vertex3DPolyline::new(Vector3::new(1.0, 2.0, z)));
         }
         pl.elevation = 5.0;
 
@@ -2178,9 +2178,9 @@ mod flatten_tests {
 
     #[test]
     fn flattens_2d_polyline_vertices_and_elevation() {
-        let mut pl = acadrust::entities::Polyline2D::new();
+        let mut pl = codec::entities::Polyline2D::new();
         pl.vertices
-            .push(acadrust::entities::Vertex2D::new(Vector3::new(3.0, 4.0, 9.0)));
+            .push(codec::entities::Vertex2D::new(Vector3::new(3.0, 4.0, 9.0)));
         pl.elevation = 9.0;
 
         let entity = EntityType::Polyline2D(pl);
@@ -2196,7 +2196,7 @@ mod flatten_tests {
 
     #[test]
     fn flattens_solid_corners() {
-        let solid = acadrust::entities::Solid::new(
+        let solid = codec::entities::Solid::new(
             Vector3::new(0.0, 0.0, 1.0),
             Vector3::new(1.0, 0.0, 2.0),
             Vector3::new(1.0, 1.0, 3.0),
@@ -2217,7 +2217,7 @@ mod flatten_tests {
 
     #[test]
     fn reports_unsupported_entities_as_not_moved() {
-        let entity = EntityType::Ray(acadrust::entities::Ray::new(
+        let entity = EntityType::Ray(codec::entities::Ray::new(
             Vector3::new(0.0, 0.0, 5.0),
             Vector3::new(1.0, 0.0, 0.0),
         ));
@@ -2226,7 +2226,7 @@ mod flatten_tests {
 
     #[test]
     fn still_flattens_a_line() {
-        let mut line = acadrust::entities::Line::new();
+        let mut line = codec::entities::Line::new();
         line.start = Vector3::new(0.0, 0.0, 3.0);
         line.end = Vector3::new(1.0, 1.0, 4.0);
         let entity = EntityType::Line(line);
@@ -2237,7 +2237,7 @@ mod flatten_tests {
 
     #[test]
     fn already_flat_line_is_not_moved() {
-        let mut line = acadrust::entities::Line::new();
+        let mut line = codec::entities::Line::new();
         line.start = Vector3::new(0.0, 0.0, 0.0);
         line.end = Vector3::new(1.0, 1.0, 0.0);
         let entity = EntityType::Line(line);
@@ -2246,7 +2246,7 @@ mod flatten_tests {
 
     #[test]
     fn tilted_circle_projects_to_ellipse() {
-        let mut circle = acadrust::entities::Circle::from_center_radius(
+        let mut circle = codec::entities::Circle::from_center_radius(
             Vector3::new(2.0, 3.0, 4.0),
             5.0,
         );
@@ -2266,7 +2266,7 @@ mod flatten_tests {
 
     #[test]
     fn tilted_solid_uses_world_projection() {
-        let mut solid = acadrust::entities::Solid::new(
+        let mut solid = codec::entities::Solid::new(
             Vector3::new(0.0, 0.0, 2.0),
             Vector3::new(1.0, 0.0, 2.0),
             Vector3::new(1.0, 1.0, 2.0),
@@ -2297,10 +2297,10 @@ mod flatten_tests {
 #[cfg(test)]
 mod align_selected_bounds_tests {
     use super::*;
-    use acadrust::entities::{EntityType, Line};
-    use acadrust::types::Vector3;
+    use codec::entities::{EntityType, Line};
+    use codec::types::Vector3;
 
-    fn add_line(app: &mut OpenCADStudio, x1: f64, y1: f64, x2: f64, y2: f64) -> acadrust::Handle {
+    fn add_line(app: &mut OpenCADStudio, x1: f64, y1: f64, x2: f64, y2: f64) -> codec::Handle {
         app.tabs[app.active_tab]
             .scene
             .add_entity(EntityType::Line(Line::from_points(
@@ -2309,14 +2309,14 @@ mod align_selected_bounds_tests {
             )))
     }
 
-    fn line_start_x(app: &OpenCADStudio, handle: acadrust::Handle) -> f64 {
+    fn line_start_x(app: &OpenCADStudio, handle: codec::Handle) -> f64 {
         match app.tabs[app.active_tab].scene.document.get_entity(handle) {
             Some(EntityType::Line(l)) => l.start.x.min(l.end.x),
             other => panic!("expected a Line, got {other:?}"),
         }
     }
 
-    fn line_max_y(app: &OpenCADStudio, handle: acadrust::Handle) -> f64 {
+    fn line_max_y(app: &OpenCADStudio, handle: codec::Handle) -> f64 {
         match app.tabs[app.active_tab].scene.document.get_entity(handle) {
             Some(EntityType::Line(l)) => l.start.y.max(l.end.y),
             other => panic!("expected a Line, got {other:?}"),

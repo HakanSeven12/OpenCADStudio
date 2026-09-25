@@ -1,6 +1,6 @@
-use acadrust::entities::polygon_mesh::{PolygonMesh, PolygonMeshVertex};
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::polygon_mesh::{PolygonMesh, PolygonMeshVertex};
+use codec::types::Vector3;
+use codec::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, DynField};

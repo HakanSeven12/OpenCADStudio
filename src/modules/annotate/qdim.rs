@@ -1,9 +1,9 @@
 //! Quick dimension creation from a selected set of drawing entities.
 
-use acadrust::entities::{Dimension, DimensionDiameter, DimensionLinear, DimensionOrdinate, DimensionRadius};
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
-use cadkernel::geom2d::{characteristic_points, intersect, Curve, SnapKind, Tolerance};
+use codec::entities::{Dimension, DimensionDiameter, DimensionLinear, DimensionOrdinate, DimensionRadius};
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
+use kernel::geom2d::{characteristic_points, intersect, Curve, SnapKind, Tolerance};
 use glam::DVec3;
 
 use crate::command::{

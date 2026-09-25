@@ -9,10 +9,10 @@
 // The MText is a separate entity referenced by the leader's annotation_handle
 // (DXF group 340); editing/erasing them stays in sync via that link.
 
-use acadrust::entities::mtext::AttachmentPoint;
-use acadrust::entities::{Leader, LeaderCreationType, LeaderPathType, MText};
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::mtext::AttachmentPoint;
+use codec::entities::{Leader, LeaderCreationType, LeaderPathType, MText};
+use codec::types::Vector3;
+use codec::EntityType;
 use glam::{DVec3, Mat4, Vec3};
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, WorkingPlane};

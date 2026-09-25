@@ -1,7 +1,7 @@
-use acadrust::entities::{Dimension, DimensionLinear};
-use acadrust::types::Vector3;
-use acadrust::EntityType;
-use cadkernel::geom2d::{
+use codec::entities::{Dimension, DimensionLinear};
+use codec::types::Vector3;
+use codec::EntityType;
+use kernel::geom2d::{
     closest_point, Circle as KernelCircle, Curve, Line as KernelLine,
 };
 
@@ -87,7 +87,7 @@ pub struct LinearDimensionCommand {
     axis_mode: AxisMode,
     selecting_object: bool,
     picked_entity: Option<EntityType>,
-    source_handle: Option<acadrust::Handle>,
+    source_handle: Option<codec::Handle>,
     mtext_override: bool,
 }
 
@@ -368,7 +368,7 @@ impl CadCommand for LinearDimensionCommand {
         self.picked_entity = Some(entity);
     }
 
-    fn on_entity_pick(&mut self, handle: acadrust::Handle, point: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: codec::Handle, point: DVec3) -> CmdResult {
         let Some(entity) = self.picked_entity.take() else {
             return CmdResult::NeedPoint;
         };

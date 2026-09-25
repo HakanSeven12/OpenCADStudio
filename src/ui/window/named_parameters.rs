@@ -18,8 +18,8 @@ use crate::scene::named_parameters::ParameterTable;
 use crate::scene::Scene;
 use crate::t;
 use crate::ui::style::common::muted_style;
-use acadrust::types::Handle;
-use acadrust::EntityType;
+use codec::types::Handle;
+use codec::EntityType;
 use iced::widget::tooltip::Position as TipPos;
 use iced::widget::{button, column, container, row, scrollable, text, text_input, tooltip, Space};
 use iced::{Background, Element, Length, Theme};
@@ -392,10 +392,10 @@ mod tests {
             ConstraintKind, ParametricRef, ParametricScope,
         };
         let mut scene = Scene::new();
-        let line = scene.add_entity(acadrust::EntityType::Line(
-            acadrust::entities::Line::from_points(
-                acadrust::types::Vector3::new(0.0, 0.0, 0.0),
-                acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+        let line = scene.add_entity(codec::EntityType::Line(
+            codec::entities::Line::from_points(
+                codec::types::Vector3::new(0.0, 0.0, 0.0),
+                codec::types::Vector3::new(10.0, 0.0, 0.0),
             ),
         ));
         scene
@@ -426,7 +426,7 @@ mod tests {
     #[test]
     fn entity_label_reports_erased_for_a_dangling_handle() {
         let scene = Scene::new();
-        let label = entity_label(&scene, acadrust::types::Handle::new(999));
+        let label = entity_label(&scene, codec::types::Handle::new(999));
         assert!(label.starts_with("(erased "), "got {label}");
     }
 }

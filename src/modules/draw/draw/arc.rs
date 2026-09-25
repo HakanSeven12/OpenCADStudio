@@ -1,9 +1,9 @@
 // Arc creation commands.
 
-use acadrust::types::Vector3;
-use acadrust::{Arc as CadArc, EntityType};
+use codec::types::Vector3;
+use codec::{Arc as CadArc, EntityType};
 use crate::t;
-use cadkernel::geom2d::{self, Curve as KernelCurve};
+use kernel::geom2d::{self, Curve as KernelCurve};
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::modules::IconKind;

@@ -22,7 +22,7 @@ pub struct RecoveryReport {
     pub source_path: Option<PathBuf>,
     pub size_bytes: u64,
     pub source_sha256: Option<String>,
-    pub read_stats: Option<acadrust::ReadStats>,
+    pub read_stats: Option<codec::ReadStats>,
     pub entities_scanned: usize,
     pub entities_removed: usize,
     pub referenced_entities_removed: usize,
@@ -35,7 +35,7 @@ pub struct RecoveryReport {
     pub references_failed: usize,
     pub references_skipped: usize,
     pub reference_details: Vec<(String, String, String, Option<String>)>,
-    pub reference_stats: Vec<(String, acadrust::ReadStats)>,
+    pub reference_stats: Vec<(String, codec::ReadStats)>,
     pub timings: OpenTimings,
     pub total_ms: u32,
     pub failure_phase: Option<String>,
@@ -52,12 +52,12 @@ impl RecoveryReport {
         path: &Path,
         size_bytes: u64,
         source_sha256: Option<String>,
-        read_stats: Option<acadrust::ReadStats>,
+        read_stats: Option<codec::ReadStats>,
         entities_scanned: usize,
         entities_removed: usize,
         referenced_entities_removed: usize,
         references: &[XrefInfo],
-        notifications: &acadrust::notification::NotificationCollection,
+        notifications: &codec::notification::NotificationCollection,
         save_as_required: bool,
         timings: OpenTimings,
         total_ms: u32,
@@ -124,7 +124,7 @@ impl RecoveryReport {
                     .iter()
                     .filter(|item| {
                         item.notification_type
-                            == acadrust::notification::NotificationType::Error
+                            == codec::notification::NotificationType::Error
                     })
                     .count()
             });
@@ -193,7 +193,7 @@ impl RecoveryReport {
         file_name: String,
         size_bytes: u64,
         source_sha256: Option<String>,
-        read_stats: Option<acadrust::ReadStats>,
+        read_stats: Option<codec::ReadStats>,
         failure_phase: String,
         error: String,
         total_ms: u32,
@@ -259,7 +259,7 @@ impl RecoveryReport {
         lines.push(format!("Application revision: {}", env!("OCS_GIT_REV")));
         lines.push(format!("Build profile: {}", env!("OCS_BUILD_PROFILE")));
         lines.push(format!("Build features: {}", env!("OCS_BUILD_FEATURES")));
-        lines.push(format!("Reader version: {}", acadrust::VERSION));
+        lines.push(format!("Reader version: {}", codec::VERSION));
         lines.push(format!("Reader revision: {}", reader_revision()));
         lines.push(format!("Platform: {}", diagnostic_platform()));
         lines.push(format!("Created (Unix seconds): {}", self.created_unix_seconds));
@@ -543,7 +543,7 @@ fn redact_source_path(message: &str, source: Option<&Path>) -> String {
     redacted
 }
 
-fn structured_diagnostic_line(diagnostic: &acadrust::ReadDiagnostic) -> String {
+fn structured_diagnostic_line(diagnostic: &codec::ReadDiagnostic) -> String {
     let section = diagnostic.section.as_deref().unwrap_or("-");
     let offset = diagnostic
         .source_offset
@@ -579,7 +579,7 @@ fn structured_diagnostic_line(diagnostic: &acadrust::ReadDiagnostic) -> String {
 fn reader_revision() -> String {
     include_str!("../../Cargo.toml")
         .lines()
-        .find(|line| line.trim_start().starts_with("acadrust = { git ="))
+        .find(|line| line.trim_start().starts_with("opencadcodec = { git ="))
         .and_then(|line| line.split("rev = \"").nth(1))
         .and_then(|value| value.split('"').next())
         .filter(|value| !value.is_empty())

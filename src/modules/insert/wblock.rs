@@ -4,7 +4,7 @@
 //   block name  → copies the named block definition to a new document
 //   *           → copies currently selected model-space entities
 
-use acadrust::{CadDocument, EntityType};
+use codec::{CadDocument, EntityType};
 use crate::t;
 
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -68,8 +68,8 @@ pub fn extract_block_into(
                 continue;
             }
             let mut clone = entity.clone();
-            clone.common_mut().handle = acadrust::types::Handle::NULL;
-            clone.common_mut().owner_handle = acadrust::types::Handle::NULL;
+            clone.common_mut().handle = codec::types::Handle::NULL;
+            clone.common_mut().owner_handle = codec::types::Handle::NULL;
             let _ = out.add_entity(clone);
         }
     }
@@ -89,7 +89,7 @@ pub fn extract_block_into(
 /// (the "selected entities" mode, `*`).
 pub fn extract_entities_to_doc(
     src: &CadDocument,
-    handles: &[acadrust::Handle],
+    handles: &[codec::Handle],
 ) -> Result<CadDocument, String> {
     let mut out = CadDocument::new();
     extract_entities_into(src, handles, &mut out)?;
@@ -99,7 +99,7 @@ pub fn extract_entities_to_doc(
 /// Extract the listed entities into `out` (fresh document or template base).
 pub fn extract_entities_into(
     src: &CadDocument,
-    handles: &[acadrust::Handle],
+    handles: &[codec::Handle],
     out: &mut CadDocument,
 ) -> Result<(), String> {
     if handles.is_empty() {
@@ -119,8 +119,8 @@ pub fn extract_entities_into(
                 }
             }
             let mut clone = entity.clone();
-            clone.common_mut().handle = acadrust::types::Handle::NULL;
-            clone.common_mut().owner_handle = acadrust::types::Handle::NULL;
+            clone.common_mut().handle = codec::types::Handle::NULL;
+            clone.common_mut().owner_handle = codec::types::Handle::NULL;
             let _ = out.add_entity(clone);
         }
     }
@@ -150,8 +150,8 @@ pub fn normalize_to_origin(out: &mut CadDocument) {
     if min.iter().any(|v| !v.is_finite()) {
         return;
     }
-    let shift = crate::command::EntityTransform::Affine(acadrust::types::Transform::from_translation(
-        acadrust::types::Vector3::new(-min[0], -min[1], -min[2]),
+    let shift = crate::command::EntityTransform::Affine(codec::types::Transform::from_translation(
+        codec::types::Vector3::new(-min[0], -min[1], -min[2]),
     ));
     for entity in out.entities_mut() {
         crate::scene::view::dispatch::apply_transform(entity, &shift);
@@ -187,7 +187,7 @@ impl crate::command::CadCommand for WblockPickBasePointCommand {
 /// applying `base_point` translation and `unit` insertion units.
 pub fn extract_entities_to_doc_with_base(
     src: &CadDocument,
-    handles: &[acadrust::Handle],
+    handles: &[codec::Handle],
     base_point: glam::DVec3,
     unit: i16,
 ) -> Result<CadDocument, String> {
@@ -196,7 +196,7 @@ pub fn extract_entities_to_doc_with_base(
     extract_entities_into(src, handles, &mut out)?;
     if base_point != glam::DVec3::ZERO {
         let shift = crate::command::EntityTransform::Affine(
-            acadrust::types::Transform::from_translation(acadrust::types::Vector3::new(
+            codec::types::Transform::from_translation(codec::types::Vector3::new(
                 -base_point.x,
                 -base_point.y,
                 -base_point.z,
@@ -212,8 +212,8 @@ pub fn extract_entities_to_doc_with_base(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::Line;
-    use acadrust::types::Vector3;
+    use codec::entities::Line;
+    use codec::types::Vector3;
 
     #[test]
     fn test_extract_entities_with_base_point_and_units() {
@@ -252,7 +252,7 @@ mod tests {
         line.end = Vector3::new(3.0, 4.0, 0.0);
         let h = doc.add_entity(EntityType::Line(line)).unwrap();
 
-        let mut block_record = acadrust::tables::BlockRecord::new("MY_BLOCK".to_string());
+        let mut block_record = codec::tables::BlockRecord::new("MY_BLOCK".to_string());
         block_record.entity_handles.push(h);
         let _ = doc.block_records.add(block_record);
 

@@ -1,4 +1,4 @@
-use acadrust::entities::{
+use codec::entities::{
     Dimension, DimensionAligned, DimensionAngular2Ln, DimensionAngular3Pt, DimensionArc,
     DimensionBase, DimensionDiameter, DimensionLargeRadial, DimensionLinear, DimensionOrdinate,
     DimensionRadius,
@@ -34,7 +34,7 @@ pub(crate) fn normalize_scripted_dimension(dim: &mut Dimension) {
     dim.base_mut().actual_measurement = dim.measurement();
 }
 
-fn dimension_definition_point(dim: &Dimension) -> acadrust::types::Vector3 {
+fn dimension_definition_point(dim: &Dimension) -> codec::types::Vector3 {
     match dim {
         Dimension::Aligned(d) => d.definition_point,
         Dimension::Linear(d) => d.definition_point,
@@ -308,9 +308,9 @@ fn properties(dim: &Dimension) -> Vec<PropSection> {
 }
 
 fn linear_like_props(
-    first: acadrust::types::Vector3,
-    second: acadrust::types::Vector3,
-    definition: acadrust::types::Vector3,
+    first: codec::types::Vector3,
+    second: codec::types::Vector3,
+    definition: codec::types::Vector3,
 ) -> Vec<crate::scene::model::object::Property> {
     vec![
         edit(t!("First X").as_ref(), "first_x", first.x),
@@ -326,8 +326,8 @@ fn linear_like_props(
 }
 
 fn radius_like_props(
-    center: acadrust::types::Vector3,
-    point: acadrust::types::Vector3,
+    center: codec::types::Vector3,
+    point: codec::types::Vector3,
 ) -> Vec<crate::scene::model::object::Property> {
     vec![
         edit(t!("Center X").as_ref(), "center_x", center.x),
@@ -340,10 +340,10 @@ fn radius_like_props(
 }
 
 fn angular_props(
-    vertex: acadrust::types::Vector3,
-    first: acadrust::types::Vector3,
-    second: acadrust::types::Vector3,
-    definition: acadrust::types::Vector3,
+    vertex: codec::types::Vector3,
+    first: codec::types::Vector3,
+    second: codec::types::Vector3,
+    definition: codec::types::Vector3,
 ) -> Vec<crate::scene::model::object::Property> {
     vec![
         edit(t!("Vertex X").as_ref(), "vertex_x", vertex.x),
@@ -482,7 +482,7 @@ fn apply_linear_fields_aligned(d: &mut DimensionAligned, field: &str, value: &st
         let delta = angle - old_angle;
         let origin_x = d.first_point.x;
         let origin_y = d.first_point.y;
-        let rotate = |point: &mut acadrust::types::Vector3| {
+        let rotate = |point: &mut codec::types::Vector3| {
             let x = point.x - origin_x;
             let y = point.y - origin_y;
             let (sin, cos) = delta.sin_cos();
@@ -530,9 +530,9 @@ fn apply_linear_fields_linear(d: &mut DimensionLinear, field: &str, value: &str)
 }
 
 fn apply_linear_common(
-    first: &mut acadrust::types::Vector3,
-    second: &mut acadrust::types::Vector3,
-    definition: &mut acadrust::types::Vector3,
+    first: &mut codec::types::Vector3,
+    second: &mut codec::types::Vector3,
+    definition: &mut codec::types::Vector3,
     field: &str,
     value: &str,
 ) {
@@ -583,8 +583,8 @@ fn apply_diameter_fields(d: &mut DimensionDiameter, field: &str, value: &str) {
 }
 
 fn apply_radius_common(
-    center: &mut acadrust::types::Vector3,
-    point: &mut acadrust::types::Vector3,
+    center: &mut codec::types::Vector3,
+    point: &mut codec::types::Vector3,
     field: &str,
     value: &str,
 ) {
@@ -646,10 +646,10 @@ fn apply_angular3_fields(d: &mut DimensionAngular3Pt, field: &str, value: &str) 
 }
 
 fn apply_angular_common(
-    vertex: &mut acadrust::types::Vector3,
-    first: &mut acadrust::types::Vector3,
-    second: &mut acadrust::types::Vector3,
-    definition: &mut acadrust::types::Vector3,
+    vertex: &mut codec::types::Vector3,
+    first: &mut codec::types::Vector3,
+    second: &mut codec::types::Vector3,
+    definition: &mut codec::types::Vector3,
     field: &str,
     value: &str,
 ) {
@@ -772,7 +772,7 @@ fn apply_large_radial_fields(d: &mut DimensionLargeRadial, field: &str, value: &
         };
         let delta = angle - large_radial_rotation(d);
         let origin = d.definition_point;
-        let rotate = |point: &mut acadrust::types::Vector3| {
+        let rotate = |point: &mut codec::types::Vector3| {
             let x = point.x - origin.x;
             let y = point.y - origin.y;
             let (sin, cos) = delta.sin_cos();
@@ -842,7 +842,7 @@ fn large_radial_rotation(d: &DimensionLargeRadial) -> f64 {
 
 fn apply_transform(dim: &mut Dimension, t: &EntityTransform) {
     crate::scene::view::transform::apply_standard_entity_transform(dim, t, |entity, p1, p2| {
-        acadrust::Entity::apply_transform(
+        codec::Entity::apply_transform(
             entity,
             &crate::scene::view::transform::reflection_about_xy_line(p1, p2),
         );
@@ -869,23 +869,23 @@ impl Transformable for Dimension {
 
 /// f64 variant for grip positions — grips must not round UTM-scale
 /// coordinates through f32 before the world-offset subtraction.
-fn dv3(v: &acadrust::types::Vector3) -> glam::DVec3 {
+fn dv3(v: &codec::types::Vector3) -> glam::DVec3 {
     glam::DVec3::new(v.x, v.y, v.z)
 }
 
-fn set_v3(target: &mut acadrust::types::Vector3, p: DVec3) {
+fn set_v3(target: &mut codec::types::Vector3, p: DVec3) {
     target.x = p.x;
     target.y = p.y;
     target.z = p.z;
 }
 
-fn translate_v3(target: &mut acadrust::types::Vector3, d: DVec3) {
+fn translate_v3(target: &mut codec::types::Vector3, d: DVec3) {
     target.x += d.x;
     target.y += d.y;
     target.z += d.z;
 }
 
-fn apply_to_v3(target: &mut acadrust::types::Vector3, apply: &GripApply) {
+fn apply_to_v3(target: &mut codec::types::Vector3, apply: &GripApply) {
     match apply {
         GripApply::Absolute(p) => set_v3(target, *p),
         GripApply::Translate(d) => translate_v3(target, *d),
@@ -1542,9 +1542,9 @@ impl Grippable for Dimension {
 // `normalized_or`, `entity_z`, `offset_snap_pts`) lives in
 // `scene::convert::tessellate` and is reused by Leader / MultiLeader too.
 
-use acadrust::entities::{MText, Text};
-use acadrust::tables::DimStyle;
-use acadrust::types::{Color as AcadColor, Vector3};
+use codec::entities::{MText, Text};
+use codec::tables::DimStyle;
+use codec::types::{Color as AcadColor, Vector3};
 
 pub(crate) fn resolved_dimension_style(
     source: &DimStyle,
@@ -1703,7 +1703,7 @@ fn calculated_dimlfac(dimension: &Dimension) -> Option<f64> {
         .get_record("ACAD_DIMASSOC_CALC_DIMLFAC")
         .and_then(|record| {
             record.values.iter().find_map(|value| match value {
-                acadrust::xdata::XDataValue::Real(factor) if factor.is_finite() => Some(*factor),
+                codec::xdata::XDataValue::Real(factor) if factor.is_finite() => Some(*factor),
                 _ => None,
             })
         })
@@ -1717,7 +1717,7 @@ pub(crate) fn dimension_in_paper_space(dimension: &Dimension, document: &CadDocu
     }
     document.objects.values().any(|object| {
         matches!(object,
-            acadrust::objects::ObjectType::Layout(layout)
+            codec::objects::ObjectType::Layout(layout)
                 if layout.name != "Model" && layout.block_record == owner
         )
     }) || document.block_records.iter().any(|block| {
@@ -3339,7 +3339,7 @@ fn choice_value(
     }
 }
 
-fn block_name(document: &CadDocument, handle: acadrust::Handle, fallback: &str) -> String {
+fn block_name(document: &CadDocument, handle: codec::Handle, fallback: &str) -> String {
     if handle.is_null() {
         return "Closed filled".to_string();
     }
@@ -3351,7 +3351,7 @@ fn block_name(document: &CadDocument, handle: acadrust::Handle, fallback: &str) 
         .unwrap_or_else(|| fallback.to_string())
 }
 
-fn linetype_name(document: &CadDocument, handle: acadrust::Handle) -> String {
+fn linetype_name(document: &CadDocument, handle: codec::Handle) -> String {
     document
         .line_types
         .iter()
@@ -3371,7 +3371,7 @@ fn linear_unit_label(value: i16) -> &'static str {
     }
 }
 
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::{CadDocument, EntityType, Handle};
 
 use crate::scene::convert::tess_util::aci_to_rgba;
 use crate::scene::convert::tessellate::{
@@ -3389,10 +3389,10 @@ fn apply_dimension_breaks(
         .objects
         .values()
         .filter_map(|object| {
-            let acadrust::objects::ObjectType::DataObject(object) = object else {
+            let codec::objects::ObjectType::DataObject(object) = object else {
                 return None;
             };
-            let acadrust::objects::DataObjectData::BreakData(data) = &object.data
+            let codec::objects::DataObjectData::BreakData(data) = &object.data
             else {
                 return None;
             };
@@ -3487,7 +3487,7 @@ fn dimension_jog_point(dimension: &Dimension) -> Option<Vec3> {
         .get_record("ACAD_DSTYLE_DIMJAG_POSITION")
         .and_then(|record| {
             record.values.iter().rev().find_map(|value| match value {
-                acadrust::xdata::XDataValue::Point3D(point) => Some(vec3_local(*point)),
+                codec::xdata::XDataValue::Point3D(point) => Some(vec3_local(*point)),
                 _ => None,
             })
         })
@@ -3515,14 +3515,14 @@ fn apply_dimension_jog(
         })
         .collect::<Vec<_>>();
     let coordinates = segments.iter().map(|(_, segment)| *segment).collect::<Vec<_>>();
-    let Some((candidate, center)) = cadkernel::space::nearest_segment_point(
+    let Some((candidate, center)) = kernel::space::nearest_segment_point(
         &coordinates,
         requested.to_array().map(f64::from),
     ) else {
         return;
     };
     let target = segments[candidate].0;
-    let Some(jog) = cadkernel::space::dimension_jog_points(
+    let Some(jog) = kernel::space::dimension_jog_points(
         coordinates[candidate],
         center,
         normal.to_array().map(f64::from),
@@ -3571,8 +3571,8 @@ pub trait DimensionTess {
         entity_color: [f32; 4],
         line_weight_px: f32,
         anno_scale: f32,
-        selected_set: &rustc_hash::FxHashSet<acadrust::Handle>,
-        active_viewport: Option<acadrust::Handle>,
+        selected_set: &rustc_hash::FxHashSet<codec::Handle>,
+        active_viewport: Option<codec::Handle>,
         bg_color: [f32; 4],
         view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
@@ -3588,8 +3588,8 @@ impl DimensionTess for Dimension {
         entity_color: [f32; 4],
         line_weight_px: f32,
         anno_scale: f32,
-        selected_set: &rustc_hash::FxHashSet<acadrust::Handle>,
-        active_viewport: Option<acadrust::Handle>,
+        selected_set: &rustc_hash::FxHashSet<codec::Handle>,
+        active_viewport: Option<codec::Handle>,
         bg_color: [f32; 4],
         view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
@@ -3622,8 +3622,8 @@ fn tessellate_dimension_inner(
     // LOD hints — when present, synthesised dim text routes through the
     // top-level LOD ladder (baseline / greek / full) instead of the render
     // path so far-out drawings collapse to a colored rect or baseline.
-    selected_set: &rustc_hash::FxHashSet<acadrust::Handle>,
-    active_viewport: Option<acadrust::Handle>,
+    selected_set: &rustc_hash::FxHashSet<codec::Handle>,
+    active_viewport: Option<codec::Handle>,
     bg_color: [f32; 4],
     view_aabb: Option<[f32; 4]>,
     world_per_pixel: Option<f32>,
@@ -4374,7 +4374,7 @@ fn tessellate_dimension_inner(
 /// The Properties panel reads and writes these same overrides, so the renderer
 /// has to consult them or an edited colour shows in the panel and nowhere else.
 fn dim_color_index(
-    xd: &acadrust::xdata::ExtendedData,
+    xd: &codec::xdata::ExtendedData,
     code: i16,
     inherited: i16,
 ) -> i16 {
@@ -4406,7 +4406,7 @@ fn resolve_dim_lineweight_px(code: i16, fallback_px: f32) -> f32 {
 /// resolve it to a (pattern_length, pattern) pair compatible with WireModel.
 fn resolve_pattern_by_handle(
     doc: &CadDocument,
-    handle: acadrust::types::Handle,
+    handle: codec::types::Handle,
     scale: f32,
 ) -> (f32, [f32; 8]) {
     if handle.is_null() {
@@ -4457,8 +4457,8 @@ fn dimtmove_leader_endpoints(
     let linear = |first: Vec3, second: Vec3, definition: Vec3, axis: [f64; 2]| {
         let bounds = text.break_box?;
         let xy = |point: Vec3| [point.x as f64, point.y as f64];
-        let (leader, under_text) = cadkernel::geom2d::linear_dimension_leader(
-            cadkernel::geom2d::Line { start: xy(first), end: xy(second) },
+        let (leader, under_text) = kernel::geom2d::linear_dimension_leader(
+            kernel::geom2d::Line { start: xy(first), end: xy(second) },
             xy(definition),
             axis,
             xy(txt),
@@ -4513,13 +4513,13 @@ fn dimtmove_leader_endpoints(
                 jogged_radial_break(chord, jog, override_center, d.jog_angle as f32);
             let curves = [(chord, near), (near, far), (far, override_center)].map(
                 |(start, end)| {
-                    cadkernel::geom2d::Curve::Line(cadkernel::geom2d::Line {
+                    kernel::geom2d::Curve::Line(kernel::geom2d::Line {
                         start: [start.x as f64, start.y as f64],
                         end: [end.x as f64, end.y as f64],
                     })
                 },
             );
-            let (_, closest) = cadkernel::geom2d::nearest_of(
+            let (_, closest) = kernel::geom2d::nearest_of(
                 curves.iter(),
                 [txt.x as f64, txt.y as f64],
             )?;
@@ -5069,11 +5069,11 @@ fn add_segment_with_text_break(
         add_segment(points, start, end);
         return;
     };
-    let segment_curve = cadkernel::geom2d::Curve::Line(cadkernel::geom2d::Line {
+    let segment_curve = kernel::geom2d::Curve::Line(kernel::geom2d::Line {
         start: [start.x as f64, start.y as f64],
         end: [end.x as f64, end.y as f64],
     });
-    let tolerance = cadkernel::geom2d::Tolerance::new((length as f64 * 1.0e-9).max(1.0e-9));
+    let tolerance = kernel::geom2d::Tolerance::new((length as f64 * 1.0e-9).max(1.0e-9));
     let inside = |padding: f32| {
         let (sin, cos) = text_break.rotation.sin_cos();
         let x_axis = Vec3::new(cos as f32, sin as f32, 0.0);
@@ -5089,13 +5089,13 @@ fn add_segment_with_text_break(
         let boundary: Vec<_> = (0..4)
             .map(|index| {
                 let next = (index + 1) % 4;
-                cadkernel::geom2d::Curve::Line(cadkernel::geom2d::Line {
+                kernel::geom2d::Curve::Line(kernel::geom2d::Line {
                     start: [corners[index].x as f64, corners[index].y as f64],
                     end: [corners[next].x as f64, corners[next].y as f64],
                 })
             })
             .collect();
-        cadkernel::geom2d::inside_spans(&boundary, &segment_curve, tolerance)
+        kernel::geom2d::inside_spans(&boundary, &segment_curve, tolerance)
     };
     if inside(0.0).is_empty() {
         add_segment(points, start, end);
@@ -5567,7 +5567,7 @@ fn two_line_angle_frame(
     arc_point: Vec3,
 ) -> Option<(Vec3, f32, f32)> {
     let (u, v) = (a2 - a1, b2 - b1);
-    let (t, _) = cadkernel::geom2d::line_line(
+    let (t, _) = kernel::geom2d::line_line(
         [a1.x as f64, a1.y as f64],
         [u.x as f64, u.y as f64],
         [b1.x as f64, b1.y as f64],
@@ -6125,13 +6125,13 @@ fn sample_angular_arc(vertex: Vec3, radius: f32, start: f32, sweep: f32) -> Vec<
     } else {
         (end, start, true)
     };
-    let mut points: Vec<_> = cadkernel::geom2d::tessellate::arc(
+    let mut points: Vec<_> = kernel::geom2d::tessellate::arc(
         [vertex.x as f64, vertex.y as f64],
         radius as f64,
         from as f64,
         to as f64,
         vertex.z as f64,
-        cadkernel::geom2d::tessellate::DEFAULT_SEGMENTS_PER_RADIAN,
+        kernel::geom2d::tessellate::DEFAULT_SEGMENTS_PER_RADIAN,
     )
     .into_iter()
     .map(|point| Vec3::new(point[0] as f32, point[1] as f32, point[2] as f32))
@@ -6143,8 +6143,8 @@ fn sample_angular_arc(vertex: Vec3, radius: f32, start: f32, sweep: f32) -> Vec<
 }
 
 fn dimension_snap_pts(dim: &Dimension) -> Vec<(glam::DVec3, SnapHint)> {
-    let lv = |v: acadrust::types::Vector3| glam::DVec3::new(v.x, v.y, v.z);
-    let node = |v: acadrust::types::Vector3| (lv(v), SnapHint::Node);
+    let lv = |v: codec::types::Vector3| glam::DVec3::new(v.x, v.y, v.z);
+    let node = |v: codec::types::Vector3| (lv(v), SnapHint::Node);
     match dim {
         Dimension::Linear(d) => vec![
             node(d.first_point),
@@ -6299,8 +6299,8 @@ fn dimension_text_entity(
     // (`\f`, `\C`, `\H`, `\S`, brace scopes, …). Otherwise stay on the Text
     // path — single-line dim text doesn't need the full MText pipeline.
     if value_has_mtext_codes(&value) {
-        use acadrust::entities::dimension::AttachmentPointType as DA;
-        use acadrust::entities::AttachmentPoint as MA;
+        use codec::entities::dimension::AttachmentPointType as DA;
+        use codec::entities::AttachmentPoint as MA;
         let attachment_point = match base.attachment_point {
             DA::TopLeft => MA::TopLeft,
             DA::TopCenter => MA::TopCenter,
@@ -6353,13 +6353,13 @@ fn dimension_text_entity(
 }
 
 fn attachment_to_text_align(
-    attach: acadrust::entities::dimension::AttachmentPointType,
+    attach: codec::entities::dimension::AttachmentPointType,
 ) -> (
-    acadrust::entities::text::TextHorizontalAlignment,
-    acadrust::entities::text::TextVerticalAlignment,
+    codec::entities::text::TextHorizontalAlignment,
+    codec::entities::text::TextVerticalAlignment,
 ) {
-    use acadrust::entities::dimension::AttachmentPointType as A;
-    use acadrust::entities::text::{TextHorizontalAlignment as H, TextVerticalAlignment as V};
+    use codec::entities::dimension::AttachmentPointType as A;
+    use codec::entities::text::{TextHorizontalAlignment as H, TextVerticalAlignment as V};
     match attach {
         A::TopLeft => (H::Left, V::Top),
         A::TopCenter => (H::Center, V::Top),
@@ -6961,7 +6961,7 @@ fn dimension_tolerance_entity(
         mtext.height = tol_height;
         mtext.rotation = rot;
         mtext.style = primary_style;
-        mtext.attachment_point = acadrust::entities::AttachmentPoint::MiddleCenter;
+        mtext.attachment_point = codec::entities::AttachmentPoint::MiddleCenter;
         mtext.common = primary_common;
         return Some(EntityType::MText(mtext));
     }
@@ -6971,8 +6971,8 @@ fn dimension_tolerance_entity(
         .with_rotation(rot);
     t.style = primary_style;
     t.common = primary_common;
-    t.horizontal_alignment = acadrust::entities::text::TextHorizontalAlignment::Center;
-    t.vertical_alignment = acadrust::entities::text::TextVerticalAlignment::Middle;
+    t.horizontal_alignment = codec::entities::text::TextHorizontalAlignment::Center;
+    t.vertical_alignment = codec::entities::text::TextVerticalAlignment::Middle;
     Some(EntityType::Text(t))
 }
 
@@ -8132,7 +8132,7 @@ pub(crate) fn dimension_text_grip_position(
 #[cfg(test)]
 mod dimtad_tests {
     use super::text_on_dim_line;
-    use acadrust::types::Vector3;
+    use codec::types::Vector3;
 
     fn v(x: f64, y: f64) -> Vector3 {
         Vector3::new(x, y, 0.0)
@@ -8205,7 +8205,7 @@ mod dimtad_tests {
 #[cfg(test)]
 mod angular_unit_tests {
     use super::format_angular_value;
-    use acadrust::tables::DimStyle;
+    use codec::tables::DimStyle;
 
     fn style(dimaunit: i16, dimadec: i16) -> DimStyle {
         let mut s = DimStyle::standard();
@@ -8241,7 +8241,7 @@ mod angular_unit_tests {
 mod dim_color_override_tests {
     use super::dim_color_index;
     use crate::entities::dim_override::{DIMCLRD, DIMCLRE, DIMCLRT};
-    use acadrust::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
+    use codec::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
 
     // An ACAD/DSTYLE record holding the overrides the Properties panel writes.
     fn xdata(overrides: &[(i16, i16)]) -> ExtendedData {
@@ -8362,8 +8362,8 @@ mod arch_format_tests {
 #[cfg(test)]
 mod dimtmove_leader_tests {
     use super::*;
-    use acadrust::entities::DimensionLinear;
-    use acadrust::types::Vector3;
+    use codec::entities::DimensionLinear;
+    use codec::types::Vector3;
 
     fn v(x: f64, y: f64) -> Vector3 {
         Vector3::new(x, y, 0.0)
@@ -8427,7 +8427,7 @@ mod dimtmove_leader_tests {
     /// Radius dimensions draw no leader (unchanged).
     #[test]
     fn radius_has_no_leader() {
-        let r = acadrust::entities::DimensionRadius::new(v(0.0, 0.0), v(0.0, 5.0));
+        let r = codec::entities::DimensionRadius::new(v(0.0, 0.0), v(0.0, 5.0));
         assert!(dimtmove_leader_endpoints(&Dimension::Radius(r), layout(vec3_local(v(0.0, 8.0)), 2.0)).is_none());
     }
 
@@ -8448,7 +8448,7 @@ mod dimtmove_leader_tests {
 #[cfg(test)]
 mod linear_transform_tests {
     use super::*;
-    use acadrust::entities::DimensionLinear;
+    use codec::entities::DimensionLinear;
     use std::f64::consts::FRAC_PI_2;
 
     /// A horizontal linear dimension measuring 10 units along X.
@@ -8685,7 +8685,7 @@ mod linear_transform_tests {
 #[cfg(test)]
 mod limits_format_tests {
     use super::*;
-    use acadrust::entities::DimensionLinear;
+    use codec::entities::DimensionLinear;
 
     /// A horizontal linear dimension measuring 10 units along X.
     fn horizontal() -> Dimension {
@@ -8835,7 +8835,7 @@ mod limits_format_tests {
     // with the vertex measures nothing; the stored angle keeps the text.
     #[test]
     fn degenerate_angular_dimension_reports_its_stored_angle() {
-        use acadrust::entities::DimensionAngular3Pt;
+        use codec::entities::DimensionAngular3Pt;
         let mut d = DimensionAngular3Pt::default();
         d.angle_vertex = Vector3::new(6.0, 4.85, 0.0);
         d.first_point = d.angle_vertex;
@@ -8906,7 +8906,7 @@ mod limits_format_tests {
 #[cfg(test)]
 mod layout_parity_tests {
     use super::*;
-    use acadrust::entities::{DimensionDiameter, DimensionLinear, DimensionRadius};
+    use codec::entities::{DimensionDiameter, DimensionLinear, DimensionRadius};
     use glam::DVec3;
 
     /// A document whose Standard style has imperial sizes and horizontal text.
@@ -9028,7 +9028,7 @@ mod layout_parity_tests {
     // applied factor; zero means the dimension reads its sheet distance.
     #[test]
     fn negative_dimlfac_follows_the_recorded_association_factor() {
-        use acadrust::xdata::{ExtendedDataRecord, XDataValue};
+        use codec::xdata::{ExtendedDataRecord, XDataValue};
         let document = CadDocument::new();
         let mut source = style(&document);
         source.dimlfac = -4.0;

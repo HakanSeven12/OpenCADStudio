@@ -1,9 +1,9 @@
 //! #1266: decoded IMAGE/OLE content must survive the shared PDF/preview/print path.
 #![cfg(not(target_arch = "wasm32"))]
 
-use acadrust::entities::{Insert, Viewport, Wipeout};
-use acadrust::types::{Vector2, Vector3};
-use acadrust::EntityType;
+use codec::entities::{Insert, Viewport, Wipeout};
+use codec::types::{Vector2, Vector3};
+use codec::EntityType;
 use std::sync::Arc;
 use OpenCADStudio::io::pdf_export::{
     export_pdf, export_pdf_pages, PdfPageInput, PdfPlotOptions, PlotContent, PlotGroupSplits,
@@ -357,7 +357,7 @@ fn viewport_projection_clips_images_and_respects_frozen_and_nonplot_layers() {
 
 #[test]
 fn linked_image_uses_decoded_pixels_and_its_image_clip_without_reopening() {
-    use acadrust::entities::{ClipBoundary, RasterImage};
+    use codec::entities::{ClipBoundary, RasterImage};
     let path = std::env::temp_dir().join(format!("ocs1266-linked-{}.png", std::process::id()));
     let source = image();
     image::save_buffer(&path, &source.image.pixels, 32, 32, image::ColorType::Rgba8).unwrap();

@@ -68,8 +68,8 @@ impl OpenCADStudio {
 
     pub(super) fn handle_replace_many(
         &mut self,
-        replacements: Vec<(Handle, Vec<acadrust::EntityType>)>,
-        additions: Vec<acadrust::EntityType>,
+        replacements: Vec<(Handle, Vec<codec::EntityType>)>,
+        additions: Vec<codec::EntityType>,
     ) -> Option<Task<Message>> {
         let i = self.active_tab;
         if let Some((handle, _)) = replacements
@@ -106,7 +106,7 @@ impl OpenCADStudio {
 
     pub(super) fn handle_replace_many_continue(
         &mut self,
-        replacements: Vec<(Handle, Vec<acadrust::EntityType>)>,
+        replacements: Vec<(Handle, Vec<codec::EntityType>)>,
     ) -> Option<Task<Message>> {
         let i = self.active_tab;
         if let Some((handle, _)) = replacements
@@ -141,7 +141,7 @@ impl OpenCADStudio {
     pub(super) fn handle_replace_entity(
         &mut self,
         handle: Handle,
-        new_entities: Vec<acadrust::EntityType>,
+        new_entities: Vec<codec::EntityType>,
     ) -> Option<Task<Message>> {
         let i = self.active_tab;
         if self.reject_locked_edit(i, handle) {
@@ -149,7 +149,7 @@ impl OpenCADStudio {
         }
         // Detect SPLINEDIT sentinel: a single XLine with a magic layer name.
         if new_entities.len() == 1 {
-            if let acadrust::EntityType::XLine(ref xl) = new_entities[0] {
+            if let codec::EntityType::XLine(ref xl) = new_entities[0] {
                 let op = xl.common.layer.clone();
                 if op.starts_with("__SPLINEDIT_") {
                     let label = self.history_label_from_active_cmd(i, "SPLINEDIT");
@@ -171,7 +171,7 @@ impl OpenCADStudio {
         let label = self.history_label_from_active_cmd(i, "TRIM");
         self.push_undo_snapshot(i, label);
         self.tabs[i].scene.erase_entities(&[handle]);
-        let new_handles: Vec<acadrust::Handle> = new_entities
+        let new_handles: Vec<codec::Handle> = new_entities
             .into_iter()
             .map(|e| self.tabs[i].scene.add_entity(e))
             .collect();
@@ -179,7 +179,7 @@ impl OpenCADStudio {
         for &nh in &new_handles {
             if matches!(
                 self.tabs[i].scene.document.get_entity(nh),
-                Some(acadrust::EntityType::Dimension(_))
+                Some(codec::EntityType::Dimension(_))
             ) {
                 self.tabs[i].scene.invalidate_dim_block_recorded(nh);
             }
@@ -327,7 +327,7 @@ impl OpenCADStudio {
             if matches!(
                 self.tabs[i].scene.document.get_entity(handle),
                 Some(
-                    acadrust::EntityType::Block(_) | acadrust::EntityType::BlockEnd(_)
+                    codec::EntityType::Block(_) | codec::EntityType::BlockEnd(_)
                 )
             ) {
                 needs_geometry_bump = true;
@@ -358,7 +358,7 @@ impl OpenCADStudio {
         for &handle in by_index.iter().filter(|h| !h.is_null()) {
             if matches!(
                 self.tabs[i].scene.document.get_entity(handle),
-                Some(acadrust::EntityType::Leader(_))
+                Some(codec::EntityType::Leader(_))
             ) {
                 let _ = self.tabs[i]
                     .scene
@@ -423,15 +423,15 @@ impl OpenCADStudio {
 /// `sync_displayed_annotation_context`, undo/dirty/selection/echo/panels).
 /// See the per-helper report in `finalize_paste`.
 pub(crate) fn paste_entities_kernel(
-    doc: &mut acadrust::CadDocument,
-    entities: &[acadrust::EntityType],
+    doc: &mut codec::CadDocument,
+    entities: &[codec::EntityType],
     deps: &crate::app::ClipboardDeps,
     translate: Option<&crate::command::EntityTransform>,
 ) -> (
     Vec<Handle>,
     rustc_hash::FxHashMap<Handle, Handle>,
 ) {
-    use acadrust::TableEntry;
+    use codec::TableEntry;
     // Port of `merge_dependencies`: recreate missing table records with fresh
     // handles from the target document. Pure `&mut CadDocument` work.
     for rec in &deps.layers {
@@ -478,7 +478,7 @@ pub(crate) fn paste_entities_kernel(
             // Same `*D`-block re-point as `finalize_paste` (#290, #161): the
             // baked dimension geometry lives in WCS, so the paste gets its own
             // transformed copy of the snapshotted block.
-            if let acadrust::EntityType::Dimension(d) = &entity {
+            if let codec::EntityType::Dimension(d) = &entity {
                 let bn = d.base().block_name.clone();
                 if !bn.trim().is_empty() {
                     if let Some(subs) = deps
@@ -491,7 +491,7 @@ pub(crate) fn paste_entities_kernel(
                             crate::command::EntityTransform::Translate(glam::DVec3::ZERO),
                         );
                         if let Some(new_bn) = define_transformed_block_doc(doc, &subs, &bt) {
-                            if let acadrust::EntityType::Dimension(d) = &mut entity {
+                            if let codec::EntityType::Dimension(d) = &mut entity {
                                 d.base_mut().block_name = new_bn;
                             }
                         }
@@ -536,7 +536,7 @@ pub(crate) fn paste_entities_kernel(
     let leader_links: Vec<(Handle, Handle)> = entities
         .iter()
         .filter_map(|source| {
-            let acadrust::EntityType::Leader(leader) = source else {
+            let codec::EntityType::Leader(leader) = source else {
                 return None;
             };
             let copied_leader = handle_map.get(&source.common().handle).copied()?;
@@ -548,7 +548,7 @@ pub(crate) fn paste_entities_kernel(
         })
         .collect();
     for (leader_handle, annotation_handle) in leader_links {
-        if let Some(acadrust::EntityType::Leader(leader)) = doc.get_entity_mut(leader_handle) {
+        if let Some(codec::EntityType::Leader(leader)) = doc.get_entity_mut(leader_handle) {
             leader.annotation_handle = annotation_handle;
         }
     }
@@ -561,14 +561,14 @@ pub(crate) fn paste_entities_kernel(
 /// two lines are mirrored here), NULL top-level/owner handles, then
 /// `doc.add_entity`. The `entity_mode` default (Model vs paper space) and all
 /// tessellation/render caching stay caller-side in the Scene shell.
-fn add_entity_clone_doc(doc: &mut acadrust::CadDocument, mut entity: acadrust::EntityType) -> Handle {
+fn add_entity_clone_doc(doc: &mut codec::CadDocument, mut entity: codec::EntityType) -> Handle {
     match &mut entity {
-        acadrust::EntityType::Insert(ins) => {
+        codec::EntityType::Insert(ins) => {
             for att in ins.attributes.iter_mut() {
                 att.common.handle = doc.allocate_handle();
             }
         }
-        acadrust::EntityType::Polyline3D(p) => {
+        codec::EntityType::Polyline3D(p) => {
             for v in p.vertices.iter_mut() {
                 v.handle = doc.allocate_handle();
             }
@@ -584,10 +584,10 @@ fn add_entity_clone_doc(doc: &mut acadrust::CadDocument, mut entity: acadrust::E
 /// half of `Scene::define_block_raw` (no-op when the block exists). The
 /// trailing `bump_geometry` stays caller-side.
 fn define_block_raw_doc(
-    doc: &mut acadrust::CadDocument,
+    doc: &mut codec::CadDocument,
     name: &str,
-    base_point: acadrust::types::Vector3,
-    entities: &[acadrust::EntityType],
+    base_point: codec::types::Vector3,
+    entities: &[codec::EntityType],
 ) {
     if name.is_empty() || doc.block_records.get(name).is_some() {
         return;
@@ -596,21 +596,21 @@ fn define_block_raw_doc(
     let br_handle = Handle::new(next);
     let block_handle = Handle::new(next + 1);
     let end_handle = Handle::new(next + 2);
-    let mut block_record = acadrust::tables::BlockRecord::new(name);
+    let mut block_record = codec::tables::BlockRecord::new(name);
     block_record.handle = br_handle;
     block_record.block_entity_handle = block_handle;
     block_record.block_end_handle = end_handle;
     if doc.block_records.add(block_record).is_err() {
         return;
     }
-    let mut block = acadrust::entities::Block::new(name, base_point);
+    let mut block = codec::entities::Block::new(name, base_point);
     block.common.handle = block_handle;
     block.common.owner_handle = br_handle;
-    let _ = doc.add_entity(acadrust::EntityType::Block(block));
-    let mut block_end = acadrust::entities::BlockEnd::new();
+    let _ = doc.add_entity(codec::EntityType::Block(block));
+    let mut block_end = codec::entities::BlockEnd::new();
     block_end.common.handle = end_handle;
     block_end.common.owner_handle = br_handle;
-    let _ = doc.add_entity(acadrust::EntityType::BlockEnd(block_end));
+    let _ = doc.add_entity(codec::EntityType::BlockEnd(block_end));
     for mut entity in entities.iter().cloned() {
         add_entity_clone_doc_inner(doc, &mut entity, br_handle);
         let _ = doc.add_entity(entity);
@@ -619,17 +619,17 @@ fn define_block_raw_doc(
 
 /// Shared sub-handle reset + owner stamp for block-definition members.
 fn add_entity_clone_doc_inner(
-    doc: &mut acadrust::CadDocument,
-    entity: &mut acadrust::EntityType,
+    doc: &mut codec::CadDocument,
+    entity: &mut codec::EntityType,
     owner: Handle,
 ) {
     match entity {
-        acadrust::EntityType::Insert(ins) => {
+        codec::EntityType::Insert(ins) => {
             for att in ins.attributes.iter_mut() {
                 att.common.handle = doc.allocate_handle();
             }
         }
-        acadrust::EntityType::Polyline3D(p) => {
+        codec::EntityType::Polyline3D(p) => {
             for v in p.vertices.iter_mut() {
                 v.handle = doc.allocate_handle();
             }
@@ -645,8 +645,8 @@ fn add_entity_clone_doc_inner(
 /// so this is a verbatim port). Returns the new block name, or `None` when
 /// `subs` is empty.
 fn define_transformed_block_doc(
-    doc: &mut acadrust::CadDocument,
-    subs: &[acadrust::EntityType],
+    doc: &mut codec::CadDocument,
+    subs: &[codec::EntityType],
     t: &crate::command::EntityTransform,
 ) -> Option<String> {
     if subs.is_empty() {
@@ -664,19 +664,19 @@ fn define_transformed_block_doc(
     let br_handle = Handle::new(next);
     let block_handle = Handle::new(next + 1);
     let end_handle = Handle::new(next + 2);
-    let mut br = acadrust::tables::BlockRecord::new(&new_name);
+    let mut br = codec::tables::BlockRecord::new(&new_name);
     br.handle = br_handle;
     br.block_entity_handle = block_handle;
     br.block_end_handle = end_handle;
     doc.block_records.add(br).ok()?;
-    let mut block = acadrust::entities::Block::new(&new_name, acadrust::types::Vector3::ZERO);
+    let mut block = codec::entities::Block::new(&new_name, codec::types::Vector3::ZERO);
     block.common.handle = block_handle;
     block.common.owner_handle = br_handle;
-    doc.add_entity(acadrust::EntityType::Block(block)).ok()?;
-    let mut block_end = acadrust::entities::BlockEnd::new();
+    doc.add_entity(codec::EntityType::Block(block)).ok()?;
+    let mut block_end = codec::entities::BlockEnd::new();
     block_end.common.handle = end_handle;
     block_end.common.owner_handle = br_handle;
-    doc.add_entity(acadrust::EntityType::BlockEnd(block_end))
+    doc.add_entity(codec::EntityType::BlockEnd(block_end))
         .ok()?;
     for sub in subs {
         let mut sub = sub.clone();
@@ -693,9 +693,9 @@ fn define_transformed_block_doc(
 /// storage (`clipboard`, `clipboard_base`, `clipboard_deps`) and the echo stay
 /// caller-side in `copy_entities_to_clipboard` / `handle_copy_to_clipboard`.
 pub(crate) fn copy_to_clipboard_kernel(
-    doc: &acadrust::CadDocument,
+    doc: &codec::CadDocument,
     handles: &[Handle],
-) -> (Vec<acadrust::EntityType>, crate::app::ClipboardDeps) {
+) -> (Vec<codec::EntityType>, crate::app::ClipboardDeps) {
     let entities: Vec<_> = handles
         .iter()
         .filter_map(|&handle| doc.get_entity(handle).cloned())
@@ -705,7 +705,7 @@ pub(crate) fn copy_to_clipboard_kernel(
 }
 
 fn recreate_ext_subtree(
-    doc: &mut acadrust::CadDocument,
+    doc: &mut codec::CadDocument,
     cap: &crate::app::ClipExtObjects,
     entity_handle: Option<Handle>,
 ) -> Option<Handle> {
@@ -733,12 +733,12 @@ fn recreate_ext_subtree(
 /// Replace references to a clipboard entity inside one recreated extension
 /// dictionary graph after its final block-owned handle becomes known.
 pub(crate) fn remap_ext_subtree_reference(
-    doc: &mut acadrust::CadDocument,
+    doc: &mut codec::CadDocument,
     root: Handle,
     source_entity: Handle,
     target_entity: Handle,
 ) {
-    use acadrust::objects::ObjectType;
+    use codec::objects::ObjectType;
     use rustc_hash::FxHashSet;
     use std::collections::HashMap;
 
@@ -779,12 +779,12 @@ pub(crate) fn remap_ext_subtree_reference(
 /// through `remap` (a handle still in the source space stays unchanged, which is
 /// correct for cross-references that point outside the captured subtree).
 pub(crate) fn remap_object(
-    obj: &mut acadrust::objects::ObjectType,
-    new_handle: acadrust::Handle,
-    remap: &std::collections::HashMap<acadrust::Handle, acadrust::Handle>,
+    obj: &mut codec::objects::ObjectType,
+    new_handle: codec::Handle,
+    remap: &std::collections::HashMap<codec::Handle, codec::Handle>,
 ) {
-    use acadrust::objects::ObjectType;
-    let map = |h: acadrust::Handle| remap.get(&h).copied().unwrap_or(h);
+    use codec::objects::ObjectType;
+    let map = |h: codec::Handle| remap.get(&h).copied().unwrap_or(h);
     match obj {
         ObjectType::Dictionary(d) => {
             d.handle = new_handle;
@@ -819,7 +819,7 @@ pub(crate) fn remap_object(
             x.handle = new_handle;
             x.owner = map(x.owner);
             for entry in &mut x.entries {
-                if let acadrust::objects::XRecordValue::Handle(handle) = &mut entry.value {
+                if let codec::objects::XRecordValue::Handle(handle) = &mut entry.value {
                     *handle = map(*handle);
                 }
             }
@@ -842,13 +842,13 @@ pub(crate) fn remap_object(
             }
             context.scale = map(context.scale);
             match &mut context.kind {
-                acadrust::objects::ObjectContextKind::Dim(dimension) => {
+                codec::objects::ObjectContextKind::Dim(dimension) => {
                     dimension.block = map(dimension.block);
                 }
-                acadrust::objects::ObjectContextKind::HatchView(hatch) => {
+                codec::objects::ObjectContextKind::HatchView(hatch) => {
                     hatch.view = map(hatch.view);
                 }
-                acadrust::objects::ObjectContextKind::MTextAttribute(attribute) => {
+                codec::objects::ObjectContextKind::MTextAttribute(attribute) => {
                     if let Some(embedded) = &mut attribute.context {
                         embedded.owner_handle = map(embedded.owner_handle);
                         for reactor in &mut embedded.reactors {
@@ -860,7 +860,7 @@ pub(crate) fn remap_object(
                         embedded.scale = map(embedded.scale);
                     }
                 }
-                acadrust::objects::ObjectContextKind::MLeader(mleader) => {
+                codec::objects::ObjectContextKind::MLeader(mleader) => {
                     if let Some(handle) = &mut mleader.text_style_handle {
                         *handle = map(*handle);
                     }
@@ -895,29 +895,29 @@ pub(crate) fn remap_object(
 mod clipboard_xdict_clone_tests {
     use super::recreate_ext_subtree;
     use super::remap_object;
-    use acadrust::Handle;
+    use codec::Handle;
     // Same re-export path `commands/blocks.rs:356` uses — this import proves
     // the `mod.rs` re-export still covers external callers.
     use super::super::remap_ext_subtree_reference;
-    use acadrust::objects::{ObjectType, XRecordValue};
+    use codec::objects::{ObjectType, XRecordValue};
 
     /// A dictionary root pointing at one XRecord leaf that references the
     /// source entity — the minimal shape of a captured XCLIP filter graph.
     fn xdict_capture_fixture() -> crate::app::ClipExtObjects {
-        let mut src = acadrust::CadDocument::new();
+        let mut src = codec::CadDocument::new();
         let src_entity = src.allocate_handle();
         let src_root = src.allocate_handle();
         let src_leaf = src.allocate_handle();
 
-        let mut dict = acadrust::objects::Dictionary::new();
+        let mut dict = codec::objects::Dictionary::new();
         dict.handle = src_root;
         dict.owner = src_entity;
         dict.add_entry("XCLIP", src_leaf);
 
-        let mut xrec = acadrust::objects::XRecord::new();
+        let mut xrec = codec::objects::XRecord::new();
         xrec.handle = src_leaf;
         xrec.owner = src_root;
-        xrec.entries.push(acadrust::objects::XRecordEntry::new(
+        xrec.entries.push(codec::objects::XRecordEntry::new(
             340,
             XRecordValue::Handle(src_entity),
         ));
@@ -934,7 +934,7 @@ mod clipboard_xdict_clone_tests {
         }
     }
 
-    fn leaf_of(doc: &acadrust::CadDocument, root: Handle) -> Handle {
+    fn leaf_of(doc: &codec::CadDocument, root: Handle) -> Handle {
         match doc.objects.get(&root) {
             Some(ObjectType::Dictionary(d)) => {
                 assert_eq!(d.entries.len(), 1);
@@ -949,7 +949,7 @@ mod clipboard_xdict_clone_tests {
     #[test]
     fn cross_drawing_clone_remaps_xdict_handles() {
         let cap = xdict_capture_fixture();
-        let mut dst = acadrust::CadDocument::new();
+        let mut dst = codec::CadDocument::new();
         let before: Vec<Handle> = dst.objects.keys().copied().collect();
         let dst_entity = dst.allocate_handle();
 
@@ -990,7 +990,7 @@ mod clipboard_xdict_clone_tests {
     #[test]
     fn cross_drawing_clone_two_phase_remap_resolves_reference() {
         let cap = xdict_capture_fixture();
-        let mut dst = acadrust::CadDocument::new();
+        let mut dst = codec::CadDocument::new();
         let before_len = dst.objects.len();
 
         let root =
@@ -1021,7 +1021,7 @@ mod clipboard_xdict_clone_tests {
     #[test]
     fn remap_object_rewrites_dictionary_handles() {
         use std::collections::HashMap;
-        let mut scratch = acadrust::CadDocument::new();
+        let mut scratch = codec::CadDocument::new();
         let old_self = scratch.allocate_handle();
         let old_owner = scratch.allocate_handle();
         let old_child = scratch.allocate_handle();
@@ -1029,7 +1029,7 @@ mod clipboard_xdict_clone_tests {
         let new_owner = scratch.allocate_handle();
         let new_child = scratch.allocate_handle();
 
-        let mut dict = acadrust::objects::Dictionary::new();
+        let mut dict = codec::objects::Dictionary::new();
         dict.handle = old_self;
         dict.owner = old_owner;
         dict.add_entry("K", old_child);
@@ -1051,17 +1051,17 @@ mod clipboard_xdict_clone_tests {
 mod copy_to_clipboard_kernel_tests {
     use super::copy_to_clipboard_kernel;
 
-    fn line_on(layer: &str) -> acadrust::EntityType {
-        let mut line = acadrust::entities::Line::new();
+    fn line_on(layer: &str) -> codec::EntityType {
+        let mut line = codec::entities::Line::new();
         line.common.layer = layer.to_string();
-        acadrust::EntityType::Line(line)
+        codec::EntityType::Line(line)
     }
 
     #[test]
     fn clones_entities_and_captures_layer_deps() {
-        let mut doc = acadrust::CadDocument::new();
+        let mut doc = codec::CadDocument::new();
         doc.layers
-            .add(acadrust::tables::Layer::new("WALLS"))
+            .add(codec::tables::Layer::new("WALLS"))
             .expect("add layer");
         let a = doc.add_entity(line_on("WALLS")).unwrap();
         let b = doc.add_entity(line_on("WALLS")).unwrap();
@@ -1078,7 +1078,7 @@ mod copy_to_clipboard_kernel_tests {
 
     #[test]
     fn skips_handles_missing_from_the_document() {
-        let mut doc = acadrust::CadDocument::new();
+        let mut doc = codec::CadDocument::new();
         let kept = doc.add_entity(line_on("0")).unwrap();
         let missing = doc.allocate_handle();
 
@@ -1090,7 +1090,7 @@ mod copy_to_clipboard_kernel_tests {
 
     #[test]
     fn empty_selection_yields_empty_payload() {
-        let doc = acadrust::CadDocument::new();
+        let doc = codec::CadDocument::new();
 
         let (entities, deps) = copy_to_clipboard_kernel(&doc, &[]);
 
@@ -1103,32 +1103,32 @@ mod copy_to_clipboard_kernel_tests {
 #[cfg(test)]
 mod paste_entities_kernel_tests {
     use super::{copy_to_clipboard_kernel, paste_entities_kernel};
-    use acadrust::Handle;
+    use codec::Handle;
 
-    fn line_on(layer: &str) -> acadrust::EntityType {
-        let mut line = acadrust::entities::Line::new();
+    fn line_on(layer: &str) -> codec::EntityType {
+        let mut line = codec::entities::Line::new();
         line.common.layer = layer.to_string();
-        acadrust::EntityType::Line(line)
+        codec::EntityType::Line(line)
     }
 
     #[test]
     fn pastes_with_fresh_handles_and_translate() {
-        let mut seed = acadrust::CadDocument::new();
+        let mut seed = codec::CadDocument::new();
         seed.layers
-            .add(acadrust::tables::Layer::new("WALLS"))
+            .add(codec::tables::Layer::new("WALLS"))
             .expect("add layer");
         // Position the seed line away from the origin so the translate is visible.
-        let mut seed_line = acadrust::entities::Line::from_points(
-            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
-            acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+        let mut seed_line = codec::entities::Line::from_points(
+            codec::types::Vector3::new(0.0, 0.0, 0.0),
+            codec::types::Vector3::new(10.0, 0.0, 0.0),
         );
         seed_line.common.layer = "WALLS".to_string();
         let seed_handle = seed
-            .add_entity(acadrust::EntityType::Line(seed_line))
+            .add_entity(codec::EntityType::Line(seed_line))
             .unwrap();
         let (entities, deps) = copy_to_clipboard_kernel(&seed, &[seed_handle]);
 
-        let mut dst = acadrust::CadDocument::new();
+        let mut dst = codec::CadDocument::new();
         let delta = glam::DVec3::new(5.0, 7.0, 0.0);
         let translate = crate::command::EntityTransform::Translate(delta);
         let (handles, handle_map) =
@@ -1140,7 +1140,7 @@ mod paste_entities_kernel_tests {
         assert_ne!(pasted, seed_handle, "paste must use a fresh handle");
         assert_eq!(handle_map.get(&seed_handle), Some(&pasted));
         let line = match dst.get_entity(pasted) {
-            Some(acadrust::EntityType::Line(l)) => l,
+            Some(codec::EntityType::Line(l)) => l,
             other => panic!("expected pasted Line, got {other:?}"),
         };
         assert!((line.start.x - 5.0).abs() < 1e-9, "start.x = {}", line.start.x);
@@ -1153,23 +1153,23 @@ mod paste_entities_kernel_tests {
 
     #[test]
     fn remaps_leader_annotation_link_to_pasted_handles() {
-        let mut seed = acadrust::CadDocument::new();
+        let mut seed = codec::CadDocument::new();
         let note = seed
-            .add_entity(acadrust::EntityType::MText(acadrust::entities::MText::new()))
+            .add_entity(codec::EntityType::MText(codec::entities::MText::new()))
             .unwrap();
-        let mut leader = acadrust::entities::Leader::default();
+        let mut leader = codec::entities::Leader::default();
         leader.annotation_handle = note;
         let leader_handle = seed
-            .add_entity(acadrust::EntityType::Leader(leader))
+            .add_entity(codec::EntityType::Leader(leader))
             .unwrap();
         let (entities, deps) = copy_to_clipboard_kernel(&seed, &[leader_handle, note]);
 
-        let mut dst = acadrust::CadDocument::new();
+        let mut dst = codec::CadDocument::new();
         let (handles, _) = paste_entities_kernel(&mut dst, &entities, &deps, None);
 
         assert_eq!(handles.len(), 2);
         let pasted_leader = match dst.get_entity(handles[0]) {
-            Some(acadrust::EntityType::Leader(l)) => l,
+            Some(codec::EntityType::Leader(l)) => l,
             other => panic!("expected pasted Leader, got {other:?}"),
         };
         assert_eq!(
@@ -1182,8 +1182,8 @@ mod paste_entities_kernel_tests {
     fn recreates_ext_subtree_and_repoints_xdictionary() {
         // Minimal XCLIP-shaped capture: a dictionary root over one XRecord leaf
         // that references the source entity (mirrors clipboard_xdict_clone_tests).
-        use acadrust::objects::{Dictionary, ObjectType, XRecord, XRecordEntry, XRecordValue};
-        let mut seed = acadrust::CadDocument::new();
+        use codec::objects::{Dictionary, ObjectType, XRecord, XRecordEntry, XRecordValue};
+        let mut seed = codec::CadDocument::new();
         let seed_entity = seed.add_entity(line_on("0")).unwrap();
         let src_root = seed.allocate_handle();
         let src_leaf = seed.allocate_handle();
@@ -1206,7 +1206,7 @@ mod paste_entities_kernel_tests {
         let (entities, deps) = copy_to_clipboard_kernel(&seed, &[seed_entity]);
         assert_eq!(deps.ext_objects.len(), 1, "capture must snapshot the xdict");
 
-        let mut dst = acadrust::CadDocument::new();
+        let mut dst = codec::CadDocument::new();
         let before: Vec<Handle> = dst.objects.keys().copied().collect();
         let (handles, _) = paste_entities_kernel(&mut dst, &entities, &deps, None);
 
@@ -1243,7 +1243,7 @@ mod paste_entities_kernel_tests {
 mod headless_reuse_proof_tests {
     // Task 5 reuse proof — headless only. This module constructs NO
     // `OpenCADStudio` value and touches no UI/scene state: only
-    // `acadrust::CadDocument`, entities, and the shared kernels
+    // `codec::CadDocument`, entities, and the shared kernels
     // (`copy_to_clipboard_kernel`, `paste_entities_kernel`,
     // `match_layer_kernel`, `match_properties_kernel` + `MatchOpts`).
     use super::{copy_to_clipboard_kernel, paste_entities_kernel};
@@ -1252,25 +1252,25 @@ mod headless_reuse_proof_tests {
     #[test]
     fn headless_copy_paste_then_match_kernels_share_one_path() {
         // Phase 1: copy in doc A, paste into doc B with a translate.
-        let mut doc_a = acadrust::CadDocument::new();
+        let mut doc_a = codec::CadDocument::new();
         doc_a
             .layers
-            .add(acadrust::tables::Layer::new("WALLS"))
+            .add(codec::tables::Layer::new("WALLS"))
             .expect("add layer");
-        let mut seed_line = acadrust::entities::Line::from_points(
-            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
-            acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+        let mut seed_line = codec::entities::Line::from_points(
+            codec::types::Vector3::new(0.0, 0.0, 0.0),
+            codec::types::Vector3::new(10.0, 0.0, 0.0),
         );
         seed_line.common.layer = "WALLS".to_string();
         let seed_handle = doc_a
-            .add_entity(acadrust::EntityType::Line(seed_line))
+            .add_entity(codec::EntityType::Line(seed_line))
             .unwrap();
 
         let (entities, deps) = copy_to_clipboard_kernel(&doc_a, &[seed_handle]);
         assert_eq!(entities.len(), 1);
         assert_eq!(entities[0].common().layer, "WALLS");
 
-        let mut doc_b = acadrust::CadDocument::new();
+        let mut doc_b = codec::CadDocument::new();
         let translate =
             crate::command::EntityTransform::Translate(glam::DVec3::new(5.0, 7.0, 0.0));
         let (handles, handle_map) =
@@ -1283,7 +1283,7 @@ mod headless_reuse_proof_tests {
         assert_eq!(handle_map.get(&seed_handle), Some(&pasted));
         assert!(doc_b.layers.contains("WALLS"), "layer dep must follow");
         match doc_b.get_entity(pasted) {
-            Some(acadrust::EntityType::Line(l)) => {
+            Some(codec::EntityType::Line(l)) => {
                 assert_eq!(l.common.layer, "WALLS");
                 assert!((l.start.x - 5.0).abs() < 1e-9, "start.x = {}", l.start.x);
                 assert!((l.start.y - 7.0).abs() < 1e-9, "start.y = {}", l.start.y);
@@ -1293,19 +1293,19 @@ mod headless_reuse_proof_tests {
         }
 
         // Phase 2: match kernels on a src/dst pair in the same headless doc.
-        let mut src_line = acadrust::entities::Line::new();
+        let mut src_line = codec::entities::Line::new();
         src_line.common.layer = "WALLS".to_string();
         src_line.common.linetype_scale = 2.5;
         src_line.thickness = 1.25;
         let src = doc_b
-            .add_entity(acadrust::EntityType::Line(src_line))
+            .add_entity(codec::EntityType::Line(src_line))
             .unwrap();
-        let mut dst_line = acadrust::entities::Line::new();
+        let mut dst_line = codec::entities::Line::new();
         dst_line.common.layer = "0".to_string();
         dst_line.common.linetype_scale = 1.0;
         dst_line.thickness = 0.0;
         let dst = doc_b
-            .add_entity(acadrust::EntityType::Line(dst_line))
+            .add_entity(codec::EntityType::Line(dst_line))
             .unwrap();
 
         let count = match_layer_kernel(&mut doc_b, &[dst], src).expect("match layer");
@@ -1322,7 +1322,7 @@ mod headless_reuse_proof_tests {
             match_properties_kernel(&src_clone, dst_entity, &MatchOpts::all());
         }
         match doc_b.get_entity(dst) {
-            Some(acadrust::EntityType::Line(l)) => {
+            Some(codec::EntityType::Line(l)) => {
                 assert_eq!(l.common.layer, "WALLS");
                 assert!((l.common.linetype_scale - 2.5).abs() < 1e-9);
                 assert!((l.thickness - 1.25).abs() < 1e-9);

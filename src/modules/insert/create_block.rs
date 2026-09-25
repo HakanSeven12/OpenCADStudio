@@ -1,5 +1,5 @@
 use crate::t;
-use acadrust::Handle;
+use codec::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -205,15 +205,15 @@ mod tests {
     use super::*;
     use crate::scene::{CreateBlockOptions, Scene};
     use crate::ui::window::block_definition::BlockObjectMode;
-    use acadrust::entities::Line;
-    use acadrust::types::{Transform, Vector3};
+    use codec::entities::Line;
+    use codec::types::{Transform, Vector3};
 
     fn make_test_scene() -> (Scene, Handle) {
         let mut scene = Scene::new();
         let mut line = Line::new();
         line.start = Vector3::new(0.0, 0.0, 0.0);
         line.end = Vector3::new(10.0, 10.0, 0.0);
-        let h = scene.add_entity(acadrust::EntityType::Line(line));
+        let h = scene.add_entity(codec::EntityType::Line(line));
         (scene, h)
     }
 
@@ -279,7 +279,7 @@ mod tests {
         // Insert entity exists in drawing
         let insert_entity = scene.document.get_entity(insert_h);
         assert!(insert_entity.is_some());
-        if let Some(acadrust::EntityType::Insert(ins)) = insert_entity {
+        if let Some(codec::EntityType::Insert(ins)) = insert_entity {
             assert_eq!(ins.block_name, "BLK_CONVERT");
         } else {
             panic!("Expected Insert entity");
@@ -352,7 +352,7 @@ mod tests {
             let mut line2 = Line::new();
             line2.start = Vector3::new(5.0, 5.0, 0.0);
             line2.end = Vector3::new(15.0, 15.0, 0.0);
-            scene.add_entity(acadrust::EntityType::Line(line2))
+            scene.add_entity(codec::EntityType::Line(line2))
         };
 
         let options2 = CreateBlockOptions {
@@ -560,7 +560,7 @@ mod tests {
 
         // In Convert mode, the insert entity must be placed at the picked base point
         let insert_entity = scene.document.get_entity(insert_h).unwrap();
-        if let acadrust::EntityType::Insert(ins) = insert_entity {
+        if let codec::EntityType::Insert(ins) = insert_entity {
             assert_eq!(ins.block_name, "ON_SCREEN_BASE_TEST");
             assert!((ins.insert_point.x - 10.0).abs() < 1e-6);
             assert!((ins.insert_point.y - 10.0).abs() < 1e-6);
@@ -580,10 +580,10 @@ mod tests {
             .document
             .entities()
             .find(|e| {
-                e.common().owner_handle == br.handle && matches!(e, acadrust::EntityType::Line(_))
+                e.common().owner_handle == br.handle && matches!(e, codec::EntityType::Line(_))
             })
             .unwrap();
-        if let acadrust::EntityType::Line(l) = block_line {
+        if let codec::EntityType::Line(l) = block_line {
             assert!((l.start.x - (-10.0)).abs() < 1e-6);
             assert!((l.start.y - (-10.0)).abs() < 1e-6);
             assert!((l.end.x - 0.0).abs() < 1e-6);

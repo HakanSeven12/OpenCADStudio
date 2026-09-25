@@ -82,10 +82,7 @@ impl OpenCADStudio {
         let old = vp.clip_boundary_handle;
         let scene = &mut self.tabs[i].scene;
         let clip = match boundary {
-            Some(mut entity) => {
-                entity.common_mut().invisible = true;
-                scene.add_entity(entity)
-            }
+            Some(entity) => scene.add_entity(entity),
             None => boundary_handle,
         };
         let mut vp = vp;
@@ -116,7 +113,6 @@ impl OpenCADStudio {
             vp.clip_boundary_handle = clip;
             if let Some(entity) = scene.document.get_entity_mut(clip) {
                 let common = entity.common_mut();
-                common.invisible = true;
                 if !common.reactors.contains(&viewport) {
                     common.reactors.push(viewport);
                 }
@@ -182,13 +178,10 @@ impl OpenCADStudio {
         let label = self.history_label_from_active_cmd(i, "MVIEW");
         let pending = self.begin_undo(i, label, touched, true);
         let clip_handle = match boundary {
-            Some(mut boundary) => {
-                // A non-rectangular viewport owns a helper boundary
-                // entity through `clip_boundary_handle`. Keep that
-                // helper in the document for DWG compatibility and
-                // stencil clipping, but do not expose it as a separate
-                // selectable polyline.
-                boundary.common_mut().invisible = true;
+            Some(boundary) => {
+                // A non-rectangular viewport owns its boundary through
+                // `clip_boundary_handle`: a visible paper-space object that
+                // is picked and erased together with the viewport.
                 match self.commit_entity_handle(boundary) {
                     Some(handle) => handle,
                     None => {
@@ -242,7 +235,6 @@ impl OpenCADStudio {
             }
             if let Some(boundary) = self.tabs[i].scene.document.get_entity_mut(clip_handle) {
                 let common = boundary.common_mut();
-                common.invisible = true;
                 if !common.reactors.contains(&viewport_handle) {
                     common.reactors.push(viewport_handle);
                 }

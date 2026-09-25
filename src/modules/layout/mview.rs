@@ -11,6 +11,8 @@
 //   Enter an arc boundary option
 //   [Angle/CEnter/CLose/Direction/Line/Radius/Second pt/Undo/Endpoint of arc] <Endpoint>:
 //   Specify length of line:
+// and the arc options' prompts (Angle, CEnter, Direction, Radius, Second pt)
+// as the reference words them; CLose in arc mode closes with a tangent arc.
 
 use codec::entities::{LwPolyline, LwVertex, Viewport};
 use codec::tables::View;
@@ -20,7 +22,7 @@ use crate::t;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
 use crate::modules::draw::draw::polyline::{
-    arc_sample_points, compute_bulge, seg_exit_tangent, update_tangent_after_arc,
+    arc_for, arc_sample_points, compute_bulge, seg_exit_tangent, update_tangent_after_arc, Sub,
 };
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
@@ -78,6 +80,8 @@ pub struct MviewCommand {
     /// already has a boundary.
     clip: Option<(Handle, bool)>,
     picked: Option<EntityType>,
+    /// VPCLIP arc mode: the arc option being answered.
+    arc_sub: Sub,
 }
 
 impl MviewCommand {
@@ -99,6 +103,7 @@ impl MviewCommand {
             original_layout,
             clip: None,
             picked: None,
+            arc_sub: Sub::None,
         }
     }
 
@@ -122,7 +127,129 @@ impl MviewCommand {
         self.clip.map_or(Handle::NULL, |(handle, _)| handle)
     }
 
+    /// VPCLIP: an arc segment from the last vertex to `e`.
+    fn push_arc(&mut self, e: DVec2, bulge: f64) -> CmdResult {
+        let Some(last) = self.polygon.last().copied() else {
+            return CmdResult::NeedPoint;
+        };
+        let end = DVec3::new(e.x, e.y, last.z);
+        let index = self.polygon.len() - 1;
+        self.polygon_bulges[index] = bulge;
+        self.polygon_last_tangent = seg_exit_tangent(last, end, bulge);
+        self.arc_sub = Sub::None;
+        self.polygon.push(end);
+        self.polygon_bulges.push(0.0);
+        CmdResult::NeedPoint
+    }
+
+    fn last2(&self) -> Option<DVec2> {
+        self.polygon.last().map(|p| DVec2::new(p.x, p.y))
+    }
+
+    /// VPCLIP arc option answered with a typed value.
+    fn arc_value(&mut self, value: f64) -> Option<CmdResult> {
+        let a = self.last2()?;
+        let tangent = self.polygon_last_tangent;
+        let angle_ok = |r: f64| r.abs() > 1e-9 && r.abs() < std::f64::consts::TAU;
+        let next = match self.arc_sub {
+            Sub::ArcAngle if angle_ok(value.to_radians()) => Sub::ArcAngleEnd { angle: value.to_radians() },
+            Sub::ArcAngleRadius { angle } if value > 0.0 => Sub::ArcAngleRadiusDir { angle, r: value },
+            Sub::ArcRadius if value > 0.0 => Sub::ArcRadiusEnd { r: value },
+            Sub::ArcRadiusAngle { r } if angle_ok(value.to_radians()) => {
+                Sub::ArcRadiusAngleDir { r, angle: value.to_radians() }
+            }
+            sub @ Sub::ArcCenterAngle { .. } => {
+                let (e, bulge) = arc_for(sub, a, DVec2::new(value.to_radians(), 0.0), tangent)?;
+                return Some(self.push_arc(e, bulge));
+            }
+            sub @ Sub::ArcCenterLength { .. } => {
+                let (e, bulge) = arc_for(sub, a, DVec2::new(value, 0.0), tangent)?;
+                return Some(self.push_arc(e, bulge));
+            }
+            _ => return None,
+        };
+        self.arc_sub = next;
+        Some(CmdResult::NeedPoint)
+    }
+
+    /// VPCLIP arc option answered with a point.
+    fn arc_point(&mut self, pt: DVec3) -> CmdResult {
+        let Some(a) = self.last2() else {
+            return CmdResult::NeedPoint;
+        };
+        let p = DVec2::new(pt.x, pt.y);
+        let sub = self.arc_sub;
+        if sub.is_scalar() {
+            let value = if sub.is_angle() { (p - a).y.atan2((p - a).x).to_degrees() } else { (p - a).length() };
+            return self.arc_value(value).unwrap_or(CmdResult::NeedPoint);
+        }
+        match sub {
+            Sub::ArcCenter if (p - a).length_squared() > 1e-12 => self.arc_sub = Sub::ArcCenterEnd { c: p },
+            Sub::ArcDirection => {
+                if let Some(dir) = (p - a).try_normalize() {
+                    self.arc_sub = Sub::ArcDirectionEnd { dir };
+                }
+            }
+            Sub::ArcSecond if (p - a).length_squared() > 1e-12 => self.arc_sub = Sub::ArcSecondEnd { s: p },
+            _ => {
+                if let Some((e, bulge)) = arc_for(sub, a, p, self.polygon_last_tangent) {
+                    return self.push_arc(e, bulge);
+                }
+            }
+        }
+        CmdResult::NeedPoint
+    }
+
+    /// VPCLIP CLose in arc mode: a tangent arc back to the start.
+    fn close_with_arc(&mut self) -> CmdResult {
+        let (Some(last), Some(first)) = (self.polygon.last().copied(), self.polygon.first().copied()) else {
+            return CmdResult::NeedPoint;
+        };
+        let tangent = self.polygon_last_tangent.map_or(DVec2::X, |t| t.as_dvec2());
+        let index = self.polygon.len() - 1;
+        self.polygon_bulges[index] = compute_bulge(DVec2::new(last.x, last.y), tangent, DVec2::new(first.x, first.y));
+        self.finish_polygon()
+    }
+
+    fn arc_prompt(&self) -> Option<&'static str> {
+        Some(match self.arc_sub {
+            Sub::ArcAngle | Sub::ArcCenterAngle { .. } | Sub::ArcRadiusAngle { .. } => "Specify included angle:",
+            Sub::ArcAngleEnd { .. } => "Specify endpoint of arc (hold Ctrl to switch direction) or [CEnter/Radius]:",
+            Sub::ArcCenter | Sub::ArcAngleCenter { .. } => "Specify center point of arc:",
+            Sub::ArcCenterEnd { .. } => "Specify endpoint of arc (hold Ctrl to switch direction) or [Angle/Length]:",
+            Sub::ArcCenterLength { .. } => "Specify length of chord:",
+            Sub::ArcDirection => "Specify the tangent direction for the start point of arc:",
+            Sub::ArcDirectionEnd { .. } => "Specify endpoint of the arc (hold Ctrl to switch direction):",
+            Sub::ArcRadius | Sub::ArcAngleRadius { .. } => "Specify radius of arc:",
+            Sub::ArcRadiusEnd { .. } => "Specify endpoint of arc (hold Ctrl to switch direction) or [Angle]:",
+            Sub::ArcAngleRadiusDir { .. } | Sub::ArcRadiusAngleDir { .. } => "Specify direction of chord for arc:",
+            Sub::ArcSecond => "Specify second point on arc:",
+            Sub::ArcSecondEnd { .. } => "Specify end point of arc:",
+            _ => return None,
+        })
+    }
+
     fn clip_text(&mut self, upper: &str) -> Option<CmdResult> {
+        if self.step == Step::Polygon && self.arc_sub != Sub::None {
+            let next = match (self.arc_sub, upper) {
+                (Sub::ArcAngleEnd { angle }, "CE" | "CENTER" | "CENTRE") => Sub::ArcAngleCenter { angle },
+                (Sub::ArcAngleEnd { angle }, "R" | "RADIUS") => Sub::ArcAngleRadius { angle },
+                (Sub::ArcCenterEnd { c }, "A" | "ANGLE") => Sub::ArcCenterAngle { c },
+                (Sub::ArcCenterEnd { c }, "L" | "LENGTH") => Sub::ArcCenterLength { c },
+                (Sub::ArcRadiusEnd { r }, "A" | "ANGLE") => Sub::ArcRadiusAngle { r },
+                (sub, text) if sub.is_scalar() => {
+                    let value = if sub.is_angle() {
+                        crate::entities::common::parse_typed_angle(text).map(f64::to_degrees)
+                    } else {
+                        crate::entities::common::parse_typed_length(text)
+                    };
+                    return value.and_then(|v| self.arc_value(v));
+                }
+                _ => return None,
+            };
+            self.arc_sub = next;
+            return Some(CmdResult::NeedPoint);
+        }
         match self.step {
             Step::ClipChoice => match upper {
                 "" | "P" | "POLYGONAL" => {
@@ -146,7 +273,18 @@ impl MviewCommand {
                 Some(self.on_point(last + DVec3::new(direction.x, direction.y, 0.0) * length))
             }
             Step::Polygon if self.polygon_mode == PolygonMode::Arc => match upper {
-                "CL" | "CLOSE" if self.polygon.len() >= 2 => Some(self.finish_polygon()),
+                "CL" | "CLOSE" if self.polygon.len() >= 2 => Some(self.close_with_arc()),
+                "A" | "ANGLE" | "CE" | "CENTER" | "CENTRE" | "D" | "DIRECTION" | "R" | "RADIUS" | "S"
+                | "SECOND" | "SECOND PT" => {
+                    self.arc_sub = match upper {
+                        "A" | "ANGLE" => Sub::ArcAngle,
+                        "CE" | "CENTER" | "CENTRE" => Sub::ArcCenter,
+                        "D" | "DIRECTION" => Sub::ArcDirection,
+                        "R" | "RADIUS" => Sub::ArcRadius,
+                        _ => Sub::ArcSecond,
+                    };
+                    Some(CmdResult::NeedPoint)
+                }
                 "L" | "LINE" => {
                     self.polygon_mode = PolygonMode::Line;
                     Some(CmdResult::NeedPoint)
@@ -367,6 +505,7 @@ impl CadCommand for MviewCommand {
                 Step::ClipChoice => "Select clipping object or [Polygonal] <Polygonal>:",
                 Step::ClipLength => "Specify length of line:",
                 Step::Polygon if self.polygon.is_empty() => "Specify start point:",
+                Step::Polygon if self.arc_prompt().is_some() => self.arc_prompt().unwrap_or_default(),
                 Step::Polygon if self.polygon_mode == PolygonMode::Arc => {
                     "Enter an arc boundary option\n[Angle/CEnter/CLose/Direction/Line/Radius/Second pt/Undo/Endpoint of arc] <Endpoint>:"
                 }
@@ -418,9 +557,20 @@ impl CadCommand for MviewCommand {
         if self.clip.is_some() {
             return match self.step {
                 Step::ClipChoice => vec![CmdOption::new("Polygonal", "P")],
+                Step::Polygon if self.arc_sub != Sub::None => match self.arc_sub {
+                    Sub::ArcAngleEnd { .. } => vec![CmdOption::new("CEnter", "CE"), CmdOption::new("Radius", "R")],
+                    Sub::ArcCenterEnd { .. } => vec![CmdOption::new("Angle", "A"), CmdOption::new("Length", "L")],
+                    Sub::ArcRadiusEnd { .. } => vec![CmdOption::new("Angle", "A")],
+                    _ => Vec::new(),
+                },
                 Step::Polygon if self.polygon_mode == PolygonMode::Arc => vec![
+                    CmdOption::new("Angle", "A"),
+                    CmdOption::new("CEnter", "CE"),
                     CmdOption::new("CLose", "CL"),
+                    CmdOption::new("Direction", "D"),
                     CmdOption::new("Line", "L"),
+                    CmdOption::new("Radius", "R"),
+                    CmdOption::new("Second pt", "S"),
                     CmdOption::new("Undo", "U"),
                 ],
                 Step::Polygon if !self.polygon.is_empty() => {
@@ -479,6 +629,7 @@ impl CadCommand for MviewCommand {
                 },
                 None => CmdResult::NeedPoint,
             },
+            Step::Polygon if self.arc_sub != Sub::None => self.arc_point(pt),
             Step::Polygon => {
                 if let Some(last) = self.polygon.last().copied() {
                     let last_index = self.polygon.len() - 1;
@@ -620,7 +771,7 @@ impl CadCommand for MviewCommand {
     }
 
     fn input_kind(&self) -> InputKind {
-        if self.step == Step::ClipLength {
+        if self.step == Step::ClipLength || (self.step == Step::Polygon && self.arc_sub.is_scalar()) {
             InputKind::FreeText
         } else if self.step == Step::ChooseView {
             InputKind::FreeText
@@ -705,6 +856,10 @@ impl CadCommand for MviewCommand {
     fn on_undo_step(&mut self) -> Option<CmdResult> {
         if self.clip.is_some() && self.step == Step::ClipLength {
             self.step = Step::Polygon;
+            return Some(CmdResult::NeedPoint);
+        }
+        if self.arc_sub != Sub::None {
+            self.arc_sub = Sub::None;
             return Some(CmdResult::NeedPoint);
         }
         if self.step == Step::Polygon && !self.polygon.is_empty() {

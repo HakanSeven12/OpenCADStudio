@@ -47,7 +47,7 @@ enum SegMode {
 /// sub-step returns to `None` once it has produced a vertex, or when Undo /
 /// Enter / Escape backs out of it.
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum Sub {
+pub(crate) enum Sub {
     None,
     /// Width / Halfwidth: starting width, then ending width. `half` scales the
     /// prompt and the typed value by two.
@@ -81,7 +81,7 @@ enum Sub {
 
 impl Sub {
     /// The step reads a single typed value (width, length, angle, radius).
-    fn is_scalar(self) -> bool {
+    pub(crate) fn is_scalar(self) -> bool {
         matches!(
             self,
             Sub::WidthStart { .. }
@@ -97,7 +97,7 @@ impl Sub {
     }
 
     /// The typed value is an angle (degrees) rather than a length.
-    fn is_angle(self) -> bool {
+    pub(crate) fn is_angle(self) -> bool {
         matches!(
             self,
             Sub::ArcAngle | Sub::ArcCenterAngle { .. } | Sub::ArcRadiusAngle { .. }
@@ -249,149 +249,8 @@ impl PlineCommand {
             .unwrap_or(DVec2::X)
     }
 
-    /// Sign for an arc whose direction is not fixed by its definition
-    /// (CEnter / Radius endpoints, chord length): bend the way the previous
-    /// segment was heading so the polyline flows on, else counter-clockwise.
-    fn free_arc_sign(&self, a: DVec2, e: DVec2) -> f64 {
-        let chord = e - a;
-        let cross = match self.last_tangent {
-            Some(t) => t.as_dvec2().perp_dot(chord),
-            None => 1.0,
-        };
-        if cross < 0.0 {
-            -1.0
-        } else {
-            1.0
-        }
-    }
-
-    /// Bulge of the arc from `a` to `e` through `s` (3-point arc). `None` when
-    /// the points are collinear or coincident.
-    fn bulge_through(a: DVec2, s: DVec2, e: DVec2) -> Option<f64> {
-        let d = 2.0 * (a.x * (s.y - e.y) + s.x * (e.y - a.y) + e.x * (a.y - s.y));
-        if d.abs() < 1e-12 {
-            return None;
-        }
-        let a2 = a.length_squared();
-        let s2 = s.length_squared();
-        let e2 = e.length_squared();
-        let cx = (a2 * (s.y - e.y) + s2 * (e.y - a.y) + e2 * (a.y - s.y)) / d;
-        let cy = (a2 * (e.x - s.x) + s2 * (a.x - e.x) + e2 * (s.x - a.x)) / d;
-        let c = DVec2::new(cx, cy);
-        let start = (a - c).y.atan2((a - c).x);
-        let end = (e - c).y.atan2((e - c).x);
-        // The arc bends towards `s`: with `s` right of the chord a → e the
-        // arc runs counter-clockwise, left of it clockwise.
-        let ccw = (e - a).perp_dot(s - a) < 0.0;
-        let mut sweep = end - start;
-        if ccw {
-            if sweep <= 0.0 {
-                sweep += std::f64::consts::TAU;
-            }
-        } else if sweep >= 0.0 {
-            sweep -= std::f64::consts::TAU;
-        }
-        Some((sweep / 4.0).tan())
-    }
-
-    /// Endpoint of the arc about `c` starting at `a` with signed `sweep`.
-    fn rotate_about(c: DVec2, a: DVec2, sweep: f64) -> DVec2 {
-        let (sn, cs) = sweep.sin_cos();
-        let v = a - c;
-        c + DVec2::new(v.x * cs - v.y * sn, v.x * sn + v.y * cs)
-    }
-
-    /// Resolve the arc a sub-step describes for a candidate `cursor`/point:
-    /// `(endpoint, bulge)`. `None` when the geometry is degenerate for that
-    /// input (e.g. a chord longer than the diameter).
     fn arc_for(&self, sub: Sub, a: DVec2, p: DVec2) -> Option<(DVec2, f64)> {
-        let sweep_ok = |s: f64| s.abs() > 1e-9 && s.abs() < std::f64::consts::TAU;
-        match sub {
-            Sub::ArcAngleEnd { angle } if sweep_ok(angle) => {
-                if (p - a).length_squared() < 1e-12 {
-                    return None;
-                }
-                Some((p, (angle / 4.0).tan()))
-            }
-            Sub::ArcAngleCenter { angle } if sweep_ok(angle) => {
-                if (a - p).length_squared() < 1e-12 {
-                    return None;
-                }
-                Some((Self::rotate_about(p, a, angle), (angle / 4.0).tan()))
-            }
-            Sub::ArcAngleRadiusDir { angle, r } if sweep_ok(angle) && r > 0.0 => {
-                let dir = (p - a).try_normalize()?;
-                let chord = 2.0 * r * (angle.abs() * 0.5).sin();
-                Some((a + dir * chord, (angle / 4.0).tan()))
-            }
-            Sub::ArcCenterEnd { c } => {
-                let r = (a - c).length();
-                if r < 1e-9 {
-                    return None;
-                }
-                let dir = (p - c).try_normalize()?;
-                let e = c + dir * r;
-                let start = (a - c).y.atan2((a - c).x);
-                let end = (e - c).y.atan2((e - c).x);
-                let sign = self.free_arc_sign(a, e);
-                let mut sweep = (end - start).rem_euclid(std::f64::consts::TAU);
-                if sign < 0.0 {
-                    sweep -= std::f64::consts::TAU;
-                }
-                if !sweep_ok(sweep) {
-                    return None;
-                }
-                Some((e, (sweep / 4.0).tan()))
-            }
-            Sub::ArcCenterAngle { c } => {
-                // `p` carries the typed angle in `x`.
-                let angle = p.x;
-                if (a - c).length_squared() < 1e-12 || !sweep_ok(angle) {
-                    return None;
-                }
-                Some((Self::rotate_about(c, a, angle), (angle / 4.0).tan()))
-            }
-            Sub::ArcCenterLength { c } => {
-                // `p` carries the typed chord length in `x`.
-                let len = p.x;
-                let r = (a - c).length();
-                if r < 1e-9 || len <= 0.0 || len > 2.0 * r {
-                    return None;
-                }
-                let sweep = 2.0 * (len / (2.0 * r)).asin();
-                // Minor arc; bend on the side the previous segment favours.
-                let e_ccw = Self::rotate_about(c, a, sweep);
-                let sign = self.free_arc_sign(a, e_ccw);
-                let sweep = sweep * sign;
-                Some((Self::rotate_about(c, a, sweep), (sweep / 4.0).tan()))
-            }
-            Sub::ArcDirectionEnd { dir } => {
-                if (p - a).length_squared() < 1e-12 {
-                    return None;
-                }
-                Some((p, compute_bulge(a, dir, p)))
-            }
-            Sub::ArcRadiusEnd { r } if r > 0.0 => {
-                let chord = (p - a).length();
-                if chord < 1e-9 || chord > 2.0 * r {
-                    return None;
-                }
-                let sweep = 2.0 * (chord / (2.0 * r)).asin() * self.free_arc_sign(a, p);
-                Some((p, (sweep / 4.0).tan()))
-            }
-            Sub::ArcRadiusAngleDir { r, angle } if r > 0.0 && sweep_ok(angle) => {
-                let dir = (p - a).try_normalize()?;
-                let chord = 2.0 * r * (angle.abs() * 0.5).sin();
-                Some((a + dir * chord, (angle / 4.0).tan()))
-            }
-            Sub::ArcSecondEnd { s } => {
-                if (p - a).length_squared() < 1e-12 {
-                    return None;
-                }
-                Some((p, Self::bulge_through(a, s, p)?))
-            }
-            _ => None,
-        }
+        arc_for(sub, a, p, self.last_tangent)
     }
 
     /// Land a segment ending at local `e` with `bulge`, publish it, and
@@ -581,6 +440,152 @@ impl PlineCommand {
 }
 
 // ── Arc geometry helpers ───────────────────────────────────────────────────
+
+/// Sign for an arc whose direction is not fixed by its definition
+/// (CEnter / Radius endpoints, chord length): bend the way the previous
+/// segment was heading so the polyline flows on, else counter-clockwise.
+fn free_arc_sign(last_tangent: Option<Vec2>, a: DVec2, e: DVec2) -> f64 {
+    let chord = e - a;
+    let cross = match last_tangent {
+        Some(t) => t.as_dvec2().perp_dot(chord),
+        None => 1.0,
+    };
+    if cross < 0.0 {
+        -1.0
+    } else {
+        1.0
+    }
+}
+
+/// Bulge of the arc from `a` to `e` through `s` (3-point arc). `None` when
+/// the points are collinear or coincident.
+fn bulge_through(a: DVec2, s: DVec2, e: DVec2) -> Option<f64> {
+    let d = 2.0 * (a.x * (s.y - e.y) + s.x * (e.y - a.y) + e.x * (a.y - s.y));
+    if d.abs() < 1e-12 {
+        return None;
+    }
+    let a2 = a.length_squared();
+    let s2 = s.length_squared();
+    let e2 = e.length_squared();
+    let cx = (a2 * (s.y - e.y) + s2 * (e.y - a.y) + e2 * (a.y - s.y)) / d;
+    let cy = (a2 * (e.x - s.x) + s2 * (a.x - e.x) + e2 * (s.x - a.x)) / d;
+    let c = DVec2::new(cx, cy);
+    let start = (a - c).y.atan2((a - c).x);
+    let end = (e - c).y.atan2((e - c).x);
+    // The arc bends towards `s`: with `s` right of the chord a → e the
+    // arc runs counter-clockwise, left of it clockwise.
+    let ccw = (e - a).perp_dot(s - a) < 0.0;
+    let mut sweep = end - start;
+    if ccw {
+        if sweep <= 0.0 {
+            sweep += std::f64::consts::TAU;
+        }
+    } else if sweep >= 0.0 {
+        sweep -= std::f64::consts::TAU;
+    }
+    Some((sweep / 4.0).tan())
+}
+
+/// Endpoint of the arc about `c` starting at `a` with signed `sweep`.
+fn rotate_about(c: DVec2, a: DVec2, sweep: f64) -> DVec2 {
+    let (sn, cs) = sweep.sin_cos();
+    let v = a - c;
+    c + DVec2::new(v.x * cs - v.y * sn, v.x * sn + v.y * cs)
+}
+
+/// Resolve the arc an arc sub-step describes (PLINE, VPCLIP) from `a` for a
+/// candidate `cursor`/point `p`, after a segment leaving along
+/// `last_tangent`: `(endpoint, bulge)`. `None` when the geometry is
+/// degenerate for that input (e.g. a chord longer than the diameter).
+pub(crate) fn arc_for(sub: Sub, a: DVec2, p: DVec2, last_tangent: Option<Vec2>) -> Option<(DVec2, f64)> {
+    let sweep_ok = |s: f64| s.abs() > 1e-9 && s.abs() < std::f64::consts::TAU;
+    match sub {
+        Sub::ArcAngleEnd { angle } if sweep_ok(angle) => {
+            if (p - a).length_squared() < 1e-12 {
+                return None;
+            }
+            Some((p, (angle / 4.0).tan()))
+        }
+        Sub::ArcAngleCenter { angle } if sweep_ok(angle) => {
+            if (a - p).length_squared() < 1e-12 {
+                return None;
+            }
+            Some((rotate_about(p, a, angle), (angle / 4.0).tan()))
+        }
+        Sub::ArcAngleRadiusDir { angle, r } if sweep_ok(angle) && r > 0.0 => {
+            let dir = (p - a).try_normalize()?;
+            let chord = 2.0 * r * (angle.abs() * 0.5).sin();
+            Some((a + dir * chord, (angle / 4.0).tan()))
+        }
+        Sub::ArcCenterEnd { c } => {
+            let r = (a - c).length();
+            if r < 1e-9 {
+                return None;
+            }
+            let dir = (p - c).try_normalize()?;
+            let e = c + dir * r;
+            let start = (a - c).y.atan2((a - c).x);
+            let end = (e - c).y.atan2((e - c).x);
+            let sign = free_arc_sign(last_tangent, a, e);
+            let mut sweep = (end - start).rem_euclid(std::f64::consts::TAU);
+            if sign < 0.0 {
+                sweep -= std::f64::consts::TAU;
+            }
+            if !sweep_ok(sweep) {
+                return None;
+            }
+            Some((e, (sweep / 4.0).tan()))
+        }
+        Sub::ArcCenterAngle { c } => {
+            // `p` carries the typed angle in `x`.
+            let angle = p.x;
+            if (a - c).length_squared() < 1e-12 || !sweep_ok(angle) {
+                return None;
+            }
+            Some((rotate_about(c, a, angle), (angle / 4.0).tan()))
+        }
+        Sub::ArcCenterLength { c } => {
+            // `p` carries the typed chord length in `x`.
+            let len = p.x;
+            let r = (a - c).length();
+            if r < 1e-9 || len <= 0.0 || len > 2.0 * r {
+                return None;
+            }
+            let sweep = 2.0 * (len / (2.0 * r)).asin();
+            // Minor arc; bend on the side the previous segment favours.
+            let e_ccw = rotate_about(c, a, sweep);
+            let sign = free_arc_sign(last_tangent, a, e_ccw);
+            let sweep = sweep * sign;
+            Some((rotate_about(c, a, sweep), (sweep / 4.0).tan()))
+        }
+        Sub::ArcDirectionEnd { dir } => {
+            if (p - a).length_squared() < 1e-12 {
+                return None;
+            }
+            Some((p, compute_bulge(a, dir, p)))
+        }
+        Sub::ArcRadiusEnd { r } if r > 0.0 => {
+            let chord = (p - a).length();
+            if chord < 1e-9 || chord > 2.0 * r {
+                return None;
+            }
+            let sweep = 2.0 * (chord / (2.0 * r)).asin() * free_arc_sign(last_tangent, a, p);
+            Some((p, (sweep / 4.0).tan()))
+        }
+        Sub::ArcRadiusAngleDir { r, angle } if r > 0.0 && sweep_ok(angle) => {
+            let dir = (p - a).try_normalize()?;
+            let chord = 2.0 * r * (angle.abs() * 0.5).sin();
+            Some((a + dir * chord, (angle / 4.0).tan()))
+        }
+        Sub::ArcSecondEnd { s } => {
+            if (p - a).length_squared() < 1e-12 {
+                return None;
+            }
+            Some((p, bulge_through(a, s, p)?))
+        }
+        _ => None,
+    }
+}
 
 /// Compute the bulge for the arc from `a` to `b` that is tangent to `tangent` at `a`.
 /// Returns 0.0 if the points are coincident or the tangent is parallel to the chord.

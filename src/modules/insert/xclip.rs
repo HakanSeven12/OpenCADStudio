@@ -220,10 +220,11 @@ impl XclipCommand {
                 self.step = Step::Back;
                 CmdResult::NeedPoint
             }
-            // A front plane behind the back one changes nothing.
+            // A front plane behind the back one is not applied; the back
+            // plane is cleared and the old front one kept.
             _ if self.front.is_some_and(|front| front < d) => self.act(XclipAction::Depth {
                 front: None,
-                back: None,
+                back: Some(None),
                 rejected: true,
             }),
             _ => self.act(XclipAction::Depth { front: Some(self.front), back: Some(Some(d)), rejected: false }),

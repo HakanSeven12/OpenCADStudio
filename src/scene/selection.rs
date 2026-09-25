@@ -121,6 +121,19 @@ impl Scene {
         handles: &[Handle],
     ) -> Vec<Handle> {
         let mut expanded = self.expanded_with_leaders(handles);
+        // A viewport's clip boundary goes with its viewport: picking the
+        // boundary selects both, erasing it erases the viewport.
+        let viewports: Vec<Handle> = expanded
+            .iter()
+            .filter_map(|h| self.document.get_entity(*h).map(|e| (*h, e)))
+            .flat_map(|(h, e)| {
+                e.common().reactors.iter().copied().filter(move |r| {
+                    matches!(self.document.get_entity(*r),
+                        Some(EntityType::Viewport(vp)) if vp.clip_boundary_handle == h)
+                })
+            })
+            .collect();
+        expanded.extend(viewports);
         expanded.sort_unstable_by_key(|handle| handle.value());
         expanded.dedup();
         expanded

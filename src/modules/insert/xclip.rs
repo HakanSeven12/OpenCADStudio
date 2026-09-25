@@ -13,7 +13,8 @@
 //   Specify front clip point or [Distance/Remove]:
 //
 // CLIP asks for one object: a block reference continues as XCLIP, a PDF
-// underlay as PDFCLIP, anything else is "*Invalid selection*".
+// underlay as PDFCLIP, a raster image as IMAGECLIP, a layout viewport as
+// VPCLIP, anything else is "*Invalid selection*".
 
 use codec::entities::UnderlayType;
 use codec::types::Handle;
@@ -22,6 +23,7 @@ use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
 use crate::modules::insert::pdf_clip::PdfClipCommand;
+use crate::modules::layout::mview::MviewCommand;
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 
@@ -43,8 +45,9 @@ pub enum XclipAction {
     Polyline,
     /// Boundary in WCS (two points = rectangle corners).
     New { boundary: Vec<[f64; 2]>, inverted: bool },
-    /// Front and back clipping planes; `None` removes one.
-    Depth { front: Option<f64>, back: Option<f64> },
+    /// Front and back clipping planes: `Some(None)` removes one, `None`
+    /// leaves it. `rejected` prints that the front plane was not applied.
+    Depth { front: Option<Option<f64>>, back: Option<Option<f64>>, rejected: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,8 +79,11 @@ pub struct XclipCommand {
     inverted: bool,
     points: Vec<DVec3>,
     picked: Option<EntityType>,
+    /// The front plane answered: a distance, or `None` for Remove.
     front: Option<f64>,
 }
+
+pub const DEPTH_REJECTED: &str = "Error: Front clipping plane behind back clipping plane.  Clipdepth not applied.";
 
 impl XclipCommand {
     pub fn new() -> Self {
@@ -178,7 +184,19 @@ impl XclipCommand {
 
     fn depth(&mut self, text: &str) -> CmdResult {
         match (self.step, text.trim().to_ascii_uppercase().as_str()) {
-            (_, "R" | "REMOVE") => self.act(XclipAction::Depth { front: None, back: None }),
+            // Remove clears only the plane being asked; the back one is still asked.
+            (Step::Front, "R" | "REMOVE") => {
+                self.front = None;
+                self.step = Step::Back;
+                CmdResult::NeedPoint
+            }
+            // Back Remove after a front distance: the back plane goes, the
+            // front is not applied.
+            (Step::Back, "R" | "REMOVE") => self.act(XclipAction::Depth {
+                front: self.front.is_none().then_some(None),
+                back: Some(None),
+                rejected: self.front.is_some(),
+            }),
             (Step::Front, "D" | "DISTANCE") => {
                 self.step = Step::FrontDistance;
                 CmdResult::NeedPoint
@@ -202,7 +220,14 @@ impl XclipCommand {
                 self.step = Step::Back;
                 CmdResult::NeedPoint
             }
-            _ => self.act(XclipAction::Depth { front: self.front, back: Some(d) }),
+            // A front plane behind the back one is not applied; the back
+            // plane is cleared and the old front one kept.
+            _ if self.front.is_some_and(|front| front < d) => self.act(XclipAction::Depth {
+                front: None,
+                back: Some(None),
+                rejected: true,
+            }),
+            _ => self.act(XclipAction::Depth { front: Some(self.front), back: Some(Some(d)), rejected: false }),
         }
     }
 
@@ -456,6 +481,16 @@ impl CadCommand for ClipCommand {
             }
             Some(EntityType::Underlay(u)) if u.underlay_type == UnderlayType::Pdf => {
                 self.inner = Some(Box::new(PdfClipCommand::for_underlay(handle, u)));
+                CmdResult::NeedPoint
+            }
+            Some(EntityType::RasterImage(image)) => {
+                self.inner = Some(Box::new(PdfClipCommand::for_image(handle, image)));
+                CmdResult::NeedPoint
+            }
+            // The layout's own paper-space viewport (id 1) is not clippable.
+            Some(EntityType::Viewport(vp)) if vp.id != 1 => {
+                let clipped = !vp.clip_boundary_handle.is_null();
+                self.inner = Some(Box::new(MviewCommand::vpclip(handle, clipped)));
                 CmdResult::NeedPoint
             }
             _ => CmdResult::ReportError("*Invalid selection*".to_string()),

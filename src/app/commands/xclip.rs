@@ -37,6 +37,9 @@ impl OpenCADStudio {
         inserts: Vec<codec::Handle>,
         action: XclipAction,
     ) {
+        if let XclipAction::Depth { rejected: true, .. } = action {
+            self.command_line.push_error(crate::modules::insert::xclip::DEPTH_REJECTED);
+        }
         self.push_undo_snapshot(i, "XCLIP");
         let extents: Vec<_> = inserts.iter().map(|h| self.insert_extents(i, *h)).collect();
         let current_layer = self.tabs[i].scene.document.header.current_layer_name.clone();
@@ -51,7 +54,7 @@ impl OpenCADStudio {
                 XclipAction::Delete => {
                     clip::remove_insert_clip(doc, *insert);
                 }
-                XclipAction::Depth { front, back } => {
+                XclipAction::Depth { front, back, .. } => {
                     clip::set_insert_clip_depth(doc, *insert, *front, *back);
                 }
                 XclipAction::New { boundary, inverted } => {

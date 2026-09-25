@@ -33,10 +33,10 @@ fn quad_verts(corners: &[[f32; 3]; 4], corners_low: &[[f32; 3]; 4]) -> Vec<Image
 
 /// Visible-region triangles in image PIXEL space (flat, groups of 3): the whole
 /// image rectangle when unclipped, else the clip rectangle or the triangulated
-/// clip polygon. An inverted (show-outside) boundary isn't a simple filled
-/// region, so it falls back to the whole image rather than mis-clip.
+/// clip polygon, or the image with the polygon cut out when the boundary
+/// hides its inside.
 fn clip_triangles_px(img: &codec::entities::RasterImage) -> Vec<[f64; 2]> {
-    use codec::entities::{ClipMode, ClipType};
+    use codec::entities::ClipMode;
     let w = img.size.x;
     let h = img.size.y;
     let quad = || {
@@ -45,34 +45,16 @@ fn clip_triangles_px(img: &codec::entities::RasterImage) -> Vec<[f64; 2]> {
             [0.0, 0.0], [w, h], [0.0, h],
         ]
     };
-    if !img.clipping_enabled {
+    let Some(poly) = crate::entities::raster_image::image_clip_polygon(img) else {
         return quad();
-    }
-    let cb = &img.clip_boundary;
-    if cb.clip_mode == ClipMode::Inside {
-        return quad();
-    }
-    // Clip-boundary Y is in image raster space (row 0 = top, Y increasing
-    // downward), whereas this pixel space matches the image's v-vector (Y up
-    // from the insertion corner). Flip each vertex's Y (`h - y`) so the clip
-    // lands where AutoCAD draws it and samples the matching texels.
-    let tris: Vec<[f64; 2]> = match cb.clip_type {
-        ClipType::Rectangular if cb.vertices.len() >= 2 => {
-            let (v0, v1) = (cb.vertices[0], cb.vertices[1]);
-            let (xa, xb) = (v0.x.min(v1.x), v0.x.max(v1.x));
-            let (y0, y1) = (h - v0.y, h - v1.y);
-            let (ya, yb) = (y0.min(y1), y0.max(y1));
-            vec![[xa, ya], [xb, ya], [xb, yb], [xa, ya], [xb, yb], [xa, yb]]
-        }
-        ClipType::Polygonal if cb.vertices.len() >= 3 => {
-            let poly: Vec<[f64; 3]> = cb.vertices.iter().map(|v| [v.x, h - v.y, 0.0]).collect();
-            crate::entities::mesh::triangulate_planar(&poly)
-                .into_iter()
-                .map(|p| [p[0], p[1]])
-                .collect()
-        }
-        _ => quad(),
     };
+    // Inside mode shows the image with the boundary cut out.
+    let (points, triangles) = if img.clip_boundary.clip_mode == ClipMode::Inside {
+        kernel::geom2d::triangulate(&[[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]], &[poly])
+    } else {
+        kernel::geom2d::triangulate(&poly, &[])
+    };
+    let tris: Vec<[f64; 2]> = triangles.into_iter().flat_map(|t| t.map(|i| points[i])).collect();
     if tris.is_empty() {
         quad()
     } else {

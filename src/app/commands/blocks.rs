@@ -715,6 +715,18 @@ impl OpenCADStudio {
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
+            "IMAGECLIP" => {
+                use crate::command::CadCommand;
+                let command = crate::modules::insert::pdf_clip::PdfClipCommand::image();
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+            "VPCLIP" => {
+                use crate::command::CadCommand;
+                let command = crate::modules::layout::mview::MviewCommand::vpclip_select();
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
             "CLIP" => {
                 use crate::command::CadCommand;
                 let command = crate::modules::insert::xclip::ClipCommand::new();

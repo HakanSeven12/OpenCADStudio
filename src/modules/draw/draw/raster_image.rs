@@ -96,6 +96,7 @@ impl ImageCommand {
                     world_height,
                 );
                 img.flags = codec::entities::ImageDisplayFlags::SHOW_IMAGE
+                    | codec::entities::ImageDisplayFlags::SHOW_NOT_ALIGNED
                     | codec::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
                 self.plane.place_entity(EntityType::RasterImage(img))
             }

@@ -1938,6 +1938,9 @@ pub enum CmdResult {
     MviewCreateClipped {
         boundary: Option<EntityType>,
         boundary_handle: Handle,
+        /// VPCLIP: the viewport to clip instead of creating one (NULL for
+        /// MVIEW). With neither boundary nor handle its clip is deleted.
+        target: Handle,
     },
     /// Create a wipeout from an existing closed polyline in the active space.
     /// `erase_source` controls whether the source boundary is consumed.

@@ -43,6 +43,97 @@ impl OpenCADStudio {
         }
     }
 
+    /// VPCLIP: clip `viewport` to a new polygon (`boundary`) or a picked closed
+    /// paper-space object (`boundary_handle`), or — with neither — delete its
+    /// clip. The viewport shrinks to the boundary's extents and its view
+    /// moves with it, so the model stays where it was on paper; the old
+    /// boundary is erased. One undo step.
+    pub(super) fn handle_vpclip(
+        &mut self,
+        viewport: Handle,
+        boundary: Option<codec::EntityType>,
+        boundary_handle: Handle,
+    ) {
+        let i = self.active_tab;
+        self.tabs[i].scene.clear_preview_wire();
+        self.tabs[i].active_cmd = None;
+        self.tabs[i].snap_result = None;
+        let Some(codec::EntityType::Viewport(vp)) = self.tabs[i].scene.document.get_entity(viewport).cloned()
+        else {
+            return;
+        };
+        if boundary.is_none() && !boundary_handle.is_null() {
+            let scene = &self.tabs[i].scene;
+            let closed = scene.entity_belongs_to_current_layout(boundary_handle)
+                && scene.document.get_entity(boundary_handle).is_some_and(|entity| match entity {
+                    codec::EntityType::Circle(_) => true,
+                    codec::EntityType::Ellipse(ellipse) => ellipse.is_full(),
+                    codec::EntityType::LwPolyline(polyline) => polyline.is_closed,
+                    codec::EntityType::Polyline(polyline) => polyline.is_closed(),
+                    codec::EntityType::Polyline2D(polyline) => polyline.is_closed(),
+                    _ => false,
+                });
+            if !closed {
+                self.command_line.push_error("Object is not a closed curve.");
+                return;
+            }
+        }
+        self.push_undo_snapshot(i, "VPCLIP");
+        let old = vp.clip_boundary_handle;
+        let scene = &mut self.tabs[i].scene;
+        let clip = match boundary {
+            Some(entity) => scene.add_entity(entity),
+            None => boundary_handle,
+        };
+        let mut vp = vp;
+        if clip.is_null() {
+            vp.clip_boundary_handle = Handle::NULL;
+        } else {
+            let (lo, hi) = clip_boundary_extents(scene, clip)
+                .map(|(lo, hi)| (glam::DVec2::from(lo), glam::DVec2::from(hi)))
+                .unwrap_or((glam::DVec2::ZERO, glam::DVec2::ZERO));
+            if hi.x - lo.x < 1e-6 || hi.y - lo.y < 1e-6 {
+                self.command_line
+                    .push_error(crate::t!("MVIEW: the clipping boundary has no usable area.").as_ref());
+                return;
+            }
+            // Model units per paper unit; the view centre follows the paper
+            // centre so the model does not move on the sheet.
+            let scale = if vp.height.abs() > 1e-12 { vp.view_height / vp.height } else { 1.0 };
+            let center = (lo + hi) * 0.5;
+            let (dx, dy) = (center.x - vp.center.x, center.y - vp.center.y);
+            let (s, c) = (-vp.twist_angle).sin_cos();
+            vp.view_center.x += (dx * c - dy * s) * scale;
+            vp.view_center.y += (dx * s + dy * c) * scale;
+            vp.center.x = center.x;
+            vp.center.y = center.y;
+            vp.width = hi.x - lo.x;
+            vp.height = hi.y - lo.y;
+            vp.view_height = vp.height * scale;
+            vp.clip_boundary_handle = clip;
+            if let Some(entity) = scene.document.get_entity_mut(clip) {
+                let common = entity.common_mut();
+                if !common.reactors.contains(&viewport) {
+                    common.reactors.push(viewport);
+                }
+            }
+        }
+        if let Some(entity) = scene.document.get_entity_mut(viewport) {
+            *entity = codec::EntityType::Viewport(vp);
+        }
+        if !old.is_null() && old != clip {
+            scene.erase_entities(&[old]);
+        }
+        let mut changes = vec![(viewport, crate::scene::ChangeKind::Modified)];
+        if !clip.is_null() {
+            changes.push((clip, crate::scene::ChangeKind::Modified));
+        }
+        scene.bump_entities(&changes);
+        scene.camera_generation += 1;
+        self.tabs[i].dirty = true;
+        self.restore_pre_cmd_tangent();
+    }
+
     pub(super) fn handle_mview_create_clipped(
         &mut self,
         boundary: Option<codec::EntityType>,
@@ -87,13 +178,10 @@ impl OpenCADStudio {
         let label = self.history_label_from_active_cmd(i, "MVIEW");
         let pending = self.begin_undo(i, label, touched, true);
         let clip_handle = match boundary {
-            Some(mut boundary) => {
-                // A non-rectangular viewport owns a helper boundary
-                // entity through `clip_boundary_handle`. Keep that
-                // helper in the document for DWG compatibility and
-                // stencil clipping, but do not expose it as a separate
-                // selectable polyline.
-                boundary.common_mut().invisible = true;
+            Some(boundary) => {
+                // A non-rectangular viewport owns its boundary through
+                // `clip_boundary_handle`: a visible paper-space object that
+                // is picked and erased together with the viewport.
                 match self.commit_entity_handle(boundary) {
                     Some(handle) => handle,
                     None => {
@@ -107,27 +195,8 @@ impl OpenCADStudio {
             }
             None => boundary_handle,
         };
-        let polygon = self.tabs[i].scene.clip_boundary_polygon(clip_handle, 0.0);
-        let bounds: Option<(f64, f64, f64, f64)> = polygon.iter().fold(None, |bounds, point| {
-            if !point[0].is_finite() || !point[1].is_finite() {
-                return bounds;
-            }
-            Some(match bounds {
-                Some((min_x, min_y, max_x, max_y)) => (
-                    min_x.min(point[0] as f64),
-                    min_y.min(point[1] as f64),
-                    max_x.max(point[0] as f64),
-                    max_y.max(point[1] as f64),
-                ),
-                None => (
-                    point[0] as f64,
-                    point[1] as f64,
-                    point[0] as f64,
-                    point[1] as f64,
-                ),
-            })
-        });
-        let Some((min_x, min_y, max_x, max_y)) = bounds else {
+        let bounds = clip_boundary_extents(&self.tabs[i].scene, clip_handle);
+        let Some(([min_x, min_y], [max_x, max_y])) = bounds else {
             self.command_line
                 .push_error(crate::t!("MVIEW: the clipping boundary has no usable area.").as_ref());
             self.tabs[i].active_cmd = None;
@@ -166,7 +235,6 @@ impl OpenCADStudio {
             }
             if let Some(boundary) = self.tabs[i].scene.document.get_entity_mut(clip_handle) {
                 let common = boundary.common_mut();
-                common.invisible = true;
                 if !common.reactors.contains(&viewport_handle) {
                     common.reactors.push(viewport_handle);
                 }
@@ -411,4 +479,28 @@ impl OpenCADStudio {
         self.restore_pre_cmd_tangent();
         self.on_quick_print_handles(handles)
     }
+}
+
+/// Paper-space extents of a viewport clip boundary: exact for lines, arcs
+/// and circles (bulges included), else from its outline.
+fn clip_boundary_extents(scene: &crate::scene::Scene, clip: Handle) -> Option<([f64; 2], [f64; 2])> {
+    let exact = scene
+        .document
+        .get_entity(clip)
+        .and_then(crate::entities::curve::entity_curve_xy)
+        .and_then(|curve| kernel::geom2d::analytic_curve_bounds(&[curve]));
+    if exact.is_some() {
+        return exact;
+    }
+    let polygon = scene.clip_boundary_polygon(clip, 0.0);
+    polygon
+        .iter()
+        .filter(|p| p[0].is_finite() && p[1].is_finite())
+        .fold(None, |bounds: Option<([f64; 2], [f64; 2])>, p| {
+            let (x, y) = (p[0] as f64, p[1] as f64);
+            Some(match bounds {
+                Some((lo, hi)) => ([lo[0].min(x), lo[1].min(y)], [hi[0].max(x), hi[1].max(y)]),
+                None => ([x, y], [x, y]),
+            })
+        })
 }

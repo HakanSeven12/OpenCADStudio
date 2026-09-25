@@ -33,7 +33,7 @@ pub fn pdf_underlay_tools() -> Vec<ToolDef> {
     vec![
         tool("_PDFULMONO", "Display in\nMonochrome", FRAMES),
         tool("_PDFULCLIP", "Create Clipping\nBoundary", CLIP),
-        tool("_PDFULUNCLIP", "Remove\nClipping", CLIP),
+        tool("_PDFULUNCLIP", "Remove\nClipping", UNCLIP),
         tool("_PDFULSHOW", "Show\nUnderlay", FRAMES),
         tool(
             "_PDFULSNAP",
@@ -64,7 +64,7 @@ pub fn xref_tools() -> Vec<ToolDef> {
         ),
         tool("_XREFOPEN", "Open\nReference", crate::ui::icons::FOLDER_OPEN),
         tool("_XREFCLIP", "Create Clipping\nBoundary", CLIP),
-        tool("_XREFUNCLIP", "Remove\nClipping", CLIP),
+        tool("_XREFUNCLIP", "Remove\nClipping", UNCLIP),
         tool("EXTERNALREFERENCES", "External\nReferences", crate::ui::icons::FOLDER_OPEN),
     ]
 }

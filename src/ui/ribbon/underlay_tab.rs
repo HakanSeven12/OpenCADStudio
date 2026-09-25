@@ -1,5 +1,6 @@
-//! The contextual "PDF Underlay" tab: shown and brought forward while only
-//! PDF underlays are selected, gone when the selection changes.
+//! The contextual tabs: "PDF Underlay" while only PDF underlays are
+//! selected, "External Reference" while only xrefs are; shown and brought
+//! forward with the selection, gone when it changes.
 
 use iced::widget::{column, row, slider, text, text_input};
 use iced::{Element, Length};
@@ -112,6 +113,47 @@ fn groups() -> &'static [RibbonGroup] {
     })
 }
 
+/// The External Reference tab: edit or open the reference, clip it, and the
+/// External References palette.
+fn xref_groups() -> &'static [RibbonGroup] {
+    static GROUPS: std::sync::OnceLock<Vec<RibbonGroup>> = std::sync::OnceLock::new();
+    const CLIP: &[u8] = include_bytes!("../../../assets/icons/xclip.svg");
+    GROUPS.get_or_init(|| {
+        vec![
+            RibbonGroup {
+                title: "Edit",
+                tools: vec![
+                    RibbonItem::LargeTool(tool(
+                        "_XREFEDIT",
+                        "Edit Reference\nIn-Place",
+                        include_bytes!("../../../assets/icons/edit_block.svg"),
+                    )),
+                    RibbonItem::LargeTool(tool(
+                        "_XREFOPEN",
+                        "Open\nReference",
+                        crate::ui::icons::FOLDER_OPEN,
+                    )),
+                ],
+            },
+            RibbonGroup {
+                title: "Clipping",
+                tools: vec![
+                    RibbonItem::LargeTool(tool("_XREFCLIP", "Create Clipping\nBoundary", CLIP)),
+                    RibbonItem::LargeTool(tool("_XREFUNCLIP", "Remove\nClipping", CLIP)),
+                ],
+            },
+            RibbonGroup {
+                title: "Options",
+                tools: vec![RibbonItem::LargeTool(tool(
+                    "EXTERNALREFERENCES",
+                    "External\nReferences",
+                    crate::ui::icons::FOLDER_OPEN,
+                ))],
+            },
+        ]
+    })
+}
+
 /// Contrast / Fade: a label, a 0–100 slider and the value box.
 fn adjust_rows<'a>(ctx: &'a UnderlayContext) -> Element<'a, Message> {
     let line = |label: &'static str,
@@ -156,15 +198,16 @@ fn adjust_rows<'a>(ctx: &'a UnderlayContext) -> Element<'a, Message> {
 }
 
 impl Ribbon {
-    /// Show the tab for the selected underlay, or drop it (`None`). A tab
-    /// that appears comes to the front; one that goes returns the tab that
-    /// was active before it.
-    pub fn set_underlay_context(&mut self, context: Option<UnderlayContext>) {
-        match (&self.underlay_ctx, &context) {
-            (None, Some(_)) => self.underlay_tab_active = true,
-            (Some(_), None) => self.underlay_tab_active = false,
-            _ => {}
+    /// Show the tab for the selected underlay (`context`) or the selected
+    /// xrefs (`xref`), or drop it. A tab that appears comes to the front;
+    /// one that goes returns the tab that was active before it.
+    pub fn set_underlay_context(&mut self, context: Option<UnderlayContext>, xref: bool) {
+        let before = (self.underlay_ctx.is_some(), self.xref_ctx);
+        let after = (context.is_some(), xref);
+        if before != after {
+            self.underlay_tab_active = after.0 || after.1;
         }
+        self.xref_ctx = xref;
         // A value being typed survives a refresh that leaves the value as is.
         let mut context = context;
         if let (Some(old), Some(new)) = (&self.underlay_ctx, &mut context) {
@@ -180,9 +223,10 @@ impl Ribbon {
         self.underlay_ctx.as_mut()
     }
 
-    /// Select a tab by its module id; "pdf_underlay" is the contextual tab.
+    /// Select a tab by its module id; "pdf_underlay" and "xref" are the
+    /// contextual tabs.
     pub fn select_by_id(&mut self, id: &str) -> bool {
-        if id == "pdf_underlay" {
+        if (id == "pdf_underlay" && self.underlay_ctx.is_some()) || (id == "xref" && self.xref_ctx) {
             self.select_underlay_tab();
             return self.underlay_tab_active;
         }
@@ -196,13 +240,22 @@ impl Ribbon {
     }
 
     pub fn select_underlay_tab(&mut self) {
-        if self.underlay_ctx.is_some() {
+        if self.contextual_tab().is_some() {
             self.underlay_tab_active = true;
         }
     }
 
     pub(super) fn underlay_tab_shown(&self) -> bool {
-        self.underlay_tab_active && self.underlay_ctx.is_some()
+        self.underlay_tab_active && self.contextual_tab().is_some()
+    }
+
+    /// The contextual tab's title, while one is offered.
+    pub(super) fn contextual_tab(&self) -> Option<&'static str> {
+        if self.xref_ctx {
+            Some("External Reference")
+        } else {
+            self.underlay_ctx.as_ref().map(|_| "PDF Underlay")
+        }
     }
 
     pub(super) fn underlay_panels<'a>(
@@ -210,6 +263,12 @@ impl Ribbon {
         ts: widgets::ToggleState,
         style_ctx: &StyleContext<'_>,
     ) -> Vec<Panel<'a>> {
+        if self.xref_ctx {
+            return xref_groups()
+                .iter()
+                .map(|g| self.panel(g, ts, style_ctx, &|_| Vec::new()))
+                .collect();
+        }
         let Some(ctx) = self.underlay_ctx.as_ref() else {
             return Vec::new();
         };

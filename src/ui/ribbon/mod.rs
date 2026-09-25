@@ -109,6 +109,8 @@ pub struct Ribbon {
     underlay_ctx: Option<UnderlayContext>,
     /// The contextual underlay tab is the one shown.
     underlay_tab_active: bool,
+    /// Only xrefs are selected: the External Reference tab is offered.
+    xref_ctx: bool,
     /// XDWGFADECTL as the Reference slide-out shows it (negative = off).
     pub xref_fade: i32,
 }
@@ -206,6 +208,7 @@ impl Ribbon {
             collapse_tight: Arc::new(AtomicBool::new(false)),
             underlay_ctx: None,
             underlay_tab_active: false,
+            xref_ctx: false,
             xref_fade: 50,
         }
     }
@@ -589,8 +592,8 @@ impl Ribbon {
         );
 
         let mut tab_items = tab_items;
-        if self.underlay_ctx.is_some() {
-            tab_items.push(underlay_tab_button(self.underlay_tab_shown()));
+        if let Some(title) = self.contextual_tab() {
+            tab_items.push(underlay_tab_button(title, self.underlay_tab_shown()));
         }
 
         // Tabs may squeeze their gaps to fit before wrapping: from the normal 6px
@@ -1627,9 +1630,9 @@ mod tests {
     }
 }
 
-/// The contextual underlay tab's button: framed in the accent colour.
-fn underlay_tab_button<'a>(active: bool) -> Element<'a, Message> {
-    let btn = button(text(t!("PDF Underlay")).size(12))
+/// The contextual tab's button: framed in the accent colour.
+fn underlay_tab_button<'a>(title: &'static str, active: bool) -> Element<'a, Message> {
+    let btn = button(text(t!(title)).size(12))
         .on_press(Message::RibbonSelectUnderlayTab)
         .style(move |theme: &Theme, status| {
             let palette = theme.palette();

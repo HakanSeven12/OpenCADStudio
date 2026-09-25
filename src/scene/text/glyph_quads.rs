@@ -143,12 +143,14 @@ pub fn layout_glyph_quads(
                     uv_min: e.uv_min,
                     uv_max: e.uv_max,
                 });
-                cursor_x += e.advance + face.letter_spacing() * tracking;
+                cursor_x += e.advance + face.spacing_after(ch) * tracking;
             }
             None => {
                 // No ink (whitespace glyph) or atlas full: advance only.
-                let adv = face.glyph(ch).map(|g| g.advance).unwrap_or(6.0);
-                cursor_x += adv + face.letter_spacing() * tracking;
+                cursor_x += match face.glyph(ch) {
+                    Some(g) => g.advance + face.spacing_after(ch) * tracking,
+                    None => 6.0 + face.letter_spacing() * tracking,
+                };
             }
         }
     }

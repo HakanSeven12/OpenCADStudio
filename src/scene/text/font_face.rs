@@ -158,6 +158,25 @@ impl Face {
         }
     }
 
+    /// [`letter_spacing`](Self::letter_spacing) after the glyph drawn for
+    /// `ch`: a stroke font's tracking belongs to its own glyphs only. A
+    /// big-font glyph's advance already carries its gap and a TrueType
+    /// stand-in's its side bearings, so tracking them too spread CJK text
+    /// by a third of the height per character (#1470).
+    pub fn spacing_after(&self, ch: char) -> f32 {
+        match self {
+            Face::Lff(f) if f.glyph(ch).is_none() => 0.0,
+            Face::WithBig { primary, big } => {
+                if ttf_glyph::is_full_width(ch) && shx::bigfont_glyph(big, ch).is_some() {
+                    0.0
+                } else {
+                    primary.spacing_after(ch)
+                }
+            }
+            _ => self.letter_spacing(),
+        }
+    }
+
     /// Width of a space (9-unit).
     pub fn word_spacing(&self) -> f32 {
         match self {

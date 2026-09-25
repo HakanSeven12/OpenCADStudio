@@ -214,7 +214,7 @@ pub fn text_local_bounds(
                         max_y = max_y.max(sy);
                     }
                 }
-                cursor_x += glyph.advance + face.letter_spacing();
+                cursor_x += glyph.advance + face.spacing_after(ch);
             }
             None => {
                 cursor_x += 6.0 + face.letter_spacing();
@@ -964,7 +964,7 @@ pub fn measure_word(
     let mut w = 0.0_f32;
     for ch in text.chars() {
         w += match face.glyph(ch) {
-            Some(g) => (g.advance + face.letter_spacing() * state.tracking) * scale,
+            Some(g) => (g.advance + face.spacing_after(ch) * state.tracking) * scale,
             None => (6.0 + face.letter_spacing() * state.tracking) * scale,
         };
     }
@@ -2315,7 +2315,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             for (ci, ch) in text.chars().enumerate() {
                                 let adv = match face.glyph(ch) {
                                     Some(g) => {
-                                        (g.advance + face.letter_spacing() * tracking) * scale
+                                        (g.advance + face.spacing_after(ch) * tracking) * scale
                                     }
                                     None => (6.0 + face.letter_spacing() * tracking) * scale,
                                 };

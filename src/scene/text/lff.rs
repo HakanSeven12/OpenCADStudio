@@ -441,7 +441,7 @@ pub fn tessellate_text_run(
                     Some(glyph) => {
                         emit_glyph(out, &glyph.strokes, *cursor_x);
                         emit_fill(fill_tris, &glyph.fill_tris, *cursor_x);
-                        *cursor_x += glyph.advance + face.letter_spacing() * tracking;
+                        *cursor_x += glyph.advance + face.spacing_after(ch) * tracking;
                     }
                     None => {
                         warn_missing_glyph(font_name, ch);
@@ -470,7 +470,7 @@ pub fn tessellate_text_run(
                         Some(glyph) => {
                             emit_glyph(&mut out, &glyph.strokes, cursor_x);
                             emit_fill(&mut fill_tris, &glyph.fill_tris, cursor_x);
-                            cursor_x += glyph.advance + face.letter_spacing() * tracking;
+                            cursor_x += glyph.advance + face.spacing_after(*c) * tracking;
                         }
                         None => {
                             warn_missing_glyph(font_name, *c);

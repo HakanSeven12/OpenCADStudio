@@ -1286,16 +1286,28 @@ fn tessellate_entity_inner(
             b.set_fixed_screen_width(2.0);
         }
     }
-    // PDF underlay geometry: a hidden, unplotted wire that object snaps
-    // (nearest, intersection, perpendicular) find, beside the page frame.
+    // PDF underlay geometry: hidden, unplotted wires that object snaps
+    // (nearest, intersection, perpendicular, centre) find, beside the page
+    // frame — one per segment or circle, so they intersect each other.
     if let EntityType::Underlay(underlay) = e {
-        let geometry = crate::scene::model::pdf_vector::underlay_snap_geometry(underlay, document);
-        if !geometry.is_empty() {
-            let (points, points_low) = convert::tessellate::points_to_ds(geometry);
+        for piece in crate::scene::model::pdf_vector::underlay_snap_geometry(underlay, document) {
+            let (points, points_low) = convert::tessellate::points_to_ds(piece.points);
             let mut wire = WireModel::solid(h.value().to_string(), points, entity_color, sel);
             wire.points_low = points_low;
             wire.display_visible = false;
             wire.plot_visible = false;
+            if let Some((center, radius)) = piece.circle {
+                wire.tangent_geoms = vec![crate::scene::model::wire_model::TangentGeom::PlanarCircle {
+                    center,
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius,
+                }];
+                wire.snap_pts = vec![(
+                    glam::DVec3::from(center),
+                    crate::scene::model::wire_model::SnapHint::Center,
+                )];
+            }
             set_wire_aabb(&mut wire, aabb);
             bases.push(wire);
         }

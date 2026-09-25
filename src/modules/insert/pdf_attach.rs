@@ -92,7 +92,7 @@ pub struct PdfAttachCommand {
     path: String,
     /// The path the definition stores (full, relative or file name only).
     stored_path: Option<String>,
-    /// Pages after the first, attached beside it (dialog selection).
+    /// Pages after the first, attached at the same point (dialog selection).
     extra_pages: Vec<String>,
     /// Scale and rotation fixed in the dialog: their prompts are skipped.
     preset_scale: Option<f64>,
@@ -301,7 +301,6 @@ impl PdfAttachCommand {
             .chain(self.extra_pages.iter().cloned())
             .collect();
         let placed = underlays_for_pages(
-            &self.path,
             &pages,
             self.plane.to_local(self.insertion),
             self.scale,
@@ -427,24 +426,19 @@ impl CadCommand for PdfAttachCommand {
     }
 }
 
-/// Underlays for `pages` of a file: the first at `insertion`, each next one
-/// beside the previous along the rotated X axis (page width times scale).
-// ponytail: side-by-side placement of the pages after the first is not
-// measured against the reference.
+/// Underlays for `pages` of a file, all at `insertion` with the same scale
+/// and rotation (the reference stacks the chosen pages there).
 pub fn underlays_for_pages(
-    read_path: &str,
     pages: &[String],
     insertion: DVec3,
     scale: f64,
     rotation: f64,
 ) -> Vec<(String, EntityType)> {
-    let mut origin = insertion;
-    let (c, s) = (rotation.cos(), rotation.sin());
     pages
         .iter()
         .map(|page| {
             let mut underlay = Underlay::pdf();
-            underlay.insertion_point = Vector3::new(origin.x, origin.y, origin.z);
+            underlay.insertion_point = Vector3::new(insertion.x, insertion.y, insertion.z);
             underlay.set_scale(scale);
             underlay.rotation = rotation;
             // On, clipped by its boundary and colour-adjusted for the
@@ -452,9 +446,6 @@ pub fn underlays_for_pages(
             underlay.flags = UnderlayDisplayFlags::ON
                 | UnderlayDisplayFlags::CLIPPING
                 | UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND;
-            let width = crate::scene::model::pdf_raster::page_size_inches(read_path, page)
-                .map_or(0.0, |(w, _)| w * scale);
-            origin += DVec3::new(c * width, s * width, 0.0);
             (page.clone(), EntityType::Underlay(underlay))
         })
         .collect()

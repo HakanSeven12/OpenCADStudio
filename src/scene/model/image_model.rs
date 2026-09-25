@@ -217,7 +217,11 @@ impl ImageModel {
         // Hidden PDF layers come from the underlay's layer overrides.
         let source = super::pdf_layers::underlay_source(u, &def.file_path);
         let raster = pdf_raster::rasterize_page_display(&source, page)?;
-        let bg_lum = 0.299 * background[0] + 0.587 * background[1] + 0.114 * background[2];
+        // Dark means an HSL lightness under one half: pure blue counts as
+        // light, (0, 128, 0) as dark.
+        let bg_max = background[0].max(background[1]).max(background[2]);
+        let bg_min = background[0].min(background[1]).min(background[2]);
+        let bg_lum = (bg_max + bg_min) / 2.0;
         let pixels = pdf_raster::adjusted_pixels(
             &source,
             page,
@@ -226,7 +230,7 @@ impl ImageModel {
                 contrast: u.contrast.min(100),
                 monochrome: u.flags.contains(UnderlayDisplayFlags::MONOCHROME),
                 adjust_for_background: u.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND),
-                dark_background: bg_lum <= 0.5,
+                dark_background: bg_lum < 0.5,
             },
         );
 

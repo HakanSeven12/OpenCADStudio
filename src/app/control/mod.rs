@@ -459,6 +459,7 @@ impl OpenCADStudio {
                 | "commands"
                 | "properties"
                 | "measure"
+                | "snap"
                 | "query"
                 | "records"
                 | "record_schema"
@@ -705,6 +706,28 @@ impl OpenCADStudio {
             let response = match op {
                 "properties" => self.control_properties(),
                 "measure" => self.control_measure(&req),
+                // The object snap a cursor over `point` (world) would get;
+                // `from` is the base for perpendicular and tangent.
+                "snap" => {
+                    let p = &req["point"];
+                    let world = glam::DVec3::new(
+                        p[0].as_f64().unwrap_or(0.0),
+                        p[1].as_f64().unwrap_or(0.0),
+                        p[2].as_f64().unwrap_or(0.0),
+                    );
+                    let from = req["from"].as_array().map(|f| {
+                        glam::DVec3::new(
+                            f.first().and_then(|v| v.as_f64()).unwrap_or(0.0),
+                            f.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0),
+                            f.get(2).and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        )
+                    });
+                    let i = self.active_tab;
+                    match self.snap_query(i, world, from) {
+                        Some(hit) => json!({"ok":true,"snap":format!("{:?}", hit.snap_type),"world":[hit.world.x,hit.world.y,hit.world.z]}),
+                        None => json!({"ok":true,"snap":null}),
+                    }
+                }
                 "xdata_get" => self.xdata_read(&req),
                 "get_selection" => self.control_get_selection(),
                 "history" => {

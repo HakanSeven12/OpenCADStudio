@@ -2872,6 +2872,49 @@ impl OpenCADStudio {
         )
     }
 
+    /// The object snap the cursor would get over `world` in the model view,
+    /// through the same candidate gathering and snapper as a cursor move
+    /// (automation's `snap` query).
+    pub(in crate::app) fn snap_query(
+        &mut self,
+        i: usize,
+        world: glam::DVec3,
+        from: Option<glam::DVec3>,
+    ) -> Option<crate::snap::SnapResult> {
+        let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
+        if vw <= 1.0 || vh <= 1.0 {
+            return None;
+        }
+        let tile_b = self.tabs[i].scene.active_model_tile_bounds(vw, vh);
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: tile_b.width,
+            height: tile_b.height,
+        };
+        let (view_rot, eye, px) = {
+            let cam = self.tabs[i].scene.camera.borrow();
+            (cam.view_proj_rte(bounds), cam.eye(), cam.project(world, bounds)?)
+        };
+        let p = Point::new(px.x, px.y);
+        let raw = self.cursor_model_point(i, &None, p, bounds);
+        let all_wires = self.tabs[i].scene.hit_test_wires();
+        let candidates = self.tabs[i].scene.interaction_candidates_near(
+            all_wires,
+            raw,
+            view_rot,
+            eye,
+            bounds,
+            self.snapper.osnap_radius_px,
+        );
+        // Perpendicular and tangent measure from `from`, else the running
+        // command's last point.
+        self.snapper.from_point = from.or(self.last_point).map(|p| p.as_vec3());
+        let (go, gr) = self.drafting_grid_basis(i);
+        self.snapper
+            .snap(raw, p, &candidates, view_rot, eye, bounds, go, gr, None)
+    }
+
     /// Apply one frame of a UCS-icon grip drag: map the cursor onto the active
     /// UCS plane (so the move stays in-plane) and either slide the origin there
     /// or rotate the chosen axis to point at it, keeping a right-handed frame

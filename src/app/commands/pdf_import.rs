@@ -82,13 +82,8 @@ impl OpenCADStudio {
         };
         let mut result = pdf_import::convert(&content, &underlay, &area, &naming);
         let images = std::mem::take(&mut result.images);
-        let image_dir = self.tabs[i]
-            .current_path
-            .as_deref()
-            .and_then(|p| p.parent())
-            .map(|p| p.to_path_buf())
-            .or_else(|| std::path::Path::new(&path).parent().map(|p| p.to_path_buf()))
-            .map(|dir| dir.join("PDF Images"));
+        // PDFIMPORTIMAGEPATH "PDF Images": a folder next to the PDF.
+        let image_dir = std::path::Path::new(&path).parent().map(|dir| dir.join("PDF Images"));
 
         self.push_undo_snapshot(i, "PDFIMPORT");
         let scene = &mut self.tabs[i].scene;
@@ -101,7 +96,7 @@ impl OpenCADStudio {
             let _ = scene.document.line_types.add(lt);
         }
         // Raster images: each written as a PNG under "PDF Images" next to the
-        // drawing (or the PDF while the drawing is unsaved), then referenced.
+        // PDF, named after it with 8 hex digits, then referenced.
         let stem = std::path::Path::new(&path.replace('\\', "/"))
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
@@ -128,7 +123,9 @@ impl OpenCADStudio {
             raster.u_vector = image.u;
             raster.v_vector = image.v;
             raster.flags = codec::entities::ImageDisplayFlags::SHOW_IMAGE
-                | codec::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
+                | codec::entities::ImageDisplayFlags::SHOW_NOT_ALIGNED
+                | codec::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY
+                | codec::entities::ImageDisplayFlags::TRANSPARENCY_ON;
             raster.common.layer = image.layer.clone();
             result.entities.push(codec::EntityType::RasterImage(raster));
         }
@@ -154,8 +151,8 @@ impl OpenCADStudio {
             let mut name = stem.clone();
             let mut n = 1;
             while scene.document.block_records.get(&name).is_some() {
+                name = format!("{stem}{n}");
                 n += 1;
-                name = format!("{stem}({n})");
             }
             if scene
                 .define_block_from_owned_entities(result.entities, &name, glam::DVec3::ZERO)

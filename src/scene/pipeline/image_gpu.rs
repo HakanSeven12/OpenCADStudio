@@ -2,7 +2,7 @@
 //
 // Group 1 bindings per image:
 //   binding 0 — texture_2d<f32>   (RGBA image texture)
-//   binding 1 — sampler           (bilinear filtering)
+//   binding 1 — sampler           (bilinear; nearest magnification for raster images)
 //   binding 2 — ImageParams       (opacity uniform, 16 bytes)
 
 use crate::scene::model::image_model::ImageModel;
@@ -118,19 +118,27 @@ impl ImageGpu {
             });
             groups[slot].push(model);
         }
-        let sampler = Arc::new(device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("image.sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-            ..Default::default()
-        }));
+        let sampler = |mag_filter| {
+            Arc::new(device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("image.sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+                ..Default::default()
+            }))
+        };
+        // Raster images show square pixels when magnified.
+        let smooth = sampler(wgpu::FilterMode::Linear);
+        let pixelated = sampler(wgpu::FilterMode::Nearest);
         groups
             .into_iter()
-            .flat_map(|group| Self::new(device, queue, &group, bgl1, &sampler))
+            .flat_map(|group| {
+                let sampler = if group.first().is_some_and(|m| m.pixelated) { &pixelated } else { &smooth };
+                Self::new(device, queue, &group, bgl1, sampler)
+            })
             .collect()
     }
 

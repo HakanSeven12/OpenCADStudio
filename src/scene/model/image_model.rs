@@ -109,6 +109,9 @@ pub struct ImageModel {
     /// (when the entity carries a clip boundary) the triangulated clip polygon
     /// — so the raster is drawn only inside its clip boundary.
     pub verts: Vec<ImageQuadVertex>,
+    /// Magnified pixels stay square (raster images); otherwise they blend
+    /// (PDF pages, OLE pictures).
+    pub pixelated: bool,
 }
 
 impl ImageModel {
@@ -179,6 +182,7 @@ impl ImageModel {
             corners_low,
             draw_depth: 0.0,
             verts,
+            pixelated: true,
         })
     }
 }
@@ -283,6 +287,7 @@ impl ImageModel {
             corners_low,
             draw_depth: 0.0,
             verts,
+            pixelated: false,
         })
     }
 }
@@ -363,6 +368,7 @@ impl ImageModel {
             corners_low,
             draw_depth: 0.0,
             verts,
+            pixelated: false,
         })
     }
 }

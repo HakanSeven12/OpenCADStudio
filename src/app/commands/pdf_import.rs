@@ -111,8 +111,14 @@ impl OpenCADStudio {
             {
                 continue;
             }
+            // Rebuilt from its components: one separator style, the platform's.
+            let stored = file
+                .components()
+                .collect::<std::path::PathBuf>()
+                .to_string_lossy()
+                .into_owned();
             let mut raster = codec::entities::RasterImage::with_size(
-                file.to_string_lossy().as_ref(),
+                &stored,
                 image.insertion,
                 image.width as f64,
                 image.height as f64,

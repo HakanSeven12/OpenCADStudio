@@ -514,26 +514,25 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::PdfAttach => {
                 let state = self.pdf_attach.as_ref()?;
-                let height = if state.details { 520 } else { 440 };
-                sized_flow(ex, 820, height, |flow| {
+                sized_flow(ex, 880, 540, |flow| {
                     crate::ui::window::pdf_dialogs::view_attach(state, flow)
                 })
             }
             super::super::ModalKind::UnderlayLayers => {
                 let state = self.underlay_layers.as_ref()?;
-                sized_flow(ex, 500, 500, |flow| {
+                sized_flow(ex, 460, 520, |flow| {
                     crate::ui::window::pdf_dialogs::view_layers(state, flow)
                 })
             }
             super::super::ModalKind::PdfImportSettings => {
                 let settings = self.pdf_import_settings.as_ref()?;
-                sized_flow(ex, 600, 360, |flow| {
+                sized_flow(ex, 640, 380, |flow| {
                     crate::ui::window::pdf_dialogs::view_import_settings(settings, flow)
                 })
             }
             super::super::ModalKind::PdfImportFile => {
                 let state = self.pdf_import_file.as_ref()?;
-                sized_flow(ex, 900, 560, |flow| {
+                sized_flow(ex, 960, 560, |flow| {
                     crate::ui::window::pdf_dialogs::view_import_file(state, flow)
                 })
             }

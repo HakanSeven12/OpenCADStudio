@@ -6104,6 +6104,18 @@ impl OpenCADStudio {
             // take priority and system text is used when that clipboard is empty.
             Message::PasteShortcut => self.on_paste_shortcut(),
 
+            Message::PasteShortcutResolved(focused) => {
+                if focused {
+                    // A focused text_input widget already handled Ctrl+V natively.
+                    // Doing anything here would duplicate the paste or leak text into the command line.
+                    Task::none()
+                } else if self.clipboard.is_empty() {
+                    self.read_system_clipboard_for_paste()
+                } else {
+                    self.dispatch_command("PASTECLIP")
+                }
+            }
+
             Message::SystemClipboardPaste(result) => {
                 use super::SystemClipboardText as Text;
 
@@ -10966,6 +10978,29 @@ mod free_text_entry_tests {
         app.automation_op(r#"{"op":"new"}"#);
         let _ = app.update(Message::CommandInput(">Plugin MixedCase".into()));
         assert_eq!(app.command_line.input, ">Plugin MixedCase");
+    }
+
+    #[test]
+    fn paste_shortcut_resolved_focused_is_noop() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.command_line.input = "EXISTING".into();
+
+        // When a text input is focused, PasteShortcutResolved(true) does not mutate command line or start a command.
+        let _ = app.update(Message::PasteShortcutResolved(true));
+        assert_eq!(app.command_line.input, "EXISTING");
+        assert!(app.tabs[0].active_cmd.is_none());
+    }
+
+    #[test]
+    fn paste_shortcut_resolved_unfocused_with_entities_starts_pasteclip() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.clipboard = vec![acadrust::EntityType::Line(acadrust::entities::Line::default())];
+
+        // When unfocused and CAD entities are copied, dispatches PASTECLIP
+        let _ = app.update(Message::PasteShortcutResolved(false));
+        assert!(app.tabs[0].active_cmd.as_ref().is_some_and(|cmd| cmd.name() == "PASTECLIP"));
     }
 }
 

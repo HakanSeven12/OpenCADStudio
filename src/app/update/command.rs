@@ -70,6 +70,48 @@ fn polyline_vertex_count(entity: &AcadEntityType) -> Option<usize> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+struct CheckTextInputFocused {
+    last_was_text_input: bool,
+    is_focused: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl iced::advanced::widget::Operation<bool> for CheckTextInputFocused {
+    fn text_input(
+        &mut self,
+        _id: Option<&iced::advanced::widget::Id>,
+        _bounds: iced::Rectangle,
+        _state: &mut dyn iced::advanced::widget::operation::TextInput,
+    ) {
+        self.last_was_text_input = true;
+    }
+
+    fn focusable(
+        &mut self,
+        _id: Option<&iced::advanced::widget::Id>,
+        _bounds: iced::Rectangle,
+        state: &mut dyn iced::advanced::widget::operation::Focusable,
+    ) {
+        let is_text = std::mem::replace(&mut self.last_was_text_input, false);
+        if is_text && state.is_focused() {
+            self.is_focused = true;
+        }
+    }
+
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn iced::advanced::widget::Operation<bool>)) {
+        if self.is_focused {
+            return;
+        }
+        operate(self);
+    }
+
+    fn finish(&self) -> iced::advanced::widget::operation::Outcome<bool> {
+        iced::advanced::widget::operation::Outcome::Some(self.is_focused)
+    }
+}
+
 impl OpenCADStudio {
 pub(super) fn begin_tab_close_queue(&mut self, tab_ids: Vec<u64>) -> Task<Message> {
                 self.pending_tab_closes.clear();
@@ -1955,10 +1997,18 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     #[cfg(not(target_arch = "wasm32"))]
                     return Task::none();
                 }
-                if self.clipboard.is_empty() {
-                    self.read_system_clipboard_for_paste()
-                } else {
-                    Task::done(Message::Command("PASTECLIP".to_string()))
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    iced::advanced::widget::operate(CheckTextInputFocused::default())
+                        .map(Message::PasteShortcutResolved)
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    if self.clipboard.is_empty() {
+                        self.read_system_clipboard_for_paste()
+                    } else {
+                        Task::done(Message::Command("PASTECLIP".to_string()))
+                    }
                 }
     }
 

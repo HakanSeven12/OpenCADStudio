@@ -2106,6 +2106,8 @@ pub enum Message {
     /// Ctrl+V. Routed by `update` into an open text editor, the drawing-object
     /// clipboard, or the system text clipboard.
     PasteShortcut,
+    /// Result of probing whether a text input was focused when `PasteShortcut` arrived.
+    PasteShortcutResolved(bool),
     /// Completion of a system text clipboard read requested by PASTECLIP.
     SystemClipboardPaste(SystemClipboardText),
     /// Ctrl/Cmd+A — select all layer rows when the Layer Manager is open, or all

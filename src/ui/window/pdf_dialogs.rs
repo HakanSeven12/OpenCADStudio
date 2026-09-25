@@ -1,5 +1,6 @@
 //! PDF dialogs: Attach PDF Underlay (pages, path type, insertion, scale,
-//! rotation), Underlay Layers, PDF Import Settings and Import PDF.
+//! rotation), Underlay Layers, PDF Import Settings and Import PDF, built
+//! from cards, segmented choices and toggle chips.
 
 use std::fmt;
 
@@ -14,8 +15,7 @@ use crate::io::xref_model::Pathtype;
 use crate::modules::insert::pdf_import::{ImportLayers, PdfImportSettings};
 use crate::t;
 use crate::ui::style::common::muted_style;
-use crate::ui::style::form::{button_style, dialog_button, field_style, form_radio};
-use crate::ui::window::block_definition::{group, labeled_checkbox};
+use crate::ui::style::form::{button_style, dialog_button, field_style};
 
 /// One edit in any of the PDF dialogs.
 #[derive(Debug, Clone)]
@@ -115,7 +115,7 @@ pub struct PageThumb {
     pub image: Option<image::Handle>,
 }
 
-/// Thumbnails of every page, about 100 px wide.
+/// Thumbnails of every page, about 220 px wide (sharp at preview size).
 // ponytail: all pages are rasterised when the dialog opens; lazy per-row
 // thumbnails if files with hundreds of pages matter.
 pub fn page_thumbs(path: &str) -> Vec<PageThumb> {
@@ -125,7 +125,7 @@ pub fn page_thumbs(path: &str) -> Vec<PageThumb> {
         .map(|n| {
             let label = n.to_string();
             let image = page_size_inches(path, &label).and_then(|(w, h)| {
-                let dpi = (100.0 / w.max(h).max(0.1)) as f32;
+                let dpi = (220.0 / w.max(h).max(0.1)) as f32;
                 let page = rasterize_page_at_dpi(path, &label, dpi)?;
                 Some(image::Handle::from_rgba(page.width, page.height, page.pixels.to_vec()))
             });
@@ -158,23 +158,159 @@ pub fn click_page(selected: &mut Vec<usize>, anchor: &mut usize, page: usize, ct
     }
 }
 
-fn frame_style(theme: &Theme) -> container::Style {
+// ── Shared look ────────────────────────────────────────────────────────────
+//
+// The PDF dialogs are built from rounded cards on a slightly raised surface,
+// accent-coloured card titles, segmented choices and toggle chips, with the
+// help button on the left of the footer and the named action on the right.
+
+fn accent_text(theme: &Theme) -> text::Style {
+    text::Style {
+        color: Some(theme.palette().primary.base.color),
+    }
+}
+
+fn card_style(theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(theme.palette().background.base.color)),
+        background: Some(Background::Color(theme.palette().background.weak.color)),
         border: Border {
-            width: 1.0,
-            radius: 2.0.into(),
-            color: theme.palette().background.strong.color,
+            width: 0.0,
+            radius: 8.0.into(),
+            color: iced::Color::TRANSPARENT,
         },
         ..Default::default()
     }
 }
 
-fn page_grid<'a>(
+fn well_style(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(theme.palette().background.base.color)),
+        border: Border {
+            width: 0.0,
+            radius: 6.0.into(),
+            color: iced::Color::TRANSPARENT,
+        },
+        ..Default::default()
+    }
+}
+
+/// A titled card.
+fn card<'a>(title: String, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    container(
+        column![text(title.to_uppercase()).size(10).style(accent_text), content.into()].spacing(8),
+    )
+    .padding([10, 12])
+    .width(Fill)
+    .style(card_style)
+    .into()
+}
+
+/// One choice out of a few, as joined buttons.
+fn segmented<'a, T: Copy + PartialEq + 'a>(
+    options: Vec<(T, String)>,
+    current: T,
+    on: fn(T) -> PdfDialogMsg,
+) -> Element<'a, Message> {
+    let buttons = options.into_iter().map(|(value, label)| {
+        button(text(label).size(11).width(Fill).align_x(iced::Center))
+            .on_press(msg(on(value)))
+            .style(button_style(value == current))
+            .padding([5, 6])
+            .width(Fill)
+            .into()
+    });
+    container(iced::widget::Row::with_children(buttons.collect::<Vec<_>>()).spacing(2))
+        .padding(2)
+        .width(Fill)
+        .style(well_style)
+        .into()
+}
+
+/// A switch shown as a chip: filled with a tick while on.
+fn chip<'a>(label: String, on: bool, message: Message) -> Element<'a, Message> {
+    let label = if on { format!("\u{2713} {label}") } else { label };
+    button(text(label).size(11))
+        .on_press(message)
+        .style(button_style(on))
+        .padding([4, 10])
+        .into()
+}
+
+/// A labelled field on one row; read-only while `enabled` is false.
+fn field<'a>(
+    label: String,
+    value: &'a str,
+    enabled: bool,
+    label_width: f32,
+    on_input: impl Fn(String) -> Message + 'a,
+) -> Element<'a, Message> {
+    let mut input = text_input("", value)
+        .size(11)
+        .padding([4, 8])
+        .width(Fill)
+        .style(field_style);
+    if enabled {
+        input = input.on_input(on_input);
+    }
+    row![
+        text(label).size(11).style(muted_style).width(Length::Fixed(label_width)),
+        input
+    ]
+    .spacing(6)
+    .align_y(iced::Center)
+    .into()
+}
+
+/// A label and a value on one line; a long value keeps its end.
+fn info_line<'a>(label: String, value: &'a str) -> Element<'a, Message> {
+    const MAX: usize = 70;
+    let count = value.chars().count();
+    let shown = if count > MAX {
+        format!("…{}", value.chars().skip(count - (MAX - 1)).collect::<String>())
+    } else {
+        value.to_string()
+    };
+    row![
+        text(label).size(11).style(muted_style).width(Length::Fixed(96.0)),
+        text(shown).size(11).width(Fill).wrapping(iced::advanced::text::Wrapping::None),
+    ]
+    .spacing(6)
+    .into()
+}
+
+/// Help on the left, extra buttons, then Cancel and the named action.
+fn footer<'a>(
+    help: &'static str,
+    extra: Option<Element<'a, Message>>,
+    action: std::borrow::Cow<'static, str>,
+    ok: PdfDialogMsg,
+) -> Element<'a, Message> {
+    let mut left = row![button(text("?").size(12))
+        .on_press(msg(PdfDialogMsg::Help(help)))
+        .style(button_style(false))
+        .padding([5, 11])]
+    .spacing(6)
+    .align_y(iced::Center);
+    if let Some(extra) = extra {
+        left = left.push(extra);
+    }
+    row![
+        left,
+        Space::new().width(Fill),
+        dialog_button(t!("Cancel"), Message::CloseModal, false),
+        dialog_button(action, msg(ok), true),
+    ]
+    .spacing(6)
+    .align_y(iced::Center)
+    .into()
+}
+
+/// Page thumbnails as cards; the chosen ones framed in the accent colour
+/// with a ticked page number.
+fn page_tiles<'a>(
     pages: &'a [PageThumb],
     selected: &[usize],
     on_click: fn(usize) -> PdfDialogMsg,
-    height: f32,
 ) -> Element<'a, Message> {
     let tiles = pages.iter().enumerate().map(|(index, page)| {
         let chosen = selected.contains(&index);
@@ -182,90 +318,50 @@ fn page_grid<'a>(
             Some(handle) => image(handle.clone()).width(Fill).height(Fill).into(),
             None => Space::new().width(Fill).height(Fill).into(),
         };
+        let number = if chosen {
+            format!("\u{2713} {}", page.label)
+        } else {
+            page.label.clone()
+        };
         let tile = column![
             container(picture)
-                .width(Length::Fixed(100.0))
-                .height(Length::Fixed(60.0))
-                .padding(2)
+                .width(Length::Fixed(132.0))
+                .height(Length::Fixed(86.0))
+                .padding(4)
                 .style(move |theme: &Theme| container::Style {
                     background: Some(Background::Color(iced::Color::WHITE)),
                     border: Border {
-                        width: if chosen { 2.0 } else { 1.0 },
-                        radius: 1.0.into(),
-                        color: if chosen {
-                            theme.palette().primary.base.color
-                        } else {
-                            theme.palette().background.strong.color
-                        },
+                        width: if chosen { 2.5 } else { 0.0 },
+                        radius: 6.0.into(),
+                        color: theme.palette().primary.base.color,
                     },
                     ..Default::default()
                 }),
-            container(text(page.label.clone()).size(11))
-                .width(Length::Fixed(100.0))
-                .align_x(iced::Center)
-                .style(move |theme: &Theme| container::Style {
-                    background: chosen
-                        .then(|| Background::Color(theme.palette().primary.weak.color)),
-                    ..Default::default()
+            container(text(number).size(11).style(move |theme: &Theme| text::Style {
+                color: Some(if chosen {
+                    theme.palette().primary.base.color
+                } else {
+                    theme.palette().background.base.text.scale_alpha(0.68)
                 }),
+            }))
+            .width(Length::Fixed(132.0))
+            .align_x(iced::Center),
         ]
-        .spacing(1);
+        .spacing(4);
         button(tile)
             .on_press(msg(on_click(index)))
-            .padding(2)
+            .padding(4)
             .style(|_: &Theme, _| button::Style::default())
             .into()
     });
-    container(scrollable(
+    scrollable(
         iced::widget::Row::with_children(tiles.collect::<Vec<_>>())
-            .spacing(8)
+            .spacing(6)
             .wrap()
-            .vertical_spacing(8),
-    ))
-    .padding(6)
-    .width(Fill)
-    .height(Length::Fixed(height))
-    .style(frame_style)
+            .vertical_spacing(6),
+    )
+    .height(Fill)
     .into()
-}
-
-fn value_field<'a>(
-    label: String,
-    value: &'a str,
-    enabled: bool,
-    label_width: f32,
-    on_input: impl Fn(String) -> Message + 'a,
-) -> Element<'a, Message> {
-    let mut field = text_input("", value)
-        .size(11)
-        .padding([3, 6])
-        .width(Fill)
-        .style(field_style);
-    if enabled {
-        field = field.on_input(on_input);
-    }
-    row![
-        text(label).size(11).style(muted_style).width(Length::Fixed(label_width)),
-        field
-    ]
-    .spacing(6)
-    .align_y(iced::Center)
-    .into()
-}
-
-fn read_only<'a>(label: String, value: &'a str, label_width: f32) -> Element<'a, Message> {
-    value_field(label, value, false, label_width, |_| Message::Noop)
-}
-
-fn footer<'a>(ok: PdfDialogMsg, help: &'static str) -> iced::widget::Row<'a, Message> {
-    row![
-        Space::new().width(Fill),
-        dialog_button(t!("OK"), msg(ok), true),
-        dialog_button(t!("Cancel"), Message::CloseModal, false),
-        dialog_button(t!("Help"), msg(PdfDialogMsg::Help(help)), false),
-    ]
-    .spacing(6)
-    .align_y(iced::Center)
 }
 
 // ── Attach PDF Underlay ────────────────────────────────────────────────────
@@ -377,144 +473,117 @@ pub fn view_attach<'a>(
     state: &'a PdfAttachState,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
+    // File: the attached PDFs to pick from, Browse, and the page count.
     let name_combo = combo_box(
         &state.name_combo,
         "",
         (!state.name.is_empty()).then_some(&state.name),
         |chosen: String| msg(PdfDialogMsg::AttachName(chosen)),
     )
-    .size(11)
-    .padding([3, 6])
+    .size(12)
+    .padding([5, 8])
     .width(Fill);
-    let name_section = column![
-        text(t!("Name:")).size(11).style(muted_style),
-        row![
-            name_combo,
-            button(text(t!("Browse...")).size(11))
-                .on_press(msg(PdfDialogMsg::AttachBrowse))
-                .style(button_style(false))
-                .padding([4, 12])
-                .width(Length::Fixed(96.0)),
-        ]
-        .spacing(8)
-        .align_y(iced::Center),
+    let count = container(
+        text(crate::tf!("{count} pages", count = state.pages.len())).size(11).style(accent_text),
+    )
+    .padding([4, 10])
+    .style(well_style);
+    let file = row![
+        name_combo,
+        count,
+        button(text(t!("Browse...")).size(11))
+            .on_press(msg(PdfDialogMsg::AttachBrowse))
+            .style(button_style(false))
+            .padding([5, 12]),
     ]
-    .spacing(3);
-
-    let pages = group(
-        t!("Select one or more pages from the PDF file:").into_owned(),
-        page_grid(&state.pages, &state.selected, PdfDialogMsg::AttachPage, 250.0),
-        Length::Shrink,
-    );
-
-    let path_type = group(
-        t!("Path type").into_owned(),
-        pick_list(Some(state.path_type), PathTypeChoice::ALL, |c| c.to_string())
-            .on_select(|v| msg(PdfDialogMsg::AttachPathType(v)))
-            .text_size(11)
-            .padding([3, 6])
-            .width(Fill),
-        Length::Shrink,
-    );
-    let insert_enabled = !state.insert_on_screen;
-    let insertion = group(
-        t!("Insertion point").into_owned(),
-        column![
-            labeled_checkbox(t!("Specify On-screen"), state.insert_on_screen, |v| msg(
-                PdfDialogMsg::AttachInsertOnScreen(v)
-            )),
-            value_field("X:".into(), &state.insert[0], insert_enabled, 16.0, |v| msg(
-                PdfDialogMsg::AttachInsert(0, v)
-            )),
-            value_field("Y:".into(), &state.insert[1], insert_enabled, 16.0, |v| msg(
-                PdfDialogMsg::AttachInsert(1, v)
-            )),
-            value_field("Z:".into(), &state.insert[2], insert_enabled, 16.0, |v| msg(
-                PdfDialogMsg::AttachInsert(2, v)
-            )),
-        ]
-        .spacing(5),
-        Length::Shrink,
-    );
-    let middle = column![path_type, insertion].spacing(6).width(Length::FillPortion(1));
-
-    let mut scale_field = text_input("", &state.scale)
-        .size(11)
-        .padding([3, 6])
-        .width(Fill)
-        .style(field_style);
-    if !state.scale_on_screen {
-        scale_field = scale_field.on_input(|v| msg(PdfDialogMsg::AttachScale(v)));
-    }
-    let scale = group(
-        t!("Scale").into_owned(),
-        column![
-            labeled_checkbox(t!("Specify On-screen"), state.scale_on_screen, |v| msg(
-                PdfDialogMsg::AttachScaleOnScreen(v)
-            )),
-            scale_field,
-        ]
-        .spacing(5),
-        Length::Shrink,
-    );
-    let rotation = group(
-        t!("Rotation").into_owned(),
-        column![
-            labeled_checkbox(t!("Specify On-screen"), state.rotation_on_screen, |v| msg(
-                PdfDialogMsg::AttachRotationOnScreen(v)
-            )),
-            value_field(
-                t!("Angle:").into_owned(),
-                &state.rotation,
-                !state.rotation_on_screen,
-                44.0,
-                |v| msg(PdfDialogMsg::AttachRotation(v))
-            ),
-        ]
-        .spacing(5),
-        Length::Shrink,
-    );
-    let right = column![scale, rotation].spacing(6).width(Length::FillPortion(1));
-
-    let body = row![
-        container(pages).width(Length::FillPortion(1)),
-        middle,
-        right
-    ]
-    .spacing(6)
-    .width(Fill);
-
-    let details: Element<'a, Message> = if state.details {
-        group(
-            t!("Location").into_owned(),
-            column![
-                read_only(t!("Found in:").into_owned(), &state.found_in, 92.0),
-                read_only(t!("Saved path:").into_owned(), &state.saved_path, 92.0),
-                read_only(t!("Page size:").into_owned(), &state.page_size, 92.0),
-            ]
-            .spacing(5),
-            Length::Shrink,
-        )
-    } else {
-        Space::new().height(0).into()
-    };
-
-    let details_label = if state.details {
-        t!("Hide Details")
-    } else {
-        t!("Show Details")
-    };
-    let footer = row![dialog_button(
-        details_label,
-        msg(PdfDialogMsg::AttachDetails(!state.details)),
-        false
-    )]
-    .push(footer(PdfDialogMsg::AttachOk, "attach"))
+    .spacing(8)
     .align_y(iced::Center);
 
-    column![name_section, body, details, footer]
-        .spacing(6)
-        .padding([8, 10])
+    // Pages: the thumbnails, then which ones are chosen.
+    let chosen = state.page_labels().join(", ");
+    let pages = card(
+        t!("Pages").into_owned(),
+        column![
+            container(page_tiles(&state.pages, &state.selected, PdfDialogMsg::AttachPage))
+                .padding(6)
+                .height(Length::Fixed(226.0))
+                .width(Fill)
+                .style(well_style),
+            text(crate::tf!("Selected pages: {pages}", pages = chosen)).size(11).style(muted_style),
+        ]
+        .spacing(6),
+    );
+
+    // Placement: insertion point, scale and rotation, each with an
+    // "On screen" chip that leaves the value to the command line.
+    let on_screen = t!("On screen").into_owned();
+    let insert_enabled = !state.insert_on_screen;
+    let xyz = row![
+        field("X".into(), &state.insert[0], insert_enabled, 12.0, |v| msg(PdfDialogMsg::AttachInsert(0, v))),
+        field("Y".into(), &state.insert[1], insert_enabled, 12.0, |v| msg(PdfDialogMsg::AttachInsert(1, v))),
+        field("Z".into(), &state.insert[2], insert_enabled, 12.0, |v| msg(PdfDialogMsg::AttachInsert(2, v))),
+    ]
+    .spacing(8);
+    let heading = |label: std::borrow::Cow<'static, str>, on: bool, message: Message| {
+        row![
+            text(label).size(11).width(Fill),
+            chip(on_screen.clone(), on, message)
+        ]
+        .align_y(iced::Center)
+    };
+    let placement = card(
+        t!("Placement").into_owned(),
+        column![
+            heading(
+                t!("Insertion point"),
+                state.insert_on_screen,
+                msg(PdfDialogMsg::AttachInsertOnScreen(!state.insert_on_screen))
+            ),
+            xyz,
+            heading(
+                t!("Scale"),
+                state.scale_on_screen,
+                msg(PdfDialogMsg::AttachScaleOnScreen(!state.scale_on_screen))
+            ),
+            field(String::new(), &state.scale, !state.scale_on_screen, 0.0, |v| msg(PdfDialogMsg::AttachScale(v))),
+            heading(
+                t!("Rotation"),
+                state.rotation_on_screen,
+                msg(PdfDialogMsg::AttachRotationOnScreen(!state.rotation_on_screen))
+            ),
+            field(String::new(), &state.rotation, !state.rotation_on_screen, 0.0, |v| msg(PdfDialogMsg::AttachRotation(v))),
+        ]
+        .spacing(6),
+    );
+
+    let path = card(
+        t!("Path type").into_owned(),
+        segmented(
+            PathTypeChoice::ALL.iter().map(|c| (*c, c.to_string())).collect(),
+            state.path_type,
+            PdfDialogMsg::AttachPathType,
+        ),
+    );
+
+    let details = card(
+        t!("File details").into_owned(),
+        column![
+            info_line(t!("Found in:").into_owned(), &state.found_in),
+            info_line(t!("Saved path:").into_owned(), &state.saved_path),
+            info_line(t!("Page size:").into_owned(), &state.page_size),
+        ]
+        .spacing(4),
+    );
+
+    let body = row![
+        column![pages, details].spacing(8).width(Length::FillPortion(3)),
+        column![placement, path].spacing(8).width(Length::FillPortion(2)),
+    ]
+    .spacing(10);
+
+    column![file, body, footer("attach", None, t!("Attach"), PdfDialogMsg::AttachOk)]
+        .spacing(10)
+        .padding([10, 12])
         .width(sizing.width)
         .into()
 }
@@ -543,28 +612,24 @@ pub fn view_layers<'a>(
 ) -> Element<'a, Message> {
     let names: Vec<String> = state.targets.iter().map(|t| t.name.clone()).collect();
     let target = state.targets.get(state.current);
-    let reference = row![
-        text(t!("Reference name:")).size(11).width(Length::Fixed(110.0)),
-        pick_list(target.map(|t| t.name.clone()), names, |n: &String| n.clone())
-            .on_select(|n| msg(PdfDialogMsg::LayersUnderlay(n)))
-            .text_size(11)
-            .padding([3, 6])
-            .width(Fill),
-    ]
-    .spacing(6)
-    .align_y(iced::Center);
+    let underlay = pick_list(target.map(|t| t.name.clone()), names, |n: &String| n.clone())
+        .on_select(|n| msg(PdfDialogMsg::LayersUnderlay(n)))
+        .text_size(12)
+        .padding([5, 8])
+        .width(Fill);
     let search = text_input(t!("Search for layer").as_ref(), &state.search)
         .on_input(|s| msg(PdfDialogMsg::LayersSearch(s)))
         .size(11)
-        .padding([3, 6])
-        .width(Length::Fixed(220.0))
+        .padding([5, 8])
+        .width(Fill)
         .style(field_style);
 
-    let header = row![
-        text(t!("On")).size(11).style(muted_style).width(Length::Fixed(44.0)),
-        text(t!("Name")).size(11).style(muted_style),
-    ]
-    .padding([4, 8]);
+    let (total, hidden) = target.map_or((0, 0), |t| (t.layers.len(), t.hidden.len()));
+    let summary = text(crate::tf!("{count} layers, {hidden} hidden", count = total, hidden = hidden))
+        .size(11)
+        .style(muted_style);
+
+    // Each layer: its name and an On / Off switch.
     let body: Element<'a, Message> = match target {
         Some(t) if !t.layers.is_empty() => {
             let needle = state.search.to_lowercase();
@@ -574,135 +639,118 @@ pub fn view_layers<'a>(
                 .filter(|name| needle.is_empty() || name.to_lowercase().contains(&needle))
                 .map(|name| {
                     let on = !t.hidden.contains(name);
-                    let bulb = button(crate::ui::icons::semantic(
-                        crate::ui::icons::layer_visible(on),
-                        14.0,
-                    ))
+                    let switch = button(
+                        text(if on { t!("On") } else { t!("Off") })
+                            .size(11)
+                            .width(Fill)
+                            .align_x(iced::Center),
+                    )
                     .on_press(msg(PdfDialogMsg::LayersToggle(name.clone())))
-                    .padding([0, 4])
-                    .style(|_: &Theme, _| button::Style::default());
-                    row![
-                        container(bulb).width(Length::Fixed(44.0)),
-                        text(name.clone()).size(11)
-                    ]
-                    .padding([2, 8])
-                    .align_y(iced::Center)
+                    .style(button_style(on))
+                    .padding([3, 6])
+                    .width(Length::Fixed(64.0));
+                    container(
+                        row![text(name.clone()).size(12).width(Fill), switch]
+                            .align_y(iced::Center),
+                    )
+                    .padding([5, 10])
+                    .style(well_style)
                     .into()
                 });
-            scrollable(iced::widget::Column::with_children(rows.collect::<Vec<_>>()))
+            scrollable(iced::widget::Column::with_children(rows.collect::<Vec<_>>()).spacing(4))
                 .height(Fill)
                 .into()
         }
-        _ => container(text(t!("This file does not contain any layers.")).size(11))
+        _ => container(text(t!("This file does not contain any layers.")).size(11).style(muted_style))
             .width(Fill)
             .height(Fill)
             .align_x(iced::Center)
             .align_y(iced::Center)
             .into(),
     };
-    let list = container(column![header, body])
-        .width(Fill)
-        .height(Length::Fixed(300.0))
-        .style(frame_style);
 
     column![
-        text(t!("Select an underlay to view its layers.")).size(11),
-        reference,
-        search,
-        list,
-        footer(PdfDialogMsg::LayersOk, "layers"),
+        card(t!("Underlay").into_owned(), underlay),
+        card(
+            t!("Layers").into_owned(),
+            column![search, summary, container(body).height(Length::Fixed(250.0))].spacing(6)
+        ),
+        footer("layers", None, t!("Apply"), PdfDialogMsg::LayersOk),
     ]
-    .spacing(8)
-    .padding([8, 10])
+    .spacing(10)
+    .padding([10, 12])
     .width(sizing.width)
     .into()
 }
 
 // ── PDF Import Settings ────────────────────────────────────────────────────
 
-fn settings_groups<'a>(s: &'a PdfImportSettings) -> (Element<'a, Message>, Element<'a, Message>, Element<'a, Message>) {
-    let fills: Element<'a, Message> = if s.vector {
-        labeled_checkbox(t!("Solid fills"), s.fills, |v| msg(PdfDialogMsg::Fills(v)))
+/// Content as chips, layers as a segmented choice, options as chips.
+fn settings_cards<'a>(s: &'a PdfImportSettings) -> (Element<'a, Message>, Element<'a, Message>, Element<'a, Message>) {
+    let fills = if s.vector {
+        chip(t!("Solid fills").into_owned(), s.fills, msg(PdfDialogMsg::Fills(!s.fills)))
     } else {
-        labeled_checkbox(t!("Solid fills"), s.fills, move |_| Message::Noop)
+        chip(t!("Solid fills").into_owned(), s.fills, Message::Noop)
     };
-    let data = group(
+    let content = card(
         t!("PDF data to import").into_owned(),
-        column![
-            labeled_checkbox(t!("Vector geometry"), s.vector, |v| msg(PdfDialogMsg::Vector(v))),
-            container(fills).padding(iced::Padding { left: 20.0, ..Default::default() }),
-            labeled_checkbox(t!("TrueType text"), s.text, |v| msg(PdfDialogMsg::Text(v))),
-            labeled_checkbox(t!("Raster images"), s.raster, |v| msg(PdfDialogMsg::Raster(v))),
+        row![
+            chip(t!("Vector geometry").into_owned(), s.vector, msg(PdfDialogMsg::Vector(!s.vector))),
+            fills,
+            chip(t!("TrueType text").into_owned(), s.text, msg(PdfDialogMsg::Text(!s.text))),
+            chip(t!("Raster images").into_owned(), s.raster, msg(PdfDialogMsg::Raster(!s.raster))),
         ]
-        .spacing(6),
-        Length::Fill,
+        .spacing(6)
+        .wrap()
+        .vertical_spacing(6),
     );
-    let layer_radio = |label: std::borrow::Cow<'static, str>, value: ImportLayers| {
-        form_radio(label, value, Some(s.layers), |v| msg(PdfDialogMsg::Layers(v)))
-    };
-    let layers = group(
+    let layers = card(
         t!("Layers").into_owned(),
-        column![
-            layer_radio(t!("Use PDF layers"), ImportLayers::Pdf),
-            layer_radio(t!("Create object layers"), ImportLayers::Object),
-            layer_radio(t!("Current layer"), ImportLayers::Current),
-        ]
-        .spacing(6),
-        Length::Fill,
+        segmented(
+            vec![
+                (ImportLayers::Pdf, t!("Use PDF layers").into_owned()),
+                (ImportLayers::Object, t!("Create object layers").into_owned()),
+                (ImportLayers::Current, t!("Current layer").into_owned()),
+            ],
+            s.layers,
+            PdfDialogMsg::Layers,
+        ),
     );
-    let options = group(
+    let options = card(
         t!("Import options").into_owned(),
-        column![
-            labeled_checkbox(t!("Import as block"), s.as_block, |v| msg(PdfDialogMsg::AsBlock(v))),
-            labeled_checkbox(t!("Join line and arc segments"), s.join, |v| msg(
-                PdfDialogMsg::Join(v)
-            )),
-            labeled_checkbox(t!("Convert solid fills to hatches"), s.hatches, |v| msg(
-                PdfDialogMsg::Hatches(v)
-            )),
-            labeled_checkbox(t!("Apply lineweight properties"), s.lineweights, |v| msg(
-                PdfDialogMsg::Lineweights(v)
-            )),
-            labeled_checkbox(t!("Infer linetypes from collinear dashes"), s.linetypes, |v| msg(
-                PdfDialogMsg::Linetypes(v)
-            )),
+        row![
+            chip(t!("Import as block").into_owned(), s.as_block, msg(PdfDialogMsg::AsBlock(!s.as_block))),
+            chip(t!("Join line and arc segments").into_owned(), s.join, msg(PdfDialogMsg::Join(!s.join))),
+            chip(t!("Convert solid fills to hatches").into_owned(), s.hatches, msg(PdfDialogMsg::Hatches(!s.hatches))),
+            chip(t!("Apply lineweight properties").into_owned(), s.lineweights, msg(PdfDialogMsg::Lineweights(!s.lineweights))),
+            chip(t!("Infer linetypes from collinear dashes").into_owned(), s.linetypes, msg(PdfDialogMsg::Linetypes(!s.linetypes))),
         ]
-        .spacing(6),
-        Length::Shrink,
+        .spacing(6)
+        .wrap()
+        .vertical_spacing(6),
     );
-    (data, layers, options)
+    (content, layers, options)
 }
 
 pub fn view_import_settings<'a>(
     settings: &'a PdfImportSettings,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
-    let (data, layers, options) = settings_groups(settings);
-    let side_button = |label: std::borrow::Cow<'static, str>, on: Message, accent: bool| {
-        button(text(label).size(11).width(Fill).align_x(iced::Center))
-            .on_press(on)
-            .style(button_style(accent))
-            .padding([4, 12])
-            .width(Length::Fixed(110.0))
-    };
-    let left = column![
-        row![data, layers].spacing(8).height(Length::Fixed(140.0)),
-        options
+    let (content, layers, options) = settings_cards(settings);
+    let more = button(text(t!("Options...")).size(11))
+        .on_press(msg(PdfDialogMsg::Options))
+        .style(button_style(false))
+        .padding([5, 12]);
+    column![
+        content,
+        layers,
+        options,
+        footer("settings", Some(more.into()), t!("Save"), PdfDialogMsg::SettingsOk),
     ]
-    .spacing(8)
-    .width(Fill);
-    let right = column![
-        side_button(t!("OK"), msg(PdfDialogMsg::SettingsOk), true),
-        side_button(t!("Cancel"), Message::CloseModal, false),
-        side_button(t!("Options..."), msg(PdfDialogMsg::Options), false),
-        side_button(t!("Help"), msg(PdfDialogMsg::Help("settings")), false),
-    ]
-    .spacing(8);
-    row![left, right]
-        .spacing(10)
-        .padding([8, 10])
-        .width(sizing.width)
-        .into()
+    .spacing(10)
+    .padding([10, 12])
+    .width(sizing.width)
+    .into()
 }
 
 // ── Import PDF (File) ──────────────────────────────────────────────────────
@@ -727,100 +775,110 @@ pub fn view_import_file<'a>(
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let file_row = row![
-        text(t!("File name:")).size(11).width(Length::Fixed(70.0)),
-        text_input("", &file_name)
-            .size(11)
-            .padding([3, 6])
+    let file = row![
+        container(text(file_name).size(12))
+            .padding([6, 10])
             .width(Fill)
-            .style(field_style),
+            .style(well_style),
         button(text(t!("Browse...")).size(11))
             .on_press(msg(PdfDialogMsg::ImportBrowse))
             .style(button_style(false))
-            .padding([4, 12])
-            .width(Length::Fixed(96.0)),
+            .padding([5, 12]),
     ]
     .spacing(8)
     .align_y(iced::Center);
 
-    let selected = [state.selected];
-    let page_group = group(
-        t!("Page to import").into_owned(),
+    // One page at a time: a large preview with previous / next.
+    let count = state.pages.len();
+    let preview: Element<'a, Message> = match state.pages.get(state.selected).and_then(|p| p.image.clone()) {
+        Some(handle) => image(handle).width(Fill).height(Fill).into(),
+        None => Space::new().width(Fill).height(Fill).into(),
+    };
+    let step = |label: &'static str, to: Option<usize>| {
+        button(text(label).size(14))
+            .on_press_maybe(to.map(|p| msg(PdfDialogMsg::ImportPage(p))))
+            .style(button_style(false))
+            .padding([2, 12])
+    };
+    let navigator = row![
+        step("\u{2039}", state.selected.checked_sub(1)),
+        Space::new().width(Fill),
+        text_input("", &state.page_text)
+            .on_input(|s| msg(PdfDialogMsg::ImportPageText(s)))
+            .size(11)
+            .padding([3, 6])
+            .width(Length::Fixed(48.0))
+            .style(field_style),
+        text(format!("/ {count}")).size(11).style(muted_style),
+        Space::new().width(Fill),
+        step("\u{203a}", (state.selected + 1 < count).then_some(state.selected + 1)),
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+    let page = card(
+        t!("Pages").into_owned(),
         column![
+            container(preview)
+                .padding(8)
+                .height(Length::Fixed(300.0))
+                .width(Fill)
+                .style(|_: &Theme| container::Style {
+                    background: Some(Background::Color(iced::Color::WHITE)),
+                    border: Border { width: 0.0, radius: 6.0.into(), color: iced::Color::TRANSPARENT },
+                    ..Default::default()
+                }),
+            navigator,
             row![
-                text(t!("Page:")).size(11),
-                text_input("", &state.page_text)
-                    .on_input(|s| msg(PdfDialogMsg::ImportPageText(s)))
-                    .size(11)
-                    .padding([3, 6])
-                    .width(Length::Fixed(56.0))
-                    .style(field_style),
-                text(crate::tf!("Total: {count}", count = state.pages.len()))
-                    .size(11)
-                    .style(muted_style),
-            ]
-            .spacing(8)
-            .align_y(iced::Center),
-            page_grid(&state.pages, &selected, PdfDialogMsg::ImportPage, 300.0),
-            row![
-                text(crate::tf!("Page size: {size}", size = state.page_size.clone()))
-                    .size(11)
-                    .style(muted_style),
+                text(crate::tf!("Page size: {size}", size = state.page_size.clone())).size(11).style(muted_style),
                 Space::new().width(Fill),
-                text(crate::tf!("PDF scale: {scale}:1", scale = state.scale.trim()))
-                    .size(11)
-                    .style(muted_style),
+                text(crate::tf!("PDF scale: {scale}:1", scale = state.scale.trim())).size(11).style(muted_style),
             ],
         ]
-        .spacing(6),
-        Length::Shrink,
+        .spacing(8),
     );
 
-    let location = group(
-        t!("Location").into_owned(),
+    let placement = card(
+        t!("Placement").into_owned(),
         column![
-            labeled_checkbox(t!("Specify insertion point on-screen"), state.insert_on_screen, |v| {
-                msg(PdfDialogMsg::ImportInsertOnScreen(v))
-            }),
             row![
-                text(t!("Scale:")).size(11).style(muted_style),
-                text_input("", &state.scale)
-                    .on_input(|s| msg(PdfDialogMsg::ImportScale(s)))
-                    .size(11)
-                    .padding([3, 6])
-                    .width(Length::Fixed(80.0))
-                    .style(field_style),
-                Space::new().width(Length::Fixed(20.0)),
-                text(t!("Rotation:")).size(11).style(muted_style),
-                pick_list(Some(state.rotation), RotationChoice::ALL, |c| c.to_string())
-                    .on_select(|v| msg(PdfDialogMsg::ImportRotation(v)))
-                    .text_size(11)
-                    .padding([3, 6])
-                    .width(Length::Fixed(76.0)),
+                text(t!("Insertion point")).size(11).width(Fill),
+                chip(
+                    t!("On screen").into_owned(),
+                    state.insert_on_screen,
+                    msg(PdfDialogMsg::ImportInsertOnScreen(!state.insert_on_screen))
+                ),
+            ]
+            .align_y(iced::Center),
+            field(t!("Scale").into_owned(), &state.scale, true, 60.0, |s| msg(PdfDialogMsg::ImportScale(s))),
+            row![
+                text(t!("Rotation")).size(11).style(muted_style).width(Length::Fixed(60.0)),
+                segmented(
+                    RotationChoice::ALL.iter().map(|r| (*r, format!("{}\u{b0}", r.0))).collect(),
+                    state.rotation,
+                    PdfDialogMsg::ImportRotation,
+                ),
             ]
             .spacing(6)
             .align_y(iced::Center),
         ]
-        .spacing(6),
-        Length::Shrink,
+        .spacing(8),
     );
-    let (data, layers, options) = settings_groups(&state.settings);
-    let right = column![
-        location,
-        row![data, layers].spacing(8).height(Length::Fixed(140.0)),
-        options
+    let (content, layers, options) = settings_cards(&state.settings);
+    let right = scrollable(column![placement, content, layers, options].spacing(8)).height(Fill);
+    let body = row![
+        container(page).width(Length::FillPortion(1)),
+        container(right).width(Length::FillPortion(1)),
     ]
-    .spacing(8)
-    .width(Length::FillPortion(1));
-    let body = row![container(page_group).width(Length::FillPortion(1)), right].spacing(8);
+    .spacing(10)
+    .height(Length::Fixed(420.0));
 
-    let footer = row![dialog_button(t!("Options..."), msg(PdfDialogMsg::Options), false)]
-        .push(footer(PdfDialogMsg::ImportOk, "import"))
-    .align_y(iced::Center);
-
-    column![file_row, body, footer]
-        .spacing(8)
-        .padding([8, 10])
+    let more = button(text(t!("Options...")).size(11))
+        .on_press(msg(PdfDialogMsg::Options))
+        .style(button_style(false))
+        .padding([5, 12]);
+    column![file, body, footer("import", Some(more.into()), t!("Import"), PdfDialogMsg::ImportOk)]
+        .spacing(10)
+        .padding([10, 12])
         .width(sizing.width)
         .into()
 }

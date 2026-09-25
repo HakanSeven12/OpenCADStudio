@@ -261,11 +261,18 @@ fn field<'a>(
     .into()
 }
 
-/// A label and a value as plain text.
+/// A label and a value on one line; a long value keeps its end.
 fn info_line<'a>(label: String, value: &'a str) -> Element<'a, Message> {
+    const MAX: usize = 70;
+    let count = value.chars().count();
+    let shown = if count > MAX {
+        format!("…{}", value.chars().skip(count - (MAX - 1)).collect::<String>())
+    } else {
+        value.to_string()
+    };
     row![
         text(label).size(11).style(muted_style).width(Length::Fixed(96.0)),
-        text(value).size(11).width(Fill),
+        text(shown).size(11).width(Fill).wrapping(iced::advanced::text::Wrapping::None),
     ]
     .spacing(6)
     .into()
@@ -499,7 +506,7 @@ pub fn view_attach<'a>(
         column![
             container(page_tiles(&state.pages, &state.selected, PdfDialogMsg::AttachPage))
                 .padding(6)
-                .height(Length::Fixed(262.0))
+                .height(Length::Fixed(226.0))
                 .width(Fill)
                 .style(well_style),
             text(crate::tf!("Selected pages: {pages}", pages = chosen)).size(11).style(muted_style),

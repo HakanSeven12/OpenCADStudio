@@ -306,7 +306,9 @@ impl OpenCADStudio {
                             Some(at) => {
                                 t.hidden.remove(at);
                             }
-                            None => t.hidden.push(layer),
+                            // Only a layer the file has can be turned off.
+                            None if t.layers.contains(&layer) => t.hidden.push(layer),
+                            None => {}
                         }
                     }
                 }

@@ -219,6 +219,83 @@ impl OpenCADStudio {
                 return self.graph_set(i, port, value);
             }
             GraphMsg::Set(port, value) => return self.graph_set(i, port, value),
+            GraphMsg::New => self.tabs[i].graph = Default::default(),
+            GraphMsg::Save => {
+                // The file names the drawing by its fingerprint so reopening it
+                // elsewhere cannot take over unrelated entities; a drawing that
+                // never had one gets it now and saves it with its next save.
+                let tab = &mut self.tabs[i];
+                let header = &mut tab.scene.document.header;
+                if header.fingerprint_guid.is_empty() {
+                    header.fingerprint_guid =
+                        format!("{{{}}}", crate::app::control::new_guid_v4().to_uppercase());
+                    tab.dirty = true;
+                }
+                let bytes = tab.graph.to_file(&tab.scene.document.header.fingerprint_guid);
+                return Task::perform(
+                    async move {
+                        let handle = crate::sys::file_dialog()
+                            .set_title(crate::t!("Save Node Graph").as_ref())
+                            .add_filter(crate::t!("Node Graph").as_ref(), &["ocg"])
+                            .set_file_name("graph.ocg")
+                            .save_file()
+                            .await?;
+                        let name = crate::sys::handle_path(&handle).to_string_lossy().into_owned();
+                        Some(handle.write(&bytes).await.map(|()| name).map_err(|e| e.to_string()))
+                    },
+                    |result| Message::Graph(GraphMsg::Saved(result)),
+                );
+            }
+            GraphMsg::Saved(Some(Ok(name))) => {
+                self.command_line
+                    .push_output(crate::tf!("Node graph saved to {}", name).as_ref());
+            }
+            GraphMsg::Saved(Some(Err(error))) => self.command_line.push_error(&error),
+            GraphMsg::Open => {
+                return Task::perform(
+                    async {
+                        let handle = crate::sys::file_dialog()
+                            .set_title(crate::t!("Open Node Graph").as_ref())
+                            .add_filter(crate::t!("Node Graph").as_ref(), &["ocg"])
+                            .pick_file()
+                            .await?;
+                        let _ = crate::sys::handle_path(&handle);
+                        Some(handle.read().await)
+                    },
+                    |bytes| Message::Graph(GraphMsg::Loaded(bytes)),
+                );
+            }
+            GraphMsg::Loaded(Some(bytes)) => {
+                let (mut graph, drawing) = match crate::ui::node_graph::Graph::from_file(&bytes) {
+                    Ok(loaded) => loaded,
+                    Err(error) => {
+                        self.command_line.push_error(&error);
+                        return Task::none();
+                    }
+                };
+                // Entities are reused only in the drawing the graph was saved
+                // against, and only while they are still the node's kind;
+                // otherwise evaluation creates fresh ones.
+                let document = &self.tabs[i].scene.document;
+                let same_drawing =
+                    !drawing.is_empty() && drawing == document.header.fingerprint_guid;
+                for node in &graph.engine.nodes {
+                    let kind = match &node.kind {
+                        Kind::Object(name) => ObjectKind::from_name(name),
+                        Kind::Op(_) => None,
+                    };
+                    if let Some(ui) = graph.ui.get_mut(&node.id) {
+                        ui.handles.retain(|handle| {
+                            same_drawing
+                                && kind.zip(document.get_entity(*handle)).is_some_and(
+                                    |(kind, entity)| kind.matches(entity),
+                                )
+                        });
+                    }
+                }
+                self.tabs[i].graph = graph;
+                return self.graph_run(i);
+            }
             _ => {}
         }
         Task::none()

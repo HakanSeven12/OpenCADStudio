@@ -1317,6 +1317,7 @@ mod entities;
 pub(crate) mod http_bridge;
 mod interactive;
 mod sheets;
+pub(crate) use sheets::new_guid_v4;
 
 #[cfg(test)]
 mod p1_tests;

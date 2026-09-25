@@ -519,7 +519,7 @@ fn marker_identity(document: &codec::CadDocument, handle: codec::Handle) -> Opti
 }
 
 /// A random RFC 4122 version-4 GUID string, from the OS entropy pool.
-fn new_guid_v4() -> String {
+pub(crate) fn new_guid_v4() -> String {
     use std::fmt::Write as _;
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).expect("OS entropy unavailable");

@@ -10,7 +10,7 @@ use codec::{EntityType, Handle};
 use graph::{Kind, NodeId, Port, Spec};
 use iced::widget::{
     button, canvas, checkbox, column, container, mouse_area, opaque, pin, row, scrollable, slider,
-    stack, text, text_input, Space,
+    stack, text, text_input, tooltip, Space,
 };
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Widget};
@@ -20,7 +20,7 @@ use iced::{
     Vector,
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::app::Message;
 use crate::t;
@@ -83,6 +83,23 @@ impl ObjectKind {
 
     pub fn from_name(name: &str) -> Option<Self> {
         OBJECTS.iter().copied().find(|kind| kind.name() == name)
+    }
+
+    /// Whether `entity` is this kind of object.
+    pub fn matches(self, entity: &EntityType) -> bool {
+        matches!(
+            (self, entity),
+            (ObjectKind::Line, EntityType::Line(_))
+                | (ObjectKind::Circle, EntityType::Circle(_))
+                | (ObjectKind::Arc, EntityType::Arc(_))
+                | (ObjectKind::Ellipse, EntityType::Ellipse(_))
+                | (ObjectKind::Point, EntityType::Point(_))
+                | (ObjectKind::Polyline, EntityType::LwPolyline(_))
+                | (ObjectKind::Ray, EntityType::Ray(_))
+                | (ObjectKind::XLine, EntityType::XLine(_))
+                | (ObjectKind::Text, EntityType::Text(_))
+                | (ObjectKind::MText, EntityType::MText(_))
+        )
     }
 
     fn command(self) -> &'static str {
@@ -224,6 +241,13 @@ pub enum GraphMsg {
     /// A slider or toggle set an operation input.
     Set(Port, Value),
     Zoom(mouse::ScrollDelta),
+    /// Start an empty graph; the drawing keeps the old graph's objects.
+    New,
+    Save,
+    /// `None` when the dialog was cancelled.
+    Saved(Option<Result<String, String>>),
+    Open,
+    Loaded(Option<Vec<u8>>),
 }
 
 fn msg(m: GraphMsg) -> Message {
@@ -266,6 +290,66 @@ impl Graph {
     fn to_screen(&self, graph: Point) -> Point {
         let zoom = self.zoom();
         Point::new(self.pan.x + graph.x * zoom, self.pan.y + graph.y * zoom)
+    }
+
+    /// The `.ocg` file: the graph, the canvas, and the fingerprint of the
+    /// drawing its object nodes' entities live in.
+    pub fn to_file(&self, drawing: &str) -> Vec<u8> {
+        let nodes: serde_json::Map<String, Value> = self
+            .ui
+            .iter()
+            .map(|(id, ui)| {
+                let mut open: Vec<&String> = ui.open.iter().collect();
+                open.sort();
+                let handles: Vec<u64> = ui.handles.iter().map(|handle| handle.value()).collect();
+                (id.to_string(), json!({ "pos": [ui.pos.x, ui.pos.y], "open": open, "handles": handles }))
+            })
+            .collect();
+        let file = json!({
+            "format": "ocg",
+            "version": 1,
+            "drawing": drawing,
+            "graph": self.engine.to_json(),
+            "canvas": { "pan": [self.pan.x, self.pan.y], "zoom": self.zoom_steps, "nodes": nodes },
+        });
+        serde_json::to_vec_pretty(&file).unwrap_or_default()
+    }
+
+    /// Reads an `.ocg` file, returning the graph and the drawing fingerprint
+    /// it was saved against. Handles come back unchecked.
+    pub fn from_file(bytes: &[u8]) -> Result<(Self, String), String> {
+        let file: Value = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+        if file["format"] != "ocg" {
+            return Err(t!("Not a node graph file").into_owned());
+        }
+        let mut graph = Graph {
+            engine: graph::Graph::from_json(&file["graph"])?,
+            ..Graph::default()
+        };
+        let canvas = &file["canvas"];
+        let pair = |value: &Value| {
+            Some(Vector::new(value[0].as_f64()? as f32, value[1].as_f64()? as f32))
+        };
+        graph.pan = pair(&canvas["pan"]).unwrap_or_default();
+        graph.zoom_steps = canvas["zoom"]
+            .as_i64()
+            .map_or(0, |steps| (steps as i32).clamp(*ZOOM_STEPS.start(), *ZOOM_STEPS.end()));
+        let ids: Vec<NodeId> = graph.engine.nodes.iter().map(|node| node.id).collect();
+        for (index, id) in ids.into_iter().enumerate() {
+            let saved = &canvas["nodes"][id.to_string()];
+            let step = (index % 6) as f32 * 30.0;
+            let pos = pair(&saved["pos"]).unwrap_or(Vector::new(TREE_W + 40.0 + step, 40.0 + step));
+            let open: HashSet<String> = match saved["open"].as_array() {
+                Some(titles) => titles.iter().filter_map(|title| title.as_str().map(str::to_owned)).collect(),
+                None => std::iter::once(t!("Geometry").into_owned()).collect(),
+            };
+            let handles = saved["handles"]
+                .as_array()
+                .map(|values| values.iter().filter_map(Value::as_u64).map(Handle::new).collect())
+                .unwrap_or_default();
+            graph.ui.insert(id, NodeUi { pos: Point::ORIGIN + pos, open, handles });
+        }
+        Ok((graph, file["drawing"].as_str().unwrap_or_default().to_owned()))
     }
 
     pub fn add_node(&mut self, item: PaletteItem, handles: Vec<Handle>, pos: Point) -> NodeId {
@@ -485,7 +569,26 @@ impl Graph {
     }
 
     fn palette_view(&self) -> Element<'_, Message> {
-        let mut col = column![text(t!("Nodes")).size(12)].spacing(2).padding(8);
+        let tool = |icon: &'static [u8], tip: &str, message: GraphMsg| {
+            tooltip(
+                button(crate::ui::icons::themed(icon, 12.0))
+                    .on_press(msg(message))
+                    .style(button::text)
+                    .padding([2, 4]),
+                container(text(t!(tip)).size(11))
+                    .padding([3, 6])
+                    .style(container::bordered_box),
+                tooltip::Position::Bottom,
+            )
+        };
+        let header = row![
+            text(t!("Nodes")).size(12).width(Length::Fill),
+            tool(crate::ui::icons::DOC_NEW, "New graph", GraphMsg::New),
+            tool(crate::ui::icons::FOLDER_OPEN, "Open graph", GraphMsg::Open),
+            tool(crate::ui::icons::SAVE, "Save graph", GraphMsg::Save),
+        ]
+        .align_y(iced::Center);
+        let mut col = column![header].spacing(2).padding(8);
         let categories = std::iter::once("Objects").chain(graph::CATEGORIES.iter().copied());
         for category in categories {
             let open = !self.closed_categories.contains(category);

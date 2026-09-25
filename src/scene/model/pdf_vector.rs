@@ -200,11 +200,14 @@ fn images_to_last_layer(
         return;
     };
     let key = |s: &dyn std::fmt::Debug| format!("{s:?}");
-    let owner = |item: String| {
-        layered.iter().position(|(_, pv)| {
-            pv.paths.iter().any(|p| key(p) == item) || pv.texts.iter().any(|t| key(t) == item)
-        })
-    };
+    // Each layered path and text keyed once; the first layer holding it wins.
+    let mut owners: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (n, (_, pv)) in layered.iter().enumerate() {
+        for item in pv.paths.iter().map(|p| key(p)).chain(pv.texts.iter().map(|t| key(t))) {
+            owners.entry(item).or_insert(n);
+        }
+    }
+    let owner = |item: String| owners.get(&item).copied();
     let mut last: Option<usize> = None;
     let mut moves: Vec<(usize, PdfImage)> = Vec::new();
     for drawn in &full.order {

@@ -708,13 +708,12 @@ impl OpenCADStudio {
                 "measure" => self.control_measure(&req),
                 // The object snap a cursor over `point` (world) would get;
                 // `from` is the base for perpendicular and tangent.
-                "snap" => {
+                "snap" => 'snap: {
                     let p = &req["point"];
-                    let world = glam::DVec3::new(
-                        p[0].as_f64().unwrap_or(0.0),
-                        p[1].as_f64().unwrap_or(0.0),
-                        p[2].as_f64().unwrap_or(0.0),
-                    );
+                    let (Some(x), Some(y)) = (p[0].as_f64(), p[1].as_f64()) else {
+                        break 'snap failure("invalid_point", "point must be [x, y] or [x, y, z]");
+                    };
+                    let world = glam::DVec3::new(x, y, p[2].as_f64().unwrap_or(0.0));
                     let from = req["from"].as_array().map(|f| {
                         glam::DVec3::new(
                             f.first().and_then(|v| v.as_f64()).unwrap_or(0.0),

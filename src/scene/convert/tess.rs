@@ -1308,7 +1308,9 @@ fn tessellate_entity_inner(
                     crate::scene::model::wire_model::SnapHint::Center,
                 )];
             }
-            set_wire_aabb(&mut wire, aabb);
+            // Each piece gets its own box (not the page's), so candidate
+            // gathering only visits the pieces near the cursor.
+            set_wire_aabb(&mut wire, WireModel::UNBOUNDED_AABB);
             bases.push(wire);
         }
     }

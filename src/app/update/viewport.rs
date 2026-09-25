@@ -2908,11 +2908,15 @@ impl OpenCADStudio {
             self.snapper.osnap_radius_px,
         );
         // Perpendicular and tangent measure from `from`, else the running
-        // command's last point.
+        // command's last point; the live cursor's base point is restored.
+        let live_from = self.snapper.from_point;
         self.snapper.from_point = from.or(self.last_point).map(|p| p.as_vec3());
         let (go, gr) = self.drafting_grid_basis(i);
-        self.snapper
-            .snap(raw, p, &candidates, view_rot, eye, bounds, go, gr, None)
+        let hit = self
+            .snapper
+            .snap(raw, p, &candidates, view_rot, eye, bounds, go, gr, None);
+        self.snapper.from_point = live_from;
+        hit
     }
 
     /// Apply one frame of a UCS-icon grip drag: map the cursor onto the active

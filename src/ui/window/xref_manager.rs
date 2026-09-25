@@ -545,60 +545,12 @@ impl XrefManagerPanel {
         missing: usize,
         doc: &'a CadDocument,
     ) -> Element<'a, Message> {
-        use crate::ui::dock::{DockMsg, PanelId};
-        // ── Dock chrome (title, pin, close) — matches the block palette ──
-        let pin_icon = if auto_collapse {
-            crate::ui::icons::themed_primary_weak_text(crate::ui::icons::PIN, 12.0)
-        } else {
-            crate::ui::icons::themed_secondary(crate::ui::icons::PIN, 12.0)
-        };
-        let pin = button(pin_icon)
-            .on_press(Message::Dock(DockMsg::AutoCollapseToggle(
-                PanelId::ExternalReferences,
-            )))
-            .style(move |theme: &Theme, status| {
-                let mut style = button::subtle(theme, status);
-                if auto_collapse {
-                    let palette = theme.palette();
-                    style.background = Some(Background::Color(palette.primary.weak.color));
-                    style.text_color = palette.primary.weak.text;
-                    style.border.color = palette.primary.base.color;
-                    style.border.width = 1.0;
-                }
-                style
-            })
-            .padding([3, 5]);
-        let pin = tooltip(pin, text("Auto").size(10), tooltip::Position::Bottom).gap(4);
-        let close = button(crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 12.0))
-            .on_press(Message::Dock(DockMsg::Close(PanelId::ExternalReferences)))
-            .style(button::subtle)
-            .padding([3, 5]);
-        let close = tooltip(close, text("Close").size(10), tooltip::Position::Bottom).gap(4);
-        let title_bar = mouse_area(
-            container(
-                row![
-                    text(format!(
-                        "{} ({})",
-                        crate::t!("External References").as_ref(),
-                        self.entries.len()
-                    ))
-                    .size(12),
-                    iced::widget::Space::new().width(Fill),
-                    pin,
-                    close,
-                ]
-                .spacing(3)
-                .align_y(iced::Center),
-            )
-            .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(theme.palette().background.weak.color)),
-                ..Default::default()
-            })
-            .width(Fill)
-            .padding([3, 6]),
-        )
-        .on_press(Message::Dock(DockMsg::DockGrab(PanelId::ExternalReferences)))
-        .interaction(iced::mouse::Interaction::Grab);
+        use crate::ui::dock::PanelId;
+        let title_bar = crate::ui::dock::title_bar(
+            PanelId::ExternalReferences,
+            format!("{} ({})", crate::t!("External References").as_ref(), self.entries.len()),
+            auto_collapse,
+        );
         // Table content width: column widths plus gutters, stretched to the
         // dock when wider so rows fill the panel; narrower docks sidescroll.
         let table_w = (width - 16.0).max(self.table_content_width());

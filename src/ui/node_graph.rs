@@ -10,7 +10,7 @@ use codec::{EntityType, Handle};
 use graph::{Kind, NodeId, Port, Spec};
 use iced::widget::{
     button, canvas, checkbox, column, container, mouse_area, opaque, pin, row, scrollable, slider,
-    stack, text, text_input, tooltip, Space,
+    stack, text, text_input, Space,
 };
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Widget};
@@ -32,7 +32,6 @@ const ROW_H: f32 = 22.0;
 const LABEL_W: f32 = 96.0;
 const PORT_W: f32 = 14.0;
 const PORT_HIT: f32 = 10.0;
-pub const TREE_W: f32 = 190.0;
 const ZOOM_STEP: f32 = 1.1;
 const ZOOM_STEPS: std::ops::RangeInclusive<i32> = -15..=12;
 
@@ -220,7 +219,11 @@ pub struct Graph {
     pub cursor: Point,
     pub drag: Option<Drag>,
     pub drafts: HashMap<Port, String>,
-    closed_categories: HashSet<&'static str>,
+    /// Categories the user has flipped from their initial state: Objects
+    /// starts open, the rest closed.
+    toggled_categories: HashSet<&'static str>,
+    /// Filter typed into the panel's search box.
+    search: String,
 }
 
 #[derive(Debug, Clone)]
@@ -248,6 +251,9 @@ pub enum GraphMsg {
     Saved(Option<Result<String, String>>),
     Open,
     Loaded(Option<Vec<u8>>),
+    /// The button was released over the panel entry it was pressed on.
+    PaletteRelease,
+    Search(String),
 }
 
 fn msg(m: GraphMsg) -> Message {
@@ -338,7 +344,7 @@ impl Graph {
         for (index, id) in ids.into_iter().enumerate() {
             let saved = &canvas["nodes"][id.to_string()];
             let step = (index % 6) as f32 * 30.0;
-            let pos = pair(&saved["pos"]).unwrap_or(Vector::new(TREE_W + 40.0 + step, 40.0 + step));
+            let pos = pair(&saved["pos"]).unwrap_or(Vector::new(40.0 + step, 40.0 + step));
             let open: HashSet<String> = match saved["open"].as_array() {
                 Some(titles) => titles.iter().filter_map(|title| title.as_str().map(str::to_owned)).collect(),
                 None => std::iter::once(t!("Geometry").into_owned()).collect(),
@@ -365,13 +371,13 @@ impl Graph {
     }
 
     /// Where a palette entry lands: under the cursor when dropped on the
-    /// canvas, staggered beside the palette when clicked.
-    pub fn drop_position(&self) -> Point {
-        if self.cursor.x > TREE_W {
+    /// canvas, staggered near the top-left when clicked in the panel.
+    pub fn drop_position(&self, on_canvas: bool) -> Point {
+        if on_canvas {
             return self.to_graph(self.cursor);
         }
         let step = (self.engine.nodes.len() % 6) as f32 * 30.0;
-        self.to_graph(Point::new(TREE_W + 40.0 + step, 40.0 + step))
+        self.to_graph(Point::new(40.0 + step, 40.0 + step))
     }
 
     /// Rows of an operation node, read from its spec. An input sharing its
@@ -528,7 +534,6 @@ impl Graph {
                 pan: self.pan,
                 zoom,
             },
-            self.palette_view(),
         ];
         if let Some(Drag::Palette(item)) = self.drag {
             let ghost = container(text(t!(item.label())).size(11))
@@ -556,43 +561,67 @@ impl Graph {
         };
         mouse_area(
             container(
-                row![icon, text(t!(item.label())).size(11)]
+                row![icon, text(t!(item.label())).size(12)]
                     .spacing(6)
                     .align_y(iced::Center),
             )
-            .padding([3, 16])
+            .padding([3, 10])
             .width(Length::Fill),
         )
         .on_press(msg(GraphMsg::PalettePress(item)))
+        .on_release(msg(GraphMsg::PaletteRelease))
         .interaction(mouse::Interaction::Grab)
         .into()
     }
 
-    fn palette_view(&self) -> Element<'_, Message> {
+    /// The node library as a docked panel: title bar, a search box with the
+    /// graph's New / Open / Save beside it, then the categories. Entries are
+    /// clicked or dragged onto the canvas.
+    pub fn panel(&self, width: f32, auto_collapse: bool) -> Element<'_, Message> {
+        use crate::ui::dock::{self, PanelId};
         let tool = |icon: &'static [u8], tip: &str, message: GraphMsg| {
-            tooltip(
-                button(crate::ui::icons::themed(icon, 12.0))
-                    .on_press(msg(message))
-                    .style(button::text)
-                    .padding([2, 4]),
-                container(text(t!(tip)).size(11))
-                    .padding([3, 6])
-                    .style(container::bordered_box),
-                tooltip::Position::Bottom,
+            dock::tool_button(
+                crate::ui::icons::themed(icon, dock::TOOL_H - 6.0),
+                t!(tip).into_owned(),
+                msg(message),
             )
         };
-        let header = row![
-            text(t!("Nodes")).size(12).width(Length::Fill),
+        let toolbar = row![
+            text_input(&t!("Search nodes…"), &self.search)
+                .on_input(|value| msg(GraphMsg::Search(value)))
+                .padding([4, 8])
+                .size(12),
             tool(crate::ui::icons::DOC_NEW, "New graph", GraphMsg::New),
             tool(crate::ui::icons::FOLDER_OPEN, "Open graph", GraphMsg::Open),
             tool(crate::ui::icons::SAVE, "Save graph", GraphMsg::Save),
         ]
+        .spacing(4)
         .align_y(iced::Center);
-        let mut col = column![header].spacing(2).padding(8);
+
+        let query = self.search.trim().to_lowercase();
+        let wanted = |item: PaletteItem| {
+            query.is_empty() || t!(item.label()).to_lowercase().contains(&query)
+        };
+        let mut tree = column![].spacing(1);
         let categories = std::iter::once("Objects").chain(graph::CATEGORIES.iter().copied());
         for category in categories {
-            let open = !self.closed_categories.contains(category);
-            col = col.push(
+            let items: Vec<PaletteItem> = if category == "Objects" {
+                OBJECTS.iter().map(|kind| PaletteItem::Object(*kind)).collect()
+            } else {
+                graph::LIBRARY
+                    .iter()
+                    .filter(|spec| spec.category == category)
+                    .map(PaletteItem::Op)
+                    .collect()
+            };
+            let items: Vec<PaletteItem> = items.into_iter().filter(|item| wanted(*item)).collect();
+            if items.is_empty() {
+                continue;
+            }
+            // A search shows every match, collapsed categories included.
+            let open = !query.is_empty()
+                || (category == "Objects") != self.toggled_categories.contains(category);
+            tree = tree.push(
                 button(
                     row![
                         crate::ui::icons::themed_arrow_toggle(open, 9.0),
@@ -602,36 +631,38 @@ impl Graph {
                     .align_y(iced::Center),
                 )
                 .on_press(msg(GraphMsg::Category(category)))
-                .style(button::text)
+                .style(|theme: &Theme, status| {
+                    let mut style = button::text(theme, status);
+                    style.background =
+                        Some(Background::Color(theme.palette().background.weak.color));
+                    style
+                })
                 .width(Length::Fill)
-                .padding([2, 2]),
+                .padding([3, 6]),
             );
-            if !open {
-                continue;
-            }
-            if category == "Objects" {
-                for &kind in OBJECTS {
-                    col = col.push(self.palette_entry(PaletteItem::Object(kind)));
-                }
-            } else {
-                for spec in graph::LIBRARY.iter().filter(|spec| spec.category == category) {
-                    col = col.push(self.palette_entry(PaletteItem::Op(spec)));
+            if open {
+                for item in items {
+                    tree = tree.push(self.palette_entry(item));
                 }
             }
         }
-        opaque(
-            container(scrollable(col))
-                .width(TREE_W)
-                .height(Length::Fill)
-                .style(|theme: &Theme| container::Style {
-                    background: Some(Background::Color(theme.palette().background.base.color)),
-                    border: Border {
-                        color: theme.palette().background.strong.color,
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }),
+        let body = scrollable(container(tree).padding(iced::Padding {
+            top: 0.0,
+            right: 8.0,
+            bottom: 6.0,
+            left: 0.0,
+        }))
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+        dock::frame(
+            column![
+                dock::title_bar(PanelId::NodeGraph, t!("Node Graph").into_owned(), auto_collapse),
+                toolbar,
+                body
+            ]
+            .spacing(6),
+            width,
         )
     }
 
@@ -783,11 +814,12 @@ impl Graph {
     pub fn update_ui(&mut self, message: &GraphMsg) {
         match message {
             GraphMsg::Category(category) => {
-                if !self.closed_categories.remove(category) {
-                    self.closed_categories.insert(category);
+                if !self.toggled_categories.remove(category) {
+                    self.toggled_categories.insert(category);
                 }
             }
             GraphMsg::PalettePress(item) => self.drag = Some(Drag::Palette(*item)),
+            GraphMsg::Search(value) => self.search = value.clone(),
             GraphMsg::Moved(p) => {
                 self.cursor = *p;
                 match self.drag {

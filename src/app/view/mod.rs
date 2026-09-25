@@ -1847,6 +1847,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 crate::ui::dock::PanelId::BlockPalette => self.show_block_palette,
                 crate::ui::dock::PanelId::ExternalReferences => self.show_external_references,
                 crate::ui::dock::PanelId::Browser => self.show_browser,
+                crate::ui::dock::PanelId::NodeGraph => self.show_node_graph,
             }
         };
         let edge_stack = |side: crate::app::config::DockSide| -> Option<Element<'_, Message>> {
@@ -2950,6 +2951,7 @@ impl OpenCADStudio {
                 width,
                 auto_collapse,
             ),
+            crate::ui::dock::PanelId::NodeGraph => tab.graph.panel(width, auto_collapse),
         };
         let divider = dock_divider(id);
         match side {

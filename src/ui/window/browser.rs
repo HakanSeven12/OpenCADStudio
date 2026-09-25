@@ -16,11 +16,11 @@
 //! table of contents, and it is labelled as one.
 
 use crate::app::Message;
-use crate::ui::dock::{DockMsg, PanelId};
+use crate::ui::dock::PanelId;
 use codec::objects::SolidHistoryOperation;
 use codec::{CadDocument, EntityType, Handle};
-use iced::widget::{button, column, container, mouse_area, row, scrollable, text, tooltip};
-use iced::{Background, Border, Element, Fill, Length, Theme};
+use iced::widget::{button, column, container, scrollable, text};
+use iced::{Background, Element, Fill, Theme};
 
 /// The three world planes, with the argument `CREATESKETCH` takes for each.
 const ORIGIN_PLANES: [(&str, &str); 3] = [("XY", "XY"), ("XZ", "XZ"), ("YZ", "YZ")];
@@ -99,54 +99,8 @@ pub fn view<'a>(
     width: f32,
     auto_collapse: bool,
 ) -> Element<'a, Message> {
-    // ── Dock chrome (title, pin, close) — matches the other panels ────────
-    let pin_icon = if auto_collapse {
-        crate::ui::icons::themed_primary_weak_text(crate::ui::icons::PIN, 12.0)
-    } else {
-        crate::ui::icons::themed_secondary(crate::ui::icons::PIN, 12.0)
-    };
-    let pin = button(pin_icon)
-        .on_press(Message::Dock(DockMsg::AutoCollapseToggle(PanelId::Browser)))
-        .style(move |theme: &Theme, status| {
-            let mut style = button::subtle(theme, status);
-            if auto_collapse {
-                let palette = theme.palette();
-                style.background = Some(Background::Color(palette.primary.weak.color));
-                style.text_color = palette.primary.weak.text;
-                style.border.color = palette.primary.base.color;
-                style.border.width = 1.0;
-            }
-            style
-        })
-        .padding([3, 5]);
-    let pin = tooltip(pin, text(crate::t!("Auto")).size(10), tooltip::Position::Bottom).gap(4);
-
-    let close = button(crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 12.0))
-        .on_press(Message::Dock(DockMsg::Close(PanelId::Browser)))
-        .style(button::subtle)
-        .padding([3, 5]);
-    let close = tooltip(close, text(crate::t!("Close")).size(10), tooltip::Position::Bottom).gap(4);
-
-    let title_bar = mouse_area(
-        container(
-            row![
-                text(crate::t!("Browser")).size(12),
-                iced::widget::Space::new().width(Fill),
-                pin,
-                close,
-            ]
-            .spacing(3)
-            .align_y(iced::Center),
-        )
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.weak.color)),
-            ..Default::default()
-        })
-        .width(Fill)
-        .padding([3, 6]),
-    )
-    .on_press(Message::Dock(DockMsg::DockGrab(PanelId::Browser)))
-    .interaction(iced::mouse::Interaction::Grab);
+    let title_bar =
+        crate::ui::dock::title_bar(PanelId::Browser, crate::t!("Browser").into_owned(), auto_collapse);
 
     let mut tree = column![].spacing(1);
 
@@ -189,17 +143,5 @@ pub fn view<'a>(
     .width(Fill)
     .height(Fill);
 
-    container(column![title_bar, body].spacing(6).padding(6))
-        .width(Length::Fixed(width))
-        .height(Fill)
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.base.color)),
-            border: Border {
-                color: theme.palette().background.neutral.color,
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        })
-        .into()
+    crate::ui::dock::frame(column![title_bar, body].spacing(6), width)
 }

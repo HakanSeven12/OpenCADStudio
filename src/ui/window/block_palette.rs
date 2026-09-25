@@ -4,9 +4,9 @@
 use crate::app::Message;
 use crate::modules::IconKind;
 use crate::scene::model::wire_model::WireModel;
-use crate::ui::dock::{DockMsg, PanelId};
+use crate::ui::dock::PanelId;
 use iced::widget::canvas::{Frame, Path, Program, Stroke};
-use iced::widget::{button, canvas, column, container, mouse_area, row, scrollable, text, text_input, tooltip};
+use iced::widget::{button, canvas, column, container, row, scrollable, text, text_input};
 use iced::{Background, Border, Color, Element, Fill, Length, Theme};
 
 const TOOL_H: f32 = 22.0;
@@ -190,54 +190,11 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
         .filter(|block| query.is_empty() || block.name.to_lowercase().contains(&query))
         .collect();
 
-    // ── Dock chrome (title, pin, close) — matches the Properties panel ────
-    let pin_icon = if auto_collapse {
-        crate::ui::icons::themed_primary_weak_text(crate::ui::icons::PIN, 12.0)
-    } else {
-        crate::ui::icons::themed_secondary(crate::ui::icons::PIN, 12.0)
-    };
-    let pin = button(pin_icon)
-        .on_press(Message::Dock(DockMsg::AutoCollapseToggle(PanelId::BlockPalette)))
-        .style(move |theme: &Theme, status| {
-            let mut style = button::subtle(theme, status);
-            if auto_collapse {
-                let palette = theme.palette();
-                style.background = Some(Background::Color(palette.primary.weak.color));
-                style.text_color = palette.primary.weak.text;
-                style.border.color = palette.primary.base.color;
-                style.border.width = 1.0;
-            }
-            style
-        })
-        .padding([3, 5]);
-    let pin = tooltip(pin, text(crate::t!("Auto")).size(10), tooltip::Position::Bottom).gap(4);
-
-    let close = button(crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 12.0))
-        .on_press(Message::Dock(DockMsg::Close(PanelId::BlockPalette)))
-        .style(button::subtle)
-        .padding([3, 5]);
-    let close = tooltip(close, text(crate::t!("Close")).size(10), tooltip::Position::Bottom).gap(4);
-
-    let title_bar = mouse_area(
-        container(
-            row![
-                text(crate::t!("Block Palette")).size(12),
-                iced::widget::Space::new().width(Fill),
-                pin,
-                close,
-            ]
-            .spacing(3)
-            .align_y(iced::Center),
-        )
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.weak.color)),
-            ..Default::default()
-        })
-        .width(Fill)
-        .padding([3, 6]),
-    )
-    .on_press(Message::Dock(DockMsg::DockGrab(PanelId::BlockPalette)))
-    .interaction(iced::mouse::Interaction::Grab);
+    let title_bar = crate::ui::dock::title_bar(
+        PanelId::BlockPalette,
+        crate::t!("Block Palette").into_owned(),
+        auto_collapse,
+    );
 
     let search_input = text_input(&crate::t!("Search blocks…"), &palette.search)
         .on_input(|v| Message::BlockPalette(BlockPaletteMsg::Search(v)))
@@ -248,10 +205,12 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
         search_input,
         icon_button(
             IconKind::Svg(include_bytes!("../../../assets/icons/blocks/insert.svg")),
+            "Insert from file",
             BlockPaletteMsg::PickFile,
         ),
         icon_button(
             IconKind::Svg(include_bytes!("../../../assets/icons/blocks/preview_size.svg")),
+            "Preview size",
             BlockPaletteMsg::CyclePreviewSize,
         ),
     ]
@@ -305,19 +264,7 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
         .into()
     };
 
-    container(column![title_bar, header, body].spacing(6).padding(6))
-        .width(Length::Fixed(width))
-        .height(Fill)
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.base.color)),
-            border: Border {
-                color: theme.palette().background.neutral.color,
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        })
-        .into()
+    crate::ui::dock::frame(column![title_bar, header, body].spacing(6), width)
 }
 
 /// Theme-aware foreground/background pair for a block card.
@@ -409,32 +356,14 @@ fn block_card<'a>(palette: &'a BlockPalette, block: &'a BlockEntry) -> Element<'
         .into()
 }
 
-fn icon_button<'a>(icon: IconKind, msg: BlockPaletteMsg) -> Element<'a, Message> {
+fn icon_button<'a>(icon: IconKind, tip: &str, msg: BlockPaletteMsg) -> Element<'a, Message> {
     let icon_el: Element<'_, Message> = match icon {
         // No explicit color — inherits the button's theme-aware `text_color`
         // so glyphs stay legible on light themes.
         IconKind::Glyph(s) => text(s).size(15).into(),
         IconKind::Svg(bytes) => crate::ui::icons::semantic(bytes, TOOL_H),
     };
-    button(icon_el)
-        .on_press(Message::BlockPalette(msg))
-        .width(Length::Fixed(TOOL_H + 8.0))
-        .height(Length::Fixed(TOOL_H + 8.0))
-        .style(|theme: &Theme, status| button::Style {
-            background: Some(Background::Color(match status {
-                button::Status::Hovered | button::Status::Pressed => {
-                    theme.palette().background.strong.color
-                }
-                _ => Color::TRANSPARENT,
-            })),
-            border: Border {
-                radius: 3.0.into(),
-                ..Default::default()
-            },
-            text_color: block_icon_button_text_color(theme, status),
-            ..Default::default()
-        })
-        .into()
+    crate::ui::dock::tool_button(icon_el, crate::t!(tip).into_owned(), Message::BlockPalette(msg))
 }
 
 #[cfg(test)]

@@ -170,6 +170,21 @@ impl OpenCADStudio {
             GraphMsg::Toggle => {
                 self.show_node_graph = !self.show_node_graph;
                 if self.show_node_graph {
+                    // The node library docks on the right on first use; after
+                    // that it stays wherever the user moved it.
+                    let id = crate::ui::dock::PanelId::NodeGraph;
+                    if self.dock.location(id).is_none() {
+                        self.dock
+                            .dock(id, crate::app::config::DockSide::Right, usize::MAX);
+                    }
+                    self.dock_expanded = Some(id);
+                    return self.graph_run(i);
+                }
+            }
+            GraphMsg::PaletteRelease => {
+                if let Some(Drag::Palette(item)) = self.tabs[i].graph.drag.take() {
+                    let pos = self.tabs[i].graph.drop_position(false);
+                    self.tabs[i].graph.add_node(item, Vec::new(), pos);
                     return self.graph_run(i);
                 }
             }
@@ -177,7 +192,7 @@ impl OpenCADStudio {
                 let sections = self.graph_all_sections(i);
                 match self.tabs[i].graph.drag.take() {
                     Some(Drag::Palette(item)) => {
-                        let pos = self.tabs[i].graph.drop_position();
+                        let pos = self.tabs[i].graph.drop_position(true);
                         self.tabs[i].graph.add_node(item, Vec::new(), pos);
                         return self.graph_run(i);
                     }

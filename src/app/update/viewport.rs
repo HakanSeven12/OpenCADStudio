@@ -87,6 +87,28 @@ pub(in crate::app) fn snap_keeps_elevation(hit: Option<crate::snap::SnapType>) -
     matches!(hit, Some(t) if t != crate::snap::SnapType::Grid)
 }
 
+/// Point on a command's construction axis (height / distance steps). A
+/// genuine object snap supplies its own coordinate along the axis, so a
+/// height or push distance seats on existing geometry — as axis grips do.
+/// Otherwise the cursor maps onto the axis on screen.
+fn command_axis_point(
+    snap: Option<crate::snap::SnapResult>,
+    cursor: Point,
+    bounds: iced::Rectangle,
+    view: glam::Mat4,
+    eye: glam::DVec3,
+    origin: glam::DVec3,
+    direction: glam::DVec3,
+) -> Option<glam::DVec3> {
+    match snap.filter(|hit| snap_keeps_elevation(Some(hit.snap_type))) {
+        Some(hit) => {
+            let axis = direction.try_normalize()?;
+            Some(origin + axis * (hit.world - origin).dot(axis))
+        }
+        None => cursor_on_projected_axis(cursor, bounds, view, eye, origin, direction),
+    }
+}
+
 fn cursor_on_projected_axis(
     cursor: Point,
     bounds: iced::Rectangle,
@@ -2393,7 +2415,15 @@ impl OpenCADStudio {
                     .as_ref()
                     .and_then(|command| command.cursor_axis())
                     .and_then(|(origin, direction)| {
-                        cursor_on_projected_axis(p, bounds, view_rot, eye, origin, direction)
+                        command_axis_point(
+                            self.tabs[i].snap_result,
+                            p,
+                            bounds,
+                            view_rot,
+                            eye,
+                            origin,
+                            direction,
+                        )
                     })
                     .unwrap_or(effective)
             };
@@ -3955,7 +3985,7 @@ impl OpenCADStudio {
                     .as_ref()
                     .and_then(|command| command.cursor_axis())
                     .and_then(|(origin, direction)| {
-                        cursor_on_projected_axis(p, bounds, view_rot, eye, origin, direction)
+                        command_axis_point(snap_hit, p, bounds, view_rot, eye, origin, direction)
                     })
                     .unwrap_or(pt);
                 // A click while dynamic-input fields hold typed values

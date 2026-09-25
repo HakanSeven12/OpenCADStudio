@@ -462,6 +462,16 @@ impl CadCommand for CylinderCommand {
         self.plane = plane;
     }
 
+    /// The radius step reads the cursor on the base plane through the
+    /// centre, so a base started on a raised face follows the mouse.
+    fn cursor_plane(&self) -> Option<(DVec3, DVec3)> {
+        if !matches!(self.step, Step::BaseRadius | Step::BaseDiameter) {
+            return None;
+        }
+        let frame = self.frame?;
+        Some((frame.z.normalize_or_zero(), frame.origin))
+    }
+
     fn cursor_axis(&self) -> Option<(DVec3, DVec3)> {
         matches!(self.step, Step::Height).then(|| {
             let frame = self.frame.unwrap_or(self.plane);

@@ -2098,6 +2098,25 @@ impl CadCommand for PrimitiveCommand {
         self.plane = plane;
     }
 
+    /// Base steps after the first base point read the cursor on the base
+    /// plane through that point, so a base started on a raised face follows
+    /// the mouse instead of the ray's hit on the working plane below.
+    fn cursor_plane(&self) -> Option<(DVec3, DVec3)> {
+        let origin = if self.shape == Shape::Cone {
+            matches!(self.cone_step, ConeStep::BaseRadius | ConeStep::BaseDiameter)
+                .then_some(self.cone_frame?.origin)
+        } else if self.shape == Shape::Pyramid {
+            (self.pyramid_step == PyramidStep::BaseRadius).then_some(self.pyramid_frame?.origin)
+        } else if self.shape.rectangular() {
+            matches!(self.box_step, BoxStep::OppositeCorner | BoxStep::CubeSize)
+                .then(|| self.pts.first().map(|&first| self.plane.to_world(first)))
+                .flatten()
+        } else {
+            None
+        }?;
+        Some((self.plane.z.normalize_or_zero(), origin))
+    }
+
     fn cursor_axis(&self) -> Option<(DVec3, DVec3)> {
         if self.shape == Shape::Cone {
             return matches!(self.cone_step, ConeStep::Height | ConeStep::HeightAfterTopRadius)

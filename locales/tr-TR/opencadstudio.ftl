@@ -3548,6 +3548,12 @@ insert =
     .refui-requires-int-90 = -90 ile 90 arasında bir tam sayı gerekir.
     .refui-xref-fading = Xref soldurma
     .refui-edit-reference = Referansı Düzenle
+    .refui-edit-reference-in-place =
+        Yerinde Referansı
+        Düzenle
+    .refui-open-reference =
+        Referansı
+        Aç
     .refui-snap-to-underlays-off = Altlıklara Yakala Kapalı
     .refui-snap-to-underlays-on = Altlıklara Yakala Açık
     .refui-snap-to-underlays = Altlıklara Yakala
@@ -4501,7 +4507,7 @@ properties =
     .extended-lighting = Gelişmiş Aydınlatma
     .extents-max = En Büyük Sınırlar
     .extents-min = En Küçük Sınırlar
-    .external-reference = Dış Referans
+    .external-reference = Harici Referans
     .face = Yüz
     .face-count = Yüz sayısı
     .falloff-angle = Düşüş Açısı

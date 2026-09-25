@@ -25,8 +25,8 @@ mod draw_panel;
 pub(crate) use draw_panel::tools as panel_tools;
 mod modify_panel;
 mod color_dropdown;
-mod underlay_tab;
-pub use underlay_tab::{UnderlayContext, UnderlayTabMsg};
+mod context_tools;
+pub use context_tools::{pdf_underlay_tools, xref_tools, UnderlayContext};
 use widgets::{StyleContext, *};
 pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
 mod collapse;
@@ -105,10 +105,10 @@ pub struct Ribbon {
     /// Set by `CollapsePanels` when the tool row is in its tight state; the mode
     /// selector hides itself then to give the cramped tab row its space back.
     collapse_tight: Arc<AtomicBool>,
-    /// The selected PDF underlay's values while the contextual tab exists.
+    /// The selected PDF underlay's switches while only underlays are selected.
     underlay_ctx: Option<UnderlayContext>,
-    /// The contextual underlay tab is the one shown.
-    underlay_tab_active: bool,
+    /// Only xrefs are selected.
+    xref_ctx: bool,
     /// XDWGFADECTL as the Reference slide-out shows it (negative = off).
     pub xref_fade: i32,
 }
@@ -205,7 +205,7 @@ impl Ribbon {
             collapse_mode: CollapseMode::default(),
             collapse_tight: Arc::new(AtomicBool::new(false)),
             underlay_ctx: None,
-            underlay_tab_active: false,
+            xref_ctx: false,
             xref_fade: 50,
         }
     }
@@ -284,7 +284,6 @@ impl Ribbon {
     pub fn select(&mut self, index: usize) {
         if index < self.modules.len() {
             self.active = index;
-            self.underlay_tab_active = false;
         }
     }
 
@@ -348,9 +347,6 @@ impl Ribbon {
             show_block_palette,
             show_file_tabs: self.show_file_tabs,
             show_layout_tabs: self.show_layout_tabs,
-            underlay_mono: self.underlay_ctx.as_ref().is_some_and(|c| c.monochrome),
-            underlay_shown: self.underlay_ctx.as_ref().is_some_and(|c| c.shown),
-            underlay_snap: self.underlay_ctx.as_ref().is_some_and(|c| c.snap),
         }
     }
 
@@ -518,7 +514,7 @@ impl Ribbon {
                     return acc;
                 }
 
-                let is_active = i == self.active && !self.underlay_tab_shown();
+                let is_active = i == self.active;
                 let is_contextual = module.id() == "layout";
                 let btn = container(
                     button(text(crate::i18n::ribbon_module_title(module.id(), module.title())).size(12))
@@ -588,10 +584,6 @@ impl Ribbon {
             },
         );
 
-        let mut tab_items = tab_items;
-        if self.underlay_ctx.is_some() {
-            tab_items.push(underlay_tab_button(self.underlay_tab_shown()));
-        }
 
         // Tabs may squeeze their gaps to fit before wrapping: from the normal 6px
         // down to -12px on a narrow (e.g. phone) tab row, tucking neighbours into
@@ -673,14 +665,10 @@ impl Ribbon {
                 // shrink to compact icon columns, then it collapses to a ▾ flyout
                 // button. See `CollapsePanels`.
                 let ts = self.toggle_state(show_block_palette);
-                let panels: Vec<Panel<'_>> = if self.underlay_tab_shown() {
-                    self.underlay_panels(ts, &style_ctx)
-                } else {
-                    groups
-                        .iter()
-                        .map(|g| self.panel(g, ts, &style_ctx, &|_| Vec::new()))
-                        .collect()
-                };
+                let panels: Vec<Panel<'_>> = groups
+                    .iter()
+                    .map(|g| self.panel(g, ts, &style_ctx, &|_| Vec::new()))
+                    .collect();
                 CollapsePanels::new(panels, self.collapsed_open.clone(), TOOL_BAR_H)
                     .report_height(self.tool_bar_h.clone())
                     .report_tight(self.collapse_tight.clone())
@@ -1627,30 +1615,3 @@ mod tests {
     }
 }
 
-/// The contextual underlay tab's button: framed in the accent colour.
-fn underlay_tab_button<'a>(active: bool) -> Element<'a, Message> {
-    let btn = button(text(t!("PDF Underlay")).size(12))
-        .on_press(Message::RibbonSelectUnderlayTab)
-        .style(move |theme: &Theme, status| {
-            let palette = theme.palette();
-            let pair = match (active, status) {
-                (true, _) => palette.background.weakest,
-                (false, button::Status::Hovered) => palette.background.weak,
-                _ => palette.background.base,
-            };
-            button::Style {
-                background: (active || matches!(status, button::Status::Hovered))
-                    .then_some(Background::Color(pair.color)),
-                text_color: if active { pair.text } else { palette.primary.base.color },
-                border: Border {
-                    color: palette.primary.base.color,
-                    width: if active { 2.0 } else { 1.0 },
-                    radius: 0.0.into(),
-                },
-                shadow: iced::Shadow::default(),
-                snap: false,
-            }
-        })
-        .padding([5, 14]);
-    container(btn).into()
-}

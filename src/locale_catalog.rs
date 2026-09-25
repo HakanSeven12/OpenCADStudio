@@ -2950,6 +2950,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Snap to Underlays ON" => Some(("insert", "refui-snap-to-underlays-on")),
         "Snap to Underlays OFF" => Some(("insert", "refui-snap-to-underlays-off")),
         "Edit Reference" => Some(("insert", "refui-edit-reference")),
+        "Edit Reference\nIn-Place" => Some(("insert", "refui-edit-reference-in-place")),
+        "Open\nReference" => Some(("insert", "refui-open-reference")),
         "Xref fading" => Some(("insert", "refui-xref-fading")),
         "Requires an integer between -90 and 90." => Some(("insert", "refui-requires-int-90")),
         "Underlay" => Some(("properties", "underlay")),

@@ -700,8 +700,7 @@ impl OpenCADStudio {
                 state.selected = pages;
                 return Ok(Task::none());
             }
-            // Bring a ribbon tab forward by module id ("pdf_underlay" for the
-            // contextual underlay tab).
+            // Bring a ribbon tab forward by module id.
             "ribbon_tab" => {
                 let id = string(req, "value")?;
                 if !self.ribbon.select_by_id(id) {

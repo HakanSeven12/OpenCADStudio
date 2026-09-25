@@ -109,6 +109,15 @@ impl XclipCommand {
         }
     }
 
+    /// A new boundary for block references already chosen (the External
+    /// Reference tab's Create Clipping Boundary): the New boundary branch at
+    /// once. Returns the command and the result of its first step.
+    pub fn start_new_boundary(inserts: Vec<Handle>, clipped: bool) -> (Self, CmdResult) {
+        let mut command = Self::for_inserts(inserts, clipped);
+        let first = command.option("N");
+        (command, first)
+    }
+
     fn act(&self, action: XclipAction) -> CmdResult {
         CmdResult::XClip {
             inserts: self.inserts.clone(),

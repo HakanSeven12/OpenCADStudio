@@ -1601,9 +1601,32 @@ bg={bg_ms:.1}ms n={view_count}"
                 }
             }
 
-            // Paper-space context actions: a right-edge vertical toolbar
-            // (viewport / page setup / plot) instead of a contextual ribbon tab.
-            if is_paper && !tab.is_start {
+            // Selection actions: with only PDF underlays or only xrefs
+            // selected, their tools take the right edge (over the paper-space
+            // tools, which come back when the selection changes).
+            // ponytail: one right-edge toolbar at a time; stack them if both
+            // are ever needed together.
+            let selection_tools = if tab.is_start {
+                None
+            } else if self.ribbon.xref_context() {
+                crate::ui::side_toolbar::view(&crate::ui::ribbon::xref_tools())
+            } else if let Some(ctx) = self.ribbon.underlay_context() {
+                let ctx = ctx.clone();
+                crate::ui::side_toolbar::view_with_active(
+                    &crate::ui::ribbon::pdf_underlay_tools(),
+                    &move |id| match id {
+                        "_PDFULMONO" => ctx.monochrome,
+                        "_PDFULSHOW" => ctx.shown,
+                        "_PDFULSNAP" => ctx.snap,
+                        _ => false,
+                    },
+                )
+            } else {
+                None
+            };
+            if let Some(tb) = selection_tools {
+                viewport_stack = viewport_stack.push(tb);
+            } else if is_paper && !tab.is_start {
                 if let Some(tb) =
                     crate::ui::side_toolbar::view(&crate::modules::layout::paper_space_tools())
                 {

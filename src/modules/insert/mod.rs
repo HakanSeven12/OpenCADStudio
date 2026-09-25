@@ -52,6 +52,7 @@ impl CadModule for InsertModule {
                     title: "Reference",
                     tools: vec![
                         RibbonItem::LargeTool(xattach::tool()),
+                        RibbonItem::LargeTool(pdf_attach::tool()),
                         RibbonItem::LargeTool(xclip::tool()),
                         RibbonItem::LargeTool(xadjust::tool()),
                         RibbonItem::LabeledTool(underlay_layers::tool()),

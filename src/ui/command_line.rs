@@ -164,8 +164,9 @@ pub struct CommandLine {
     pub history_open: bool,
     /// Persisted height of the full-history editor in logical pixels.
     pub history_height: f32,
-    /// Index of the currently-highlighted autocomplete suggestion, or
-    /// `None` before keyboard navigation begins. Reset when input changes.
+    /// Index of the currently-highlighted autocomplete suggestion. `None`
+    /// means the first match is pre-selected (highlighted) before keyboard
+    /// navigation begins. Reset when input changes.
     pub autocomplete_cursor: Option<usize>,
     /// Command names contributed by loaded plugins, refreshed whenever the
     /// enabled-plugin set changes. Merged into autocomplete alongside the
@@ -617,11 +618,20 @@ impl CommandLine {
         true
     }
 
-    /// The command name explicitly highlighted in the autocomplete popup.
+    /// The command name highlighted in the autocomplete popup. Before any
+    /// arrow-key navigation the first match is pre-selected (the popup renders
+    /// `autocomplete_cursor.unwrap_or(0)` as highlighted), so Enter runs that
+    /// entry — never a different command resolved through another path.
     pub fn selected_suggestion(&self) -> Option<String> {
         let matches = self.autocomplete_matches();
-        self.autocomplete_cursor
-            .and_then(|index| matches.get(index).cloned())
+        if matches.is_empty() {
+            return None;
+        }
+        let index = self
+            .autocomplete_cursor
+            .unwrap_or(0)
+            .min(matches.len() - 1);
+        matches.get(index).cloned()
     }
 
     /// Autocomplete suggestions for the current input — see
@@ -1243,6 +1253,59 @@ mod tests {
         assert_eq!(m.first().map(String::as_str), Some("AREA"), "got {m:?}");
         let m = ranked_matches("L", &[], &a);
         assert_eq!(m.first().map(String::as_str), Some("LINE"), "got {m:?}");
+    }
+
+    #[test]
+    fn preselected_top_suggestion_is_returned_without_navigation() {
+        // The popup highlights the first match before any arrow-key navigation
+        // (`unwrap_or(0)` in `view`); Enter must run that same entry. Typing
+        // `LT` with no alias table highlights `LTSCALE`, so the pre-selection
+        // must be `LTSCALE` — not `None` (which would fall through to alias /
+        // closest-match resolution and could run a different command).
+        let mut line = CommandLine::new();
+        line.clear_history();
+        line.command_aliases = FxHashMap::default();
+        line.input = "LT".to_string();
+        line.autocomplete_cursor = None;
+        let matches = line.autocomplete_matches();
+        assert_eq!(
+            matches.first().map(String::as_str),
+            Some("LTSCALE"),
+            "got {matches:?}"
+        );
+        assert_eq!(
+            line.selected_suggestion().as_deref(),
+            Some("LTSCALE"),
+            "Enter must run the highlighted pre-selection"
+        );
+    }
+
+    #[test]
+    fn preselected_alias_target_is_returned_without_navigation() {
+        // With the `LT` → `LINETYPE` alias, the forced top entry is `LINETYPE`
+        // and Enter must run it without requiring arrow-key navigation.
+        let mut line = CommandLine::new();
+        line.clear_history();
+        line.command_aliases = aliases(&[("LT", "LINETYPE"), ("LTS", "LTSCALE")]);
+        line.input = "LT".to_string();
+        line.autocomplete_cursor = None;
+        assert_eq!(
+            line.selected_suggestion().as_deref(),
+            Some("LINETYPE"),
+            "got {:?}",
+            line.autocomplete_matches()
+        );
+    }
+
+    #[test]
+    fn no_preselection_without_matches_or_input() {
+        let mut line = CommandLine::new();
+        line.clear_history();
+        line.input = String::new();
+        line.autocomplete_cursor = None;
+        assert_eq!(line.selected_suggestion(), None);
+        line.input = "ZZZ_NO_SUCH_COMMAND".to_string();
+        assert_eq!(line.selected_suggestion(), None);
     }
 
     #[test]

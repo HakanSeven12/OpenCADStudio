@@ -252,19 +252,11 @@ impl OpenCADStudio {
             return;
         }
         let blocks = self.clipboard_deps.blocks.clone();
-        for def in blocks {
-            if self.tabs[i]
-                .scene
-                .document
-                .block_records
-                .get(&def.name)
-                .is_some()
-            {
-                continue;
-            }
-            self.tabs[i]
-                .scene
-                .define_block_raw(&def.name, def.base_point, def.entities);
+        // Single shared copy — see `merge_block_defs`. One batched geometry
+        // rebuild instead of one per definition; same end state as the
+        // per-definition bumps `Scene::define_block_raw` used to run.
+        if merge_block_defs(&mut self.tabs[i].scene.document, &blocks) > 0 {
+            self.tabs[i].scene.bump_geometry();
         }
     }
 
@@ -415,25 +407,11 @@ impl OpenCADStudio {
 /// PASTECLIP kernel: paste a clipboard payload (`entities` + `deps`, as
 /// captured by [`copy_to_clipboard_kernel`]) into `doc`, optionally
 /// translated, returning the new handles index-aligned with `entities`
-/// (`NULL` where an add failed) plus the source-handle → pasted-handle map.
-///
-/// Document-level work lives here; Scene/render concerns stay caller-side in
-/// `finalize_paste` (tessellation bumps, `populate_missing_meshes`,
-/// `recreate_groups`, `duplicate_parametric_constraints_for`,
-/// `sync_displayed_annotation_context`, undo/dirty/selection/echo/panels).
-/// See the per-helper report in `finalize_paste`.
-pub(crate) fn paste_entities_kernel(
-    doc: &mut codec::CadDocument,
-    entities: &[codec::EntityType],
-    deps: &crate::app::ClipboardDeps,
-    translate: Option<&crate::command::EntityTransform>,
-) -> (
-    Vec<Handle>,
-    rustc_hash::FxHashMap<Handle, Handle>,
-) {
+/// Recreate missing layer/linetype/text-style/dim-style records with fresh
+/// handles from the target document. Shared by `merge_dependencies` (PASTEBLOCK
+/// path) and `paste_entities_kernel` — one copy, not a port per caller.
+pub(crate) fn merge_table_records(doc: &mut codec::CadDocument, deps: &crate::app::ClipboardDeps) {
     use codec::TableEntry;
-    // Port of `merge_dependencies`: recreate missing table records with fresh
-    // handles from the target document. Pure `&mut CadDocument` work.
     for rec in &deps.layers {
         if !doc.layers.contains(rec.name()) {
             let mut r = rec.clone();
@@ -462,11 +440,43 @@ pub(crate) fn paste_entities_kernel(
             let _ = doc.dim_styles.add(r);
         }
     }
-    // Port of `merge_clipboard_blocks` / `Scene::define_block_raw` minus the
-    // trailing `bump_geometry` (render cache — caller-side).
-    for def in &deps.blocks {
+}
+
+/// Recreate block definitions the pasted INSERTs reference but the target
+/// document lacks. Shared by `merge_clipboard_blocks` and
+/// `paste_entities_kernel`. Returns how many definitions were created, so
+/// render-cache callers can bump once instead of per definition.
+pub(crate) fn merge_block_defs(doc: &mut codec::CadDocument, blocks: &[crate::app::BlockDef]) -> usize {
+    let mut created = 0;
+    for def in blocks {
+        let before = doc.block_records.len();
         define_block_raw_doc(doc, &def.name, def.base_point, &def.entities);
+        created += usize::from(doc.block_records.len() > before);
     }
+    created
+}
+
+/// (`NULL` where an add failed) plus the source-handle → pasted-handle map.
+///
+/// Document-level work lives here; Scene/render concerns stay caller-side in
+/// `finalize_paste` (tessellation bumps, `populate_missing_meshes`,
+/// `recreate_groups`, `duplicate_parametric_constraints_for`,
+/// `sync_displayed_annotation_context`, undo/dirty/selection/echo/panels).
+/// See the per-helper report in `finalize_paste`.
+pub(crate) fn paste_entities_kernel(
+    doc: &mut codec::CadDocument,
+    entities: &[codec::EntityType],
+    deps: &crate::app::ClipboardDeps,
+    translate: Option<&crate::command::EntityTransform>,
+) -> (
+    Vec<Handle>,
+    rustc_hash::FxHashMap<Handle, Handle>,
+) {
+    // Shared table-record merge (also used by `merge_dependencies`): recreate
+    // missing records with fresh handles from the target document.
+    merge_table_records(doc, deps);
+    // Shared block-definition merge (also used by `merge_clipboard_blocks`).
+    merge_block_defs(doc, &deps.blocks);
 
     let by_index: Vec<Handle> = entities
         .iter()

@@ -2412,18 +2412,247 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     return Task::none();
                 }
             }
-            self.push_undo_snapshot(i, "CHPROP");
-
+            // CTB mode has no named plot styles, so the `plot_style` arm
+            // below is a no-op early return. Guard here — before the shared
+            // snapshot — so the no-op path pushes no undo entry. (No other
+            // arm returns early after the snapshot, so nothing else depends
+            // on it existing at this point.)
+            if field == "plot_style" && self.tabs[i].scene.document.header.plotstyle_mode {
+                self.refresh_properties();
+                return Task::none();
+            }
+            if field == "transparency" {
+                self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                    if app.tabs[i].scene.is_layer_locked(handle) {
+                        return;
+                    }
+                    if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                        crate::scene::view::dispatch::apply_common_prop(
+                            entity,
+                            "transparency",
+                            &value,
+                        );
+                    }
+                });
+                self.tabs[i].properties.edit_choice_open = false;
+                return Task::none();
+            }
+            if field == "material" {
+                // Material source: ByLayer / ByBlock clear the handle; a
+                // named material sets flag 3 + its handle (resolved here
+                // because the update loop holds the document).
+                let mat_handle: Option<codec::Handle> = self.tabs[i]
+                    .scene
+                    .document
+                    .objects
+                    .iter()
+                    .find_map(|(h, o)| match o {
+                        codec::objects::ObjectType::Material(m) if m.name == value => {
+                            Some(*h)
+                        }
+                        _ => None,
+                    });
+                self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                    if app.tabs[i].scene.is_layer_locked(handle) {
+                        return;
+                    }
+                    if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle)
+                    {
+                        let common = entity.common_mut();
+                        match value.as_str() {
+                            "ByLayer" => {
+                                common.material_flags = 0;
+                                common.material_handle = None;
+                            }
+                            "ByBlock" => {
+                                common.material_flags = 1;
+                                common.material_handle = None;
+                            }
+                            "Global" => {
+                                common.material_flags = 2;
+                                common.material_handle = None;
+                            }
+                            _ => {
+                                if let Some(h) = mat_handle {
+                                    common.material_flags = 3;
+                                    common.material_handle = Some(h);
+                                }
+                            }
+                        }
+                    }
+                });
+                self.tabs[i].properties.edit_choice_open = false;
+                return Task::none();
+            }
+            if field == "tol_text_style" {
+                use crate::entities::dim_override as dov;
+                use codec::xdata::XDataValue;
+                let style_handle = self.tabs[i]
+                    .scene
+                    .document
+                    .text_styles
+                    .iter()
+                    .find(|entry| entry.name.eq_ignore_ascii_case(&value))
+                    .map(|entry| entry.handle);
+                if let Some(style_handle) = style_handle {
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                        if app.tabs[i].scene.is_layer_locked(handle)
+                            || !matches!(
+                                app.tabs[i].scene.document.get_entity(handle),
+                                Some(codec::EntityType::Tolerance(_))
+                            )
+                        {
+                            return;
+                        }
+                        dov::set(
+                            &mut app.tabs[i].scene.document,
+                            handle,
+                            dov::DIMTXSTY,
+                            Some(XDataValue::Handle(style_handle)),
+                        );
+                    });
+                } else {
+                    self.invalidate_property_targets(i, &handles);
+                    self.refresh_properties();
+                }
+                self.tabs[i].properties.edit_choice_open = false;
+                return Task::none();
+            }
+            if field.starts_with("dim_") {
+                self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                    if app.tabs[i].scene.is_layer_locked(handle) {
+                        return;
+                    }
+                    if matches!(
+                        app.tabs[i].scene.document.get_entity(handle),
+                        Some(codec::EntityType::Dimension(_))
+                    ) {
+                        let applied = crate::entities::dim_override::set_property(
+                            &mut app.tabs[i].scene.document,
+                            handle,
+                            field,
+                            &value,
+                        );
+                        if applied && field == "dim_text_inside" {
+                            if let Some(codec::EntityType::Dimension(
+                                codec::entities::Dimension::LargeRadial(dimension),
+                            )) = app.tabs[i].scene.document.get_entity_mut(handle)
+                            {
+                                dimension.base.text_user_positioned = false;
+                            }
+                        }
+                    }
+                });
+                self.tabs[i].properties.edit_choice_open = false;
+                return Task::none();
+            }
+            if field == "vscale_std" {
+                self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                    if matches!(
+                        app.tabs[i].scene.document.get_entity(handle),
+                        Some(codec::EntityType::Viewport(_))
+                    ) {
+                        let _ = app.tabs[i]
+                            .scene
+                            .set_viewport_scale_named_for(handle, &value);
+                    }
+                });
+                self.tabs[i].properties.edit_choice_open = false;
+                return Task::none();
+            }
+            if field == "vp_ucs_name" {
+                // Resolve UCS name → cloned data, then mutate viewports.
+                let ucs_data = self.tabs[i]
+                    .scene
+                    .document
+                    .ucss
+                    .iter()
+                    .find(|u| u.name == value)
+                    .cloned();
+                if let Some(ucs) = ucs_data {
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                        if let Some(codec::EntityType::Viewport(vp)) =
+                            app.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            vp.ucs_handle = ucs.handle;
+                            vp.ucs_origin = ucs.origin.clone();
+                            vp.ucs_x_axis = ucs.x_axis.clone();
+                            vp.ucs_y_axis = ucs.y_axis.clone();
+                            vp.ucs_per_viewport = true;
+                        }
+                    });
+                } else {
+                    self.invalidate_property_targets(i, &handles);
+                    self.refresh_properties();
+                }
+                self.tabs[i].properties.edit_choice_open = false;
+                return Task::none();
+            }
+            if field == "vp_named_view" {
+                // Assign a named view to viewport(s): copy camera parameters.
+                let view_data = self.tabs[i]
+                    .scene
+                    .document
+                    .views
+                    .iter()
+                    .find(|v| v.name == value)
+                    .cloned();
+                if let Some(view) = view_data {
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                        if let Some(codec::EntityType::Viewport(vp)) =
+                            app.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            vp.view_target = view.target.clone();
+                            vp.view_direction = view.direction.clone();
+                            if view.height > 0.0 {
+                                vp.view_height = view.height;
+                            }
+                        }
+                    });
+                    self.tabs[i].scene.camera_generation += 1;
+                } else {
+                    self.invalidate_property_targets(i, &handles);
+                    self.refresh_properties();
+                }
+                self.tabs[i].properties.edit_choice_open = false;
+                return Task::none();
+            }
+            if crate::scene::model::solid_history::is_loft_geometry_choice(field) {
+                // These choices change the generated body, not just history
+                // flags. Use the same transactional rebuild as numeric edits.
+                self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                    if app.tabs[i].scene.is_layer_locked(handle) {
+                        return;
+                    }
+                    app.tabs[i]
+                        .scene
+                        .apply_solid_history_property(handle, field, &value);
+                });
+                self.tabs[i].properties.edit_choice_open = false;
+                return Task::none();
+            }
+            if crate::scene::model::solid_history::is_history_choice(field) {
+                self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                    if app.tabs[i].scene.is_layer_locked(handle) {
+                        return;
+                    }
+                    app.tabs[i]
+                        .scene
+                        .apply_solid_history_choice(handle, field, &value);
+                });
+                self.tabs[i].properties.edit_choice_open = false;
+                return Task::none();
+            }
             if crate::scene::model::solid_history::is_surface_property_choice(field) {
                 use crate::scene::model::solid_history::{
                     PROP_SURFACE_MAINTAIN_ASSOCIATIVITY, PROP_SURFACE_SHOW_ASSOCIATIVITY,
                     PROP_SURFACE_WIREFRAME_TYPE,
                 };
-                for &handle in &handles {
-                    if self.tabs[i].scene.is_layer_locked(handle) {
-                        continue;
+                self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                    if app.tabs[i].scene.is_layer_locked(handle) {
+                        return;
                     }
-                    let Some(mut state) = self.tabs[i]
+                    let Some(mut state) = app.tabs[i]
                         .scene
                         .document
                         .get_entity(handle)
@@ -2434,7 +2663,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             _ => None,
                         })
                     else {
-                        continue;
+                        return;
                     };
                     match field {
                         PROP_SURFACE_WIREFRAME_TYPE => {
@@ -2446,67 +2675,22 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         PROP_SURFACE_SHOW_ASSOCIATIVITY => {
                             state.show_associativity = value.eq_ignore_ascii_case("Yes")
                         }
-                        _ => continue,
+                        _ => return,
                     }
                     crate::scene::view::dispatch::set_entity_xdata(
-                        &mut self.tabs[i].scene.document,
+                        &mut app.tabs[i].scene.document,
                         handle,
                         crate::entities::solid3d::SURFACE_PROPERTIES_APP,
                         Some(crate::entities::solid3d::surface_property_xdata_values(state)),
                     );
                     if field == PROP_SURFACE_WIREFRAME_TYPE {
-                        self.tabs[i].scene.reseed_derived_caches(handle);
+                        app.tabs[i].scene.reseed_derived_caches(handle);
                     }
-                }
-            } else if crate::scene::model::solid_history::is_loft_geometry_choice(field) {
-                // These choices change the generated body, not just history
-                // flags. Use the same transactional rebuild as numeric edits.
-                for &handle in &handles {
-                    if self.tabs[i].scene.is_layer_locked(handle) {
-                        continue;
-                    }
-                    self.tabs[i]
-                        .scene
-                        .apply_solid_history_property(handle, field, &value);
-                }
-            } else if crate::scene::model::solid_history::is_history_choice(field) {
-                for &handle in &handles {
-                    if self.tabs[i].scene.is_layer_locked(handle) {
-                        continue;
-                    }
-                    self.tabs[i]
-                        .scene
-                        .apply_solid_history_choice(handle, field, &value);
-                }
-            } else if field == "tol_text_style" {
-                use crate::entities::dim_override as dov;
-                use codec::xdata::XDataValue;
-                let style_handle = self.tabs[i]
-                    .scene
-                    .document
-                    .text_styles
-                    .iter()
-                    .find(|entry| entry.name.eq_ignore_ascii_case(&value))
-                    .map(|entry| entry.handle);
-                if let Some(style_handle) = style_handle {
-                    for &handle in &handles {
-                        if self.tabs[i].scene.is_layer_locked(handle)
-                            || !matches!(
-                                self.tabs[i].scene.document.get_entity(handle),
-                                Some(codec::EntityType::Tolerance(_))
-                            )
-                        {
-                            continue;
-                        }
-                        dov::set(
-                            &mut self.tabs[i].scene.document,
-                            handle,
-                            dov::DIMTXSTY,
-                            Some(XDataValue::Handle(style_handle)),
-                        );
-                    }
-                }
-            } else if field == "tol_dim_style" {
+                });
+                self.tabs[i].properties.edit_choice_open = false;
+                return Task::none();
+            }
+            if field == "tol_dim_style" {
                 let style = self.tabs[i]
                     .scene
                     .document
@@ -2516,116 +2700,86 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     .map(|entry| (entry.handle, entry.name.clone(), entry.annotative));
                 if let Some((style_handle, style_name, annotative)) = style {
                     let scale = self.tabs[i].scene.creation_annotation_scale_handle();
-                    for &handle in &handles {
-                        if self.tabs[i].scene.is_layer_locked(handle) {
-                            continue;
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                        if app.tabs[i].scene.is_layer_locked(handle) {
+                            return;
                         }
                         if let Some(codec::EntityType::Tolerance(tolerance)) =
-                            self.tabs[i].scene.document.get_entity_mut(handle)
+                            app.tabs[i].scene.document.get_entity_mut(handle)
                         {
                             tolerance.dimension_style_handle = Some(style_handle);
                             tolerance.dimension_style_name = style_name.clone();
                         } else {
-                            continue;
+                            return;
                         }
                         crate::scene::annotative::set_entity_annotative(
-                            &mut self.tabs[i].scene.document,
+                            &mut app.tabs[i].scene.document,
                             handle,
                             annotative,
                         );
                         if annotative {
                             if let Some(scale) = scale {
                                 crate::scene::annotative::create_annotation_context(
-                                    &mut self.tabs[i].scene.document,
+                                    &mut app.tabs[i].scene.document,
                                     handle,
                                     scale,
                                 );
                             }
                         }
-                    }
+                    });
+                } else {
+                    self.invalidate_property_targets(i, &handles);
+                    self.refresh_properties();
                 }
-            } else if field.starts_with("dim_") {
-                for &handle in &handles {
-                    if self.tabs[i].scene.is_layer_locked(handle) {
-                        continue;
-                    }
-                    if matches!(
-                        self.tabs[i].scene.document.get_entity(handle),
-                        Some(codec::EntityType::Dimension(_))
-                    ) {
-                        let applied = crate::entities::dim_override::set_property(
-                            &mut self.tabs[i].scene.document,
-                            handle,
-                            field,
-                            &value,
-                        );
-                        if applied && field == "dim_text_inside" {
-                            if let Some(codec::EntityType::Dimension(
-                                codec::entities::Dimension::LargeRadial(dimension),
-                            )) = self.tabs[i].scene.document.get_entity_mut(handle)
-                            {
-                                dimension.base.text_user_positioned = false;
-                            }
+                self.tabs[i].properties.edit_choice_open = false;
+                return Task::none();
+            }
+            if field == "tbl_style_handle" {
+                let style_handle = self.tabs[i]
+                    .scene
+                    .document
+                    .objects
+                    .iter()
+                    .find_map(|(handle, object)| match object {
+                        codec::objects::ObjectType::TableStyle(style)
+                            if style.name.eq_ignore_ascii_case(value.trim()) =>
+                        {
+                            Some(*handle)
+                        }
+                        _ => None,
+                    });
+                if let Some(style_handle) = style_handle {
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                        if let Some(codec::EntityType::Table(table)) =
+                            app.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            table.table_style_handle = Some(style_handle);
+                            // Shared-tail `tbl_` epilogue, now local: drop
+                            // stale block_record refs so the new style takes
+                            // effect (same final state as style loop + tail
+                            // clearing, independent fields).
+                            table.block_record_handle = None;
+                        }
+                    });
+                } else {
+                    // Unresolvable name: preserve the old tail's
+                    // block_record clearing without pushing a snapshot.
+                    for &handle in &handles {
+                        if let Some(codec::EntityType::Table(table)) =
+                            self.tabs[i].scene.document.get_entity_mut(handle)
+                        {
+                            table.block_record_handle = None;
                         }
                     }
+                    self.invalidate_property_targets(i, &handles);
+                    self.refresh_properties();
                 }
-            } else if field == "vscale_std" {
-                for &handle in &handles {
-                    if matches!(
-                        self.tabs[i].scene.document.get_entity(handle),
-                        Some(codec::EntityType::Viewport(_))
-                    ) {
-                        let _ = self.tabs[i]
-                            .scene
-                            .set_viewport_scale_named_for(handle, &value);
-                    }
-                }
-            } else if field == "vp_ucs_name" {
-                        // Resolve UCS name → cloned data, then mutate viewports.
-                        let ucs_data = self.tabs[i]
-                            .scene
-                            .document
-                            .ucss
-                            .iter()
-                            .find(|u| u.name == value)
-                            .cloned();
-                        if let Some(ucs) = ucs_data {
-                            for handle in &handles {
-                                if let Some(codec::EntityType::Viewport(vp)) =
-                                    self.tabs[i].scene.document.get_entity_mut(*handle)
-                                {
-                                    vp.ucs_handle = ucs.handle;
-                                    vp.ucs_origin = ucs.origin.clone();
-                                    vp.ucs_x_axis = ucs.x_axis.clone();
-                                    vp.ucs_y_axis = ucs.y_axis.clone();
-                                    vp.ucs_per_viewport = true;
-                                }
-                            }
-                        }
-                    } else if field == "vp_named_view" {
-                        // Assign a named view to viewport(s): copy camera parameters.
-                        let view_data = self.tabs[i]
-                            .scene
-                            .document
-                            .views
-                            .iter()
-                            .find(|v| v.name == value)
-                            .cloned();
-                        if let Some(view) = view_data {
-                            for handle in &handles {
-                                if let Some(codec::EntityType::Viewport(vp)) =
-                                    self.tabs[i].scene.document.get_entity_mut(*handle)
-                                {
-                                    vp.view_target = view.target.clone();
-                                    vp.view_direction = view.direction.clone();
-                                    if view.height > 0.0 {
-                                        vp.view_height = view.height;
-                                    }
-                                }
-                            }
-                            self.tabs[i].scene.camera_generation += 1;
-                        }
-                    } else if matches!(
+                self.tabs[i].properties.edit_choice_open = false;
+                return Task::none();
+            }
+            self.push_undo_snapshot(i, "CHPROP");
+
+            if matches!(
                         field,
                         "mleader_style"
                             | "text_style_handle"
@@ -2887,43 +3041,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 self.tabs[i].scene.bump_entities(&changes);
                             }
                         }
-                    } else if field == "tbl_style_handle" {
-                        let style_handle = self.tabs[i]
-                            .scene
-                            .document
-                            .objects
-                            .iter()
-                            .find_map(|(handle, object)| match object {
-                                codec::objects::ObjectType::TableStyle(style)
-                                    if style.name.eq_ignore_ascii_case(value.trim()) =>
-                                {
-                                    Some(*handle)
-                                }
-                                _ => None,
-                            });
-                        if let Some(style_handle) = style_handle {
-                            for &handle in &handles {
-                                if let Some(codec::EntityType::Table(table)) =
-                                    self.tabs[i].scene.document.get_entity_mut(handle)
-                                {
-                                    table.table_style_handle = Some(style_handle);
-                                }
-                            }
-                        }
-                    } else if field == "transparency" {
-                        for &handle in &handles {
-                            if self.tabs[i].scene.is_layer_locked(handle) {
-                                continue;
-                            }
-                            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                                crate::scene::view::dispatch::apply_common_prop(entity, "transparency", &value);
-                            }
-                        }
                     } else if field == "plot_style" {
-                        if self.tabs[i].scene.document.header.plotstyle_mode {
-                            self.refresh_properties();
-                            return Task::none();
-                        }
                         // Named plot-style pick: ByLayer / ByBlock clear the
                         // handle; a named style resolves through the drawing's
                         // ACAD_PLOTSTYLENAME dictionary to its placeholder handle.
@@ -2961,50 +3079,6 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                         if let Some(h) = ph {
                                             common.plotstyle_flags = 3;
                                             common.plotstyle_handle = Some(h);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else if field == "material" {
-                        // Material source: ByLayer / ByBlock clear the handle; a
-                        // named material sets flag 3 + its handle (resolved here
-                        // because the update loop holds the document).
-                        let mat_handle: Option<codec::Handle> = self.tabs[i]
-                            .scene
-                            .document
-                            .objects
-                            .iter()
-                            .find_map(|(h, o)| match o {
-                                codec::objects::ObjectType::Material(m) if m.name == value => {
-                                    Some(*h)
-                                }
-                                _ => None,
-                            });
-                        for &handle in &handles {
-                            if self.tabs[i].scene.is_layer_locked(handle) {
-                                continue;
-                            }
-                            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle)
-                            {
-                                let common = entity.common_mut();
-                                match value.as_str() {
-                                    "ByLayer" => {
-                                        common.material_flags = 0;
-                                        common.material_handle = None;
-                                    }
-                                    "ByBlock" => {
-                                        common.material_flags = 1;
-                                        common.material_handle = None;
-                                    }
-                                    "Global" => {
-                                        common.material_flags = 2;
-                                        common.material_handle = None;
-                                    }
-                                    _ => {
-                                        if let Some(h) = mat_handle {
-                                            common.material_flags = 3;
-                                            common.material_handle = Some(h);
                                         }
                                     }
                                 }
@@ -4359,5 +4433,54 @@ mod layer_rename_tests {
             .scene
             .invalidate_layer_dependencies(&["Renamed".to_string()]);
         assert_ne!(app.tabs[i].scene.geometry_epoch, epoch);
+    }
+}
+
+#[cfg(test)]
+mod plot_style_ctb_guard_tests {
+    use crate::app::OpenCADStudio;
+    use codec::entities::Line;
+    use codec::types::Vector3;
+
+    fn line_handle(app: &mut OpenCADStudio) -> codec::Handle {
+        let mut line = Line::new();
+        line.start = Vector3::ZERO;
+        line.end = Vector3::new(1.0, 0.0, 0.0);
+        app.commit_entity_handle(codec::EntityType::Line(line))
+            .expect("line should commit")
+    }
+
+    #[test]
+    fn ctb_mode_plot_style_choice_pushes_no_undo_entry() {
+        let mut app = OpenCADStudio::new_for_test();
+        let i = app.active_tab;
+        let h = line_handle(&mut app);
+        // Mirror `chprop_integration_tests`: seed `source_handles` so
+        // `property_target_handles` returns the line.
+        app.tabs[i].properties.source_handles = vec![h];
+        // CTB mode: the B15 `plot_style` arm is a no-op early return.
+        app.tabs[i].scene.document.header.plotstyle_mode = true;
+        // Settle any pending snapshot left by the fixture setup.
+        app.finish_pending_history(i);
+        assert!(
+            app.tabs[i].history.pending.is_none(),
+            "test setup: no pending snapshot before the choice change"
+        );
+        let before = app.tabs[i].history.undo_stack.len();
+        // Drive the handler directly: `update()` closes the pending
+        // transaction at the message boundary (`finish_all_pending_history`),
+        // which silently discards the leaked no-op snapshot and would mask
+        // the bug. The direct call exposes whether a snapshot was pushed.
+        let _ = app.on_prop_geom_choice_changed("plot_style", "ByLayer".to_string());
+        assert!(
+            app.tabs[i].history.pending.is_none(),
+            "CTB-mode plot_style choice is a no-op and must not push an undo snapshot"
+        );
+        app.finish_pending_history(i);
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            before,
+            "CTB-mode plot_style choice must not add an undo entry"
+        );
     }
 }

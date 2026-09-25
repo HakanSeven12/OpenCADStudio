@@ -145,6 +145,7 @@ fn image() -> PlotImage {
                     uv: uv[i],
                 })
                 .collect(),
+            pixelated: true,
         },
         clips: Vec::new(),
     }

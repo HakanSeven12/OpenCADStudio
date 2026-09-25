@@ -74,13 +74,15 @@ impl OpenCADStudio {
                     _ => false,
                 });
             if !closed {
-                self.command_line.push_error("Object is not a closed curve.");
+                self.command_line
+                    .push_error(crate::t!("Object is not a closed curve.").as_ref());
                 return;
             }
         }
         self.push_undo_snapshot(i, "VPCLIP");
         let old = vp.clip_boundary_handle;
         let scene = &mut self.tabs[i].scene;
+        let created = boundary.is_some();
         let clip = match boundary {
             Some(entity) => scene.add_entity(entity),
             None => boundary_handle,
@@ -93,6 +95,10 @@ impl OpenCADStudio {
                 .map(|(lo, hi)| (glam::DVec2::from(lo), glam::DVec2::from(hi)))
                 .unwrap_or((glam::DVec2::ZERO, glam::DVec2::ZERO));
             if hi.x - lo.x < 1e-6 || hi.y - lo.y < 1e-6 {
+                // The polygon drawn for this clip must not stay behind.
+                if created {
+                    scene.erase_entities(&[clip]);
+                }
                 self.command_line
                     .push_error(crate::t!("MVIEW: the clipping boundary has no usable area.").as_ref());
                 return;

@@ -233,11 +233,15 @@ impl MviewCommand {
         if self.chord_step() {
             let default = format!("{:.4}", self.tangent_degrees());
             let default = default.trim_end_matches('0').trim_end_matches('.');
-            return Some(format!(
-                "Specify direction of chord for arc (hold Ctrl to switch direction) <{default}>:"
-            ));
+            return Some(
+                t!(
+                    "Specify direction of chord for arc (hold Ctrl to switch direction) <%{default}>:",
+                    default = default
+                )
+                .into_owned(),
+            );
         }
-        Some(match self.arc_sub {
+        Some(t!(match self.arc_sub {
             Sub::ArcCenterAngle { .. } => "Specify included angle (hold Ctrl to switch direction):",
             Sub::ArcAngle | Sub::ArcRadiusAngle { .. } => "Specify included angle:",
             Sub::ArcAngleEnd { .. } => "Specify endpoint of arc (hold Ctrl to switch direction) or [CEnter/Radius]:",
@@ -251,8 +255,8 @@ impl MviewCommand {
             Sub::ArcSecond => "Specify second point on arc:",
             Sub::ArcSecondEnd { .. } => "Specify end point of arc:",
             _ => return None,
-        }
-        .to_string())
+        })
+        .into_owned())
     }
 
     fn clip_text(&mut self, upper: &str) -> Option<CmdResult> {
@@ -535,7 +539,7 @@ impl CadCommand for MviewCommand {
             }
         }
         if self.clip.is_some() {
-            return match self.step {
+            return t!(match self.step {
                 Step::ClipSelect => "Select viewport to clip:",
                 Step::ClipChoice => "Select clipping object or [Polygonal] <Polygonal>:",
                 Step::ClipLength => "Specify length of line:",
@@ -545,8 +549,8 @@ impl CadCommand for MviewCommand {
                 }
                 Step::Polygon if self.polygon.len() < 3 => "Specify next point or [Arc/Length/Undo]:",
                 _ => "Specify next point or [Arc/Close/Length/Undo]:",
-            }
-            .to_string();
+            })
+            .into_owned();
         }
         match self.step {
             Step::RectangleFirst => t!(
@@ -799,7 +803,7 @@ impl CadCommand for MviewCommand {
                     self.step = Step::ClipChoice;
                     CmdResult::NeedPoint
                 }
-                _ => CmdResult::ReportError("Object selected was not a viewport\n.".to_string()),
+                _ => CmdResult::ReportError(t!("Object selected was not a viewport\n.").into_owned()),
             };
         }
         CmdResult::MviewCreateClipped {

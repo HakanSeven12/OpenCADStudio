@@ -1784,11 +1784,6 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::RibbonSelectUnderlayTab => {
-                self.ribbon.select_underlay_tab();
-                Task::none()
-            }
-            Message::UnderlayTab(message) => self.update_underlay_tab(message),
             Message::PdfDialog(message) => self.update_pdf_dialog(message),
             Message::RibbonSelectTab(idx) => {
                 self.ribbon.select(idx);

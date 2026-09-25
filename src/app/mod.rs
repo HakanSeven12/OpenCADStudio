@@ -3827,11 +3827,8 @@ pub enum Message {
     PdfAttachPick,
     /// PDFIMPORT File: pick the PDF to import.
     PdfImportPick,
-    /// The contextual PDF Underlay tab.
-    RibbonSelectUnderlayTab,
     /// An edit in one of the PDF dialogs.
     PdfDialog(crate::ui::window::pdf_dialogs::PdfDialogMsg),
-    UnderlayTab(crate::ui::ribbon::UnderlayTabMsg),
     PdfImportPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
     /// Result of the PDFATTACH file picker.
     PdfAttachPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),

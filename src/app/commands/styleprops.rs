@@ -1022,6 +1022,7 @@ impl OpenCADStudio {
                     | "PDFIMPORTMODE"
                     | "PDFIMPORTFILTER"
                     | "PDFIMPORTLAYERS"
+                    | "PDFIMPORTIMAGEPATH"
                     | "XDWGFADECTL"
                     | "POINTCLOUDCLIPFRAME"
                     | "XCLIPFRAME"
@@ -1155,6 +1156,24 @@ impl OpenCADStudio {
                         } else {
                             self.command_line.push_output(&format!("Enter new value for {name} <{current}>:"));
                             self.pending_setvar = Some(name.clone());
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    // A folder name; "." clears it.
+                    if name == "PDFIMPORTIMAGEPATH" {
+                        use crate::modules::insert::pdf_import::{image_path, set_image_path};
+                        match &value {
+                            Some(value) => {
+                                let value = value.trim().trim_matches('"');
+                                set_image_path(if value == "." { String::new() } else { value.to_string() });
+                            }
+                            None => {
+                                self.command_line.push_output(&format!(
+                                    "Enter new value for PDFIMPORTIMAGEPATH, or . for none <\"{}\">:",
+                                    image_path()
+                                ));
+                                self.pending_setvar = Some(name.clone());
+                            }
                         }
                         return Some(self.finish_dispatch(cmd));
                     }

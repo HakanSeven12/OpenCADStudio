@@ -77,13 +77,12 @@ impl OpenCADStudio {
         };
         let naming = pdf_import::LayerNaming {
             settings,
-            prefix: import_prefix(&path),
+            prefix: import_prefix(),
             current: current_layer.clone(),
         };
         let mut result = pdf_import::convert(&content, &underlay, &area, &naming);
         let images = std::mem::take(&mut result.images);
-        // PDFIMPORTIMAGEPATH "PDF Images": a folder next to the PDF.
-        let image_dir = std::path::Path::new(&path).parent().map(|dir| dir.join("PDF Images"));
+        let image_dir = pdf_import::image_dir(&path);
 
         self.push_undo_snapshot(i, "PDFIMPORT");
         let scene = &mut self.tabs[i].scene;
@@ -95,8 +94,8 @@ impl OpenCADStudio {
             lt.pattern_length = 1.0;
             let _ = scene.document.line_types.add(lt);
         }
-        // Raster images: each written as a PNG under "PDF Images" next to the
-        // PDF, named after it with 8 hex digits, then referenced.
+        // Raster images: each written as a PNG in the PDFIMPORTIMAGEPATH
+        // folder, named after the PDF with 8 hex digits, then referenced.
         let stem = std::path::Path::new(&path.replace('\\', "/"))
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
@@ -236,24 +235,15 @@ impl OpenCADStudio {
     }
 }
 
-/// The layer prefix of an imported file: "PDF_" for the first file of the
-/// session, "PDF2_", "PDF3_" … for each other file.
-// ponytail: remembered for the session only; a reopened drawing starts from
+/// The layer prefix of an import: "PDF_" for the first import of the
+/// session, "PDF2_", "PDF3_" … for each later one, of the same file or not.
+// ponytail: counted for the session only; a reopened drawing starts from
 // "PDF_" again.
-fn import_prefix(path: &str) -> String {
-    static FILES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
-    let mut files = FILES.lock().unwrap_or_else(|e| e.into_inner());
-    let index = match files.iter().position(|f| f.eq_ignore_ascii_case(path)) {
-        Some(at) => at,
-        None => {
-            files.push(path.to_string());
-            files.len() - 1
-        }
-    };
-    if index == 0 {
-        "PDF_".to_string()
-    } else {
-        format!("PDF{}_", index + 1)
+fn import_prefix() -> String {
+    static IMPORTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    match IMPORTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) {
+        0 => "PDF_".to_string(),
+        n => format!("PDF{}_", n + 1),
     }
 }
 

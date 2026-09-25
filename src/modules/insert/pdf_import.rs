@@ -134,6 +134,35 @@ pub fn set_import_settings(settings: PdfImportSettings) {
     }
 }
 
+static IMAGE_PATH: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// PDFIMPORTIMAGEPATH: the folder raster images are extracted to — relative
+/// to the folder of the PDF, absolute as given, empty for that folder itself.
+pub fn image_path() -> String {
+    IMAGE_PATH
+        .lock()
+        .ok()
+        .and_then(|p| p.clone())
+        .unwrap_or_else(|| "PDF Images".to_string())
+}
+
+pub fn set_image_path(path: String) {
+    if let Ok(mut p) = IMAGE_PATH.lock() {
+        *p = Some(path);
+    }
+}
+
+/// The extraction folder for the PDF at `pdf`.
+pub fn image_dir(pdf: &str) -> Option<std::path::PathBuf> {
+    let setting = image_path();
+    let folder = std::path::Path::new(&setting);
+    if folder.is_absolute() {
+        return Some(folder.to_path_buf());
+    }
+    let parent = std::path::Path::new(pdf).parent()?;
+    Some(if setting.is_empty() { parent.to_path_buf() } else { parent.join(folder) })
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ImportArea {
     All,

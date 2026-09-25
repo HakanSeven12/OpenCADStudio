@@ -318,6 +318,18 @@ impl OpenCADStudio {
     }
 
     pub fn update(&mut self, msg: Message) -> Task<Message> {
+        // Whatever makes another document active (switching, opening,
+        // creating or closing a tab), the contextual ribbon tab follows that
+        // document's selection.
+        let before = self.tabs.get(self.active_tab).map(|tab| tab.id);
+        let task = self.update_message(msg);
+        if self.tabs.get(self.active_tab).map(|tab| tab.id) != before {
+            self.sync_underlay_tab();
+        }
+        task
+    }
+
+    fn update_message(&mut self, msg: Message) -> Task<Message> {
         if let Some(tab) = self.tabs.get(self.active_tab) {
             crate::entities::common::set_unit_context(
                 crate::entities::common::UnitContext::from_header(&tab.scene.document.header),

@@ -4537,10 +4537,7 @@ impl Scene {
             && inst.tile_idx.is_none()
             && inst.handle != codec::Handle::NULL
         {
-            match self.document.get_entity(inst.handle) {
-                Some(EntityType::Viewport(vp)) => vp.frozen_layers.iter().cloned().collect(),
-                _ => rustc_hash::FxHashSet::default(),
-            }
+            self.viewport_hidden_handles(inst.handle)
         } else {
             rustc_hash::FxHashSet::default()
         };

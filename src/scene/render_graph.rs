@@ -612,7 +612,8 @@ impl<'a> RenderSceneGraph<'a> {
             return false;
         }
         if self.frozen_layers.is_some_and(|frozen| {
-            layer.is_some_and(|layer| frozen.contains(&layer.handle))
+            frozen.contains(&common.handle)
+                || layer.is_some_and(|layer| frozen.contains(&layer.handle))
         }) {
             return false;
         }

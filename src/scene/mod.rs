@@ -8108,6 +8108,33 @@ impl Scene {
             .unwrap_or(false)
     }
 
+    /// Handles hidden inside content viewport `vp`: its VP-frozen layers plus
+    /// model-space references bound to another viewport (Inventor drawing
+    /// views overlap in model space; each is drawn only in its own viewport).
+    /// Entity and layer handles never collide, so both ride the same set and
+    /// its cache signature.
+    pub(super) fn viewport_hidden_handles(&self, vp: Handle) -> HashSet<Handle> {
+        let mut hidden: HashSet<Handle> = match self.document.get_entity(vp) {
+            Some(EntityType::Viewport(v)) => v.frozen_layers.iter().copied().collect(),
+            _ => HashSet::default(),
+        };
+        // ponytail: full entity scan per call, gated to drawings declaring the
+        // class; memoize per geometry epoch if large Inventor sheets show up.
+        if self.document.classes.get_by_name("ACIDBLOCKREFERENCE").is_some() {
+            let model = self.model_space_block_handle();
+            hidden.extend(self.document.entities().filter_map(|e| match e {
+                EntityType::Insert(i)
+                    if i.common.owner_handle == model
+                        && i.view_rep_handle.is_some_and(|bound| bound != vp) =>
+                {
+                    Some(i.common.handle)
+                }
+                _ => None,
+            }));
+        }
+        hidden
+    }
+
     /// True when `layer`'s handle is in a content viewport's per-viewport
     /// frozen-layer set (VP freeze). Mirrors the wire path's test in
     /// [`Scene::resident_entity_visible`] so fills / images / meshes hide on the
@@ -10199,6 +10226,9 @@ impl Scene {
         }
         if let Some(frozen) = frozen_layers {
             if !frozen.is_empty() {
+                if frozen.contains(&c.handle) {
+                    return false;
+                }
                 if let Some(lh) = layer.map(|l| l.handle) {
                     if frozen.contains(&lh) {
                         return false;

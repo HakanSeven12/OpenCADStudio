@@ -828,13 +828,7 @@ impl Scene {
         // wheel tick whenever the drawing contained one annotative object.
         // Explicit viewport annotation-scale changes still rebuild the resident
         // set; PSLTSCALE is a viewport GPU uniform.
-        let frozen = match self.document.get_entity(vp_handle) {
-            Some(EntityType::Viewport(vp)) => {
-                let f: HSet<Handle> = vp.frozen_layers.iter().cloned().collect();
-                f
-            }
-            _ => HSet::default(),
-        };
+        let frozen: HSet<Handle> = self.viewport_hidden_handles(vp_handle);
 
         let scale_handle = self.viewport_scale_handle(vp_handle);
         self.resident_wires_for(

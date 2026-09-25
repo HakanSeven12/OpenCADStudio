@@ -24,6 +24,8 @@ fn tool(id: &'static str, label: &'static str, icon: &'static [u8]) -> ToolDef {
 }
 
 const CLIP: &[u8] = include_bytes!("../../../assets/icons/xclip.svg");
+/// The clip icon with a small red cross at its lower right.
+const UNCLIP: &[u8] = include_bytes!("../../../assets/icons/xclip_remove.svg");
 
 /// PDF underlay tools: display, clipping, options, layers and import.
 pub fn pdf_underlay_tools() -> Vec<ToolDef> {

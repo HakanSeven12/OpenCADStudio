@@ -17,6 +17,9 @@ const ICON_SIZE: f32 = 22.0;
 const BTN_SIZE: f32 = 38.0;
 /// Gap between the toolbar and the right edge of the canvas.
 const EDGE_MARGIN: f32 = 8.0;
+/// Room kept free at the top right for the view cube and the UCS list; the
+/// toolbar is centred in the height below it.
+const TOP_RESERVE: f32 = 200.0;
 
 fn icon_el(icon: IconKind) -> Element<'static, Message> {
     match icon {
@@ -122,6 +125,7 @@ pub fn view_with_active(
             .align_y(iced::Center)
             .padding(iced::Padding {
                 right: EDGE_MARGIN,
+                top: TOP_RESERVE,
                 ..iced::Padding::ZERO
             })
             .into(),

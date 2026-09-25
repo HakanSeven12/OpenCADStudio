@@ -211,25 +211,55 @@ impl MviewCommand {
         self.finish_polygon()
     }
 
-    fn arc_prompt(&self) -> Option<&'static str> {
+    /// Direction of the last segment, degrees: the chord direction default.
+    fn tangent_degrees(&self) -> f64 {
+        let t = self.polygon_last_tangent.map_or(DVec2::X, |t| t.as_dvec2());
+        t.y.atan2(t.x).to_degrees().rem_euclid(360.0)
+    }
+
+    /// VPCLIP chord direction (degrees) for the arc option being answered.
+    fn arc_chord(&mut self, degrees: f64) -> Option<CmdResult> {
+        let a = self.last2()?;
+        let p = a + DVec2::from_angle(degrees.to_radians());
+        let (e, bulge) = arc_for(self.arc_sub, a, p, self.polygon_last_tangent)?;
+        Some(self.push_arc(e, bulge))
+    }
+
+    fn chord_step(&self) -> bool {
+        matches!(self.arc_sub, Sub::ArcAngleRadiusDir { .. } | Sub::ArcRadiusAngleDir { .. })
+    }
+
+    fn arc_prompt(&self) -> Option<String> {
+        if self.chord_step() {
+            let default = format!("{:.4}", self.tangent_degrees());
+            let default = default.trim_end_matches('0').trim_end_matches('.');
+            return Some(format!(
+                "Specify direction of chord for arc (hold Ctrl to switch direction) <{default}>:"
+            ));
+        }
         Some(match self.arc_sub {
-            Sub::ArcAngle | Sub::ArcCenterAngle { .. } | Sub::ArcRadiusAngle { .. } => "Specify included angle:",
+            Sub::ArcCenterAngle { .. } => "Specify included angle (hold Ctrl to switch direction):",
+            Sub::ArcAngle | Sub::ArcRadiusAngle { .. } => "Specify included angle:",
             Sub::ArcAngleEnd { .. } => "Specify endpoint of arc (hold Ctrl to switch direction) or [CEnter/Radius]:",
             Sub::ArcCenter | Sub::ArcAngleCenter { .. } => "Specify center point of arc:",
             Sub::ArcCenterEnd { .. } => "Specify endpoint of arc (hold Ctrl to switch direction) or [Angle/Length]:",
-            Sub::ArcCenterLength { .. } => "Specify length of chord:",
+            Sub::ArcCenterLength { .. } => "Specify length of chord (hold Ctrl to switch direction):",
             Sub::ArcDirection => "Specify the tangent direction for the start point of arc:",
             Sub::ArcDirectionEnd { .. } => "Specify endpoint of the arc (hold Ctrl to switch direction):",
             Sub::ArcRadius | Sub::ArcAngleRadius { .. } => "Specify radius of arc:",
             Sub::ArcRadiusEnd { .. } => "Specify endpoint of arc (hold Ctrl to switch direction) or [Angle]:",
-            Sub::ArcAngleRadiusDir { .. } | Sub::ArcRadiusAngleDir { .. } => "Specify direction of chord for arc:",
             Sub::ArcSecond => "Specify second point on arc:",
             Sub::ArcSecondEnd { .. } => "Specify end point of arc:",
             _ => return None,
-        })
+        }
+        .to_string())
     }
 
     fn clip_text(&mut self, upper: &str) -> Option<CmdResult> {
+        if self.step == Step::Polygon && self.chord_step() {
+            let degrees = crate::entities::common::parse_typed_angle(upper)?.to_degrees();
+            return self.arc_chord(degrees);
+        }
         if self.step == Step::Polygon && self.arc_sub != Sub::None {
             let next = match (self.arc_sub, upper) {
                 (Sub::ArcAngleEnd { angle }, "CE" | "CENTER" | "CENTRE") => Sub::ArcAngleCenter { angle },
@@ -499,13 +529,17 @@ impl CadCommand for MviewCommand {
     }
 
     fn prompt(&self) -> String {
+        if self.clip.is_some() && self.step == Step::Polygon {
+            if let Some(prompt) = self.arc_prompt() {
+                return prompt;
+            }
+        }
         if self.clip.is_some() {
             return match self.step {
                 Step::ClipSelect => "Select viewport to clip:",
                 Step::ClipChoice => "Select clipping object or [Polygonal] <Polygonal>:",
                 Step::ClipLength => "Specify length of line:",
                 Step::Polygon if self.polygon.is_empty() => "Specify start point:",
-                Step::Polygon if self.arc_prompt().is_some() => self.arc_prompt().unwrap_or_default(),
                 Step::Polygon if self.polygon_mode == PolygonMode::Arc => {
                     "Enter an arc boundary option\n[Angle/CEnter/CLose/Direction/Line/Radius/Second pt/Undo/Endpoint of arc] <Endpoint>:"
                 }
@@ -716,6 +750,11 @@ impl CadCommand for MviewCommand {
 
     fn on_enter(&mut self) -> CmdResult {
         match self.step {
+            // The chord direction defaults to the last segment's direction.
+            Step::Polygon if self.chord_step() => {
+                let degrees = self.tangent_degrees();
+                self.arc_chord(degrees).unwrap_or(CmdResult::NeedPoint)
+            }
             Step::ClipChoice => {
                 self.step = Step::Polygon;
                 CmdResult::NeedPoint
@@ -771,7 +810,9 @@ impl CadCommand for MviewCommand {
     }
 
     fn input_kind(&self) -> InputKind {
-        if self.step == Step::ClipLength || (self.step == Step::Polygon && self.arc_sub.is_scalar()) {
+        if self.step == Step::ClipLength
+            || (self.step == Step::Polygon && (self.arc_sub.is_scalar() || self.chord_step()))
+        {
             InputKind::FreeText
         } else if self.step == Step::ChooseView {
             InputKind::FreeText

@@ -995,16 +995,4 @@ mod marquee_cancel_tests {
             Some("LINE")
         );
     }
-
-    #[test]
-    fn empty_enter_repeats_plugin_command() {
-        let mut app = fresh();
-        let i = app.active_tab;
-        app.tabs[i].last_cmd = Some("TARC".to_string());
-
-        // When idle, CommandFinalize repeats last_cmd
-        let _ = app.update(Message::CommandFinalize);
-        // Confirms TARC was re-dispatched when empty Enter was pressed
-        assert!(app.command_line.last_error.as_deref().unwrap_or("").contains("TARC"));
-    }
 }

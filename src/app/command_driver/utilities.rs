@@ -731,6 +731,8 @@ impl OpenCADStudio {
         // (`LINE`), so the full line is not a plugin command and falls through to
         // the first-word + fed-tokens path below. (#162)
         if !self.suppress_plugin_dispatch && crate::plugin::try_dispatch(self, i, cmd) {
+            self.tabs[i].last_cmd = Some(cmd.to_string());
+            self.command_line.record_recent(cmd);
             let toks: Vec<String> = tokens.iter().map(|s| s.to_string()).collect();
             return self.finish_active_command(&toks, finish);
         }

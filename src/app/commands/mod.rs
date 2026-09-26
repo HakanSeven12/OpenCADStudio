@@ -197,11 +197,15 @@ impl OpenCADStudio {
             // tool was a one-shot and we must turn the ribbon highlight off here —
             // normally apply_cmd_result does that, but plugin dispatch can return
             // without producing a CmdResult.
+            self.tabs[i].last_cmd = Some(cmd.to_string());
             self.command_line.record_recent(cmd);
             if self.tabs[i].active_cmd.is_none() {
                 self.ribbon.deactivate_tool();
+                return Task::none();
+            } else {
+                self.sync_dyn_fields();
+                return self.focus_cmd_input();
             }
-            return Task::none();
         }
 
         // Command families are dispatched in source order (see
@@ -822,7 +826,7 @@ inventory::submit!(crate::command::CommandRegistration {
 
 #[cfg(test)]
 mod marquee_cancel_tests {
-    use crate::app::{GripPendingValue, OpenCADStudio};
+    use crate::app::{GripPendingValue, Message, OpenCADStudio};
     use crate::scene::model::object::GripMenuAction;
     use crate::scene::pick::grip::GripEdit;
     use codec::Handle;
@@ -963,6 +967,29 @@ mod marquee_cancel_tests {
         assert!(app.tabs[i].active_grip.is_none());
         assert!(app.grip_pending.is_none());
         assert!(app.command_line.input.is_empty());
+        assert_eq!(
+            app.tabs[i].active_cmd.as_deref().map(|cmd| cmd.name()),
+            Some("LINE")
+        );
+    }
+
+    #[test]
+    fn command_finalize_repeats_last_cmd() {
+        let mut app = fresh();
+        let i = app.active_tab;
+        assert_eq!(app.tabs[i].last_cmd, None);
+
+        // Run LINE command
+        let _ = app.dispatch_command("LINE");
+        assert_eq!(app.tabs[i].last_cmd.as_deref(), Some("LINE"));
+
+        // Cancel LINE with Escape
+        let _ = app.update(Message::CommandEscape);
+        assert!(app.tabs[i].active_cmd.is_none());
+        assert_eq!(app.tabs[i].last_cmd.as_deref(), Some("LINE"));
+
+        // Press Enter (CommandFinalize) on empty command line repeats LINE
+        let _ = app.update(Message::CommandFinalize);
         assert_eq!(
             app.tabs[i].active_cmd.as_deref().map(|cmd| cmd.name()),
             Some("LINE")

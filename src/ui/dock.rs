@@ -40,6 +40,7 @@ pub enum DockMsg {
 #[serde(rename_all = "snake_case")]
 pub enum PanelId {
     Properties,
+    GraphicAttributes,
     BlockPalette,
     ExternalReferences,
     /// Outline of the drawing's origin planes, open sketch and solid bodies.
@@ -51,6 +52,7 @@ impl PanelId {
     pub fn title(self) -> &'static str {
         match self {
             PanelId::Properties => "Properties",
+            PanelId::GraphicAttributes => "Graphic Attributes",
             PanelId::BlockPalette => "Block Palette",
             PanelId::ExternalReferences => "External References",
             PanelId::Browser => "Browser",
@@ -61,6 +63,7 @@ impl PanelId {
     fn default_width(self) -> f32 {
         match self {
             PanelId::Properties => 250.0,
+            PanelId::GraphicAttributes => 250.0,
             PanelId::BlockPalette => 260.0,
             PanelId::ExternalReferences => 460.0,
             PanelId::Browser => 230.0,
@@ -120,7 +123,7 @@ pub struct DockState {
 impl Default for DockState {
     fn default() -> Self {
         Self {
-            left: vec![PanelId::Properties],
+            left: vec![PanelId::Properties, PanelId::GraphicAttributes],
             right: vec![PanelId::BlockPalette],
             panels: BTreeMap::new(),
         }
@@ -149,11 +152,19 @@ impl DockState {
     pub fn ensure_settings(&mut self) {
         for id in [
             PanelId::Properties,
+            PanelId::GraphicAttributes,
             PanelId::BlockPalette,
             PanelId::ExternalReferences,
             PanelId::Browser,
         ] {
             self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
+        }
+        if self.location(PanelId::GraphicAttributes).is_none() {
+            if let Some((side, index)) = self.location(PanelId::Properties) {
+                self.stack_mut(side).insert(index + 1, PanelId::GraphicAttributes);
+            } else {
+                self.left.push(PanelId::GraphicAttributes);
+            }
         }
     }
 
@@ -262,6 +273,7 @@ mod tests {
     fn default_docks_each_known_panel_on_an_edge() {
         let state = DockState::default();
         assert_eq!(state.location(PanelId::Properties), Some((DockSide::Left, 0)));
+        assert_eq!(state.location(PanelId::GraphicAttributes), Some((DockSide::Left, 1)));
         assert_eq!(
             state.location(PanelId::BlockPalette),
             Some((DockSide::Right, 0))
@@ -273,6 +285,7 @@ mod tests {
         let mut state = DockState::default();
         state.ensure_settings();
         assert_eq!(state.width(PanelId::Properties, 1600.0), 250.0);
+        assert_eq!(state.width(PanelId::GraphicAttributes, 1600.0), 250.0);
         assert_eq!(state.width(PanelId::BlockPalette, 1600.0), 260.0);
         assert!(!state.auto_collapse(PanelId::Properties));
     }
@@ -286,7 +299,7 @@ mod tests {
             Some((DockSide::Right, 0))
         );
         // It no longer occupies the left edge.
-        assert!(state.left.is_empty());
+        assert_eq!(state.left, vec![PanelId::GraphicAttributes]);
         assert_eq!(state.right.len(), 2);
     }
 

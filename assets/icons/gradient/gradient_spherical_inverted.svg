@@ -5,7 +5,7 @@
    height="64"
    version="1.1"
    id="svg3"
-   sodipodi:docname="hatch_gradient.svg"
+   sodipodi:docname="gradient_spherical_inverted.svg"
    inkscape:version="1.4.3 (0d15f75042, 2025-12-25)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
@@ -21,9 +21,9 @@
      inkscape:pageopacity="0.0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#B4B6B9"
-     inkscape:zoom="15.601563"
-     inkscape:cx="22.401602"
-     inkscape:cy="32.849273"
+     inkscape:zoom="6.4026309"
+     inkscape:cx="14.759558"
+     inkscape:cy="17.25853"
      inkscape:window-width="2560"
      inkscape:window-height="1368"
      inkscape:window-x="0"
@@ -33,55 +33,58 @@
   <defs
      id="defs2">
     <linearGradient
+       id="linearGradient4"
+       inkscape:collect="always">
+      <stop
+         style="stop-color:#6DB7ED;stop-opacity:1;"
+         offset="0.29615885"
+         id="stop5" />
+      <stop
+         style="stop-color:#B4B6B9;stop-opacity:1;"
+         offset="0.95343965"
+         id="stop4" />
+    </linearGradient>
+    <linearGradient
        id="g"
        x1="4"
        y1="4"
        x2="20"
        y2="4"
        gradientUnits="userSpaceOnUse"
-       gradientTransform="translate(22.421511,-1.7454447)">
+       gradientTransform="translate(22.421511,-1.7454447)"
+       inkscape:label="0">
       <stop
-         offset="0%"
+         offset="0"
          stop-color="#6DB7ED"
          stop-opacity="0.9"
-         id="stop1" />
+         id="stop1"
+         style="stop-color:#B4B6B9;stop-opacity:1;" />
       <stop
-         offset="100%"
+         offset="1"
          stop-color="#6DB7ED"
          stop-opacity="0.0"
-         id="stop2" />
+         id="stop2"
+         style="stop-color:#B4B6B9;stop-opacity:0;" />
     </linearGradient>
-    <linearGradient
+    <radialGradient
        inkscape:collect="always"
-       xlink:href="#linearGradient3"
-       id="linearGradient4"
-       x1="0"
-       y1="12"
-       x2="24"
-       y2="12"
-       gradientUnits="userSpaceOnUse"
-       gradientTransform="matrix(0.98333334,0,0,0.98333334,0.19999999,0.19999999)" />
-    <linearGradient
-       id="linearGradient3"
-       inkscape:collect="always">
-      <stop
-         style="stop-color:#6DB7ED;stop-opacity:0.89999998;"
-         offset="0"
-         id="stop3" />
-      <stop
-         style="stop-color:#6DB7ED;stop-opacity:0;"
-         offset="1"
-         id="stop4" />
-    </linearGradient>
+       xlink:href="#linearGradient4"
+       id="radialGradient7"
+       cx="12"
+       cy="12"
+       fx="12"
+       fy="12"
+       r="12"
+       gradientUnits="userSpaceOnUse" />
   </defs>
   <rect
-     x="0.9375"
-     y="0.9375"
-     width="22.125"
-     height="22.125"
+     x="0.5625"
+     y="0.5625"
+     width="22.875"
+     height="22.875"
      stroke="#B4B6B9"
      stroke-width="1.5"
      fill="none"
      id="rect3"
-     style="fill:url(#linearGradient4);stroke-width:1.875;stroke-dasharray:none" />
+     style="fill:url(#radialGradient7);stroke-width:1.125;stroke-dasharray:none;fill-opacity:1;stroke:#B4B6B9;stroke-opacity:1" />
 </svg>

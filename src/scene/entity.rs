@@ -103,7 +103,7 @@ fn family_from_stored_line(
 
 /// Preserve the selected hue while moving its HSL lightness towards the
 /// persisted one-colour tint/shade target (0 = black, 1 = white).
-fn gradient_tint_color(base: [f32; 4], target: f32) -> [f32; 4] {
+pub(crate) fn gradient_tint_color(base: [f32; 4], target: f32) -> [f32; 4] {
     let max = base[0].max(base[1]).max(base[2]);
     let min = base[0].min(base[1]).min(base[2]);
     let lightness = (max + min) * 0.5;
@@ -2002,9 +2002,11 @@ impl Scene {
             let range = boundary.len()..boundary.len() + ring.len();
             boundary.extend(ring);
             local_boundary.extend(local_ring.iter().map(|&[x, y]| [x as f32, y as f32]));
-            if path.edges.iter().any(|edge| {
-                matches!(edge, acadrust::entities::BoundaryEdge::Spline(_))
-            }) {
+            if path
+                .edges
+                .iter()
+                .any(|edge| matches!(edge, acadrust::entities::BoundaryEdge::Spline(_)))
+            {
                 spline_paths.push((path, local_ring, range));
             }
             boundary_exterior.push(depth == 0);
@@ -2210,13 +2212,21 @@ impl Scene {
         }
         let project = |point: [f64; 2]| {
             let [x, y] = to_xy(point[0], point[1]);
-            [(x - world_origin[0]) as f32 as f64, (y - world_origin[1]) as f32 as f64]
+            [
+                (x - world_origin[0]) as f32 as f64,
+                (y - world_origin[1]) as f32 as f64,
+            ]
         };
         for (path, ring, range) in spline_paths.into_iter().rev() {
             if range.end > boundary.len() {
                 continue;
             }
-            let curves = || path.edges.iter().filter_map(crate::entities::hatch::edge_curve).collect();
+            let curves = || {
+                path.edges
+                    .iter()
+                    .filter_map(crate::entities::hatch::edge_curve)
+                    .collect()
+            };
             if let Some(refined) =
                 cadkernel::geom2d::refine_spline_boundary(&ring, curves, &project)
             {
@@ -2224,7 +2234,10 @@ impl Scene {
                     continue;
                 }
                 boundary.splice(range.clone(), refined.iter().map(|p| to_xy(p[0], p[1])));
-                local_boundary.splice(range, refined.into_iter().map(|[x, y]| [x as f32, y as f32]));
+                local_boundary.splice(
+                    range,
+                    refined.into_iter().map(|[x, y]| [x as f32, y as f32]),
+                );
             }
         }
 

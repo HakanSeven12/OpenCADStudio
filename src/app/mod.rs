@@ -12,20 +12,18 @@ mod command_driver;
 pub(crate) mod commands;
 pub(crate) mod dim_viewport;
 #[cfg(test)]
-mod viewport_dimension_tests;
-#[cfg(test)]
 mod dimension_preview_tests;
 mod document;
 mod drafting_settings;
 pub(crate) mod expr_eval;
-mod options_session;
 mod find_replace;
 pub(crate) mod helpers;
 mod history;
 mod layers;
 mod model_ops;
-mod navigation;
 mod mtext_editor;
+mod navigation;
+mod options_session;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin_host;
 mod presspull_ops;
@@ -40,6 +38,8 @@ mod text_inline;
 mod tolerance_dialog;
 mod update;
 mod view;
+#[cfg(test)]
+mod viewport_dimension_tests;
 mod visibility;
 
 pub use style_ops::StyleKind;
@@ -768,6 +768,12 @@ pub(super) struct OpenCADStudio {
     render_mode_preview: Option<acadrust::entities::ViewportRenderMode>,
     /// Whether the Properties panel is shown on the left (PROPERTIES).
     show_properties: bool,
+    show_graphic_attributes: bool,
+    graphic_attribute_menu_open: bool,
+    solid_fill_color_menu_open: bool,
+    fill_transparency_menu_open: bool,
+    gradient_editor: Option<crate::ui::window::gradient_editor::GradientEditorState>,
+    hatch_editor_handles: Option<Vec<acadrust::Handle>>,
     /// Docked Insert Block panel visibility.
     pub(crate) show_block_palette: bool,
     /// Docked External References panel visibility (EXTERNALREFERENCES).
@@ -1524,6 +1530,8 @@ pub enum ColorPickerTab {
 /// Where a colour chosen in the standalone palette window should be applied.
 #[derive(Debug, Clone)]
 pub enum ColorPickTarget {
+    Gradient(u8),
+    GraphicAttributesSolid,
     DimStyle(DsField),
     MLeader(&'static str),
     Table(u8, &'static str),
@@ -2046,6 +2054,31 @@ pub enum ArrowKey {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    ToggleGraphicAttributeDropdown,
+    CloseGraphicAttributeDropdown,
+    GraphicAttributeChanged(crate::ui::window::graphic_attributes::GraphicAttribute),
+    ToggleSolidFillColorDropdown,
+    CloseSolidFillColorDropdown,
+    SolidFillColorChanged(AcadColor),
+    ToggleFillTransparencyDropdown,
+    CloseFillTransparencyDropdown,
+    FillTransparencyChanged(u8),
+    FillTransparencyByLayer,
+    FillTransparencyByBlock,
+    HatchEditorOpen,
+    HatchEditorClose,
+    GradientEditorOpen,
+    GradientColorModeChanged(crate::ui::window::gradient_editor::GradientColorMode),
+    GradientColorToggle(u8),
+    GradientColorChanged(u8, AcadColor),
+    GradientShadeTintChanged(f32),
+    GradientTypeChanged(crate::scene::model::hatch_model::GradientKind),
+    GradientInvertToggled,
+    GradientAngleChanged(String),
+    GradientAngleReset,
+    GradientCenteredChanged(bool),
+    GradientApply,
+    GradientCancel,
     SpaceMouseWake,
     SpaceMouseFrame(iced::time::Instant),
     SpaceMouseFocus(iced::window::Id, bool),
@@ -4095,6 +4128,12 @@ impl OpenCADStudio {
             render_mode_menu_open: false,
             render_mode_preview: None,
             show_properties: true,
+            show_graphic_attributes: true,
+            graphic_attribute_menu_open: false,
+            solid_fill_color_menu_open: false,
+            fill_transparency_menu_open: false,
+            gradient_editor: None,
+            hatch_editor_handles: None,
             show_block_palette: false,
             show_external_references: false,
             show_browser: false,

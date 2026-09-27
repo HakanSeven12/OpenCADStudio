@@ -95,6 +95,7 @@ impl fmt::Display for SelectionGroup {
 #[derive(Clone)]
 struct HatchPatternPreview {
     pattern: crate::scene::model::hatch_model::HatchPattern,
+    padding: f32,
 }
 
 impl canvas::Program<Message> for HatchPatternPreview {
@@ -112,7 +113,7 @@ impl canvas::Program<Message> for HatchPatternPreview {
 
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let palette = theme.palette();
-        let pad = 4.0;
+        let pad = self.padding;
         let sample = canvas::Path::rectangle(
             Point::new(pad, pad),
             Size::new(
@@ -199,6 +200,31 @@ fn hatch_preview_scale(pattern: &crate::scene::model::hatch_model::HatchPattern)
     } else {
         1.0
     }
+}
+
+pub(crate) fn hatch_pattern_preview(
+    pattern: crate::scene::model::hatch_model::HatchPattern,
+    height: f32,
+) -> Element<'static, Message> {
+    canvas(HatchPatternPreview {
+        pattern,
+        padding: 4.0,
+    })
+        .width(Length::Fill)
+        .height(height)
+        .into()
+}
+
+pub(crate) fn compact_hatch_pattern_preview(
+    pattern: crate::scene::model::hatch_model::HatchPattern,
+) -> Element<'static, Message> {
+    canvas(HatchPatternPreview {
+        pattern,
+        padding: 0.5,
+    })
+    .width(Length::Fill)
+    .height(ROW_H)
+    .into()
 }
 
 fn hatch_pattern_matches(
@@ -1553,11 +1579,7 @@ impl PropertiesPanel {
                 let selected = current.eq_ignore_ascii_case(&entry.name);
                 let focused = self.hatch_pattern_focus == index;
                 let name = entry.name.clone();
-                let preview = canvas(HatchPatternPreview {
-                    pattern: entry.gpu.clone(),
-                })
-                .width(Length::Fill)
-                .height(PATTERN_PREVIEW_H);
+                let preview = hatch_pattern_preview(entry.gpu.clone(), PATTERN_PREVIEW_H);
                 let card = button(
                     column![
                         preview,

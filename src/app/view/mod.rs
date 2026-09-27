@@ -613,7 +613,10 @@ bg={bg_ms:.1}ms n={view_count}"
             let control_polygon = tab.selected_handle.and_then(|handle| {
                 let spline = match tab.scene.document.get_entity(handle) {
                     Some(acadrust::EntityType::Spline(spline))
-                        if crate::entities::spline::shows_control_vertices(spline) => spline,
+                        if crate::entities::spline::shows_control_vertices(spline) =>
+                    {
+                        spline
+                    }
                     _ => return None,
                 };
                 if tab
@@ -1109,8 +1112,12 @@ bg={bg_ms:.1}ms n={view_count}"
                         (None, _) if rectangle_values.is_some() => {
                             let (width, height) = rectangle_values.unwrap();
                             match f.role {
-                                crate::command::DynRole::Width => crate::entities::common::format_length(width),
-                                crate::command::DynRole::Height => crate::entities::common::format_length(height),
+                                crate::command::DynRole::Width => {
+                                    crate::entities::common::format_length(width)
+                                }
+                                crate::command::DynRole::Height => {
+                                    crate::entities::common::format_length(height)
+                                }
                                 _ => String::new(),
                             }
                         }
@@ -1839,6 +1846,7 @@ bg={bg_ms:.1}ms n={view_count}"
             }
             match id {
                 crate::ui::dock::PanelId::Properties => self.show_properties,
+                crate::ui::dock::PanelId::GraphicAttributes => self.show_graphic_attributes,
                 crate::ui::dock::PanelId::BlockPalette => self.show_block_palette,
                 crate::ui::dock::PanelId::ExternalReferences => self.show_external_references,
                 crate::ui::dock::PanelId::Browser => self.show_browser,
@@ -2742,7 +2750,9 @@ impl OpenCADStudio {
             } else {
                 Subscription::none()
             },
-            self.spacemouse.subscription().map(|_| Message::SpaceMouseWake),
+            self.spacemouse
+                .subscription()
+                .map(|_| Message::SpaceMouseWake),
             crate::input::trackpad::subscription().map(Message::TrackpadPinch),
             event::listen_with(|event, _, id| match event {
                 iced::Event::Window(window::Event::Focused) => {
@@ -2929,18 +2939,42 @@ impl OpenCADStudio {
         let auto_collapse = self.dock.auto_collapse(id);
         let panel: Element<'_, Message> = match id {
             crate::ui::dock::PanelId::Properties => tab.properties.view(width, auto_collapse),
+            crate::ui::dock::PanelId::GraphicAttributes => {
+                let draw_depth = tab.scene.draw_depth_map();
+                crate::ui::window::graphic_attributes::view(
+                    &tab.scene.document,
+                    &tab.scene
+                        .selected_entities()
+                        .into_iter()
+                        .map(|(h, _)| h)
+                        .collect::<Vec<_>>(),
+                    draw_depth.as_ref(),
+                    width,
+                    auto_collapse,
+                    side,
+                    self.graphic_attribute_menu_open,
+                    self.solid_fill_color_menu_open,
+                    self.fill_transparency_menu_open,
+                    self.hatch_editor_handles.is_some(),
+                    self.gradient_editor.as_ref(),
+                    matches!(
+                        self.color_pick_target.as_ref().map(|(target, _)| target),
+                        Some(crate::app::ColorPickTarget::Gradient(_))
+                    ),
+                )
+            }
             crate::ui::dock::PanelId::BlockPalette => {
                 crate::ui::window::block_palette::view(&self.block_palette, width, auto_collapse)
             }
-            crate::ui::dock::PanelId::ExternalReferences => self.xref_manager.view(
-                width,
-                auto_collapse,
-                tab.xref_missing,
-                &tab.scene.document,
-            ),
+            crate::ui::dock::PanelId::ExternalReferences => {
+                self.xref_manager
+                    .view(width, auto_collapse, tab.xref_missing, &tab.scene.document)
+            }
             crate::ui::dock::PanelId::Browser => crate::ui::window::browser::view(
                 &tab.scene.document,
-                tab.sketch_session.as_ref().map(|session| session.name.as_str()),
+                tab.sketch_session
+                    .as_ref()
+                    .map(|session| session.name.as_str()),
                 width,
                 auto_collapse,
             ),

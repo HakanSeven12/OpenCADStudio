@@ -90,6 +90,46 @@ fn set_hatch_graphic_attribute(
     }
 }
 
+fn is_open_fill_boundary(entity: &acadrust::EntityType) -> bool {
+    match entity {
+        acadrust::EntityType::LwPolyline(polyline) => {
+            !polyline.is_closed && polyline.vertices.len() >= 3
+        }
+        acadrust::EntityType::Polyline(polyline) => {
+            !polyline.flags.is_closed() && polyline.vertices.len() >= 3
+        }
+        acadrust::EntityType::Polyline2D(polyline) => {
+            !polyline.is_closed() && polyline.vertices.len() >= 3
+        }
+        acadrust::EntityType::Polyline3D(polyline) => {
+            !polyline.flags.closed && polyline.vertices.len() >= 3
+        }
+        _ => false,
+    }
+}
+
+fn close_fill_boundary(entity: &mut acadrust::EntityType) -> bool {
+    match entity {
+        acadrust::EntityType::LwPolyline(polyline) if !polyline.is_closed => {
+            polyline.is_closed = true;
+            true
+        }
+        acadrust::EntityType::Polyline(polyline) if !polyline.flags.is_closed() => {
+            polyline.flags.set_closed(true);
+            true
+        }
+        acadrust::EntityType::Polyline2D(polyline) if !polyline.is_closed() => {
+            polyline.flags.set_closed(true);
+            true
+        }
+        acadrust::EntityType::Polyline3D(polyline) if !polyline.flags.closed => {
+            polyline.flags.closed = true;
+            true
+        }
+        _ => false,
+    }
+}
+
 impl OpenCADStudio {
     pub(super) fn open_gradient_editor(&mut self) {
         use crate::ui::window::gradient_editor::GradientEditorState;
@@ -196,6 +236,49 @@ impl OpenCADStudio {
         &mut self,
         value: crate::ui::window::graphic_attributes::GraphicAttribute,
     ) -> iced::Task<Message> {
+        self.pending_graphic_fill_close = None;
+        self.on_graphic_attribute_impl(value, true)
+    }
+
+    pub(super) fn on_graphic_fill_close_response(
+        &mut self,
+        close: bool,
+    ) -> iced::Task<Message> {
+        let Some((value, handles, _)) = self.pending_graphic_fill_close.take() else {
+            return iced::Task::none();
+        };
+        if close {
+            let i = self.active_tab;
+            let unlocked: Vec<_> = handles
+                .into_iter()
+                .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
+                .collect();
+            if !unlocked.is_empty() {
+                let pending = self.begin_undo(i, "Close fill boundaries", unlocked.len(), true);
+                for handle in unlocked {
+                    let Some(mut entity) =
+                        self.tabs[i].scene.document.get_entity(handle).cloned()
+                    else {
+                        continue;
+                    };
+                    if close_fill_boundary(&mut entity) {
+                        self.tabs[i].scene.update_entity(entity);
+                    }
+                }
+                self.tabs[i].dirty = true;
+                if let Some(pending) = pending {
+                    self.commit_undo_delta(i, pending);
+                }
+            }
+        }
+        self.on_graphic_attribute_impl(value, false)
+    }
+
+    fn on_graphic_attribute_impl(
+        &mut self,
+        value: crate::ui::window::graphic_attributes::GraphicAttribute,
+        ask_to_close: bool,
+    ) -> iced::Task<Message> {
         use crate::scene::model::hatch_model::{GradientKind, HatchPattern};
         use crate::ui::window::graphic_attributes::GraphicAttribute;
         self.graphic_attribute_menu_open = false;
@@ -222,6 +305,22 @@ impl OpenCADStudio {
         if selected.is_empty() {
             self.command_line
                 .push_info(crate::t!("Select one or more closed objects first.").as_ref());
+            return iced::Task::none();
+        }
+        let open_boundaries: rustc_hash::FxHashSet<_> = selected
+            .iter()
+            .copied()
+            .filter(|handle| {
+                self.tabs[i]
+                    .scene
+                    .document
+                    .get_entity(*handle)
+                    .is_some_and(is_open_fill_boundary)
+            })
+            .collect();
+        if ask_to_close && value != GraphicAttribute::None && !open_boundaries.is_empty() {
+            self.pending_graphic_fill_close =
+                Some((value, open_boundaries.iter().copied().collect(), selected.clone()));
             return iced::Task::none();
         }
         let selected_handles: rustc_hash::FxHashSet<_> = selected.iter().copied().collect();
@@ -331,7 +430,9 @@ impl OpenCADStudio {
                     hatches.push(hatch);
                     changed_boundaries.insert(*handle);
                 } else {
-                    skipped += 1;
+                    if !open_boundaries.contains(handle) {
+                        skipped += 1;
+                    }
                 }
             }
             // Replace only fills belonging to boundaries that successfully
@@ -367,11 +468,10 @@ impl OpenCADStudio {
         }
         if skipped > 0 {
             let message = if skipped == 1 {
-                "Graphic Attributes: 1 object was not changed because it is not closed or supported."
-                    .to_owned()
+                "Graphic Attributes: 1 unsupported object was not changed.".to_owned()
             } else {
                 format!(
-                    "Graphic Attributes: {skipped} objects were not changed because they are not closed or supported."
+                    "Graphic Attributes: {skipped} unsupported objects were not changed."
                 )
             };
             self.command_line.push_info(&message);
@@ -2007,6 +2107,12 @@ mod tests {
                 matches!(entity, EntityType::Hatch(_)).then_some(entity.common().handle)
             })
             .expect("gradient hatch");
+        let associated_lines = crate::ui::window::graphic_attributes::line_handles(
+            &app.tabs[i].scene.document,
+            &[selected_hatch],
+        );
+        assert_eq!(associated_lines.len(), 1);
+        assert!(boundaries.contains(&associated_lines[0]));
         assert_eq!(
             crate::ui::window::graphic_attributes::current(
                 &app.tabs[i].scene.document,
@@ -2259,6 +2365,40 @@ mod tests {
             .get_entity(selected_hatch)
             .is_none());
         assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before + 1);
+    }
+
+    #[test]
+    fn graphic_attributes_can_close_an_open_boundary_from_the_command_prompt() {
+        use crate::ui::window::graphic_attributes::GraphicAttribute;
+        use acadrust::entities::LwPolyline;
+        use acadrust::types::Vector2;
+
+        let mut app = fresh();
+        let i = app.active_tab;
+        let mut polyline = LwPolyline::new();
+        for (x, y) in [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)] {
+            polyline.add_point(Vector2::new(x, y));
+        }
+        let boundary = app.tabs[i]
+            .scene
+            .add_entity(EntityType::LwPolyline(polyline));
+        app.tabs[i].scene.select_entity(boundary, false);
+
+        let _ = app.update(Message::GraphicAttributeChanged(GraphicAttribute::Solid));
+        assert!(app.pending_graphic_fill_close.is_some());
+        assert!(!app.tabs[i].scene.document.entities().any(|entity| {
+            matches!(entity, EntityType::Hatch(_))
+        }));
+
+        let _ = app.update(Message::CommandOptionPick("Y".to_string()));
+        assert!(app.pending_graphic_fill_close.is_none());
+        assert!(matches!(
+            app.tabs[i].scene.document.get_entity(boundary),
+            Some(EntityType::LwPolyline(polyline)) if polyline.is_closed
+        ));
+        assert!(app.tabs[i].scene.document.entities().any(|entity| {
+            matches!(entity, EntityType::Hatch(hatch) if hatch.is_solid && hatch.is_associative)
+        }));
     }
 
     #[test]

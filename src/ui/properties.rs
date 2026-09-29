@@ -55,6 +55,9 @@ pub fn linetype_display_name(name: &str) -> String {
 
 impl fmt::Display for LinetypeItem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.name.is_empty() && !self.art.is_empty() {
+            return f.write_str(&self.art);
+        }
         let name = linetype_display_name(&self.name);
         if self.art.is_empty() {
             write!(f, "{name}")

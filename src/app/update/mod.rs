@@ -432,6 +432,18 @@ impl OpenCADStudio {
         }) {
             self.hatch_editor_handles = None;
         }
+        if self
+            .pending_graphic_fill_close
+            .as_ref()
+            .is_some_and(|(_, _, handles)| {
+                let selected =
+                    self.tabs[self.active_tab].scene.selected_handles_in_order();
+                selected.len() != handles.len()
+                    || selected.iter().any(|handle| !handles.contains(handle))
+            })
+        {
+            self.pending_graphic_fill_close = None;
+        }
         self.show_next_startup_modal();
         self.sync_open_command_history();
         // Close the document-level first-touch transaction started by
@@ -445,6 +457,19 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .map(|c| c.prompt())
+            .or_else(|| {
+                self.pending_graphic_fill_close.as_ref().map(|(_, handles, _)| {
+                    if handles.len() == 1 {
+                        "The selected object is open. Close it before creating the fill? [Yes / No]"
+                            .to_string()
+                    } else {
+                        format!(
+                            "{} selected objects are open. Close them before creating the fill? [Yes / No]",
+                            handles.len()
+                        )
+                    }
+                })
+            })
             .or_else(|| self.pending_pick_label());
         self.command_line.set_step_prompt(prompt);
         // Mirror the step's clickable options so they render as buttons (#304).
@@ -452,6 +477,14 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .map(|c| c.options())
+            .or_else(|| {
+                self.pending_graphic_fill_close.as_ref().map(|_| {
+                    vec![
+                        crate::command::CmdOption::new("Yes", "Y"),
+                        crate::command::CmdOption::new("No", "N"),
+                    ]
+                })
+            })
             .unwrap_or_default();
         self.command_line.set_step_options(opts);
         // Persist UI preferences whenever a toggle changes them (issue #68).
@@ -2406,6 +2439,14 @@ impl OpenCADStudio {
                 // finishes the step like Enter. (#304)
                 self.command_line.input.clear();
                 self.command_line.close_history();
+                if self.pending_graphic_fill_close.is_some() {
+                    if kw.eq_ignore_ascii_case("Y") || kw.eq_ignore_ascii_case("YES") {
+                        return self.on_graphic_fill_close_response(true);
+                    }
+                    if kw.eq_ignore_ascii_case("N") || kw.eq_ignore_ascii_case("NO") {
+                        return self.on_graphic_fill_close_response(false);
+                    }
+                }
                 if kw.is_empty() {
                     return self.feed_command(crate::command::StepInput::Enter);
                 }

@@ -780,6 +780,11 @@ pub(super) struct OpenCADStudio {
     fill_transparency_menu_open: bool,
     gradient_editor: Option<crate::ui::window::gradient_editor::GradientEditorState>,
     hatch_editor_handles: Option<Vec<acadrust::Handle>>,
+    pending_graphic_fill_close: Option<(
+        crate::ui::window::graphic_attributes::GraphicAttribute,
+        Vec<acadrust::Handle>,
+        Vec<acadrust::Handle>,
+    )>,
     /// Docked Insert Block panel visibility.
     pub(crate) show_block_palette: bool,
     /// Docked External References panel visibility (EXTERNALREFERENCES).
@@ -4167,6 +4172,7 @@ impl OpenCADStudio {
             fill_transparency_menu_open: false,
             gradient_editor: None,
             hatch_editor_handles: None,
+            pending_graphic_fill_close: None,
             show_block_palette: false,
             show_external_references: false,
             show_browser: false,

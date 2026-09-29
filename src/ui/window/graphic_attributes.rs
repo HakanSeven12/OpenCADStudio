@@ -26,14 +26,16 @@ enum PropertyMode {
     ByLayer,
     ByBlock,
     Custom,
+    Varies,
 }
 
 impl PropertyMode {
     fn button_label(self) -> &'static str {
         match self {
-            Self::ByLayer => "[L]",
-            Self::ByBlock => "[B]",
-            Self::Custom => "[C]",
+            Self::ByLayer => "L",
+            Self::ByBlock => "B",
+            Self::Custom => "C",
+            Self::Varies => "V",
         }
     }
 }
@@ -54,6 +56,7 @@ struct LinetypeScaleInfo {
 }
 
 const PALETTE_CONTROL_ICON_SIZE: f32 = 20.0;
+const COMPACT_BUTTON_HEIGHT: f32 = 22.0;
 const TRANSPARENCY_ICON: &[u8] =
     include_bytes!("../../../assets/icons/attributes/transparency.svg");
 const LINEWEIGHT_ICON: &[u8] = include_bytes!("../../../assets/icons/attributes/lineweight.svg");
@@ -156,15 +159,28 @@ pub(crate) fn fill_handles(document: &CadDocument, selected: &[Handle]) -> Vec<H
 }
 
 pub(crate) fn line_handles(document: &CadDocument, selected: &[Handle]) -> Vec<Handle> {
-    selected
-        .iter()
-        .copied()
-        .filter(|handle| {
-            document
-                .get_entity(*handle)
-                .is_some_and(|entity| !matches!(entity, EntityType::Hatch(_)))
-        })
-        .collect()
+    let mut handles = Vec::new();
+    let mut seen = rustc_hash::FxHashSet::default();
+    for handle in selected {
+        match document.get_entity(*handle) {
+            Some(EntityType::Hatch(hatch)) if hatch.is_associative => {
+                for boundary in hatch.paths.iter().flat_map(|path| &path.boundary_handles) {
+                    if seen.insert(*boundary)
+                        && document
+                            .get_entity(*boundary)
+                            .is_some_and(|entity| !matches!(entity, EntityType::Hatch(_)))
+                    {
+                        handles.push(*boundary);
+                    }
+                }
+            }
+            Some(entity) if !matches!(entity, EntityType::Hatch(_)) && seen.insert(*handle) => {
+                handles.push(*handle);
+            }
+            _ => {}
+        }
+    }
+    handles
 }
 
 fn top_handle(
@@ -276,6 +292,33 @@ fn lineweight_info(
     Some(LineweightInfo { value, varies })
 }
 
+fn effective_lineweight(
+    document: &CadDocument,
+    handles: &[Handle],
+    draw_depth: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+    stored: acadrust::types::LineWeight,
+) -> acadrust::types::LineWeight {
+    if !matches!(stored, acadrust::types::LineWeight::ByLayer) {
+        return stored;
+    }
+    let layer_name = top_handle(handles, draw_depth)
+        .and_then(|handle| document.get_entity(handle))
+        .map(|entity| entity.common().layer.as_str())
+        .unwrap_or_else(|| {
+            if document.header.current_layer_name.is_empty() {
+                "0"
+            } else {
+                document.header.current_layer_name.as_str()
+            }
+        });
+    document
+        .layers
+        .get(layer_name)
+        .map_or(acadrust::types::LineWeight::Default, |layer| {
+            layer.line_weight
+        })
+}
+
 fn linetype_scale_info(
     document: &CadDocument,
     handles: &[Handle],
@@ -364,7 +407,12 @@ fn linetype_preview_art(
     } else {
         logical_name
     };
-    document
+    if effective_name.eq_ignore_ascii_case("Continuous")
+        || effective_name.eq_ignore_ascii_case("Solid")
+    {
+        return "_".repeat(80);
+    }
+    let art = document
         .line_types
         .iter()
         .find(|line_type| line_type.name.eq_ignore_ascii_case(effective_name))
@@ -375,7 +423,26 @@ fn linetype_preview_art(
                 crate::io::linetypes::extract_pattern(&line_type.description)
             }
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let pattern_start = art.split_whitespace().find_map(|part| {
+        (part
+            .chars()
+            .filter(|character| matches!(character, '_' | '.' | '-' | '/' | '\\' | '|' | '~'))
+            .count()
+            >= 2)
+        .then(|| art.find(part))
+        .flatten()
+    });
+    let pattern = pattern_start.map_or(art.as_str(), |start| &art[start..]);
+    if pattern.is_empty() {
+        return String::new();
+    }
+    let mut full_width = pattern.to_string();
+    while full_width.chars().count() < 80 {
+        full_width.push(' ');
+        full_width.push_str(pattern);
+    }
+    full_width
 }
 
 fn top_fill_hatch<'a>(
@@ -418,11 +485,39 @@ fn top_fill_hatch<'a>(
         .map(|(_, hatch)| hatch)
 }
 
+fn gradients_vary(document: &CadDocument, selected: &[Handle]) -> bool {
+    let mut gradients = fill_handles(document, selected)
+        .into_iter()
+        .filter_map(|handle| match document.get_entity(handle) {
+            Some(EntityType::Hatch(hatch)) if hatch.gradient_color.enabled => {
+                Some(&hatch.gradient_color)
+            }
+            _ => None,
+        });
+    let Some(first) = gradients.next() else {
+        return false;
+    };
+    gradients.any(|gradient| gradient != first)
+}
+
 fn popup_alignment(side: crate::app::config::DockSide) -> iced_aw::drop_down::Alignment {
     match side {
         crate::app::config::DockSide::Left => iced_aw::drop_down::Alignment::BottomEnd,
         crate::app::config::DockSide::Right => iced_aw::drop_down::Alignment::BottomStart,
     }
+}
+
+fn compact_button_content(label: &'static str) -> Element<'static, Message> {
+    container(text(label).size(crate::ui::ROW_H * 0.42))
+        .width(12)
+        .height(Fill)
+        .align_x(iced::Center)
+        .align_y(iced::Center)
+        .into()
+}
+
+fn mode_button_content(mode: PropertyMode) -> Element<'static, Message> {
+    compact_button_content(mode.button_label())
 }
 
 fn by_mode_menu<'a>(
@@ -434,7 +529,7 @@ fn by_mode_menu<'a>(
     by_layer: Message,
     by_block: Message,
 ) -> Element<'a, Message> {
-    let more = button(text(mode.button_label()).size(crate::ui::ROW_H * 0.42))
+    let more = button(mode_button_content(mode))
         .on_press(toggle)
         .style(move |theme: &Theme, status| {
             if open {
@@ -443,8 +538,8 @@ fn by_mode_menu<'a>(
                 button::secondary(theme, status)
             }
         })
-        .height(crate::ui::ROW_H)
-        .padding([2, 7]);
+        .height(COMPACT_BUTTON_HEIGHT)
+        .padding([1, 3]);
     if !open {
         return more.into();
     }
@@ -483,7 +578,7 @@ fn color_control<'a>(
         Some("*VARIES*")
     } else {
         match info.color {
-            acadrust::types::Color::ByLayer => Some("ByLayer"),
+            acadrust::types::Color::ByLayer => None,
             acadrust::types::Color::ByBlock => Some("ByBlock"),
             _ => None,
         }
@@ -498,7 +593,7 @@ fn color_control<'a>(
     let color = button(label.unwrap_or_else(|| container(Space::new()).width(Fill).height(Fill)))
         .on_press(Message::OpenColorWindow(target.clone(), info.color))
         .width(Fill)
-        .height(crate::ui::ROW_H)
+        .height(COMPACT_BUTTON_HEIGHT)
         .padding(0)
         .style(move |theme: &Theme, status| button::Style {
             background: Some(Background::Color(info.display)),
@@ -521,7 +616,7 @@ fn color_control<'a>(
             ..Default::default()
         });
     let mode = if info.varies {
-        PropertyMode::Custom
+        PropertyMode::Varies
     } else {
         match info.color {
             acadrust::types::Color::ByLayer => PropertyMode::ByLayer,
@@ -529,7 +624,7 @@ fn color_control<'a>(
             _ => PropertyMode::Custom,
         }
     };
-    let more = button(text(mode.button_label()).size(crate::ui::ROW_H * 0.42))
+    let more = button(mode_button_content(mode))
         .on_press(toggle)
         .style(move |theme: &Theme, status| {
             if menu_open {
@@ -538,8 +633,8 @@ fn color_control<'a>(
                 button::secondary(theme, status)
             }
         })
-        .height(crate::ui::ROW_H)
-        .padding([2, 7]);
+        .height(COMPACT_BUTTON_HEIGHT)
+        .padding([1, 3]);
     let more: Element<'a, Message> = if menu_open {
         let choice = |label, color| {
             button(text(label).size(11))
@@ -599,11 +694,11 @@ fn transparency_control<'a>(
     .align_y(iced::Center)
     .height(crate::ui::ROW_H);
     let mode = if info.varies {
-        PropertyMode::Custom
+        PropertyMode::Varies
     } else {
         info.mode
     };
-    let more = button(text(mode.button_label()).size(crate::ui::ROW_H * 0.42))
+    let more = button(mode_button_content(mode))
         .on_press(toggle)
         .style(move |theme: &Theme, status| {
             if menu_open {
@@ -613,7 +708,7 @@ fn transparency_control<'a>(
             }
         })
         .height(crate::ui::ROW_H)
-        .padding([2, 7]);
+        .padding([1, 3]);
     let more: Element<'a, Message> = if menu_open {
         let row_button = |label, message| {
             button(text(label).size(11))
@@ -823,7 +918,9 @@ pub fn view<'a>(
     });
     if let Some(info) = linetype.as_ref() {
         let selected = (!info.varies).then(|| crate::ui::properties::LinetypeItem {
-            name: info.value.clone(),
+            // An empty name makes only the preview art visible in the closed
+            // Graphic Attributes control. Menu items retain their full names.
+            name: String::new(),
             art: linetype_preview_art(document, &line_handles, draw_depth, &info.value),
         });
         let combo = combo_box(
@@ -844,7 +941,7 @@ pub fn view<'a>(
         let more = by_mode_menu(
             side,
             if info.varies {
-                PropertyMode::Custom
+                PropertyMode::Varies
             } else if info.value.eq_ignore_ascii_case("ByLayer") {
                 PropertyMode::ByLayer
             } else if info.value.eq_ignore_ascii_case("ByBlock") {
@@ -890,7 +987,15 @@ pub fn view<'a>(
         let mut scale_input = text_input("*VARIES*", &scale_text)
             .size(crate::ui::ROW_H * 0.42)
             .padding([3, 5])
-            .style(crate::ui::properties::combo_input_style)
+            .style(move |theme: &Theme, status| {
+                let mut style = crate::ui::properties::combo_input_style(theme, status);
+                if continuous_linetype {
+                    let disabled = theme.palette().background.base.text.scale_alpha(0.42);
+                    style.value = disabled;
+                    style.placeholder = disabled;
+                }
+                style
+            })
             .on_submit(Message::Noop)
             .width(Fill);
         if !continuous_linetype {
@@ -902,7 +1007,10 @@ pub fn view<'a>(
             } else {
                 crate::ui::icons::themed_arrow_down(7.0)
             };
-            let button = button(icon).style(button::secondary).padding([0, 3]);
+            let button = button(icon)
+                .style(button::subtle)
+                .height(10)
+                .padding([0, 3]);
             if continuous_linetype {
                 button
             } else {
@@ -912,18 +1020,48 @@ pub fn view<'a>(
                         ))
                     }
         };
-        let scale = row![
-            crate::ui::icons::semantic(GraphicAttribute::Solid.icon(), PALETTE_CONTROL_ICON_SIZE),
-            scale_input,
-            column![step(true), step(false)].spacing(0),
-        ]
+        let scale_icon: Element<'_, Message> = if continuous_linetype {
+            crate::ui::icons::themed_disabled(
+                GraphicAttribute::Solid.icon(),
+                PALETTE_CONTROL_ICON_SIZE,
+            )
+        } else {
+            crate::ui::icons::semantic(
+                GraphicAttribute::Solid.icon(),
+                PALETTE_CONTROL_ICON_SIZE,
+            )
+        };
+        let spinner_divider = container(Space::new())
+            .width(Fill)
+            .height(1)
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(theme.palette().background.neutral.color)),
+                ..Default::default()
+            });
+        let spinner = container(column![step(true), spinner_divider, step(false)].spacing(0))
+            .height(COMPACT_BUTTON_HEIGHT)
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(theme.palette().background.base.color)),
+                border: Border {
+                    color: theme.palette().background.neutral.color,
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                ..Default::default()
+            });
+        let scale_field = row![scale_input, spinner]
+            .spacing(0)
+            .align_y(iced::Center)
+            .width(Fill);
+        let scale = row![scale_icon, scale_field]
         .spacing(3)
         .align_y(iced::Center)
         .width(Length::FillPortion(1));
-        let selected =
-            (!lineweight.varies).then_some(crate::ui::properties::LwItem(lineweight.value));
+        let selected = (!lineweight.varies).then_some(crate::ui::properties::LwItem(
+            effective_lineweight(document, &line_handles, draw_depth, lineweight.value),
+        ));
         let lineweight_mode = if lineweight.varies {
-            PropertyMode::Custom
+            PropertyMode::Varies
         } else {
             match lineweight.value {
                 acadrust::types::LineWeight::ByLayer => PropertyMode::ByLayer,
@@ -1038,12 +1176,25 @@ pub fn view<'a>(
             } else {
                 Message::GradientEditorOpen
             };
-            let preview = button(
-                image(crate::ui::window::gradient_editor::compact_preview(hatch))
-                    .width(Fill)
-                    .height(Fill)
-                    .content_fit(iced::ContentFit::Fill),
-            )
+            let preview_image = image(crate::ui::window::gradient_editor::compact_preview(hatch))
+                .width(Fill)
+                .height(Fill)
+                .content_fit(iced::ContentFit::Fill);
+            let preview_content: Element<'_, Message> = if gradients_vary(document, selected) {
+                iced::widget::stack![
+                    preview_image,
+                    container(text("*VARIES*").size(10))
+                        .width(Fill)
+                        .height(Fill)
+                        .align_x(iced::Left)
+                        .align_y(iced::Center)
+                        .padding([0, 6]),
+                ]
+                .into()
+            } else {
+                preview_image.into()
+            };
+            let preview = button(preview_content)
             .on_press(toggle.clone())
             .width(Fill)
             .height(crate::ui::ROW_H)
@@ -1063,7 +1214,7 @@ pub fn view<'a>(
                 },
                 ..Default::default()
             });
-            let edit = button(text("...").size(crate::ui::ROW_H * 0.42))
+            let edit = button(compact_button_content("⋮"))
                 .on_press(toggle)
                 .style(move |theme: &Theme, status| {
                     if gradient_editor.is_some() {
@@ -1072,8 +1223,8 @@ pub fn view<'a>(
                         button::secondary(theme, status)
                     }
                 })
-                .height(crate::ui::ROW_H)
-                .padding([2, 7]);
+                .height(COMPACT_BUTTON_HEIGHT)
+                .padding([1, 3]);
             let edit = tooltip(
                 edit,
                 text("Edit gradient").size(10),
@@ -1122,7 +1273,7 @@ pub fn view<'a>(
                 Message::HatchEditorOpen
             })
             .width(Fill)
-            .height(crate::ui::ROW_H)
+            .height(COMPACT_BUTTON_HEIGHT)
             .padding(0)
             .style(move |theme: &Theme, status| button::Style {
                     background: Some(Background::Color(theme.palette().background.base.color)),
@@ -1139,28 +1290,7 @@ pub fn view<'a>(
                     },
                     ..Default::default()
         });
-        let preview: Element<'_, Message> = if hatch_editor_open {
-            let popup = crate::ui::properties::hatch_pattern_picker_content(
-                hatch_pattern_search,
-                hatch_pattern_focus,
-                current_pattern,
-                "graphic-hatch-pattern-search",
-                Message::GraphicHatchPatternSearchChanged,
-                Message::GraphicHatchPatternConfirm,
-                Message::GraphicHatchPatternFocus,
-                Message::GraphicHatchPatternChanged,
-            );
-            iced_aw::DropDown::new(preview, popup, true)
-                .width(Length::Fixed(348.0))
-                .height(Length::Fixed(720.0))
-                .alignment(popup_alignment(side))
-                .offset(4.0)
-                .on_dismiss(Message::HatchEditorClose)
-                .into()
-        } else {
-            preview.into()
-        };
-        let edit = button(text("...").size(crate::ui::ROW_H * 0.42))
+        let edit = button(compact_button_content("⋮"))
             .on_press(if hatch_editor_open {
                 Message::HatchEditorClose
             } else {
@@ -1174,8 +1304,40 @@ pub fn view<'a>(
                 }
             })
             .height(crate::ui::ROW_H)
-            .padding([2, 7]);
+            .padding([1, 3]);
         let edit = tooltip(edit, text("Edit hatch").size(10), tooltip::Position::Bottom);
+        let edit: Element<'_, Message> = if hatch_editor_open {
+            let popup = crate::ui::properties::hatch_pattern_picker_content(
+                hatch_pattern_search,
+                hatch_pattern_focus,
+                current_pattern,
+                "graphic-hatch-pattern-search",
+                Message::GraphicHatchPatternSearchChanged,
+                Message::GraphicHatchPatternConfirm,
+                Message::GraphicHatchPatternFocus,
+                Message::GraphicHatchPatternChanged,
+            );
+            let popup = container(popup)
+                .padding(1)
+                .style(|theme: &Theme| container::Style {
+                    background: Some(Background::Color(theme.palette().background.base.color)),
+                    border: Border {
+                        color: theme.palette().primary.base.color,
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    ..Default::default()
+                });
+            iced_aw::DropDown::new(edit, popup, true)
+                .width(Length::Fixed(352.0))
+                .height(Length::Fixed(724.0))
+                .alignment(popup_alignment(side))
+                .offset(4.0)
+                .on_dismiss(Message::HatchEditorClose)
+                .into()
+        } else {
+            edit.into()
+        };
         body = body.push(row![preview, edit].spacing(4).align_y(iced::Center));
     }
     if current != GraphicAttribute::None {

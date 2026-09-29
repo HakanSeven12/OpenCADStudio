@@ -130,7 +130,324 @@ fn close_fill_boundary(entity: &mut acadrust::EntityType) -> bool {
     }
 }
 
+#[derive(Clone)]
+struct ConcreteGraphicAttributes {
+    color: acadrust::types::Color,
+    linetype: String,
+    lineweight: acadrust::types::LineWeight,
+    transparency: acadrust::types::Transparency,
+}
+
+fn concrete_graphic_attributes(
+    color: acadrust::types::Color,
+    linetype: &str,
+    lineweight: acadrust::types::LineWeight,
+    transparency: acadrust::types::Transparency,
+    layer: Option<&acadrust::tables::Layer>,
+) -> ConcreteGraphicAttributes {
+    let layer_color = layer.map_or(acadrust::types::Color::Index(7), |layer| {
+        match layer.color {
+            acadrust::types::Color::ByLayer | acadrust::types::Color::ByBlock => {
+                acadrust::types::Color::Index(7)
+            }
+            color => color,
+        }
+    });
+    let layer_linetype = layer
+        .map(|layer| layer.line_type.as_str())
+        .filter(|value| {
+            !value.is_empty()
+                && !value.eq_ignore_ascii_case("ByLayer")
+                && !value.eq_ignore_ascii_case("ByBlock")
+        })
+        .unwrap_or("Continuous");
+    let layer_lineweight = layer.map_or(acadrust::types::LineWeight::Default, |layer| {
+        match layer.line_weight {
+            acadrust::types::LineWeight::ByLayer | acadrust::types::LineWeight::ByBlock => {
+                acadrust::types::LineWeight::Default
+            }
+            value => value,
+        }
+    });
+    let layer_transparency = layer.map_or_else(
+        || acadrust::types::Transparency::from_percent(0.0),
+        |layer| {
+            if layer.transparency.is_by_layer() || layer.transparency.is_by_block() {
+                acadrust::types::Transparency::from_percent(0.0)
+            } else {
+                layer.transparency
+            }
+        },
+    );
+
+    ConcreteGraphicAttributes {
+        color: match color {
+            acadrust::types::Color::ByLayer => layer_color,
+            acadrust::types::Color::ByBlock => acadrust::types::Color::Index(7),
+            value => value,
+        },
+        linetype: if linetype.is_empty() || linetype.eq_ignore_ascii_case("ByLayer") {
+            layer_linetype.to_owned()
+        } else if linetype.eq_ignore_ascii_case("ByBlock") {
+            "Continuous".to_owned()
+        } else {
+            linetype.to_owned()
+        },
+        lineweight: match lineweight {
+            acadrust::types::LineWeight::ByLayer => layer_lineweight,
+            acadrust::types::LineWeight::ByBlock => acadrust::types::LineWeight::Default,
+            value => value,
+        },
+        transparency: if transparency.is_by_layer() {
+            layer_transparency
+        } else if transparency.is_by_block() {
+            acadrust::types::Transparency::from_percent(0.0)
+        } else {
+            transparency
+        },
+    }
+}
+
+fn valid_layer_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().count() <= 255
+        && !name.chars().any(|character| {
+            matches!(
+                character,
+                '<' | '>' | '/' | '\\' | '"' | ':' | ';' | '?' | '*' | '|' | '=' | '`'
+            )
+        })
+}
+
 impl OpenCADStudio {
+    fn graphic_attribute_handles(&self, tab: usize) -> Vec<Handle> {
+        let selected = self.tabs[tab].scene.selected_handles_in_order();
+        let document = &self.tabs[tab].scene.document;
+        let mut seen = rustc_hash::FxHashSet::default();
+        crate::ui::window::graphic_attributes::line_handles(document, &selected)
+            .into_iter()
+            .chain(crate::ui::window::graphic_attributes::fill_handles(
+                document, &selected,
+            ))
+            .filter(|handle| seen.insert(*handle))
+            .collect()
+    }
+
+    fn current_graphic_attributes(&self, tab: usize) -> ConcreteGraphicAttributes {
+        let document = &self.tabs[tab].scene.document;
+        let handles = self.graphic_attribute_handles(tab);
+        let draw_depth = self.tabs[tab].scene.draw_depth_map();
+        let entity = handles
+            .iter()
+            .filter_map(|handle| {
+                document.get_entity(*handle).map(|entity| {
+                    let depth = draw_depth
+                        .get(&handle.value())
+                        .map_or(0.0, |value| value[0]);
+                    (depth, entity)
+                })
+            })
+            .max_by(|(left, _), (right, _)| left.total_cmp(right))
+            .map(|(_, entity)| entity);
+
+        if let Some(entity) = entity {
+            let common = entity.common();
+            return concrete_graphic_attributes(
+                common.color,
+                &common.linetype,
+                common.line_weight,
+                common.transparency,
+                document.layers.get(&common.layer),
+            );
+        }
+
+        let header = &document.header;
+        let layer_name = if header.current_layer_name.is_empty() {
+            self.tabs[tab].active_layer.as_str()
+        } else {
+            header.current_layer_name.as_str()
+        };
+        concrete_graphic_attributes(
+            header.current_entity_color,
+            &header.current_linetype_name,
+            acadrust::types::LineWeight::from_value(header.current_line_weight),
+            document.current_entity_transparency(),
+            document.layers.get(layer_name),
+        )
+    }
+
+    pub(super) fn on_graphic_attributes_set_all(&mut self, by_layer: bool) -> iced::Task<Message> {
+        self.graphic_attributes_header_menu_open = false;
+        let i = self.active_tab;
+        let selected = self.tabs[i].scene.selected_handles_in_order();
+        let (color, linetype, lineweight, transparency) = if by_layer {
+            (
+                acadrust::types::Color::ByLayer,
+                "ByLayer",
+                acadrust::types::LineWeight::ByLayer,
+                acadrust::types::Transparency::BY_LAYER,
+            )
+        } else {
+            (
+                acadrust::types::Color::ByBlock,
+                "ByBlock",
+                acadrust::types::LineWeight::ByBlock,
+                acadrust::types::Transparency::BY_BLOCK,
+            )
+        };
+        if selected.is_empty() {
+            let header = &mut self.tabs[i].scene.document.header;
+            header.current_entity_color = color;
+            header.current_linetype_name = linetype.to_owned();
+            header.current_linetype_handle = acadrust::Handle::NULL;
+            header.current_line_weight = lineweight.value();
+            self.tabs[i]
+                .scene
+                .document
+                .set_current_entity_transparency(transparency);
+            self.tabs[i].dirty = true;
+            self.sync_ribbon_from_selection();
+            self.refresh_properties();
+            return iced::Task::none();
+        }
+
+        let handles: Vec<_> = self
+            .graphic_attribute_handles(i)
+            .into_iter()
+            .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
+            .collect();
+        self.apply_property_op(i, "Graphic Attributes", &handles, |app, handle| {
+            if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                crate::scene::view::dispatch::apply_color(entity, color);
+                crate::scene::view::dispatch::apply_common_prop(entity, "linetype", linetype);
+                crate::scene::view::dispatch::apply_line_weight(entity, lineweight);
+                entity.common_mut().transparency = transparency;
+            }
+        });
+        iced::Task::none()
+    }
+
+    pub(super) fn on_graphic_attributes_remove_references(&mut self) -> iced::Task<Message> {
+        self.graphic_attributes_header_menu_open = false;
+        let i = self.active_tab;
+        let selected = self.tabs[i].scene.selected_handles_in_order();
+        if selected.is_empty() {
+            let values = self.current_graphic_attributes(i);
+            let linetype_handle = self.tabs[i]
+                .scene
+                .document
+                .line_types
+                .iter()
+                .find(|linetype| linetype.name.eq_ignore_ascii_case(&values.linetype))
+                .map_or(acadrust::Handle::NULL, |linetype| linetype.handle);
+            let header = &mut self.tabs[i].scene.document.header;
+            header.current_entity_color = values.color;
+            header.current_linetype_name = values.linetype;
+            header.current_linetype_handle = linetype_handle;
+            header.current_line_weight = values.lineweight.value();
+            self.tabs[i]
+                .scene
+                .document
+                .set_current_entity_transparency(values.transparency);
+            self.tabs[i].dirty = true;
+            self.sync_ribbon_from_selection();
+            self.refresh_properties();
+            return iced::Task::none();
+        }
+
+        let handles: Vec<_> = self
+            .graphic_attribute_handles(i)
+            .into_iter()
+            .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
+            .collect();
+        let values: rustc_hash::FxHashMap<_, _> = handles
+            .iter()
+            .filter_map(|handle| {
+                let entity = self.tabs[i].scene.document.get_entity(*handle)?;
+                let common = entity.common();
+                Some((
+                    *handle,
+                    concrete_graphic_attributes(
+                        common.color,
+                        &common.linetype,
+                        common.line_weight,
+                        common.transparency,
+                        self.tabs[i].scene.document.layers.get(&common.layer),
+                    ),
+                ))
+            })
+            .collect();
+        self.apply_property_op(i, "Graphic Attributes", &handles, |app, handle| {
+            let Some(values) = values.get(&handle) else {
+                return;
+            };
+            if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                crate::scene::view::dispatch::apply_color(entity, values.color);
+                crate::scene::view::dispatch::apply_common_prop(
+                    entity,
+                    "linetype",
+                    &values.linetype,
+                );
+                crate::scene::view::dispatch::apply_line_weight(entity, values.lineweight);
+                entity.common_mut().transparency = values.transparency;
+            }
+        });
+        iced::Task::none()
+    }
+
+    pub(crate) fn create_graphic_attributes_layer(
+        &mut self,
+        raw_name: &str,
+    ) -> iced::Task<Message> {
+        let i = self.active_tab;
+        let name = raw_name.trim();
+        if !valid_layer_name(name) {
+            self.command_line
+                .push_error("Graphic Attributes: enter a valid layer name without <>/\\\":;?*|=`.");
+            return iced::Task::none();
+        }
+        if self.tabs[i]
+            .scene
+            .document
+            .layers
+            .iter()
+            .any(|layer| layer.name.eq_ignore_ascii_case(name))
+        {
+            self.command_line.push_error(
+                crate::tf!("Graphic Attributes: layer \"{name}\" already exists.").as_ref(),
+            );
+            return iced::Task::none();
+        }
+
+        let values = self.current_graphic_attributes(i);
+        let layer_name = name.to_owned();
+        let undo = self.begin_layer_undo(
+            i,
+            "Create layer with active settings",
+            std::slice::from_ref(&layer_name),
+        );
+        let mut layer = acadrust::tables::Layer::new(name);
+        layer.handle = self.tabs[i].scene.document.allocate_handle();
+        layer.color = values.color;
+        layer.line_type = values.linetype;
+        layer.line_weight = values.lineweight;
+        layer.transparency = values.transparency;
+        use acadrust::tables::Table;
+        if self.tabs[i].scene.document.layers.add(layer).is_err() {
+            self.command_line
+                .push_error("Graphic Attributes: the layer could not be created.");
+            return iced::Task::none();
+        }
+        self.tabs[i].dirty = true;
+        self.commit_layer_undo(i, undo);
+        self.refresh_layer_panel();
+        self.command_line.push_output(
+            crate::tf!("Created layer \"{name}\" with the active Graphic Attributes settings.")
+                .as_ref(),
+        );
+        iced::Task::none()
+    }
+
     pub(super) fn open_gradient_editor(&mut self) {
         use crate::ui::window::gradient_editor::GradientEditorState;
         let i = self.active_tab;
@@ -601,7 +918,7 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_line_linetype_scale(&mut self, scale: f64) -> iced::Task<Message> {
-        let scale = scale.clamp(0.01, 1000.0);
+        let scale = ((scale * 10.0).round() / 10.0).clamp(0.1, 1000.0);
         let i = self.active_tab;
         let selected = self.tabs[i].scene.selected_handles_in_order();
         if selected.is_empty() {
@@ -1278,6 +1595,7 @@ impl OpenCADStudio {
                     }
                     PanelId::GraphicAttributes => {
                         self.show_graphic_attributes = false;
+                        self.graphic_attributes_header_menu_open = false;
                         self.graphic_attribute_menu_open = false;
                     }
                 }
@@ -2270,6 +2588,17 @@ mod tests {
                 .abs()
                 < f64::EPSILON
         );
+        let _ = app.update(Message::LineLinetypeScaleChanged(1.2000000000000002));
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(line)
+                .expect("line")
+                .common()
+                .linetype_scale,
+            1.2
+        );
         let _ = app.on_line_transparency(acadrust::types::Transparency::from_percent(0.2));
         assert!(
             (app.tabs[i]
@@ -2431,6 +2760,84 @@ mod tests {
                 .abs()
                 < 0.01
         );
+    }
+
+    #[test]
+    fn graphic_attributes_bulk_modes_and_remove_references_preserve_visible_values() {
+        let mut app = fresh();
+        let i = app.active_tab;
+        {
+            let layer = app.tabs[i]
+                .scene
+                .document
+                .layers
+                .get_mut("0")
+                .expect("default layer");
+            layer.color = acadrust::types::Color::Index(3);
+            layer.line_type = "Continuous".to_string();
+            layer.line_weight = acadrust::types::LineWeight::Value(50);
+            layer.transparency = acadrust::types::Transparency::from_percent(0.25);
+        }
+        let handle = app.tabs[i].scene.add_entity(EntityType::Line(Line::new()));
+        app.tabs[i].scene.select_entity(handle, false);
+
+        let _ = app.on_graphic_attributes_set_all(false);
+        let common = app.tabs[i]
+            .scene
+            .document
+            .get_entity(handle)
+            .expect("line")
+            .common();
+        assert_eq!(common.color, acadrust::types::Color::ByBlock);
+        assert_eq!(common.linetype, "ByBlock");
+        assert_eq!(common.line_weight, acadrust::types::LineWeight::ByBlock);
+        assert!(common.transparency.is_by_block());
+
+        let _ = app.on_graphic_attributes_set_all(true);
+        let _ = app.on_graphic_attributes_remove_references();
+        let common = app.tabs[i]
+            .scene
+            .document
+            .get_entity(handle)
+            .expect("line")
+            .common();
+        assert_eq!(common.color, acadrust::types::Color::Index(3));
+        assert_eq!(common.linetype, "Continuous");
+        assert_eq!(common.line_weight, acadrust::types::LineWeight::Value(50));
+        assert!((common.transparency.as_percent() - 0.25).abs() < 0.01);
+    }
+
+    #[test]
+    fn graphic_attributes_create_layer_prompt_keeps_spaces_and_active_settings() {
+        let mut app = fresh();
+        let i = app.active_tab;
+        app.tabs[i].scene.deselect_all();
+        let _ = app.on_line_color(acadrust::types::Color::Index(2));
+        let _ = app.on_line_linetype("Continuous".to_string());
+        let _ = app.on_line_lineweight(acadrust::types::LineWeight::Value(35));
+        let _ = app.on_line_transparency(acadrust::types::Transparency::from_percent(0.3));
+
+        let _ = app.update(Message::GraphicAttributesCreateLayer);
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|command| command.name()),
+            Some("GRAPHICATTRIBUTELAYER")
+        );
+        let _ = app.update(Message::CommandInput("Graphic Settings".to_string()));
+        let _ = app.update(Message::CommandFinalize);
+
+        let layer = app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("Graphic Settings")
+            .expect("created layer");
+        assert_eq!(layer.color, acadrust::types::Color::Index(2));
+        assert_eq!(layer.line_type, "Continuous");
+        assert_eq!(layer.line_weight, acadrust::types::LineWeight::Value(35));
+        assert!((layer.transparency.as_percent() - 0.3).abs() < 0.01);
     }
 
     /// A foreign document: the fresh scene's document plus one model-space LINE.

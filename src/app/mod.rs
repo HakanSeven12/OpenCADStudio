@@ -769,6 +769,7 @@ pub(super) struct OpenCADStudio {
     /// Whether the Properties panel is shown on the left (PROPERTIES).
     show_properties: bool,
     show_graphic_attributes: bool,
+    graphic_attributes_header_menu_open: bool,
     graphic_attribute_menu_open: bool,
     line_color_menu_open: bool,
     line_linetype_menu_open: bool,
@@ -2066,6 +2067,12 @@ pub enum ArrowKey {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    ToggleGraphicAttributesHeaderMenu,
+    CloseGraphicAttributesHeaderMenu,
+    GraphicAttributesSetAllByLayer,
+    GraphicAttributesSetAllByBlock,
+    GraphicAttributesRemoveReferences,
+    GraphicAttributesCreateLayer,
     ToggleGraphicAttributeDropdown,
     CloseGraphicAttributeDropdown,
     GraphicAttributeChanged(crate::ui::window::graphic_attributes::GraphicAttribute),
@@ -4161,6 +4168,7 @@ impl OpenCADStudio {
             render_mode_preview: None,
             show_properties: true,
             show_graphic_attributes: true,
+            graphic_attributes_header_menu_open: false,
             graphic_attribute_menu_open: false,
             line_color_menu_open: false,
             line_linetype_menu_open: false,

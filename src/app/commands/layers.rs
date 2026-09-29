@@ -3,6 +3,10 @@ use super::*;
 impl OpenCADStudio {
     pub(super) fn dispatch_layers(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
+            cmd if cmd.starts_with("GRAPHICATTRIBUTELAYER ") => {
+                let name = cmd.trim_start_matches("GRAPHICATTRIBUTELAYER").trim();
+                return Some(self.create_graphic_attributes_layer(name));
+            }
             // ── Layer object commands ──────────────────────────────────────
             "LAYOFF" => {
                 let handles: Vec<_> = self.tabs[i]

@@ -2953,6 +2953,7 @@ impl OpenCADStudio {
                     width,
                     auto_collapse,
                     side,
+                    self.graphic_attributes_header_menu_open,
                     self.graphic_attribute_menu_open,
                     self.line_color_menu_open,
                     self.line_linetype_menu_open,

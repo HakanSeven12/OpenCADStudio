@@ -9577,6 +9577,29 @@ impl OpenCADStudio {
             Message::PlotDialogOpen => self.on_plot_dialog_open(),
             Message::PlotDlg(m) => self.on_plot_dlg(m),
             Message::BlockPalette(m) => self.on_block_palette(m),
+            Message::ToggleGraphicAttributesHeaderMenu => {
+                self.graphic_attributes_header_menu_open ^= true;
+                Task::none()
+            }
+            Message::CloseGraphicAttributesHeaderMenu => {
+                self.graphic_attributes_header_menu_open = false;
+                Task::none()
+            }
+            Message::GraphicAttributesSetAllByLayer => self.on_graphic_attributes_set_all(true),
+            Message::GraphicAttributesSetAllByBlock => self.on_graphic_attributes_set_all(false),
+            Message::GraphicAttributesRemoveReferences => {
+                self.on_graphic_attributes_remove_references()
+            }
+            Message::GraphicAttributesCreateLayer => {
+                self.graphic_attributes_header_menu_open = false;
+                let command = crate::command::FreeTextValuePromptCommand::new(
+                    "GRAPHICATTRIBUTELAYER",
+                    "Enter a name for the new layer:",
+                );
+                self.command_line.push_info(&command.prompt());
+                self.tabs[self.active_tab].active_cmd = Some(Box::new(command));
+                self.focus_cmd_input()
+            }
             Message::ToggleGraphicAttributeDropdown => {
                 self.graphic_attribute_menu_open ^= true;
                 self.line_color_menu_open = false;

@@ -745,6 +745,7 @@ pub fn view<'a>(
     width: f32,
     auto_collapse: bool,
     side: crate::app::config::DockSide,
+    header_menu_open: bool,
     menu_open: bool,
     line_color_menu_open: bool,
     line_linetype_menu_open: bool,
@@ -758,6 +759,57 @@ pub fn view<'a>(
     gradient_editor: Option<&'a crate::ui::window::gradient_editor::GradientEditorState>,
     gradient_color_picker_open: bool,
 ) -> Element<'a, Message> {
+    let menu_button = button(crate::ui::icons::themed_secondary(
+        crate::ui::icons::MENU,
+        12.0,
+    ))
+    .on_press(Message::ToggleGraphicAttributesHeaderMenu)
+    .style(move |theme: &Theme, status| {
+        if header_menu_open {
+            button::primary(theme, status)
+        } else {
+            button::subtle(theme, status)
+        }
+    })
+    .padding([3, 5]);
+    let menu: Element<'a, Message> = if header_menu_open {
+        let item = |label: &'static str, message| {
+            button(text(label).size(11))
+                .on_press(message)
+                .style(crate::ui::color_select::list_row_style)
+                .width(Fill)
+                .padding([4, 8])
+        };
+        let popup = container(column![
+            item(
+                "Set all attributes ByLayer",
+                Message::GraphicAttributesSetAllByLayer,
+            ),
+            item(
+                "Set all attributes ByBlock",
+                Message::GraphicAttributesSetAllByBlock,
+            ),
+            item(
+                "Remove ByLayer / ByBlock",
+                Message::GraphicAttributesRemoveReferences,
+            ),
+            item(
+                "Create Layer with active settings",
+                Message::GraphicAttributesCreateLayer,
+            ),
+        ])
+        .style(crate::ui::color_select::popup_panel_style)
+        .padding(2);
+        iced_aw::DropDown::new(menu_button, popup, true)
+            .width(Length::Fixed(220.0))
+            .height(Length::Shrink)
+            .alignment(popup_alignment(side))
+            .offset(2.0)
+            .on_dismiss(Message::CloseGraphicAttributesHeaderMenu)
+            .into()
+    } else {
+        menu_button.into()
+    };
     let pin_icon = if auto_collapse {
         crate::ui::icons::themed_primary_weak_text(crate::ui::icons::PIN, 12.0)
     } else {
@@ -793,6 +845,7 @@ pub fn view<'a>(
             row![
                 text(crate::t!("Graphic Attributes")).size(12),
                 Space::new().width(Fill),
+                menu,
                 pin,
                 close
             ]
@@ -979,15 +1032,26 @@ pub fn view<'a>(
         ));
     }
     if let (Some(scale), Some(lineweight)) = (linetype_scale, lineweight) {
-        let scale_text = if scale.varies {
-            String::new()
+        let scale_field: Element<'_, Message> = if scale.varies {
+            text_input("*VARIES*", "")
+                .size(crate::ui::ROW_H * 0.42)
+                .padding([5, 5])
+                .style(crate::ui::properties::combo_input_style)
+                .width(Fill)
+                .into()
         } else {
-            format!("{:.2}", scale.value)
-                };
-        let mut scale_input = text_input("*VARIES*", &scale_text)
-            .size(crate::ui::ROW_H * 0.42)
-            .padding([3, 5])
-            .style(move |theme: &Theme, status| {
+            let scale_value = ((scale.value * 10.0).round() / 10.0).clamp(0.1, 1000.0);
+            let mut input = iced_aw::number_input(
+                &scale_value,
+                0.1..=1000.0,
+                |value: f64| {
+                    Message::LineLinetypeScaleChanged((value * 10.0).round() / 10.0)
+                },
+            )
+            .step(0.1)
+            .set_size(crate::ui::ROW_H * 0.42)
+            .padding([5, 5])
+            .input_style(move |theme: &Theme, status| {
                 let mut style = crate::ui::properties::combo_input_style(theme, status);
                 if continuous_linetype {
                     let disabled = theme.palette().background.base.text.scale_alpha(0.42);
@@ -996,29 +1060,26 @@ pub fn view<'a>(
                 }
                 style
             })
-            .on_submit(Message::Noop)
+            .style(move |theme: &Theme, status| {
+                let text = theme.palette().background.base.text;
+                iced_aw::number_input::number_input::Style {
+                    button_background: None,
+                    icon_color: if continuous_linetype
+                        || status == iced_aw::style::Status::Disabled
+                    {
+                        text.scale_alpha(0.42)
+                    } else {
+                        text
+                    },
+                }
+            })
             .width(Fill);
-        if !continuous_linetype {
-            scale_input = scale_input.on_input(Message::LineLinetypeScaleInput);
-        }
-        let step = |up: bool| {
-            let icon: Element<'_, Message> = if up {
-                crate::ui::icons::themed_arrow_up(7.0)
-            } else {
-                crate::ui::icons::themed_arrow_down(7.0)
-            };
-            let button = button(icon)
-                .style(button::subtle)
-                .height(10)
-                .padding([0, 3]);
             if continuous_linetype {
-                button
+                input = input.on_input_maybe(None::<fn(f64) -> Message>);
             } else {
-                let delta = if up { 0.1 } else { -0.1 };
-                button.on_press(Message::LineLinetypeScaleChanged(
-                    (scale.value + delta).clamp(0.01, 1000.0),
-                        ))
-                    }
+                input = input.on_submit(Message::Noop);
+            }
+            input.into()
         };
         let scale_icon: Element<'_, Message> = if continuous_linetype {
             crate::ui::icons::themed_disabled(
@@ -1031,28 +1092,6 @@ pub fn view<'a>(
                 PALETTE_CONTROL_ICON_SIZE,
             )
         };
-        let spinner_divider = container(Space::new())
-            .width(Fill)
-            .height(1)
-            .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(theme.palette().background.neutral.color)),
-                ..Default::default()
-            });
-        let spinner = container(column![step(true), spinner_divider, step(false)].spacing(0))
-            .height(COMPACT_BUTTON_HEIGHT)
-            .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(theme.palette().background.base.color)),
-                border: Border {
-                    color: theme.palette().background.neutral.color,
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                ..Default::default()
-            });
-        let scale_field = row![scale_input, spinner]
-            .spacing(0)
-            .align_y(iced::Center)
-            .width(Fill);
         let scale = row![scale_icon, scale_field]
         .spacing(3)
         .align_y(iced::Center)

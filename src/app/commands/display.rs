@@ -472,6 +472,11 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::ToggleProperties));
             }
 
+            // ── GRAPHICATTRIBUTES — toggle Graphic Attributes palette ───────────
+            "GRAPHICATTRIBUTES" => {
+                return Some(Task::done(Message::ToggleGraphicAttributes));
+            }
+
             // ── FILETAB — toggle file/document tabs ──────────────────────────────
             "FILETAB" => {
                 return Some(Task::done(Message::ToggleFileTabs));

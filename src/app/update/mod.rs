@@ -4229,6 +4229,19 @@ impl OpenCADStudio {
                 self.ribbon.set_properties(self.show_properties);
                 Task::none()
             }
+            Message::ToggleGraphicAttributes => {
+                self.show_graphic_attributes ^= true;
+                self.ribbon
+                    .set_graphic_attributes(self.show_graphic_attributes);
+                if !self.show_graphic_attributes {
+                    self.graphic_attributes_header_menu_open = false;
+                    self.graphic_attribute_menu_open = false;
+                    self.gradient_editor = None;
+                    self.hatch_editor_handles = None;
+                }
+                self.save_config();
+                Task::none()
+            }
             Message::ToggleFileTabs => {
                 self.show_file_tabs ^= true;
                 self.ribbon.set_file_tabs(self.show_file_tabs);
@@ -11217,6 +11230,30 @@ mod prop_pointer_tests {
 
         let task = app.update(Message::PropPointerPressed);
         assert!(task.units() > 0);
+    }
+}
+
+#[cfg(test)]
+mod graphic_attributes_visibility_tests {
+    use super::Message;
+    use crate::app::OpenCADStudio;
+
+    #[test]
+    fn graphic_attributes_starts_hidden_and_toggle_is_persisted() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.apply_config(crate::app::config::AppConfig::default());
+        assert!(!app.show_graphic_attributes);
+        assert!(!app.ribbon.show_graphic_attributes);
+
+        let _ = app.update(Message::ToggleGraphicAttributes);
+        assert!(app.show_graphic_attributes);
+        assert!(app.ribbon.show_graphic_attributes);
+        assert!(app.current_config().show_graphic_attributes);
+
+        let _ = app.update(Message::ToggleGraphicAttributes);
+        assert!(!app.show_graphic_attributes);
+        assert!(!app.ribbon.show_graphic_attributes);
+        assert!(!app.current_config().show_graphic_attributes);
     }
 }
 

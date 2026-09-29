@@ -130,7 +130,6 @@ fn close_fill_boundary(entity: &mut acadrust::EntityType) -> bool {
     }
 }
 
-#[derive(Clone)]
 struct ConcreteGraphicAttributes {
     color: acadrust::types::Color,
     linetype: String,
@@ -212,10 +211,11 @@ fn valid_layer_name(name: &str) -> bool {
     !name.is_empty()
         && name.chars().count() <= 255
         && !name.chars().any(|character| {
-            matches!(
-                character,
-                '<' | '>' | '/' | '\\' | '"' | ':' | ';' | '?' | '*' | '|' | '=' | '`'
-            )
+            character.is_control()
+                || matches!(
+                    character,
+                    '<' | '>' | '/' | '\\' | '"' | ':' | ';' | '?' | '*' | '|' | '=' | '`'
+                )
         })
 }
 
@@ -918,7 +918,10 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_line_linetype_scale(&mut self, scale: f64) -> iced::Task<Message> {
-        let scale = ((scale * 10.0).round() / 10.0).clamp(0.1, 1000.0);
+        let Some(scale) = crate::ui::window::graphic_attributes::normalized_linetype_scale(scale)
+        else {
+            return iced::Task::none();
+        };
         let i = self.active_tab;
         let selected = self.tabs[i].scene.selected_handles_in_order();
         if selected.is_empty() {
@@ -1595,8 +1598,12 @@ impl OpenCADStudio {
                     }
                     PanelId::GraphicAttributes => {
                         self.show_graphic_attributes = false;
+                        self.ribbon.set_graphic_attributes(false);
                         self.graphic_attributes_header_menu_open = false;
                         self.graphic_attribute_menu_open = false;
+                        self.gradient_editor = None;
+                        self.hatch_editor_handles = None;
+                        self.save_config();
                     }
                 }
                 if self.dock_expanded == Some(id) {
@@ -2588,6 +2595,17 @@ mod tests {
                 .abs()
                 < f64::EPSILON
         );
+        let _ = app.update(Message::LineLinetypeScaleChanged(f64::NAN));
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(line)
+                .expect("line")
+                .common()
+                .linetype_scale,
+            2.5
+        );
         let _ = app.update(Message::LineLinetypeScaleChanged(1.2000000000000002));
         assert_eq!(
             app.tabs[i]
@@ -2816,6 +2834,14 @@ mod tests {
         let _ = app.on_line_linetype("Continuous".to_string());
         let _ = app.on_line_lineweight(acadrust::types::LineWeight::Value(35));
         let _ = app.on_line_transparency(acadrust::types::Transparency::from_percent(0.3));
+
+        let _ = app.create_graphic_attributes_layer("Invalid\nLayer");
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("Invalid\nLayer")
+            .is_none());
 
         let _ = app.update(Message::GraphicAttributesCreateLayer);
         assert_eq!(

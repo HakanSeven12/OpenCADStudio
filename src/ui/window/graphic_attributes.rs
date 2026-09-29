@@ -57,9 +57,18 @@ struct LinetypeScaleInfo {
 
 const PALETTE_CONTROL_ICON_SIZE: f32 = 20.0;
 const COMPACT_BUTTON_HEIGHT: f32 = 22.0;
+const LINETYPE_SCALE_MIN: f64 = 0.1;
+const LINETYPE_SCALE_MAX: f64 = 1000.0;
+const LINETYPE_SCALE_STEP: f64 = 0.1;
 const TRANSPARENCY_ICON: &[u8] =
     include_bytes!("../../../assets/icons/attributes/transparency.svg");
 const LINEWEIGHT_ICON: &[u8] = include_bytes!("../../../assets/icons/attributes/lineweight.svg");
+
+pub(crate) fn normalized_linetype_scale(value: f64) -> Option<f64> {
+    value
+        .is_finite()
+        .then(|| ((value * 10.0).round() / 10.0).clamp(LINETYPE_SCALE_MIN, LINETYPE_SCALE_MAX))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphicAttribute {
@@ -737,6 +746,60 @@ fn transparency_control<'a>(
     row![control, more].spacing(4).align_y(iced::Center).into()
 }
 
+fn header_menu(side: crate::app::config::DockSide, open: bool) -> Element<'static, Message> {
+    let menu_button = button(crate::ui::icons::themed_secondary(
+        crate::ui::icons::MENU,
+        12.0,
+    ))
+    .on_press(Message::ToggleGraphicAttributesHeaderMenu)
+    .style(move |theme: &Theme, status| {
+        if open {
+            button::primary(theme, status)
+        } else {
+            button::subtle(theme, status)
+        }
+    })
+    .padding([3, 5]);
+    if !open {
+        return menu_button.into();
+    }
+
+    let item = |label: &'static str, message| {
+        button(text(label).size(11))
+            .on_press(message)
+            .style(crate::ui::color_select::list_row_style)
+            .width(Fill)
+            .padding([4, 8])
+    };
+    let popup = container(column![
+        item(
+            "Set all attributes ByLayer",
+            Message::GraphicAttributesSetAllByLayer,
+        ),
+        item(
+            "Set all attributes ByBlock",
+            Message::GraphicAttributesSetAllByBlock,
+        ),
+        item(
+            "Remove ByLayer / ByBlock",
+            Message::GraphicAttributesRemoveReferences,
+        ),
+        item(
+            "Create Layer with active settings",
+            Message::GraphicAttributesCreateLayer,
+        ),
+    ])
+    .style(crate::ui::color_select::popup_panel_style)
+    .padding(2);
+    iced_aw::DropDown::new(menu_button, popup, true)
+        .width(Length::Fixed(220.0))
+        .height(Length::Shrink)
+        .alignment(popup_alignment(side))
+        .offset(2.0)
+        .on_dismiss(Message::CloseGraphicAttributesHeaderMenu)
+        .into()
+}
+
 pub fn view<'a>(
     document: &'a CadDocument,
     properties: &'a crate::ui::properties::PropertiesPanel,
@@ -759,57 +822,7 @@ pub fn view<'a>(
     gradient_editor: Option<&'a crate::ui::window::gradient_editor::GradientEditorState>,
     gradient_color_picker_open: bool,
 ) -> Element<'a, Message> {
-    let menu_button = button(crate::ui::icons::themed_secondary(
-        crate::ui::icons::MENU,
-        12.0,
-    ))
-    .on_press(Message::ToggleGraphicAttributesHeaderMenu)
-    .style(move |theme: &Theme, status| {
-        if header_menu_open {
-            button::primary(theme, status)
-        } else {
-            button::subtle(theme, status)
-        }
-    })
-    .padding([3, 5]);
-    let menu: Element<'a, Message> = if header_menu_open {
-        let item = |label: &'static str, message| {
-            button(text(label).size(11))
-                .on_press(message)
-                .style(crate::ui::color_select::list_row_style)
-                .width(Fill)
-                .padding([4, 8])
-        };
-        let popup = container(column![
-            item(
-                "Set all attributes ByLayer",
-                Message::GraphicAttributesSetAllByLayer,
-            ),
-            item(
-                "Set all attributes ByBlock",
-                Message::GraphicAttributesSetAllByBlock,
-            ),
-            item(
-                "Remove ByLayer / ByBlock",
-                Message::GraphicAttributesRemoveReferences,
-            ),
-            item(
-                "Create Layer with active settings",
-                Message::GraphicAttributesCreateLayer,
-            ),
-        ])
-        .style(crate::ui::color_select::popup_panel_style)
-        .padding(2);
-        iced_aw::DropDown::new(menu_button, popup, true)
-            .width(Length::Fixed(220.0))
-            .height(Length::Shrink)
-            .alignment(popup_alignment(side))
-            .offset(2.0)
-            .on_dismiss(Message::CloseGraphicAttributesHeaderMenu)
-            .into()
-    } else {
-        menu_button.into()
-    };
+    let menu = header_menu(side, header_menu_open);
     let pin_icon = if auto_collapse {
         crate::ui::icons::themed_primary_weak_text(crate::ui::icons::PIN, 12.0)
     } else {
@@ -1040,15 +1053,17 @@ pub fn view<'a>(
                 .width(Fill)
                 .into()
         } else {
-            let scale_value = ((scale.value * 10.0).round() / 10.0).clamp(0.1, 1000.0);
+            let scale_value = normalized_linetype_scale(scale.value).unwrap_or(1.0);
             let mut input = iced_aw::number_input(
                 &scale_value,
-                0.1..=1000.0,
+                LINETYPE_SCALE_MIN..=LINETYPE_SCALE_MAX,
                 |value: f64| {
-                    Message::LineLinetypeScaleChanged((value * 10.0).round() / 10.0)
+                    Message::LineLinetypeScaleChanged(
+                        normalized_linetype_scale(value).unwrap_or(1.0),
+                    )
                 },
             )
-            .step(0.1)
+            .step(LINETYPE_SCALE_STEP)
             .set_size(crate::ui::ROW_H * 0.42)
             .padding([5, 5])
             .input_style(move |theme: &Theme, status| {

@@ -2807,6 +2807,8 @@ pub enum Message {
     ToggleViewCube,
     /// Toggle the Properties panel visibility (PROPERTIES).
     ToggleProperties,
+    /// Toggle the Graphic Attributes panel visibility (GRAPHICATTRIBUTES).
+    ToggleGraphicAttributes,
     /// Toggle the document file tabs at the top (FILETAB).
     ToggleFileTabs,
     /// Toggle the layout tabs at the bottom (LAYOUTTAB).
@@ -4167,7 +4169,7 @@ impl OpenCADStudio {
             render_mode_menu_open: false,
             render_mode_preview: None,
             show_properties: true,
-            show_graphic_attributes: true,
+            show_graphic_attributes: false,
             graphic_attributes_header_menu_open: false,
             graphic_attribute_menu_open: false,
             line_color_menu_open: false,

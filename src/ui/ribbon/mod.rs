@@ -54,6 +54,8 @@ pub struct Ribbon {
     pub show_ucs_icon: bool,
     /// Properties panel (PROPERTIES) visibility — drives the Properties button highlight.
     pub show_properties: bool,
+    /// Graphic Attributes panel visibility — drives its ribbon button highlight.
+    pub show_graphic_attributes: bool,
     /// File tabs (FILETAB) visibility — drives the File Tabs button highlight.
     pub show_file_tabs: bool,
     /// Layout tabs (LAYOUTTAB) visibility — drives the Layout Tabs button highlight.
@@ -162,6 +164,7 @@ impl Ribbon {
             show_viewcube: true,
             show_ucs_icon: true,
             show_properties: true,
+            show_graphic_attributes: false,
             show_file_tabs: true,
             show_layout_tabs: true,
             open_dropdown: None,
@@ -315,6 +318,9 @@ impl Ribbon {
     pub fn set_properties(&mut self, on: bool) {
         self.show_properties = on;
     }
+    pub fn set_graphic_attributes(&mut self, on: bool) {
+        self.show_graphic_attributes = on;
+    }
     pub fn set_file_tabs(&mut self, on: bool) {
         self.show_file_tabs = on;
     }
@@ -332,6 +338,7 @@ impl Ribbon {
             show_viewcube: self.show_viewcube,
             show_ucs_icon: self.show_ucs_icon,
             show_properties: self.show_properties,
+            show_graphic_attributes: self.show_graphic_attributes,
             show_block_palette,
             show_file_tabs: self.show_file_tabs,
             show_layout_tabs: self.show_layout_tabs,

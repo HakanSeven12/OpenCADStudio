@@ -823,7 +823,8 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                 Task::none()
     }
 
-    pub(super) fn on_mleader_style_edit(&mut self, field: &'static str, value: String) -> Task<Message> {
+    pub(super) fn on_mleader_style_edit(
+        &mut self, field: &'static str, value: String,) -> Task<Message> {
                 self.mls_color_open = None;
                 match field {
                     "landing_distance" => self.mls_landing_distance = value,
@@ -850,7 +851,8 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                 Task::none()
     }
 
-    pub(super) fn on_mleader_style_set_enum(&mut self, field: &'static str, value: String) -> Task<Message> {
+    pub(super) fn on_mleader_style_set_enum(
+        &mut self, field: &'static str, value: String,) -> Task<Message> {
                 use acadrust::objects::{
                     BlockContentConnectionType, LeaderContentType, LeaderDrawOrderType,
                     MultiLeaderDrawOrderType, MultiLeaderPathType, TextAlignmentType,
@@ -870,9 +872,8 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                         "BottomOfTopLineUnderlineTopLine" => {
                             TextAttachmentType::BottomOfTopLineUnderlineTopLine
                         }
-                        "BottomOfTopLineUnderlineAll" => {
-                            TextAttachmentType::BottomOfTopLineUnderlineAll
-                        }
+                        "BottomOfTopLineUnderlineAll" =>
+                            TextAttachmentType::BottomOfTopLineUnderlineAll,
                         "CenterOfText" => TextAttachmentType::CenterOfText,
                         "CenterOfTextOverline" => TextAttachmentType::CenterOfTextOverline,
                         _ => TextAttachmentType::MiddleOfTopLine,
@@ -898,9 +899,8 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                         }
                         "text_angle_type" => {
                             s.text_angle_type = match value.as_str() {
-                                "ParallelToLastLeaderLine" => {
-                                    TextAngleType::ParallelToLastLeaderLine
-                                }
+                                "ParallelToLastLeaderLine" =>
+                                    TextAngleType::ParallelToLastLeaderLine,
                                 "Optimized" => TextAngleType::Optimized,
                                 _ => TextAngleType::Horizontal,
                             };
@@ -946,7 +946,8 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                 Task::none()
     }
 
-    pub(super) fn on_mleader_style_set_handle(&mut self, field: &'static str, value: String) -> Task<Message> {
+    pub(super) fn on_mleader_style_set_handle(
+        &mut self, field: &'static str, value: String,) -> Task<Message> {
                 let i = self.active_tab;
                 let doc = &self.tabs[i].scene.document;
                 let handle: Option<acadrust::types::Handle> = if value == "None"
@@ -1136,35 +1137,34 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                     Some(crate::app::ColorPickTarget::Gradient(index)) => {
                         Some(Message::GradientColorChanged(index, color))
                     }
-                    Some(crate::app::ColorPickTarget::GraphicAttributesSolid) => {
+                    Some(crate::app::ColorPickTarget::GraphicAttributesLine) => {
+                Some(Message::LineColorChanged(color))
+            }
+            Some(crate::app::ColorPickTarget::GraphicAttributesSolid) => {
                         Some(Message::SolidFillColorChanged(color))
                     }
                     Some(crate::app::ColorPickTarget::DimStyle(f)) => Some(Message::DsEdit(f, s)),
                     Some(crate::app::ColorPickTarget::MLeader(f)) => {
                         Some(Message::MLeaderStyleEdit { field: f, value: s })
                     }
-                    Some(crate::app::ColorPickTarget::Table(r, f)) => {
+                    Some(crate::app::ColorPickTarget::Table(r, f)) =>
                         Some(Message::TableStyleCellEdit {
                             row: r,
                             field: f,
                             value: s,
-                        })
-                    }
-                    Some(crate::app::ColorPickTarget::Properties) => {
-                        Some(Message::PropColorChanged(color))
-                    }
+                        }),
+                    Some(crate::app::ColorPickTarget::Properties) =>
+                        Some(Message::PropColorChanged(color)),
                     Some(crate::app::ColorPickTarget::PropertiesBg) => {
                         Some(Message::PropBgColorChanged(color))
                     }
                     Some(crate::app::ColorPickTarget::PropertiesField(field)) => {
                         Some(Message::PropColorFieldChanged { field, color })
                     }
-                    Some(crate::app::ColorPickTarget::MText) => {
-                        Some(Message::MTextColorChanged(color))
-                    }
-                    Some(crate::app::ColorPickTarget::Ribbon) => {
-                        Some(Message::RibbonColorChanged(color))
-                    }
+                    Some(crate::app::ColorPickTarget::MText) =>
+                        Some(Message::MTextColorChanged(color)),
+                    Some(crate::app::ColorPickTarget::Ribbon) =>
+                        Some(Message::RibbonColorChanged(color)),
                     Some(crate::app::ColorPickTarget::Layer(idx)) => {
                         self.tabs[self.active_tab].layers.selected = Some(idx);
                         Some(Message::LayerColorSet(color))

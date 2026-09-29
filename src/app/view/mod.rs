@@ -2943,6 +2943,7 @@ impl OpenCADStudio {
                 let draw_depth = tab.scene.draw_depth_map();
                 crate::ui::window::graphic_attributes::view(
                     &tab.scene.document,
+                    &tab.properties,
                     &tab.scene
                         .selected_entities()
                         .into_iter()
@@ -2953,9 +2954,15 @@ impl OpenCADStudio {
                     auto_collapse,
                     side,
                     self.graphic_attribute_menu_open,
+                    self.line_color_menu_open,
+                    self.line_linetype_menu_open,
+                    self.line_lineweight_menu_open,
+                    self.line_transparency_menu_open,
                     self.solid_fill_color_menu_open,
                     self.fill_transparency_menu_open,
                     self.hatch_editor_handles.is_some(),
+                    &self.graphic_hatch_pattern_search,
+                    self.graphic_hatch_pattern_focus,
                     self.gradient_editor.as_ref(),
                     matches!(
                         self.color_pick_target.as_ref().map(|(target, _)| target),

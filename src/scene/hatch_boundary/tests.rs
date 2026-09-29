@@ -4,6 +4,43 @@ use acadrust::types::{Vector2, Vector3};
 use cadkernel::geom2d::{refine_spline_boundary, triangulate_rings, Curve, NurbsCurve};
 use cadkernel::tessellation::DEFAULT_ANGLE;
 
+#[test]
+fn gradient_stops_keep_entity_transparency() {
+    let mut hatch = Hatch::new();
+    hatch.is_solid = true;
+    hatch
+        .paths
+        .push(rectangle([0.0, 0.0], [10.0, 10.0], [0.0; 2]));
+    hatch.gradient_color.enabled = true;
+    hatch.gradient_color.name = "LINEAR".into();
+    hatch.gradient_color.colors = vec![
+        acadrust::entities::hatch::GradientColorEntry {
+            value: 0.0,
+            color: acadrust::types::Color::Rgb { r: 255, g: 0, b: 0 },
+        },
+        acadrust::entities::hatch::GradientColorEntry {
+            value: 1.0,
+            color: acadrust::types::Color::Rgb { r: 0, g: 0, b: 255 },
+        },
+    ];
+
+    let mut model = Scene::hatch_model_from_dxf(&hatch, [0.2, 0.3, 0.4, 0.35]).unwrap();
+    assert!((model.color[3] - 0.35).abs() < f32::EPSILON);
+    let crate::scene::model::hatch_model::HatchPattern::Gradient { color2, .. } = &model.pattern
+    else {
+        panic!("gradient hatch must produce a gradient render pattern");
+    };
+    assert!((color2[3] - 0.35).abs() < f32::EPSILON);
+
+    model.set_alpha(0.6);
+    assert!((model.color[3] - 0.6).abs() < f32::EPSILON);
+    let crate::scene::model::hatch_model::HatchPattern::Gradient { color2, .. } = &model.pattern
+    else {
+        unreachable!();
+    };
+    assert!((color2[3] - 0.6).abs() < f32::EPSILON);
+}
+
 fn narrow(clearance: f64, offset: [f64; 2]) -> NurbsCurve {
     let line = |a: [f64; 2], b: [f64; 2]| {
         [
@@ -184,8 +221,7 @@ fn valid_samples_are_unchanged_and_invalid_samples_stay_rejected() {
         |p| p
     )
     .is_none());
-    assert!(refine_spline_boundary(
-        &vec![[0.0; 2]; 513],
+    assert!(refine_spline_boundary(&vec![[0.0; 2]; 513],
         || panic!("size cap ignored"),
         |p| p
     )

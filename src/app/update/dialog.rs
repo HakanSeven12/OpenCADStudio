@@ -34,12 +34,15 @@ fn set_hatch_graphic_attribute(
             hatch.gradient_color.enabled = false;
         }
         GraphicAttribute::Hatch => {
-            let Some(entry) = crate::scene::model::hatch_patterns::catalog().iter().find(|entry| {
+            let Some(entry) = crate::scene::model::hatch_patterns::catalog()
+                .iter()
+                .find(|entry| {
                 matches!(
                     entry.gpu,
                     crate::scene::model::hatch_model::HatchPattern::Pattern(_)
                 )
-            }) else {
+                })
+            else {
                 return;
             };
             let mut pattern = crate::scene::model::hatch_patterns::build_dxf_pattern(entry);
@@ -49,11 +52,7 @@ fn set_hatch_graphic_attribute(
             );
             crate::entities::hatch::rotate_pattern_geometry(&mut pattern, hatch.pattern_angle);
             let origin = hatch.pattern_origin();
-            crate::entities::hatch::translate_pattern_geometry(
-                &mut pattern,
-                origin.x,
-                origin.y,
-            );
+            crate::entities::hatch::translate_pattern_geometry(&mut pattern, origin.x, origin.y);
             hatch.pattern = pattern;
             hatch.pattern_type = acadrust::entities::HatchPatternType::Predefined;
             hatch.is_solid = false;
@@ -200,10 +199,16 @@ impl OpenCADStudio {
         use crate::scene::model::hatch_model::{GradientKind, HatchPattern};
         use crate::ui::window::graphic_attributes::GraphicAttribute;
         self.graphic_attribute_menu_open = false;
+        self.line_color_menu_open = false;
+        self.line_linetype_menu_open = false;
+        self.line_lineweight_menu_open = false;
+        self.line_transparency_menu_open = false;
         self.solid_fill_color_menu_open = false;
         self.fill_transparency_menu_open = false;
         self.gradient_editor = None;
         self.hatch_editor_handles = None;
+        self.graphic_hatch_pattern_search.clear();
+        self.graphic_hatch_pattern_focus = 0;
         if value == GraphicAttribute::Varies {
             return iced::Task::none();
         }
@@ -220,8 +225,8 @@ impl OpenCADStudio {
             return iced::Task::none();
         }
         let selected_handles: rustc_hash::FxHashSet<_> = selected.iter().copied().collect();
-        let (associated, new_hatches, updated_hatches, skipped) =
-            if value == GraphicAttribute::None {
+        let (associated, new_hatches, updated_hatches, skipped) = if value == GraphicAttribute::None
+        {
             let associated: Vec<_> = self.tabs[i]
                 .scene
                 .document
@@ -294,7 +299,8 @@ impl OpenCADStudio {
                     self.tabs[i].scene.document.get_entity(*handle)
                 {
                     let mut hatch = hatch.clone();
-                    let visible_color = crate::scene::view::render::render_style_for_common_viewport(
+                    let visible_color =
+                        crate::scene::view::render::render_style_for_common_viewport(
                         &self.tabs[i].scene.document,
                         &hatch.common,
                         None,
@@ -402,7 +408,7 @@ impl OpenCADStudio {
         self.solid_fill_color_menu_open = false;
         let i = self.active_tab;
         let selected = self.tabs[i].scene.selected_handles_in_order();
-        let handles = crate::ui::window::graphic_attributes::solid_fill_handles(
+        let handles = crate::ui::window::graphic_attributes::fill_handles(
             &self.tabs[i].scene.document,
             &selected,
         );
@@ -410,9 +416,149 @@ impl OpenCADStudio {
             .into_iter()
             .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
             .collect();
-        self.apply_property_op(i, "Solid fill color", &unlocked, |app, handle| {
+        self.apply_property_op(i, "Fill color", &unlocked, |app, handle| {
             if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
                 crate::scene::view::dispatch::apply_color(entity, color);
+            }
+        });
+        iced::Task::none()
+    }
+
+    pub(super) fn on_line_color(&mut self, color: acadrust::types::Color) -> iced::Task<Message> {
+        self.line_color_menu_open = false;
+        let i = self.active_tab;
+        let selected = self.tabs[i].scene.selected_handles_in_order();
+        if selected.is_empty() {
+            return self.on_ribbon_color_changed(color);
+        }
+        let handles = crate::ui::window::graphic_attributes::line_handles(
+            &self.tabs[i].scene.document,
+            &selected,
+        );
+        let unlocked: Vec<_> = handles
+            .into_iter()
+            .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
+            .collect();
+        self.apply_property_op(i, "Line color", &unlocked, |app, handle| {
+            if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                crate::scene::view::dispatch::apply_color(entity, color);
+            }
+        });
+        iced::Task::none()
+    }
+
+    pub(super) fn on_line_linetype(&mut self, linetype: String) -> iced::Task<Message> {
+        self.line_linetype_menu_open = false;
+        let i = self.active_tab;
+        let selected = self.tabs[i].scene.selected_handles_in_order();
+        if selected.is_empty() {
+            return self.on_ribbon_linetype_changed(linetype);
+        }
+        let handles = crate::ui::window::graphic_attributes::line_handles(
+            &self.tabs[i].scene.document,
+            &selected,
+        );
+        let unlocked: Vec<_> = handles
+            .into_iter()
+            .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
+            .collect();
+        self.apply_property_op(i, "Line linetype", &unlocked, |app, handle| {
+            if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                crate::scene::view::dispatch::apply_common_prop(entity, "linetype", &linetype);
+            }
+        });
+        iced::Task::none()
+    }
+
+    pub(super) fn on_line_lineweight(
+        &mut self,
+        lineweight: acadrust::types::LineWeight,
+    ) -> iced::Task<Message> {
+        self.line_lineweight_menu_open = false;
+        let i = self.active_tab;
+        let selected = self.tabs[i].scene.selected_handles_in_order();
+        if selected.is_empty() {
+            self.tabs[i].scene.document.header.current_line_weight = lineweight.value();
+            self.tabs[i].dirty = true;
+            self.ribbon.active_lineweight = lineweight;
+            self.refresh_properties();
+            return iced::Task::none();
+        }
+        let handles = crate::ui::window::graphic_attributes::line_handles(
+            &self.tabs[i].scene.document,
+            &selected,
+        );
+        let unlocked: Vec<_> = handles
+            .into_iter()
+            .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
+            .collect();
+        self.apply_property_op(i, "Line weight", &unlocked, |app, handle| {
+            if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                crate::scene::view::dispatch::apply_line_weight(entity, lineweight);
+            }
+        });
+        iced::Task::none()
+    }
+
+    pub(super) fn on_line_linetype_scale(&mut self, scale: f64) -> iced::Task<Message> {
+        let scale = scale.clamp(0.01, 1000.0);
+        let i = self.active_tab;
+        let selected = self.tabs[i].scene.selected_handles_in_order();
+        if selected.is_empty() {
+            self.tabs[i]
+                .scene
+                .document
+                .header
+                .current_entity_linetype_scale = scale;
+            self.tabs[i].dirty = true;
+            self.refresh_properties();
+            return iced::Task::none();
+        }
+        let handles = crate::ui::window::graphic_attributes::line_handles(
+            &self.tabs[i].scene.document,
+            &selected,
+        );
+        let unlocked: Vec<_> = handles
+            .into_iter()
+            .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
+            .collect();
+        self.apply_property_op(i, "Linetype scale", &unlocked, |app, handle| {
+            if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                entity.common_mut().linetype_scale = scale;
+            }
+        });
+        iced::Task::none()
+    }
+
+    pub(super) fn on_line_transparency(
+        &mut self,
+        transparency: acadrust::types::Transparency,
+    ) -> iced::Task<Message> {
+        self.line_transparency_menu_open = false;
+        let i = self.active_tab;
+        let selected = self.tabs[i].scene.selected_handles_in_order();
+        if selected.is_empty() {
+            if self.tabs[i]
+                .scene
+                .document
+                .set_current_entity_transparency(transparency)
+            {
+                self.tabs[i].dirty = true;
+                self.refresh_properties();
+            }
+            return iced::Task::none();
+        }
+        let handles = crate::ui::window::graphic_attributes::line_handles(
+            &self.tabs[i].scene.document,
+            &selected,
+        );
+        let unlocked: Vec<_> = handles
+            .into_iter()
+            .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
+            .collect();
+        self.apply_property_op(i, "Line transparency", &unlocked, |app, handle| {
+            if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                entity.common_mut().transparency = transparency;
             }
         });
         iced::Task::none()
@@ -520,8 +666,11 @@ impl OpenCADStudio {
         Task::none()
     }
 
-
-pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEvent) -> Task<Message> {
+    pub(super) fn on_ribbon_tool_click(
+        &mut self,
+        tool_id: String,
+        event: ModuleEvent,
+    ) -> Task<Message> {
                 // Commands use `start_allowed`; other events need a drawing
                 // and stay blocked on the Start page (#299, #388, #389).
                 if self.tabs[self.active_tab].is_start && !matches!(event, ModuleEvent::Command(_)) {
@@ -563,7 +712,8 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                         let i = self.active_tab;
                         self.tabs[i].scene.clear();
                         self.tabs[i].properties = PropertiesPanel::empty();
-                        self.command_line.push_output(crate::t!("Scene cleared.").as_ref());
+                self.command_line
+                    .push_output(crate::t!("Scene cleared.").as_ref());
                     }
                     ModuleEvent::SetVisualStyle(name) => {
                         use crate::modules::view::visual_style;
@@ -572,9 +722,8 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                             None => {
                                 // Name the styles that do exist, from the same
                                 // list every other caller reads.
-                                self.command_line.push_error(
-                                    crate::tf!("Unknown visual style \"{name}\".").as_ref(),
-                                );
+                        self.command_line
+                            .push_error(crate::tf!("Unknown visual style \"{name}\".").as_ref());
                                 self.command_line
                                     .push_info(crate::t!(visual_style::keyword_prompt()).as_ref());
                             }
@@ -591,8 +740,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                     } => {
                         return Task::perform(
                             async move {
-                                let exts: Vec<&str> =
-                                    extensions.iter().map(|s| s.as_str()).collect();
+                        let exts: Vec<&str> = extensions.iter().map(|s| s.as_str()).collect();
                                 let path = crate::sys::file_dialog()
                                     .set_title(title)
                                     .add_filter(filter_name, &exts)
@@ -622,8 +770,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                         let _ = std::fs::remove_file(self.autosave_target(idx));
                         if self.tabs.len() == 1 {
                             self.tab_counter += 1;
-                            self.tabs[0] =
-                                crate::app::document::DocumentTab::new_drawing(self.tab_counter);
+                    self.tabs[0] = crate::app::document::DocumentTab::new_drawing(self.tab_counter);
                             self.active_tab = 0;
                             self.apply_display_defaults(0);
                         } else {
@@ -1892,7 +2039,8 @@ mod tests {
             acadrust::types::Color::Index(3),
         );
         let _ = app.on_fill_transparency(acadrust::types::Transparency::from_percent(0.35));
-        assert!((app.tabs[i]
+        assert!(
+            (app.tabs[i]
             .scene
             .document
             .get_entity(selected_hatch)
@@ -1902,7 +2050,8 @@ mod tests {
             .as_percent()
             - 0.35)
             .abs()
-            < 0.01);
+                < 0.01
+        );
         let _ = app.on_fill_transparency(acadrust::types::Transparency::BY_LAYER);
         assert!(app.tabs[i]
             .scene
@@ -1912,6 +2061,170 @@ mod tests {
             .common()
             .transparency
             .is_by_layer());
+
+        // Line controls ignore HATCH entities, while fill controls ignore
+        // ordinary geometry in the same mixed selection.
+        app.tabs[i].scene.select_entity(line, false);
+        let _ = app.on_line_color(acadrust::types::Color::Index(4));
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(line)
+                .expect("line")
+                .common()
+                .color,
+            acadrust::types::Color::Index(4),
+        );
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(selected_hatch)
+                .expect("solid hatch")
+                .common()
+                .color,
+            acadrust::types::Color::Index(3),
+        );
+        let _ = app.on_solid_fill_color(acadrust::types::Color::Index(5));
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(selected_hatch)
+                .expect("solid hatch")
+                .common()
+                .color,
+            acadrust::types::Color::Index(5),
+        );
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(line)
+                .expect("line")
+                .common()
+                .color,
+            acadrust::types::Color::Index(4),
+        );
+        let _ = app.on_line_linetype("ByBlock".to_string());
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(line)
+                .expect("line")
+                .common()
+                .linetype,
+            "ByBlock",
+        );
+        let _ = app.on_line_lineweight(acadrust::types::LineWeight::Value(50));
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(line)
+                .expect("line")
+                .common()
+                .line_weight,
+            acadrust::types::LineWeight::Value(50),
+        );
+        assert_ne!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(selected_hatch)
+                .expect("solid hatch")
+                .common()
+                .line_weight,
+            acadrust::types::LineWeight::Value(50),
+        );
+        let _ = app.update(Message::LineLinetypeScaleInput("2.5".to_string()));
+        assert!(
+            (app.tabs[i]
+                .scene
+                .document
+                .get_entity(line)
+                .expect("line")
+                .common()
+                .linetype_scale
+                - 2.5)
+                .abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (app.tabs[i]
+                .scene
+                .document
+                .get_entity(selected_hatch)
+                .expect("solid hatch")
+                .common()
+                .linetype_scale
+                - 1.0)
+                .abs()
+                < f64::EPSILON
+        );
+        let _ = app.on_line_transparency(acadrust::types::Transparency::from_percent(0.2));
+        assert!(
+            (app.tabs[i]
+                .scene
+                .document
+                .get_entity(line)
+                .expect("line")
+                .common()
+                .transparency
+                .as_percent()
+                - 0.2)
+                .abs()
+                < 0.01
+        );
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .get_entity(selected_hatch)
+            .expect("solid hatch")
+            .common()
+            .transparency
+            .is_by_layer());
+        let _ = app.on_fill_transparency(acadrust::types::Transparency::from_percent(0.4));
+        assert!(
+            (app.tabs[i]
+                .scene
+                .document
+                .get_entity(line)
+                .expect("line")
+                .common()
+                .transparency
+                .as_percent()
+                - 0.2)
+                .abs()
+                < 0.01
+        );
+        let pattern_name = crate::scene::model::hatch_patterns::catalog()
+            .iter()
+            .find(|entry| {
+                matches!(
+                    entry.gpu,
+                    crate::scene::model::hatch_model::HatchPattern::Pattern(_)
+                )
+            })
+            .expect("pattern hatch")
+            .name
+            .clone();
+        let _ = app.update(Message::GraphicHatchPatternChanged(pattern_name.clone()));
+        let selected_pattern = match app.tabs[i]
+            .scene
+            .document
+            .get_entity(selected_hatch)
+            .expect("pattern hatch")
+        {
+            EntityType::Hatch(hatch) => hatch.pattern.name.as_str(),
+            _ => panic!("fill target is not a hatch"),
+        };
+        assert_eq!(selected_pattern, pattern_name);
+        app.tabs[i].scene.deselect_all();
+        app.tabs[i].scene.select_entity(selected_hatch, false);
+
         let _ = app.on_graphic_attribute(GraphicAttribute::Hatch);
         assert_eq!(
             crate::ui::window::graphic_attributes::current(
@@ -1946,6 +2259,38 @@ mod tests {
             .get_entity(selected_hatch)
             .is_none());
         assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before + 1);
+    }
+
+    #[test]
+    fn graphic_line_controls_update_creation_defaults_without_a_selection() {
+        let mut app = fresh();
+        let i = app.active_tab;
+        app.tabs[i].scene.deselect_all();
+
+        let _ = app.on_line_color(acadrust::types::Color::Index(2));
+        let _ = app.on_line_linetype("Continuous".to_string());
+        let _ = app.on_line_lineweight(acadrust::types::LineWeight::Value(35));
+        let _ = app.on_line_linetype_scale(2.5);
+        let _ = app.on_line_transparency(acadrust::types::Transparency::from_percent(0.3));
+
+        let header = &app.tabs[i].scene.document.header;
+        assert_eq!(
+            header.current_entity_color,
+            acadrust::types::Color::Index(2)
+        );
+        assert_eq!(header.current_linetype_name, "Continuous");
+        assert_eq!(header.current_line_weight, 35);
+        assert!((header.current_entity_linetype_scale - 2.5).abs() < f64::EPSILON);
+        assert!(
+            (app.tabs[i]
+                .scene
+                .document
+                .current_entity_transparency()
+                .as_percent()
+                - 0.3)
+                .abs()
+                < 0.01
+        );
     }
 
     /// A foreign document: the fresh scene's document plus one model-space LINE.
@@ -2072,12 +2417,11 @@ mod tests {
     }
 
     /// The nested-INSERT's block name inside a defined block record.
-    fn nested_insert_target(
-        doc: &acadrust::CadDocument,
-        block: &str,
-    ) -> Option<String> {
+    fn nested_insert_target(doc: &acadrust::CadDocument, block: &str) -> Option<String> {
         let br = doc.block_records.get(block)?;
-        br.entity_handles.iter().find_map(|h| match doc.get_entity(*h)? {
+        br.entity_handles
+            .iter()
+            .find_map(|h| match doc.get_entity(*h)? {
             EntityType::Insert(ins) => Some(ins.block_name.clone()),
             _ => None,
         })

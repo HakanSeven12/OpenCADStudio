@@ -4,23 +4,22 @@
 use super::util::*;
 use super::{format_size, VIEWCUBE_HIT_SIZE};
 use crate::app::helpers::{
-    parse_coord, polar_constrain_near, ucs_rotate_vec, ucs_to_wcs, ucs_z_axis,
-    CoordKind,
+    parse_coord, polar_constrain_near, ucs_rotate_vec, ucs_to_wcs, ucs_z_axis, CoordKind,
 };
-use crate::app::{Message, OpenCADStudio, POLY_START_DELAY_MS};
 use crate::app::TextEntryMode;
+use crate::app::{Message, OpenCADStudio, POLY_START_DELAY_MS};
 use crate::modules::ModuleEvent;
-use crate::scene::pick::grip::{
-    find_hit_grip, find_hit_grip_paper, find_hit_grip_rte, GripEdit, GripEditMode,
-};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::plugin::v4_support;
 use crate::scene::model::object::{GripApply, PropValue};
+use crate::scene::pick::grip::{
+    find_hit_grip, find_hit_grip_paper, find_hit_grip_rte, GripEdit, GripEditMode,
+};
 use crate::scene::{
     self, hover_id, CubeRegion, Scene, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX,
 };
-use crate::ui::PropertiesPanel;
 use crate::ui::window::attribute_editor::{AttrRow, AttrTab};
+use crate::ui::PropertiesPanel;
 use acadrust::types::Color as AcadColor;
 use acadrust::{EntityType as AcadEntityType, Handle};
 use iced::time::Instant;
@@ -243,12 +242,23 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         // Live incremental search for INSERT/MINSERT (see CommandInput)
                         let live = self.command_line.input.clone();
                         let i = self.active_tab;
-                        let (should_update, opts, prompt) = if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
-                            if cmd.on_live_input(&live) { (true, cmd.options(), cmd.prompt()) } else { (false, Vec::new(), String::new()) }
-                        } else { (false, Vec::new(), String::new()) };
+                let (should_update, opts, prompt) =
+                    if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
+                        if cmd.on_live_input(&live) {
+                            (true, cmd.options(), cmd.prompt())
+                        } else {
+                            (false, Vec::new(), String::new())
+                        }
+                    } else {
+                        (false, Vec::new(), String::new())
+                    };
                         if should_update {
                             self.command_line.set_step_options(opts);
-                            if let Some(last) = self.command_line.history.last_mut() { if last.pinned { last.text = prompt; } }
+                    if let Some(last) = self.command_line.history.last_mut() {
+                        if last.pinned {
+                            last.text = prompt;
+                        }
+                    }
                         }
                     }
                 }
@@ -290,12 +300,23 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 {
                     let live = self.command_line.input.clone();
                     let i = self.active_tab;
-                    let (should_update, opts, prompt) = if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
-                        if cmd.on_live_input(&live) { (true, cmd.options(), cmd.prompt()) } else { (false, Vec::new(), String::new()) }
-                    } else { (false, Vec::new(), String::new()) };
+            let (should_update, opts, prompt) = if let Some(cmd) = self.tabs[i].active_cmd.as_mut()
+            {
+                if cmd.on_live_input(&live) {
+                    (true, cmd.options(), cmd.prompt())
+                } else {
+                    (false, Vec::new(), String::new())
+                }
+            } else {
+                (false, Vec::new(), String::new())
+            };
                     if should_update {
                         self.command_line.set_step_options(opts);
-                        if let Some(last) = self.command_line.history.last_mut() { if last.pinned { last.text = prompt; } }
+                if let Some(last) = self.command_line.history.last_mut() {
+                    if last.pinned {
+                        last.text = prompt;
+                    }
+                }
                     }
                 }
                 self.focus_cmd_input()
@@ -324,9 +345,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         crate::scene::model::object::GripMenuAction::Lengthen => {
                             Some(GripEditMode::Lengthen)
                         }
-                        crate::scene::model::object::GripMenuAction::Radius => {
-                            Some(GripEditMode::Radius)
-                        }
+                crate::scene::model::object::GripMenuAction::Radius => Some(GripEditMode::Radius),
                         crate::scene::model::object::GripMenuAction::ArcLength => {
                             Some(GripEditMode::ArcLength)
                         }
@@ -342,7 +361,10 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         _ => None,
                     };
                     expected_mode.is_some_and(|mode| {
-                        !self.tabs[self.active_tab].active_grip.as_ref().is_some_and(|grip| {
+                !self.tabs[self.active_tab]
+                    .active_grip
+                    .as_ref()
+                    .is_some_and(|grip| {
                             grip.mode == mode
                                 && grip.handle == pending.handle
                                 && grip.grip_id == pending.grip_id
@@ -369,17 +391,13 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     let raw = crate::app::expr_eval::eval_to_string(entered);
                     self.command_line.input.clear();
                     let Ok(v) = raw.parse::<f64>() else {
-                        self.command_line.push_error(crate::tf!(
-                            "{}: expected a number, got \"{raw}\"",
-                            pending.label
-                        ).as_ref());
+                self.command_line.push_error(
+                    crate::tf!("{}: expected a number, got \"{raw}\"", pending.label).as_ref(),
+                );
                         self.grip_pending = Some(pending);
                         return self.focus_cmd_input();
                     };
-                    let interactive_value_grip = self.tabs[i]
-                        .active_grip
-                        .as_ref()
-                        .is_some_and(|grip| {
+            let interactive_value_grip = self.tabs[i].active_grip.as_ref().is_some_and(|grip| {
                             matches!(
                                 (grip.mode, pending.action),
                                 (
@@ -401,8 +419,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     GripEditMode::MoveParallel,
                                     crate::scene::model::object::GripMenuAction::MoveParallel,
                                 )
-                            )
-                                && grip.handle == pending.handle
+                ) && grip.handle == pending.handle
                                 && grip.grip_id == pending.grip_id
                         });
                     if interactive_value_grip {
@@ -410,8 +427,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     }
                     use crate::entities::traits::EntityTypeOps;
                     self.push_undo_snapshot(i, pending.label);
-                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(pending.handle)
-                    {
+            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(pending.handle) {
                         entity.apply_grip_menu_value(pending.grip_id, pending.action, v);
                     }
                     // A typed grip-menu value reshapes dimensions too — drop a
@@ -419,10 +435,9 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     self.tabs[i]
                         .scene
                         .invalidate_dim_block_recorded(pending.handle);
-                    self.tabs[i].scene.bump_entities(&[(
-                        pending.handle,
-                        crate::scene::ChangeKind::Modified,
-                    )]);
+            self.tabs[i]
+                .scene
+                .bump_entities(&[(pending.handle, crate::scene::ChangeKind::Modified)]);
                     self.tabs[i].dirty = true;
                     self.refresh_selected_grips();
                     self.refresh_properties();
@@ -439,22 +454,25 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     let i = self.active_tab;
 
                     if let Some(grip) = self.tabs[i].active_grip.clone() {
-                        if matches!(grip.mode, GripEditMode::Stretch | GripEditMode::RectangleResize) {
+                if matches!(
+                    grip.mode,
+                    GripEditMode::Stretch | GripEditMode::RectangleResize
+                ) {
                             let dyn_locked = self.tabs[i]
                                 .dyn_fields
                                 .iter()
                                 .any(|field| field.buffer.is_some());
 
                             let target = if matches!(grip.mode, GripEditMode::RectangleResize) {
-                                grip.rectangle_frame.map(|(opposite, width_axis, height_axis)| {
+                        grip.rectangle_frame
+                            .map(|(opposite, width_axis, height_axis)| {
                                     let cursor_delta = self.tabs[i].last_cursor_world - opposite;
                                     let mut width = cursor_delta.dot(width_axis);
                                     let mut height = cursor_delta.dot(height_axis);
                                     for field in &self.tabs[i].dyn_fields {
-                                        let value = field
-                                            .buffer
-                                            .as_ref()
-                                            .and_then(|buffer| crate::app::expr_eval::eval_number(buffer));
+                                    let value = field.buffer.as_ref().and_then(|buffer| {
+                                        crate::app::expr_eval::eval_number(buffer)
+                                    });
                                         if let Some(value) = value {
                                             match field.role {
                                                 crate::command::DynRole::Width => {
@@ -479,9 +497,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 self.dyn_resolve_point()
                             } else {
                                 // Legacy command-line direct-distance entry.
-                                let text = crate::app::expr_eval::eval_to_string(
-                                    self.command_line.input.trim(),
-                                );
+                        let text =
+                            crate::app::expr_eval::eval_to_string(self.command_line.input.trim());
 
                                 crate::app::expr_eval::eval_number(text.trim()).map(|dist| {
                                     let cursor = self.tabs[i].last_cursor_world;
@@ -546,7 +563,9 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 }
                                 let delta = target - grip.last_world;
 
-                                let actions: Vec<_> = if let Some((opposite, width_axis, height_axis)) = grip.rectangle_frame {
+                        let actions: Vec<_> = if let Some((opposite, width_axis, height_axis)) =
+                            grip.rectangle_frame
+                        {
                                     let opposite_id = (grip.grip_id + 2) % 4;
                                     let mut edits = Vec::with_capacity(3);
                                     for adjacent_id in [(opposite_id + 1) % 4, (opposite_id + 3) % 4] {
@@ -554,44 +573,46 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                             .selected_grip_handles
                                             .iter()
                                             .zip(self.tabs[i].selected_grips.iter())
-                                            .find(|(owner, candidate)| **owner == grip.handle && candidate.id == adjacent_id)
+                                    .find(|(owner, candidate)| {
+                                        **owner == grip.handle && candidate.id == adjacent_id
+                                    })
                                             .map(|(_, candidate)| candidate.world)
                                         {
                                             let d = original - opposite;
-                                            let axis = if d.dot(width_axis).abs() >= d.dot(height_axis).abs() {
+                                    let axis =
+                                        if d.dot(width_axis).abs() >= d.dot(height_axis).abs() {
                                                 width_axis
                                             } else {
                                                 height_axis
                                             };
-                                            edits.push((grip.handle, adjacent_id, GripApply::Absolute(
+                                    edits.push((
+                                        grip.handle,
+                                        adjacent_id,
+                                        GripApply::Absolute(
                                                 opposite + axis * (target - opposite).dot(axis),
-                                            )));
+                                        ),
+                                    ));
                                         }
                                     }
                                     edits.push((grip.handle, grip.grip_id, GripApply::Absolute(target)));
                                     edits
                                 } else {
-                                    grip.targets.iter().map(|target_grip| {
+                            grip.targets
+                                .iter()
+                                .map(|target_grip| {
                                         let apply = if target_grip.is_translate {
                                             GripApply::Translate(delta)
                                         } else {
-                                            GripApply::Absolute(
-                                                target_grip.last_world + delta,
-                                            )
+                                        GripApply::Absolute(target_grip.last_world + delta)
                                         };
 
-                                        (
-                                            target_grip.handle,
-                                            target_grip.grip_id,
-                                            apply,
-                                        )
-                                    }).collect()
+                                    (target_grip.handle, target_grip.grip_id, apply)
+                                })
+                                .collect()
                                 };
 
                                 for (handle, grip_id, apply) in actions {
-                                    self.tabs[i]
-                                        .scene
-                                        .apply_grip(handle, grip_id, apply);
+                            self.tabs[i].scene.apply_grip(handle, grip_id, apply);
                                 }
                                 self.solve_grip_constraints(i, &grip);
 
@@ -901,7 +922,10 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
     /// has an established anchor, and `text` parses as a scalar distance,
     /// project along the active reference ray (if any) or the current cursor
     /// direction in the active UCS plane.
-    pub(in crate::app) fn try_direct_distance_entry(&mut self, text: &str) -> Option<Task<Message>> {
+    pub(in crate::app) fn try_direct_distance_entry(
+        &mut self,
+        text: &str,
+    ) -> Option<Task<Message>> {
         let i = self.active_tab;
         if self.tabs[i]
             .active_cmd
@@ -1013,10 +1037,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 let i = self.active_tab;
                 let grip_dyn_locked = self.tabs[i].active_grip.is_some()
                     && self.dyn_input
-                    && self.tabs[i]
-                        .dyn_fields
-                        .iter()
-                        .any(|field| field.locked());
+            && self.tabs[i].dyn_fields.iter().any(|field| field.locked());
 
                 if grip_dyn_locked {
                     return self.update(Message::CommandSubmit);
@@ -1126,7 +1147,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         sel.box_crossing_locked = false;
                     }
                     if was_pan {
-                        self.command_line.push_output(crate::t!("PAN ended.").as_ref());
+                self.command_line
+                    .push_output(crate::t!("PAN ended.").as_ref());
                     }
                     self.ribbon.deactivate_tool();
                     return Task::none();
@@ -1212,7 +1234,11 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 Task::none()
     }
 
-    pub(super) fn on_layer_toggle_vp_freeze(&mut self, layer_idx: usize, vp_col_idx: usize) -> Task<Message> {
+    pub(super) fn on_layer_toggle_vp_freeze(
+        &mut self,
+        layer_idx: usize,
+        vp_col_idx: usize,
+    ) -> Task<Message> {
                 let i = self.active_tab;
                 let vp_handle = self.tabs[i]
                     .layers
@@ -1305,9 +1331,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 // added row is measured.
                 match new_idx {
                     Some(idx) => iced::widget::operation::scroll_to(
-                        iced::advanced::widget::Id::new(
-                            crate::ui::window::layers::LAYER_TABLE_SCROLL_ID,
-                        ),
+                iced::advanced::widget::Id::new(crate::ui::window::layers::LAYER_TABLE_SCROLL_ID),
                         iced::widget::scrollable::AbsoluteOffset {
                             x: 0.0,
                             y: idx as f32 * crate::ui::ROW_H,
@@ -1326,12 +1350,18 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 }
                 // Layer "0" and the current layer can't be deleted — drop them
                 // from the batch and note it.
-                let current = self.tabs[i].scene.document.header.current_layer_name.clone();
+        let current = self.tabs[i]
+            .scene
+            .document
+            .header
+            .current_layer_name
+            .clone();
                 let before = names.len();
                 names.retain(|n| n != "0" && *n != current);
                 if names.len() < before {
-                    self.command_line
-                        .push_info(crate::t!("Layer \"0\" and the current layer can't be deleted — skipped.").as_ref());
+            self.command_line.push_info(
+                crate::t!("Layer \"0\" and the current layer can't be deleted — skipped.").as_ref(),
+            );
                 }
                 if names.is_empty() {
                     return Task::none();
@@ -1424,7 +1454,9 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
     fn sync_layer_panel(&mut self, i: usize) {
         let doc_layers = self.tabs[i].scene.document.layers.clone();
         let vp_info = self.tabs[i].scene.viewport_list();
-        self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
+        self.tabs[i]
+            .layers
+            .sync_with_viewports(&doc_layers, vp_info);
         self.tabs[i].layers.selected = None;
         self.tabs[i].layers.selected_multi.clear();
         self.sync_ribbon_layers();
@@ -1525,10 +1557,9 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 movement,
                             );
                             self.tabs[i].dirty = true;
-                            self.tabs[i].scene.bump_entities(&[(
-                                popup.handle,
-                                crate::scene::ChangeKind::Modified,
-                            )]);
+                    self.tabs[i]
+                        .scene
+                        .bump_entities(&[(popup.handle, crate::scene::ChangeKind::Modified)]);
                         }
                     }
                     // Stretch / Move = grab this grip. Engage it so the next
@@ -1547,9 +1578,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             Some(acadrust::EntityType::MultiLeader(_))
                         );
                         let (grip_id, is_translate) =
-                            if matches!(item.action, GripMenuAction::MoveWithLeader)
-                                && is_multileader
-                            {
+                    if matches!(item.action, GripMenuAction::MoveWithLeader) && is_multileader {
                                 (crate::entities::multileader::MOVE_ALL_GRIP, true)
                             } else {
                                 (
@@ -1569,14 +1598,9 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     };
                                     let (frame, plane) =
                                         crate::entities::lwpolyline::rectangle_frame(polyline)?;
-                                    let opposite = polyline
-                                        .vertices
-                                        .get((popup.grip_id + 2) % 4)?
-                                        .location;
+                            let opposite = polyline.vertices.get((popup.grip_id + 2) % 4)?.location;
                                     Some((
-                                        glam::DVec3::from_array(
-                                            plane.point_at([opposite.x, opposite.y]),
-                                        ),
+                                glam::DVec3::from_array(plane.point_at([opposite.x, opposite.y])),
                                         glam::DVec3::from_array(plane.vector_at(frame.width_axis))
                                             .try_normalize()?,
                                         glam::DVec3::from_array(plane.vector_at(frame.height_axis))
@@ -1642,9 +1666,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             .selected_grip_handles
                             .iter()
                             .zip(self.tabs[i].selected_grips.iter())
-                            .find(|(owner, grip)| {
-                                **owner == popup.handle && grip.id == popup.grip_id
-                            })
+                    .find(|(owner, grip)| **owner == popup.handle && grip.id == popup.grip_id)
                         {
                             if self.grip_originals.is_empty() {
                                 self.grip_originals = self.tabs[i]
@@ -1656,36 +1678,22 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     .unwrap_or_default();
                             }
                             self.tabs[i].active_grip = Some(match item.action {
-                                GripMenuAction::Radius => GripEdit::radius(
-                                    popup.handle,
-                                    popup.grip_id,
-                                    grip.world,
-                                ),
-                                GripMenuAction::ArcLength => GripEdit::arc_length(
-                                    popup.handle,
-                                    popup.grip_id,
-                                    grip.world,
-                                ),
-                                GripMenuAction::RectangleWidth => GripEdit::rectangle_width(
-                                    popup.handle,
-                                    popup.grip_id,
-                                    grip.world,
-                                ),
-                                GripMenuAction::RectangleHeight => GripEdit::rectangle_height(
-                                    popup.handle,
-                                    popup.grip_id,
-                                    grip.world,
-                                ),
-                                GripMenuAction::MoveParallel => GripEdit::move_parallel(
-                                    popup.handle,
-                                    popup.grip_id,
-                                    grip.world,
-                                ),
-                                _ => GripEdit::lengthen(
-                                    popup.handle,
-                                    popup.grip_id,
-                                    grip.world,
-                                ),
+                        GripMenuAction::Radius => {
+                            GripEdit::radius(popup.handle, popup.grip_id, grip.world)
+                        }
+                        GripMenuAction::ArcLength => {
+                            GripEdit::arc_length(popup.handle, popup.grip_id, grip.world)
+                        }
+                        GripMenuAction::RectangleWidth => {
+                            GripEdit::rectangle_width(popup.handle, popup.grip_id, grip.world)
+                        }
+                        GripMenuAction::RectangleHeight => {
+                            GripEdit::rectangle_height(popup.handle, popup.grip_id, grip.world)
+                        }
+                        GripMenuAction::MoveParallel => {
+                            GripEdit::move_parallel(popup.handle, popup.grip_id, grip.world)
+                        }
+                        _ => GripEdit::lengthen(popup.handle, popup.grip_id, grip.world),
                             });
                         }
                         // Popup actions do not pass through the normal grip
@@ -1695,23 +1703,22 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         // move (and so keyboard input has a field to target).
                         self.sync_dyn_fields();
                         if matches!(item.action, GripMenuAction::Radius) {
-                            self.command_line.push_info(
-                                crate::t!("Specify point or enter radius:").as_ref(),
-                            );
+                    self.command_line
+                        .push_info(crate::t!("Specify point or enter radius:").as_ref());
                         } else if matches!(item.action, GripMenuAction::ArcLength) {
-                            self.command_line.push_info(
-                                crate::t!("Specify point or enter arc length:").as_ref(),
-                            );
+                    self.command_line
+                        .push_info(crate::t!("Specify point or enter arc length:").as_ref());
                         } else if matches!(item.action, GripMenuAction::RectangleWidth) {
                             self.command_line.push_info("Specify point or enter width:");
                         } else if matches!(item.action, GripMenuAction::RectangleHeight) {
-                            self.command_line.push_info("Specify point or enter height:");
+                    self.command_line
+                        .push_info("Specify point or enter height:");
                         } else if matches!(item.action, GripMenuAction::MoveParallel) {
-                            self.command_line.push_info("Specify point or enter parallel offset:");
+                    self.command_line
+                        .push_info("Specify point or enter parallel offset:");
                         } else {
-                            self.command_line.push_info(
-                                crate::t!("Specify point or enter distance:").as_ref(),
-                            );
+                    self.command_line
+                        .push_info(crate::t!("Specify point or enter distance:").as_ref());
                         }
                     } else {
                         self.command_line.push_info(crate::tf!("{label}:").as_ref());
@@ -1737,7 +1744,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             self.tabs[i].dirty = true;
                             self.refresh_selected_grips();
                             self.refresh_properties();
-                            self.command_line.push_output(crate::t!("Polyline broken at vertex.").as_ref());
+                    self.command_line
+                        .push_output(crate::t!("Polyline broken at vertex.").as_ref());
                         }
                         None => self
                             .command_line
@@ -1763,9 +1771,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         });
                     if let Some((original, new_gid, old_len)) = placement {
                         let dirty_before = self.tabs[i].dirty;
-                        if let Some(entity) =
-                            self.tabs[i].scene.document.get_entity_mut(popup.handle)
-                        {
+                if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(popup.handle) {
                             entity.apply_grip_menu(popup.grip_id, item.action);
                         }
                         let inserted = self.tabs[i]
@@ -1775,18 +1781,17 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             .and_then(polyline_vertex_count)
                             .is_some_and(|len| len == old_len + 1);
                         if !inserted {
-                            if let Some(entity) =
-                                self.tabs[i].scene.document.get_entity_mut(popup.handle)
-                            {
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(popup.handle) {
                                 *entity = original;
                             }
-                            self.tabs[i].scene.bump_entities(&[
-                                (popup.handle, crate::scene::ChangeKind::Modified),
-                            ]);
+                    self.tabs[i]
+                        .scene
+                        .bump_entities(&[(popup.handle, crate::scene::ChangeKind::Modified)]);
                             self.tabs[i].dirty = dirty_before;
                             self.refresh_selected_grips();
                             self.refresh_properties();
-                            self.command_line.push_error(crate::t!("Cannot add a vertex here.").as_ref());
+                    self.command_line
+                        .push_error(crate::t!("Cannot add a vertex here.").as_ref());
                             return Task::none();
                         }
                         self.tabs[i]
@@ -1799,30 +1804,22 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             .selected_grip_handles
                             .iter()
                             .zip(self.tabs[i].selected_grips.iter())
-                            .find(|(owner, grip)| {
-                                **owner == popup.handle && grip.id == new_gid
-                            })
+                    .find(|(owner, grip)| **owner == popup.handle && grip.id == new_gid)
                             .map(|(_, grip)| grip.world);
                         if let Some(grip_world) = grip_world {
                             self.grip_originals = vec![(popup.handle, original)];
                             self.grip_dirty_before = Some(dirty_before);
-                            self.tabs[i].active_grip = Some(GripEdit::single(
-                                popup.handle,
-                                new_gid,
-                                false,
-                                grip_world,
-                            ));
+                    self.tabs[i].active_grip =
+                        Some(GripEdit::single(popup.handle, new_gid, false, grip_world));
                             self.command_line
                                 .push_info(crate::t!("Specify new vertex location:").as_ref());
                         } else {
-                            if let Some(entity) =
-                                self.tabs[i].scene.document.get_entity_mut(popup.handle)
-                            {
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(popup.handle) {
                                 *entity = original;
                             }
-                            self.tabs[i].scene.bump_entities(&[
-                                (popup.handle, crate::scene::ChangeKind::Modified),
-                            ]);
+                    self.tabs[i]
+                        .scene
+                        .bump_entities(&[(popup.handle, crate::scene::ChangeKind::Modified)]);
                             self.tabs[i].dirty = dirty_before;
                             self.refresh_selected_grips();
                             self.refresh_properties();
@@ -1842,10 +1839,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             (GripMenuAction::ShowFit, acadrust::EntityType::Spline(spline)) => {
                                 crate::entities::spline::shows_fit_points(spline)
                             }
-                            (
-                                GripMenuAction::ShowControlVertices,
-                                acadrust::EntityType::Spline(spline),
-                            ) => {
+                    (GripMenuAction::ShowControlVertices, acadrust::EntityType::Spline(spline)) => {
                                 crate::entities::spline::shows_control_vertices(spline)
                             }
                             _ => false,
@@ -1898,12 +1892,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         .zip(self.tabs[i].selected_grips.iter())
                         .find(|(owner, g)| **owner == popup.handle && g.id == new_gid)
                     {
-                        self.tabs[i].active_grip = Some(GripEdit::single(
-                            popup.handle,
-                            new_gid,
-                            false,
-                            g.world,
-                        ));
+                self.tabs[i].active_grip =
+                    Some(GripEdit::single(popup.handle, new_gid, false, g.world));
                         self.grip_add_provisional = Some((popup.handle, new_gid));
                     }
                 }
@@ -1934,14 +1924,10 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     // sync clipboard read returns nothing there); native uses
                     // iced's clipboard.
                     #[cfg(target_arch = "wasm32")]
-                    return Task::perform(
-                        crate::sys::read_clipboard_text(),
-                        Message::MTextPasteClip,
-                    );
+            return Task::perform(crate::sys::read_clipboard_text(), Message::MTextPasteClip);
                     #[cfg(not(target_arch = "wasm32"))]
-                    return iced::clipboard::read_text().map(|result| {
-                        Message::MTextPasteClip(result.ok().map(|text| (*text).clone()))
-                    });
+            return iced::clipboard::read_text()
+                .map(|result| Message::MTextPasteClip(result.ok().map(|text| (*text).clone())));
                 }
                 if self.text_inline.is_some() {
                     // Web: the iced text_input can't reach the async clipboard,
@@ -1967,9 +1953,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
         {
             Task::perform(crate::sys::read_clipboard_text(), |text| {
                 Message::SystemClipboardPaste(match text {
-                    Some(text) if !text.is_empty() => {
-                        crate::app::SystemClipboardText::Text(text)
-                    }
+                    Some(text) if !text.is_empty() => crate::app::SystemClipboardText::Text(text),
                     _ => crate::app::SystemClipboardText::EmptyOrUnsupported,
                 })
             })
@@ -1999,10 +1983,11 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 let i = self.active_tab;
                 self.tabs[i].scene.selection.borrow_mut().context_menu = None;
                 let remembered = self.qselect_settings.clone();
-                let scope = remembered.as_ref().map_or(
-                    crate::app::QSelectScope::CurrentSpace,
-                    |settings| settings.scope,
-                );
+        let scope = remembered
+            .as_ref()
+            .map_or(crate::app::QSelectScope::CurrentSpace, |settings| {
+                settings.scope
+            });
                 let available_types = self.tabs[i].scene.qselect_entity_type_names(scope);
                 let type_filter = if let Some(settings) = remembered.as_ref() {
                     settings
@@ -2036,11 +2021,12 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 let mut operator = remembered
                     .as_ref()
                     .map_or(crate::app::QSelectOp::Eq, |settings| settings.operator);
-                if matches!(operator, crate::app::QSelectOp::Gt | crate::app::QSelectOp::Lt)
-                    && !property.as_ref().is_some_and(|property| {
+        if matches!(
+            operator,
+            crate::app::QSelectOp::Gt | crate::app::QSelectOp::Lt
+        ) && !property.as_ref().is_some_and(|property| {
                         matches!(property.editor, crate::app::QSelectValueEditor::Number)
-                    })
-                {
+        }) {
                     operator = crate::app::QSelectOp::Eq;
                 }
                 let value = remembered.as_ref().map_or_else(String::new, |settings| {
@@ -2103,9 +2089,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     // baked into the cached wire geometry — re-tessellate so the
                     // change shows immediately (issue #231 class).
                     self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                        if let Some(entity) =
-                            app.tabs[i].scene.document.get_entity_mut(handle)
-                        {
+                if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
                             crate::scene::view::dispatch::apply_common_prop(entity, "layer", &layer);
                         }
                     });
@@ -2132,9 +2116,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     self.ribbon.active_color = color;
                 } else {
                     self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                        if let Some(entity) =
-                            app.tabs[i].scene.document.get_entity_mut(handle)
-                        {
+                if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
                             crate::scene::view::dispatch::apply_color(entity, color);
                         }
                     });
@@ -2171,9 +2153,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     // re-tessellate so the dashed/solid look updates immediately
                     // (issue #231 class).
                     self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                        if let Some(entity) =
-                            app.tabs[i].scene.document.get_entity_mut(handle)
-                        {
+                if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
                             crate::scene::view::dispatch::apply_common_prop(entity, "linetype", &lt);
                         }
                     });
@@ -2182,7 +2162,11 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 Task::none()
     }
 
-    pub(super) fn on_ribbon_style_changed(&mut self, key: crate::modules::StyleKey, name: String) -> Task<Message> {
+    pub(super) fn on_ribbon_style_changed(
+        &mut self,
+        key: crate::modules::StyleKey,
+        name: String,
+    ) -> Task<Message> {
                 use crate::modules::StyleKey;
                 self.ribbon.close_dropdown();
                 match key {
@@ -2239,11 +2223,20 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
     pub(super) fn on_prop_hatch_pattern_changed(&mut self, name: String) -> Task<Message> {
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
+        self.apply_hatch_pattern(i, &handles, name)
+    }
+
+    pub(super) fn apply_hatch_pattern(
+        &mut self,
+        i: usize,
+        handles: &[acadrust::Handle],
+        name: String,
+    ) -> Task<Message> {
                 if !handles.is_empty() {
                     use crate::scene::model::hatch_patterns;
                     if let Some(entry) = hatch_patterns::find(&name) {
                         self.push_undo_snapshot(i, "HATCHEDIT");
-                        for &handle in &handles {
+                for &handle in handles {
                             if let Some(acadrust::EntityType::Hatch(dxf)) =
                                 self.tabs[i].scene.document.get_entity_mut(handle)
                             {
@@ -2261,14 +2254,17 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     dxf.pattern_angle,
                                 );
                                 let origin = dxf.pattern_origin();
-                                crate::entities::hatch::translate_pattern_geometry(&mut pattern, origin.x, origin.y);
+                        crate::entities::hatch::translate_pattern_geometry(
+                            &mut pattern,
+                            origin.x,
+                            origin.y,
+                        );
                                 dxf.pattern = pattern;
                                 dxf.is_solid = matches!(
                                     entry.gpu,
                                     crate::scene::model::hatch_model::HatchPattern::Solid
                                 );
-                                dxf.pattern_type =
-                                    acadrust::entities::HatchPatternType::Predefined;
+                        dxf.pattern_type = acadrust::entities::HatchPatternType::Predefined;
                                 dxf.gradient_color.enabled = false;
                             }
                             if let Some(model) = self.tabs[i].scene.hatches.get_mut(&handle) {
@@ -2297,8 +2293,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
         // The Annotative Yes/No list drives the per-object annotative toggle
         // (MTEXT's own flag, the annotation context for the rest).
         if field == "annotative" {
-            let wanted =
-                value == crate::t!("Yes").as_ref() || value.eq_ignore_ascii_case("yes");
+            let wanted = value == crate::t!("Yes").as_ref() || value.eq_ignore_ascii_case("yes");
             let Some(handle) = handles.first().copied() else {
                 return Task::none();
             };
@@ -2423,14 +2418,15 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     if self.tabs[i].scene.is_layer_locked(handle) {
                         continue;
                     }
-                    let Some(mut state) = self.tabs[i]
+                    let Some(mut state) =
+                        self.tabs[i]
                         .scene
                         .document
                         .get_entity(handle)
                         .and_then(|entity| match entity {
-                            acadrust::EntityType::Surface(surface) => Some(
-                                crate::entities::solid3d::surface_property_state(surface),
-                            ),
+                                acadrust::EntityType::Surface(surface) => {
+                                    Some(crate::entities::solid3d::surface_property_state(surface))
+                                }
                             _ => None,
                         })
                     else {
@@ -2452,7 +2448,9 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         &mut self.tabs[i].scene.document,
                         handle,
                         crate::entities::solid3d::SURFACE_PROPERTIES_APP,
-                        Some(crate::entities::solid3d::surface_property_xdata_values(state)),
+                        Some(crate::entities::solid3d::surface_property_xdata_values(
+                            state,
+                        )),
                     );
                     if field == PROP_SURFACE_WIREFRAME_TYPE {
                         self.tabs[i].scene.reseed_derived_caches(handle);
@@ -2643,15 +2641,16 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             .then(|| {
                                 doc.objects.values().find_map(|object| match object {
                                     acadrust::objects::ObjectType::MultiLeaderStyle(style)
-                                        if style.name == value => Some(style.clone()),
+                                if style.name == value =>
+                            {
+                                Some(style.clone())
+                            }
                                     _ => None,
                                 })
                             })
                             .flatten();
                         let resolved: Option<acadrust::Handle> = match field {
-                            "mleader_style" => {
-                                resolved_mleader_style.as_ref().map(|style| style.handle)
-                            }
+                    "mleader_style" => resolved_mleader_style.as_ref().map(|style| style.handle),
                             "text_style_handle" => doc
                                 .text_styles
                                 .iter()
@@ -2788,9 +2787,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     .document
                                     .block_records
                                     .iter()
-                                    .find(|b| {
-                                        crate::app::properties::arrowhead_label(&b.name) == value
-                                    })
+                            .find(|b| crate::app::properties::arrowhead_label(&b.name) == value)
                                     .map(|b| b.handle)
                             } else {
                                 None
@@ -2838,12 +2835,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                             Some(XDataValue::Handle(acadrust::Handle::NULL)),
                                         );
                                     } else if let Some(h) = arrow_h {
-                                        dov::set(
-                                            doc,
-                                            handle,
-                                            dov::DIMLDRBLK,
-                                            Some(XDataValue::Handle(h)),
-                                        );
+                                dov::set(doc, handle, dov::DIMLDRBLK, Some(XDataValue::Handle(h)));
                                     }
                                 }
                                 _ => {}
@@ -2876,10 +2868,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 {
                                     if ins.block_name != canon {
                                         ins.block_name = canon.clone();
-                                        changes.push((
-                                            handle,
-                                            crate::scene::ChangeKind::Modified,
-                                        ));
+                                changes.push((handle, crate::scene::ChangeKind::Modified));
                                     }
                                 }
                             }
@@ -2888,7 +2877,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             }
                         }
                     } else if field == "tbl_style_handle" {
-                        let style_handle = self.tabs[i]
+                let style_handle =
+                    self.tabs[i]
                             .scene
                             .document
                             .objects
@@ -2916,7 +2906,11 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 continue;
                             }
                             if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                                crate::scene::view::dispatch::apply_common_prop(entity, "transparency", &value);
+                        crate::scene::view::dispatch::apply_common_prop(
+                            entity,
+                            "transparency",
+                            &value,
+                        );
                             }
                         }
                     } else if field == "plot_style" {
@@ -2927,22 +2921,19 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         // Named plot-style pick: ByLayer / ByBlock clear the
                         // handle; a named style resolves through the drawing's
                         // ACAD_PLOTSTYLENAME dictionary to its placeholder handle.
-                        let dict_h =
-                            self.tabs[i].scene.document.header.acad_plotstylename_dict_handle;
+                let dict_h = self.tabs[i]
+                    .scene
+                    .document
+                    .header
+                    .acad_plotstylename_dict_handle;
                         let ph: Option<acadrust::Handle> =
                             crate::scene::annotative::as_dict(&self.tabs[i].scene.document, dict_h)
-                                .and_then(|d| {
-                                    d.entries
-                                        .iter()
-                                        .find(|(n, _)| *n == value)
-                                        .map(|(_, h)| *h)
-                                });
+                        .and_then(|d| d.entries.iter().find(|(n, _)| *n == value).map(|(_, h)| *h));
                         for &handle in &handles {
                             if self.tabs[i].scene.is_layer_locked(handle) {
                                 continue;
                             }
-                            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle)
-                            {
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
                                 let common = entity.common_mut();
                                 match value.as_str() {
                                     "ByLayer" => {
@@ -2976,17 +2967,14 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             .objects
                             .iter()
                             .find_map(|(h, o)| match o {
-                                acadrust::objects::ObjectType::Material(m) if m.name == value => {
-                                    Some(*h)
-                                }
+                        acadrust::objects::ObjectType::Material(m) if m.name == value => Some(*h),
                                 _ => None,
                             });
                         for &handle in &handles {
                             if self.tabs[i].scene.is_layer_locked(handle) {
                                 continue;
                             }
-                            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle)
-                            {
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
                                 let common = entity.common_mut();
                                 match value.as_str() {
                                     "ByLayer" => {
@@ -3017,7 +3005,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                             crate::command::WorkingPlane::default()
                         };
                         for &handle in &handles {
-                            let mline_style = self.tabs[i]
+                    let mline_style =
+                        self.tabs[i]
                                 .scene
                                 .document
                                 .get_entity(handle)
@@ -3038,19 +3027,13 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                     &value,
                                 );
                             }
-                            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle)
-                            {
+                    if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
                                 crate::scene::view::dispatch::apply_geom_prop_in_working_plane(
-                                    entity,
-                                    field,
-                                    &value,
-                                    plane,
+                            entity, field, &value, plane,
                                 );
                                 if matches!(field, "ml_justification" | "ml_scale") {
-                                    if let (
-                                        acadrust::EntityType::MLine(mline),
-                                        Some(style),
-                                    ) = (entity, mline_style.as_ref())
+                            if let (acadrust::EntityType::MLine(mline), Some(style)) =
+                                (entity, mline_style.as_ref())
                                     {
                                         crate::modules::draw::draw::mline::sync_mline_element_parameters(
                                             mline, style,
@@ -3080,14 +3063,16 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 } else {
                     match field {
                         "transparency" => {
-                            let Some(transparency) = crate::scene::creation_style::parse_current_transparency(&value) else {
-                                self.command_line.push_error("Transparency: expected ByLayer, ByBlock, or an integer from 0 to 90.");
+                    let Some(transparency) =
+                        crate::scene::creation_style::parse_current_transparency(&value)
+                    else {
+                        self.command_line.push_error(
+                            "Transparency: expected ByLayer, ByBlock, or an integer from 0 to 90.",
+                        );
                                 self.refresh_properties();
                                 return Task::none();
                             };
-                            if self.tabs[i].scene.document.current_entity_transparency()
-                                != transparency
-                            {
+                    if self.tabs[i].scene.document.current_entity_transparency() != transparency {
                                 self.push_undo_snapshot(i, "CETRANSPARENCY");
                                 if self.tabs[i]
                                     .scene
@@ -3123,8 +3108,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 }
                                 _ => {
                                     if let Some(h) = mat_handle {
-                                        self.tabs[i].scene.document.header.current_material_handle =
-                                            h;
+                                self.tabs[i].scene.document.header.current_material_handle = h;
                                     }
                                 }
                             }
@@ -3137,12 +3121,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 return Task::none();
                             }
                             match value.as_str() {
-                                "ByBlock" => {
-                                    self.tabs[i].scene.document.header.current_plotstyle_type = 1
-                                }
-                                "Normal" => {
-                                    self.tabs[i].scene.document.header.current_plotstyle_type = 2
-                                }
+                        "ByBlock" => self.tabs[i].scene.document.header.current_plotstyle_type = 1,
+                        "Normal" => self.tabs[i].scene.document.header.current_plotstyle_type = 2,
                                 _ => self.tabs[i].scene.document.header.current_plotstyle_type = 0,
                             }
                             self.tabs[i].dirty = true;
@@ -3161,8 +3141,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 .objects
                                 .values()
                                 .find_map(|object| {
-                                    let acadrust::objects::ObjectType::Layout(layout) = object
-                                    else {
+                            let acadrust::objects::ObjectType::Layout(layout) = object else {
                                         return None;
                                     };
                                     layout
@@ -3170,9 +3149,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                         .eq_ignore_ascii_case(&layout_name)
                                         .then(|| layout.plot_style_sheet.clone())
                                 })
-                                .unwrap_or_else(|| {
-                                    self.tabs[i].scene.document.header.stylesheet.clone()
-                                });
+                        .unwrap_or_else(|| self.tabs[i].scene.document.header.stylesheet.clone());
                             if current != next {
                                 self.push_undo_snapshot(i, "PLOTSTYLE");
                                 for object in self.tabs[i].scene.document.objects.values_mut() {
@@ -3198,7 +3175,11 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 .clone();
                             if !current.eq_ignore_ascii_case(&value) {
                                 self.push_undo_snapshot(i, "CANNOSCALE");
-                                if self.tabs[i].scene.set_annotation_scale_named(&value).is_some() {
+                        if self.tabs[i]
+                            .scene
+                            .set_annotation_scale_named(&value)
+                            .is_some()
+                        {
                                     self.tabs[i].dirty = true;
                                 } else {
                                     self.discard_last_undo_entry(i);
@@ -3375,9 +3356,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 "Flat Shaded" => Some(Mode::FlatShaded),
                                 "Gouraud Shaded" => Some(Mode::GouraudShaded),
                                 "Flat Shaded + Edges" => Some(Mode::FlatShadedWithEdges),
-                                "Gouraud Shaded + Edges" => {
-                                    Some(Mode::GouraudShadedWithEdges)
-                                }
+                        "Gouraud Shaded + Edges" => Some(Mode::GouraudShadedWithEdges),
                                 _ => None,
                             };
                             if let Some(mode) = mode {
@@ -3415,8 +3394,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         "start_x" | "start_y" | "start_z" => Some(Some(0)),
                         "end_x" | "end_y" | "end_z" => Some(Some(1)),
                         "center_x" | "center_y" | "center_z" => Some(Some(-3)),
-                        "radius" | "diameter" | "circumference" | "area"
-                        | "major_r" | "minor_r" | "ratio" => Some(None),
+                "radius" | "diameter" | "circumference" | "area" | "major_r" | "minor_r"
+                | "ratio" => Some(None),
                         _ => None,
                     };
                     let retain_size = self.constraint_solve_mode
@@ -3442,9 +3421,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         .iter()
                         .flat_map(|section| section.props.iter())
                         .find(|property| property.field == field)
-                        .is_some_and(|property| {
-                            matches!(property.value, PropValue::EditText(_))
-                        });
+                .is_some_and(|property| matches!(property.value, PropValue::EditText(_)));
                     if let Some(raw_val) = self.tabs[i]
                         .properties
                         .edit_buf
@@ -3464,20 +3441,15 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 .filter_map(|handle| {
                                     let entity = self.tabs[i].scene.document.get_entity(*handle)?;
                                     match (field, entity) {
-                                        (
-                                            "current_fit_point",
-                                            acadrust::EntityType::Spline(spline),
-                                        ) => Some(spline.fit_points.len()),
-                                        (
-                                            "current_control_point",
-                                            acadrust::EntityType::Spline(spline),
-                                        ) => Some(
-                                            crate::entities::spline::control_vertex_count(spline),
-                                        ),
-                                        (
-                                            "pm_current_vertex",
-                                            acadrust::EntityType::PolygonMesh(mesh),
-                                        ) => Some(mesh.vertices.len()),
+                                ("current_fit_point", acadrust::EntityType::Spline(spline)) => {
+                                    Some(spline.fit_points.len())
+                                }
+                                ("current_control_point", acadrust::EntityType::Spline(spline)) => {
+                                    Some(crate::entities::spline::control_vertex_count(spline))
+                                }
+                                ("pm_current_vertex", acadrust::EntityType::PolygonMesh(mesh)) => {
+                                    Some(mesh.vertices.len())
+                                }
                                         _ => None,
                                     }
                                 })
@@ -3495,7 +3467,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         }
                         self.push_undo_snapshot(i, "CHPROP");
                         if field == "tbl_style_handle" {
-                            let style_handle = self.tabs[i]
+                    let style_handle =
+                        self.tabs[i]
                                 .scene
                                 .document
                                 .objects
@@ -3637,13 +3610,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                             );
                                             if applied && field == "dim_text_inside" {
                                                 if let Some(acadrust::EntityType::Dimension(
-                                                    acadrust::entities::Dimension::LargeRadial(
-                                                        dimension,
-                                                    ),
-                                                )) = self.tabs[i]
-                                                    .scene
-                                                    .document
-                                                    .get_entity_mut(handle)
+                                            acadrust::entities::Dimension::LargeRadial(dimension),
+                                        )) = self.tabs[i].scene.document.get_entity_mut(handle)
                                                 {
                                                     dimension.base.text_user_positioned = false;
                                                 }
@@ -3656,9 +3624,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                         let vals = if val.trim().is_empty() {
                                             None
                                         } else {
-                                            Some(vec![acadrust::xdata::XDataValue::String(
-                                                val.clone(),
-                                            )])
+                                    Some(vec![acadrust::xdata::XDataValue::String(val.clone())])
                                         };
                                         crate::scene::view::dispatch::set_entity_xdata(
                                             &mut self.tabs[i].scene.document,
@@ -3681,12 +3647,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                         };
                                         let trimmed = val.trim();
                                         if trimmed.is_empty() {
-                                            dov::set(
-                                                &mut self.tabs[i].scene.document,
-                                                handle,
-                                                code,
-                                                None,
-                                            );
+                                    dov::set(&mut self.tabs[i].scene.document, handle, code, None);
                                         } else if let Ok(n) = trimmed.parse::<f64>() {
                                             dov::set(
                                                 &mut self.tabs[i].scene.document,
@@ -3712,29 +3673,19 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                         }
                                     }
                                     _ => {
-                                        if crate::scene::model::solid_history::is_primitive_property(
-                                            field,
-                                        ) {
-                                            self.tabs[i].scene.apply_solid_history_property(
-                                                handle,
-                                                field,
-                                                &val,
-                                            );
+                                if crate::scene::model::solid_history::is_primitive_property(field)
+                                {
+                                    self.tabs[i]
+                                        .scene
+                                        .apply_solid_history_property(handle, field, &val);
                                         } else if self.tabs[i]
                                             .scene
-                                            .apply_solid_position_property(
-                                                handle,
-                                                field,
-                                                &val,
-                                                plane,
-                                            )
+                                    .apply_solid_position_property(handle, field, &val, plane)
                                             .is_none()
                                         {
-                                            let mline_style = self.tabs[i]
-                                                .scene
-                                                .document
-                                                .get_entity(handle)
-                                                .and_then(|entity| match entity {
+                                    let mline_style =
+                                        self.tabs[i].scene.document.get_entity(handle).and_then(
+                                            |entity| match entity {
                                                     acadrust::EntityType::MLine(mline) => {
                                                         crate::entities::mline::resolved_mline_style(
                                                             mline,
@@ -3743,7 +3694,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                                         .cloned()
                                                     }
                                                     _ => None,
-                                                });
+                                            },
+                                        );
                                             if matches!(field, "text_x" | "text_y") {
                                                 crate::entities::dimension::materialize_large_radial_text_position(
                                                     &mut self.tabs[i].scene.document,
@@ -3751,10 +3703,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                                     &val,
                                                 );
                                             }
-                                            if let Some(entity) = self.tabs[i]
-                                                .scene
-                                                .document
-                                                .get_entity_mut(handle)
+                                    if let Some(entity) =
+                                        self.tabs[i].scene.document.get_entity_mut(handle)
                                             {
                                                 crate::scene::view::dispatch::apply_geom_prop_in_working_plane(
                                                     entity,
@@ -3774,8 +3724,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                                     }
                                                 }
                                             }
-                                            if matches!(field, "srf_u_isolines" | "srf_v_isolines")
-                                            {
+                                    if matches!(field, "srf_u_isolines" | "srf_v_isolines") {
                                                 self.tabs[i].scene.reseed_derived_caches(handle);
                                             }
                                         }
@@ -3802,9 +3751,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                         )
                                     }
                                     None => {
-                                        crate::scene::parametric_constraints::ParametricRef::whole(
-                                            handle,
-                                        )
+                                crate::scene::parametric_constraints::ParametricRef::whole(handle)
                                     }
                                 })
                             })
@@ -3840,7 +3787,12 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
         }
         // Existing target → swap the selected references to it. Anonymous,
         // xref and xref-dependent definitions are not valid targets.
-        let target = self.tabs[i].scene.document.block_records.get(new).map(|br| {
+        let target = self.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get(new)
+            .map(|br| {
             (
                 br.name.clone(),
                 br.is_anonymous() || br.flags.is_xref || br.name.contains('|'),
@@ -3943,9 +3895,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     .collect::<Vec<_>>();
                 Ok((ins.block_name.clone(), rows))
             }
-            Some(acadrust::EntityType::Insert(_)) => {
-                Err("ATTEDIT  This block has no attributes.")
-            }
+            Some(acadrust::EntityType::Insert(_)) => Err("ATTEDIT  This block has no attributes."),
             _ => Err("ATTEDIT  Select a block with attributes."),
         };
         match result {
@@ -3999,9 +3949,12 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
         // The block's layer may have been locked while the editor was open —
         // refuse to write attributes to a locked-layer block.
         if let Some(layer) = self.tabs[i].scene.locked_layer_name(handle) {
-            self.command_line.push_info(crate::tf!(
+            self.command_line.push_info(
+                crate::tf!(
                 "Object is on locked layer \"{layer}\" — unlock the layer to edit its attributes."
-            ).as_ref());
+            )
+                .as_ref(),
+            );
             return Task::none();
         }
         // Snapshot the working copy so the document can be mutated while the
@@ -4185,7 +4138,13 @@ mod layer_rename_tests {
         let i = app.active_tab;
         let old_name = app.tabs[i].layers.edit_buf.clone();
         rename_layer(&mut app, &old_name, "TEST");
-        let handle = app.tabs[i].scene.document.layers.get("TEST").unwrap().handle;
+        let handle = app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("TEST")
+            .unwrap()
+            .handle;
 
         rename_layer(&mut app, "TEST", "test");
 
@@ -4213,7 +4172,10 @@ mod layer_rename_tests {
     fn current_layer_rename_updates_name_and_allocated_handle() {
         let mut app = app_with_editing_layer();
         let i = app.active_tab;
-        let idx = app.tabs[i].layers.editing.expect("new layer is being edited");
+        let idx = app.tabs[i]
+            .layers
+            .editing
+            .expect("new layer is being edited");
         let old_name = app.tabs[i].layers.layers[idx].name.clone();
         app.tabs[i]
             .scene
@@ -4227,12 +4189,7 @@ mod layer_rename_tests {
 
         rename_layer(&mut app, &old_name, "Renamed");
 
-        let layer = app.tabs[i]
-            .scene
-            .document
-            .layers
-            .get("Renamed")
-            .unwrap();
+        let layer = app.tabs[i].scene.document.layers.get("Renamed").unwrap();
         assert!(layer.handle.is_valid());
         assert_eq!(app.tabs[i].active_layer, "Renamed");
         assert_eq!(app.tabs[i].layers.current_layer, "Renamed");
@@ -4251,7 +4208,10 @@ mod layer_rename_tests {
     fn layer_rename_undo_redo_restores_active_layer() {
         let mut app = app_with_editing_layer();
         let i = app.active_tab;
-        let idx = app.tabs[i].layers.editing.expect("new layer is being edited");
+        let idx = app.tabs[i]
+            .layers
+            .editing
+            .expect("new layer is being edited");
         let old_name = app.tabs[i].layers.layers[idx].name.clone();
         app.tabs[i].layers.selected = Some(idx);
         let _ = app.on_layer_set_current();
@@ -4277,7 +4237,10 @@ mod layer_rename_tests {
         let old_name = app.tabs[i].layers.edit_buf.clone();
         rename_layer(&mut app, &old_name, "A");
         let _ = app.on_layer_new();
-        let b_idx = app.tabs[i].layers.editing.expect("new layer is being edited");
+        let b_idx = app.tabs[i]
+            .layers
+            .editing
+            .expect("new layer is being edited");
         app.tabs[i].layers.selected = Some(b_idx);
         let _ = app.on_layer_set_current();
         let header_name = app.tabs[i].scene.document.header.current_layer_name.clone();

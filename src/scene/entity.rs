@@ -1269,10 +1269,12 @@ impl Scene {
                     style.0 = crate::scene::view::render::adapt_to_bg(style.0, hatch_bg);
                     m.aci = style.4;
                     m.line_weight_px = style.3;
-                    // A gradient's colour is its first stop (already baked into
-                    // the cached model); only solid / pattern fills take the
-                    // entity's resolved colour.
-                    if !matches!(m.pattern, model::hatch_model::HatchPattern::Gradient { .. }) {
+                    // Gradient RGB comes from its own colour stops, while
+                    // transparency remains an entity property shared by both
+                    // stops. Solid/pattern fills take the complete style.
+                    if matches!(m.pattern, model::hatch_model::HatchPattern::Gradient { .. }) {
+                        m.set_alpha(style.0[3]);
+                    } else {
                         m.color = style.0;
                     }
                     if let EntityType::Hatch(dxf) = e {
@@ -2055,7 +2057,14 @@ impl Scene {
                     .colors
                     .get(i)
                     .and_then(|e| e.color.rgb())
-                    .map(|(r, g, b)| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0])
+                    .map(|(r, g, b)| {
+                        [
+                            r as f32 / 255.0,
+                            g as f32 / 255.0,
+                            b as f32 / 255.0,
+                            color[3],
+                        ]
+                    })
             };
             gradient_color1 = stop(0);
             let color1 = gradient_color1.unwrap_or(color);

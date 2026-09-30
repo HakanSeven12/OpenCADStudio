@@ -3,7 +3,7 @@
 use crate::app::Message;
 use crate::t;
 use crate::ui::style::common::muted_style;
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{button, column, container, pick_list, row, scrollable, text, text_input, Space};
 use iced::{Background, Element, Length, Theme};
 
 #[derive(Clone, Copy, Debug)]
@@ -48,8 +48,9 @@ fn danger_input_style(
     }
 }
 
-pub fn view_window<'a>(
+pub(crate) fn view_window<'a>(
     rows: &'a [(String, String)],
+    preset: crate::app::shortcuts::ShortcutPreset,
     capture_row: Option<usize>,
     pending_add: bool,
     reset_confirm: bool,
@@ -59,7 +60,21 @@ pub fn view_window<'a>(
     close_confirm: bool,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
-    let title = text(t!("Keyboard Shortcuts")).size(15);
+    let title = row![
+        text(t!("Keyboard Shortcuts")).size(15),
+        Space::new().width(Length::Fill),
+        text(t!("Shortcut set")).size(11).style(muted_style),
+        pick_list(
+            (preset != crate::app::shortcuts::ShortcutPreset::Custom).then_some(preset),
+            crate::app::shortcuts::ShortcutPreset::PRESETS,
+            |preset| preset.label().to_string(),
+        )
+        .placeholder(preset.label())
+        .on_select(Message::ShortcutPresetSelected)
+        .width(Length::Fixed(210.0)),
+    ]
+    .spacing(8)
+    .align_y(iced::Center);
     let hint = text(t!(
         "Click + Add, press a key combination, type the command, then Apply. Esc cancels the pending row."
     ))

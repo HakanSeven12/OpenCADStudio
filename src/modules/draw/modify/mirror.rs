@@ -26,6 +26,8 @@ pub fn tool() -> ToolDef {
 }
 
 enum Step {
+    CopyBase,
+    CopyDestination { base: DVec3 },
     P1,
     P2(DVec3),
     /// Both mirror-line points fixed; waiting on the erase-source answer.
@@ -42,6 +44,8 @@ pub struct MirrorCommand {
     mirror_text: bool,
     step: Step,
     plane: WorkingPlane,
+    copy: bool,
+    copy_displacement: Option<DVec3>,
 }
 
 impl MirrorCommand {
@@ -51,6 +55,27 @@ impl MirrorCommand {
         text_ghosts: Vec<(WireModel, DVec3)>,
         mirror_text: bool,
     ) -> Self {
+        Self::with_copy(handles, wire_models, text_ghosts, mirror_text, false)
+    }
+
+    pub fn new_copy(
+        handles: Vec<Handle>,
+        wire_models: Vec<WireModel>,
+        text_ghosts: Vec<(WireModel, DVec3)>,
+        mirror_text: bool,
+    ) -> Self {
+        let mut command = Self::with_copy(handles, wire_models, text_ghosts, mirror_text, true);
+        command.step = Step::CopyBase;
+        command
+    }
+
+    fn with_copy(
+        handles: Vec<Handle>,
+        wire_models: Vec<WireModel>,
+        text_ghosts: Vec<(WireModel, DVec3)>,
+        mirror_text: bool,
+        copy: bool,
+    ) -> Self {
         Self {
             handles,
             wire_models,
@@ -58,6 +83,8 @@ impl MirrorCommand {
             mirror_text,
             step: Step::P1,
             plane: WorkingPlane::default(),
+            copy,
+            copy_displacement: None,
         }
     }
 }
@@ -73,6 +100,8 @@ impl CadCommand for MirrorCommand {
 
     fn prompt(&self) -> String {
         match &self.step {
+            Step::CopyBase => "MIRROR COPY  Specify copy base point:".to_string(),
+            Step::CopyDestination { .. } => "MIRROR COPY  Specify copy destination:".to_string(),
             Step::P1 => t!(
                 "MIRROR  Specify first mirror-line point  [%{count} objects]:",
                 count = self.handles.len()
@@ -96,13 +125,28 @@ impl CadCommand for MirrorCommand {
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match &self.step {
+            Step::CopyBase => {
+                self.step = Step::CopyDestination { base: pt };
+                CmdResult::NeedPoint
+            }
+            Step::CopyDestination { base } => {
+                self.copy_displacement = Some(pt - *base);
+                // The copy destination is also the first point on its mirror
+                // axis; only the second point remains to be picked.
+                self.step = Step::P2(pt);
+                CmdResult::NeedPoint
+            }
             Step::P1 => {
                 self.step = Step::P2(pt);
                 CmdResult::NeedPoint
             }
             Step::P2(p1) => {
-                self.step = Step::AskErase { p1: *p1, p2: pt };
-                CmdResult::NeedPoint
+                if self.copy {
+                    self.finish(*p1, pt, false)
+                } else {
+                    self.step = Step::AskErase { p1: *p1, p2: pt };
+                    CmdResult::NeedPoint
+                }
             }
             // Second point is fixed; further clicks ignored until the
             // erase-source question is answered via the command line.
@@ -113,6 +157,7 @@ impl CadCommand for MirrorCommand {
     fn on_enter(&mut self) -> CmdResult {
         // Enter at the erase prompt accepts the default (No → keep source).
         match &self.step {
+            Step::CopyBase | Step::CopyDestination { .. } => CmdResult::Cancel,
             Step::AskErase { p1, p2 } => self.finish(*p1, *p2, false),
             _ => CmdResult::Cancel,
         }
@@ -154,16 +199,41 @@ impl CadCommand for MirrorCommand {
         // While picking the second point the ghost tracks the cursor; once it
         // is fixed (erase prompt) the ghost freezes at the chosen axis.
         let (p1, p2) = match &self.step {
+            Step::CopyDestination { base } => {
+                let delta = pt - *base;
+                let mut previews: Vec<_> = self
+                    .wire_models
+                    .iter()
+                    .map(|wire| wire.translated(delta.as_vec3()))
+                    .collect();
+                previews.push(WireModel::solid_f64(
+                    "mirror_copy_displacement".into(),
+                    vec![base.to_array(), pt.to_array()],
+                    WireModel::CYAN,
+                    false,
+                ));
+                return previews;
+            }
+            Step::CopyBase => return vec![],
+            Step::P1 if self.copy_displacement.is_some() => {
+                let delta = self.copy_displacement.unwrap_or(DVec3::ZERO);
+                return self
+                    .wire_models
+                    .iter()
+                    .map(|wire| wire.translated(delta.as_vec3()))
+                    .collect();
+            }
             Step::P2(p1) => (*p1, pt),
             Step::AskErase { p1, p2 } => (*p1, *p2),
             _ => return vec![],
         };
         // Mirrored ghosts of all non-text objects (full geometric reflection).
+        let displacement = self.copy_displacement.unwrap_or(DVec3::ZERO);
         let mut out: Vec<WireModel> = self
             .wire_models
             .iter()
             .map(|w| {
-                w.mirrored_in_plane(
+                w.translated(displacement.as_vec3()).mirrored_in_plane(
                     p1.as_vec3(),
                     p2.as_vec3(),
                     self.plane.z.as_vec3(),
@@ -175,20 +245,20 @@ impl CadCommand for MirrorCommand {
         // by reflecting the box centre and translating.
         for (w, center) in &self.text_ghosts {
             if self.mirror_text {
-                out.push(w.mirrored_in_plane(
+                out.push(w.translated(displacement.as_vec3()).mirrored_in_plane(
                     p1.as_vec3(),
                     p2.as_vec3(),
                     self.plane.z.as_vec3(),
                 ));
             } else {
                 let reflected = crate::scene::view::transform::reflected_point(
-                    *center,
+                    *center + displacement,
                     p1,
                     p2,
                     self.plane.z,
                 );
-                let delta = (reflected - *center).as_vec3();
-                out.push(w.translated(delta));
+                let reflected_delta = (reflected - (*center + displacement)).as_vec3();
+                out.push(w.translated(displacement.as_vec3() + reflected_delta));
             }
         }
         // Mirror-axis line (rubber-band).
@@ -214,7 +284,13 @@ impl MirrorCommand {
             p2,
             working_normal: self.plane.z,
         };
-        if erase {
+        if self.copy {
+            CmdResult::CopyThenTransformSelected(
+                self.handles.clone(),
+                EntityTransform::Translate(self.copy_displacement.unwrap_or(DVec3::ZERO)),
+                xform,
+            )
+        } else if erase {
             CmdResult::TransformSelected(self.handles.clone(), xform)
         } else {
             CmdResult::BatchCopy(self.handles.clone(), vec![xform])

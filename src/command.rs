@@ -1535,6 +1535,9 @@ pub enum CmdResult {
     TransformSelected(Vec<Handle>, EntityTransform),
     /// Copy selected entities with a transform; command stays active for more copies.
     CopySelected(Vec<Handle>, EntityTransform),
+    /// Copy selected entities, place them, apply a second transform, then end
+    /// the command with the copies selected.
+    CopyThenTransformSelected(Vec<Handle>, EntityTransform, EntityTransform),
     /// Store selected entities in the shared clipboard; command stays active.
     CopyToClipboard {
         handles: Vec<Handle>,

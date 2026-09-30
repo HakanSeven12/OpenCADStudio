@@ -35,7 +35,7 @@ mod properties;
 mod recent;
 mod record_api;
 pub(crate) mod settings;
-mod shortcuts;
+pub(crate) mod shortcuts;
 mod startup;
 pub(crate) mod style_ops;
 mod text_inline;
@@ -1179,6 +1179,8 @@ pub(super) struct OpenCADStudio {
     // ── Keyboard Shortcut Editor ──────────────────────────────────────────
     /// Complete editable key → command/action table.
     shortcut_bindings: rustc_hash::FxHashMap<String, String>,
+    /// Preset associated with the active bindings, persisted with the table.
+    shortcut_preset: shortcuts::ShortcutPreset,
     /// Working rows shown by the shortcut editor until Apply is pressed.
     shortcut_editor_rows: Vec<(String, String)>,
     /// Row whose Key cell is armed for capture: the next key combination
@@ -3205,6 +3207,8 @@ pub enum Message {
     ShortcutEditorResetAsk,
     /// Reset bindings and rows to the shipped defaults.
     ShortcutEditorResetConfirm,
+    /// Select and apply one of the built-in shortcut layouts.
+    ShortcutPresetSelected(crate::app::shortcuts::ShortcutPreset),
     /// Hide the reset confirmation without resetting.
     ShortcutEditorResetDeny,
     /// Discard un-applied rows and close the editor.
@@ -4318,6 +4322,7 @@ impl OpenCADStudio {
             saved_custom_palette: None,
             // Keyboard shortcuts
             shortcut_bindings: rustc_hash::FxHashMap::default(),
+            shortcut_preset: shortcuts::ShortcutPreset::default(),
             shortcut_editor_rows: Vec::new(),
             shortcut_capture_row: None,
             shortcut_pending_add: false,

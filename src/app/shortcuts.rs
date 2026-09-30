@@ -1,14 +1,149 @@
 //! Editable keyboard shortcut table shared by the CUI dialog and key events.
 
 use super::{Message, OpenCADStudio};
+use crate::command::CadCommand;
 use iced::Task;
 use rustc_hash::FxHashMap;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 #[cfg(target_os = "macos")]
 const ACCEL: &str = "CMD";
 #[cfg(not(target_os = "macos"))]
 const ACCEL: &str = "CTRL";
+
+/// A built-in shortcut layout. Custom edits remain available through the
+/// shortcut table; selecting a preset loads that layout as the working table.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShortcutPreset {
+    #[default]
+    OpenCadStudio,
+    ArchicadWindows,
+    ArchicadMacos,
+    Custom,
+}
+
+impl ShortcutPreset {
+    pub(crate) const PRESETS: [Self; 3] = [
+        Self::OpenCadStudio,
+        Self::ArchicadWindows,
+        Self::ArchicadMacos,
+    ];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::OpenCadStudio => "Open CAD Studio",
+            Self::ArchicadWindows => "ArchiCAD (Windows)",
+            Self::ArchicadMacos => "ArchiCAD (macOS)",
+            Self::Custom => "Custom",
+        }
+    }
+
+    pub(crate) fn bindings(self) -> BTreeMap<String, String> {
+        match self {
+            Self::OpenCadStudio | Self::Custom => default_bindings(),
+            Self::ArchicadWindows => archicad_preset_bindings("CTRL", "ALT"),
+            Self::ArchicadMacos => archicad_preset_bindings("CMD", "ALT"),
+        }
+    }
+}
+
+impl std::fmt::Display for ShortcutPreset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+/// ArchiCAD's published shortcuts mapped to commands that Open CAD Studio
+/// supports. Duplicate combinations in the reference PDF (for example the
+/// apostrophe shortcuts) are assigned once to the view commands.
+fn archicad_bindings(accel: &str, alt: &str) -> BTreeMap<String, String> {
+    let entries = [
+        (format!("{accel}+N"), "NEW"),
+        (format!("{accel}+{alt}+N"), "NEW"),
+        (format!("{accel}+O"), "OPEN"),
+        (format!("{accel}+L"), "LAYERS"),
+        (format!("{accel}+W"), "CLOSE"),
+        (format!("{accel}+S"), "SAVE"),
+        (format!("{accel}+SHIFT+S"), "SAVEAS"),
+        (format!("{accel}+P"), "PLOT"),
+        (format!("{accel}+SHIFT+P"), "PAGESETUP"),
+        (format!("{accel}+Q"), "QUIT"),
+        (format!("{accel}+Z"), "UNDO"),
+        (format!("{accel}+SHIFT+Z"), "REDO"),
+        (format!("{accel}+A"), "SELECTALL"),
+        (format!("{accel}+SHIFT+A"), "QSELECT"),
+        (format!("{accel}+C"), "COPYCLIP"),
+        (format!("{accel}+D"), "MOVE"),
+        (format!("{accel}+E"), "ROTATE"),
+        (format!("{accel}+SHIFT+E"), "ROTATECOPY"),
+        (format!("{accel}+H"), "STRETCH"),
+        (format!("{accel}+M"), "MIRROR"),
+        (format!("{accel}+SHIFT+M"), "MIRRORCOPY"),
+        (format!("{accel}+K"), "SCALE"),
+        (format!("{accel}+-"), "ADJUST"),
+        (format!("{accel}+0"), "TRIM"),
+        (format!("{accel}+T"), "DSETTINGS"),
+        (format!("{accel}+SHIFT+D"), "COPY"),
+        (format!("{accel}+SHIFT+G"), "UNGROUP"),
+        (format!("{alt}+SHIFT+G"), "GROUP"),
+        (format!("{accel}+="), "EXPLODE"),
+        (format!("{accel}+/"), "ZOOM IN"),
+        (format!("{accel}+SHIFT+/"), "ZOOM OUT"),
+        (format!("{accel}+,"), "PAN"),
+        (format!("{accel}+'"), "ZOOM EXTENTS"),
+        (format!("{accel}+SHIFT+'"), "ZOOM OBJECT"),
+        (format!("{accel}+\\"), "CLEANSCREEN"),
+        (format!("{accel}+SHIFT+\\"), "ZOOM ALL"),
+        (format!("{accel}+["), "ZOOM PREVIOUS"),
+        (format!("{accel}+2"), "PLAN"),
+        (format!("{accel}+3"), "3DORBIT"),
+        ("SHIFT+F8".to_string(), "DSETTINGS"),
+    ];
+    entries
+        .into_iter()
+        .map(|(key, command)| (key, command.to_string()))
+        .collect()
+}
+
+/// Start from the OpenCAD Studio bindings and override only the combinations
+/// that the ArchiCAD profile defines. This keeps useful defaults such as F8
+/// (orthogonal mode) and the other OpenCAD Studio function-key shortcuts.
+fn archicad_preset_bindings(accel: &str, alt: &str) -> BTreeMap<String, String> {
+    let mut bindings = default_bindings();
+    bindings.extend(archicad_bindings(accel, alt));
+    bindings
+}
+
+/// Recognize the ArchiCAD-only shortcut maps written by earlier builds, so
+/// upgrading does not turn an existing ArchiCAD profile into Custom or leave
+/// its OpenCAD Studio defaults (such as F8) missing.
+pub(crate) fn is_legacy_archicad_bindings(
+    preset: ShortcutPreset,
+    bindings: &FxHashMap<String, String>,
+) -> bool {
+    let (accel, alt) = match preset {
+        ShortcutPreset::ArchicadWindows => ("CTRL", "ALT"),
+        ShortcutPreset::ArchicadMacos => ("CMD", "ALT"),
+        _ => return false,
+    };
+    let all = archicad_bindings(accel, alt);
+    let optional = [
+        format!("{accel}+L"),
+        format!("{accel}+SHIFT+E"),
+        format!("{accel}+SHIFT+M"),
+    ];
+    (0..(1 << optional.len())).any(|mask| {
+        let mut legacy = all.clone();
+        for (bit, key) in optional.iter().enumerate() {
+            if mask & (1 << bit) == 0 {
+                legacy.remove(key);
+            }
+        }
+        legacy.into_iter().collect::<FxHashMap<_, _>>() == *bindings
+    })
+}
 
 /// Every active binding shipped with a fresh configuration. Values are command
 /// names where possible; the small set of input actions is resolved below.
@@ -29,6 +164,7 @@ pub(super) fn default_bindings() -> BTreeMap<String, String> {
         (format!("{ACCEL}+1"), "PROPERTIES"),
         (format!("{ACCEL}+N"), "NEW"),
         (format!("{ACCEL}+O"), "OPEN"),
+        (format!("{ACCEL}+L"), "LAYERS"),
         (format!("{ACCEL}+P"), "PLOT"),
         (format!("{ACCEL}+Q"), "QUIT"),
         (format!("{ACCEL}+S"), "SAVE"),
@@ -85,6 +221,54 @@ pub(super) fn normalize_key(value: &str) -> String {
         }
     }
 
+    // Iced reports the produced character for shifted punctuation (e.g. `?`
+    // for Shift+/). Store the base key plus Shift so preset bindings use the
+    // same spelling as the ArchiCAD shortcut reference.
+    let key = match key.as_str() {
+        "?" => {
+            shift = true;
+            "/"
+        }
+        "+" => {
+            shift = true;
+            "="
+        }
+        "\"" => {
+            shift = true;
+            "'"
+        }
+        "|" => {
+            shift = true;
+            "\\"
+        }
+        "{" => {
+            shift = true;
+            "["
+        }
+        "}" => {
+            shift = true;
+            "]"
+        }
+        ":" => {
+            shift = true;
+            ";"
+        }
+        "<" => {
+            shift = true;
+            ","
+        }
+        ">" => {
+            shift = true;
+            "."
+        }
+        "_" => {
+            shift = true;
+            "-"
+        }
+        other => other,
+    }
+    .to_string();
+
     let mut parts = Vec::with_capacity(5);
     if ctrl {
         parts.push("CTRL");
@@ -112,7 +296,7 @@ pub(super) fn is_global_key(key: &str) -> bool {
         !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit())
     })
         || matches!(base, "ESCAPE")
-        || (key.starts_with(ACCEL)
+        || ((key.starts_with(ACCEL) || key.starts_with("ALT+"))
             && !matches!(
                 key.rsplit('+').next(),
                 Some("A" | "C" | "V" | "X")
@@ -165,6 +349,8 @@ pub(super) const INPUT_ACTIONS: &[&str] = &[
     "DYNINPUT",
     "SELECTALL",
     "PASTECLIP",
+    "ROTATECOPY",
+    "MIRRORCOPY",
 ];
 
 impl OpenCADStudio {
@@ -211,15 +397,11 @@ impl OpenCADStudio {
 
     /// Reset the working rows and live bindings to the shipped defaults.
     pub(super) fn reset_shortcuts_to_defaults(&mut self) {
-        let mut rows: Vec<(String, String)> = default_bindings()
-            .into_iter()
-            .collect();
-        rows.sort_by(|a, b| a.0.cmp(&b.0));
-        self.shortcut_editor_rows = rows;
-        self.shortcut_pending_add = false;
-        self.shortcut_capture_row = None;
-        self.shortcut_reset_confirm = false;
-        self.apply_shortcut_editor_rows();
+        let preset = match self.shortcut_preset {
+            ShortcutPreset::Custom => ShortcutPreset::OpenCadStudio,
+            preset => preset,
+        };
+        self.select_shortcut_preset(preset);
     }
 
     /// True when the working rows differ from the live bindings — the editor
@@ -262,12 +444,34 @@ impl OpenCADStudio {
                 (!key.is_empty() && !action.is_empty()).then_some((key, action))
             })
             .collect();
+        let selected_bindings: FxHashMap<String, String> = self
+            .shortcut_preset
+            .bindings()
+            .into_iter()
+            .collect();
+        if bindings != selected_bindings {
+            self.shortcut_preset = ShortcutPreset::Custom;
+        }
         self.shortcut_bindings = bindings;
         self.persist_settings_if_changed();
     }
 
+    pub(super) fn select_shortcut_preset(&mut self, preset: ShortcutPreset) {
+        self.shortcut_preset = preset;
+        let mut rows: Vec<(String, String)> = preset.bindings().into_iter().collect();
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+        self.shortcut_editor_rows = rows;
+        self.shortcut_capture_row = None;
+        self.shortcut_pending_add = false;
+        self.shortcut_reset_confirm = false;
+        self.shortcut_close_confirm = false;
+        self.shortcut_bindings = preset.bindings().into_iter().collect();
+        self.persist_settings_if_changed();
+    }
+
     pub(super) fn run_shortcut(&mut self, key: &str) -> Task<Message> {
-        let action = self.shortcut_bindings.get(key).or_else(|| {
+        let key = normalize_key(key);
+        let action = self.shortcut_bindings.get(&key).or_else(|| {
             let base = key.rsplit('+').next()?;
             is_named_key(base).then(|| self.shortcut_bindings.get(base)).flatten()
         });
@@ -321,6 +525,44 @@ impl OpenCADStudio {
             "DYNINPUT" => Message::ToggleDynInput,
             "SELECTALL" => Message::SelectAllShortcut,
             "PASTECLIP" => Message::PasteShortcut,
+            "ROTATECOPY" | "MIRRORCOPY" => {
+                let i = self.active_tab;
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(handle, _)| handle)
+                    .collect();
+                if handles.is_empty() {
+                    self.command_line.push_error("Select objects before using this shortcut.");
+                    return Task::none();
+                }
+                if action == "ROTATECOPY" {
+                    use crate::modules::draw::modify::rotate::RotateCommand;
+                    let wires = self.tabs[i].scene.wire_models_for(&handles);
+                    let mut cmd = RotateCommand::new_copy(handles, wires);
+                    cmd.set_working_plane(self.tabs[i].ucs_xform().working_plane());
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                } else {
+                    use crate::modules::draw::modify::mirror::MirrorCommand;
+                    let (wires, text_ghosts) = self.tabs[i].scene.mirror_preview_parts(&handles);
+                    let mirror_text = self.tabs[i].scene.document.header.mirror_text;
+                    let mut cmd = MirrorCommand::new_copy(handles, wires, text_ghosts, mirror_text);
+                    cmd.set_working_plane(self.tabs[i].ucs_xform().working_plane());
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                }
+                let options = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .map(|cmd| cmd.options())
+                    .unwrap_or_default();
+                self.command_line.set_step_options(options);
+                self.sync_dyn_fields();
+                self.refresh_active_cmd_preview(i);
+                return Task::none();
+            }
 
             "UNDO" => {
                 let i = self.active_tab;

@@ -64,12 +64,14 @@ impl Default for AppConfig {
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ShortcutConfig {
+    pub preset: super::shortcuts::ShortcutPreset,
     pub bindings: std::collections::BTreeMap<String, String>,
 }
 
 impl Default for ShortcutConfig {
     fn default() -> Self {
         Self {
+            preset: super::shortcuts::ShortcutPreset::default(),
             bindings: super::shortcuts::default_bindings(),
         }
     }

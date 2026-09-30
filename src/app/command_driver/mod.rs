@@ -503,6 +503,15 @@ impl OpenCADStudio {
                     return task;
                 }
             }
+            CmdResult::CopyThenTransformSelected(handles, placement, transform) => {
+                if let Some(task) = self.handle_copy_then_transform_selected(
+                    handles,
+                    placement,
+                    transform,
+                ) {
+                    return task;
+                }
+            }
             CmdResult::CopyToClipboard { handles, base } => {
                 self.handle_copy_to_clipboard(handles, base);
             }
@@ -1705,5 +1714,4 @@ fn apply_mleader_collect(
     scene.bump_entities(&[(handles[0], crate::scene::ChangeKind::Modified)]);
     true
 }
-
 

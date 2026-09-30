@@ -152,6 +152,20 @@ impl OpenCADStudio {
                                 .iter()
                                 .map(|action| action.to_string()),
                         )
+                        // Compound view commands are routed by the command
+                        // dispatcher even though their base command is ZOOM.
+                        .chain(
+                            [
+                                "ZOOM IN",
+                                "ZOOM OUT",
+                                "ZOOM EXTENTS",
+                                "ZOOM OBJECT",
+                                "ZOOM ALL",
+                                "ZOOM PREVIOUS",
+                            ]
+                            .into_iter()
+                            .map(str::to_string),
+                        )
                         .collect();
                 let unknown_commands: Vec<String> = self
                     .shortcut_editor_rows
@@ -171,6 +185,7 @@ impl OpenCADStudio {
                     |flow| {
                         crate::ui::window::shortcuts::view_window(
                             &self.shortcut_editor_rows,
+                            self.shortcut_preset,
                             self.shortcut_capture_row,
                             self.shortcut_pending_add,
                             self.shortcut_reset_confirm,

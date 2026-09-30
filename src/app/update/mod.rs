@@ -7664,6 +7664,17 @@ impl OpenCADStudio {
                 );
                 Task::none()
             }
+            Message::ShortcutPresetSelected(preset) => {
+                if self.shortcut_pending_add || self.shortcut_editor_dirty() {
+                    self.command_line.push_error(
+                        crate::t!("Apply or discard your shortcut edits before switching sets.")
+                            .as_ref(),
+                    );
+                } else {
+                    self.select_shortcut_preset(preset);
+                }
+                Task::none()
+            }
             Message::ShortcutPressed(key) => self.run_shortcut(&key),
 
             // ── Command Alias Editor (ALIASEDIT) ──────────────────────────────

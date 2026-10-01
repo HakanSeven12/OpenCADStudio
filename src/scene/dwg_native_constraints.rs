@@ -1472,9 +1472,10 @@ fn ensure_associative_classes_registered(document: &mut CadDocument) {
             was_zombie: false,
             is_an_entity: false,
             class_number: 0,
-            // Gold-shadow capture field: constructed classes carry no
-            // gold-decode record, so the reader's own is_an_entity applies.
-            gold_item_class_id: None,
+            // Gold-shadow capture record (§19 H5b): constructed classes
+            // carry no gold-decode record, so this reader's own
+            // is_an_entity applies.
+            gold_shadow: None,
             // 499 = "object" (non-entity) — every class here is one.
             item_class_id: 0x1F3,
             dwg_version: 27,
@@ -2721,6 +2722,10 @@ fn materialize_scope(
             dependency: Handle::NULL,
             actions: group_dependencies,
             nodes,
+            // The §19 H8h node-region wire captures are read-side
+            // genus: constructed groups take the modeled emission (the
+            // DXF/generator fallback per the struct's capture contract).
+            ..Default::default()
         };
         allocator.insert_associative_at(
             group_handle,

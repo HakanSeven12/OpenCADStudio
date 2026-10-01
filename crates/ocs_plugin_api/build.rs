@@ -139,6 +139,10 @@ fn generate_type_registry(out_dir: &Path) {
             trace_simple::<acadrust::objects::AssocEvalValue>,
         ),
         (
+            "AssocSubcurve",
+            trace_simple::<acadrust::objects::AssocSubcurve>,
+        ),
+        (
             "AssocSubcurveKind",
             trace_simple::<acadrust::objects::AssocSubcurveKind>,
         ),
@@ -235,6 +239,10 @@ fn generate_type_registry(out_dir: &Path) {
         (
             "DimensionType",
             trace_simple::<acadrust::entities::DimensionType>,
+        ),
+        (
+            "DxfVersion",
+            trace_simple::<acadrust::DxfVersion>,
         ),
         (
             "DynamicBlockData",

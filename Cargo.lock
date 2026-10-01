@@ -86,7 +86,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.5.5"
-source = "git+https://github.com/schoeller/cadcodec.git?branch=gold-vs-silver#96a2d6ca2fd9a148a15ec14e0d02097adb00447f"
+source = "git+https://github.com/schoeller/cadcodec.git?branch=gold-vs-silver#b7e9bd710eaf1953f8a5ae44a2a67f521a143d37"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",

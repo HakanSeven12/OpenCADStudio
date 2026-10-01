@@ -3,14 +3,40 @@
 //! Analytic surfaces remain analytic instead of becoming facets.
 
 use cadkernel::acis::append;
-use acadrust::entities::acis::{SabReader, SabWriter, SatDocument};
+use acadrust::entities::acis::{SabReader, SabWriter, SatDocument, SatToken};
 use cadkernel::brep::Body;
+
+/// Repair cadkernel's vertex records to the authored ASM genus.
+///
+/// cadkernel appends the classic three-token vertex (`$attr $edge $point`).
+/// Every authored vertex — the §20 G-A census across the measured corpus —
+/// carries the four-token form `vertex $attr $-1 $edge <role> $point`, where
+/// the role token marks the vertex's stance in its own edge (0 start, 1 end,
+/// 2 both endpoints of a closed edge; acadrust's primitive builders ship the
+/// 0 placeholder). The ASM modeler reads the record positionally: without
+/// the role token it consumes the point pointer as the role, the record
+/// parse desyncs, and the solid arrives as "Modeling operation error:
+/// Data stream is empty" (BricsCAD AUDIT on a constructed cylinder).
+///
+/// `cadkernel::acis::lift` reads the point by pointer ordinal, so the
+/// repaired document still round-trips through cadkernel unchanged.
+fn repair_vertex_roles(document: &mut SatDocument) {
+    for record in &mut document.records {
+        if record.entity_type == "vertex"
+            && record.tokens.len() == 3
+            && matches!(record.tokens[2], SatToken::Pointer(_))
+        {
+            record.tokens.insert(2, SatToken::Integer(0));
+        }
+    }
+}
 
 /// Returns `None` when the body contains an unsupported record form.
 pub fn solid_to_sat(body: &Body) -> Option<SatDocument> {
     let mut document = SatDocument::new();
     append(body, &mut document).ok()?;
-    let document = SatDocument::parse(&document.to_sat_string()).ok()?;
+    let mut document = SatDocument::parse(&document.to_sat_string()).ok()?;
+    repair_vertex_roles(&mut document);
     let valid = |candidate: &SatDocument| {
         let (restored, loss) = cadkernel::acis::lift(candidate);
         loss.is_empty() && restored.len() == 1 && restored[0].validate().is_empty()
@@ -68,6 +94,63 @@ mod tests {
         let parsed_binary = SabReader::read(&binary).unwrap();
         let (restored, binary_loss) = cadkernel::acis::lift(&parsed_binary);
         assert!(binary_loss.is_empty(), "{binary_loss:?}");
+        assert_eq!(restored.len(), 1);
+        assert!(restored[0].validate().is_empty());
+    }
+
+    #[test]
+    fn exported_vertices_carry_the_authored_role_token() {
+        // The cylinder the CYLINDER command commits (equal radii): the
+        // seamed brep whose SAT previously reached the DWG AcDs stream
+        // without the vertex role token and failed BricsCAD's AUDIT
+        // with "Data stream is empty".
+        let body = cadkernel::brep::make::elliptical_cylinder(
+            [0.0, 0.0, 0.0],
+            1.0,
+            1.0,
+            1.0,
+        )
+        .unwrap();
+        assert!(body.validate().is_empty());
+
+        let sat = solid_to_sat(&body).unwrap();
+        let vertices: Vec<_> = sat
+            .records
+            .iter()
+            .filter(|record| record.entity_type == "vertex")
+            .collect();
+        assert!(!vertices.is_empty(), "the seamed cylinder has seam vertices");
+        for vertex in &vertices {
+            assert_eq!(
+                vertex.tokens.len(),
+                4,
+                "vertex must carry the ASM role token: {:?}",
+                vertex.tokens
+            );
+            assert!(matches!(vertex.tokens[2], SatToken::Integer(_)));
+            assert!(matches!(vertex.tokens[3], SatToken::Pointer(_)));
+        }
+
+        // The SAB round trip — the exact conversion the DWG writer's
+        // queue_sab_entry performs — must preserve the four-token form.
+        let binary = SabWriter::write(&sat);
+        let reread = SabReader::read(&binary).unwrap();
+        for vertex in reread
+            .records
+            .iter()
+            .filter(|record| record.entity_type == "vertex")
+        {
+            assert_eq!(
+                vertex.tokens.len(),
+                4,
+                "SAB round trip lost the role token: {:?}",
+                vertex.tokens
+            );
+        }
+
+        // The repaired document still lifts losslessly through cadkernel.
+        let (restored, loss) = cadkernel::acis::lift(&sat);
+        assert!(loss.is_empty(), "{loss:?}");
         assert_eq!(restored.len(), 1);
         assert!(restored[0].validate().is_empty());
     }

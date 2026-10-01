@@ -1522,6 +1522,72 @@ mod tests {
     }
 
     #[test]
+    fn a_constructed_cylinder_saves_the_authored_vertex_genus() {
+        // Regression for the BricsCAD AUDIT failure ("Modeling operation
+        // error: Data stream is empty" on the committed cylinder): the
+        // SAT cadkernel appends carries the classic three-token vertex;
+        // the ASM modeler requires the authored four-token form with the
+        // edge-role token. The repair lives in acis_export::solid_to_sat;
+        // this test drives the whole path — CYLINDER command, commit,
+        // DWG save — and re-reads the AcDs SAB blob the way the modeler
+        // does.
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(app.automation_op(r#"{"op":"new"}"#)["ok"], true);
+        let run = app.automation_op(r#"{"op":"run","cmd":"CYLINDER 0,0,0 1,0,0 0,0,1"}"#);
+        assert_eq!(run["ok"], true, "cylinder run failed: {}", run["error"]);
+
+        let path = std::env::temp_dir().join(format!(
+            "ocs_cylinder_genus_{}.dwg",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let p = path.to_string_lossy().replace('\\', "\\\\");
+        let saved = app.automation_op(&format!(r#"{{"op":"save","path":"{p}"}}"#));
+        assert_eq!(saved["ok"], true, "save failed: {}", saved["error"]);
+        drop(app);
+
+        let mut reader = acadrust::DwgReader::from_file(&path).unwrap();
+        let outcome = reader.read_with_stats().unwrap();
+        let solids: Vec<_> = outcome
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                acadrust::entities::EntityType::Solid3D(solid) => Some(solid.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(solids.len(), 1, "the committed cylinder must survive save");
+        let solid = &solids[0];
+        assert!(
+            solid.common.has_ds_data,
+            "R2013+ solids must pair with an AcDs blob"
+        );
+        assert!(!solid.acis_data.sab_data.is_empty());
+        let sat = acadrust::entities::acis::SabReader::read(&solid.acis_data.sab_data).unwrap();
+        let vertices: Vec<_> = sat
+            .records
+            .iter()
+            .filter(|record| record.entity_type == "vertex")
+            .collect();
+        assert!(!vertices.is_empty(), "the seamed cylinder has seam vertices");
+        for vertex in &vertices {
+            assert_eq!(
+                vertex.tokens.len(),
+                4,
+                "authored vertex genus `vertex $attr $-1 $edge <role> $point`: {:?}",
+                vertex.tokens
+            );
+        }
+
+        let sidecar = path.with_file_name(format!(
+            ".{}.ocs.lock",
+            path.file_name().unwrap().to_string_lossy()
+        ));
+        let _ = std::fs::remove_file(sidecar);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn save_then_open_round_trips() {
         let mut app = OpenCADStudio::new_for_test();
         let path =

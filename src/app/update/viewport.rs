@@ -14,6 +14,7 @@ use crate::scene::model::object::GripApply;
 use crate::scene::pick::grip::{
     find_hit_grip, find_hit_grip_paper, find_hit_grip_rte, GripEdit, GripEditMode, GripTarget,
 };
+use crate::scene::view::camera::Camera;
 use crate::scene::{
     self, hover_id, CubeRegion, Scene, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX,
 };
@@ -3738,6 +3739,33 @@ impl OpenCADStudio {
             }
         }
 
+        let is_gathering = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .map(|c| c.is_selection_gathering())
+            .unwrap_or(false);
+        let selection_box_active = self.tabs[i].scene.selection.borrow().box_anchor.is_some();
+
+        if self.tabs[i].active_cmd.is_some()
+            && !is_gathering
+            && !selection_box_active
+        {
+            self.press_consumed_point = true;
+            let is_window_corner = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.window_corner_pick())
+                .unwrap_or(false);
+            return self.dispatch_active_command_click(
+                i,
+                p_full,
+                p,
+                edit_cam,
+                (vw, vh),
+                is_window_corner,
+            );
+        }
+
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
         sel.left_down = true;
         // Stored in full-canvas space (like ViewportMove's cursor and
@@ -3750,6 +3778,16 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_viewport_left_release(&mut self) -> Task<Message> {
+        if self.press_consumed_point {
+            self.press_consumed_point = false;
+            let i = self.active_tab;
+            let mut sel = self.tabs[i].scene.selection.borrow_mut();
+            sel.left_down = false;
+            sel.left_press_pos = None;
+            sel.left_press_time = None;
+            sel.left_dragging = false;
+            return Task::none();
+        }
         let i = self.active_tab;
         // A block dragged from the Blocks palette lands here.
         if let Some(item) = self.take_block_drop() {
@@ -3880,758 +3918,14 @@ impl OpenCADStudio {
             && !is_gathering
             && !selection_box_active
         {
-            let (vw, vh) = (tile_vw, tile_vh);
-            let bounds = iced::Rectangle {
-                x: 0.0,
-                y: 0.0,
-                width: vw,
-                height: vh,
-            };
-
-            let snap_taken = self.tabs[i].snap_result.take();
-            let tangent_obj_at_click = snap_taken.and_then(|s| s.tangent_obj);
-
-            let world_pt = {
-                // Cursor → model point (viewport camera inside a viewport,
-                // else paper sheet → model). Model space throughout.
-                let raw = self.cursor_model_point(i, &edit_cam, p, bounds);
-                let (view_rot, eye) = match &edit_cam {
-                    Some(cam) => (cam.view_proj_rte(bounds), cam.eye()),
-                    None => {
-                        let c = self.tabs[i].scene.camera.borrow();
-                        (c.view_proj_rte(bounds), c.eye())
-                    }
-                };
-                let snap_cursor = raw;
-                let all_wires =
-                    if let (Some(_), Some(h)) = (&edit_cam, self.tabs[i].scene.active_viewport) {
-                        self.tabs[i]
-                            .scene
-                            .model_wires_for_viewport_arc(h, bounds.height)
-                    } else {
-                        self.tabs[i].scene.hit_test_wires()
-                    };
-                let snap_candidates = self.tabs[i].scene.interaction_candidates_near(
-                    all_wires,
-                    snap_cursor,
-                    view_rot,
-                    eye,
-                    bounds,
-                    self.snapper.osnap_radius_px,
-                );
-                let needs_tan = self.tabs[i]
-                    .active_cmd
-                    .as_ref()
-                    .map(|c| c.needs_tangent_pick())
-                    .unwrap_or(false);
-                let needs_entity_click = self.tabs[i]
-                    .active_cmd
-                    .as_ref()
-                    .map(|c| c.needs_entity_pick())
-                    .unwrap_or(false);
-                let entity_click_takes_points = needs_entity_click
-                    && self.tabs[i]
-                        .active_cmd
-                        .as_ref()
-                        .is_some_and(|command| command.entity_pick_accepts_points());
-                let mut snap_hit = if needs_entity_click && !entity_click_takes_points {
-                    None
-                } else if needs_tan {
-                    self.snapper.snap_tangent_only(
-                        snap_cursor.as_vec3(),
-                        p,
-                        &snap_candidates,
-                        view_rot,
-                        eye,
-                        bounds,
-                    )
-                } else {
-                    let (go, gr) = self.drafting_grid_basis(i);
-                    self.snapper.from_point = self.last_point;
-
-                    let construction_ray = if is_window_corner {
-                        None
-                    } else {
-                        self.last_point.and_then(|base| {
-                            self.active_construction_ray(
-                                i,
-                                snap_cursor,
-                                base,
-                                view_rot,
-                                eye,
-                                bounds,
-                            )
-                        })
-                    };
-
-                    self.snapper.snap(
-                        snap_cursor,
-                        p,
-                        &snap_candidates,
-                        view_rot,
-                        eye,
-                        bounds,
-                        go,
-                        gr,
-                        construction_ray,
-                    )
-                };
-                // Mirror the cursor-move OTRACK × geometry intersection pass when the
-                // point is actually clicked. The move path may already display the
-                // Intersection marker, but click handling recomputes snapping from scratch.
-                if !needs_entity_click && !needs_tan && !is_window_corner {
-                    let tracking_probe = self.active_otrack_hit(
-                        i,
-                        raw,
-                        None,
-                        self.last_point,
-                        true,
-                        view_rot,
-                        eye,
-                        bounds,
-                    );
-
-                    if let Some(track) = tracking_probe {
-                        let (go, gr) = self.drafting_grid_basis(i);
-
-                        let tracked_snap = self.snapper.snap(
-                            snap_cursor,
-                            p,
-                            &snap_candidates,
-                            view_rot,
-                            eye,
-                            bounds,
-                            go,
-                            gr,
-                            Some((track.base, track.base + track.dir)),
-                        );
-
-                        if tracked_snap
-                            .is_some_and(|hit| hit.snap_type == crate::snap::SnapType::Intersection)
-                        {
-                            snap_hit = tracked_snap;
-                        }
-                    }
-                }
-                // Paper-space snapping through layout viewports. Mirrors
-                // the cursor-move pass: the click recomputes snapping from
-                // scratch, so the viewport query has to run here too. The hit
-                // comes back already projected onto the sheet.
-                let mut click_frame: Option<crate::scene::viewport_ref::ViewportFrame> = None;
-                if edit_cam.is_none() && !needs_entity_click && !needs_tan {
-                    if let Some((vp_hit, frame)) =
-                        self.paper_viewport_snap(i, p_full, (vw, vh), raw)
-                    {
-                        let merged = crate::snap::merge_snap(snap_hit, Some(vp_hit), p_full);
-                        if merged.is_some_and(|hit| hit.viewport.is_some()) {
-                            click_frame = Some(frame);
-                        }
-                        snap_hit = merged;
-                    }
-                }
-                // Solid-face snaps (Nearest/Perpendicular to face), mirroring
-                // the cursor-move pass so click and preview agree. Merged
-                // before the accepted-snap record so face sources associate.
-                if !needs_entity_click
-                    && !needs_tan
-                    && !is_window_corner
-                    && (self
-                        .snapper
-                        .is_on_3d(crate::snap::SnapType::FacePerpendicular)
-                        || self
-                            .snapper
-                            .is_on_3d(crate::snap::SnapType::NearestFace))
-                {
-                    let face_hit = self.tabs[i].scene.solid_face_snaps(
-                        p,
-                        view_rot,
-                        eye,
-                        bounds,
-                        self.snapper.osnap_radius_px,
-                        self.last_point,
-                        self.snapper
-                            .is_on_3d(crate::snap::SnapType::FacePerpendicular),
-                        self.snapper.is_on_3d(crate::snap::SnapType::NearestFace),
-                    );
-                    if face_hit.is_some() {
-                        snap_hit = crate::snap::merge_snap(snap_hit, face_hit, p);
-                    }
-                }
-                self.pending_click_snap = snap_hit.map(|hit| (hit, click_frame));
-                // Snap runs in model space; the result is already model.
-                let mut pt = snap_hit.map(|s| s.world).unwrap_or(raw);
-                // When no UCS is active clamp to world XY; with a UCS the point is
-                // already constrained to that plane by the ray–plane intersection.
-                // A genuine 3D object snap keeps its elevation — only grid snaps
-                // and misses are flattened.
-                let uses_command_cursor_plane = self.tabs[i]
-                    .active_cmd
-                    .as_ref()
-                    .and_then(|command| command.cursor_plane())
-                    .is_some();
-                let clamp_world_xy = self.tabs[i].active_ucs.is_none()
-                    && !uses_command_cursor_plane
-                    && !snap_keeps_elevation(snap_hit.map(|s| s.snap_type));
-                if clamp_world_xy {
-                    pt.z = 0.0;
-                }
-                let axis_lock = if let Some(base) = self.last_point {
-                    self.active_axis_lock(
-                        i,
-                        raw,
-                        base,
-                        !needs_entity_click
-                            && !needs_tan
-                            && !is_window_corner
-                            && !uses_command_cursor_plane,
-                    )
-                } else {
-                    self.axis_lock_dir = None;
-                    None
-                };
-                if let (Some(dir), Some(base)) = (axis_lock, self.last_point) {
-                    pt = axis_lock_apply(pt, base, dir);
-                    if clamp_world_xy {
-                        pt.z = 0.0;
-                    }
-                }
-                let otrack = if axis_lock.is_none() {
-                    self.active_otrack_hit(
-                        i,
-                        raw,
-                        snap_hit,
-                        self.last_point,
-                        !is_window_corner,
-                        view_rot,
-                        eye,
-                        bounds,
-                    )
-                } else {
-                    None
-                };
-                if let Some(h) = otrack {
-                    pt = h.aligned;
-                    if clamp_world_xy {
-                        pt.z = 0.0;
-                    }
-                } else if axis_lock.is_none()
-                    && !is_window_corner
-                    && !uses_command_cursor_plane
-                    && !snap_hit.is_some_and(|s| s.snap_type != crate::snap::SnapType::Grid)
-                {
-                    // Object snap wins over ortho/polar — a snapped point
-                    // commits as-is. Grid snap still combines. (#132)
-                    if let Some(base) = self.last_point {
-                        let ucs_xf = self.tabs[i].ucs_xform();
-                        if self.ortho_mode {
-                            pt = drafting_constrain(
-                                pt,
-                                base,
-                                &ucs_xf,
-                                self.isometric_drafting,
-                                self.iso_plane,
-                                self.snap_angle_deg,
-                            );
-                        } else if self.polar_mode {
-                            pt = polar_constrain_near(
-                                pt,
-                                base,
-                                self.polar_increment_deg,
-                                view_rot,
-                                eye,
-                                bounds,
-                                self.snapper.osnap_radius_px,
-                                &ucs_xf,
-                            );
-                        }
-                    }
-                }
-                pt = self.tabs[i]
-                    .active_cmd
-                    .as_ref()
-                    .and_then(|command| command.cursor_axis())
-                    .and_then(|(origin, direction)| {
-                        command_axis_point(snap_hit, p, bounds, view_rot, eye, origin, direction)
-                    })
-                    .unwrap_or(pt);
-                // A click while dynamic-input fields hold typed values
-                // commits the CONSTRAINED point — the same resolution
-                // the preview shows and Enter would commit (#356).
-                if !needs_entity_click
-                    && self.tabs[i].active_cmd.is_some()
-                    && self.tabs[i].dyn_fields.iter().any(|f| f.buffer.is_some())
-                {
-                    self.tabs[i].last_cursor_world = pt;
-                    if let Some(r) = self.dyn_resolve_point() {
-                        pt = r;
-                    }
-                }
-                if entity_click_takes_points {
-                    snap_hit.map_or(raw, |hit| hit.world)
-                } else {
-                    pt
-                }
-            };
-
-            // `world_pt` is in offset-relative (local) space, matching
-            // the camera and the point-creation commands. Entity-pick /
-            // tangent / structure-pick commands instead compare the
-            // click against WCS document entities, so they need the
-            // world_offset added back (model space only — paper-space
-            // entities are already in sheet coordinates). Without this,
-            // TRIM/EXTEND/FILLET pick the wrong side on UTM-scale files.
-            let pick_wcs = {
-                let wo = if self.tabs[i].scene.current_layout == "Model" {
-                    [0.0_f64; 3]
-                } else {
-                    [0.0; 3]
-                };
-                world_pt + glam::DVec3::new(wo[0], wo[1], wo[2])
-            };
-
-            if let Some(command) = self.tabs[i].active_cmd.as_mut() {
-                command.set_ctrl(self.ctrl_down);
-                command.set_shift(self.shift_down);
-            }
-            let result = if self.tabs[i]
-                .active_cmd
-                .as_ref()
-                .map(|c| c.needs_structure_point_pick())
-                .unwrap_or(false)
-            {
-                let pick = self.tabs[i].active_cmd.as_ref().and_then(|c| {
-                    c.resolve_object_pick(&self.tabs[i].scene, pick_wcs.x as f64, pick_wcs.y as f64)
-                });
-                if let Some(pick) = pick {
-                    let center = glam::DVec3::new(pick.x, pick.y, pick_wcs.z);
-                    let result = self.tabs[i]
-                        .active_cmd
-                        .as_mut()
-                        .map(|c| c.on_structure_pick(pick.handle, center));
-                    self.command_line
-                        .push_info(crate::tf!("{} acquired.", pick.label).as_ref());
-                    result
-                } else {
-                    let msg = self.tabs[i]
-                        .active_cmd
-                        .as_ref()
-                        .map(|c| c.object_pick_miss_message())
-                        .unwrap_or("No object near click.");
-                    self.command_line.push_error(msg);
-                    None
-                }
-            } else if self.tabs[i]
-                .active_cmd
-                .as_ref()
-                .map(|c| c.needs_entity_pick())
-                .unwrap_or(false)
-            {
-                let (view_rot2, eye2, all_wires2) = self.pick_view(i, &edit_cam, bounds);
-                let click_candidates = self.tabs[i].scene.interaction_pick_candidates_near(
-                    all_wires2,
-                    world_pt,
-                    view_rot2,
-                    eye2,
-                    bounds,
-                    crate::ui::overlay::pick_box_aperture_px(self.pick_box) * 2.0,
-                );
-                let include_fills = self.tabs[i]
-                    .active_cmd
-                    .as_ref()
-                    .map(|c| c.entity_pick_includes_fills())
-                    .unwrap_or(false);
-                let candidate_handles = if include_fills {
-                    self.tabs[i]
-                        .scene
-                        .interaction_candidate_handles(&click_candidates)
-                } else {
-                    None
-                };
-                let hit = scene::pick::hit_test::click_hit(
-                    p,
-                    &click_candidates,
-                    view_rot2,
-                    eye2,
-                    bounds,
-                    self.tabs[i].scene.document.header.lineweight_display,
-                    crate::ui::overlay::pick_box_aperture_px(self.pick_box),
-                    &self.tabs[i].scene.draw_depth_map(),
-                )
-                .and_then(|s| Scene::handle_from_wire_name(s))
-                .or_else(|| {
-                    if !include_fills {
-                        return None;
-                    }
-                    scene::pick::hit_test::click_hit_hatch(
-                        p,
-                        &self.tabs[i]
-                            .scene
-                            .visible_hatches_for_click(candidate_handles.as_ref()),
-                        view_rot2,
-                        eye2,
-                        bounds,
-                        candidate_handles.as_ref(),
-                    )
-                })
-                .or_else(|| {
-                    include_fills.then(|| {
-                        scene::pick::hit_test::click_hit_insert_hatch(
-                            p,
-                            self.tabs[i].scene.insert_hatches_for_click().as_ref(),
-                            view_rot2,
-                            eye2,
-                            bounds,
-                            candidate_handles.as_ref(),
-                        )
-                    })?
-                })
-                .or_else(|| {
-                    include_fills.then(|| {
-                        self.tabs[i].scene.solid_click_hit(
-                            p,
-                            view_rot2,
-                            eye2,
-                            bounds,
-                            candidate_handles.as_ref(),
-                        )
-                    })?
-                });
-                if let Some(handle) = hit {
-                    let uses_surface_point = self.tabs[i]
-                        .active_cmd
-                        .as_ref()
-                        .is_some_and(|command| command.entity_pick_uses_surface_point());
-                    let entity_pick_point = if uses_surface_point {
-                        self.tabs[i]
-                            .scene
-                            .solid_click_point_for(p, view_rot2, eye2, bounds, handle)
-                            .or_else(|| {
-                                self.tabs[i]
-                                    .active_cmd
-                                    .as_ref()
-                                    .is_some_and(|command| command.entity_pick_deferred_hover())
-                                    .then(|| {
-                                        self.profile_pick_point(i, handle, &edit_cam, p, bounds)
-                                    })
-                                    .flatten()
-                            })
-                            .unwrap_or_else(|| {
-                                let bounded_pick = self.tabs[i]
-                                    .active_cmd
-                                    .as_ref()
-                                    .is_some_and(|command| command.entity_pick_deferred_hover());
-                                if bounded_pick
-                                    && matches!(
-                                        self.tabs[i].scene.document.get_entity(handle),
-                                        Some(codec::EntityType::Solid3D(_)),
-                                    )
-                                {
-                                    // The aperture caught an edge outside its face.
-                                    // Do not reinterpret the working-plane point as
-                                    // a hit on another cap of the same body.
-                                    glam::DVec3::NAN
-                                } else {
-                                    pick_wcs
-                                }
-                            })
-                    } else {
-                        pick_wcs
-                    };
-                    let entity_pick_direction =
-                        if uses_surface_point && entity_pick_point.is_finite() {
-                            if matches!(
-                                self.tabs[i].scene.document.get_entity(handle),
-                                Some(codec::EntityType::Solid3D(_))
-                            ) {
-                                self.tabs[i]
-                                    .scene
-                                    .solid_planar_face_normal_at(handle, entity_pick_point)
-                            } else {
-                                self.tabs[i]
-                                    .scene
-                                    .document
-                                    .get_entity(handle)
-                                    .and_then(crate::entities::curve::entity_curve)
-                                    .and_then(|curve| curve.plane.normal())
-                                    .map(glam::DVec3::from_array)
-                            }
-                        } else {
-                            None
-                        };
-                    // Some commands (e.g. SS_CATCHMENT) need the entity
-                    // body before `on_entity_pick` can advance.
-                    let inject_first = self.tabs[i]
-                        .active_cmd
-                        .as_ref()
-                        .map(|c| c.inject_before_entity_pick())
-                        .unwrap_or(false);
-                    if inject_first {
-                        let surface_area = self.tabs[i]
-                            .scene
-                            .meshes
-                            .get(&handle)
-                            .or_else(|| self.tabs[i].scene.block_meshes.get(&handle))
-                            .map(|mesh| mesh.metrics.surface_area);
-                        if let Some(entity) =
-                            self.tabs[i].scene.document.get_entity(handle).cloned()
-                        {
-                            if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
-                                cmd.inject_picked_entity(entity);
-                                if let Some(area) = surface_area {
-                                    cmd.inject_picked_surface_area(area);
-                                }
-                            }
-                        }
-                    }
-
-                    if !self.dimension_acquisition_allowed(i, None) {
-                        self.finish_command_click(i);
-                        return Task::none();
-                    }
-                    let shift = self.shift_down;
-                    let result = self.tabs[i].active_cmd.as_mut().map(|c| {
-                        // Shift-swap state for TRIM/EXTEND (#336).
-                        c.set_shift(shift);
-                        c.set_entity_pick_direction(entity_pick_direction);
-                        c.on_entity_pick(handle, entity_pick_point)
-                    });
-                    self.record_dimension_entity_points(i, None, handle, Vec::new());
-                    // HATCHEDIT: after pick, inject hatch model data into the command.
-                    if self.tabs[i]
-                        .active_cmd
-                        .as_ref()
-                        .map(|c| c.name() == "HATCHEDIT")
-                        .unwrap_or(false)
-                    {
-                        if let Some(model) = self.tabs[i].scene.hatches.get(&handle).cloned() {
-                            let entity = self.tabs[i].scene.document.get_entity(handle);
-                            let annotative = entity.is_some_and(|entity| {
-                                crate::scene::annotative::is_annotative(
-                                    &self.tabs[i].scene.document,
-                                    entity,
-                                )
-                            });
-                            let (scale, angle) = match entity {
-                                Some(codec::EntityType::Hatch(hatch)) => (
-                                    hatch.pattern_scale as f32,
-                                    hatch.pattern_angle.to_degrees() as f32,
-                                ),
-                                _ => (model.scale, model.angle_offset.to_degrees()),
-                            };
-                            use crate::command::CadCommand;
-                            use crate::modules::draw::draw::hatchedit::HatcheditCommand;
-                            let current_color =
-                                self.tabs[i].scene.document.header.current_entity_color;
-                            let current_transparency =
-                                self.tabs[i].scene.document.current_entity_transparency();
-                            let current_origin = self.tabs[i].scene.document.hatch_origin();
-                            let cmd: Box<dyn CadCommand> = Box::new(
-                                HatcheditCommand::with_handle(
-                                    handle,
-                                    model.name.clone(),
-                                    scale,
-                                    angle,
-                                    annotative,
-                                )
-                                .with_appearance(entity, current_color, current_transparency)
-                                .with_origin(current_origin),
-                            );
-                            self.command_line.push_info(&cmd.prompt());
-                            self.tabs[i].active_cmd = Some(cmd);
-                        } else {
-                            self.command_line
-                                .push_error(crate::t!("HATCHEDIT: not a hatch entity.").as_ref());
-                            self.tabs[i].active_cmd = None;
-                        }
-                    }
-                    // DIMTEDIT / MLEADERADD / MLEADERREMOVE: inject cloned entity via trait.
-                    {
-                        let needs_inject = self.tabs[i]
-                            .active_cmd
-                            .as_ref()
-                            .map(|c| {
-                                matches!(c.name(), "DIMTEDIT" | "MLEADERADD" | "MLEADERREMOVE")
-                            })
-                            .unwrap_or(false);
-                        if needs_inject {
-                            if let Some(entity) =
-                                self.tabs[i].scene.document.get_entity(handle).cloned()
-                            {
-                                if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
-                                    cmd.inject_picked_entity(entity);
-                                    let prompt = cmd.prompt();
-                                    self.command_line.push_info(&prompt);
-                                }
-                            }
-                        }
-                    }
-                    result
-                } else if let Some(result) = {
-                    let dimension = self.tabs[i]
-                        .active_cmd
-                        .as_ref()
-                        .is_some_and(|c| c.measures_through_viewports());
-                    if dimension {
-                        let per_px = self.tabs[i].scene.camera.borrow().ortho_size() as f64 * 2.0
-                            / (bounds.height as f64).max(1.0);
-                        self.try_dimension_viewport_entity_pick(
-                            i,
-                            pick_wcs,
-                            crate::ui::overlay::pick_box_aperture_px(self.pick_box) as f64 * per_px,
-                        )
-                    } else {
-                        None
-                    }
-                } {
-                    Some(result)
-                } else if self.tabs[i]
-                    .active_cmd
-                    .as_ref()
-                    .is_some_and(|command| command.entity_pick_accepts_points())
-                {
-                    let pending = self.pending_click_snap.take();
-                    if !self.record_accepted_snap(
-                        i,
-                        pending.map(|(hit, _)| hit),
-                        pending.and_then(|(_, frame)| frame),
-                        pick_wcs,
-                    ) {
-                        self.finish_command_click(i);
-                        return Task::none();
-                    }
-                    self.refresh_command_point_pick_context(i);
-                    self.tabs[i]
-                        .active_cmd
-                        .as_mut()
-                        .map(|command| command.on_point(pick_wcs))
-                } else if self.tabs[i]
-                    .active_cmd
-                    .as_ref()
-                    .is_some_and(|command| command.accepts_drag_selection())
-                {
-                    let anchor_world = self.cursor_model_point(i, &edit_cam, p, bounds);
-                    let mut selection = self.tabs[i].scene.selection.borrow_mut();
-                    selection.box_anchor = Some(p_full);
-                    selection.box_current = Some(p_full);
-                    selection.box_anchor_world = Some(anchor_world);
-                    if !selection.box_crossing_locked {
-                        selection.box_crossing = false;
-                    }
-                    None
-                } else {
-                    self.command_line
-                        .push_info(crate::t!("Nothing found at that point.").as_ref());
-                    None
-                }
-            } else if self.tabs[i]
-                .active_cmd
-                .as_ref()
-                .map(|c| c.needs_tangent_pick())
-                .unwrap_or(false)
-            {
-                if let Some(obj) = tangent_obj_at_click {
-                    self.tabs[i]
-                        .active_cmd
-                        .as_mut()
-                        .map(|c| c.on_tangent_point(obj, pick_wcs))
-                } else {
-                    self.command_line
-                        .push_info(crate::t!("Select a tangent object.").as_ref());
-                    None
-                }
-            } else if !self.command_point_allowed(i, world_pt) {
-                None
-            } else {
-                // A scalar typed into the dynamic-input box but not
-                // yet confirmed with Enter is applied before the
-                // point pick — e.g. an OFFSET distance typed and then
-                // clicked takes effect rather than being discarded.
-                let wants_text = self.tabs[i]
-                    .active_cmd
-                    .as_ref()
-                    .map(|c| c.input_kind().wants_text())
-                    .unwrap_or(false);
-                if wants_text {
-                    if let Some(text) = self.tabs[i]
-                        .dyn_fields
-                        .iter()
-                        .find_map(|f| f.buffer.clone())
-                    {
-                        let text = crate::app::expr_eval::eval_to_string(text.trim());
-                        if let Some(c) = self.tabs[i].active_cmd.as_mut() {
-                            c.on_text_input(&text);
-                        }
-                        for f in self.tabs[i].dyn_fields.iter_mut() {
-                            f.buffer = None;
-                        }
-                        self.tabs[i].dyn_active = 0;
-                    }
-                }
-                // Record what this point step accepted, alongside the point
-                // itself: paper point, model point, viewport, frame and
-                // geometry identity. Commands that don't care keep consuming
-                // `world_pt` exactly as before.
-                let pending = self.pending_click_snap.take();
-                if !self.record_accepted_snap(
-                    i,
-                    pending.map(|(hit, _)| hit),
-                    pending.and_then(|(_, frame)| frame),
-                    world_pt,
-                ) {
-                    self.finish_command_click(i);
-                    return Task::none();
-                }
-                self.last_point = Some(world_pt);
-                // The one-shot snap override is spent by this pick —
-                // restore the running osnap configuration (#337).
-                self.snapper.clear_override();
-                self.dyn_user_reshaped = false;
-                self.dyn_coord_absolute = false;
-                self.sync_dyn_fields();
-                self.reset_tracking_after_point();
-                // A running Tangent snap may carry a tangent object; a
-                // command can consume it to resolve a deferred tangent
-                // (LINE tangent to two circles, which needs both). When
-                // it does, sync last_point to the command's resolved
-                // anchor since it replaced the picked coordinate.
-                self.refresh_command_point_pick_context(i);
-                let handled = self.tabs[i]
-                    .active_cmd
-                    .as_mut()
-                    .and_then(|c| c.on_point_with_tangent(world_pt, tangent_obj_at_click));
-                if handled.is_some() {
-                    if let Some(a) = self.tabs[i]
-                        .active_cmd
-                        .as_ref()
-                        .and_then(|c| c.resolved_anchor())
-                    {
-                        self.last_point = Some(a);
-                    }
-                    handled
-                } else {
-                    self.tabs[i]
-                        .active_cmd
-                        .as_mut()
-                        .map(|c| c.on_point(world_pt))
-                }
-            };
-
-            self.sync_dimension_snaps(i);
-            if let Some(r) = result {
-                let task = self.apply_cmd_result(r);
-                let mut sel = self.tabs[i].scene.selection.borrow_mut();
-                sel.left_down = false;
-                sel.left_press_pos = None;
-                sel.left_press_time = None;
-                sel.left_dragging = false;
-                return task;
-            }
-            let mut sel = self.tabs[i].scene.selection.borrow_mut();
-            sel.left_down = false;
-            sel.left_press_pos = None;
-            sel.left_press_time = None;
-            sel.left_dragging = false;
-            return Task::none();
+            return self.dispatch_active_command_click(
+                i,
+                p_full,
+                p,
+                edit_cam,
+                (tile_vw, tile_vh),
+                is_window_corner,
+            );
         }
 
         let (is_down2, is_dragging, box_anchor, box_crossing, _vp_size, poly_drag) = {
@@ -5615,6 +4909,770 @@ properties={:.1}ms picked={}",
             }
         }
 
+        Task::none()
+    }
+
+    #[inline(never)]
+    fn dispatch_active_command_click(
+        &mut self,
+        i: usize,
+        p_full: iced::Point,
+        p: iced::Point,
+        edit_cam: Option<Camera>,
+        tile_sz: (f32, f32),
+        is_window_corner: bool,
+    ) -> Task<Message> {
+        let (tile_vw, tile_vh) = tile_sz;
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: tile_vw,
+            height: tile_vh,
+        };
+
+        let snap_taken = self.tabs[i].snap_result.take();
+        let tangent_obj_at_click = snap_taken.and_then(|s| s.tangent_obj);
+
+        let world_pt = {
+            // Cursor → model point (viewport camera inside a viewport,
+            // else paper sheet → model). Model space throughout.
+            let raw = self.cursor_model_point(i, &edit_cam, p, bounds);
+            let (view_rot, eye) = match &edit_cam {
+                Some(cam) => (cam.view_proj_rte(bounds), cam.eye()),
+                None => {
+                    let c = self.tabs[i].scene.camera.borrow();
+                    (c.view_proj_rte(bounds), c.eye())
+                }
+            };
+            let snap_cursor = raw;
+            let all_wires =
+                if let (Some(_), Some(h)) = (&edit_cam, self.tabs[i].scene.active_viewport) {
+                    self.tabs[i]
+                        .scene
+                        .model_wires_for_viewport_arc(h, bounds.height)
+                } else {
+                    self.tabs[i].scene.hit_test_wires()
+                };
+            let snap_candidates = self.tabs[i].scene.interaction_candidates_near(
+                all_wires,
+                snap_cursor,
+                view_rot,
+                eye,
+                bounds,
+                self.snapper.osnap_radius_px,
+            );
+            let needs_tan = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.needs_tangent_pick())
+                .unwrap_or(false);
+            let needs_entity_click = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.needs_entity_pick())
+                .unwrap_or(false);
+            let entity_click_takes_points = needs_entity_click
+                && self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .is_some_and(|command| command.entity_pick_accepts_points());
+            let mut snap_hit = if needs_entity_click && !entity_click_takes_points {
+                None
+            } else if needs_tan {
+                self.snapper.snap_tangent_only(
+                    snap_cursor.as_vec3(),
+                    p,
+                    &snap_candidates,
+                    view_rot,
+                    eye,
+                    bounds,
+                )
+            } else {
+                let (go, gr) = self.drafting_grid_basis(i);
+                self.snapper.from_point = self.last_point;
+
+                let construction_ray = if is_window_corner {
+                    None
+                } else {
+                    self.last_point.and_then(|base| {
+                        self.active_construction_ray(
+                            i,
+                            snap_cursor,
+                            base,
+                            view_rot,
+                            eye,
+                            bounds,
+                        )
+                    })
+                };
+
+                self.snapper.snap(
+                    snap_cursor,
+                    p,
+                    &snap_candidates,
+                    view_rot,
+                    eye,
+                    bounds,
+                    go,
+                    gr,
+                    construction_ray,
+                )
+            };
+            // Mirror the cursor-move OTRACK × geometry intersection pass when the
+            // point is actually clicked. The move path may already display the
+            // Intersection marker, but click handling recomputes snapping from scratch.
+            if !needs_entity_click && !needs_tan && !is_window_corner {
+                let tracking_probe = self.active_otrack_hit(
+                    i,
+                    raw,
+                    None,
+                    self.last_point,
+                    true,
+                    view_rot,
+                    eye,
+                    bounds,
+                );
+
+                if let Some(track) = tracking_probe {
+                    let (go, gr) = self.drafting_grid_basis(i);
+
+                    let tracked_snap = self.snapper.snap(
+                        snap_cursor,
+                        p,
+                        &snap_candidates,
+                        view_rot,
+                        eye,
+                        bounds,
+                        go,
+                        gr,
+                        Some((track.base, track.base + track.dir)),
+                    );
+
+                    if tracked_snap
+                        .is_some_and(|hit| hit.snap_type == crate::snap::SnapType::Intersection)
+                    {
+                        snap_hit = tracked_snap;
+                    }
+                }
+            }
+            // Paper-space snapping through layout viewports. Mirrors
+            // the cursor-move pass: the click recomputes snapping from
+            // scratch, so the viewport query has to run here too. The hit
+            // comes back already projected onto the sheet.
+            let mut click_frame: Option<crate::scene::viewport_ref::ViewportFrame> = None;
+            if edit_cam.is_none() && !needs_entity_click && !needs_tan {
+                if let Some((vp_hit, frame)) =
+                    self.paper_viewport_snap(i, p_full, (tile_vw, tile_vh), raw)
+                {
+                    let merged = crate::snap::merge_snap(snap_hit, Some(vp_hit), p_full);
+                    if merged.is_some_and(|hit| hit.viewport.is_some()) {
+                        click_frame = Some(frame);
+                    }
+                    snap_hit = merged;
+                }
+            }
+            // Solid-face snaps (Nearest/Perpendicular to face), mirroring
+            // the cursor-move pass so click and preview agree. Merged
+            // before the accepted-snap record so face sources associate.
+            if !needs_entity_click
+                && !needs_tan
+                && !is_window_corner
+                && (self
+                    .snapper
+                    .is_on_3d(crate::snap::SnapType::FacePerpendicular)
+                    || self
+                        .snapper
+                        .is_on_3d(crate::snap::SnapType::NearestFace))
+            {
+                let face_hit = self.tabs[i].scene.solid_face_snaps(
+                    p,
+                    view_rot,
+                    eye,
+                    bounds,
+                    self.snapper.osnap_radius_px,
+                    self.last_point,
+                    self.snapper
+                        .is_on_3d(crate::snap::SnapType::FacePerpendicular),
+                    self.snapper.is_on_3d(crate::snap::SnapType::NearestFace),
+                );
+                if face_hit.is_some() {
+                    snap_hit = crate::snap::merge_snap(snap_hit, face_hit, p);
+                }
+            }
+            self.pending_click_snap = snap_hit.map(|hit| (hit, click_frame));
+            // Snap runs in model space; the result is already model.
+            let mut pt = snap_hit.map(|s| s.world).unwrap_or(raw);
+            // When no UCS is active clamp to world XY; with a UCS the point is
+            // already constrained to that plane by the ray–plane intersection.
+            // A genuine 3D object snap keeps its elevation — only grid snaps
+            // and misses are flattened.
+            let uses_command_cursor_plane = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .and_then(|command| command.cursor_plane())
+                .is_some();
+            let clamp_world_xy = self.tabs[i].active_ucs.is_none()
+                && !uses_command_cursor_plane
+                && !snap_keeps_elevation(snap_hit.map(|s| s.snap_type));
+            if clamp_world_xy {
+                pt.z = 0.0;
+            }
+            let axis_lock = if let Some(base) = self.last_point {
+                self.active_axis_lock(
+                    i,
+                    raw,
+                    base,
+                    !needs_entity_click
+                        && !needs_tan
+                        && !is_window_corner
+                        && !uses_command_cursor_plane,
+                )
+            } else {
+                self.axis_lock_dir = None;
+                None
+            };
+            if let (Some(dir), Some(base)) = (axis_lock, self.last_point) {
+                pt = axis_lock_apply(pt, base, dir);
+                if clamp_world_xy {
+                    pt.z = 0.0;
+                }
+            }
+            let otrack = if axis_lock.is_none() {
+                self.active_otrack_hit(
+                    i,
+                    raw,
+                    snap_hit,
+                    self.last_point,
+                    !is_window_corner,
+                    view_rot,
+                    eye,
+                    bounds,
+                )
+            } else {
+                None
+            };
+            if let Some(h) = otrack {
+                pt = h.aligned;
+                if clamp_world_xy {
+                    pt.z = 0.0;
+                }
+            } else if axis_lock.is_none()
+                && !is_window_corner
+                && !uses_command_cursor_plane
+                && !snap_hit.is_some_and(|s| s.snap_type != crate::snap::SnapType::Grid)
+            {
+                // Object snap wins over ortho/polar — a snapped point
+                // commits as-is. Grid snap still combines. (#132)
+                if let Some(base) = self.last_point {
+                    let ucs_xf = self.tabs[i].ucs_xform();
+                    if self.ortho_mode {
+                        pt = drafting_constrain(
+                            pt,
+                            base,
+                            &ucs_xf,
+                            self.isometric_drafting,
+                            self.iso_plane,
+                            self.snap_angle_deg,
+                        );
+                    } else if self.polar_mode {
+                        pt = polar_constrain_near(
+                            pt,
+                            base,
+                            self.polar_increment_deg,
+                            view_rot,
+                            eye,
+                            bounds,
+                            self.snapper.osnap_radius_px,
+                            &ucs_xf,
+                        );
+                    }
+                }
+            }
+            pt = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .and_then(|command| command.cursor_axis())
+                .and_then(|(origin, direction)| {
+                    command_axis_point(snap_hit, p, bounds, view_rot, eye, origin, direction)
+                })
+                .unwrap_or(pt);
+            // A click while dynamic-input fields hold typed values
+            // commits the CONSTRAINED point — the same resolution
+            // the preview shows and Enter would commit (#356).
+            if !needs_entity_click
+                && self.tabs[i].active_cmd.is_some()
+                && self.tabs[i].dyn_fields.iter().any(|f| f.buffer.is_some())
+            {
+                self.tabs[i].last_cursor_world = pt;
+                if let Some(r) = self.dyn_resolve_point() {
+                    pt = r;
+                }
+            }
+            if entity_click_takes_points {
+                snap_hit.map_or(raw, |hit| hit.world)
+            } else {
+                pt
+            }
+        };
+
+        // `world_pt` is in offset-relative (local) space, matching
+        // the camera and the point-creation commands. Entity-pick /
+        // tangent / structure-pick commands instead compare the
+        // click against WCS document entities, so they need the
+        // world_offset added back (model space only — paper-space
+        // entities are already in sheet coordinates). Without this,
+        // TRIM/EXTEND/FILLET pick the wrong side on UTM-scale files.
+        let pick_wcs = {
+            let wo = if self.tabs[i].scene.current_layout == "Model" {
+                [0.0_f64; 3]
+            } else {
+                [0.0; 3]
+            };
+            world_pt + glam::DVec3::new(wo[0], wo[1], wo[2])
+        };
+
+        if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+            command.set_ctrl(self.ctrl_down);
+            command.set_shift(self.shift_down);
+        }
+        let result = if self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .map(|c| c.needs_structure_point_pick())
+            .unwrap_or(false)
+        {
+            let pick = self.tabs[i].active_cmd.as_ref().and_then(|c| {
+                c.resolve_object_pick(&self.tabs[i].scene, pick_wcs.x as f64, pick_wcs.y as f64)
+            });
+            if let Some(pick) = pick {
+                let center = glam::DVec3::new(pick.x, pick.y, pick_wcs.z);
+                let result = self.tabs[i]
+                    .active_cmd
+                    .as_mut()
+                    .map(|c| c.on_structure_pick(pick.handle, center));
+                self.command_line
+                    .push_info(crate::tf!("{} acquired.", pick.label).as_ref());
+                result
+            } else {
+                let msg = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .map(|c| c.object_pick_miss_message())
+                    .unwrap_or("No object near click.");
+                self.command_line.push_error(msg);
+                None
+            }
+        } else if self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .map(|c| c.needs_entity_pick())
+            .unwrap_or(false)
+        {
+            let (view_rot2, eye2, all_wires2) = self.pick_view(i, &edit_cam, bounds);
+            let click_candidates = self.tabs[i].scene.interaction_pick_candidates_near(
+                all_wires2,
+                world_pt,
+                view_rot2,
+                eye2,
+                bounds,
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box) * 2.0,
+            );
+            let include_fills = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.entity_pick_includes_fills())
+                .unwrap_or(false);
+            let candidate_handles = if include_fills {
+                self.tabs[i]
+                    .scene
+                    .interaction_candidate_handles(&click_candidates)
+            } else {
+                None
+            };
+            let hit = scene::pick::hit_test::click_hit(
+                p,
+                &click_candidates,
+                view_rot2,
+                eye2,
+                bounds,
+                self.tabs[i].scene.document.header.lineweight_display,
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                &self.tabs[i].scene.draw_depth_map(),
+            )
+            .and_then(|s| Scene::handle_from_wire_name(s))
+            .or_else(|| {
+                if !include_fills {
+                    return None;
+                }
+                scene::pick::hit_test::click_hit_hatch(
+                    p,
+                    &self.tabs[i]
+                        .scene
+                        .visible_hatches_for_click(candidate_handles.as_ref()),
+                    view_rot2,
+                    eye2,
+                    bounds,
+                    candidate_handles.as_ref(),
+                )
+            })
+            .or_else(|| {
+                include_fills.then(|| {
+                    scene::pick::hit_test::click_hit_insert_hatch(
+                        p,
+                        self.tabs[i].scene.insert_hatches_for_click().as_ref(),
+                        view_rot2,
+                        eye2,
+                        bounds,
+                        candidate_handles.as_ref(),
+                    )
+                })?
+            })
+            .or_else(|| {
+                include_fills.then(|| {
+                    self.tabs[i].scene.solid_click_hit(
+                        p,
+                        view_rot2,
+                        eye2,
+                        bounds,
+                        candidate_handles.as_ref(),
+                    )
+                })?
+            });
+            if let Some(handle) = hit {
+                let uses_surface_point = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .is_some_and(|command| command.entity_pick_uses_surface_point());
+                let entity_pick_point = if uses_surface_point {
+                    self.tabs[i]
+                        .scene
+                        .solid_click_point_for(p, view_rot2, eye2, bounds, handle)
+                        .or_else(|| {
+                            self.tabs[i]
+                                .active_cmd
+                                .as_ref()
+                                .is_some_and(|command| command.entity_pick_deferred_hover())
+                                .then(|| {
+                                    self.profile_pick_point(i, handle, &edit_cam, p, bounds)
+                                })
+                                .flatten()
+                        })
+                        .unwrap_or_else(|| {
+                            let bounded_pick = self.tabs[i]
+                                .active_cmd
+                                .as_ref()
+                                .is_some_and(|command| command.entity_pick_deferred_hover());
+                            if bounded_pick
+                                && matches!(
+                                    self.tabs[i].scene.document.get_entity(handle),
+                                    Some(codec::EntityType::Solid3D(_)),
+                                )
+                            {
+                                // The aperture caught an edge outside its face.
+                                // Do not reinterpret the working-plane point as
+                                // a hit on another cap of the same body.
+                                glam::DVec3::NAN
+                            } else {
+                                pick_wcs
+                            }
+                        })
+                } else {
+                    pick_wcs
+                };
+                let entity_pick_direction =
+                    if uses_surface_point && entity_pick_point.is_finite() {
+                        if matches!(
+                            self.tabs[i].scene.document.get_entity(handle),
+                            Some(codec::EntityType::Solid3D(_))
+                        ) {
+                            self.tabs[i]
+                                .scene
+                                .solid_planar_face_normal_at(handle, entity_pick_point)
+                        } else {
+                            self.tabs[i]
+                                .scene
+                                .document
+                                .get_entity(handle)
+                                .and_then(crate::entities::curve::entity_curve)
+                                .and_then(|curve| curve.plane.normal())
+                                .map(glam::DVec3::from_array)
+                        }
+                    } else {
+                        None
+                    };
+                // Some commands (e.g. SS_CATCHMENT) need the entity
+                // body before `on_entity_pick` can advance.
+                let inject_first = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .map(|c| c.inject_before_entity_pick())
+                    .unwrap_or(false);
+                if inject_first {
+                    let surface_area = self.tabs[i]
+                        .scene
+                        .meshes
+                        .get(&handle)
+                        .or_else(|| self.tabs[i].scene.block_meshes.get(&handle))
+                        .map(|mesh| mesh.metrics.surface_area);
+                    if let Some(entity) =
+                        self.tabs[i].scene.document.get_entity(handle).cloned()
+                    {
+                        if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
+                            cmd.inject_picked_entity(entity);
+                            if let Some(area) = surface_area {
+                                cmd.inject_picked_surface_area(area);
+                            }
+                        }
+                    }
+                }
+
+                if !self.dimension_acquisition_allowed(i, None) {
+                    self.finish_command_click(i);
+                    return Task::none();
+                }
+                let shift = self.shift_down;
+                let result = self.tabs[i].active_cmd.as_mut().map(|c| {
+                    // Shift-swap state for TRIM/EXTEND (#336).
+                    c.set_shift(shift);
+                    c.set_entity_pick_direction(entity_pick_direction);
+                    c.on_entity_pick(handle, entity_pick_point)
+                });
+                self.record_dimension_entity_points(i, None, handle, Vec::new());
+                // HATCHEDIT: after pick, inject hatch model data into the command.
+                if self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .map(|c| c.name() == "HATCHEDIT")
+                    .unwrap_or(false)
+                {
+                    if let Some(model) = self.tabs[i].scene.hatches.get(&handle).cloned() {
+                        let entity = self.tabs[i].scene.document.get_entity(handle);
+                        let annotative = entity.is_some_and(|entity| {
+                            crate::scene::annotative::is_annotative(
+                                &self.tabs[i].scene.document,
+                                entity,
+                            )
+                        });
+                        let (scale, angle) = match entity {
+                            Some(codec::EntityType::Hatch(hatch)) => (
+                                hatch.pattern_scale as f32,
+                                hatch.pattern_angle.to_degrees() as f32,
+                            ),
+                            _ => (model.scale, model.angle_offset.to_degrees()),
+                        };
+                        use crate::command::CadCommand;
+                        use crate::modules::draw::draw::hatchedit::HatcheditCommand;
+                        let current_color =
+                            self.tabs[i].scene.document.header.current_entity_color;
+                        let current_transparency =
+                            self.tabs[i].scene.document.current_entity_transparency();
+                        let current_origin = self.tabs[i].scene.document.hatch_origin();
+                        let cmd: Box<dyn CadCommand> = Box::new(
+                            HatcheditCommand::with_handle(
+                                handle,
+                                model.name.clone(),
+                                scale,
+                                angle,
+                                annotative,
+                            )
+                            .with_appearance(entity, current_color, current_transparency)
+                            .with_origin(current_origin),
+                        );
+                        self.command_line.push_info(&cmd.prompt());
+                        self.tabs[i].active_cmd = Some(cmd);
+                    } else {
+                        self.command_line
+                            .push_error(crate::t!("HATCHEDIT: not a hatch entity.").as_ref());
+                        self.tabs[i].active_cmd = None;
+                    }
+                }
+                // DIMTEDIT / MLEADERADD / MLEADERREMOVE: inject cloned entity via trait.
+                {
+                    let needs_inject = self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .map(|c| {
+                            matches!(c.name(), "DIMTEDIT" | "MLEADERADD" | "MLEADERREMOVE")
+                        })
+                        .unwrap_or(false);
+                    if needs_inject {
+                        if let Some(entity) =
+                            self.tabs[i].scene.document.get_entity(handle).cloned()
+                        {
+                            if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
+                                cmd.inject_picked_entity(entity);
+                                let prompt = cmd.prompt();
+                                self.command_line.push_info(&prompt);
+                            }
+                        }
+                    }
+                }
+                result
+            } else if let Some(result) = {
+                let dimension = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .is_some_and(|c| c.measures_through_viewports());
+                if dimension {
+                    let per_px = self.tabs[i].scene.camera.borrow().ortho_size() as f64 * 2.0
+                        / (bounds.height as f64).max(1.0);
+                    self.try_dimension_viewport_entity_pick(
+                        i,
+                        pick_wcs,
+                        crate::ui::overlay::pick_box_aperture_px(self.pick_box) as f64 * per_px,
+                    )
+                } else {
+                    None
+                }
+            } {
+                Some(result)
+            } else if self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.entity_pick_accepts_points())
+            {
+                let pending = self.pending_click_snap.take();
+                if !self.record_accepted_snap(
+                    i,
+                    pending.map(|(hit, _)| hit),
+                    pending.and_then(|(_, frame)| frame),
+                    pick_wcs,
+                ) {
+                    self.finish_command_click(i);
+                    return Task::none();
+                }
+                self.refresh_command_point_pick_context(i);
+                self.tabs[i]
+                    .active_cmd
+                    .as_mut()
+                    .map(|command| command.on_point(pick_wcs))
+            } else if self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.accepts_drag_selection())
+            {
+                let anchor_world = self.cursor_model_point(i, &edit_cam, p, bounds);
+                let mut selection = self.tabs[i].scene.selection.borrow_mut();
+                selection.box_anchor = Some(p_full);
+                selection.box_current = Some(p_full);
+                selection.box_anchor_world = Some(anchor_world);
+                if !selection.box_crossing_locked {
+                    selection.box_crossing = false;
+                }
+                None
+            } else {
+                self.command_line
+                    .push_info(crate::t!("Nothing found at that point.").as_ref());
+                None
+            }
+        } else if self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .map(|c| c.needs_tangent_pick())
+            .unwrap_or(false)
+        {
+            if let Some(obj) = tangent_obj_at_click {
+                self.tabs[i]
+                    .active_cmd
+                    .as_mut()
+                    .map(|c| c.on_tangent_point(obj, pick_wcs))
+            } else {
+                self.command_line
+                    .push_info(crate::t!("Select a tangent object.").as_ref());
+                None
+            }
+        } else if !self.command_point_allowed(i, world_pt) {
+            None
+        } else {
+            // A scalar typed into the dynamic-input box but not
+            // yet confirmed with Enter is applied before the
+            // point pick — e.g. an OFFSET distance typed and then
+            // clicked takes effect rather than being discarded.
+            let wants_text = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.input_kind().wants_text())
+                .unwrap_or(false);
+            if wants_text {
+                if let Some(text) = self.tabs[i]
+                    .dyn_fields
+                    .iter()
+                    .find_map(|f| f.buffer.clone())
+                {
+                    let text = crate::app::expr_eval::eval_to_string(text.trim());
+                    if let Some(c) = self.tabs[i].active_cmd.as_mut() {
+                        c.on_text_input(&text);
+                    }
+                    for f in self.tabs[i].dyn_fields.iter_mut() {
+                        f.buffer = None;
+                    }
+                    self.tabs[i].dyn_active = 0;
+                }
+            }
+            // Record what this point step accepted, alongside the point
+            // itself: paper point, model point, viewport, frame and
+            // geometry identity. Commands that don't care keep consuming
+            // `world_pt` exactly as before.
+            let pending = self.pending_click_snap.take();
+            if !self.record_accepted_snap(
+                i,
+                pending.map(|(hit, _)| hit),
+                pending.and_then(|(_, frame)| frame),
+                world_pt,
+            ) {
+                self.finish_command_click(i);
+                return Task::none();
+            }
+            self.last_point = Some(world_pt);
+            // The one-shot snap override is spent by this pick —
+            // restore the running osnap configuration (#337).
+            self.snapper.clear_override();
+            self.dyn_user_reshaped = false;
+            self.dyn_coord_absolute = false;
+            self.sync_dyn_fields();
+            self.reset_tracking_after_point();
+            // A running Tangent snap may carry a tangent object; a
+            // command can consume it to resolve a deferred tangent
+            // (LINE tangent to two circles, which needs both). When
+            // it does, sync last_point to the command's resolved
+            // anchor since it replaced the picked coordinate.
+            self.refresh_command_point_pick_context(i);
+            let handled = self.tabs[i]
+                .active_cmd
+                .as_mut()
+                .and_then(|c| c.on_point_with_tangent(world_pt, tangent_obj_at_click));
+            if handled.is_some() {
+                if let Some(a) = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .and_then(|c| c.resolved_anchor())
+                {
+                    self.last_point = Some(a);
+                }
+                handled
+            } else {
+                self.tabs[i]
+                    .active_cmd
+                    .as_mut()
+                    .map(|c| c.on_point(world_pt))
+            }
+        };
+
+        self.sync_dimension_snaps(i);
+        if let Some(r) = result {
+            let task = self.apply_cmd_result(r);
+            let mut sel = self.tabs[i].scene.selection.borrow_mut();
+            sel.left_down = false;
+            sel.left_press_pos = None;
+            sel.left_press_time = None;
+            sel.left_dragging = false;
+            return task;
+        }
+        let mut sel = self.tabs[i].scene.selection.borrow_mut();
+        sel.left_down = false;
+        sel.left_press_pos = None;
+        sel.left_press_time = None;
+        sel.left_dragging = false;
         Task::none()
     }
 
@@ -7943,6 +8001,36 @@ mod selection_preview_tests {
             (hit.world - target).length() < 1e-6,
             "snap missed the edge midpoint: {:?} vs {target:?}",
             hit.world
+        );
+    }
+
+    /// Pressing down in the viewport while a drawing command is active captures
+    /// the point immediately on MouseDown (zero input lag) and flags press_consumed_point.
+    #[test]
+    fn command_press_captures_point_immediately() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+
+        let _ = app.run_command_line("LINE");
+        assert!(app.tabs[i].active_cmd.is_some(), "LINE command should be active");
+
+        // Move cursor to a point
+        let _ = app.on_viewport_move(Point::new(100.0, 100.0));
+
+        // Press down
+        let _ = app.on_viewport_left_press();
+        assert!(
+            app.press_consumed_point,
+            "on_viewport_left_press should consume point during active command"
+        );
+
+        // Release mouse button
+        let _ = app.on_viewport_left_release();
+        assert!(
+            !app.press_consumed_point,
+            "on_viewport_left_release should clear press_consumed_point flag"
         );
     }
 }

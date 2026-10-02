@@ -551,6 +551,8 @@ pub(super) struct OpenCADStudio {
     add_selected_restore: Option<AddSelectedRestore>,
     /// Whether Ortho mode was temporarily suppressed by a command (e.g. RECTANG).
     rect_suppressed_ortho: bool,
+    /// Flag indicating if the current mouse-down event consumed a command point pick.
+    press_consumed_point: bool,
     /// Orthogonal drawing constraint (F8): constrains picks to 0°/90°/180°/270°.
     ortho_mode: bool,
     /// Polar tracking (F10): constrains picks to configurable angle increments.
@@ -4108,6 +4110,7 @@ impl OpenCADStudio {
             pre_cmd_tangent: None,
             add_selected_restore: None,
             rect_suppressed_ortho: false,
+            press_consumed_point: false,
             ortho_mode: false,
             polar_mode: false,
             polar_increment_deg: 45.0,

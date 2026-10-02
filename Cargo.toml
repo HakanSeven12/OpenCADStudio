@@ -34,8 +34,8 @@ clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
 acadrust = { git = "https://github.com/schoeller/cadcodec.git", branch = "gold-vs-silver", features = ["serde"] }
-cadkernel = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "6f046af", features = ["acis", "offset"] }
-cadkernel-constraints = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "6f046af" }
+cadkernel = { git = "https://github.com/schoeller/cadkernel.git", branch = "gold-vs-silver", features = ["acis", "offset"] }
+cadkernel-constraints = { git = "https://github.com/schoeller/cadkernel.git", branch = "gold-vs-silver" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
@@ -80,9 +80,6 @@ objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString"
 [patch.crates-io]
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
-
-[patch."https://github.com/HakanSeven12/cadcodec.git"]
-acadrust = { git = "https://github.com/schoeller/cadcodec.git", branch = "gold-vs-silver" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = "0.3"

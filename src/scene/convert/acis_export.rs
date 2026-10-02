@@ -154,4 +154,87 @@ mod tests {
         assert_eq!(restored.len(), 1);
         assert!(restored[0].validate().is_empty());
     }
+
+    /// Every constructible primitive family, through the same
+    /// `solid_model` makers the Model-tab commands commit, must export
+    /// to the authored ASM genus: the vertex role token present, the
+    /// family's analytic surface preserved, and the whole document
+    /// SAB-round-trip valid (the `solid_to_sat` gate). The authored
+    /// census behind these forms is the cadcodec gold-harness fixture
+    /// corpus (`tests/gold_harness/fixtures/sh_history`).
+    #[test]
+    fn every_primitive_family_exports_the_authored_record_genus() {
+        use crate::scene::model::solid_model as model;
+
+        let families: &[(&str, Option<Body>, &str)] = &[
+            ("box", model::box_solid([0.0, 0.0, 0.0], 10.0, 10.0, 10.0), "plane-surface"),
+            ("wedge", model::wedge_solid([0.0, 0.0, 0.0], 10.0, 10.0, 10.0), "plane-surface"),
+            (
+                "cylinder",
+                model::cylinder_solid([0.0, 0.0, 0.0], 5.0, 10.0),
+                "cone-surface",
+            ),
+            (
+                // A true ellipse is a cone-surface record with a section
+                // ratio — the authored elliptical-cylinder wire form
+                // (CylinderElliptical_2018 in the gold corpus: major
+                // basis, ratio 0.6, sine 0 / cosine 1), not a spline.
+                "elliptical-cylinder",
+                model::elliptical_cylinder_solid([0.0, 0.0, 0.0], 5.0, 3.0, 10.0),
+                "cone-surface",
+            ),
+            (
+                "cone",
+                model::cone_frustum_solid([0.0, 0.0, 0.0], 5.0, 5.0, 0.0, 10.0),
+                "cone-surface",
+            ),
+            (
+                "cone-frustum",
+                model::cone_frustum_solid([0.0, 0.0, 0.0], 5.0, 5.0, 2.0, 10.0),
+                "cone-surface",
+            ),
+            ("sphere", model::sphere_solid([0.0, 0.0, 0.0], 5.0), "sphere-surface"),
+            ("torus", model::torus_solid([0.0, 0.0, 0.0], 5.0, 1.0), "torus-surface"),
+            (
+                "pyramid",
+                model::pyramid_solid([0.0, 0.0, 0.0], 5.0, 10.0, 4),
+                "plane-surface",
+            ),
+            (
+                "pyramid-frustum",
+                model::pyramid_frustum_solid([0.0, 0.0, 0.0], 5.0, 2.0, 10.0, 6),
+                "plane-surface",
+            ),
+        ];
+
+        for (family, body, surface_kind) in families {
+            let body = body
+                .as_ref()
+                .unwrap_or_else(|| panic!("{family}: maker returned no body"));
+            assert!(body.validate().is_empty(), "{family}: brep invalid");
+
+            let sat = solid_to_sat(body)
+                .unwrap_or_else(|| panic!("{family}: export rejected the body"));
+            assert!(
+                sat.records.iter().any(|r| r.entity_type == *surface_kind),
+                "{family}: analytic surface {surface_kind} lost to export"
+            );
+
+            let mut vertices = 0;
+            for record in &sat.records {
+                if record.entity_type == "vertex" {
+                    vertices += 1;
+                    assert_eq!(
+                        record.tokens.len(),
+                        4,
+                        "{family}: vertex missing the ASM role token: {:?}",
+                        record.tokens
+                    );
+                    assert!(matches!(record.tokens[2], SatToken::Integer(_)));
+                    assert!(matches!(record.tokens[3], SatToken::Pointer(_)));
+                }
+            }
+            assert!(vertices > 0, "{family}: no vertices");
+        }
+    }
 }

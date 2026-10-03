@@ -848,7 +848,7 @@ pub fn view_window<'a>(
                 .step(250)
                 .width(Fill),
                 text(if prefs.commandline_fade_ms <= 0 {
-                    crate::t!("Off").into_owned()
+                    crate::t!("Never").into_owned()
                 } else {
                     format!("{:.1} s", prefs.commandline_fade_ms as f32 / 1000.0)
                 })
@@ -861,7 +861,7 @@ pub fn view_window<'a>(
         .push(Space::new().height(6))
         .push(
             text(crate::t!(
-                "How long overlay history lines stay visible; 0 skips them (COMMANDLINEFADETIME)."
+                "How long overlay history lines stay visible; 0 means never fade (COMMANDLINEFADETIME)."
             ))
             .size(11)
             .width(sizing.width),

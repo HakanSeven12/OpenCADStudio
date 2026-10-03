@@ -25,7 +25,7 @@ pub const HISTORY_SCROLL_ID: &str = "command_history_scroll";
 /// Default for `COMMANDLINEFADETIME` (ms); the live value lives on
 /// [`CommandLine::fade_ms`] so it can be changed via SETVAR.
 pub const DEFAULT_COMMANDLINE_FADE_MS: u32 = 3000;
-/// COMMANDLINEFADETIME bounds in milliseconds: 0 skips the overlay entirely,
+/// COMMANDLINEFADETIME bounds in milliseconds: 0 means never fade,
 /// 60000 keeps lines for a full minute.
 pub const COMMANDLINE_FADE_MIN_MS: u32 = 0;
 pub const COMMANDLINE_FADE_MAX_MS: u32 = 60000;
@@ -190,8 +190,8 @@ pub struct CommandLine {
     /// are displayed above the command window (0–50, default 3).
     cliprompt_lines: u8,
     /// COMMANDLINEFADETIME: how long overlay history lines stay visible,
-    /// in milliseconds (0–60000, default 3000). 0 skips drawing transient
-    /// lines entirely; the pinned step prompt still shows.
+    /// in milliseconds (0–60000, default 3000). 0 means history never fades;
+    /// the pinned step prompt still shows.
     fade_ms: u32,
 }
 
@@ -500,8 +500,8 @@ impl CommandLine {
         self.cliprompt_lines = n.min(50);
     }
 
-    /// COMMANDLINEFADETIME mirror (ms, 0–60000). `0` skips transient overlay
-    /// lines entirely; the pinned step prompt still shows.
+    /// COMMANDLINEFADETIME mirror (ms, 0–60000). `0` means overlay history
+    /// lines never fade; the pinned step prompt still shows.
     pub fn set_commandline_fade_ms(&mut self, ms: u32) {
         self.fade_ms = ms.min(COMMANDLINE_FADE_MAX_MS);
     }
@@ -515,7 +515,7 @@ impl CommandLine {
     }
 
     fn entry_visible(&self, e: &HistoryEntry) -> bool {
-        e.pinned || (self.fade_ms > 0 && e.created_at.elapsed().as_secs_f32() < self.fade_secs())
+        e.pinned || self.fade_ms == 0 || e.created_at.elapsed().as_secs_f32() < self.fade_secs()
     }
 
     /// Height of the overlaid prompt lines currently shown above the input
@@ -547,15 +547,26 @@ impl CommandLine {
         visible.len().min(self.cliprompt_lines as usize)
     }
 
-    /// `true` while at least one history entry is still within the
-    /// visible window — the host app uses this to drive a low-frequency
-    /// tick subscription so the overlay re-renders and fades the entry
-    /// once it expires.
+    /// `true` while at least one history entry is currently visible in the
+    /// overlay area (subject to CLIPROMPTLINES).
     pub fn has_visible_history(&self) -> bool {
         if self.cliprompt_lines == 0 {
             return false;
         }
         self.history.iter().any(|e| self.entry_visible(e))
+    }
+
+    /// `true` while at least one visible history entry is waiting to fade out.
+    /// Used by the host app to drive an animation frame subscription only when
+    /// an entry actually needs to be removed after its visible window expires.
+    /// When `fade_ms == 0` (never fade) or entries are pinned, no tick is needed.
+    pub fn has_expiring_history(&self) -> bool {
+        if self.cliprompt_lines == 0 || self.fade_ms == 0 {
+            return false;
+        }
+        self.history
+            .iter()
+            .any(|e| !e.pinned && e.created_at.elapsed().as_secs_f32() < self.fade_secs())
     }
 
     pub fn toggle_history(&mut self) {
@@ -656,7 +667,7 @@ impl CommandLine {
         graph_open: bool,
     ) -> Element<'a, Message> {
         // Only the most recent entries pushed within COMMANDLINEFADETIME
-        // show on the overlay (0 skips transient lines). The dropdown button
+        // show on the overlay (0 means never fade). The dropdown button
         // keeps the full backlog reachable when the user actually wants it.
         let mut visible: Vec<&HistoryEntry> =
             self.history.iter().filter(|e| self.entry_visible(e)).collect();
@@ -1431,17 +1442,20 @@ mod tests {
     }
 
     #[test]
-    fn commandline_fade_zero_hides_unpinned_but_keeps_pinned() {
+    fn commandline_fade_zero_never_fades() {
         let mut line = CommandLine::new();
         line.push_info("transient");
         assert!(line.has_visible_history());
+        assert!(line.has_expiring_history());
         line.set_commandline_fade_ms(0);
-        // Non-pinned entries are skipped entirely at 0.
-        assert!(!line.has_visible_history());
-        assert_eq!(line.visible_history_count(), 0);
+        // At 0, entries never fade so history stays visible, but no timer tick is needed.
+        assert!(line.has_visible_history());
+        assert_eq!(line.visible_history_count(), 3);
+        assert!(!line.has_expiring_history());
         // Pinned step prompt still shows at 0.
         line.set_step_prompt(Some("Specify point:".to_string()));
         assert!(line.has_visible_history());
+        assert!(!line.has_expiring_history());
     }
 
     #[test]

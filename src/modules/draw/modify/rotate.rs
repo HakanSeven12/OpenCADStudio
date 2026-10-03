@@ -35,6 +35,9 @@ pub fn tool() -> ToolDef {
 // ── Command implementation ─────────────────────────────────────────────────
 
 enum Step {
+    CopyBase,
+    CopyDestination { base: DVec3 },
+    CopyAngle { center: DVec3, displacement: DVec3 },
     Center,
     Angle { center: DVec3 },
     RefFirst { center: DVec3 },
@@ -48,29 +51,47 @@ pub struct RotateCommand {
     step: Step,
     default_angle: f64, // degrees
     plane: WorkingPlane,
+    copy: bool,
 }
 
 impl RotateCommand {
     pub fn new(handles: Vec<Handle>, wire_models: Vec<WireModel>) -> Self {
+        Self::with_copy(handles, wire_models, false)
+    }
+
+    pub fn new_copy(handles: Vec<Handle>, wire_models: Vec<WireModel>) -> Self {
+        let mut command = Self::with_copy(handles, wire_models, true);
+        command.step = Step::CopyBase;
+        command
+    }
+
+    fn with_copy(handles: Vec<Handle>, wire_models: Vec<WireModel>, copy: bool) -> Self {
         Self {
             handles,
             wire_models,
             step: Step::Center,
             default_angle: defaults::get_rotate_angle(),
             plane: WorkingPlane::default(),
+            copy,
         }
     }
 
-    fn commit(&self, center: DVec3, angle_rad: f64) -> CmdResult {
+    fn commit(&self, center: DVec3, angle_rad: f64, displacement: Option<DVec3>) -> CmdResult {
         defaults::set_rotate_angle(angle_rad.to_degrees());
-        CmdResult::TransformSelected(
-            self.handles.clone(),
-            EntityTransform::Rotate {
+        let transform = EntityTransform::Rotate {
                 center,
                 axis: self.plane.z,
                 angle_rad,
-            },
-        )
+            };
+        if let Some(displacement) = displacement {
+            CmdResult::CopyThenTransformSelected(
+                self.handles.clone(),
+                EntityTransform::Translate(displacement),
+                transform,
+            )
+        } else {
+            CmdResult::TransformSelected(self.handles.clone(), transform)
+        }
     }
 
     fn angle_arc(
@@ -147,6 +168,12 @@ impl CadCommand for RotateCommand {
 
     fn prompt(&self) -> String {
         match &self.step {
+            Step::CopyBase => "ROTATE COPY  Specify copy base point:".to_string(),
+            Step::CopyDestination { .. } => "ROTATE COPY  Specify copy destination:".to_string(),
+            Step::CopyAngle { .. } => {
+                let a = format!("{:.4}", self.default_angle);
+                format!("ROTATE COPY  Specify rotation angle  <{a}>:")
+            }
             Step::Center => t!(
                 "ROTATE  Specify rotation center  [%{count} objects]:",
                 count = self.handles.len()
@@ -172,13 +199,34 @@ impl CadCommand for RotateCommand {
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
         match self.step {
-            Step::Angle { .. } => vec![CmdOption::new(t!("Reference").as_ref(), "R")],
+            Step::Angle { .. } if !self.copy => {
+                vec![CmdOption::new(t!("Reference").as_ref(), "R")]
+            }
             _ => vec![],
         }
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match &self.step {
+            Step::CopyBase => {
+                self.step = Step::CopyDestination { base: pt };
+                CmdResult::NeedPoint
+            }
+            Step::CopyDestination { base } => {
+                let displacement = pt - *base;
+                self.step = Step::CopyAngle {
+                    center: pt,
+                    displacement,
+                };
+                CmdResult::NeedPoint
+            }
+            Step::CopyAngle { center, displacement } => {
+                let center = *center;
+                let Some(angle_rad) = self.plane.angle(center, pt) else {
+                    return CmdResult::NeedPoint;
+                };
+                self.commit(center, angle_rad, Some(*displacement))
+            }
             Step::Center => {
                 self.step = Step::Angle { center: pt };
                 CmdResult::NeedPoint
@@ -188,7 +236,7 @@ impl CadCommand for RotateCommand {
                 let Some(angle_rad) = self.plane.angle(center, pt) else {
                     return CmdResult::NeedPoint;
                 };
-                self.commit(center, angle_rad)
+                self.commit(center, angle_rad, None)
             }
             Step::RefFirst { center } => {
                 let center = *center;
@@ -208,7 +256,7 @@ impl CadCommand for RotateCommand {
                 let Some(new_angle) = self.plane.angle(center, pt) else {
                     return CmdResult::NeedPoint;
                 };
-                self.commit(center, new_angle - *ref_angle)
+                self.commit(center, new_angle - *ref_angle, None)
             }
         }
     }
@@ -217,7 +265,10 @@ impl CadCommand for RotateCommand {
         // At the normal angle step, Enter uses the stored default angle.
         if let Step::Angle { center } = &self.step {
             let center = *center;
-            return self.commit(center, self.default_angle.to_radians());
+            return self.commit(center, self.default_angle.to_radians(), None);
+        }
+        if let Step::CopyAngle { center, displacement } = &self.step {
+            return self.commit(*center, self.default_angle.to_radians(), Some(*displacement));
         }
         CmdResult::Cancel
     }
@@ -238,7 +289,13 @@ impl CadCommand for RotateCommand {
                 // The value already carries the correct sign when it comes
                 // from dynamic input.
                 let angle = crate::entities::common::parse_typed_angle(t)?;
-                Some(self.commit(center, angle))
+                Some(self.commit(center, angle, None))
+            }
+            Step::CopyAngle { center, displacement } => {
+                let center = *center;
+                let displacement = *displacement;
+                let angle = crate::entities::common::parse_typed_angle(t)?;
+                Some(self.commit(center, angle, Some(displacement)))
             }
             Step::RefFirst { center } => {
                 let center = *center;
@@ -252,19 +309,43 @@ impl CadCommand for RotateCommand {
             Step::RefNew { center, ref_angle } => {
                 let (center, ref_angle) = (*center, *ref_angle);
                 let new_angle = crate::entities::common::parse_typed_angle(t)?;
-                Some(self.commit(center, new_angle - ref_angle))
+                Some(self.commit(center, new_angle - ref_angle, None))
             }
-            Step::Center | Step::RefSecond { .. } => None,
+            Step::Center
+            | Step::CopyBase
+            | Step::CopyDestination { .. }
+            | Step::RefSecond { .. } => None,
         }
     }
 
     fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
-        let (center, angle_rad, guide_angle) = match &self.step {
+        let (center, angle_rad, guide_angle, displacement) = match &self.step {
+            Step::CopyDestination { base } => {
+                let delta = pt - *base;
+                let mut previews: Vec<_> = self
+                    .wire_models
+                    .iter()
+                    .map(|wire| wire.translated(delta.as_vec3()))
+                    .collect();
+                previews.push(WireModel::solid_f64(
+                    "rotate_copy_displacement".into(),
+                    vec![base.to_array(), pt.to_array()],
+                    WireModel::CYAN,
+                    false,
+                ));
+                return previews;
+            }
+            Step::CopyAngle { center, displacement } => {
+                let Some(angle) = self.plane.angle(*center, pt) else {
+                    return vec![];
+                };
+                (*center, angle, angle, Some(*displacement))
+            }
             Step::Angle { center } => {
                 let Some(angle) = self.plane.angle(*center, pt) else {
                     return vec![];
                 };
-                (*center, angle, angle)
+                (*center, angle, angle, None)
             }
             Step::RefSecond { first, .. } => {
                 return vec![WireModel::solid(
@@ -281,7 +362,7 @@ impl CadCommand for RotateCommand {
                 let Some(angle) = self.plane.angle(*center, pt) else {
                     return vec![];
                 };
-                (*center, angle - *ref_angle, angle)
+                (*center, angle - *ref_angle, angle, None)
             }
             _ => return vec![],
         };
@@ -289,7 +370,10 @@ impl CadCommand for RotateCommand {
             .wire_models
             .iter()
             .map(|w| {
-                w.rotated_about_axis(
+                let placed = displacement
+                    .map(|delta| w.translated(delta.as_vec3()))
+                    .unwrap_or_else(|| w.clone());
+                placed.rotated_about_axis(
                     center.as_vec3(),
                     self.plane.z.as_vec3(),
                     angle_rad as f32,
@@ -303,7 +387,7 @@ impl CadCommand for RotateCommand {
 
     fn dyn_field(&self) -> DynField {
         match self.step {
-            Step::Angle { .. } | Step::RefNew { .. } => DynField::Angle,
+            Step::Angle { .. } | Step::CopyAngle { .. } | Step::RefNew { .. } => DynField::Angle,
             Step::RefFirst { .. } => DynField::Scalar,
             _ => DynField::Point,
         }
@@ -315,7 +399,9 @@ impl CadCommand for RotateCommand {
         // directions from the center. Reference mode subtracts its stored
         // reference angle only when previewing or committing the transform.
         match self.step {
-            Step::Angle { center } | Step::RefNew { center, .. } => Some(DynSpec {
+            Step::Angle { center }
+            | Step::CopyAngle { center, .. }
+            | Step::RefNew { center, .. } => Some(DynSpec {
                 anchor: DynAnchor::Point(center),
                 fields: vec![DynFieldSpec::new(DynRole::Angle)],
                 guide: DynGuide::None,
@@ -326,12 +412,17 @@ impl CadCommand for RotateCommand {
     }
 
     fn dyn_commit_as_text(&self) -> bool {
-        matches!(self.step, Step::Angle { .. } | Step::RefFirst { .. })
+        matches!(
+            self.step,
+            Step::Angle { .. } | Step::CopyAngle { .. } | Step::RefFirst { .. }
+        )
     }
 
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
         match self.step {
-            Step::Angle { center } | Step::RefNew { center, .. } => self
+            Step::Angle { center }
+            | Step::CopyAngle { center, .. }
+            | Step::RefNew { center, .. } => self
                 .plane
                 .angle(center, cursor)
                 .map(|angle| crate::command::dyn_display_angle_deg(angle as f32) as f64),
@@ -341,7 +432,9 @@ impl CadCommand for RotateCommand {
 
     fn dyn_label_point(&self, cursor: DVec3) -> Option<DVec3> {
         let center = match self.step {
-            Step::Angle { center } | Step::RefNew { center, .. } => center,
+            Step::Angle { center }
+            | Step::CopyAngle { center, .. }
+            | Step::RefNew { center, .. } => center,
             _ => return None,
         };
         let center_local = self.plane.to_local(center);

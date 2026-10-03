@@ -1183,6 +1183,7 @@ impl OpenCADStudio {
             },
             plot: self.plot_dialog.clone(),
             shortcuts: crate::app::config::ShortcutConfig {
+                preset: self.shortcut_preset,
                 bindings: self
                     .shortcut_bindings
                     .iter()
@@ -1238,7 +1239,24 @@ impl OpenCADStudio {
         self.annotation_auto_scale = cfg.annotation_auto_scale.clamp(-4, 4);
         self.ribbon.set_collapse_mode(cfg.ribbon.collapse);
         self.plot_dialog = cfg.plot;
-        self.shortcut_bindings = cfg.shortcuts.bindings.into_iter().collect();
+        let preset = cfg.shortcuts.preset;
+        let mut bindings: rustc_hash::FxHashMap<String, String> = cfg
+            .shortcuts
+            .bindings
+            .into_iter()
+            .map(|(key, command)| (crate::app::shortcuts::normalize_key(&key), command))
+            .collect();
+        if crate::app::shortcuts::is_legacy_archicad_bindings(preset, &bindings) {
+            bindings = preset.bindings().into_iter().collect();
+        }
+        let preset_bindings: rustc_hash::FxHashMap<String, String> =
+            preset.bindings().into_iter().collect();
+        self.shortcut_preset = if bindings != preset_bindings {
+            crate::app::shortcuts::ShortcutPreset::Custom
+        } else {
+            preset
+        };
+        self.shortcut_bindings = bindings;
         self.shortcut_bindings
             .entry("F5".to_string())
             .or_insert_with(|| "ISOPLANE".to_string());

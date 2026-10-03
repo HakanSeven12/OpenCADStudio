@@ -63,6 +63,39 @@ impl OpenCADStudio {
         None
     }
 
+    pub(super) fn handle_copy_then_transform_selected(
+        &mut self,
+        mut handles: Vec<Handle>,
+        placement: crate::command::EntityTransform,
+        transform: crate::command::EntityTransform,
+    ) -> Option<Task<Message>> {
+        let i = self.active_tab;
+        handles.retain(|handle| !self.tabs[i].scene.is_layer_locked(*handle));
+        if handles.is_empty() {
+            self.tabs[i].active_cmd = None;
+            return Some(Task::none());
+        }
+        let label = self.history_label_from_active_cmd(i, "COPY");
+        let delta_safe = self.delta_copy_safe(i, &handles);
+        let pending = self.begin_undo(i, label, handles.len(), delta_safe);
+        let copies = self.tabs[i].scene.copy_entities(&handles, &placement);
+        self.tabs[i].scene.transform_entities(&copies, &transform);
+        self.tabs[i].scene.deselect_all();
+        for handle in copies {
+            self.tabs[i].scene.select_entity(handle, false);
+        }
+        self.tabs[i].dirty = true;
+        self.tabs[i].active_cmd = None;
+        self.tabs[i].snap_result = None;
+        self.tabs[i].scene.clear_preview_wire();
+        self.restore_pre_cmd_tangent();
+        self.refresh_properties();
+        if let Some(pending) = pending {
+            self.commit_undo_delta(i, pending);
+        }
+        None
+    }
+
     pub(super) fn handle_align_selected(&mut self, result: CmdResult) {
         let i = self.active_tab;
         let CmdResult::AlignSelected {

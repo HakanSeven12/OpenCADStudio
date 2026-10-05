@@ -139,6 +139,10 @@ fn generate_type_registry(out_dir: &Path) {
             trace_simple::<acadrust::objects::AssocEvalValue>,
         ),
         (
+            "AssocCompositeSegment",
+            trace_simple::<acadrust::objects::AssocCompositeSegment>,
+        ),
+        (
             "AssocSubcurve",
             trace_simple::<acadrust::objects::AssocSubcurve>,
         ),

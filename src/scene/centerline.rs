@@ -319,7 +319,10 @@ impl Scene {
         if let Some(entry) = record.entries.iter_mut().find(|entry| entry.code == code) {
             entry.value = replacement;
         } else {
-            record.entries.push(XRecordEntry { code, value: replacement });
+            // The constructor keeps the wire-code-page retention flag at
+            // its None default: constructed entries carry no codeword
+            // plumbing, exactly the pre-field behavior.
+            record.entries.push(XRecordEntry::new(code, replacement));
         }
         Ok(format!("{name} = {display}"))
     }

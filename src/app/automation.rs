@@ -1689,6 +1689,452 @@ mod tests {
         }
     }
 
+    /// The OCS->DWG entity battery: every entity class the application
+    /// can author is drawn through its real command path (or, for the
+    /// editor-gated classes, through the same builder + commit path the
+    /// commands use), saved once, and re-read -- asserting per class
+    /// that it survives the round trip, keeps its class identity, and
+    /// carries its definition wiring and key fields.
+    ///
+    /// The 2026-10-02 manual battery round found three real bugs on
+    /// exactly this surface (unwired AcDbSectionViewStyle / PDF
+    /// definition objects, the OLE synthesis form), so this pins the
+    /// whole authoring surface as a regression guard: a writer change
+    /// that drops or corrupts any class fails here, not in the field.
+    #[test]
+    fn all_supported_entities_write_to_dwg_and_survive_reload() {
+        use acadrust::entities::EntityType;
+        use acadrust::objects::ObjectType;
+        use std::collections::BTreeMap;
+
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(app.automation_op(r#"{"op":"new"}"#)["ok"], true);
+
+        // Runs a command and asserts it completed and added entities.
+        let run = |app: &mut OpenCADStudio, cmd: &str| {
+            let r = app.automation_op(&format!(r#"{{"op":"run","cmd":"{cmd}"}}"#));
+            assert_eq!(r["ok"], true, "{cmd}: {}", r["error"]);
+            assert_eq!(
+                r["status"], "completed",
+                "{cmd}: blocked by {:?}",
+                r["blocked_by"]
+            );
+            assert!(r["added"].as_i64().unwrap_or(0) >= 1, "{cmd}: added nothing");
+        };
+
+        // -- the command-authored classes, spread along +X --
+        run(&mut app, "LINE 0,0 10,0");
+        run(&mut app, "CIRCLE 20,5 3");
+        run(&mut app, "ARC C 40,0 45,0 40,5");
+        run(&mut app, "POINT 60,0");
+        run(&mut app, "TEXT 70,0 5 0 Hello");
+        run(&mut app, "PLINE 80,0 90,0 90,10");
+        run(&mut app, "RAY 100,0 105,0");
+        run(&mut app, "XLINE 110,0 115,5");
+        run(&mut app, "MLINE 120,0 130,10");
+        run(&mut app, "SPLINE 140,0 145,5 150,0");
+        run(&mut app, "SOLID 160,0 170,0 160,10 170,10");
+        run(&mut app, "3DPOLY 180,0,0 190,0,0 190,10,0");
+        run(&mut app, "ELLIPSE 200,0 210,0 5");
+        run(&mut app, "DONUT 0 2 220,5");
+        run(&mut app, "WIPEOUT 230,0 240,0 240,10 230,10");
+        run(&mut app, "DIMLINEAR 250,0 260,0 255,5");
+        run(&mut app, "DIMANGULAR 270,0 275,0 270,5 273,3");
+        run(&mut app, "DIMORDINATE 280,0 280,8");
+        run(&mut app, "RECTANG 320,0 330,10");
+        run(&mut app, "HATCH 325,5");
+        run(&mut app, "BOX 400,0,0 410,10,0 10");
+
+        // MLEADER commits its entity and leaves the in-place text editor
+        // open for the content -- the leader geometry is what the round
+        // trip carries.
+        let r = app.automation_op(r#"{"op":"run","cmd":"MLEADER 340,0 345,5"}"#);
+        assert_eq!(r["ok"], true);
+        assert_eq!(r["added"].as_i64(), Some(1), "the leader entity commits");
+
+        // -- the radial dimensions pick the circle by handle --
+        let query = app.automation_op(r#"{"op":"query","type":"Circle"}"#);
+        let circle_handle = query["entities"]
+            .as_array()
+            .and_then(|list| list.first())
+            .and_then(|entry| entry["handle"].as_str())
+            .expect("the circle to dimension")
+            .to_string();
+        run(&mut app, &format!("DIMRADIUS {circle_handle} 300,5"));
+        run(&mut app, &format!("DIMDIAMETER {circle_handle} 310,5"));
+
+        // -- the block flow: definition from a selected line, then a
+        // reference. BLOCK converts its selection into a reference at
+        // the base point (the reference application's own default), so
+        // the flow yields two inserts.
+        run(&mut app, "LINE 350,0 355,0");
+        let query = app.automation_op(r#"{"op":"query","type":"Line"}"#);
+        let bat_line = query["entities"]
+            .as_array()
+            .expect("the line query")
+            .iter()
+            .find_map(|entry| {
+                let at_source = entry["start"]
+                    .as_array()
+                    .and_then(|start| start.first())
+                    .and_then(|x| x.as_f64())
+                    .is_some_and(|x| x == 350.0);
+                if at_source {
+                    entry["handle"].as_str().map(str::to_string)
+                } else {
+                    None
+                }
+            })
+            .expect("the block source line");
+        let selected = app.automation_op(&format!(
+            r#"{{"op":"select","handles":["{bat_line}"]}}"#
+        ));
+        assert_eq!(selected["ok"], true);
+        run(&mut app, "BLOCK BAT 352,0");
+        run(&mut app, "INSERT BAT 360,10");
+
+        // -- the two editor-gated classes, through the same builders and
+        // the same commit path their commands use --
+        let mut mtext = acadrust::entities::MText::new();
+        mtext.value = "MText programmatic".to_string();
+        mtext.insertion_point = acadrust::types::Vector3::new(370.0, 0.0, 0.0);
+        mtext.height = 2.5;
+        mtext.rectangle_width = 20.0;
+        mtext.style = "Standard".to_string();
+        let committed = app
+            .commit_entity_handle(EntityType::MText(mtext))
+            .expect("the mtext commits");
+        assert!(!committed.is_null());
+
+        let mut table = acadrust::entities::TableBuilder::new(2, 2)
+            .at(acadrust::types::Vector3::new(380.0, 0.0, 0.0))
+            .row_height(8.0)
+            .column_width(40.0)
+            .build();
+        assert!(table.set_cell_text(0, 0, "cell 0-0"));
+        assert!(table.set_cell_text(1, 1, "cell 1-1"));
+        let committed = app
+            .commit_entity_handle(EntityType::Table(table))
+            .expect("the table commits");
+        assert!(!committed.is_null());
+
+        // -- save, and read the file back the way a loader does --
+        // The authored handles, captured before the save: the save path
+        // stamps the template's paper-space frame into the file (the
+        // title block, its lines/solids/texts), so the reload census
+        // scopes to exactly what this test authored.
+        let i = app.active_tab;
+        let authored: std::collections::HashSet<u64> = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .map(|entity| entity.common().handle.value())
+            .collect();
+        assert_eq!(authored.len(), 29, "the authored entity census before save");
+
+        let path = std::env::temp_dir().join(format!(
+            "ocs_all_entities_{}.dwg",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let p = path.to_string_lossy().replace('\\', "\\\\");
+        let saved = app.automation_op(&format!(r#"{{"op":"save","path":"{p}"}}"#));
+        assert_eq!(saved["ok"], true, "save failed: {}", saved["error"]);
+        drop(app);
+
+        let mut reader = acadrust::DwgReader::from_file(&path).unwrap();
+        let outcome = reader.read_with_stats().unwrap();
+        let document = outcome.document;
+        // Every authored entity must survive with its handle intact.
+        let re_read: std::collections::HashSet<u64> = document
+            .entities()
+            .map(|entity| entity.common().handle.value())
+            .collect();
+        for handle in &authored {
+            assert!(
+                re_read.contains(handle),
+                "entity 0x{handle:X} did not survive the save/reload"
+            );
+        }
+        let entities: Vec<_> = document
+            .entities()
+            .filter(|entity| authored.contains(&entity.common().handle.value()))
+            .collect();
+
+        // The census: every authored class survives, exactly as drawn.
+        // The second Line is the block definition's source, stored in the
+        // definition's local frame; the second Insert is BLOCK's own
+        // conversion of its selection.
+        let mut census: BTreeMap<&'static str, usize> = BTreeMap::new();
+        let mut bump = |name: &'static str, census: &mut BTreeMap<&'static str, usize>| {
+            *census.entry(name).or_default() += 1;
+        };
+        for entity in &entities {
+            match entity {
+                EntityType::Line(_) => bump("Line", &mut census),
+                EntityType::Circle(_) => bump("Circle", &mut census),
+                EntityType::Arc(_) => bump("Arc", &mut census),
+                EntityType::Point(_) => bump("Point", &mut census),
+                EntityType::Text(_) => bump("Text", &mut census),
+                EntityType::MText(_) => bump("MText", &mut census),
+                EntityType::LwPolyline(_) => bump("LwPolyline", &mut census),
+                EntityType::Ray(_) => bump("Ray", &mut census),
+                EntityType::XLine(_) => bump("XLine", &mut census),
+                EntityType::MLine(_) => bump("MLine", &mut census),
+                EntityType::Spline(_) => bump("Spline", &mut census),
+                EntityType::Solid(_) => bump("Solid", &mut census),
+                EntityType::Polyline3D(_) => bump("Polyline3D", &mut census),
+                EntityType::Ellipse(_) => bump("Ellipse", &mut census),
+                EntityType::Wipeout(_) => bump("Wipeout", &mut census),
+                EntityType::Dimension(_) => bump("Dimension", &mut census),
+                EntityType::Hatch(_) => bump("Hatch", &mut census),
+                EntityType::MultiLeader(_) => bump("MultiLeader", &mut census),
+                EntityType::Insert(_) => bump("Insert", &mut census),
+                EntityType::Block(_) => bump("Block", &mut census),
+                EntityType::BlockEnd(_) => bump("BlockEnd", &mut census),
+                EntityType::Table(_) => bump("Table", &mut census),
+                EntityType::Solid3D(_) => bump("Solid3D", &mut census),
+                other => panic!("unexpected entity class: {other:?}"),
+            }
+        }
+        let expected_census: &[(&'static str, usize)] = &[
+            ("Line", 2),
+            ("Circle", 1),
+            ("Arc", 1),
+            ("Point", 1),
+            ("Text", 1),
+            ("MText", 1),
+            ("LwPolyline", 3), // the pline, the donut, the rectangle
+            ("Ray", 1),
+            ("XLine", 1),
+            ("MLine", 1),
+            ("Spline", 1),
+            ("Solid", 1),
+            ("Polyline3D", 1),
+            ("Ellipse", 1),
+            ("Wipeout", 1),
+            ("Dimension", 5),
+            ("Hatch", 1),
+            ("MultiLeader", 1),
+            // BLOCK converts its selection into a reference at the base
+            // point (the reference application's own default), and the
+            // explicit INSERT adds a second one.
+            ("Insert", 2),
+            ("Table", 1),
+            ("Solid3D", 1),
+        ];
+        for (name, count) in expected_census {
+            assert_eq!(
+                census.get(name).copied().unwrap_or(0),
+                *count,
+                "{name}: expected {count} in the re-read file, census is {census:?}"
+            );
+        }
+
+        // The per-class key fields and definition wiring.
+        let mut dimension_types: Vec<(&'static str, f64)> = Vec::new();
+        for entity in &entities {
+            match entity {
+                EntityType::Line(value) => {
+                    if value.start.x == -2.0 {
+                        // the block definition's source line, in the
+                        // definition's local frame: the base point
+                        // (352,0) is subtracted from the drawn world
+                        // coordinates, exactly as the reference
+                        // application stores block content.
+                        assert_eq!(value.end, acadrust::types::Vector3::new(3.0, 0.0, 0.0));
+                    } else {
+                        // the model-space line, in world coordinates.
+                        assert_eq!(
+                            value.start,
+                            acadrust::types::Vector3::new(0.0, 0.0, 0.0)
+                        );
+                        assert_eq!(value.end, acadrust::types::Vector3::new(10.0, 0.0, 0.0));
+                    }
+                }
+                EntityType::Circle(value) => {
+                    assert_eq!(value.center, acadrust::types::Vector3::new(20.0, 5.0, 0.0));
+                    assert!((value.radius - 3.0).abs() < 1e-9);
+                }
+                EntityType::Arc(value) => {
+                    assert_eq!(value.center, acadrust::types::Vector3::new(40.0, 0.0, 0.0));
+                    assert!((value.radius - 5.0).abs() < 1e-9);
+                }
+                EntityType::Point(value) => {
+                    assert_eq!(value.location, acadrust::types::Vector3::new(60.0, 0.0, 0.0));
+                }
+                EntityType::Text(value) => {
+                    assert_eq!(value.value, "Hello");
+                }
+                EntityType::MText(value) => {
+                    assert_eq!(value.value, "MText programmatic");
+                    assert_eq!(
+                        value.insertion_point,
+                        acadrust::types::Vector3::new(370.0, 0.0, 0.0)
+                    );
+                }
+                EntityType::LwPolyline(value) => {
+                    // The pline: 3 open vertices; the donut and the
+                    // rectangle: closed.
+                    if value.vertices.len() == 3 {
+                        assert!(!value.is_closed, "the pline is open");
+                    } else {
+                        assert!(value.is_closed, "donut and rectangle are closed");
+                    }
+                }
+                EntityType::Ray(value) => {
+                    assert_eq!(
+                        value.base_point,
+                        acadrust::types::Vector3::new(100.0, 0.0, 0.0)
+                    );
+                }
+                EntityType::XLine(value) => {
+                    assert_eq!(
+                        value.base_point,
+                        acadrust::types::Vector3::new(110.0, 0.0, 0.0)
+                    );
+                }
+                EntityType::MLine(value) => {
+                    assert_eq!(
+                        value.start_point,
+                        acadrust::types::Vector3::new(120.0, 0.0, 0.0)
+                    );
+                    // Definition wiring: the style handle must resolve to
+                    // a real MLineStyle object.
+                    let style = value
+                        .style_handle
+                        .filter(|handle| handle.is_valid())
+                        .expect("the mline carries a style handle");
+                    assert!(document.objects.contains_key(&style));
+                    assert!(matches!(
+                        document.objects.get(&style),
+                        Some(ObjectType::MLineStyle(_))
+                    ));
+                }
+                EntityType::Spline(value) => {
+                    assert!(
+                        value.fit_points.len() >= 3 || value.control_points.len() >= 3,
+                        "the spline carries its defining points"
+                    );
+                }
+                EntityType::Solid(value) => {
+                    assert_eq!(
+                        value.first_corner,
+                        acadrust::types::Vector3::new(160.0, 0.0, 0.0)
+                    );
+                }
+                EntityType::Polyline3D(value) => {
+                    assert_eq!(value.vertices.len(), 3);
+                }
+                EntityType::Ellipse(value) => {
+                    assert_eq!(value.center, acadrust::types::Vector3::new(200.0, 0.0, 0.0));
+                    assert!((value.minor_axis_ratio - 0.5).abs() < 1e-9);
+                }
+                EntityType::Dimension(value) => {
+                    let kind = match value {
+                        acadrust::entities::Dimension::Aligned(_) => "aligned",
+                        acadrust::entities::Dimension::Linear(_) => "linear",
+                        acadrust::entities::Dimension::Radius(_) => "radius",
+                        acadrust::entities::Dimension::Diameter(_) => "diameter",
+                        acadrust::entities::Dimension::Angular2Ln(_)
+                        | acadrust::entities::Dimension::Angular3Pt(_) => "angular",
+                        acadrust::entities::Dimension::Ordinate(_) => "ordinate",
+                        acadrust::entities::Dimension::Arc(_) => "arc",
+                        acadrust::entities::Dimension::LargeRadial(_) => "large-radial",
+                    };
+                    dimension_types.push((kind, value.base().actual_measurement));
+                }
+                EntityType::Hatch(value) => {
+                    assert!(
+                        !value.paths.is_empty(),
+                        "the hatch carries its boundary"
+                    );
+                }
+                EntityType::MultiLeader(value) => {
+                    let style = value
+                        .style_handle
+                        .filter(|handle| handle.is_valid())
+                        .expect("the multileader carries a style handle");
+                    assert!(document.objects.contains_key(&style));
+                }
+                EntityType::Insert(value) => {
+                    assert_eq!(
+                        value.block_name, "BAT",
+                        "every reference names the authored definition"
+                    );
+                    assert!(
+                        document.block_records.iter().any(|record| {
+                            record.name.eq_ignore_ascii_case("BAT")
+                        }),
+                        "the referenced block definition exists"
+                    );
+                    // One reference at the block's base point (BLOCK's
+                    // conversion of its selection), one at the drawn
+                    // insertion point.
+                    let at_base =
+                        value.insert_point == acadrust::types::Vector3::new(352.0, 0.0, 0.0);
+                    let at_drawn =
+                        value.insert_point == acadrust::types::Vector3::new(360.0, 10.0, 0.0);
+                    assert!(
+                        at_base || at_drawn,
+                        "unexpected reference placement {:?}",
+                        value.insert_point
+                    );
+                }
+                EntityType::Table(value) => {
+                    assert_eq!(value.rows.len(), 2);
+                    assert_eq!(value.cell_text(0, 0), Some("cell 0-0"));
+                    assert_eq!(value.cell_text(1, 1), Some("cell 1-1"));
+                }
+                _ => {}
+            }
+        }
+
+        // The dimension family: one of each authored subtype, with the
+        // measured values the drawn geometry implies.
+        assert_eq!(
+            dimension_types.iter().filter(|(k, _)| *k == "linear").count(),
+            1
+        );
+        assert_eq!(
+            dimension_types.iter().filter(|(k, _)| *k == "radius").count(),
+            1
+        );
+        assert_eq!(
+            dimension_types.iter().filter(|(k, _)| *k == "diameter").count(),
+            1
+        );
+        assert_eq!(
+            dimension_types.iter().filter(|(k, _)| *k == "ordinate").count(),
+            1
+        );
+        assert_eq!(
+            dimension_types.iter().filter(|(k, _)| *k == "angular").count(),
+            1
+        );
+        for (kind, measurement) in &dimension_types {
+            let expected = match *kind {
+                "linear" => Some(10.0),
+                "radius" => Some(3.0),
+                "diameter" => Some(6.0),
+                _ => None,
+            };
+            if let Some(expected) = expected {
+                assert!(
+                    (measurement - expected).abs() < 1e-6,
+                    "{kind} dimension measures {measurement}, expected {expected}"
+                );
+            }
+        }
+
+        let sidecar = path.with_file_name(format!(
+            ".{}.ocs.lock",
+            path.file_name().unwrap().to_string_lossy()
+        ));
+        let _ = std::fs::remove_file(sidecar);
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[test]
     fn save_then_open_round_trips() {
         let mut app = OpenCADStudio::new_for_test();

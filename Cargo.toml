@@ -181,3 +181,6 @@ harness = false
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
+
+[patch."https://github.com/HakanSeven12/opencadcodec.git"]
+opencadcodec = { git = "https://github.com/ramox81/cadcodec.git", rev = "164a091" }

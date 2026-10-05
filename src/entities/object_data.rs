@@ -903,6 +903,7 @@ fn associative_data_name(data: &AssociativeData) -> &'static str {
         AssociativeData::ArrayParameters(_) => "Array Parameters",
         AssociativeData::ArrayActionBody(_) => "Array Action",
         AssociativeData::ArrayModifyActionBody(_) => "Array Modify Action",
+        AssociativeData::SmartCenterActionBody(_) => "Center Mark/Line Action",
         AssociativeData::DimensionAssociation(_) => "Dimension Association",
         AssociativeData::PersSubentManagerStatic(_) => "Static Subentity Manager",
         AssociativeData::ViewRepActionBody(_) => "View Representation Action",

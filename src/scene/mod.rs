@@ -9174,8 +9174,8 @@ impl Scene {
 
     /// Small simple sets are cheaper to scan. Either many wires or substantial
     /// sub-geometry (one giant polyline/text batch/mesh) enables the index.
-    const INTERACTION_INDEX_MIN_WIRES: usize = 4_000;
-    const INTERACTION_INDEX_MIN_WORK: usize = 20_000;
+    const INTERACTION_INDEX_MIN_WIRES: usize = 128;
+    const INTERACTION_INDEX_MIN_WORK: usize = 1_000;
 
     fn interaction_index_worthwhile(&self, wires: &[WireModel]) -> bool {
         wires.len() >= Self::INTERACTION_INDEX_MIN_WIRES

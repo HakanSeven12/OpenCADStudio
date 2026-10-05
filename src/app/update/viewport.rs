@@ -1101,6 +1101,30 @@ impl OpenCADStudio {
             return Task::none();
         }
         let i = self.active_tab;
+
+        // Sub-pixel mouse motion filter (< 0.25px):
+        // When idling (no active command, drag, or grip edit), if mouse displacement
+        // is below 0.25 screen pixels (dx^2 + dy^2 < 0.0625), ignore sub-pixel sensor
+        // jitter to prevent high-polling gaming mice from thrashing CPU and GPU.
+        {
+            let sel_ref = self.tabs[i].scene.selection.borrow();
+            if let Some(prev_p) = sel_ref.last_move_pos {
+                let dx = p.x - prev_p.x;
+                let dy = p.y - prev_p.y;
+                let dist2 = dx * dx + dy * dy;
+                if dist2 < 0.0625
+                    && self.tabs[i].active_cmd.is_none()
+                    && self.tabs[i].active_grip.is_none()
+                    && self.ucs_grip_drag.is_none()
+                    && !sel_ref.left_down
+                    && !sel_ref.middle_down
+                    && !sel_ref.right_down
+                {
+                    return Task::none();
+                }
+            }
+        }
+
         self.constraint_glyph_tooltip = None;
         let constraint_hover = self
             .constraint_glyph_under(i, p)

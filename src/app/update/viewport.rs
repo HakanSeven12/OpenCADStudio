@@ -1592,16 +1592,6 @@ impl OpenCADStudio {
 
             self.tabs[i].snap_result = snap_hit;
 
-            // OTRACK acquisition needs access to the original wire geometry so, once a
-            // reference point has dwelt long enough, it can capture the segment directions
-            // meeting at that point.
-            //
-            // IMPORTANT: this combined set is used ONLY for OTRACK acquisition.
-            // It is never passed to the normal movement snap above.
-            let mut tracking_candidates: Vec<_> = snap_candidates.iter().cloned().collect();
-
-            tracking_candidates.extend(self.grip_reference_wires.iter().cloned());
-
             // Prefer a genuine drawing snap when it is an acquisition-capable point.
             // Otherwise let the frozen-reference snap drive the dwell acquisition.
             let normal_tracking_hit = snap_hit.filter(|hit| {
@@ -1620,14 +1610,27 @@ impl OpenCADStudio {
 
             let dwell_hit = normal_tracking_hit.or(reference_snap_hit);
 
-            self.snapper.update_otrack_dwell(
-                dwell_hit,
-                &tracking_candidates,
-                view_rot,
-                eye,
-                bounds,
-                Instant::now(),
-            );
+            if self.grip_reference_wires.is_empty() {
+                self.snapper.update_otrack_dwell(
+                    dwell_hit,
+                    &snap_candidates,
+                    view_rot,
+                    eye,
+                    bounds,
+                    Instant::now(),
+                );
+            } else {
+                let mut tracking_candidates: Vec<_> = snap_candidates.iter().cloned().collect();
+                tracking_candidates.extend(self.grip_reference_wires.iter().cloned());
+                self.snapper.update_otrack_dwell(
+                    dwell_hit,
+                    &tracking_candidates,
+                    view_rot,
+                    eye,
+                    bounds,
+                    Instant::now(),
+                );
+            }
             let axis_lock = self.active_axis_lock(i, raw, base, true);
             let otrack_hit = if axis_lock.is_none() {
                 self.active_otrack_hit(i, raw, snap_hit, Some(base), true, view_rot, eye, bounds)

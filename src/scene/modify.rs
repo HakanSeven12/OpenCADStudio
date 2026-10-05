@@ -834,6 +834,7 @@ impl Scene {
             return Vec::new();
         };
         std::iter::once(graph.root)
+            .chain(graph.evaluation_graph)
             .chain(graph.nodes)
             .filter_map(|object_handle| {
                 self.document
@@ -863,6 +864,9 @@ impl Scene {
             return false;
         };
         self.record_undo_object_before(graph.root, None);
+        if let Some(evaluation) = graph.evaluation_graph {
+            self.record_undo_object_before(evaluation, None);
+        }
         for node in graph.nodes {
             self.record_undo_object_before(node, None);
         }
@@ -878,14 +882,19 @@ impl Scene {
         let previous = self
             .document
             .solid_history_graph(handle)
-            .map(|graph| graph.nodes)
+            .map(|graph| (graph.nodes, graph.evaluation_graph))
             .unwrap_or_default();
         self.record_solid_history_before(handle);
         let Some(graph) = self.document.append_solid_history(handle, operation) else {
             return false;
         };
+        if let Some(evaluation) = graph.evaluation_graph {
+            if previous.1 != Some(evaluation) {
+                self.record_undo_object_before(evaluation, None);
+            }
+        }
         for node in graph.nodes {
-            if !previous.contains(&node) {
+            if !previous.0.contains(&node) {
                 self.record_undo_object_before(node, None);
             }
         }
@@ -919,6 +928,9 @@ impl Scene {
             return false;
         };
         self.record_undo_object_before(graph.root, None);
+        if let Some(evaluation) = graph.evaluation_graph {
+            self.record_undo_object_before(evaluation, None);
+        }
         for node in graph.nodes {
             self.record_undo_object_before(node, None);
         }

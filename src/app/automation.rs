@@ -1587,6 +1587,108 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// The OCS↔AutoCAD geometry agreement, per primitive family: the
+    /// solid AutoCAD regrows from the editable history node — the local
+    /// primitive centred on the frame origin, placed by the node
+    /// transform, the authored `sh_history` genus — must sit exactly
+    /// where OCS placed the B-rep. The node's world-centre convention
+    /// is carried by the codec's write/read centre shift pair, so the
+    /// re-read model frame applied to the family's local centre names
+    /// the regrown solid's centre; it must equal the drawn centre.
+    ///
+    /// Regression for the 2026-10-05 geometry discrepancy: a cylinder
+    /// drawn at base (0,0,0) showed (0,0,-1) in AutoCAD's geometry
+    /// section because the node transform carried the base instead of
+    /// the centre. Every family is drawn at a non-origin placement —
+    /// identity transforms masked the bug.
+    #[test]
+    fn every_family_s_editable_history_sits_on_the_drawn_geometry() {
+        use acadrust::entities::EntityType;
+        use acadrust::objects::SolidHistoryOperation;
+
+        // (command, family, drawn world centre)
+        let cases: &[(&str, &str, [f64; 3])] = &[
+            ("CYLINDER 10,5,2 5 10", "Cylinder", [10.0, 5.0, 7.0]),
+            ("BOX 20,0,0 30,10,0 10", "Box", [25.0, 5.0, 5.0]),
+            ("WEDGE 40,0,0 50,10,0 8", "Wedge", [45.0, 5.0, 4.0]),
+            ("CONE 60,0,0 5 12", "Cone", [60.0, 0.0, 6.0]),
+            ("SPHERE 80,0,0 6", "Sphere", [80.0, 0.0, 0.0]),
+            ("TORUS 100,0,0 8 2", "Torus", [100.0, 0.0, 0.0]),
+            ("PYRAMID 120,0,0 6 10", "Pyramid", [120.0, 0.0, 5.0]),
+        ];
+
+        for (command, family, expected) in cases {
+            let mut app = OpenCADStudio::new_for_test();
+            assert_eq!(app.automation_op(r#"{"op":"new"}"#)["ok"], true);
+            let run = app.automation_op(&format!(r#"{{"op":"run","cmd":"{command}"}}"#));
+            assert_eq!(run["ok"], true, "{family} run failed: {}", run["error"]);
+
+            let path = std::env::temp_dir().join(format!(
+                "ocs_geom_agreement_{}_{}.dwg",
+                family,
+                std::process::id()
+            ));
+            let _ = std::fs::remove_file(&path);
+            let p = path.to_string_lossy().replace('\\', "\\\\");
+            let saved = app.automation_op(&format!(r#"{{"op":"save","path":"{p}"}}"#));
+            assert_eq!(saved["ok"], true, "{family} save failed: {}", saved["error"]);
+            drop(app);
+
+            let mut reader = acadrust::DwgReader::from_file(&path).unwrap();
+            let outcome = reader.read_with_stats().unwrap();
+            let document = outcome.document;
+            let solid = document
+                .entities()
+                .find_map(|entity| match entity {
+                    EntityType::Solid3D(solid) => Some(solid.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{family}: no solid survived the save"));
+            let operations = document
+                .solid_history_operations(solid.common.handle)
+                .unwrap_or_else(|| panic!("{family}: the history tree did not survive"));
+            assert_eq!(operations.len(), 1, "{family}: exactly one step");
+
+            // The family's local centre in the authored centred-local
+            // convention — the same centres the codec's write/read shift
+            // pair carries (the gold sh_history measurements).
+            let local_center = match &operations[0] {
+                SolidHistoryOperation::Box(value) | SolidHistoryOperation::Wedge(value) => [
+                    value.length * 0.5,
+                    value.width * 0.5,
+                    value.height * 0.5,
+                ],
+                SolidHistoryOperation::Cylinder(value) => [0.0, 0.0, value.height * 0.5],
+                SolidHistoryOperation::Cone(value) => [0.0, 0.0, value.height * 0.5],
+                SolidHistoryOperation::Pyramid(value) => [0.0, 0.0, value.height * 0.5],
+                SolidHistoryOperation::Sphere(_) | SolidHistoryOperation::Torus(_) => {
+                    [0.0; 3]
+                }
+                other => panic!("{family}: unexpected operation {other:?}"),
+            };
+            let base = operations[0]
+                .base()
+                .unwrap_or_else(|| panic!("{family}: the node carries no base"));
+            let frame = glam::DMat4::from_cols_array(&base.transform);
+            let regrown = frame.transform_point3(glam::DVec3::from(local_center));
+            for axis in 0..3 {
+                assert!(
+                    (regrown[axis] - expected[axis]).abs() < 1e-9,
+                    "{family}: the editable-history interpretation places the solid at \
+                     {regrown}, but it was drawn centred at {expected:?} — OCS and \
+                     AutoCAD would disagree about this solid's geometry"
+                );
+            }
+
+            let sidecar = path.with_file_name(format!(
+                ".{}.ocs.lock",
+                path.file_name().unwrap().to_string_lossy()
+            ));
+            let _ = std::fs::remove_file(sidecar);
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
     #[test]
     fn save_then_open_round_trips() {
         let mut app = OpenCADStudio::new_for_test();

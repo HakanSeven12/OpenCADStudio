@@ -458,14 +458,6 @@ impl shader::Primitive for Primitive {
             inner.skip_hatch_frame = vp.skip_hatch;
             inner.skip_background = vp.skip_background;
             if skip {
-                if !vp.preview_wires.is_empty() {
-                    if let Some(draw_depths) = vp.draw_depths.upgrade() {
-                        inner.upload_preview_wires(device, queue, &vp.preview_wires[..], &draw_depths);
-                    }
-                }
-                if !vp.preview_text_verts.is_empty() {
-                    inner.upload_preview_text(device, queue, &vp.preview_text_verts[..]);
-                }
                 if vp.show_viewcube {
                     inner.viewcube.upload(
                         queue,
@@ -1465,17 +1457,17 @@ fn render_signature(vp: &ViewportData, placement: &PhysicalViewport) -> u64 {
     for value in [placement.raster.x, placement.raster.y, placement.raster.width, placement.raster.height] {
         value.to_bits().hash(&mut h);
     }
-    // Live overlay (command preview / interim / grip drag). Hash the presence,
-    // point counts, and color properties of preview wires so appearing/disappearing
-    // invalidates the signature, but moving endpoint coordinates update in the
-    // fast overlay pass without re-rasterizing the static base scene.
-    vp.preview_wires.len().hash(&mut h);
+    // Live overlay (command preview / interim / grip drag). Hashing its
+    // coordinates catches the endpoint moving with the cursor as well as the
+    // preview appearing / clearing. Base scene geometry remains cached by
+    // geometry_epoch, avoiding base re-uploads or re-tessellation.
     for w in vp.preview_wires.iter() {
         w.points.len().hash(&mut h);
-        for &c in &w.color {
-            c.to_bits().hash(&mut h);
+        for p in &w.points {
+            p[0].to_bits().hash(&mut h);
+            p[1].to_bits().hash(&mut h);
+            p[2].to_bits().hash(&mut h);
         }
-        w.name.hash(&mut h);
     }
     // Live hatch preview. Pattern-origin grip drags keep the boundary fixed and
     // move only the family anchors, so hash both geometry and pattern data.

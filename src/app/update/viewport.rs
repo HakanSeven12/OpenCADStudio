@@ -2951,6 +2951,7 @@ impl OpenCADStudio {
                 .scene
                 .set_command_preview_hidden(&preview_hidden);
             self.tabs[i].scene.set_preview_wires(previews);
+            self.tabs[i].dirty = true;
         } else if !self.client_pick_pending(i) {
             // Idle (no command, no pending client pick): the snap marker is
             // command-only, so clear it — a pending client pick keeps the

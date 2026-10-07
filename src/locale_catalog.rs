@@ -5274,7 +5274,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Graphic Attributes: 1 unsupported object was not changed." => Some(("graphic-attributes", "one-unsupported")),
         "Graphic Attributes: {skipped} unsupported objects were not changed." => Some(("graphic-attributes", "unsupported-skipped")),
         "Fill transparency" => Some(("graphic-attributes", "fill-transparency")),
-        "Line linetype" => Some(("graphic-attributes", "line-linetype")),
+        "Fill change" => Some(("graphic-attributes", "fill-change")),
         "Line transparency" => Some(("graphic-attributes", "line-transparency")),
         "Cyl." => Some(("graphic-attributes", "cylindrical-short")),
         "Spher." => Some(("graphic-attributes", "spherical-short")),

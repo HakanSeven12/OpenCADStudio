@@ -21,15 +21,14 @@ type DrawDepth = FxHashMap<u64, [f32; 2]>;
 
 const PALETTE_CONTROL_ICON_SIZE: f32 = 20.0;
 const COMPACT_BUTTON_HEIGHT: f32 = 22.0;
-const LINETYPE_SCALE_STEP: f64 = 0.1;
 const TRANSPARENCY_ICON: &[u8] =
     include_bytes!("../../../assets/icons/attributes/transparency.svg");
 const LINEWEIGHT_ICON: &[u8] = include_bytes!("../../../assets/icons/attributes/lineweight.svg");
 
-/// A usable object linetype scale (CELTSCALE): any positive finite value.
-/// Spinner steps are rounded to six decimals so repeated `±0.1` steps do not
-/// accumulate floating-point noise; typed values such as the ISO pen widths
-/// 0.13, 0.18, 0.25 and 0.35 are kept as entered.
+/// A usable object linetype scale (CELTSCALE): any positive finite value,
+/// rounded to six decimals so arithmetic noise does not reach the drawing.
+/// Typed values such as the ISO pen widths 0.13, 0.18, 0.25 and 0.35 are
+/// kept as entered.
 pub(crate) fn normalized_linetype_scale(value: f64) -> Option<f64> {
     let value = (value * 1.0e6).round() / 1.0e6;
     (value.is_finite() && value > 0.0).then_some(value)
@@ -109,6 +108,9 @@ pub enum GraphicAttributesMsg {
     LineLinetype(String),
     LineLineweight(LineWeight),
     LineLinetypeScale(f64),
+    /// Text typed in the linetype scale field, applied on Enter.
+    LineLinetypeScaleInput(String),
+    LineLinetypeScaleSubmit,
     LineTransparency(Transparency),
     FillColor(AcadColor),
     FillTransparency(Transparency),
@@ -150,6 +152,10 @@ pub struct GraphicAttributesState {
     pub pending_fill_close: Option<PendingFillClose>,
     /// New fills go to the current layer instead of their object's layer.
     pub fill_on_current_layer: bool,
+    /// Text typed in the linetype scale field, until Enter applies it.
+    pub linetype_scale_input: Option<String>,
+    /// Whether the linetype scale field has focus (its value was selected).
+    pub linetype_scale_focused: bool,
     /// View-side caches; `view` runs after every message, so neither the
     /// fill lookup nor the gradient preview is rebuilt unless its input changed.
     fill_index: RefCell<Option<(u64, FillIndex)>>,
@@ -694,35 +700,16 @@ fn color_control<'a>(
     target: ColorPickTarget,
     changed: fn(AcadColor) -> GraphicAttributesMsg,
 ) -> Element<'a, Message> {
-    let label = if info.varies {
-        Some("*VARIES*")
-    } else if info.color == AcadColor::ByBlock {
-        Some("ByBlock")
-    } else {
-        None
-    };
-    let label: Element<'a, Message> = match label {
-        Some(label) => container(text(label).size(10))
-            .width(Fill)
-            .align_x(iced::Left)
-            .align_y(iced::Center)
-            .padding([0, 6])
-            .into(),
-        None => container(Space::new()).width(Fill).height(Fill).into(),
-    };
+    // The L / B / C / V button already shows ByLayer, ByBlock and *VARIES*,
+    // so the swatch carries no text.
     let display = info.display;
-    let swatch = button(label)
+    let swatch = button(Space::new().width(Fill).height(Fill))
         .on_press(Message::OpenColorWindow(target.clone(), info.color))
         .width(Fill)
         .height(COMPACT_BUTTON_HEIGHT)
         .padding(0)
         .style(move |theme: &Theme, status| button::Style {
             background: Some(Background::Color(display)),
-            text_color: if display.r * 0.299 + display.g * 0.587 + display.b * 0.114 > 0.55 {
-                iced::Color::BLACK
-            } else {
-                iced::Color::WHITE
-            },
             border: Border {
                 color: if matches!(status, button::Status::Hovered) {
                     theme.palette().primary.base.color
@@ -818,6 +805,7 @@ fn header_menu(side: DockSide, open: bool, fill_on_current_layer: bool) -> Eleme
         item("Set all attributes ByBlock", GraphicAttributesMsg::SetAllByBlock),
         item("Remove ByLayer / ByBlock", GraphicAttributesMsg::RemoveReferences),
         item("Create Layer with active settings", GraphicAttributesMsg::CreateLayer),
+        container(iced::widget::rule::horizontal(1)).padding([2, 4]),
         container(
             iced::widget::checkbox(fill_on_current_layer)
                 .label(crate::t!("Create fills on the current layer"))
@@ -1067,28 +1055,26 @@ fn linetype_row<'a>(
         .into()
 }
 
-fn linetype_scale_field<'a>(scale: f64, varies: bool, continuous: bool) -> Element<'a, Message> {
-    let field: Element<'a, Message> = if varies {
-        text_input("*VARIES*", "")
-            .size(crate::ui::ROW_H * 0.42)
-            .padding([5, 5])
-            .style(crate::ui::properties::combo_input_style)
-            .width(Fill)
-            .into()
-    } else {
-        let value = normalized_linetype_scale(scale).unwrap_or(1.0);
-        let mut input = iced_aw::number_input(
-            &value,
-            (std::ops::Bound::Excluded(0.0), std::ops::Bound::Unbounded),
-            |value: f64| match normalized_linetype_scale(value) {
-                Some(value) => msg(GraphicAttributesMsg::LineLinetypeScale(value)),
-                None => Message::Noop,
-            },
-        )
-        .step(LINETYPE_SCALE_STEP)
-        .set_size(crate::ui::ROW_H * 0.42)
+/// Widget id of the linetype scale field, for select-all on focus.
+pub(crate) const LINETYPE_SCALE_FIELD: &str = "graphic-linetype-scale";
+
+/// Like a Properties field: clicking selects the value, Enter applies it.
+fn linetype_scale_field<'a>(
+    scale: f64,
+    varies: bool,
+    continuous: bool,
+    typed: Option<&str>,
+) -> Element<'a, Message> {
+    let shown = match typed {
+        Some(typed) => typed.to_string(),
+        None if varies => String::new(),
+        None => normalized_linetype_scale(scale).unwrap_or(1.0).to_string(),
+    };
+    let mut field = text_input(if varies { "*VARIES*" } else { "" }, &shown)
+        .id(iced::widget::Id::new(LINETYPE_SCALE_FIELD))
+        .size(crate::ui::ROW_H * 0.42)
         .padding([5, 5])
-        .input_style(move |theme: &Theme, status| {
+        .style(move |theme: &Theme, status| {
             let mut style = crate::ui::properties::combo_input_style(theme, status);
             if continuous {
                 let disabled = theme.palette().background.base.text.scale_alpha(0.42);
@@ -1097,25 +1083,12 @@ fn linetype_scale_field<'a>(scale: f64, varies: bool, continuous: bool) -> Eleme
             }
             style
         })
-        .style(move |theme: &Theme, status| {
-            let text = theme.palette().background.base.text;
-            iced_aw::number_input::number_input::Style {
-                button_background: None,
-                icon_color: if continuous || status == iced_aw::style::Status::Disabled {
-                    text.scale_alpha(0.42)
-                } else {
-                    text
-                },
-            }
-        })
         .width(Fill);
-        if continuous {
-            input = input.on_input_maybe(None::<fn(f64) -> Message>);
-        } else {
-            input = input.on_submit(Message::Noop);
-        }
-        input.into()
-    };
+    if !continuous {
+        field = field
+            .on_input(|value| msg(GraphicAttributesMsg::LineLinetypeScaleInput(value)))
+            .on_submit(msg(GraphicAttributesMsg::LineLinetypeScaleSubmit));
+    }
     let icon = GraphicAttribute::Solid.icon();
     let icon = if continuous {
         crate::ui::icons::themed_disabled(icon, PALETTE_CONTROL_ICON_SIZE)
@@ -1193,8 +1166,10 @@ fn line_section<'a>(
     no_selection: bool,
     draw_depth: &DrawDepth,
     side: DockSide,
-    open_menu: Option<Menu>,
+    state: &GraphicAttributesState,
 ) -> Vec<Element<'a, Message>> {
+    let open_menu = state.open_menu;
+    let typed_scale = state.linetype_scale_input.as_deref();
     let mut rows = Vec::new();
     if handles.is_empty() && !no_selection {
         return rows;
@@ -1246,7 +1221,7 @@ fn line_section<'a>(
     let effective = effective_lineweight(document, handles, draw_depth, lineweight);
     rows.push(
         row![
-            linetype_scale_field(scale, scale_varies, continuous),
+            linetype_scale_field(scale, scale_varies, continuous, typed_scale),
             lineweight_field(
                 properties,
                 lineweight,
@@ -1296,7 +1271,7 @@ pub fn view<'a>(
         selected.is_empty(),
         draw_depth,
         side,
-        open_menu,
+        state,
     ));
 
     body = body

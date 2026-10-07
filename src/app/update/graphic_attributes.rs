@@ -219,7 +219,11 @@ impl OpenCADStudio {
         use GraphicAttributesMsg as M;
         if !matches!(
             message,
-            M::ToggleMenu(_) | M::HatchPatternSearch(_) | M::HatchPatternFocus(_) | M::Gradient(_)
+            M::ToggleMenu(_)
+                | M::HatchPatternSearch(_)
+                | M::HatchPatternFocus(_)
+                | M::LineLinetypeScaleInput(_)
+                | M::Gradient(_)
         ) {
             self.graphic_attributes.open_menu = None;
         }
@@ -253,6 +257,19 @@ impl OpenCADStudio {
             M::LineLinetype(linetype) => self.on_line_linetype(linetype),
             M::LineLineweight(lineweight) => self.on_line_lineweight(lineweight),
             M::LineLinetypeScale(scale) => self.on_line_linetype_scale(scale),
+            M::LineLinetypeScaleInput(value) => {
+                self.graphic_attributes.linetype_scale_input = Some(value);
+                Task::none()
+            }
+            M::LineLinetypeScaleSubmit => {
+                match self.graphic_attributes.linetype_scale_input.take() {
+                    Some(typed) => {
+                        let value = crate::app::expr_eval::eval_number(&typed.replace(',', "."));
+                        value.map_or_else(Task::none, |scale| self.on_line_linetype_scale(scale))
+                    }
+                    None => Task::none(),
+                }
+            }
             M::LineTransparency(transparency) => self.on_line_transparency(transparency),
             M::FillColor(color) => self.on_solid_fill_color(color),
             M::FillTransparency(transparency) => self.on_fill_transparency(transparency),
@@ -731,7 +748,7 @@ impl OpenCADStudio {
             );
         }
         let selected = selected.as_slice();
-        let pending = self.begin_undo(i, crate::t!("Graphic Attributes"), selected.len(), true);
+        let pending = self.begin_undo(i, crate::t!("Fill change"), selected.len(), true);
         let mut changed = false;
         for handle in to_close {
             let Some(mut entity) = self.tabs[i].scene.document.get_entity(*handle).cloned() else {
@@ -920,7 +937,7 @@ impl OpenCADStudio {
         if !self.has_selection() {
             return self.on_ribbon_linetype_changed(linetype);
         }
-        self.edit_graphic_part(Part::Line, &crate::t!("Line linetype"), |entity| {
+        self.edit_graphic_part(Part::Line, &crate::t!("Linetype"), |entity| {
             crate::scene::view::dispatch::apply_common_prop(entity, "linetype", &linetype);
         });
         Task::none()
@@ -1603,5 +1620,70 @@ mod tests {
             app.dock.location(PanelId::GraphicAttributes),
             Some((DockSide::Right, 0))
         );
+    }
+
+    fn output_since(app: &OpenCADStudio, start: usize) -> String {
+        app.command_line.history[start..]
+            .iter()
+            .map(|entry| entry.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn undo_names_fill_and_linetype_changes() {
+        let mut app = fresh();
+        let boundary = add_closed_square(&mut app, 0.0);
+        select(&mut app, &[boundary]);
+
+        let _ = app.update(ga(GraphicAttributesMsg::Fill(GraphicAttribute::Solid)));
+        let start = app.command_line.history.len();
+        let _ = app.update(Message::Undo);
+        assert!(output_since(&app, start).contains("Undo: Fill change"));
+
+        let _ = app.update(ga(GraphicAttributesMsg::LineLinetype("Continuous".into())));
+        let start = app.command_line.history.len();
+        let _ = app.update(Message::Undo);
+        assert!(output_since(&app, start).contains("Undo: Linetype"));
+    }
+
+    #[test]
+    fn typed_linetype_scale_is_applied_on_enter() {
+        let mut app = fresh();
+        let i = app.active_tab;
+        let line = app.tabs[i].scene.add_entity(EntityType::Line(Line::new()));
+        select(&mut app, &[line]);
+
+        // Enter without typing changes nothing.
+        let _ = app.update(ga(GraphicAttributesMsg::LineLinetypeScaleSubmit));
+        assert_eq!(common(&app, line).linetype_scale, 1.0);
+
+        // Typing alone does not apply; Enter does, with a decimal comma too.
+        let _ = app.update(ga(GraphicAttributesMsg::LineLinetypeScaleInput("0,35".into())));
+        assert_eq!(common(&app, line).linetype_scale, 1.0);
+        let _ = app.update(ga(GraphicAttributesMsg::LineLinetypeScaleSubmit));
+        assert_eq!(common(&app, line).linetype_scale, 0.35);
+        assert!(app.graphic_attributes.linetype_scale_input.is_none());
+
+        // Invalid or non-positive input is dropped.
+        for typed in ["abc", "0", "-2"] {
+            let _ = app.update(ga(GraphicAttributesMsg::LineLinetypeScaleInput(typed.into())));
+            let _ = app.update(ga(GraphicAttributesMsg::LineLinetypeScaleSubmit));
+            assert_eq!(common(&app, line).linetype_scale, 0.35);
+        }
+    }
+
+    #[test]
+    fn clicking_the_linetype_scale_field_selects_it_once() {
+        let mut app = fresh();
+        let field = iced::widget::Id::new(palette::LINETYPE_SCALE_FIELD);
+        let _ = app.update(Message::PropSyncActive(Some(field.clone())));
+        assert!(app.graphic_attributes.linetype_scale_focused);
+
+        // Focus elsewhere drops unsubmitted text.
+        app.graphic_attributes.linetype_scale_input = Some("3".into());
+        let _ = app.update(Message::PropSyncActive(None));
+        assert!(!app.graphic_attributes.linetype_scale_focused);
+        assert!(app.graphic_attributes.linetype_scale_input.is_none());
     }
 }

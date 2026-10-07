@@ -335,6 +335,8 @@ pub fn prepare_xref_block(
         anonymous: false,
         has_attributes: false,
         is_external: false,
+        // The reference is being attached now: it is loaded.
+        is_xref_unloaded: false,
     };
     br.xref_path = store_path.clone();
     let _ = scene.document.block_records.add(br);

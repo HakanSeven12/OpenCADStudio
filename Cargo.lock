@@ -86,7 +86,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.5.5"
-source = "git+https://github.com/schoeller/cadcodec.git?branch=gold-vs-silver#6075e6e62fdfc11f8f0a22b166fb003f9709feeb"
+source = "git+https://github.com/schoeller/cadcodec.git?branch=gold-vs-silver-clean#c73556010da596954bf0e21f6605c8f5241aefee"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
@@ -929,7 +929,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 [[package]]
 name = "cadkernel"
 version = "0.1.0"
-source = "git+https://github.com/schoeller/cadkernel.git?branch=gold-vs-silver#715989fe54b53ff8a45f7668f2672fc3c7bce0cb"
+source = "git+https://github.com/schoeller/cadkernel.git?branch=gold-vs-silver#191bbe7e7c4fc02c4289ef89ee0834bc64d9560d"
 dependencies = [
  "acadrust",
  "cavalier_contours",
@@ -940,7 +940,7 @@ dependencies = [
 [[package]]
 name = "cadkernel-constraints"
 version = "0.1.0"
-source = "git+https://github.com/schoeller/cadkernel.git?branch=gold-vs-silver#715989fe54b53ff8a45f7668f2672fc3c7bce0cb"
+source = "git+https://github.com/schoeller/cadkernel.git?branch=gold-vs-silver#191bbe7e7c4fc02c4289ef89ee0834bc64d9560d"
 dependencies = [
  "nalgebra",
 ]

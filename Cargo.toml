@@ -33,7 +33,7 @@ rfd = "0.17"
 clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
-acadrust = { git = "https://github.com/schoeller/cadcodec.git", branch = "gold-vs-silver", features = ["serde"] }
+acadrust = { git = "https://github.com/schoeller/cadcodec.git", branch = "gold-vs-silver-clean", features = ["serde"] }
 cadkernel = { git = "https://github.com/schoeller/cadkernel.git", branch = "gold-vs-silver", features = ["acis", "offset"] }
 cadkernel-constraints = { git = "https://github.com/schoeller/cadkernel.git", branch = "gold-vs-silver" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }

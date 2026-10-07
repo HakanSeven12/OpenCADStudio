@@ -33,7 +33,7 @@ rfd = "0.17"
 clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
-acadrust = { git = "https://github.com/schoeller/cadcodec.git", branch = "gold-vs-silver-clean", features = ["serde"] }
+acadrust = { git = "https://github.com/schoeller/cadcodec.git", branch = "gold-vs-silver", features = ["serde"] }
 cadkernel = { git = "https://github.com/schoeller/cadkernel.git", branch = "gold-vs-silver", features = ["acis", "offset"] }
 cadkernel-constraints = { git = "https://github.com/schoeller/cadkernel.git", branch = "gold-vs-silver" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
@@ -70,7 +70,7 @@ windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_Window
 ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "wayland"] }
 
 # For `src/bin/ocs_launcher.rs` only (the .app's real CFBundleExecutable,
-# see that file for why) — already in the tree transitively via winit, pinned
+# see that file for why) â€” already in the tree transitively via winit, pinned
 # here to the same versions Cargo already resolves for it.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5"

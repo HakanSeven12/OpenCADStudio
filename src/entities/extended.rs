@@ -1,9 +1,9 @@
-use acadrust::entities::{
+use codec::entities::{
     ArcAlignedTextData, ExtendedEntity, ExtendedEntityData, GeoPositionMarkerData,
     PointCloudData, PointCloudExData, RemoteTextData, SectionObjectData,
 };
-use acadrust::types::{Handle, Transform, Vector3};
-use acadrust::xdata::{ExtendedDataRecord, XDataValue};
+use codec::types::{Handle, Transform, Vector3};
+use codec::xdata::{ExtendedDataRecord, XDataValue};
 use crate::t;
 
 use crate::command::EntityTransform;
@@ -470,10 +470,75 @@ fn point_cloud_clip_lines(data: &PointCloudData) -> Vec<[f64; 3]> {
     points
 }
 
-fn point_cloud_ex_lines(data: &PointCloudExData) -> Vec<[f64; 3]> {
-    let mut points = Vec::new();
-    push_box(&mut points, data.extents_min, data.extents_max);
+/// The cloud's extents box, placed in the drawing. Its points are drawn from
+/// the scan file; the box only picks the cloud, unless the file cannot be
+/// found: then the box shows, with the saved path written across it.
+fn point_cloud_ex_lines(data: &PointCloudExData, document: &codec::CadDocument) -> Vec<[f64; 3]> {
+    let mut points = point_cloud_ex_box(data);
+    if crate::scene::model::point_cloud::resolve_source(document, data).is_none() {
+        let saved = crate::scene::model::point_cloud::definition(document, data)
+            .map(|definition| definition.source_filename.clone())
+            .unwrap_or_default();
+        append_missing_cloud_label(&mut points, data, &saved);
+    }
     points
+}
+
+fn point_cloud_ex_box(data: &PointCloudExData) -> Vec<[f64; 3]> {
+    let corners = codec::entities::point_cloud_ex_corners(data).map(|c| [c.x, c.y, c.z]);
+    let mut points = Vec::new();
+    for a in 0..8 {
+        for bit in [1, 2, 4] {
+            if a & bit == 0 {
+                push_segment(&mut points, corners[a], corners[a | bit]);
+            }
+        }
+    }
+    points
+}
+
+/// A cloud in the 2D wireframe visual style, which draws no points: its
+/// extents box with the reference's message across the base.
+pub(crate) fn point_cloud_2d_style_lines(data: &PointCloudExData) -> Vec<[f64; 3]> {
+    let mut points = point_cloud_ex_box(data);
+    append_missing_cloud_label(&mut points, data, "Point clouds are not displayed in 2D visual style.");
+    points
+}
+
+/// The saved path, centred on the extents' base and as wide as most of it.
+fn append_missing_cloud_label(points: &mut Vec<[f64; 3]>, data: &PointCloudExData, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    let (strokes, _) =
+        crate::scene::text::lff::tessellate_text_ex([0.0, 0.0], 1.0, 0.0, 1.0, 0.0, "standard", text);
+    let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+    for [x, y] in strokes.iter().flatten() {
+        lo = [lo[0].min(*x as f64), lo[1].min(*y as f64)];
+        hi = [hi[0].max(*x as f64), hi[1].max(*y as f64)];
+    }
+    let (min, max) = (data.extents_min, data.extents_max);
+    let (width, height) = (hi[0] - lo[0], hi[1] - lo[1]);
+    if !(width > 0.0 && height > 0.0) {
+        return;
+    }
+    let scale = (0.8 * (max.x - min.x) / width).min(0.5 * (max.y - min.y) / height);
+    let center = [(min.x + max.x) * 0.5, (min.y + max.y) * 0.5];
+    let mid = [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5];
+    for stroke in strokes {
+        push_chain(
+            points,
+            stroke.into_iter().map(|[x, y]| {
+                let local = Vector3::new(
+                    center[0] + (x as f64 - mid[0]) * scale,
+                    center[1] + (y as f64 - mid[1]) * scale,
+                    min.z,
+                );
+                let p = codec::entities::point_cloud_ex_to_world(data, local);
+                [p.x, p.y, p.z]
+            }),
+        );
+    }
 }
 
 fn point_cloud_ex_clip_lines(data: &PointCloudExData) -> Vec<[f64; 3]> {
@@ -483,9 +548,27 @@ fn point_cloud_ex_clip_lines(data: &PointCloudExData) -> Vec<[f64; 3]> {
             if crop.points.len() < 2 {
                 continue;
             }
-            let mut chain: Vec<[f64; 3]> =
-                crop.points.iter().map(|p| [p.x, p.y, p.z]).collect();
-            if crop.points.len() > 2 {
+            // Crop points are kept in the cloud's own coordinates; the crop
+            // runs along the normal of the plane its two directions span.
+            let place = |p: Vector3| {
+                let w = codec::entities::point_cloud_ex_to_world(data, p);
+                [w.x, w.y, w.z]
+            };
+            // A circle is stored as its centre and a point on it.
+            let outline: Vec<Vector3> = if crop.crop_type == 3 {
+                let (c, d) = (crop.points[0], crop.points[1] - crop.points[0]);
+                let r = d.dot(&crop.x_direction).hypot(d.dot(&crop.y_direction));
+                (0..64)
+                    .map(|k| {
+                        let a = k as f64 / 64.0 * std::f64::consts::TAU;
+                        c + crop.x_direction * (r * a.cos()) + crop.y_direction * (r * a.sin())
+                    })
+                    .collect()
+            } else {
+                crop.points.clone()
+            };
+            let mut chain: Vec<[f64; 3]> = outline.into_iter().map(place).collect();
+            if chain.len() > 2 {
                 chain.push(chain[0]);
             }
             push_chain(&mut points, chain);
@@ -502,7 +585,7 @@ pub(crate) fn point_cloud_frame_lines(entity: &ExtendedEntity) -> Option<Vec<[f6
     }
 }
 
-fn camera_lines(document: &acadrust::CadDocument, view_handle: Handle) -> Vec<[f64; 3]> {
+fn camera_lines(document: &codec::CadDocument, view_handle: Handle) -> Vec<[f64; 3]> {
     let Some(view) = document.views.iter().find(|view| view.handle == view_handle) else {
         return Vec::new();
     };
@@ -536,7 +619,7 @@ fn camera_lines(document: &acadrust::CadDocument, view_handle: Handle) -> Vec<[f
     points
 }
 
-fn to_render(entity: &ExtendedEntity, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+fn to_render(entity: &ExtendedEntity, document: &codec::CadDocument) -> Option<RenderEntity> {
     let (points, snaps, keys): (
         Vec<[f64; 3]>,
         Vec<(glam::DVec3, SnapHint)>,
@@ -605,14 +688,14 @@ fn to_render(entity: &ExtendedEntity, document: &acadrust::CadDocument) -> Optio
                 [data.extents_max.x, data.extents_max.y, data.extents_max.z],
             ],
         ),
-        ExtendedEntityData::PointCloudEx(data) => (
-            point_cloud_ex_lines(data),
-            Vec::new(),
-            vec![
-                [data.extents_min.x, data.extents_min.y, data.extents_min.z],
-                [data.extents_max.x, data.extents_max.y, data.extents_max.z],
-            ],
-        ),
+        ExtendedEntityData::PointCloudEx(data) => {
+            let origin = data.ucs_origin;
+            (
+                point_cloud_ex_lines(data, document),
+                vec![(glam::DVec3::new(origin.x, origin.y, origin.z), SnapHint::Insertion)],
+                vec![[origin.x, origin.y, origin.z]],
+            )
+        }
         _ => return None,
     };
     if points.len() < 2 {
@@ -1048,124 +1131,231 @@ fn point_cloud_properties(data: &PointCloudData) -> Vec<PropSection> {
     ]
 }
 
-fn point_cloud_ex_properties(data: &PointCloudExData) -> Vec<PropSection> {
-    let crops = data
-        .croppings
+/// The colour ramps every point cloud colour map carries, by their fixed
+/// identifiers; a cloud names its schemes by identifier.
+pub(crate) const POINT_CLOUD_RAMPS: [(&str, &str); 7] = [
+    ("Blues", "9B45EA40-176A-46B5-9470-1FA6A7880EE3"),
+    ("Earth", "6DFAB669-B096-4842-9F90-F23CBDD9E410"),
+    ("Grayscale", "655FCCB9-2DB2-40BC-86BB-A513D3DF3FEE"),
+    ("Greens", "B5E88F37-A921-45DF-9987-B979CE516EF3"),
+    ("Hydro", "46B3A5C6-4029-4D50-90D3-C49ADB0A2B45"),
+    ("Reds", "E247D320-B4DE-471F-8E5F-B848819BF6F6"),
+    ("Spectrum", "C0A3838B-81E3-4506-B908-13ECF523DB68"),
+];
+
+/// A built-in scheme's identifier by name (Blues when unknown).
+pub(crate) fn point_cloud_ramp_id(name: &str) -> &'static str {
+    POINT_CLOUD_RAMPS.iter().find(|(n, _)| *n == name).unwrap_or(&POINT_CLOUD_RAMPS[0]).1
+}
+
+/// Stylization choices in the order the reference lists them, with the
+/// stored values: scan colours 1, object colour 2, normals 3, intensity 5,
+/// elevation 4.
+const POINT_CLOUD_STYLIZATIONS: [(&str, i16); 5] = [
+    ("Scan Colors", 1),
+    ("Object Color", 2),
+    ("Normals", 3),
+    ("Intensity", 5),
+    ("Elevation", 4),
+];
+
+/// The scheme slot a stylization colours by: intensity and elevation each
+/// keep their own; the other stylizations show (and set) the intensity one.
+fn point_cloud_scheme_slot(data: &mut PointCloudExData) -> &mut String {
+    match data.stylization_type {
+        4 => &mut data.current_color_scheme,
+        6 => &mut data.classification_color_scheme,
+        _ => &mut data.intensity_color_scheme,
+    }
+}
+
+/// The name of the scheme a cloud shows; an unset scheme reads as the first
+/// of the list, as the reference shows it.
+pub(crate) fn point_cloud_scheme_name(data: &PointCloudExData) -> &'static str {
+    let id = match data.stylization_type {
+        4 => &data.current_color_scheme,
+        6 => &data.classification_color_scheme,
+        _ => &data.intensity_color_scheme,
+    };
+    POINT_CLOUD_RAMPS
         .iter()
-        .enumerate()
-        .map(|(index, crop)| {
-            format!(
-                "{}: type {}; inside {}; inverted {}; points {}; plane [{}]",
-                index + 1,
-                crop.crop_type,
-                crop.inside,
-                crop.inverted,
-                crop.points.len(),
-                vector_text(crop.plane)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+        .find(|(_, guid)| guid.eq_ignore_ascii_case(id))
+        .unwrap_or(&POINT_CLOUD_RAMPS[0])
+        .0
+}
+
+/// A placement's rotation about its Z axis and its scale.
+pub(crate) fn point_cloud_rotation_scale(data: &PointCloudExData) -> (f64, f64) {
+    let x = data.ucs_x_direction;
+    (x.y.atan2(x.x), x.length())
+}
+
+fn plain_row(label: &str, field: &'static str, value: f64) -> Property {
+    Property {
+        label: label.into(),
+        field,
+        value: PropValue::EditText(crate::entities::underlay::plain_number(value)),
+    }
+}
+
+fn yes_no_row(label: &str, field: &'static str, flag: bool) -> Property {
+    Property {
+        label: label.into(),
+        field,
+        value: PropValue::Choice {
+            selected: if flag { t!("Yes") } else { t!("No") }.into_owned(),
+            options: vec![t!("Yes").into_owned(), t!("No").into_owned()],
+        },
+    }
+}
+
+fn is_yes(value: &str) -> bool {
+    let value = value.trim();
+    value == t!("Yes").as_ref() || value.eq_ignore_ascii_case("yes") || value.eq_ignore_ascii_case("true")
+}
+
+// Props: General → 3D Visualization → Geometry → Misc, as the reference
+// lists a point cloud. Saved path, Unit and Unit factor are filled by the
+// Properties panel, where the definition is reachable.
+fn point_cloud_ex_properties(data: &PointCloudExData) -> Vec<PropSection> {
+    let stylization = POINT_CLOUD_STYLIZATIONS
+        .iter()
+        .find(|(_, value)| *value == data.stylization_type)
+        .map_or("Scan Colors", |(name, _)| name);
+    let (rotation, scale) = point_cloud_rotation_scale(data);
+    let origin = data.ucs_origin;
     vec![
         PropSection {
-            title: t!("Point Cloud Ex").into_owned(),
+            title: t!("3D Visualization").into_owned(),
             props: vec![
-                ro_prop(t!("Class Version").as_ref(),
-                    "ext_pcx_version",
-                    data.class_version.to_string(),
-                ),
-                text_prop(t!("Name").as_ref(), "ext_pcx_name", &data.name),
-                ro_prop(t!("Extents Min").as_ref(), "ext_pcx_min", vector_text(data.extents_min)),
-                ro_prop(t!("Extents Max").as_ref(), "ext_pcx_max", vector_text(data.extents_max)),
-                ro_prop(t!("UCS Origin").as_ref(),
-                    "ext_pcx_ucs_origin",
-                    vector_text(data.ucs_origin),
-                ),
-                ro_prop(t!("UCS X").as_ref(),
-                    "ext_pcx_ucs_x",
-                    vector_text(data.ucs_x_direction),
-                ),
-                ro_prop(t!("UCS Y").as_ref(),
-                    "ext_pcx_ucs_y",
-                    vector_text(data.ucs_y_direction),
-                ),
-                ro_prop(t!("UCS Z").as_ref(),
-                    "ext_pcx_ucs_z",
-                    vector_text(data.ucs_z_direction),
-                ),
-                bool_prop(t!("Locked").as_ref(), "ext_pcx_locked", data.locked),
-                ro_prop(t!("Definition").as_ref(),
-                    "ext_pcx_definition",
-                    handle_text(data.definition_handle),
-                ),
-                ro_prop(t!("Reactor").as_ref(),
-                    "ext_pcx_reactor",
-                    handle_text(data.reactor_handle),
+                Property {
+                    label: t!("Stylization").into_owned(),
+                    field: "ext_pcx_stylization",
+                    value: PropValue::Choice {
+                        selected: t!(stylization).into_owned(),
+                        options: POINT_CLOUD_STYLIZATIONS
+                            .iter()
+                            .map(|(name, _)| t!(*name).into_owned())
+                            .collect(),
+                    },
+                },
+                choice_prop(
+                    t!("Color scheme").as_ref(),
+                    "ext_pcx_color_scheme",
+                    point_cloud_scheme_name(data),
+                    &POINT_CLOUD_RAMPS.map(|(name, _)| name),
                 ),
             ],
         },
         PropSection {
-            title: t!("Point Cloud Ex Display").into_owned(),
+            title: t!("Geometry").into_owned(),
             props: vec![
-                bool_prop(t!("Show Intensity").as_ref(),
-                    "ext_pcx_show_intensity",
-                    data.show_intensity,
-                ),
-                bool_prop(t!("Show Cropping").as_ref(), "ext_pcx_show_cropping", data.show_cropping),
-                ro_prop(t!("Unknown Flags").as_ref(),
-                    "ext_pcx_unknown",
-                    format!("{}, {}", data.unknown_bl0, data.unknown_bl1),
-                ),
-                ro_prop(t!("Stylization Type").as_ref(),
-                    "ext_pcx_stylization",
-                    data.stylization_type.to_string(),
-                ),
-                text_prop(t!("Intensity Color Scheme").as_ref(),
-                    "ext_pcx_intensity_scheme",
-                    &data.intensity_color_scheme,
-                ),
-                text_prop(t!("Current Color Scheme").as_ref(),
-                    "ext_pcx_current_scheme",
-                    &data.current_color_scheme,
-                ),
-                text_prop(t!("Classification Scheme").as_ref(),
-                    "ext_pcx_class_scheme",
-                    &data.classification_color_scheme,
-                ),
-                edit_prop(t!("Elevation Min").as_ref(), "ext_pcx_elevation_min", data.elevation_min),
-                edit_prop(t!("Elevation Max").as_ref(), "ext_pcx_elevation_max", data.elevation_max),
-                ro_prop(t!("Intensity Range").as_ref(),
-                    "ext_pcx_intensity_range",
-                    format!("{}..{}", data.intensity_min, data.intensity_max),
-                ),
-                ro_prop(t!("Out Of Range Behavior").as_ref(),
-                    "ext_pcx_out_of_range",
-                    format!(
-                        "intensity {}; elevation {}",
-                        data.intensity_out_of_range_behavior,
-                        data.elevation_out_of_range_behavior
-                    ),
-                ),
-                bool_prop(t!("Fixed Elevation Range").as_ref(),
-                    "ext_pcx_fixed_range",
-                    data.elevation_apply_to_fixed_range,
-                ),
-                bool_prop(t!("Intensity Gradient").as_ref(),
-                    "ext_pcx_intensity_gradient",
-                    data.intensity_as_gradient,
-                ),
-                bool_prop(t!("Elevation Gradient").as_ref(),
-                    "ext_pcx_elevation_gradient",
-                    data.elevation_as_gradient,
-                ),
-                ro_prop(t!("Croppings").as_ref(), "ext_pcx_croppings", crops),
+                plain_row(t!("Insertion point X").as_ref(), "ext_pcx_ix", origin.x),
+                plain_row(t!("Insertion point Y").as_ref(), "ext_pcx_iy", origin.y),
+                plain_row(t!("Insertion point Z").as_ref(), "ext_pcx_iz", origin.z),
+                plain_row(t!("Rotation").as_ref(), "ext_pcx_rotation", rotation.to_degrees()),
+                plain_row(t!("Scale").as_ref(), "ext_pcx_scale", scale),
+            ],
+        },
+        PropSection {
+            title: t!("Misc").into_owned(),
+            props: vec![
+                text_prop(t!("Name").as_ref(), "ext_pcx_name", &data.name),
+                ro_prop(t!("Saved path").as_ref(), "ext_pcx_path", String::new()),
+                yes_no_row(t!("Show cropped").as_ref(), "ext_pcx_show_cropping", data.show_cropping),
+                yes_no_row(t!("Locked").as_ref(), "ext_pcx_locked", data.locked),
+                yes_no_row(t!("Geolocate").as_ref(), "ext_pcx_geolocate", data.show_intensity),
+                ro_prop(t!("Segmentation").as_ref(), "ext_pcx_segmentation", t!("No").into_owned()),
+                ro_prop(t!("Unit").as_ref(), "ext_pcx_unit", String::new()),
+                ro_prop(t!("Unit factor").as_ref(), "ext_pcx_unit_factor", String::new()),
             ],
         },
     ]
 }
 
+/// Writes a point cloud row, after `validate_point_cloud_property` passed
+/// it; a locked cloud takes only its Locked row (the caller sees to that).
+fn apply_point_cloud_ex_prop(data: &mut PointCloudExData, field: &str, value: &str) {
+    let number = parse_f64(value);
+    match field {
+        "ext_pcx_name" => data.name = value.to_string(),
+        "ext_pcx_locked" => data.locked = is_yes(value),
+        "ext_pcx_show_cropping" => data.show_cropping = is_yes(value),
+        // Geolocation needs the drawing's geographic location, which a cloud
+        // attached without one never gets: the row stays No.
+        "ext_pcx_geolocate" => {}
+        "ext_pcx_stylization" => {
+            if let Some((_, stylization)) = POINT_CLOUD_STYLIZATIONS
+                .iter()
+                .find(|(name, _)| value == t!(*name).as_ref() || value.eq_ignore_ascii_case(name))
+            {
+                set_point_cloud_stylization(data, *stylization);
+            }
+        }
+        "ext_pcx_color_scheme" => {
+            if let Some((_, guid)) = POINT_CLOUD_RAMPS.iter().find(|(name, _)| *name == value) {
+                *point_cloud_scheme_slot(data) = guid.to_string();
+            }
+        }
+        "ext_pcx_ix" | "ext_pcx_iy" | "ext_pcx_iz" => {
+            if let Some(number) = number {
+                match field {
+                    "ext_pcx_ix" => data.ucs_origin.x = number,
+                    "ext_pcx_iy" => data.ucs_origin.y = number,
+                    _ => data.ucs_origin.z = number,
+                }
+            }
+        }
+        // Turns the placement about its own Z axis to the angle given.
+        "ext_pcx_rotation" => {
+            if let Some(degrees) = number {
+                let (current, _) = point_cloud_rotation_scale(data);
+                let axis = normalized(data.ucs_z_direction, Vector3::UNIT_Z);
+                let turn = Transform::from_rotation(axis, degrees.to_radians() - current);
+                data.ucs_x_direction = turn.apply_rotation(data.ucs_x_direction);
+                data.ucs_y_direction = turn.apply_rotation(data.ucs_y_direction);
+            }
+        }
+        "ext_pcx_scale" => {
+            let (_, current) = point_cloud_rotation_scale(data);
+            if let Some(scale) = number.filter(|scale| *scale > 0.0 && current > 0.0) {
+                let factor = scale / current;
+                data.ucs_x_direction = data.ucs_x_direction * factor;
+                data.ucs_y_direction = data.ucs_y_direction * factor;
+                data.ucs_z_direction = data.ucs_z_direction * factor;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Sets a cloud's stylization (its stored value); intensity and elevation
+/// start from their default schemes, Spectrum and Earth.
+pub(crate) fn set_point_cloud_stylization(data: &mut PointCloudExData, stylization: i16) {
+    data.stylization_type = stylization;
+    let default = match stylization {
+        5 => Some(POINT_CLOUD_RAMPS[6].1),
+        4 => Some(POINT_CLOUD_RAMPS[1].1),
+        _ => None,
+    };
+    if let Some(default) = default {
+        let slot = point_cloud_scheme_slot(data);
+        if slot.is_empty() {
+            *slot = default.to_string();
+        }
+    }
+}
+
+/// Rejects what the reference rejects before a point cloud row is written.
+pub(crate) fn validate_point_cloud_property(field: &str, value: &str) -> Result<(), &'static str> {
+    if field == "ext_pcx_scale" && !parse_f64(value).is_some_and(|scale| scale > 0.0) {
+        return Err("Value must be positive");
+    }
+    Ok(())
+}
+
 fn semantic_properties(
-    properties: &[acadrust::objects::SemanticProperty],
+    properties: &[codec::objects::SemanticProperty],
 ) -> String {
     properties
         .iter()
@@ -1180,7 +1370,7 @@ fn semantic_properties(
 }
 
 fn reference_properties(
-    references: &[acadrust::objects::ProxyObjectReference],
+    references: &[codec::objects::ProxyObjectReference],
 ) -> String {
     references
         .iter()
@@ -1504,27 +1694,7 @@ fn apply_geom_prop(entity: &mut ExtendedEntity, field: &str, value: &str) {
             "ext_pc_high_threshold" => set_f64(value, &mut data.high_intensity_threshold),
             _ => {}
         },
-        ExtendedEntityData::PointCloudEx(data) => match field {
-            "ext_pcx_name" => data.name = value.to_string(),
-            "ext_pcx_locked" => data.locked = !data.locked,
-            "ext_pcx_show_intensity" => data.show_intensity = !data.show_intensity,
-            "ext_pcx_show_cropping" => data.show_cropping = !data.show_cropping,
-            "ext_pcx_intensity_scheme" => data.intensity_color_scheme = value.to_string(),
-            "ext_pcx_current_scheme" => data.current_color_scheme = value.to_string(),
-            "ext_pcx_class_scheme" => data.classification_color_scheme = value.to_string(),
-            "ext_pcx_elevation_min" => set_f64(value, &mut data.elevation_min),
-            "ext_pcx_elevation_max" => set_f64(value, &mut data.elevation_max),
-            "ext_pcx_fixed_range" => {
-                data.elevation_apply_to_fixed_range = !data.elevation_apply_to_fixed_range
-            }
-            "ext_pcx_intensity_gradient" => {
-                data.intensity_as_gradient = !data.intensity_as_gradient
-            }
-            "ext_pcx_elevation_gradient" => {
-                data.elevation_as_gradient = !data.elevation_as_gradient
-            }
-            _ => {}
-        },
+        ExtendedEntityData::PointCloudEx(data) => apply_point_cloud_ex_prop(data, field, value),
         _ => {}
     }
 }
@@ -1657,34 +1827,38 @@ fn grips(entity: &ExtendedEntity) -> Vec<GripDef> {
                 ),
             ),
         ],
-        ExtendedEntityData::PointCloudEx(data) => vec![
-            square_grip(
-                0,
-                glam::DVec3::new(
-                    data.extents_min.x,
-                    data.extents_min.y,
-                    data.extents_min.z,
-                ),
-            ),
-            square_grip(
-                1,
-                glam::DVec3::new(
-                    data.extents_max.x,
-                    data.extents_max.y,
-                    data.extents_max.z,
-                ),
-            ),
-            center_grip(
-                2,
-                glam::DVec3::new(
-                    (data.extents_min.x + data.extents_max.x) * 0.5,
-                    (data.extents_min.y + data.extents_max.y) * 0.5,
-                    (data.extents_min.z + data.extents_max.z) * 0.5,
-                ),
-            ),
-        ],
+        // One grip, at the insertion point: it moves the cloud.
+        ExtendedEntityData::PointCloudEx(data) => vec![square_grip(
+            0,
+            glam::DVec3::new(data.ucs_origin.x, data.ucs_origin.y, data.ucs_origin.z),
+        )],
         _ => Vec::new(),
     }
+}
+
+/// The move gizmo at a point cloud's insertion point: arrows 1-3 along X/Y/Z
+/// and squares 4-6 for the XY/YZ/ZX planes.
+pub(crate) fn point_cloud_gizmo_grips(data: &PointCloudExData) -> Vec<GripDef> {
+    use crate::scene::model::object::GripShape;
+    let world = glam::DVec3::new(data.ucs_origin.x, data.ucs_origin.y, data.ucs_origin.z);
+    (0..3u8)
+        .map(|k| GripDef {
+            id: 1 + k as usize,
+            world,
+            is_midpoint: true,
+            shape: GripShape::GizmoAxis(k),
+            dir: None,
+            axis: Some(crate::scene::pick::grip::gizmo_axis(k)),
+        })
+        .chain((0..3u8).map(|k| GripDef {
+            id: 4 + k as usize,
+            world,
+            is_midpoint: true,
+            shape: GripShape::GizmoPlane(k),
+            dir: None,
+            axis: None,
+        }))
+        .collect()
 }
 
 fn apply_grip(entity: &mut ExtendedEntity, grip_id: usize, apply: GripApply) {
@@ -1762,23 +1936,10 @@ fn apply_grip(entity: &mut ExtendedEntity, grip_id: usize, apply: GripApply) {
                 data.ucs_origin = data.ucs_origin + delta;
             }
         }
+        // The insertion grip and every move-gizmo part move the cloud.
         ExtendedEntityData::PointCloudEx(data) => {
-            let before = (data.extents_min + data.extents_max) * 0.5;
-            move_extents(
-                &mut data.extents_min,
-                &mut data.extents_max,
-                grip_id,
-                apply,
-            );
-            if grip_id == 2 {
-                let after = (data.extents_min + data.extents_max) * 0.5;
-                let delta = after - before;
-                data.ucs_origin = data.ucs_origin + delta;
-                for crop in &mut data.croppings {
-                    for point in &mut crop.points {
-                        *point = *point + delta;
-                    }
-                }
+            if grip_id <= 6 {
+                apply_point(&mut data.ucs_origin, apply);
             }
         }
         _ => {}
@@ -2019,11 +2180,11 @@ fn apply_transform(entity: &mut ExtendedEntity, requested: &EntityTransform) {
             data.radius *= scale;
             data.landing_gap *= scale;
             if let Some(text) = data.embedded_mtext.as_mut() {
-                acadrust::Entity::apply_transform(text, &transform);
+                codec::Entity::apply_transform(text, &transform);
             }
         }
         ExtendedEntityData::CoordinationModel(data) => {
-            let mut matrix = acadrust::types::Matrix4::zero();
+            let mut matrix = codec::types::Matrix4::zero();
             for row in 0..4 {
                 for column in 0..4 {
                     matrix.m[row][column] = data.transform[row * 4 + column];
@@ -2080,37 +2241,14 @@ fn apply_transform(entity: &mut ExtendedEntity, requested: &EntityTransform) {
                 }
             }
         }
+        // The scan keeps its own coordinates (extents and crop boundaries
+        // stay as they are); the placement takes the transform, its axes
+        // carrying the scale.
         ExtendedEntityData::PointCloudEx(data) => {
             data.ucs_origin = transform.apply(data.ucs_origin);
-            data.ucs_x_direction = normalized(
-                transform.apply_rotation(data.ucs_x_direction),
-                Vector3::UNIT_X,
-            );
-            data.ucs_y_direction = normalized(
-                transform.apply_rotation(data.ucs_y_direction),
-                Vector3::UNIT_Y,
-            );
-            data.ucs_z_direction = normalized(
-                transform.apply_rotation(data.ucs_z_direction),
-                Vector3::UNIT_Z,
-            );
-            (data.extents_min, data.extents_max) =
-                transform_extents(data.extents_min, data.extents_max, &transform);
-            for crop in &mut data.croppings {
-                crop.plane =
-                    normalized(transform.apply_rotation(crop.plane), Vector3::UNIT_Z);
-                crop.x_direction = normalized(
-                    transform.apply_rotation(crop.x_direction),
-                    Vector3::UNIT_X,
-                );
-                crop.y_direction = normalized(
-                    transform.apply_rotation(crop.y_direction),
-                    Vector3::UNIT_Y,
-                );
-                for point in &mut crop.points {
-                    *point = transform.apply(*point);
-                }
-            }
+            data.ucs_x_direction = transform.apply_rotation(data.ucs_x_direction);
+            data.ucs_y_direction = transform.apply_rotation(data.ucs_y_direction);
+            data.ucs_z_direction = transform.apply_rotation(data.ucs_z_direction);
         }
         _ => {}
     }
@@ -2120,7 +2258,7 @@ fn apply_transform(entity: &mut ExtendedEntity, requested: &EntityTransform) {
 }
 
 impl RenderConvertible for ExtendedEntity {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         to_render(self, document)
     }
 }
@@ -2208,8 +2346,8 @@ impl Transformable for ExtendedEntity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::EntityCommon;
-    use acadrust::types::Color;
+    use codec::entities::EntityCommon;
+    use codec::types::Color;
 
     #[test]
     fn reselecting_slice_keeps_its_depth() {

@@ -126,8 +126,8 @@ several kinds and features are interleaved, so read by area rather than commit b
 ## What is deliberately not done
 
 - **Twelve of the 43 kinds are not `Complete`** (see the ledger). Seven are blocked by DXF bugs in
-  cadcodec, whose fixes are submitted as [cadcodec#48](https://github.com/HakanSeven12/cadcodec/pull/48) and
-  [#51](https://github.com/HakanSeven12/cadcodec/pull/51). **This change still pins the unfixed cadcodec revision**,
+  opencadcodec, whose fixes are submitted as [opencadcodec#48](https://github.com/HakanSeven12/opencadcodec/pull/48) and
+  [#51](https://github.com/HakanSeven12/opencadcodec/pull/51). **This change still pins the unfixed opencadcodec revision**,
   so its canary tests assert the old behaviour; once those merge, the pin moves, the canaries flip and those kinds
   can be marked complete. The other five are held by the DWG format, a kind change on DXF save, an image-reactor
   structure that cannot be verified, an update-only decision, and a missing creation path.

@@ -3,8 +3,8 @@
 // Command:  POINT (PO)
 //   POINT commits one entity and exits. MULTIPOINT stays active.
 
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Point as CadPoint};
+use codec::types::Vector3;
+use codec::{EntityType, Point as CadPoint};
 use crate::t;
 
 use crate::command::{CadCommand, CmdResult};
@@ -81,5 +81,5 @@ impl CadCommand for PointCommand {
 inventory::submit!(crate::command::CommandRegistration { names: &["POINT", "MULTIPOINT"] });  // PointCommand
 // Point display style system variables + dialog.
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["PDMODE", "PDSIZE", "DDPTYPE"]
+    names: &["PDMODE", "PDSIZE", "DDPTYPE", "PTYPE"]
 });

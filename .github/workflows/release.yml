@@ -24,9 +24,17 @@ on:
         options:
           - all
           - snap
+      # Rebuild an already-published release from the commit its tag points at.
+      tag:
+        description: Existing release tag to rebuild (optional)
+        default: ''
+        type: string
 
 env:
   RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+  # Mirrors .cargo/config.toml so rebuilding a commit that predates the bump
+  # still gives rustc 1.99 enough stack.
+  RUST_MIN_STACK: "67108864"
 
 jobs:
   build-appimage:
@@ -38,7 +46,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.commit || github.sha }}
+          ref: ${{ inputs.commit || inputs.tag || github.sha }}
           # Full history so build.rs can measure the distance from the
           # release tag; a shallow clone would label the build `+g<hash>`.
           fetch-depth: 0
@@ -129,7 +137,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.commit || github.sha }}
+          ref: ${{ inputs.commit || inputs.tag || github.sha }}
           # Full history so build.rs can measure the distance from the
           # release tag; a shallow clone would label the build `+g<hash>`.
           fetch-depth: 0
@@ -204,7 +212,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.commit || github.sha }}
+          ref: ${{ inputs.commit || inputs.tag || github.sha }}
           # Full history so build.rs can measure the distance from the
           # release tag; a shallow clone would label the build `+g<hash>`.
           fetch-depth: 0
@@ -238,6 +246,7 @@ jobs:
       - name: Build
         env:
           OCS_PATREON_TOKEN: ${{ secrets.OCS_PATREON_TOKEN }}
+        shell: bash
         run: |
           cargo build --locked --release
           cargo build --locked --release -p dwg-thumbnailer-win
@@ -385,7 +394,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.commit || github.sha }}
+          ref: ${{ inputs.commit || inputs.tag || github.sha }}
           # Full history so build.rs can measure the distance from the
           # release tag; a shallow clone would label the build `+g<hash>`.
           fetch-depth: 0
@@ -552,7 +561,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.commit || github.sha }}
+          ref: ${{ inputs.commit || inputs.tag || github.sha }}
       - name: Verify native release assets and notes
         env:
           GH_TOKEN: ${{ github.token }}

@@ -33,10 +33,10 @@ fn quad_verts(corners: &[[f32; 3]; 4], corners_low: &[[f32; 3]; 4]) -> Vec<Image
 
 /// Visible-region triangles in image PIXEL space (flat, groups of 3): the whole
 /// image rectangle when unclipped, else the clip rectangle or the triangulated
-/// clip polygon. An inverted (show-outside) boundary isn't a simple filled
-/// region, so it falls back to the whole image rather than mis-clip.
-fn clip_triangles_px(img: &acadrust::entities::RasterImage) -> Vec<[f64; 2]> {
-    use acadrust::entities::{ClipMode, ClipType};
+/// clip polygon, or the image with the polygon cut out when the boundary
+/// hides its inside.
+fn clip_triangles_px(img: &codec::entities::RasterImage) -> Vec<[f64; 2]> {
+    use codec::entities::ClipMode;
     let w = img.size.x;
     let h = img.size.y;
     let quad = || {
@@ -45,34 +45,16 @@ fn clip_triangles_px(img: &acadrust::entities::RasterImage) -> Vec<[f64; 2]> {
             [0.0, 0.0], [w, h], [0.0, h],
         ]
     };
-    if !img.clipping_enabled {
+    let Some(poly) = crate::entities::raster_image::image_clip_polygon(img) else {
         return quad();
-    }
-    let cb = &img.clip_boundary;
-    if cb.clip_mode == ClipMode::Inside {
-        return quad();
-    }
-    // Clip-boundary Y is in image raster space (row 0 = top, Y increasing
-    // downward), whereas this pixel space matches the image's v-vector (Y up
-    // from the insertion corner). Flip each vertex's Y (`h - y`) so the clip
-    // lands where AutoCAD draws it and samples the matching texels.
-    let tris: Vec<[f64; 2]> = match cb.clip_type {
-        ClipType::Rectangular if cb.vertices.len() >= 2 => {
-            let (v0, v1) = (cb.vertices[0], cb.vertices[1]);
-            let (xa, xb) = (v0.x.min(v1.x), v0.x.max(v1.x));
-            let (y0, y1) = (h - v0.y, h - v1.y);
-            let (ya, yb) = (y0.min(y1), y0.max(y1));
-            vec![[xa, ya], [xb, ya], [xb, yb], [xa, ya], [xb, yb], [xa, yb]]
-        }
-        ClipType::Polygonal if cb.vertices.len() >= 3 => {
-            let poly: Vec<[f64; 3]> = cb.vertices.iter().map(|v| [v.x, h - v.y, 0.0]).collect();
-            crate::entities::mesh::triangulate_planar(&poly)
-                .into_iter()
-                .map(|p| [p[0], p[1]])
-                .collect()
-        }
-        _ => quad(),
     };
+    // Inside mode shows the image with the boundary cut out.
+    let (points, triangles) = if img.clip_boundary.clip_mode == ClipMode::Inside {
+        kernel::geom2d::triangulate(&[[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]], &[poly])
+    } else {
+        kernel::geom2d::triangulate(&poly, &[])
+    };
+    let tris: Vec<[f64; 2]> = triangles.into_iter().flat_map(|t| t.map(|i| points[i])).collect();
     if tris.is_empty() {
         quad()
     } else {
@@ -109,13 +91,72 @@ pub struct ImageModel {
     /// (when the entity carries a clip boundary) the triangulated clip polygon
     /// — so the raster is drawn only inside its clip boundary.
     pub verts: Vec<ImageQuadVertex>,
+    /// Magnified pixels stay square (raster images); otherwise they blend
+    /// (PDF pages, OLE pictures).
+    pub pixelated: bool,
+    /// Pixel alpha applies. A raster image whose transparency is off draws
+    /// every pixel opaque in its stored colour.
+    pub use_alpha: bool,
+}
+
+/// The colour adjustments an underlay's content is drawn with over
+/// the background: contrast, monochrome, the background adjustment and (DGN)
+/// the fade.
+pub(crate) fn underlay_adjust(
+    u: &codec::entities::Underlay,
+    def: &codec::entities::UnderlayDefinition,
+    background: [f32; 4],
+) -> super::pdf_raster::PageAdjust {
+    use codec::entities::{UnderlayDisplayFlags, UnderlayType};
+    use super::pdf_raster::PageAdjust;
+    let page = crate::entities::underlay::page_of(def);
+    // Dark means an HSL lightness under one half: pure blue counts as
+    // light, (0, 128, 0) as dark.
+    let bg_max = background[0].max(background[1]).max(background[2]);
+    let bg_min = background[0].min(background[1]).min(background[2]);
+    let bg_lum = (bg_max + bg_min) / 2.0;
+    let dgn = def.underlay_type == UnderlayType::Dgn;
+    // A DGN model is faded into the background before its contrast is
+    // applied (the reference's order), so it is drawn opaque.
+    let bg_rgb = [0, 1, 2].map(|i| (background[i].clamp(0.0, 1.0) * 255.0).round() as u8);
+    let fade_before_contrast = (dgn && u.fade > 0).then_some((bg_rgb, u.fade.min(100)));
+    PageAdjust {
+        contrast: u.contrast.min(100),
+        // Measured: PDF 0.5; DWF 0.243, or 0.73 once its colours are
+        // turned over for a dark background; a DGN model's from its
+        // own colours, over any background.
+        contrast_pivot: match def.underlay_type {
+            UnderlayType::Pdf => 500,
+            UnderlayType::Dwf
+                if u.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND) && bg_lum < 0.5 =>
+            {
+                730
+            }
+            UnderlayType::Dwf => 243,
+            UnderlayType::Dgn => super::underlay_vector::dgn_contrast_pivot(
+                &def.file_path,
+                page,
+                &super::pdf_layers::hidden_layers(u),
+                super::underlay_vector::Backdrop::of([background[0], background[1], background[2]]),
+                fade_before_contrast,
+            )
+            .unwrap_or(404),
+        },
+        monochrome: u.flags.contains(UnderlayDisplayFlags::MONOCHROME),
+        // A DGN model's colours follow the background through its
+        // colour table, whatever this setting.
+        adjust_for_background: u.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND)
+            && !dgn,
+        dark_background: bg_lum < 0.5,
+        fade_before_contrast,
+    }
 }
 
 impl ImageModel {
     /// Build an ImageModel from a DXF RasterImage entity.
     /// Returns `None` if the image file cannot be opened or decoded.
     pub fn from_raster_image(
-        img: &acadrust::entities::RasterImage,
+        img: &codec::entities::RasterImage,
     ) -> Option<Self> {
         let w = img.size.x;
         let h = img.size.y;
@@ -179,6 +220,10 @@ impl ImageModel {
             corners_low,
             draw_depth: 0.0,
             verts,
+            pixelated: true,
+            use_alpha: img
+                .flags
+                .contains(codec::entities::ImageDisplayFlags::TRANSPARENCY_ON),
         })
     }
 }
@@ -186,42 +231,77 @@ impl ImageModel {
 impl ImageModel {
     /// Build an ImageModel from a PDF UNDERLAY + its definition object.
     ///
-    /// The page rasterises through `pdf_raster` (system pdftoppm, cached);
-    /// the world quad sizes from the page's physical size — 1 underlay unit =
-    /// 1 PDF inch — times the entity's scale, placed at the insertion with
-    /// the entity's rotation. `None` when the underlay is off, non-PDF, or
-    /// the page can't be rendered (caller keeps the outline placeholder).
+    /// The page rasterises through `pdf_raster` with no page background, so
+    /// only the drawn content covers the drawing; contrast, monochrome and
+    /// the background adjustment recolour that raster and fade lowers its
+    /// opacity. The world quad is the page size in inches (1 drawing unit per
+    /// page inch) times the entity scale, placed at the insertion with the
+    /// entity rotation. A clip boundary (on, 2+ vertices, in underlay units)
+    /// limits the drawn area to its inside, or to the page outside it when
+    /// inverted. `None` when the underlay is off, non-PDF, or the page can't
+    /// be rendered (caller keeps the outline placeholder).
+    /// `world_per_pixel` is the view's scale: the page is rasterised near
+    /// the size it shows on screen (full size when `None` or when larger),
+    /// so thin lines stay one crisp pixel wide when zoomed out.
     pub fn from_underlay(
-        u: &acadrust::entities::Underlay,
-        def: &acadrust::entities::UnderlayDefinition,
+        u: &codec::entities::Underlay,
+        def: &codec::entities::UnderlayDefinition,
+        background: [f32; 4],
+        world_per_pixel: Option<f64>,
     ) -> Option<Self> {
-        use acadrust::entities::{UnderlayDisplayFlags, UnderlayType};
+        use codec::entities::{UnderlayDisplayFlags, UnderlayType};
+        use super::pdf_raster;
         if !u.flags.contains(UnderlayDisplayFlags::ON) {
             return None;
         }
-        if !matches!(def.underlay_type, UnderlayType::Pdf) {
+        if def.unloaded {
             return None;
         }
-        let page = if def.page_name.trim().is_empty() {
-            "1"
-        } else {
-            def.page_name.trim()
+        let page = crate::entities::underlay::page_of(def);
+        let rect = crate::entities::underlay::definition_rect(def)?;
+        // The page's longest side on screen, pixels (the view scale is taken
+        // a step coarser, so the raster is never reduced on screen and its
+        // one-pixel lines stay unbroken).
+        let screen_side = world_per_pixel
+            .filter(|wpp| *wpp > 0.0)
+            .map(|wpp| {
+                let w = (rect[2] - rect[0]) * u.x_scale.abs();
+                let h = (rect[3] - rect[1]) * u.y_scale.abs();
+                w.max(h) / wpp
+            });
+        let (source, raster) = match def.underlay_type {
+            UnderlayType::Pdf => {
+                // Hidden PDF layers come from the underlay's layer overrides.
+                let source = super::pdf_layers::underlay_source(u, &def.file_path);
+                let inches = (rect[2] - rect[0]).max(rect[3] - rect[1]);
+                let raster = match screen_side {
+                    Some(side) if inches > 0.0 && side / inches < pdf_raster::DISPLAY_DPI as f64 => {
+                        pdf_raster::rasterize_page_display_at(&source, page, (side / inches).max(8.0) as f32)?
+                    }
+                    _ => pdf_raster::rasterize_page_display(&source, page)?,
+                };
+                (source, raster)
+            }
+            // DWF sheets and DGN models are drawn as vector wires
+            // (`underlay_vector::display_wires`).
+            _ => return None,
         };
-        let raster = super::pdf_raster::rasterize_page(&def.file_path, page)?;
+        let pixels = pdf_raster::adjusted_pixels(&source, page, &raster, underlay_adjust(u, def, background));
 
-        // Page size in drawing units (1 unit per PDF inch), entity scale applied.
-        let w_du = raster.width as f64 / raster.dpi as f64 * u.x_scale;
-        let h_du = raster.height as f64 / raster.dpi as f64 * u.y_scale;
-        if w_du <= 0.0 || h_du <= 0.0 {
+        // The page rectangle in drawing units (1 unit per PDF inch, or per
+        // DWF/DGN sheet unit), entity scale applied, from its lower-left
+        // corner.
+        let (page_w, page_h) = (rect[2] - rect[0], rect[3] - rect[1]);
+        let w_du = page_w * u.x_scale;
+        let h_du = page_h * u.y_scale;
+        if w_du.abs() <= 0.0 || h_du.abs() <= 0.0 {
             return None;
         }
         let (c, s) = (u.rotation.cos(), u.rotation.sin());
         let (uxv, uyv) = (c * w_du, s * w_du);
         let (vxv, vyv) = (-s * h_du, c * h_du);
 
-        let oxv = u.insertion_point.x;
-        let oyv = u.insertion_point.y;
-        let ozv = u.insertion_point.z;
+        let [oxv, oyv, ozv] = crate::entities::underlay::local_to_world(u, [rect[0], rect[1]]);
         let ox = oxv as f32;
         let oy = oyv as f32;
         let oz = ozv as f32;
@@ -238,35 +318,7 @@ impl ImageModel {
         ];
         let corners_low = [[oxl, oyl, ozl]; 4];
 
-        // Visible region: the clip polygon (vertices in underlay units,
-        // scaled like the quad) fan-triangulated, or the full page. Inverted
-        // clips fall back to the full page (rare; better whole than hidden).
-        let clipping = u.flags.contains(UnderlayDisplayFlags::CLIPPING)
-            && !u.clip_inverted
-            && u.clip_boundary_vertices.len() >= 3;
-        let tris_uv: Vec<[f64; 2]> = if clipping {
-            let pts: Vec<[f64; 2]> = u
-                .clip_boundary_vertices
-                .iter()
-                .map(|p| [p.x * u.x_scale / w_du, p.y * u.y_scale / h_du])
-                .collect();
-            let mut tris = Vec::with_capacity((pts.len().saturating_sub(2)) * 3);
-            for i in 1..pts.len() - 1 {
-                tris.push(pts[0]);
-                tris.push(pts[i]);
-                tris.push(pts[i + 1]);
-            }
-            tris
-        } else {
-            vec![
-                [0.0, 0.0],
-                [1.0, 0.0],
-                [1.0, 1.0],
-                [0.0, 0.0],
-                [1.0, 1.0],
-                [0.0, 1.0],
-            ]
-        };
+        let tris_uv = underlay_visible_uv(u, rect);
         let verts: Vec<ImageQuadVertex> = tris_uv
             .iter()
             .map(|&[fu, fv]| {
@@ -282,16 +334,45 @@ impl ImageModel {
         Some(Self {
             render_instance: None,
             file_path: def.file_path.clone(),
-            pixels: raster.pixels.clone(),
+            pixels,
             width: raster.width,
             height: raster.height,
-            opacity: 1.0 - u.fade as f32 / 100.0,
+            opacity: 1.0 - u.fade.min(100) as f32 / 100.0,
             corners,
             corners_low,
             draw_depth: 0.0,
             verts,
+            pixelated: false,
+            use_alpha: true,
         })
     }
+}
+
+/// Visible region of an underlay page as triangles in page UV (0..1, y up):
+/// the whole page, the clip polygon, or — for an inverted clip — the page
+/// with the polygon cut out.
+fn underlay_visible_uv(u: &codec::entities::Underlay, rect: [f64; 4]) -> Vec<[f64; 2]> {
+    let (page_w, page_h) = (rect[2] - rect[0], rect[3] - rect[1]);
+    use codec::entities::UnderlayDisplayFlags;
+    let page = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    let whole = || vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    let clip = crate::entities::underlay::clip_polygon_local(u);
+    if !u.flags.contains(UnderlayDisplayFlags::CLIPPING) || clip.len() < 3 {
+        return whole();
+    }
+    let ring: Vec<[f64; 2]> = clip
+        .iter()
+        .map(|p| [(p[0] - rect[0]) / page_w, (p[1] - rect[1]) / page_h])
+        .collect();
+    let (points, triangles) = if u.clip_inverted {
+        kernel::geom2d::triangulate(&page, &[ring])
+    } else {
+        kernel::geom2d::triangulate(&ring, &[])
+    };
+    triangles
+        .into_iter()
+        .flat_map(|t| t.map(|i| points[i]))
+        .collect()
 }
 
 impl ImageModel {
@@ -300,7 +381,7 @@ impl ImageModel {
     /// metafile picture (rasterized by the `gdi` player); returns `None` when
     /// the frame is degenerate or nothing in the blob decodes, so the caller
     /// falls back to the frame placeholder.
-    pub fn from_ole2frame(ole: &acadrust::entities::Ole2Frame) -> Option<Self> {
+    pub fn from_ole2frame(ole: &codec::entities::Ole2Frame) -> Option<Self> {
         let payload = ole.encoded_payload();
         let (pixels, width, height) = super::ole_pres::decode(&payload)?;
 
@@ -347,6 +428,8 @@ impl ImageModel {
             corners_low,
             draw_depth: 0.0,
             verts,
+            pixelated: false,
+            use_alpha: true,
         })
     }
 }

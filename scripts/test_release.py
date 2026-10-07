@@ -50,7 +50,7 @@ class ReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             binary = str(Path(temp) / "build-script")
             subprocess.run(["rustc", str(Path(__file__).resolve().parents[1] / "build.rs"), "-o", binary], check=True)
-            for cargo in ("0.9.8", "2026.9.0", "2026.35.0", "2026.53.0", "2027.1.0"):
+            for cargo in ("0.9.8", "2026.9.0", "2026.35.0", "2026.53.0", "2027.1.0", "2026.40.1", "2026.5.2"):
                 result = subprocess.check_output([binary], text=True, env={**os.environ, "CARGO_PKG_VERSION": cargo})
                 self.assertIn(f"cargo:rustc-env=OCS_APP_VERSION={release.display_version(cargo)}\n", result)
 
@@ -61,6 +61,10 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(release.versions("2026.09")["cargo"], "2026.9.0")
         self.assertEqual(release.display_version("2026.9.0"), "2026.09")
         self.assertEqual(release.display_version("0.9.8"), "0.9.8")
+        self.assertEqual(release.versions("v2026.40.1"), {
+            "version": "2026.40.1", "cargo": "2026.40.1", "msi": "26.40.1", "tag": "v2026.40.1",
+        })
+        self.assertEqual(release.display_version("2026.5.2"), "2026.05.2")
         self.assertEqual(datetime(2027, 1, 3, tzinfo=timezone.utc).strftime("v%G.%V"), "v2026.53")
         for value in ("2026.00", "2026.54", "2027.53", "2026.9", "2026.35.0", "bad", "0.09.8"):
             with self.assertRaises(ValueError, msg=value):

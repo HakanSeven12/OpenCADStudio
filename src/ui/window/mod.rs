@@ -1,4 +1,6 @@
 pub mod about;
+pub mod attdef_dialog;
+pub mod field_dialog;
 pub mod block_definition;
 pub mod block_palette;
 pub mod browser;
@@ -26,6 +28,10 @@ pub mod annotation_data;
 pub mod alias_editor;
 pub mod find_replace;
 pub mod named_parameters;
+pub mod pc_manager;
+pub mod count_palette;
+pub mod sheet_set;
+pub mod pdf_dialogs;
 pub mod xref_attach;
 pub mod xref_help;
 pub mod xref_manager;

@@ -6,9 +6,9 @@
 //! entity is a single [`Insert`] with its array fields set, which the renderer
 //! replicates over `row_count × column_count` using the row/column spacing.
 
-use acadrust::entities::Insert;
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::Insert;
+use codec::types::Vector3;
+use codec::EntityType;
 use glam::DVec3;
 use crate::t;
 

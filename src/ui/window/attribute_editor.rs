@@ -14,8 +14,8 @@
 //! edits, undo and repaint live in the update handler (`Message::AttrEditorApply`).
 
 use crate::app::Message;
-use acadrust::entities::{HorizontalAlignment, VerticalAlignment};
-use acadrust::types::{Color as AcadColor, LineWeight};
+use codec::entities::{HorizontalAlignment, VerticalAlignment};
+use codec::types::{Color as AcadColor, LineWeight};
 use iced::widget::{
     button, checkbox, column, container, row, scrollable, text, text_input, Space,
 };

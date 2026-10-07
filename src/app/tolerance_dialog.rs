@@ -1,4 +1,4 @@
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 
 impl super::OpenCADStudio {
     pub(super) fn open_tolerance_dialog(&mut self, editing: Option<Handle>) {
@@ -73,8 +73,8 @@ impl super::OpenCADStudio {
         let i = self.active_tab;
         let text = state.to_text();
         let mut preview_entity = EntityType::Tolerance(
-            acadrust::entities::Tolerance::with_text(
-                acadrust::types::Vector3::ZERO,
+            codec::entities::Tolerance::with_text(
+                codec::types::Vector3::ZERO,
                 text.clone(),
             ),
         );

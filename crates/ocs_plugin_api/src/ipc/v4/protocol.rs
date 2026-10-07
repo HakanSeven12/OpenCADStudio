@@ -114,7 +114,7 @@ mod tests {
             CommandRequest::Point { point: [1.0, 2.0, 3.0] },
             CommandRequest::Text { text: "2".into() },
             CommandRequest::Token { text: "R".into() },
-            CommandRequest::Entity { handle: acadrust::Handle::new(9), point: [0.0; 3] },
+            CommandRequest::Entity { handle: codec::Handle::new(9), point: [0.0; 3] },
             CommandRequest::Selection,
             CommandRequest::Enter,
             CommandRequest::Cancel,
@@ -149,7 +149,7 @@ mod tests {
             TableOperation::LayerCreate {
                 config: LayerConfig {
                     name: "Walls".into(),
-                    color: Some(acadrust::types::Color::Index(5)),
+                    color: Some(codec::types::Color::Index(5)),
                     frozen: Some(true),
                     description: Some("d".into()),
                     ..Default::default()
@@ -170,7 +170,7 @@ mod tests {
             TableOperation::StyleSetCurrent { kind: crate::host::TableStyleKind::Dim, name: "A".into() },
             TableOperation::BlockCreate {
                 name: "B".into(),
-                entities: vec![acadrust::Handle::new(4), acadrust::Handle::new(5)],
+                entities: vec![codec::Handle::new(4), codec::Handle::new(5)],
                 base_point: [1.0, 2.0, 3.0],
                 erase_originals: true,
                 description: Some("d".into()),
@@ -180,7 +180,7 @@ mod tests {
             TableOperation::BlockDelete { name: "C".into() },
             TableOperation::BlockEntityAdd {
                 block: "C".into(),
-                entity: acadrust::EntityType::Line(acadrust::entities::Line::new()),
+                entity: codec::EntityType::Line(codec::entities::Line::new()),
             },
             TableOperation::LinetypeCreate { name: "L".into(), description: "d".into(), pattern: vec![1.0, -1.0] },
             TableOperation::LinetypeModify { name: "L".into(), description: None, pattern: Some(vec![2.0, -2.0]) },
@@ -196,7 +196,7 @@ mod tests {
             assert!(matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
                 PluginRequest::TableOperation { operation: decoded } if decoded == operation));
         }
-        for result in [Ok(acadrust::Handle::new(9)), Err("refused".to_owned())] {
+        for result in [Ok(codec::Handle::new(9)), Err("refused".to_owned())] {
             let bytes = bincode::serialize(&PluginResponse::TableResult(result.clone())).unwrap();
             assert!(matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
                 PluginResponse::TableResult(decoded) if decoded == result));
@@ -211,24 +211,24 @@ mod tests {
                 primitive: SolidPrimitive::Pyramid { center: [1.0, 2.0, 3.0], radius: 4.0, height: 5.0, sides: 6 },
                 layer: Some("SOLIDS".into()),
             },
-            SolidOperation::Transform { handle: acadrust::Handle::new(7), matrix: [1.0; 16] },
-            SolidOperation::RegionFromProfile { source: acadrust::Handle::new(3), layer: None, delete_source: true },
+            SolidOperation::Transform { handle: codec::Handle::new(7), matrix: [1.0; 16] },
+            SolidOperation::RegionFromProfile { source: codec::Handle::new(3), layer: None, delete_source: true },
             SolidOperation::EmbedPicture { path: "p.png".into(), origin: [0.0; 3], width: 5.0, layer: None },
             SolidOperation::Boolean {
-                first: acadrust::Handle::new(1),
-                second: acadrust::Handle::new(2),
+                first: codec::Handle::new(1),
+                second: codec::Handle::new(2),
                 operation: crate::host::SolidBoolean::Subtract,
                 layer: None,
                 keep_operands: false,
             },
-            SolidOperation::SurfaceFromProfile { source: acadrust::Handle::new(4), layer: Some("S".into()), delete_source: false },
-            SolidOperation::Extrude { source: acadrust::Handle::new(5), direction: [0.0, 0.0, 2.0], layer: None, delete_source: true },
+            SolidOperation::SurfaceFromProfile { source: codec::Handle::new(4), layer: Some("S".into()), delete_source: false },
+            SolidOperation::Extrude { source: codec::Handle::new(5), direction: [0.0, 0.0, 2.0], layer: None, delete_source: true },
         ] {
             let bytes = bincode::serialize(&PluginRequest::SolidOperation { operation: operation.clone() }).unwrap();
             assert!(matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
                 PluginRequest::SolidOperation { operation: decoded } if decoded == operation));
         }
-        for result in [Ok(acadrust::Handle::new(9)), Err("refused".to_owned())] {
+        for result in [Ok(codec::Handle::new(9)), Err("refused".to_owned())] {
             let bytes = bincode::serialize(&PluginResponse::SolidResult(result.clone())).unwrap();
             assert!(matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
                 PluginResponse::SolidResult(decoded) if decoded == result));
@@ -237,14 +237,14 @@ mod tests {
 
     #[test]
     fn selection_request_and_response_roundtrip() {
-        let request = PluginRequest::SetSelection { handles: vec![acadrust::Handle::new(9)] };
+        let request = PluginRequest::SetSelection { handles: vec![codec::Handle::new(9)] };
         let bytes = bincode::serialize(&request).unwrap();
         assert!(matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
-            PluginRequest::SetSelection { handles } if handles == vec![acadrust::Handle::new(9)]));
-        let response = PluginResponse::Selection(vec![acadrust::Handle::new(9)]);
+            PluginRequest::SetSelection { handles } if handles == vec![codec::Handle::new(9)]));
+        let response = PluginResponse::Selection(vec![codec::Handle::new(9)]);
         let bytes = bincode::serialize(&response).unwrap();
         assert!(matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
-            PluginResponse::Selection(handles) if handles == vec![acadrust::Handle::new(9)]));
+            PluginResponse::Selection(handles) if handles == vec![codec::Handle::new(9)]));
     }
 
     #[test]

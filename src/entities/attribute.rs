@@ -1,8 +1,8 @@
-use acadrust::entities::attribute_definition::{
+use codec::entities::attribute_definition::{
     HorizontalAlignment as AHA, MTextFlag, VerticalAlignment as AVA,
 };
-use acadrust::entities::{AttributeDefinition, AttributeEntity};
-use acadrust::types::Vector3;
+use codec::entities::{AttributeDefinition, AttributeEntity};
+use codec::types::Vector3;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_angle_prop as edit_angle, edit_prop as edit, parse_f64, ro_prop as ro, square_grip};
@@ -101,7 +101,21 @@ fn mtext_flag_str(f: MTextFlag) -> &'static str {
 /// Render text strokes for an attribute, honouring alignment, oblique angle,
 /// width factor, generation flags (backward / upside-down), text-style
 /// resolution, and basic multiline splitting on `\n` / `\\P`.
-fn build_attr_render(input: AttrTextInputs<'_>, document: &acadrust::CadDocument) -> RenderEntity {
+/// Laid-out character cells of a multi-line (MTEXT) attribute: the layout's
+/// glyph boxes, the point they are relative to and the layout rotation.
+pub(crate) type AttrCells = (Vec<crate::entities::text_support::GlyphBox>, [f64; 2], f32);
+
+fn build_attr_render(input: AttrTextInputs<'_>, document: &codec::CadDocument) -> RenderEntity {
+    build_attr_layout(input, document, None)
+}
+
+/// [`build_attr_render`], also handing back a multi-line attribute's
+/// character cells in `cells` (left `None` for a single-line one).
+fn build_attr_layout(
+    mut input: AttrTextInputs<'_>,
+    document: &codec::CadDocument,
+    mut cells: Option<&mut Option<AttrCells>>,
+) -> RenderEntity {
     let normal = (input.normal.x, input.normal.y, input.normal.z);
     let (wsx, wsy, wsz) = transform::ocs_point_to_wcs(
         (
@@ -146,6 +160,37 @@ fn build_attr_render(input: AttrTextInputs<'_>, document: &acadrust::CadDocument
     } else {
         resolved.oblique_angle
     };
+
+    // Align / Fit run the text along the baseline between the two points:
+    // Fit stretches its width, Align scales its height too.
+    let (mut rotation, mut width_factor) = (rotation, width_factor);
+    let span = (
+        input.alignment_point.x - input.insertion_point.x,
+        input.alignment_point.y - input.insertion_point.y,
+    );
+    let length = span.0.hypot(span.1);
+    if matches!(input.horizontal_alignment, AHA::Aligned | AHA::Fit)
+        && length > 1.0e-9
+        && !input.value.contains("\\P")
+    {
+        if let Some(b) = text_local_bounds(
+            &resolved.font_name,
+            &resolve_dxf_special_chars(input.value),
+            input.height as f32,
+            width_factor.abs(),
+            oblique_angle,
+        )
+        .filter(|b| b.advance > 1.0e-6)
+        {
+            let scale = length / b.advance as f64;
+            rotation = span.1.atan2(span.0) as f32;
+            if matches!(input.horizontal_alignment, AHA::Aligned) {
+                input.height *= scale;
+            } else {
+                width_factor *= scale as f32;
+            }
+        }
+    }
 
     // Anchor selection mirrors Text: only Left/Baseline uses insertion_point;
     // every other alignment uses alignment_point.
@@ -217,8 +262,11 @@ fn build_attr_render(input: AttrTextInputs<'_>, document: &acadrust::CadDocument
             exact_line_spacing: false,
             rectangle_height: 0.0,
             vertical_text: false,
-            want_glyph_boxes: false,
+            want_glyph_boxes: cells.is_some(),
         });
+        if let Some(out) = cells.as_deref_mut() {
+            *out = Some((layout.glyph_boxes.clone(), [anchor_pt.x, anchor_pt.y], rotation));
+        }
         let _ = input.line_count;
         let _ = input.is_multiline;
         return RenderEntity {
@@ -290,7 +338,7 @@ fn build_attr_render(input: AttrTextInputs<'_>, document: &acadrust::CadDocument
             anchor_f64[0] - (anchor_local_x as f64 * cos_r - local_y_for_line as f64 * sin_r),
             anchor_f64[1] - (anchor_local_x as f64 * sin_r + local_y_for_line as f64 * cos_r),
         ];
-        // Parse `%%` codes through acadrust (same as TEXT), re-encoded for the
+        // Parse `%%` codes through opencadcodec (same as TEXT), re-encoded for the
         // stroke tessellator, so attribute text shares the one parser.
         let encoded = crate::entities::text::acad_text_encode(line);
         let (strokes, fill_tris) = lff::tessellate_text_ex(
@@ -338,18 +386,12 @@ fn build_attr_render(input: AttrTextInputs<'_>, document: &acadrust::CadDocument
 // ── AttributeDefinition ───────────────────────────────────────────────────────
 
 impl RenderConvertible for AttributeDefinition {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
-        // An attribute definition previews its tag when it has no default
-        // value, so the placeholder is visible where a block will prompt for
-        // input. (Passed as a non-empty value, so it renders as-is.)
-        let display_value = if self.default_value.is_empty() {
-            self.tag.clone()
-        } else {
-            self.default_value.clone()
-        };
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
+        // A definition shows its tag; the value appears only on the block
+        // references (block content renders a constant one's value itself).
         Some(build_attr_render(
             AttrTextInputs {
-                value: &display_value,
+                value: &self.tag,
                 insertion_point: self.insertion_point,
                 alignment_point: self.alignment_point,
                 height: self.height,
@@ -361,82 +403,262 @@ impl RenderConvertible for AttributeDefinition {
                 horizontal_alignment: self.horizontal_alignment,
                 vertical_alignment: self.vertical_alignment,
                 normal: self.normal,
-                mtext_flag: self.mtext_flag,
-                is_multiline: self.is_multiline,
-                line_count: self.line_count,
+                // The tag is one line even on a multi-line definition.
+                mtext_flag: MTextFlag::SingleLine,
+                is_multiline: false,
+                line_count: 1,
             },
             document,
         ))
     }
 }
 
+fn is_plain_left(a: &AttributeDefinition) -> bool {
+    a.is_multiline
+        || matches!(
+            (a.horizontal_alignment, a.vertical_alignment),
+            (AHA::Left, AVA::Baseline)
+        )
+}
+
+fn is_two_point(a: &AttributeDefinition) -> bool {
+    !a.is_multiline && matches!(a.horizontal_alignment, AHA::Aligned | AHA::Fit)
+}
+
+fn dv(p: Vector3) -> glam::DVec3 {
+    glam::DVec3::new(p.x, p.y, p.z)
+}
+
+fn shift(p: &mut Vector3, d: glam::DVec3) {
+    p.x += d.x;
+    p.y += d.y;
+    p.z += d.z;
+}
+
 impl Grippable for AttributeDefinition {
+    /// Left text has one grip at its start; every other justification adds
+    /// the alignment point. Lock position only pins attributes on block
+    /// references, never the definition itself.
     fn grips(&self) -> Vec<GripDef> {
-        // lock_position blocks the position grip. Show an empty grip set so
-        // the renderer can't drag the entity in either AttributeFlags or
-        // top-level lock_position is on.
-        if self.lock_position || self.flags.locked_position {
-            return vec![];
+        let mut grips = vec![square_grip(0, dv(self.insertion_point))];
+        if !is_plain_left(self) {
+            grips.push(square_grip(1, dv(self.alignment_point)));
         }
-        vec![square_grip(
-            0,
-            glam::DVec3::new(
-                self.insertion_point.x,
-                self.insertion_point.y,
-                self.insertion_point.z,
-            ),
-        )]
+        grips
     }
 
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
-        if self.lock_position || self.flags.locked_position {
+        let current = if grip_id == 1 { self.alignment_point } else { self.insertion_point };
+        let d = match apply {
+            GripApply::Translate(d) => glam::DVec3::new(d.x as f64, d.y as f64, d.z as f64),
+            GripApply::Absolute(p) => glam::DVec3::new(p.x as f64, p.y as f64, p.z as f64) - dv(current),
+        };
+        // A two-point definition stretches the moved endpoint; any other
+        // grip moves the whole text.
+        if is_two_point(self) {
+            if grip_id == 1 {
+                shift(&mut self.alignment_point, d);
+            } else {
+                shift(&mut self.insertion_point, d);
+            }
             return;
         }
-        if grip_id == 0 {
-            match apply {
-                GripApply::Translate(d) => {
-                    self.insertion_point.x += d.x as f64;
-                    self.insertion_point.y += d.y as f64;
-                    self.insertion_point.z += d.z as f64;
-                    self.alignment_point.x += d.x as f64;
-                    self.alignment_point.y += d.y as f64;
-                    self.alignment_point.z += d.z as f64;
-                }
-                GripApply::Absolute(p) => {
-                    self.insertion_point.x = p.x as f64;
-                    self.insertion_point.y = p.y as f64;
-                    self.insertion_point.z = p.z as f64;
-                    self.alignment_point.x = p.x as f64;
-                    self.alignment_point.y = p.y as f64;
-                    self.alignment_point.z = p.z as f64;
-                }
-            }
+        shift(&mut self.insertion_point, d);
+        shift(&mut self.alignment_point, d);
+        if let Some(m) = self.embedded_mtext.as_mut() {
+            shift(&mut m.insertion_point, d);
         }
+    }
+}
+
+const JUSTIFY_OPTIONS: [&str; 15] = [
+    "Left",
+    "Align",
+    "Fit",
+    "Center",
+    "Middle",
+    "Right",
+    "Top left",
+    "Top center",
+    "Top right",
+    "Middle left",
+    "Middle center",
+    "Middle right",
+    "Bottom left",
+    "Bottom center",
+    "Bottom right",
+];
+
+fn justify_label(a: &AttributeDefinition) -> &'static str {
+    match (a.horizontal_alignment, a.vertical_alignment) {
+        (AHA::Aligned, _) => "Align",
+        (AHA::Fit, _) => "Fit",
+        (AHA::Middle, _) => "Middle",
+        (AHA::Left, AVA::Baseline) => "Left",
+        (AHA::Center, AVA::Baseline) => "Center",
+        (AHA::Right, AVA::Baseline) => "Right",
+        (AHA::Left, AVA::Top) => "Top left",
+        (AHA::Center, AVA::Top) => "Top center",
+        (AHA::Right, AVA::Top) => "Top right",
+        (AHA::Left, AVA::Middle) => "Middle left",
+        (AHA::Center, AVA::Middle) => "Middle center",
+        (AHA::Right, AVA::Middle) => "Middle right",
+        (AHA::Left, AVA::Bottom) => "Bottom left",
+        (AHA::Center, AVA::Bottom) => "Bottom center",
+        (AHA::Right, AVA::Bottom) => "Bottom right",
+    }
+}
+
+fn parse_justify(s: &str) -> Option<(AHA, AVA)> {
+    Some(match s {
+        "Left" => (AHA::Left, AVA::Baseline),
+        "Align" | "Aligned" => (AHA::Aligned, AVA::Baseline),
+        "Fit" => (AHA::Fit, AVA::Baseline),
+        "Center" => (AHA::Center, AVA::Baseline),
+        "Middle" => (AHA::Middle, AVA::Baseline),
+        "Right" => (AHA::Right, AVA::Baseline),
+        "Top left" => (AHA::Left, AVA::Top),
+        "Top center" => (AHA::Center, AVA::Top),
+        "Top right" => (AHA::Right, AVA::Top),
+        "Middle left" => (AHA::Left, AVA::Middle),
+        "Middle center" => (AHA::Center, AVA::Middle),
+        "Middle right" => (AHA::Right, AVA::Middle),
+        "Bottom left" => (AHA::Left, AVA::Bottom),
+        "Bottom center" => (AHA::Center, AVA::Bottom),
+        "Bottom right" => (AHA::Right, AVA::Bottom),
+        _ => return None,
+    })
+}
+
+/// Offset of the justification anchor from the baseline start, in the
+/// text's own frame (the shown tag measured with its style's font).
+fn justify_offset(a: &AttributeDefinition) -> Option<(f64, f64)> {
+    let b = text_local_bounds(
+        &crate::entities::common::style_font(&a.text_style),
+        &a.tag,
+        a.height as f32,
+        a.width_factor as f32,
+        a.oblique_angle as f32,
+    )?;
+    let ax = match a.horizontal_alignment {
+        AHA::Left => 0.0,
+        AHA::Center | AHA::Middle => b.advance as f64 * 0.5,
+        AHA::Right | AHA::Aligned | AHA::Fit => b.advance as f64,
+    };
+    let ay = match a.vertical_alignment {
+        AVA::Baseline => 0.0,
+        AVA::Bottom => b.ink_min[1] as f64,
+        AVA::Middle => (b.ink_min[1] + b.ink_max[1]) as f64 * 0.5,
+        AVA::Top => b.ink_max[1] as f64,
+    };
+    Some((ax, ay))
+}
+
+fn rotate(a: &AttributeDefinition, (x, y): (f64, f64)) -> (f64, f64) {
+    let (sin, cos) = a.rotation.sin_cos();
+    (x * cos - y * sin, x * sin + y * cos)
+}
+
+/// The baseline start a justified definition stores as its insertion point
+/// (the alignment point minus the justification offset).
+pub fn definition_text_start(a: &AttributeDefinition) -> Vector3 {
+    let Some(offset) = justify_offset(a) else {
+        return a.alignment_point;
+    };
+    let (dx, dy) = rotate(a, offset);
+    let p = a.alignment_point;
+    Vector3::new(p.x - dx, p.y - dy, p.z)
+}
+
+fn yes_no(flag: bool) -> PropValue {
+    PropValue::Choice {
+        selected: if flag { t!("Yes") } else { t!("No") }.into_owned(),
+        options: vec![t!("Yes").into_owned(), t!("No").into_owned()],
+    }
+}
+
+fn is_yes(value: &str) -> bool {
+    value == t!("Yes").as_ref() || value.eq_ignore_ascii_case("yes")
+}
+
+fn row(label: &str, field: &'static str, value: PropValue) -> Property {
+    Property { label: label.into(), field, value }
+}
+
+fn set_bit(flags: i16, bit: i16, on: bool) -> i16 {
+    if on {
+        flags | bit
+    } else {
+        flags & !bit
+    }
+}
+
+/// What the Properties palette refuses for a definition, with the message
+/// the reference shows.
+pub fn validate_definition_property(field: &str, value: &str) -> Result<(), &'static str> {
+    match field {
+        "att_tag" if value.trim().is_empty() || value.trim().contains(char::is_whitespace) => {
+            Err("Invalid argument Tag in setting TagString")
+        }
+        "att_h" | "att_wf" if !parse_f64(value).is_some_and(|v| v > 0.0) => Err("Invalid input"),
+        _ => Ok(()),
+    }
+}
+
+/// Multiple lines on: the value moves into an embedded MText anchored at the
+/// start point. Off: back to single-line Left text.
+fn set_multiline(a: &mut AttributeDefinition, on: bool) {
+    if on == a.is_multiline {
+        return;
+    }
+    a.is_multiline = on;
+    if on {
+        a.mtext_flag = MTextFlag::ConstantMultiLine;
+        a.horizontal_alignment = AHA::Left;
+        a.vertical_alignment = AVA::Top;
+        a.alignment_point = a.insertion_point;
+        a.line_count = a.default_value.split("\\P").count().max(1) as i16;
+        let mut mtext = codec::entities::MText::new();
+        mtext.value = a.default_value.clone();
+        mtext.insertion_point = a.insertion_point;
+        mtext.height = a.height;
+        mtext.rotation = a.rotation;
+        mtext.style = a.text_style.clone();
+        a.embedded_mtext = Some(Box::new(mtext));
+    } else {
+        a.mtext_flag = MTextFlag::SingleLine;
+        a.horizontal_alignment = AHA::Left;
+        a.vertical_alignment = AVA::Baseline;
+        a.line_count = 1;
+        a.default_value = a.default_value.replace("\\P", " ");
+        a.embedded_mtext = None;
     }
 }
 
 impl PropertyEditable for AttributeDefinition {
     fn geometry_properties(&self, text_style_names: &[String]) -> Vec<PropSection> {
-        let mut text_props = vec![
-            Property {
-                label: t!("Tag").into_owned(),
-                field: "att_tag",
-                value: PropValue::PlainText(self.tag.clone()),
+        let left = is_plain_left(self);
+        // Text alignment is the anchor of every justification but Left.
+        let alignment = |label: std::borrow::Cow<'static, str>, field: &'static str, v: f64| {
+            if left {
+                ro(label.as_ref(), field, String::new())
+            } else {
+                edit(label.as_ref(), field, v)
+            }
+        };
+        let text_props = vec![
+            row(t!("Tag").as_ref(), "att_tag", PropValue::PlainText(self.tag.clone())),
+            row(t!("Annotative").as_ref(), "att_annotative", yes_no(self.flags.annotative)),
+            if self.flags.constant {
+                ro(t!("Prompt").as_ref(), "att_prompt", self.prompt.clone())
+            } else {
+                row(t!("Prompt").as_ref(), "att_prompt", PropValue::PlainText(self.prompt.clone()))
             },
-            Property {
-                label: t!("Prompt").into_owned(),
-                field: "att_prompt",
-                value: PropValue::PlainText(self.prompt.clone()),
-            },
-            Property {
-                label: t!("Value").into_owned(),
-                field: "att_default",
-                value: PropValue::PlainText(self.default_value.clone()),
-            },
-            Property {
-                label: t!("Style").into_owned(),
-                field: "att_style",
-                value: PropValue::Choice {
+            row(t!("Value").as_ref(), "att_default", PropValue::PlainText(self.default_value.clone())),
+            row(
+                t!("Style").as_ref(),
+                "att_style",
+                PropValue::Choice {
                     selected: if self.text_style.trim().is_empty() {
                         "Standard".into()
                     } else {
@@ -444,33 +666,18 @@ impl PropertyEditable for AttributeDefinition {
                     },
                     options: text_style_names.to_vec(),
                 },
-            },
-            ro(
-                t!("Annotative").as_ref(),
-                "att_annotative",
-                bool_yn(self.flags.annotative),
             ),
-            Property {
-                label: t!("Justify").into_owned(),
-                field: "att_halign",
-                value: PropValue::Choice {
-                    selected: halign_str(self.horizontal_alignment).to_string(),
-                    options: ["Left", "Center", "Right", "Aligned", "Middle", "Fit"]
-                        .into_iter()
-                        .map(str::to_string)
-                        .collect(),
-                },
-            },
-            Property {
-                label: t!("V-Align").into_owned(),
-                field: "att_valign",
-                value: PropValue::Choice {
-                    selected: valign_str(self.vertical_alignment).to_string(),
-                    options: ["Baseline", "Bottom", "Middle", "Top"]
-                        .into_iter()
-                        .map(str::to_string)
-                        .collect(),
-                },
+            if self.is_multiline {
+                ro(t!("Justify").as_ref(), "att_justify", t!(justify_label(self)).into_owned())
+            } else {
+                row(
+                    t!("Justify").as_ref(),
+                    "att_justify",
+                    PropValue::Choice {
+                        selected: justify_label(self).to_string(),
+                        options: JUSTIFY_OPTIONS.into_iter().map(str::to_string).collect(),
+                    },
+                )
             },
             // Fixed by the style when the style fixes its height.
             crate::entities::common::num_prop(
@@ -482,125 +689,148 @@ impl PropertyEditable for AttributeDefinition {
             edit_angle(t!("Rotation").as_ref(), "att_rot", self.rotation.to_degrees()),
             edit(t!("Width factor").as_ref(), "att_wf", self.width_factor),
             edit_angle(t!("Obliquing").as_ref(), "att_ob", self.oblique_angle.to_degrees()),
-            edit(t!("Text alignment X").as_ref(), "att_ax", self.alignment_point.x),
-            edit(t!("Text alignment Y").as_ref(), "att_ay", self.alignment_point.y),
-            edit(t!("Text alignment Z").as_ref(), "att_az", self.alignment_point.z),
-            ro(
-                t!("Boundary width").as_ref(),
-                "att_field_len",
-                self.field_length.to_string(),
-            ),
-            ro(
-                t!("Upside down").as_ref(),
-                "att_upside_down",
-                bool_yn(self.text_generation_flags & 0x4 != 0),
-            ),
-            ro(
-                t!("Backward").as_ref(),
-                "att_backward",
-                bool_yn(self.text_generation_flags & 0x2 != 0),
-            ),
+            ro(t!("Direction").as_ref(), "att_direction", t!("By style").into_owned()),
+            if self.is_multiline {
+                edit(
+                    t!("Boundary width").as_ref(),
+                    "att_bwidth",
+                    self.embedded_mtext.as_ref().map_or(0.0, |m| m.rectangle_width),
+                )
+            } else {
+                ro(t!("Boundary width").as_ref(), "att_bwidth", String::new())
+            },
+            alignment(t!("Text alignment X"), "att_ax", self.alignment_point.x),
+            alignment(t!("Text alignment Y"), "att_ay", self.alignment_point.y),
+            alignment(t!("Text alignment Z"), "att_az", self.alignment_point.z),
         ];
-        // Constant attributes can't be edited at insert time — surface that
-        // by marking the Value field read-only.
-        if self.flags.constant {
-            if let Some(p) = text_props.iter_mut().find(|p| p.field == "att_default") {
-                p.value = PropValue::ReadOnly(self.default_value.clone());
-            }
-        }
         vec![
-            PropSection {
-                title: t!("Text").into_owned(),
-                props: text_props,
-            },
-            PropSection {
-                title: t!("Geometry").into_owned(),
-                props: vec![
-                    edit(t!("Position X").as_ref(), "att_ix", self.insertion_point.x),
-                    edit(t!("Position Y").as_ref(), "att_iy", self.insertion_point.y),
-                    edit(t!("Position Z").as_ref(), "att_iz", self.insertion_point.z),
-                ],
-            },
+            PropSection { title: t!("Text").into_owned(), props: text_props },
             PropSection {
                 title: t!("Misc").into_owned(),
                 props: vec![
-                    ro(t!("Invisible").as_ref(), "att_invisible", bool_yn(self.flags.invisible)),
-                    ro(t!("Constant").as_ref(), "att_constant", bool_yn(self.flags.constant)),
-                    ro(t!("Verify").as_ref(), "att_verify", bool_yn(self.flags.verify)),
-                    ro(t!("Preset").as_ref(), "att_preset", bool_yn(self.flags.preset)),
-                    ro(t!("Lock position").as_ref(), "att_lock_pos", bool_yn(self.lock_position)),
-                    Property {
-                        label: t!("Multiple lines").into_owned(),
-                        field: "att_mtext_flag",
-                        value: PropValue::Choice {
-                            selected: mtext_flag_str(self.mtext_flag).to_string(),
-                            options: ["SingleLine", "MultiLine", "ConstantMultiLine"]
-                                .into_iter()
-                                .map(str::to_string)
-                                .collect(),
-                        },
-                    },
+                    row(t!("Upside down").as_ref(), "att_upside_down", yes_no(self.text_generation_flags & 0x4 != 0)),
+                    row(t!("Backward").as_ref(), "att_backward", yes_no(self.text_generation_flags & 0x2 != 0)),
+                    row(t!("Invisible").as_ref(), "att_invisible", yes_no(self.flags.invisible)),
+                    row(t!("Constant").as_ref(), "att_constant", yes_no(self.flags.constant)),
+                    row(t!("Verify").as_ref(), "att_verify", yes_no(self.flags.verify)),
+                    row(t!("Preset").as_ref(), "att_preset", yes_no(self.flags.preset)),
+                    row(t!("Multiple lines").as_ref(), "att_multiline", yes_no(self.is_multiline)),
+                    row(
+                        t!("Lock position").as_ref(),
+                        "att_lock_pos",
+                        yes_no(self.lock_position || self.flags.locked_position),
+                    ),
                 ],
             },
         ]
     }
 
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
-        // String / enum fields first.
-        if field == "att_tag" {
-            self.tag = value.to_string();
+        if validate_definition_property(field, value).is_err() {
             return;
         }
-        if field == "att_prompt" {
-            self.prompt = value.to_string();
-            return;
-        }
-        if field == "att_default" {
-            if !self.flags.constant {
-                self.default_value = value.to_string();
-            }
-            return;
-        }
-        if field == "att_style" {
-            self.text_style = value.to_string();
-            return;
-        }
-        if field == "att_halign" {
-            if let Some(a) = parse_halign(value) {
-                self.horizontal_alignment = a;
-            }
-            return;
-        }
-        if field == "att_valign" {
-            if let Some(a) = parse_valign(value) {
-                self.vertical_alignment = a;
-            }
-            return;
-        }
-        if field == "att_mtext_flag" {
-            self.mtext_flag = match value {
-                "MultiLine" => MTextFlag::MultiLine,
-                "ConstantMultiLine" => MTextFlag::ConstantMultiLine,
-                _ => MTextFlag::SingleLine,
-            };
-            return;
-        }
-        // Numeric scalars.
-        let Some(v) = parse_f64(value) else {
-            return;
-        };
         match field {
-            "att_ix" => self.insertion_point.x = v,
-            "att_iy" => self.insertion_point.y = v,
-            "att_iz" => self.insertion_point.z = v,
-            "att_ax" => self.alignment_point.x = v,
-            "att_ay" => self.alignment_point.y = v,
-            "att_az" => self.alignment_point.z = v,
-            "att_h" if v > 0.0 => self.height = v,
-            "att_rot" => self.rotation = v.to_radians(),
-            "att_wf" if v.abs() > 1e-9 => self.width_factor = v,
-            "att_ob" => self.oblique_angle = v.to_radians(),
-            _ => {}
+            "att_tag" => self.tag = value.trim().to_uppercase(),
+            "att_prompt" if !self.flags.constant => self.prompt = value.to_string(),
+            "att_default" => {
+                self.default_value = value.to_string();
+                if let Some(m) = self.embedded_mtext.as_mut() {
+                    m.value = value.to_string();
+                }
+            }
+            "att_style" => {
+                self.text_style = value.to_string();
+                if let Some(m) = self.embedded_mtext.as_mut() {
+                    m.style = value.to_string();
+                }
+            }
+            "att_annotative" => self.flags.annotative = is_yes(value),
+            "att_invisible" => self.flags.invisible = is_yes(value),
+            "att_constant" => {
+                self.flags.constant = is_yes(value);
+                if self.flags.constant {
+                    self.prompt.clear();
+                }
+            }
+            "att_verify" => self.flags.verify = is_yes(value),
+            "att_preset" => self.flags.preset = is_yes(value),
+            "att_lock_pos" => {
+                self.lock_position = is_yes(value);
+                self.flags.locked_position = self.lock_position;
+            }
+            "att_upside_down" => {
+                self.text_generation_flags = set_bit(self.text_generation_flags, 0x4, is_yes(value))
+            }
+            "att_backward" => {
+                self.text_generation_flags = set_bit(self.text_generation_flags, 0x2, is_yes(value))
+            }
+            "att_multiline" => set_multiline(self, is_yes(value)),
+            "att_justify" => {
+                let Some((h, v)) = parse_justify(value) else {
+                    return;
+                };
+                let was_two_point = is_two_point(self);
+                self.horizontal_alignment = h;
+                self.vertical_alignment = v;
+                if is_plain_left(self) {
+                    return;
+                }
+                // The text stays where it is: the baseline start is kept and
+                // the alignment point moves to the new anchor.
+                if !is_two_point(self) {
+                    let (dx, dy) = justify_offset(self).map_or((0.0, 0.0), |o| rotate(self, o));
+                    let s = self.insertion_point;
+                    self.alignment_point = Vector3::new(s.x + dx, s.y + dy, s.z);
+                    return;
+                }
+                let span = (self.alignment_point.x - self.insertion_point.x)
+                    .hypot(self.alignment_point.y - self.insertion_point.y);
+                if !was_two_point || span < 1.0e-9 {
+                    // A baseline as long as the tag.
+                    let length = justify_offset(self).map_or(self.height, |(advance, _)| advance);
+                    let (sin, cos) = self.rotation.sin_cos();
+                    self.alignment_point = Vector3::new(
+                        self.insertion_point.x + cos * length,
+                        self.insertion_point.y + sin * length,
+                        self.insertion_point.z,
+                    );
+                }
+            }
+            _ => {
+                let Some(v) = parse_f64(value) else {
+                    return;
+                };
+                match field {
+                    "att_ax" => self.alignment_point.x = v,
+                    "att_ay" => self.alignment_point.y = v,
+                    "att_az" => self.alignment_point.z = v,
+                    "att_h" => {
+                        self.height = v;
+                        if let Some(m) = self.embedded_mtext.as_mut() {
+                            m.height = v;
+                        }
+                    }
+                    "att_rot" => {
+                        self.rotation = v.to_radians();
+                        if let Some(m) = self.embedded_mtext.as_mut() {
+                            m.rotation = self.rotation;
+                        }
+                    }
+                    "att_wf" => self.width_factor = v,
+                    "att_ob" => self.oblique_angle = v.to_radians(),
+                    "att_bwidth" if v >= 0.0 => {
+                        if let Some(m) = self.embedded_mtext.as_mut() {
+                            m.rectangle_width = v;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // A one-point justified definition keeps its stored baseline start in
+        // step with the anchor, height, style and rotation.
+        if !is_plain_left(self) && !is_two_point(self) {
+            self.insertion_point = definition_text_start(self);
         }
     }
 }
@@ -626,8 +856,37 @@ impl Transformable for AttributeDefinition {
 
 // ── AttributeEntity ───────────────────────────────────────────────────────────
 
+/// The laid-out character cells of a multi-line (MTEXT) attribute, the
+/// point they are relative to and the layout rotation; `None` for a
+/// single-line attribute.
+pub(crate) fn attribute_cells(a: &AttributeEntity, document: &codec::CadDocument) -> Option<AttrCells> {
+    let mut out = None;
+    build_attr_layout(attr_inputs(a), document, Some(&mut out));
+    out
+}
+
+fn attr_inputs(a: &AttributeEntity) -> AttrTextInputs<'_> {
+    AttrTextInputs {
+        value: &a.value,
+        insertion_point: a.insertion_point,
+        alignment_point: a.alignment_point,
+        height: a.height,
+        rotation: a.rotation,
+        width_factor: a.width_factor,
+        oblique_angle: a.oblique_angle,
+        text_style: &a.text_style,
+        text_generation_flags: a.text_generation_flags,
+        horizontal_alignment: a.horizontal_alignment,
+        vertical_alignment: a.vertical_alignment,
+        normal: a.normal,
+        mtext_flag: a.mtext_flag,
+        is_multiline: a.is_multiline,
+        line_count: a.line_count,
+    }
+}
+
 impl RenderConvertible for AttributeEntity {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(build_attr_render(
             AttrTextInputs {
                 value: &self.value,
@@ -874,7 +1133,7 @@ impl Transformable for AttributeEntity {
     }
 }
 
-impl crate::entities::traits::TextContent for acadrust::entities::AttributeDefinition {
+impl crate::entities::traits::TextContent for codec::entities::AttributeDefinition {
     fn text_content(&self) -> Option<String> {
         Some(self.default_value.clone())
     }
@@ -886,7 +1145,7 @@ impl crate::entities::traits::TextContent for acadrust::entities::AttributeDefin
     }
 }
 
-impl crate::entities::traits::TextContent for acadrust::entities::AttributeEntity {
+impl crate::entities::traits::TextContent for codec::entities::AttributeEntity {
     fn text_content(&self) -> Option<String> {
         Some(self.get_value().to_string())
     }

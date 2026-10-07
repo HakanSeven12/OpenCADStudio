@@ -3,7 +3,7 @@
 
 use std::io::Write;
 
-use ocs_plugin_api::host::acadrust::{
+use ocs_plugin_api::host::codec::{
     entities::{Line, Text, Viewport},
     CadDocument, DwgWriter, EntityType, Vector3,
 };

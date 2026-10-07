@@ -5,7 +5,7 @@ use super::*;
 
 use crate::command::EntityTransform;
 use crate::scene::viewport_ref::ViewportFrame;
-use acadrust::types::{Matrix4, Transform};
+use codec::types::{Matrix4, Transform};
 #[cfg(test)]
 use glam::DVec2;
 use glam::DVec3;
@@ -177,7 +177,7 @@ impl Scene {
     /// Returns the entity already transformed into WCS plus the INSERT path.
     fn descend_block_instance(
         &self,
-        insert: &acadrust::entities::Insert,
+        insert: &codec::entities::Insert,
         outer: Transform,
         model_point: DVec3,
         depth: usize,
@@ -312,11 +312,11 @@ fn wire_polyline_nearest(
             continue;
         }
         let nearest = previous.map_or(current, |start| {
-            let segment = cadkernel::geom2d::Curve::Line(cadkernel::geom2d::Line {
+            let segment = kernel::geom2d::Curve::Line(kernel::geom2d::Line {
                 start: start.truncate().to_array(),
                 end: current.truncate().to_array(),
             });
-            let near = cadkernel::geom2d::closest_point(&segment, point.truncate().to_array());
+            let near = kernel::geom2d::closest_point(&segment, point.truncate().to_array());
             start.lerp(current, near.t)
         });
         let distance = (nearest - point).truncate().length();
@@ -338,7 +338,7 @@ pub fn planar_pick_distance(entity: &EntityType, point: DVec3) -> Option<f64> {
         return None;
     }
     let uv = planar.plane.project(point.to_array())?;
-    let nearest = cadkernel::geom2d::closest_point(&planar.curve, uv);
+    let nearest = kernel::geom2d::closest_point(&planar.curve, uv);
     Some(
         (DVec3::from_array(planar.plane.point_at(nearest.point)) - point)
             .truncate()
@@ -371,7 +371,7 @@ mod tests {
             DVec3::new(940.5, 2113.25, 0.0),
         ] {
             let expected = f.model_to_paper(model);
-            let actual = t.apply(acadrust::types::Vector3::new(model.x, model.y, model.z));
+            let actual = t.apply(codec::types::Vector3::new(model.x, model.y, model.z));
             assert!(
                 (actual.x - expected.x).abs() < 1e-9 && (actual.y - expected.y).abs() < 1e-9,
                 "{actual:?} != {expected:?}"
@@ -388,7 +388,7 @@ pub(crate) fn feature_pick_distance(
     kind: Option<crate::snap::SnapType>,
 ) -> Option<f64> {
     use crate::snap::SnapType as S;
-    let points: Vec<acadrust::types::Vector3> = match kind {
+    let points: Vec<codec::types::Vector3> = match kind {
         Some(S::Center) => match entity {
             EntityType::Circle(c) => vec![c.center_wcs()],
             EntityType::Arc(a) => vec![a.center_wcs()],
@@ -402,15 +402,15 @@ pub(crate) fn feature_pick_distance(
         },
         Some(S::Midpoint | S::Quadrant) => {
             let planar = crate::entities::curve::entity_curve(entity)?;
-            cadkernel::geom2d::snap::characteristic_points(&planar.curve)
+            kernel::geom2d::snap::characteristic_points(&planar.curve)
                 .into_iter()
                 .filter(|p| match kind {
-                    Some(S::Midpoint) => p.kind == cadkernel::geom2d::snap::SnapKind::Midpoint,
-                    _ => p.kind == cadkernel::geom2d::snap::SnapKind::Quadrant,
+                    Some(S::Midpoint) => p.kind == kernel::geom2d::snap::SnapKind::Midpoint,
+                    _ => p.kind == kernel::geom2d::snap::SnapKind::Quadrant,
                 })
                 .map(|p| {
                     let p = planar.plane.point_at(p.point);
-                    acadrust::types::Vector3::new(p[0], p[1], p[2])
+                    codec::types::Vector3::new(p[0], p[1], p[2])
                 })
                 .collect()
         }

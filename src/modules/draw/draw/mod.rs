@@ -1,3 +1,4 @@
+pub mod apollonius;
 pub mod arc;
 pub mod attdef;
 pub mod centerline;

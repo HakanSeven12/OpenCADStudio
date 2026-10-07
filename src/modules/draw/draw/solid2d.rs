@@ -6,9 +6,9 @@
 // starts the next connected shape. Enter after the third point commits a
 // triangle.
 
-use acadrust::entities::Solid;
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::Solid;
+use codec::types::Vector3;
+use codec::EntityType;
 use crate::t;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};

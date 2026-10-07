@@ -11,7 +11,7 @@ use super::widgets::{muted_text_style, popup_panel_style, popup_row_style};
 use crate::app::Message;
 use crate::t;
 use crate::ui::properties::acad_color_display;
-use acadrust::types::Color as AcadColor;
+use codec::types::Color as AcadColor;
 use iced::widget::{button, column, container, row, text, Space};
 use iced::{Background, Border, Element, Length, Padding, Theme};
 
@@ -82,7 +82,7 @@ pub const QUICK_PICK_GRID: [[(u8, u8, u8); 9]; 5] = [
 #[allow(dead_code)]
 pub fn aci_1_9() -> [(u8, u8, u8); 9] {
     std::array::from_fn(|i| {
-        acadrust::types::aci_table::aci_to_rgb((i + 1) as u8).unwrap_or((128, 128, 128))
+        codec::types::aci_table::aci_to_rgb((i + 1) as u8).unwrap_or((128, 128, 128))
     })
 }
 

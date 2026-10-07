@@ -1,6 +1,6 @@
-use acadrust::entities::{Helix, HelixConstraint, Spline};
-use acadrust::types::Vector3;
-use cadkernel::space::{HelixCurve, HelixDirection, NurbsCurve3, Vec3};
+use codec::entities::{Helix, HelixConstraint, Spline};
+use codec::types::Vector3;
+use kernel::space::{HelixCurve, HelixDirection, NurbsCurve3, Vec3};
 use glam::DVec3;
 
 use crate::command::EntityTransform;
@@ -451,7 +451,7 @@ fn apply_grip(helix: &mut Helix, grip_id: usize, apply: GripApply) {
 fn apply_transform(helix: &mut Helix, transform: &EntityTransform) {
     match transform {
         EntityTransform::Translate(delta) => {
-            acadrust::Entity::translate(helix, Vector3::new(delta.x, delta.y, delta.z));
+            codec::Entity::translate(helix, Vector3::new(delta.x, delta.y, delta.z));
         }
         EntityTransform::Rotate { center, axis, angle_rad } => {
             crate::scene::view::transform::apply_standard_transform(
@@ -470,14 +470,14 @@ fn apply_transform(helix: &mut Helix, transform: &EntityTransform) {
                 *p2,
                 *working_normal,
             );
-            acadrust::Entity::apply_transform(helix, &reflection);
+            codec::Entity::apply_transform(helix, &reflection);
         }
-        EntityTransform::Affine(value) => acadrust::Entity::apply_transform(helix, value),
+        EntityTransform::Affine(value) => codec::Entity::apply_transform(helix, value),
     }
 }
 
 impl RenderConvertible for Helix {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         self.spline.to_render(document)
     }
 }

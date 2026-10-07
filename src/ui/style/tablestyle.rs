@@ -34,7 +34,7 @@ pub struct TableStyleView<'a> {
     pub styles: Vec<String>,
     pub selected: &'a str,
     pub current: &'a str,
-    pub style: Option<&'a acadrust::objects::TableStyle>,
+    pub style: Option<&'a codec::objects::TableStyle>,
     pub tab: u8,
     pub compare_name: String,
     pub compare_opts: Vec<String>,

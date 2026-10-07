@@ -20,6 +20,15 @@ The server provides four tools:
 - `ocs_execute` performs one operation, an atomic record update, or a sequential batch against the real editor.
 - `ocs_capture` returns a bounded PNG of the drawing viewport or complete window.
 
+### Stale sessions clean themselves up
+
+Dead editor sessions used to leave descriptor files behind that slowed down
+session discovery. Discovery now skips processes that are gone (and removes
+their leftover files), and a bridge started from an older build exits on its
+own once it detects a rebuild so the client starts a fresh one. No action is
+needed on your side; if a client reports version errors after an upgrade,
+reconnecting its MCP servers picks up the new build.
+
 Run `python docs/automation/mcp_acceptance.py target/debug/OpenCADStudio.exe`
 for a repeatable end-to-end acceptance. It creates visible geometry through
 MCP, audits and verified-saves DWG 2000/2013/2018 plus DXF 2000, and records a
@@ -301,9 +310,57 @@ maps onto these three steps rather than a native op.
 
 `query` entities of type `TEXT`/`MTEXT` return the raw stored string in `value` plus a formatting-free rendering in `text` (MTEXT inline codes such as `\A1;` or `\P` are resolved; `%%d`-style TEXT codes become their glyphs). With `detail:"full"`, degenerate-width text bounds are widened with a documented estimate (height × 0.8 × character count) so `bounds`-based region filters stay usable.
 
+### Text operations — search, audit and replace
+
+Three dedicated text operations go beyond `query` for bulk text work:
+
+**`text_search`** (read) scans all `Text`, `MText`, and `Insert` attribute values for a pattern. It supports case-insensitive, whole-word, and accent-insensitive matching, scoped to a layer, entity type list, or handle set.
+
+```json
+{"op":"text_search","find":"CUVE","match_case":false,"whole_word":true,"ignore_accents":true}
+```
+
+**`text_audit`** (read) is a non-mutating spell-check and dry-run replacement preview. It accepts three independent analysis modes, all optional, in one call:
+
+| Parameter | Effect |
+|---|---|
+| `pairs` | `[{"find":"X","replace":"Y"}, …]` — simulates a batch replacement and reports what would change, without touching the document |
+| `check_terms` | `["CIRTUITS","NON TRAITE"]` — flags entities that contain suspect strings |
+| `dictionary` | `["EAU","POMPE","VANNE"]` — any word ≥ 3 letters not found in this list is reported as unrecognised |
+| `system_spellcheck` | `true` to use the OS native spell-checker alongside or instead of the agent dictionary |
+| `language` | BCP-47 tag for the system speller, e.g. `"en-US"` or `"fr-FR"` (defaults to the OS default) |
+| `suggest` | `true` (default) to include spelling suggestions for unrecognised words |
+
+The agent dictionary and system spell-checker work as a layered pipeline: a word that matches the agent dictionary is accepted immediately; only words that fail (or when no dictionary is supplied) are forwarded to the OS spell-checker when enabled.
+
+System spell-check backends:
+
+| Platform | Backend | Notes |
+|---|---|---|
+| Windows 8.1+ | Win32 `ISpellChecker` COM API | Per-language; checks available via Settings → Language. ALL-CAPS words are checked in lowercase since Windows skips all-caps by default. |
+| macOS | `NSSpellChecker` | Uses the system language or the `language` parameter |
+| Linux | Hunspell `.dic` files or `hunspell` CLI | Reads `/usr/share/hunspell/` dictionaries; falls back to pipe mode |
+
+Example combining an agent dictionary with system spell-check:
+
+```json
+{
+  "op": "text_audit",
+  "dictionary": ["VANNE", "CHAUDIÈRE", "POMPE"],
+  "system_spellcheck": true,
+  "language": "fr-FR",
+  "suggest": true
+}
+```
+
+The response includes a `system_speller` object with `enabled`, `available`, `backend`, and `language` fields, plus an `unrecognized_words` array with each word's `handle`, `position`, and optional `suggestions`.
+
+**`text_replace`** (execute) performs the actual batch replacement with single-transaction undo. Add `"dry_run": true` to preview the result without mutating the document or pushing an undo entry.
+
 ### Smoke test
 
 The stdio path is covered black-box by a Python script that draws two entities, exports them with `wblock`, plots them with `plot`, and checks the capability advertisement:
+
 
 ```sh
 python3 docs/automation/serve_smoke.py target/debug/OpenCADStudio
@@ -321,13 +378,22 @@ editor, events and plotting.
 resource-oriented REST surface on `http://127.0.0.1:<port>/api/v1`. Any
 HTTP client works — curl, Python, C# `HttpClient`, JS `fetch`; there is no
 SDK and nothing AI-specific. The server keeps one drawing session alive
-across requests, binds loopback only, sends permissive CORS headers, and
-serves its machine-readable description at `GET /api/v1/openapi`
-(OpenAPI 3, embedded from `src/rest_openapi.json`).
+across requests, binds loopback only, and serves its machine-readable
+description at `GET /api/v1/openapi` (OpenAPI 3, embedded from
+`src/rest_openapi.json`).
+
+Every request carries `Authorization: Bearer <token>`; anything else is
+answered `401 {"code":"unauthorized"}`. Loopback is shared by every process
+and user on the machine, so the port alone proves nothing. Set the token
+yourself with `OCS_API_TOKEN` before launching, or read the random one the
+server prints on stderr at startup. No CORS headers are sent, so a web page
+cannot drive or read the session. The same token guards `--serve --port`
+(as a `"token"` field in each JSON line) and the GUI-hosted channel below.
 
 ```sh
+export OCS_API_TOKEN=$(openssl rand -hex 32)
 OpenCADStudio --http 8090            # start the REST server (headless)
-curl http://127.0.0.1:8090/api/v1/ready
+curl -H "Authorization: Bearer $OCS_API_TOKEN" http://127.0.0.1:8090/api/v1/ready
 ```
 
 ### GUI-hosted REST channel (`--http` + file)
@@ -455,7 +521,7 @@ HTTP.
 ```sh
 # 1. Create entities (the missing layer "FRAME" is created automatically;
 #    the whole batch commits as one undoable step or not at all).
-curl -s -X POST http://127.0.0.1:8090/api/v1/entities \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/entities \
   -H "Content-Type: application/json" \
   -d '{"entities":[
         {"type":"Line","start":[0,0],"end":[100,0],"layer":"FRAME"},
@@ -466,71 +532,71 @@ curl -s -X POST http://127.0.0.1:8090/api/v1/entities \
 # → 201 {"ok":true,"status":"completed","result":{"handles":["63","64","65","66"],…}}
 
 # 2. Verify: query it back.
-curl -s "http://127.0.0.1:8090/api/v1/entities?type=Line&detail=full"
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" "http://127.0.0.1:8090/api/v1/entities?type=Line&detail=full"
 # → {"ok":true,"entities":[{"handle":"63","start":[0,0,0],"end":[100,0,0],…},…]
 
 # 3. Move the circle 10 units right.
-curl -s -X POST http://127.0.0.1:8090/api/v1/entities/transform \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/entities/transform \
   -H "Content-Type: application/json" \
   -d '{"handles":["66"],"action":"move","vector":[10,0]}'
 
 # 4. Mark the text with extended data (RegApp "SPM" registered implicitly).
-curl -s -X PUT http://127.0.0.1:8090/api/v1/entities/65/xdata/SPM \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X PUT http://127.0.0.1:8090/api/v1/entities/65/xdata/SPM \
   -H "Content-Type: application/json" \
   -d '[{"code":1000,"value":"PAGE-01"},{"code":1070,"value":3}]'
-curl -s "http://127.0.0.1:8090/api/v1/entities/65/xdata?app=SPM"
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" "http://127.0.0.1:8090/api/v1/entities/65/xdata?app=SPM"
 
 # 5. Turn the two frame lines into a block definition + Insert.
-curl -s -X POST http://127.0.0.1:8090/api/v1/blocks \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/blocks \
   -H "Content-Type: application/json" \
   -d '{"name":"FRAME-MARK","base":[0,0,0],"handles":["63","67"]}'
 # → 201 {"result":{"block":"FRAME-MARK","insert":"6B"}}
 
 # 6. Save and prove persistence.
-curl -s -X POST http://127.0.0.1:8090/api/v1/save \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/save \
   -H "Content-Type: application/json" -d '{"path":"C:/out/session.dwg"}'
 
 # 7. Filter entities by any property (RFC 6901 pointers, SQL-ish operators).
-curl -s "http://127.0.0.1:8090/api/v1/entities?type=Circle&detail=geometry&where=%5B%7B%22path%22%3A%22%2Fradius%22%2C%22op%22%3A%22gt%22%2C%22value%22%3A2%7D%5D"
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" "http://127.0.0.1:8090/api/v1/entities?type=Circle&detail=geometry&where=%5B%7B%22path%22%3A%22%2Fradius%22%2C%22op%22%3A%22gt%22%2C%22value%22%3A2%7D%5D"
 
 # 8. Set and read back drawing sysvars.
-curl -s -X POST http://127.0.0.1:8090/api/v1/sysvars \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/sysvars \
   -H "Content-Type: application/json" -d '{"set":{"ltscale":2.5}}'
-curl -s "http://127.0.0.1:8090/api/v1/sysvars?names=ltscale,mirrtext"
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" "http://127.0.0.1:8090/api/v1/sysvars?names=ltscale,mirrtext"
 
 # 9. Provision a sheet: create the layout, write its page setup, then
 #    plot every layout to its own PDF (one file per entry in result.files).
-curl -s -X POST http://127.0.0.1:8090/api/v1/layouts \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/layouts \
   -H "Content-Type: application/json" -d '{"name":"PLAN"}'
-curl -s -X PUT http://127.0.0.1:8090/api/v1/layouts/PLAN/page-setup \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X PUT http://127.0.0.1:8090/api/v1/layouts/PLAN/page-setup \
   -H "Content-Type: application/json" \
   -d '{"paper":"ISO_A4_(210.00_x_297.00_MM)","orientation":"landscape","fit":true,"center":true}'
-curl -s -X POST http://127.0.0.1:8090/api/v1/plot \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/plot \
   -H "Content-Type: application/json" \
   -d '{"path":"C:/out/plan.pdf","layout":"all","per_page":true}'
 
 # 10. Save the drawing as a template (a .dwt is DWG bytes — same writer,
 #     no lock held on the file) and start a fresh drawing from it.
-curl -s -X POST http://127.0.0.1:8090/api/v1/save \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/save \
   -H "Content-Type: application/json" -d '{"path":"C:/out/session.dwt"}'
-curl -s -X POST http://127.0.0.1:8090/api/v1/documents \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/documents \
   -H "Content-Type: application/json" -d '{"template":"C:/out/session.dwt"}'
 
 # 11. Second document, then copy entities across documents.
-curl -s -X POST http://127.0.0.1:8090/api/v1/documents -d '{}'   # a fresh document
-curl -s -X POST http://127.0.0.1:8090/api/v1/entities/copy-to \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/documents -d '{}'   # a fresh document
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/entities/copy-to \
   -H "Content-Type: application/json" \
   -d '{"handles":["63","67"],"document_id":2}'
 
 # 12. Group the copies, save them as a named selection set, recall it.
-curl -s -X POST http://127.0.0.1:8090/api/v1/groups \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/groups \
   -H "Content-Type: application/json" -d '{"name":"FRAME","handles":["63","67"]}'
-curl -s -X POST http://127.0.0.1:8090/api/v1/selection-sets \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/selection-sets \
   -H "Content-Type: application/json" -d '{"name":"frame-set","handles":["63","67"]}'
-curl -s "http://127.0.0.1:8090/api/v1/selection-sets/frame-set?select=true"
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" "http://127.0.0.1:8090/api/v1/selection-sets/frame-set?select=true"
 
 # 13. Close a document, discarding unsaved changes.
-curl -s -X DELETE "http://127.0.0.1:8090/api/v1/documents/2?discard=true"
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X DELETE "http://127.0.0.1:8090/api/v1/documents/2?discard=true"
 ```
 
 The same lifecycle — create → verify → transform → xdata → block →

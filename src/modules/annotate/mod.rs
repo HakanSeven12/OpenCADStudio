@@ -7,6 +7,8 @@ pub mod angular_dim;
 pub mod data_extract;
 pub mod data_link;
 pub mod ddedit;
+pub mod field_cmd;
+pub mod count_cmd;
 pub mod diameter_dim;
 pub mod dim_baseline;
 pub mod dim_continue;

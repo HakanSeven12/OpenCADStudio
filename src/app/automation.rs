@@ -15,7 +15,9 @@
 //!                                             once opened/saved)
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::io::{BufRead, Write};
+use crate::io::line_read::{lines_capped, MAX_LINE_BYTES};
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::Write;
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
@@ -27,12 +29,17 @@ use super::OpenCADStudio;
 
 /// Run the headless JSON server. Default transport is stdin/stdout; with
 /// `--port <N>` it instead listens on `127.0.0.1:<N>` and serves one client at
-/// a time (the document session persists across reconnects).
+/// a time (the document session persists across reconnects); every socket
+/// request carries `"token"` (see `rest::api_token`).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn serve() {
     let mut app = OpenCADStudio::new();
     match port_arg() {
-        Some(port) => serve_socket(&mut app, port),
+        Some(port) => serve_socket(
+            &mut app,
+            port,
+            &std::sync::Arc::new(std::sync::atomic::AtomicU16::new(0)),
+        ),
         None => serve_stdio(&mut app),
     }
 }
@@ -106,7 +113,7 @@ fn serve_stdio(app: &mut OpenCADStudio) {
         let _ = writeln!(o, "{}", ready());
         let _ = o.flush();
     }
-    for line in stdin.lock().lines() {
+    for line in lines_capped(stdin.lock(), MAX_LINE_BYTES) {
         let Ok(line) = line else { break };
         let line = line.trim();
         if line.is_empty() {
@@ -119,8 +126,34 @@ fn serve_stdio(app: &mut OpenCADStudio) {
     }
 }
 
+/// Idle timeout for one `--serve` socket client — the same 15 s every other
+/// transport in the codebase uses (`rest.rs`, `http_bridge.rs`,
+/// `control::transport`), and the only one this path was missing.
 #[cfg(not(target_arch = "wasm32"))]
-fn serve_socket(app: &mut OpenCADStudio, port: u16) {
+const SERVE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Serve one socket client at a time on `127.0.0.1:port`. An idle client is
+/// disconnected after [`SERVE_IDLE_TIMEOUT`] — the accept loop is
+/// single-threaded, so a read that never completes would wedge the port for
+/// every later client. The document session survives reconnects.
+#[cfg(not(target_arch = "wasm32"))]
+fn serve_socket(
+    app: &mut OpenCADStudio,
+    port: u16,
+    bound_port: &std::sync::Arc<std::sync::atomic::AtomicU16>,
+) {
+    serve_socket_with_idle(app, port, bound_port, SERVE_IDLE_TIMEOUT)
+}
+
+/// [`serve_socket`] with an explicit per-client idle timeout (a test seam;
+/// production traffic uses [`SERVE_IDLE_TIMEOUT`]).
+#[cfg(not(target_arch = "wasm32"))]
+fn serve_socket_with_idle(
+    app: &mut OpenCADStudio,
+    port: u16,
+    bound_port: &std::sync::Arc<std::sync::atomic::AtomicU16>,
+    idle: std::time::Duration,
+) {
     let listener = match std::net::TcpListener::bind(("127.0.0.1", port)) {
         Ok(l) => l,
         Err(e) => {
@@ -128,8 +161,12 @@ fn serve_socket(app: &mut OpenCADStudio, port: u16) {
             return;
         }
     };
-    eprintln!("OpenCADStudio --serve listening on 127.0.0.1:{port}");
+    let bound = listener.local_addr().map(|a| a.port()).unwrap_or(port);
+    bound_port.store(bound, std::sync::atomic::Ordering::SeqCst);
+    eprintln!("OpenCADStudio --serve listening on 127.0.0.1:{bound}");
+    crate::rest::announce_token();
     for stream in listener.incoming().flatten() {
+        let _ = stream.set_read_timeout(Some(idle));
         let Ok(read_half) = stream.try_clone() else {
             continue;
         };
@@ -137,13 +174,24 @@ fn serve_socket(app: &mut OpenCADStudio, port: u16) {
         let mut writer = stream;
         let _ = writeln!(writer, "{}", ready());
         let _ = writer.flush();
-        for line in reader.lines() {
+        for line in lines_capped(reader, MAX_LINE_BYTES) {
             let Ok(line) = line else { break };
             let line = line.trim();
             if line.is_empty() {
                 continue;
             }
-            let resp = app.automation_op(line);
+            // Loopback is shared by every process and user on the machine:
+            // each request carries the session token, like the GUI's own
+            // channel, and a connection that fails it is dropped.
+            let mut request: Value = serde_json::from_str(line).unwrap_or(Value::Null);
+            if !crate::rest::token_matches(request["token"].as_str()) {
+                let _ = writeln!(writer, "{}", crate::rest::unauthorized());
+                break;
+            }
+            if let Some(object) = request.as_object_mut() {
+                object.remove("token");
+            }
+            let resp = app.automation_op(&request.to_string());
             if writeln!(writer, "{resp}").is_err() {
                 break;
             }
@@ -152,15 +200,56 @@ fn serve_socket(app: &mut OpenCADStudio, port: u16) {
     }
 }
 
+/// The entities inside block definitions: owned by (or listed in) a block
+/// record that is not a layout's model or paper space.
+fn definition_members(
+    document: &codec::CadDocument,
+) -> std::collections::HashSet<codec::Handle> {
+    let mut layouts: std::collections::HashSet<codec::Handle> = document
+        .objects
+        .values()
+        .filter_map(|object| match object {
+            codec::objects::ObjectType::Layout(layout) if !layout.block_record.is_null() => {
+                Some(layout.block_record)
+            }
+            _ => None,
+        })
+        .collect();
+    layouts.extend(document.block_records.iter().filter_map(|record| {
+        let name = record.name.to_ascii_uppercase();
+        (name.starts_with("*MODEL_SPACE") || name.starts_with("*PAPER_SPACE"))
+            .then_some(record.handle)
+    }));
+    let definitions: std::collections::HashSet<codec::Handle> = document
+        .block_records
+        .iter()
+        .filter(|record| !layouts.contains(&record.handle))
+        .map(|record| record.handle)
+        .collect();
+    let mut members: std::collections::HashSet<codec::Handle> = document
+        .block_records
+        .iter()
+        .filter(|record| definitions.contains(&record.handle))
+        .flat_map(|record| record.entity_handles.iter().copied())
+        .collect();
+    members.extend(
+        document
+            .entities()
+            .filter(|e| definitions.contains(&e.common().owner_handle))
+            .map(|e| e.common().handle),
+    );
+    members
+}
+
 fn err(msg: impl std::fmt::Display) -> Value {
     json!({ "ok": false, "error": msg.to_string() })
 }
 
-fn v3(v: acadrust::types::Vector3) -> Value {
+fn v3(v: codec::types::Vector3) -> Value {
     json!([v.x, v.y, v.z])
 }
 
-pub(crate) fn entity_type_matches(entity: &acadrust::EntityType, requested: &str) -> bool {
+pub(crate) fn entity_type_matches(entity: &codec::EntityType, requested: &str) -> bool {
     if crate::entities::names::ui_name(entity).eq_ignore_ascii_case(requested) {
         return true;
     }
@@ -170,8 +259,8 @@ pub(crate) fn entity_type_matches(entity: &acadrust::EntityType, requested: &str
 
 /// One entity as JSON. Summary mode carries identity only, geometry adds the
 /// entity's defining values, and full also includes its world bounds.
-pub(crate) fn entity_json(e: &acadrust::EntityType, detail: &str) -> Value {
-    use acadrust::EntityType as E;
+pub(crate) fn entity_json(e: &codec::EntityType, detail: &str) -> Value {
+    use codec::EntityType as E;
     let c = e.common();
     let mut obj = json!({
         "handle": format!("{:X}", c.handle.value()),
@@ -217,7 +306,7 @@ pub(crate) fn entity_json(e: &acadrust::EntityType, detail: &str) -> Value {
             map.insert("value".into(), json!(t.value));
             map.insert(
                 "text".into(),
-                json!(acadrust::entities::mtext_format::parse_mtext(&t.value, true)
+                json!(codec::entities::mtext_format::parse_mtext(&t.value, true)
                     .to_plain_text()),
             );
             map.insert("position".into(), v3(t.insertion_point));
@@ -252,7 +341,7 @@ pub(crate) fn entity_json(e: &acadrust::EntityType, detail: &str) -> Value {
                     .edges
                     .iter()
                     .filter_map(|edge| match edge {
-                        acadrust::entities::BoundaryEdge::Polyline(polyline) => Some(
+                        codec::entities::BoundaryEdge::Polyline(polyline) => Some(
                             json!(polyline
                                 .vertices
                                 .iter()
@@ -305,7 +394,7 @@ fn request_point(req: &Value, key: &str) -> Option<[f64; 2]> {
     (x.is_finite() && y.is_finite()).then_some([x, y])
 }
 
-fn request_handle(value: &Value) -> Option<acadrust::Handle> {
+fn request_handle(value: &Value) -> Option<codec::Handle> {
     value
         .as_str()
         .and_then(|value| {
@@ -315,7 +404,7 @@ fn request_handle(value: &Value) -> Option<acadrust::Handle> {
                 .unwrap_or(value);
             u64::from_str_radix(value, 16).ok()
         })
-        .map(acadrust::Handle::new)
+        .map(codec::Handle::new)
 }
 
 fn projected_fields(mut entity: Value, fields: Option<&Vec<Value>>) -> Value {
@@ -330,10 +419,10 @@ fn projected_fields(mut entity: Value, fields: Option<&Vec<Value>>) -> Value {
 
 pub(super) fn requested_save_target(
     req: &Value,
-    default_version: acadrust::DxfVersion,
+    default_version: codec::DxfVersion,
     default_is_dxf: bool,
     path: Option<&std::path::Path>,
-) -> Result<(acadrust::DxfVersion, bool), String> {
+) -> Result<(codec::DxfVersion, bool), String> {
     let version = match req["target_version"].as_str() {
         Some(value) => crate::io::parse_target_version(value)?,
         None => default_version,
@@ -362,7 +451,7 @@ pub(super) fn requested_save_target(
     Ok((version, is_dxf))
 }
 
-fn document_manifest(document: &acadrust::CadDocument) -> Value {
+fn document_manifest(document: &codec::CadDocument) -> Value {
     let mut by_type: BTreeMap<String, u64> = BTreeMap::new();
     let mut by_layer: BTreeMap<String, u64> = BTreeMap::new();
     let mut total = 0u64;
@@ -600,6 +689,7 @@ impl OpenCADStudio {
                         self.tabs[i].scene.document = doc;
                         self.tabs[i].scene.bump_layout_epoch();
                         self.tabs[i].scene.bump_scale_epoch();
+                        self.tabs[i].scene.bump_ucs_epoch();
                         self.tabs[i].scene.load_named_parameters_from_document();
                         self.tabs[i]
                             .scene
@@ -679,6 +769,9 @@ impl OpenCADStudio {
             "entities" => self.entity_summary(),
             "audit" => self.document_audit(&req),
             "query" => self.entity_query(&req),
+            "text_search" => self.automation_text_search(&req),
+            "text_audit" => self.automation_text_audit(&req),
+            "text_replace" => self.automation_text_replace(&req),
             "records" => self.record_query(&req),
             "record_schema" => self.record_schema(&req),
             "capabilities" => self.record_capabilities(),
@@ -742,30 +835,64 @@ impl OpenCADStudio {
             }
             "select" => {
                 let i = self.active_tab;
+                // By explicit handles (hex, as returned by `query`). An entity
+                // inside a block definition is not selectable on its own.
+                let explicit: Vec<codec::Handle> = req["handles"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|h| h.as_str())
+                            .filter_map(|h| {
+                                let h = h
+                                    .strip_prefix("0x")
+                                    .or_else(|| h.strip_prefix("0X"))
+                                    .unwrap_or(h);
+                                u64::from_str_radix(h, 16).ok().map(codec::Handle::new)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if req["clear"].as_bool() != Some(true) {
+                    let inside = definition_members(&self.tabs[i].scene.document);
+                    let refused: Vec<String> = explicit
+                        .iter()
+                        .filter(|h| inside.contains(h))
+                        .map(|h| format!("{:X}", h.value()))
+                        .collect();
+                    if !refused.is_empty() {
+                        return err(format!(
+                            "select: inside a block definition, not selectable: {}",
+                            refused.join(", ")
+                        ));
+                    }
+                }
                 self.tabs[i].scene.deselect_all();
                 if req["clear"].as_bool() != Some(true) {
-                    // By explicit handles (hex, as returned by `query`).
-                    if let Some(arr) = req["handles"].as_array() {
-                        for h in arr.iter().filter_map(|h| h.as_str()) {
-                            let h = h
-                                .strip_prefix("0x")
-                                .or_else(|| h.strip_prefix("0X"))
-                                .unwrap_or(h);
-                            if let Ok(v) = u64::from_str_radix(h, 16) {
-                                self.tabs[i]
-                                    .scene
-                                    .select_entity(acadrust::Handle::new(v), false);
-                            }
-                        }
+                    for h in explicit {
+                        self.tabs[i].scene.select_entity(h, false);
                     }
                     // Or by type / layer.
                     let type_filter = req["type"].as_str();
                     let layer_filter = req["layer"].as_str();
                     if type_filter.is_some() || layer_filter.is_some() {
-                        let handles: Vec<acadrust::Handle> = self.tabs[i]
-                            .scene
+                        // Only what the current space draws: an entity inside a
+                        // block definition is not selectable on its own.
+                        let scene = &self.tabs[i].scene;
+                        let space = scene.current_layout_block_handle_pub();
+                        let listed: std::collections::HashSet<codec::Handle> = scene
+                            .document
+                            .block_records
+                            .iter()
+                            .find(|record| record.handle == space)
+                            .map(|record| record.entity_handles.iter().copied().collect())
+                            .unwrap_or_default();
+                        let handles: Vec<codec::Handle> = scene
                             .document
                             .entities()
+                            .filter(|e| {
+                                e.common().owner_handle == space
+                                    || listed.contains(&e.common().handle)
+                            })
                             .filter(|e| type_filter.is_none_or(|t| entity_type_matches(e, t)))
                             .filter(|e| layer_filter.is_none_or(|l| e.common().layer == l))
                             .map(|e| e.common().handle)
@@ -797,6 +924,7 @@ impl OpenCADStudio {
                         ".{}.tmp.dwg",
                         path.file_name().unwrap().to_string_lossy()
                     ));
+                    self.tabs[i].scene.update_fields(2, None);
                     let document = self.tabs[i].scene.document_for_save();
                     if let Err(e) = crate::io::save(&document, &scratch) {
                         return err(format!("save: {e}"));
@@ -922,10 +1050,10 @@ impl OpenCADStudio {
             let Some(second_curve) = crate::entities::curve::entity_curve_xy(second_entity) else {
                 return err("query intersections second entity is not a planar curve");
             };
-            let crossings = cadkernel::geom2d::intersect(
+            let crossings = kernel::geom2d::intersect(
                 &first_curve,
                 &second_curve,
-                cadkernel::geom2d::Tolerance::default(),
+                kernel::geom2d::Tolerance::default(),
             );
             return json!({
                 "ok":true,
@@ -1066,7 +1194,7 @@ impl OpenCADStudio {
                 }
             }
             if let Some(bounds) = bounds {
-                let (min, max) = crate::scene::convert::tess::entity_bounds(e);
+                let (min, max) = crate::scene::convert::tess::entity_bounds_in(&tab.scene.document, e);
                 if max[0] < bounds[0]
                     || max[1] < bounds[1]
                     || min[0] > bounds[2]
@@ -1082,10 +1210,10 @@ impl OpenCADStudio {
                 let Some(curve) = curve.as_ref().filter(|curve| curve.is_closed()) else {
                     continue;
                 };
-                if !cadkernel::geom2d::contains(
+                if !kernel::geom2d::contains(
                     std::slice::from_ref(curve),
                     point,
-                    cadkernel::geom2d::Tolerance::default(),
+                    kernel::geom2d::Tolerance::default(),
                 ) {
                     continue;
                 }
@@ -1093,7 +1221,7 @@ impl OpenCADStudio {
             let nearest = near.and_then(|point| {
                 curve
                     .as_ref()
-                    .map(|curve| cadkernel::geom2d::closest_point(curve, point))
+                    .map(|curve| kernel::geom2d::closest_point(curve, point))
             });
             if near.is_some() && nearest.is_none() {
                 continue;
@@ -1185,12 +1313,12 @@ impl OpenCADStudio {
             if !seen_handles.insert(common.handle.value()) {
                 duplicate_handles.insert(format!("{:X}", common.handle.value()));
             }
-            if let acadrust::EntityType::Insert(insert) = entity {
+            if let codec::EntityType::Insert(insert) = entity {
                 if !block_names.contains(&insert.block_name.to_ascii_uppercase()) {
                     missing_blocks.insert(insert.block_name.clone());
                 }
             }
-            if matches!(entity, acadrust::EntityType::Unknown(_)) {
+            if matches!(entity, codec::EntityType::Unknown(_)) {
                 unknown_entities += 1;
             }
             if let Err(error) = serde_json::to_value(entity) {
@@ -1347,7 +1475,13 @@ impl OpenCADStudio {
         // The same snapshot a normal save writes: display-only overrides and
         // resolved xref content stay out of the file.
         let snapshot = self.tabs[i].scene.document_for_save();
-        let before = document_manifest(&snapshot);
+        // Bake simulation: save_as_version mints *D geometry blocks on its
+        // private clone, so the reopened manifest always contains baked
+        // sub-entities. Compare against the same baked view or every new
+        // (still blockless) dimension trips a false semantic_mismatch.
+        let mut baked_view = snapshot.clone();
+        crate::modules::draw::modify::explode::bake_dimension_blocks(&mut baked_view);
+        let before = document_manifest(&baked_view);
         crate::io::save_as_version(&snapshot, &path, version)
             .map_err(|error| json!({
                 "ok":false,"status":"failed","code":"save_failed","error":error,
@@ -1451,8 +1585,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn plugin_edit_publication_is_not_repeated_at_message_boundary() {
-        use acadrust::entities::Point;
-        use acadrust::EntityType;
+        use codec::entities::Point;
+        use codec::EntityType;
 
         let mut app = super::OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -1522,14 +1656,51 @@ mod tests {
     }
 
     #[test]
+    fn save_verified_accepts_new_dimension_with_baked_block() {
+        use codec::entities::{Dimension, DimensionLinear};
+        use codec::{EntityType, Vector3};
+
+        let mut app = super::OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut d = DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
+        d.definition_point = Vector3::new(0.0, 5.0, 0.0);
+        d.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
+        app.tabs[i]
+            .scene
+            .document
+            .add_entity(EntityType::Dimension(Dimension::Linear(d)))
+            .unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "ocs_verified_dim_{}_{}.dwg",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let _ = std::fs::remove_file(&path);
+        let result = app
+            .save_verified_request(&serde_json::json!({
+                "path":path,
+                "target_format":"dwg",
+                "overwrite":true,
+            }))
+            .expect("verified save of a new dimension");
+        assert_eq!(result["verified"], true, "{result}");
+        assert!(path.is_file());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn explicit_target_version_parser_never_silently_defaults() {
         assert_eq!(
             crate::io::parse_target_version("R14").unwrap(),
-            acadrust::DxfVersion::AC1014
+            codec::DxfVersion::AC1014
         );
         assert_eq!(
             crate::io::parse_target_version("AC1015").unwrap(),
-            acadrust::DxfVersion::AC1015
+            codec::DxfVersion::AC1015
         );
         assert!(crate::io::parse_target_version("R12").is_err());
         assert!(crate::io::parse_target_version("future").is_err());
@@ -1590,14 +1761,14 @@ mod tests {
         let scene = &mut app.tabs[i].scene;
         scene.document.add_layout("Review").unwrap();
         scene.set_current_layout("Review".to_string());
-        let mut viewport = acadrust::entities::Viewport::new();
+        let mut viewport = codec::entities::Viewport::new();
         viewport.id = 2;
         viewport.width = 100.0;
         viewport.height = 50.0;
         viewport.status.is_on = true;
-        scene.add_entity(acadrust::EntityType::Viewport(viewport));
+        scene.add_entity(codec::EntityType::Viewport(viewport));
         for entity in scene.document.entities_mut() {
-            if let acadrust::EntityType::Viewport(viewport) = entity {
+            if let codec::EntityType::Viewport(viewport) = entity {
                 viewport.status.grid_on = true;
             }
         }
@@ -1661,7 +1832,7 @@ mod tests {
         );
         assert_eq!(text["added"], 1, "{text}");
 
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (1600.0, 800.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 800.0);
         app.tabs[i].scene.fit_all();
         let (_, max) = app.tabs[i]
             .scene
@@ -1752,7 +1923,7 @@ mod tests {
             .document
             .entities()
             .filter_map(|e| match e {
-                acadrust::EntityType::Text(t) => Some(t.value.clone()),
+                codec::EntityType::Text(t) => Some(t.value.clone()),
                 _ => None,
             })
             .collect();
@@ -1817,8 +1988,8 @@ mod tests {
 
     #[test]
     fn block_reference_query_exposes_instance_attributes() {
-        use acadrust::entities::{AttributeEntity, EntityType, Insert};
-        use acadrust::types::Vector3;
+        use codec::entities::{AttributeEntity, EntityType, Insert};
+        use codec::types::Vector3;
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -1931,11 +2102,11 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let mut line = acadrust::entities::Line::new();
-        line.start = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
-        line.end = acadrust::types::Vector3::new(10.0, 0.0, 0.0);
-        let handle = app.tabs[i].scene.document.add_entity(acadrust::EntityType::Line(line)).unwrap();
-        let mut br = acadrust::tables::BlockRecord::new("A_CPT");
+        let mut line = codec::entities::Line::new();
+        line.start = codec::types::Vector3::new(0.0, 0.0, 0.0);
+        line.end = codec::types::Vector3::new(10.0, 0.0, 0.0);
+        let handle = app.tabs[i].scene.document.add_entity(codec::EntityType::Line(line)).unwrap();
+        let mut br = codec::tables::BlockRecord::new("A_CPT");
         br.handle = app.tabs[i].scene.document.allocate_handle();
         br.entity_handles = vec![handle];
         app.tabs[i].scene.document.block_records.add(br).unwrap();
@@ -2025,11 +2196,11 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let mtext = acadrust::MText::with_value(
+        let mtext = codec::MText::with_value(
             "\\A1;10.5000",
-            acadrust::types::Vector3::new(10.0, 20.0, 0.0),
+            codec::types::Vector3::new(10.0, 20.0, 0.0),
         );
-        app.tabs[i].scene.add_entity(acadrust::EntityType::MText(mtext));
+        app.tabs[i].scene.add_entity(codec::EntityType::MText(mtext));
 
         let q = app.automation_op(
             r#"{"op":"query","type":"MTEXT","detail":"full","fields":["value","text","height","bounds"]}"#,
@@ -2491,7 +2662,7 @@ mod tests {
             .document
             .entities()
             .find_map(|entity| match entity {
-                acadrust::EntityType::Line(line) => Some(line),
+                codec::EntityType::Line(line) => Some(line),
                 _ => None,
             })
             .expect("LINE should create one segment");
@@ -2516,7 +2687,7 @@ mod tests {
             .document
             .entities()
             .find_map(|entity| match entity {
-                acadrust::EntityType::Circle(circle) => Some(circle),
+                codec::EntityType::Circle(circle) => Some(circle),
                 _ => None,
             })
             .expect("CIRCLE should create one entity");
@@ -2679,7 +2850,7 @@ mod tests {
             app.pick_add = add;
             app.pick_drag_rect = rect;
             let _ = app.run_command_line("LINE 0,0 10,10");
-            app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+            app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
             let _ = app.run_command_line("ZOOM EXTENTS");
             // Both directions. Crossing = a right → left diagonal sweep (the
             // freeform path may be degenerate — crossing counts hits).
@@ -2723,16 +2894,16 @@ mod tests {
             }
             {
                 let sel = app.tabs[i].scene.selection.borrow();
-                assert!(sel.left_dragging, "drag must start (add={add} rect={rect})");
+                assert!(sel.input.left_dragging, "drag must start (add={add} rect={rect})");
                 if rect {
                     // Rectangle mode drives the box machinery, not the lasso.
                     assert!(
-                        sel.box_anchor.is_some() && sel.box_current.is_some() && !sel.poly_active,
+                        sel.gesture.box_anchor.is_some() && sel.gesture.box_current.is_some() && !sel.gesture.poly_active,
                         "rect marquee must arm the box (add={add})"
                     );
                 } else {
-                    assert!(sel.poly_active, "lasso must start (add={add})");
-                    assert!(sel.poly_points.len() >= 3, "lasso points (add={add})");
+                    assert!(sel.gesture.poly_active, "lasso must start (add={add})");
+                    assert!(sel.gesture.poly_points.len() >= 3, "lasso points (add={add})");
                 }
             }
             let _ = app.update(Message::ViewportLeftRelease);
@@ -2772,7 +2943,7 @@ mod tests {
         // properties (style, height) to TEXT and MTEXT destinations, not just
         // the generic layer/color/linetype set. Regression for #361.
         use crate::command::StepInput;
-        use acadrust::{EntityType, MText, Text};
+        use codec::{EntityType, MText, Text};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -2991,10 +3162,10 @@ mod tests {
     #[test]
     fn open_finalizes_and_purges_like_the_ui_open_path() {
         let mut app = OpenCADStudio::new_for_test();
-        let stale = acadrust::Handle::from(9999);
+        let stale = codec::Handle::from(9999);
         app.tabs[app.active_tab].scene.solid_models.insert(
             stale,
-            cadkernel::brep::make::cuboid([0.0; 3], [1.0; 3]).unwrap(),
+            kernel::brep::make::cuboid([0.0; 3], [1.0; 3]).unwrap(),
         );
         let path = std::env::temp_dir().join(format!(
             "ocs_automation_finalize_test_{}.dxf",
@@ -3002,16 +3173,16 @@ mod tests {
         ));
         let _ = std::fs::remove_file(&path);
 
-        let mut doc = acadrust::CadDocument::new();
-        let mut good = acadrust::entities::Circle::new();
-        good.center = acadrust::types::Vector3::new(5.0, 5.0, 0.0);
+        let mut doc = codec::CadDocument::new();
+        let mut good = codec::entities::Circle::new();
+        good.center = codec::types::Vector3::new(5.0, 5.0, 0.0);
         good.radius = 2.0;
-        doc.add_entity(acadrust::EntityType::Circle(good)).unwrap();
-        let mut corrupt = acadrust::entities::Circle::new();
-        corrupt.center = acadrust::types::Vector3::new(1.0, 1.0, 0.0);
+        doc.add_entity(codec::EntityType::Circle(good)).unwrap();
+        let mut corrupt = codec::entities::Circle::new();
+        corrupt.center = codec::types::Vector3::new(1.0, 1.0, 0.0);
         // An absurd radius is rejected; a zero radius is valid.
         corrupt.radius = 1.0e11;
-        doc.add_entity(acadrust::EntityType::Circle(corrupt))
+        doc.add_entity(codec::EntityType::Circle(corrupt))
             .unwrap();
         let bytes = crate::io::save_to_bytes(&doc, "dxf", doc.version)
             .expect("save a document containing a corrupt entity");
@@ -3042,7 +3213,7 @@ mod tests {
 
         app.tabs[i].scene.solid_models.insert(
             stale,
-            cadkernel::brep::make::cuboid([0.0; 3], [1.0; 3]).unwrap(),
+            kernel::brep::make::cuboid([0.0; 3], [1.0; 3]).unwrap(),
         );
         assert_eq!(app.automation_op(r#"{"op":"new"}"#)["ok"], true);
         assert!(app.tabs[i].scene.solid_models.is_empty());
@@ -3061,7 +3232,7 @@ mod tests {
                 let mut app = OpenCADStudio::new_for_test();
                 app.automation_op(r#"{"op":"new"}"#);
                 {
-                    app.tabs[0].scene.selection.borrow_mut().vp_size = (1920.0, 1080.0);
+                    app.tabs[0].scene.selection.borrow_mut().view.vp_size = (1920.0, 1080.0);
                     app.tabs[0].scene.sync_tiles_from_panes(1920.0, 1080.0);
                 }
 
@@ -3130,7 +3301,7 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         {
-            app.tabs[0].scene.selection.borrow_mut().vp_size = (1920.0, 1080.0);
+            app.tabs[0].scene.selection.borrow_mut().view.vp_size = (1920.0, 1080.0);
             app.tabs[0].scene.sync_tiles_from_panes(1920.0, 1080.0);
         }
 
@@ -3279,5 +3450,134 @@ mod tests {
         let _ = app.view(wid);
         let _ = app.update(Message::ToggleRibbonDropdown("PROP_COLOR".to_string()));
         let _ = app.view(wid);
+    }
+
+    /// A JSON-lines client streaming one endless line must not be buffered
+    /// (or processed) without bound: `BufRead::lines` grows its `String` by
+    /// doubling until the allocation aborts the process — an abort nobody
+    /// upstream can catch. The connection is dropped at the cap instead.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn serve_socket_drops_a_client_streaming_an_oversize_line() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpStream;
+        use std::sync::atomic::{AtomicU16, Ordering};
+        use std::sync::Arc;
+
+        let bound = Arc::new(AtomicU16::new(0));
+        let listen_bound = bound.clone();
+        std::thread::spawn(move || {
+            let mut app = super::OpenCADStudio::new_for_test();
+            super::serve_socket(&mut app, 0, &listen_bound);
+        });
+        let mut port = 0;
+        for _ in 0..50 {
+            port = bound.load(Ordering::SeqCst);
+            if port != 0 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert_ne!(port, 0, "listener never bound a port");
+
+        let client = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+        client
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .expect("read timeout");
+        let mut reader = BufReader::new(client.try_clone().expect("clone"));
+        let mut banner = String::new();
+        reader.read_line(&mut banner).expect("ready banner");
+        assert!(banner.contains("ready"), "{banner}");
+
+        // Stream >64 MiB without a newline from its own thread: the payload
+        // dwarfs any socket buffer, so one thread would deadlock writing
+        // before the server reads.
+        let mut writer = client.try_clone().expect("clone");
+        let payload = std::thread::spawn(move || {
+            let chunk = vec![b'A'; 1024 * 1024];
+            for _ in 0..65 {
+                if writer.write_all(&chunk).is_err() {
+                    return;
+                }
+            }
+            let _ = writer.write_all(b"\n");
+            let _ = writer.flush();
+        });
+
+        // The server must drop the connection WITHOUT answering: a response
+        // means the oversize line was read whole and handed to the dispatcher.
+        let mut response = String::new();
+        let read = reader.read_line(&mut response);
+        assert_eq!(
+            read.unwrap_or(0),
+            0,
+            "oversize line must be dropped, not processed — got: {response:?}"
+        );
+        payload.join().unwrap();
+    }
+
+    /// A client that connects and says nothing must not hold the automation
+    /// port forever: `serve_socket` serves one client at a time, so a read
+    /// that never completes (no timeout was ever set on this path, unlike
+    /// `rest.rs`, `http_bridge.rs` and `control::transport`) wedges the
+    /// accept loop and every later client hangs waiting for the `ready`
+    /// banner. The server drops an idle connection at its timeout and goes
+    /// back to accepting.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn serve_socket_drops_an_idle_client_and_keeps_serving() {
+        use std::io::{BufRead, BufReader};
+        use std::net::TcpStream;
+        use std::sync::atomic::{AtomicU16, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let bound = Arc::new(AtomicU16::new(0));
+        let listen_bound = bound.clone();
+        std::thread::spawn(move || {
+            let mut app = super::OpenCADStudio::new_for_test();
+            super::serve_socket_with_idle(
+                &mut app,
+                0,
+                &listen_bound,
+                Duration::from_millis(300),
+            );
+        });
+        let mut port = 0;
+        for _ in 0..50 {
+            port = bound.load(Ordering::SeqCst);
+            if port != 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert_ne!(port, 0, "listener never bound a port");
+
+        let first = TcpStream::connect(("127.0.0.1", port)).expect("connect first client");
+        first
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("read timeout");
+        let mut reader = BufReader::new(first.try_clone().expect("clone"));
+        let mut banner = String::new();
+        reader.read_line(&mut banner).expect("ready banner");
+        assert!(banner.contains("ready"), "{banner}");
+
+        // Say nothing: the server must drop the idle connection at its read
+        // timeout instead of holding the accept loop hostage.
+        let mut tail = String::new();
+        let read = reader.read_line(&mut tail).unwrap_or_else(|error| {
+            panic!("idle connection must be closed by the server, blocked instead: {error}")
+        });
+        assert_eq!(read, 0, "idle connection must see EOF, got {tail:?}");
+
+        // And the port must still serve the next client.
+        let second = TcpStream::connect(("127.0.0.1", port)).expect("connect second client");
+        second
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("read timeout");
+        let mut reader2 = BufReader::new(second.try_clone().expect("clone"));
+        let mut banner2 = String::new();
+        reader2.read_line(&mut banner2).expect("second ready banner");
+        assert!(banner2.contains("ready"), "{banner2}");
     }
 }

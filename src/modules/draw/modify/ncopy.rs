@@ -1,6 +1,6 @@
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::{CadDocument, EntityType, Handle};
 use glam::DVec3;
-use acadrust::nested_copy::{NestedCopyMode, NestedCopySymbolNames};
+use codec::nested_copy::{NestedCopyMode, NestedCopySymbolNames};
 use std::collections::{HashMap, HashSet};
 use crate::command::{CadCommand, CmdOption, CmdResult, EntityTransform};
 use crate::entities::traits::EntityTypeOps;
@@ -101,13 +101,13 @@ impl CadCommand for NcopyCommand {
             let nearest = entities.iter().enumerate().filter_map(|(index, entity)| {
                 let distance = if let Some(curve) = crate::entities::curve::entity_curve(entity) {
                     let projected = curve.plane.project([point.x, point.y, point.z])?;
-                    cadkernel::geom2d::closest_point(&curve.curve, projected).distance
+                    kernel::geom2d::closest_point(&curve.curve, projected).distance
                         .hypot(curve.plane.distance_to(point.to_array())?)
                 } else {
                     let path = self.hit_paths.get(&handle)?.get(index)?;
-                    let point = cadkernel::space::Vec3::from(point.to_array());
+                    let point = kernel::space::Vec3::from(point.to_array());
                     if path.len() == 1 {
-                        point.distance(cadkernel::space::Vec3::from(path[0]))
+                        point.distance(kernel::space::Vec3::from(path[0]))
                     } else {
                         path.windows(2).filter(|segment| segment.iter().flatten().all(|v| v.is_finite()))
                             .map(|segment| point.distance_to_segment(segment[0].into(), segment[1].into()))
@@ -197,8 +197,8 @@ impl CadCommand for NcopyCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::Line;
-    use acadrust::types::Vector3;
+    use codec::entities::Line;
+    use codec::types::Vector3;
 
     #[test]
     fn placement_moves_only_geometry_and_keeps_source_style() {

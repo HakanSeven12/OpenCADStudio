@@ -9,7 +9,11 @@
 //! the identical handlers with identical validation, undo and idempotency.
 //!
 //! Conventions: one request per connection (`Connection: close`), JSON
-//! bodies, permissive CORS for local browser clients, loopback bind only.
+//! bodies, loopback bind only, and every request carries
+//! `Authorization: Bearer <token>` (see [`api_token`]). Loopback is shared by
+//! every process and user on the machine, and a web page can aim requests at
+//! it too, so the port alone proves nothing; no CORS headers are sent, so a
+//! browser page cannot read an answer either.
 //! Connections are served one thread each: a slow op (plot, open a large
 //! drawing) or a client that connects and stalls must never keep other
 //! callers — `state`, `get_selection`, `cancel`, `operation` — from being
@@ -23,14 +27,27 @@
 //! so both `--http` modes serve the identical surface.
 
 use crate::app::OpenCADStudio;
+use crate::io::line_read::{is_line_too_long, read_line_capped};
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU16, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 const MAX_BODY: usize = 16 * 1024 * 1024;
+
+/// Per-line cap for the request line and each header line. `BufRead::read_line`
+/// grows its `String` by doubling, so a client streaming `X: AAAA…` with no
+/// CRLF could otherwise push a single line to gigabytes until the allocation
+/// aborts the process — which is not a catchable panic. 8 KiB matches the
+/// usual reverse-proxy header-line allowance.
+const MAX_LINE: usize = 8 * 1024;
+
+/// Cap on the whole header block: every individual line may sit under
+/// [`MAX_LINE`] while their count is infinite. 64 KiB matches common
+/// reverse-proxy header-buffer budgets.
+const MAX_HEADER_BYTES: usize = 64 * 1024;
 
 /// Serial for request ids stamped onto `POST /api/v1/{op}` passthroughs that
 /// arrive without one — the protocol-1 envelope requires a unique id, and
@@ -89,11 +106,62 @@ pub fn serve(port: u16) {
     listen(OpenCADStudio::new(), port, Arc::new(AtomicU16::new(0)));
 }
 
+/// The secret every TCP automation client presents: `OCS_API_TOKEN` when the
+/// launcher set one (so a script knows it in advance), otherwise 32 random
+/// bytes printed once on stderr when a listener starts. The GUI's private
+/// channel keeps its own per-session token in the user-only descriptor.
+pub fn api_token() -> &'static str {
+    static TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TOKEN.get_or_init(|| {
+        if let Some(token) = std::env::var("OCS_API_TOKEN")
+            .ok()
+            .filter(|token| !token.trim().is_empty())
+        {
+            return token.trim().to_owned();
+        }
+        let mut secret = [0u8; 32];
+        getrandom::fill(&mut secret).expect("system random source");
+        secret.iter().map(|byte| format!("{byte:02x}")).collect()
+    })
+}
+
+/// Tells a listener's user how to authenticate. A token the launcher chose
+/// is not echoed back.
+pub(crate) fn announce_token() {
+    if std::env::var("OCS_API_TOKEN").map_or(true, |token| token.trim().is_empty()) {
+        eprintln!("API token (or set OCS_API_TOKEN before launch): {}", api_token());
+    }
+}
+
+/// Whether `presented` is the session's token, compared in constant time.
+pub(crate) fn token_matches(presented: Option<&str>) -> bool {
+    let expected = api_token().as_bytes();
+    let Some(presented) = presented.map(str::as_bytes) else {
+        return false;
+    };
+    presented.len() == expected.len()
+        && presented
+            .iter()
+            .zip(expected)
+            .fold(0u8, |difference, (a, b)| difference | (a ^ b))
+            == 0
+}
+
+/// The answer to a request without the session's token.
+pub(crate) fn unauthorized() -> Value {
+    json!({
+        "ok": false,
+        "code": "unauthorized",
+        "error": "Send the session token (printed at startup, or OCS_API_TOKEN): Authorization: Bearer <token> over HTTP, \"token\" in each --serve --port request",
+    })
+}
+
 pub(crate) struct HttpRequest {
     pub(crate) method: String,
     pub(crate) path: String,
     query: Vec<(String, String)>,
     body: Vec<u8>,
+    bearer: Option<String>,
 }
 
 impl HttpRequest {
@@ -106,6 +174,10 @@ impl HttpRequest {
 
     pub(crate) fn json(&self) -> Value {
         serde_json::from_slice(&self.body).unwrap_or(Value::Null)
+    }
+
+    pub(crate) fn authorized(&self) -> bool {
+        token_matches(self.bearer.as_deref())
     }
 }
 
@@ -131,6 +203,7 @@ fn listen(mut app: OpenCADStudio, port: u16, bound_port: Arc<AtomicU16>) {
     let bound = listener.local_addr().map(|a| a.port()).unwrap_or(port);
     bound_port.store(bound, Ordering::SeqCst);
     eprintln!("OpenCADStudio REST listening on http://127.0.0.1:{bound}/api/v1");
+    announce_token();
     let (jobs, incoming) = std::sync::mpsc::channel::<Job>();
     // Connections are served one thread each: a slow op (plot, open a large
     // drawing) or a client that connects and stalls must never keep other
@@ -172,8 +245,8 @@ fn serve_connection(mut stream: TcpStream, jobs: std::sync::mpsc::Sender<Job>) {
     let Ok(Some(request)) = read_request(&mut stream) else {
         return;
     };
-    if request.method == "OPTIONS" {
-        let _ = write_response(&mut stream, 204, &Value::Null);
+    if !request.authorized() {
+        let _ = write_response(&mut stream, 401, &unauthorized());
         return;
     }
     let (reply, answer) = std::sync::mpsc::channel();
@@ -194,12 +267,31 @@ fn serve_connection(mut stream: TcpStream, jobs: std::sync::mpsc::Sender<Job>) {
     }
 }
 
-/// Parse one HTTP/1.1 request. `Ok(None)` = the peer hung up cleanly.
+/// Answer a peer whose request line or header block blew a size cap — RFC
+/// 9110's `431` — then hand the caller `Ok(None)` so it closes without
+/// dispatching. Writing the refusal from here keeps the headless `--http`
+/// server and the GUI-hosted bridge (`app::control::http_bridge`), which both
+/// call `read_request`, answering identically.
+fn refuse_oversized(stream: &mut TcpStream) -> std::io::Result<Option<HttpRequest>> {
+    let body = json!({
+        "ok": false,
+        "code": "header_too_large",
+        "error": "Request line or headers exceed the size limit.",
+    });
+    let _ = write_response(stream, 431, &body);
+    Ok(None)
+}
+
+/// Parse one HTTP/1.1 request. `Ok(None)` = the peer hung up cleanly, or the
+/// request blew a size cap (a `431` has already been written in that case).
 pub(crate) fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<HttpRequest>> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut line = String::new();
-    if reader.read_line(&mut line)? == 0 {
-        return Ok(None);
+    match read_line_capped(&mut reader, &mut line, MAX_LINE) {
+        Ok(0) => return Ok(None),
+        Ok(_) => {}
+        Err(error) if is_line_too_long(&error) => return refuse_oversized(stream),
+        Err(error) => return Err(error),
     }
     let mut parts = line.split_whitespace();
     let method = parts.next().unwrap_or("").to_ascii_uppercase();
@@ -210,10 +302,19 @@ pub(crate) fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Htt
     };
 
     let mut content_length = 0usize;
+    let mut header_bytes = 0usize;
+    let mut bearer = None;
     loop {
         let mut header = String::new();
-        if reader.read_line(&mut header)? == 0 {
-            return Ok(None);
+        match read_line_capped(&mut reader, &mut header, MAX_LINE) {
+            Ok(0) => return Ok(None),
+            Ok(_) => {}
+            Err(error) if is_line_too_long(&error) => return refuse_oversized(stream),
+            Err(error) => return Err(error),
+        }
+        header_bytes += header.len();
+        if header_bytes > MAX_HEADER_BYTES {
+            return refuse_oversized(stream);
         }
         let header = header.trim();
         if header.is_empty() {
@@ -225,6 +326,14 @@ pub(crate) fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Htt
         {
             content_length = value.trim().parse().unwrap_or(0);
         }
+        if let Some((name, value)) = header.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("authorization") {
+                bearer = value
+                    .trim()
+                    .strip_prefix("Bearer ")
+                    .map(|token| token.trim().to_owned());
+            }
+        }
     }
     if content_length > MAX_BODY {
         return Ok(Some(HttpRequest {
@@ -232,6 +341,7 @@ pub(crate) fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Htt
             path,
             query,
             body: Vec::new(),
+            bearer,
         }));
     }
     let mut body = vec![0u8; content_length];
@@ -243,6 +353,7 @@ pub(crate) fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Htt
         path,
         query,
         body,
+        bearer,
     }))
 }
 
@@ -288,15 +399,17 @@ pub(crate) fn write_response(stream: &mut TcpStream, status: u16, body: &Value) 
         201 => "Created",
         204 => "No Content",
         400 => "Bad Request",
+        401 => "Unauthorized",
         403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
         409 => "Conflict",
+        431 => "Request Header Fields Too Large",
         503 => "Service Unavailable",
         _ => "OK",
     };
     let header = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
     stream.write_all(header.as_bytes())?;
@@ -684,6 +797,7 @@ pub(crate) fn map_status(response: Value, created: bool) -> u16 {
 mod tests {
     use super::*;
     use crate::app::OpenCADStudio;
+    use std::io::BufRead;
 
     fn request(method: &str, path: &str, body: &str) -> HttpRequest {
         HttpRequest {
@@ -691,6 +805,7 @@ mod tests {
             path: path.to_string(),
             query: Vec::new(),
             body: body.as_bytes().to_vec(),
+            bearer: None,
         }
     }
 
@@ -721,19 +836,30 @@ mod tests {
         }
         assert_ne!(port, 0, "listener never bound a port");
 
+        let status = |authorization: &str| {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .write_all(
+                    format!("GET /api/v1/ready HTTP/1.1\r\nHost: 127.0.0.1\r\n{authorization}\r\n")
+                        .as_bytes(),
+                )
+                .unwrap();
+            let mut status_line = String::new();
+            BufReader::new(stream)
+                .read_line(&mut status_line)
+                .expect("readiness answered");
+            status_line
+        };
         // Stalls the thread that accepted it: no request line, ever.
         let _stalled = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        stream
-            .write_all(b"GET /api/v1/ready HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
-            .unwrap();
-        let mut reader = BufReader::new(stream);
-        let mut status_line = String::new();
-        reader.read_line(&mut status_line).expect("readiness answered");
-        assert!(status_line.contains("200"), "{status_line}");
+        let answered = status(&format!("Authorization: Bearer {}\r\n", api_token()));
+        assert!(answered.contains("200"), "{answered}");
+        // Anything else on the machine that finds the port is turned away.
+        assert!(status("").contains("401"));
+        assert!(status("Authorization: Bearer guess\r\n").contains("401"));
     }
 
     #[test]
@@ -1154,5 +1280,89 @@ mod tests {
         let (status, body) = route(&mut app, &delete, &mut document_id, &mut counter);
         assert_eq!(status, 200, "{body}");
         assert_eq!(body["result"]["closed"], true);
+    }
+
+    /// A connected pair: the test writes the request from `client`,
+    /// `read_request` parses it from `server`.
+    fn loopback_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = TcpStream::connect(addr).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        (client, server)
+    }
+
+    /// Stream `payload` from a clone of `client` on its own thread: the
+    /// bytes exceed any socket buffer, so a single thread would deadlock
+    /// writing before `read_request` drains the other end. Write failures
+    /// after a refusal are expected and ignored.
+    fn spawn_writer(client: &TcpStream, payload: Vec<u8>) -> std::thread::JoinHandle<()> {
+        let mut writer = client.try_clone().unwrap();
+        std::thread::spawn(move || {
+            let _ = writer.write_all(&payload);
+            let _ = writer.shutdown(std::net::Shutdown::Write);
+        })
+    }
+
+    /// Read the status line of the answer the server just wrote.
+    fn read_status(client: TcpStream) -> String {
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut reader = BufReader::new(client);
+        let mut status = String::new();
+        reader.read_line(&mut status).expect("server answers");
+        status
+    }
+
+    /// A request line streamed without CRLF must be refused at the cap
+    /// instead of growing one `String` to gigabytes — an allocation failure
+    /// aborts the process and is not catchable.
+    #[test]
+    fn oversize_request_line_is_refused_with_431() {
+        let (client, mut server) = loopback_pair();
+        let mut payload = b"GET /".to_vec();
+        payload.extend(std::iter::repeat(b'A').take(1024 * 1024));
+        payload.extend_from_slice(b" HTTP/1.1\r\n\r\n");
+        let writer = spawn_writer(&client, payload);
+
+        let parsed = read_request(&mut server)
+            .expect("an over-cap line is a refusal, not an I/O error");
+        assert!(
+            parsed.is_none(),
+            "over-cap request line must be refused, got a parsed request"
+        );
+
+        let status = read_status(client);
+        assert!(status.contains("431"), "expected 431, got: {status:?}");
+        drop(server);
+        writer.join().unwrap();
+    }
+
+    /// Individually-fine headers must not add up to an unbounded header
+    /// block: a client can send an unlimited number of small lines.
+    #[test]
+    fn oversize_header_block_is_refused_with_431() {
+        let (client, mut server) = loopback_pair();
+        let mut payload = b"GET /api/v1/state HTTP/1.1\r\n".to_vec();
+        for _ in 0..80 {
+            payload.extend_from_slice(b"X-Pad: ");
+            payload.extend(std::iter::repeat(b'a').take(1024));
+            payload.extend_from_slice(b"\r\n");
+        }
+        payload.extend_from_slice(b"\r\n");
+        let writer = spawn_writer(&client, payload);
+
+        let parsed = read_request(&mut server)
+            .expect("an over-cap header block is a refusal, not an I/O error");
+        assert!(
+            parsed.is_none(),
+            "over-cap header block must be refused, got a parsed request"
+        );
+
+        let status = read_status(client);
+        assert!(status.contains("431"), "expected 431, got: {status:?}");
+        drop(server);
+        writer.join().unwrap();
     }
 }

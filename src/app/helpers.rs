@@ -1,4 +1,4 @@
-use acadrust::tables::Ucs;
+use codec::tables::Ucs;
 
 // ── Coordinate parsing ─────────────────────────────────────────────────────
 
@@ -137,7 +137,7 @@ impl UcsXform {
     }
 
     pub(super) fn from_ucs(ucs: &Ucs) -> Self {
-        let v = |a: acadrust::types::Vector3| glam::DVec3::new(a.x, a.y, a.z);
+        let v = |a: codec::types::Vector3| glam::DVec3::new(a.x, a.y, a.z);
         let x = v(ucs.x_axis).normalize_or(glam::DVec3::X);
         let raw_y = v(ucs.y_axis).normalize_or(glam::DVec3::Y);
         let fallback_z = if x.dot(glam::DVec3::Z).abs() < 0.999 {
@@ -211,8 +211,8 @@ impl UcsXform {
 
     /// Full UCS-local → WCS transform, using `origin` as local zero while
     /// retaining this UCS's orthonormal axes.
-    pub(crate) fn to_wcs_transform_at(&self, origin: glam::DVec3) -> acadrust::types::Transform {
-        use acadrust::types::{Matrix4, Transform};
+    pub(crate) fn to_wcs_transform_at(&self, origin: glam::DVec3) -> codec::types::Transform {
+        use codec::types::{Matrix4, Transform};
         Transform::from_matrix(Matrix4 {
             m: [
                 [self.x.x, self.y.x, self.z.x, origin.x],
@@ -224,8 +224,8 @@ impl UcsXform {
     }
 
     /// Full WCS → UCS-local transform, using `origin` as the local zero.
-    pub(crate) fn to_ucs_transform_at(&self, origin: glam::DVec3) -> acadrust::types::Transform {
-        use acadrust::types::{Matrix4, Transform};
+    pub(crate) fn to_ucs_transform_at(&self, origin: glam::DVec3) -> codec::types::Transform {
+        use codec::types::{Matrix4, Transform};
         Transform::from_matrix(Matrix4 {
             m: [
                 [self.x.x, self.x.y, self.x.z, -origin.dot(self.x)],
@@ -237,7 +237,7 @@ impl UcsXform {
     }
 
     /// Convert from the represented UCS into its canonical local frame.
-    pub(super) fn to_ucs_transform(&self) -> acadrust::types::Transform {
+    pub(super) fn to_ucs_transform(&self) -> codec::types::Transform {
         self.to_ucs_transform_at(self.origin)
     }
 }
@@ -274,9 +274,9 @@ pub(super) fn ucs_from_normal(origin: glam::DVec3, normal: glam::DVec3) -> Optio
     }
     let ((xx, xy, xz), (yx, yy, yz)) = crate::scene::view::transform::ocs_axes((z.x, z.y, z.z));
     let mut ucs = Ucs::new("*ACTIVE*");
-    ucs.origin = acadrust::types::Vector3::new(origin.x, origin.y, origin.z);
-    ucs.x_axis = acadrust::types::Vector3::new(xx, xy, xz);
-    ucs.y_axis = acadrust::types::Vector3::new(yx, yy, yz);
+    ucs.origin = codec::types::Vector3::new(origin.x, origin.y, origin.z);
+    ucs.x_axis = codec::types::Vector3::new(xx, xy, xz);
+    ucs.y_axis = codec::types::Vector3::new(yx, yy, yz);
     Some(ucs)
 }
 
@@ -285,9 +285,9 @@ pub(super) fn ucs_rotated_z(origin: glam::DVec3, angle_z: f32) -> Ucs {
     let cos = angle_z.cos() as f64;
     let sin = angle_z.sin() as f64;
     let mut ucs = Ucs::new("*ACTIVE*");
-    ucs.origin = acadrust::types::Vector3::new(origin.x, origin.y, origin.z);
-    ucs.x_axis = acadrust::types::Vector3::new(cos, sin, 0.0);
-    ucs.y_axis = acadrust::types::Vector3::new(-sin, cos, 0.0);
+    ucs.origin = codec::types::Vector3::new(origin.x, origin.y, origin.z);
+    ucs.x_axis = codec::types::Vector3::new(cos, sin, 0.0);
+    ucs.y_axis = codec::types::Vector3::new(-sin, cos, 0.0);
     ucs
 }
 
@@ -479,8 +479,8 @@ pub(super) fn axis_lock_apply(pt: glam::DVec3, base: glam::DVec3, dir: glam::DVe
 /// whole-drawing copy. The per-entity `min` corners give the exact enclosing
 /// box's lower-left.
 pub(super) fn entities_lower_left_by_bbox(
-    doc: &acadrust::CadDocument,
-    handles: &[acadrust::Handle],
+    doc: &codec::CadDocument,
+    handles: &[codec::Handle],
 ) -> glam::DVec3 {
     let mut min = glam::DVec3::splat(f64::INFINITY);
     let mut any = false;
@@ -514,12 +514,12 @@ pub(super) fn next_group_auto_name(scene: &crate::scene::Scene) -> String {
 
 // ── Entity type labels ─────────────────────────────────────────────────────
 
-pub(super) fn entity_type_label(entity: &acadrust::EntityType) -> String {
+pub(super) fn entity_type_label(entity: &codec::EntityType) -> String {
     crate::t!(crate::entities::names::ui_name_or_class(entity)).into_owned()
 }
 
-pub(super) fn entity_type_key(entity: &acadrust::EntityType) -> String {
-    use acadrust::EntityType::*;
+pub(super) fn entity_type_key(entity: &codec::EntityType) -> String {
+    use codec::EntityType::*;
     match entity {
         Point(_) => "point",
         Line(_) => "line",
@@ -622,7 +622,7 @@ mod ucs_from_normal_tests {
     use super::ucs_from_normal;
     use glam::DVec3;
 
-    fn axes(ucs: &acadrust::tables::Ucs) -> (DVec3, DVec3, DVec3) {
+    fn axes(ucs: &codec::tables::Ucs) -> (DVec3, DVec3, DVec3) {
         let x = DVec3::new(ucs.x_axis.x, ucs.x_axis.y, ucs.x_axis.z);
         let y = DVec3::new(ucs.y_axis.x, ucs.y_axis.y, ucs.y_axis.z);
         (x, y, x.cross(y))

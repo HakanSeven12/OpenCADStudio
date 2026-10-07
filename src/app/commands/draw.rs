@@ -23,7 +23,7 @@ impl OpenCADStudio {
                     .objects
                     .iter()
                     .filter_map(|(handle, object)| match object {
-                        acadrust::objects::ObjectType::MLineStyle(style) => {
+                        codec::objects::ObjectType::MLineStyle(style) => {
                             Some((*handle, style.clone()))
                         }
                         _ => None,
@@ -79,21 +79,6 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
-            "ATTDEF" => {
-                use crate::modules::draw::draw::attdef::AttdefCommand;
-                let defaults = crate::scene::creation_style::current_text_defaults(
-                    &self.tabs[i].scene.document,
-                );
-                let cmd = AttdefCommand::with_text_defaults(
-                    defaults.height,
-                    defaults.style_name,
-                    defaults.width_factor,
-                    defaults.oblique_angle,
-                );
-                self.command_line.push_info(&cmd.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(cmd));
-            }
-
             // Command-line attribute editing on selected Insert entities. Bare
             // ATTEDIT and the ATE alias launch the interactive editor instead
             // (see the ATTEDIT arm in the inquiry family); the dash form is the
@@ -110,7 +95,7 @@ impl OpenCADStudio {
                     .trim_start_matches("ATTEDIT")
                     .trim();
                 let parts: Vec<&str> = rest.splitn(2, char::is_whitespace).collect();
-                let selected_handles: Vec<acadrust::Handle> = self.tabs[i]
+                let selected_handles: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
@@ -122,7 +107,7 @@ impl OpenCADStudio {
                 } else {
                     let mut found_any = false;
                     for sh in &selected_handles {
-                        if let Some(acadrust::EntityType::Insert(ins)) = self.tabs[i]
+                        if let Some(codec::EntityType::Insert(ins)) = self.tabs[i]
                             .scene
                             .document
                             .entities()
@@ -166,7 +151,7 @@ impl OpenCADStudio {
                             if self.tabs[i].scene.is_layer_locked(*sh) {
                                 continue;
                             }
-                            if let Some(acadrust::EntityType::Insert(ins)) = self.tabs[i]
+                            if let Some(codec::EntityType::Insert(ins)) = self.tabs[i]
                                 .scene
                                 .document
                                 .entities_mut()
@@ -198,68 +183,32 @@ impl OpenCADStudio {
                 }
             }
 
-            // ATTDISP — control attribute display visibility.
-            // ATTDISP ON   — make all AttributeDefinitions visible
-            // ATTDISP OFF  — make all AttributeDefinitions invisible
-            // ATTDISP NORMAL — restore: show only those without the invisible flag
+            // ATTDISP sets ATTMODE: 0 hides every attribute, 1 shows the
+            // visible ones, 2 shows them all. The definitions are not touched.
             "ATTDISP" => {
-                use crate::command::KeywordCommand;
-                let c = KeywordCommand::new(
-                    "ATTDISP",
-                    "ATTDISP  attribute display  [On / Off / Normal]:",
-                    vec![
-                        ("On", "ON", None),
-                        ("Off", "OFF", None),
-                        ("Normal", "NORMAL", None),
-                    ],
+                let command = crate::modules::draw::draw::attdef::AttdispCommand::new(
+                    self.tabs[i].scene.document.header.attribute_visibility,
                 );
-                self.command_line.push_info(&c.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(c));
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
             }
             cmd if cmd.starts_with("ATTDISP ") => {
-                let sub = cmd.split_whitespace().nth(1).unwrap_or("").to_uppercase();
-                match sub.as_str() {
-                    "ON" | "OFF" | "NORMAL" => {
-                        let handles: Vec<_> = self.tabs[i]
-                            .scene
-                            .document
-                            .entities()
-                            .filter_map(|entity| {
-                                matches!(entity, acadrust::EntityType::AttributeDefinition(_))
-                                    .then_some(entity.common().handle)
-                            })
-                            .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
-                            .collect();
-                        self.push_undo_snapshot(i, "ATTDISP");
-                        let mut count = 0usize;
-                        for handle in handles {
-                            if let Some(acadrust::EntityType::AttributeDefinition(ad)) =
-                                self.tabs[i].scene.document.get_entity_mut(handle)
-                            {
-                                match sub.as_str() {
-                                    "ON" => {
-                                        ad.flags.invisible = false;
-                                        count += 1;
-                                    }
-                                    "OFF" => {
-                                        ad.flags.invisible = true;
-                                        count += 1;
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                        self.tabs[i].dirty = true;
-                        self.command_line.push_output(
-                            crate::tf!("ATTDISP {sub}: {count} attribute definition(s) updated.")
-                                .as_ref(),
-                        );
-                    }
+                let mode = match cmd[8..].trim().to_ascii_uppercase().as_str() {
+                    "OFF" => 0,
+                    "ON" => 2,
+                    "NORMAL" | "N" => 1,
                     _ => {
-                        self.command_line
-                            .push_info(crate::t!("Usage: ATTDISP ON | OFF | NORMAL").as_ref());
+                        self.command_line.push_error("Invalid option keyword.");
+                        return Some(Task::none());
                     }
+                };
+                if self.tabs[i].scene.document.header.attribute_visibility != mode {
+                    self.push_undo_snapshot(i, "ATTDISP");
+                    self.tabs[i].scene.document.header.attribute_visibility = mode;
+                    self.tabs[i].dirty = true;
+                    self.tabs[i].scene.bump_geometry();
                 }
+                self.command_line.push_output("Regenerating model.");
             }
 
             "DONUT" => {
@@ -391,6 +340,7 @@ impl OpenCADStudio {
                 });
                 match seed {
                     Some((s, tangent)) => {
+                        self.last_point = Some(s);
                         let new_cmd = ArcContCommand::new(s, tangent);
                         self.command_line.push_info(&new_cmd.prompt());
                         self.tabs[i].active_cmd = Some(Box::new(new_cmd));
@@ -488,7 +438,7 @@ impl OpenCADStudio {
                     .document
                     .entities()
                     .filter_map(|entity| match entity {
-                        acadrust::EntityType::Face3D(face) => {
+                        codec::EntityType::Face3D(face) => {
                             Some((face.common.handle, face.clone()))
                         }
                         _ => None,
@@ -549,12 +499,12 @@ impl OpenCADStudio {
                     .iter()
                     .copied()
                     .filter(|handle| {
-                        let Some(acadrust::EntityType::Line(line)) =
+                        let Some(codec::EntityType::Line(line)) =
                             self.tabs[i].scene.document.get_entity(*handle)
                         else {
                             return false;
                         };
-                        acadrust::entities::CenterMarkAssociation::read(&line.common.extended_data)
+                        codec::entities::CenterMarkAssociation::read(&line.common.extended_data)
                             .is_some()
                     })
                     .collect();
@@ -793,7 +743,7 @@ impl OpenCADStudio {
                 let normal = working_plane.z.normalize_or(glam::DVec3::Z);
                 let elevation = working_plane.origin.dot(normal);
                 let storage = crate::entities::curve::ocs_plane(
-                    acadrust::types::Vector3::new(normal.x, normal.y, normal.z),
+                    codec::types::Vector3::new(normal.x, normal.y, normal.z),
                     elevation,
                 );
                 let plane = crate::command::WorkingPlane::new(
@@ -837,7 +787,7 @@ impl OpenCADStudio {
                             )
                         });
                         let (scale, angle) = match entity {
-                            Some(acadrust::EntityType::Hatch(hatch)) => (
+                            Some(codec::EntityType::Hatch(hatch)) => (
                                 hatch.pattern_scale as f32,
                                 hatch.pattern_angle.to_degrees() as f32,
                             ),
@@ -1131,7 +1081,7 @@ impl OpenCADStudio {
                         self.command_line.push_output("No constraints found.");
                         return None;
                     }
-                    let dimensions: Vec<acadrust::Handle> = ids
+                    let dimensions: Vec<codec::Handle> = ids
                         .iter()
                         .filter_map(|id| before.dimensions.get(id).copied())
                         .collect();
@@ -1456,7 +1406,7 @@ impl OpenCADStudio {
                         annotational,
                         decimals,
                     );
-                    if let Some(acadrust::EntityType::Dimension(mut dimension)) =
+                    if let Some(codec::EntityType::Dimension(mut dimension)) =
                         self.tabs[i].scene.document.get_entity(handle).cloned()
                     {
                         let before = self.tabs[i].scene.document.get_entity_arc(handle);
@@ -1472,7 +1422,7 @@ impl OpenCADStudio {
                             dimension.base_mut().common.layer =
                                 crate::scene::parametric_constraints::DYNAMIC_DIMENSION_LAYER
                                     .to_string();
-                            dimension.base_mut().common.color = acadrust::types::Color::Rgb {
+                            dimension.base_mut().common.color = codec::types::Color::Rgb {
                                 r: 103,
                                 g: 109,
                                 b: 118,
@@ -1480,7 +1430,7 @@ impl OpenCADStudio {
                         }
                         self.tabs[i]
                             .scene
-                            .update_entity(acadrust::EntityType::Dimension(dimension));
+                            .update_entity(codec::EntityType::Dimension(dimension));
                     }
                     let set = self.tabs[i].scene.parametric_constraint_set_mut(scope);
                     let id = set.add(kind, refs, Some(DrivingValue::Named(name)));
@@ -1554,7 +1504,7 @@ impl OpenCADStudio {
                         return Some(self.apply_cmd_result(CmdResult::AddHorizontalConstraint {
                             kind,
                             selection: HorizontalConstraintSelection::Reference(reference),
-                            direction: acadrust::types::Vector3::new(
+                            direction: codec::types::Vector3::new(
                                 direction.x,
                                 direction.y,
                                 direction.z,
@@ -2105,7 +2055,7 @@ impl OpenCADStudio {
                     .filter(|handle| {
                         matches!(
                             self.tabs[i].scene.document.get_entity(*handle),
-                            Some(acadrust::EntityType::Solid3D(_))
+                            Some(codec::EntityType::Solid3D(_))
                         )
                     })
                     .collect::<Vec<_>>();
@@ -2166,12 +2116,12 @@ impl OpenCADStudio {
                             matches!(
                                 scene.document.get_entity(*handle),
                                 Some(
-                                    acadrust::EntityType::Solid3D(_)
-                                        | acadrust::EntityType::Region(_)
-                                        | acadrust::EntityType::Surface(_)
-                                        | acadrust::EntityType::Mesh(_)
-                                        | acadrust::EntityType::PolygonMesh(_)
-                                        | acadrust::EntityType::PolyfaceMesh(_)
+                                    codec::EntityType::Solid3D(_)
+                                        | codec::EntityType::Region(_)
+                                        | codec::EntityType::Surface(_)
+                                        | codec::EntityType::Mesh(_)
+                                        | codec::EntityType::PolygonMesh(_)
+                                        | codec::EntityType::PolyfaceMesh(_)
                                 )
                             )
                         })
@@ -2180,9 +2130,9 @@ impl OpenCADStudio {
                         matches!(
                             scene.document.get_entity(*handle),
                             Some(
-                                acadrust::EntityType::Mesh(_)
-                                    | acadrust::EntityType::PolygonMesh(_)
-                                    | acadrust::EntityType::PolyfaceMesh(_)
+                                codec::EntityType::Mesh(_)
+                                    | codec::EntityType::PolygonMesh(_)
+                                    | codec::EntityType::PolyfaceMesh(_)
                             )
                         )
                     });
@@ -2218,12 +2168,12 @@ impl OpenCADStudio {
                     .find(|(_, entity)| {
                         matches!(
                             entity,
-                            acadrust::EntityType::Line(_)
-                                | acadrust::EntityType::Arc(_)
-                                | acadrust::EntityType::Circle(_)
-                                | acadrust::EntityType::Ellipse(_)
-                                | acadrust::EntityType::LwPolyline(_)
-                                | acadrust::EntityType::Spline(_)
+                            codec::EntityType::Line(_)
+                                | codec::EntityType::Arc(_)
+                                | codec::EntityType::Circle(_)
+                                | codec::EntityType::Ellipse(_)
+                                | codec::EntityType::LwPolyline(_)
+                                | codec::EntityType::Spline(_)
                         )
                     })
                     .map(|(handle, entity)| (handle, entity.clone()));
@@ -2246,18 +2196,18 @@ impl OpenCADStudio {
                     self.tabs[i].active_cmd = Some(Box::new(command));
                     return Some(iced::Task::none());
                 }
-                use acadrust::entities::Region;
-                use acadrust::types::Vector3;
+                use codec::entities::Region;
+                use codec::types::Vector3;
                 let mut regions = Vec::new();
                 let mut sources = Vec::new();
                 for (handle, e) in self.tabs[i].scene.selected_entities().iter() {
-                    if !matches!(e, acadrust::EntityType::Region(_)) {
+                    if !matches!(e, codec::EntityType::Region(_)) {
                         let Some((plane, loops, true)) =
                             crate::scene::model::presspull_model::profile_geometry(e)
                         else {
                             continue;
                         };
-                        let Some(body) = cadkernel::brep::planar_region(plane, &loops) else {
+                        let Some(body) = kernel::brep::planar_region(plane, &loops) else {
                             continue;
                         };
                         let mut region = Region::new();
@@ -2276,7 +2226,7 @@ impl OpenCADStudio {
                     .filter(|(handle, _)| !sources.contains(handle))
                     .filter_map(|(_, entity)| crate::entities::curve::entity_curve(entity))
                     .collect();
-                let open_plane = cadkernel::space::common_curve_plane(&open_curves, 1.0e-6);
+                let open_plane = kernel::space::common_curve_plane(&open_curves, 1.0e-6);
                 let open_plane_rejected = !open_curves.is_empty() && open_plane.is_none();
                 if let Some(plane) = open_plane {
                     let working_plane = crate::command::WorkingPlane::new(
@@ -2314,7 +2264,7 @@ impl OpenCADStudio {
                         else {
                             continue;
                         };
-                        let Some(body) = cadkernel::brep::planar_region(plane, &[curves]) else {
+                        let Some(body) = kernel::brep::planar_region(plane, &[curves]) else {
                             continue;
                         };
                         let mut region = Region::new();
@@ -2427,10 +2377,10 @@ impl OpenCADStudio {
                         .filter_map(|entity| {
                             matches!(
                                 entity,
-                                acadrust::EntityType::Solid3D(_)
-                                    | acadrust::EntityType::Surface(_)
-                                    | acadrust::EntityType::Region(_)
-                                    | acadrust::EntityType::Body(_)
+                                codec::EntityType::Solid3D(_)
+                                    | codec::EntityType::Surface(_)
+                                    | codec::EntityType::Region(_)
+                                    | codec::EntityType::Body(_)
                             )
                             .then_some(entity.common().handle)
                         })
@@ -2452,10 +2402,10 @@ impl OpenCADStudio {
                         .document
                         .entities()
                         .filter_map(|entity| {
-                            let acadrust::EntityType::Extended(extended) = entity else {
+                            let codec::EntityType::Extended(extended) = entity else {
                                 return None;
                             };
-                            let acadrust::entities::ExtendedEntityData::SectionObject(data) =
+                            let codec::entities::ExtendedEntityData::SectionObject(data) =
                                 &extended.data
                             else {
                                 return None;
@@ -2534,21 +2484,26 @@ impl OpenCADStudio {
             }
 
             // 3DROTATE [X|Y|Z] <angle> — rotate the selected solid about an axis.
+            // 3DROTATE — any objects about an axis through a base point.
             "3DROTATE" | "ROTATE3D" => {
-                use crate::command::SelectThenKeywordCommand;
-                let has_sel = !self.tabs[i].scene.selected_entities().is_empty();
-                let c = SelectThenKeywordCommand::new(
-                    "3DROTATE",
-                    "3DROTATE  rotation axis  [X / Y / Z]:",
-                    vec![
-                        ("X", "X", Some("3DROTATE  angle in degrees:")),
-                        ("Y", "Y", Some("3DROTATE  angle in degrees:")),
-                        ("Z", "Z", Some("3DROTATE  angle in degrees:")),
-                    ],
-                    has_sel,
-                );
-                self.command_line.push_info(&c.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(c));
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let cmd = SelectObjectsCommand::new("3DROTATE");
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                } else {
+                    use crate::modules::draw::modify::rotate::RotateCommand;
+                    let wires = self.tabs[i].scene.wire_models_for(&handles);
+                    let new_cmd = RotateCommand::new_3d(handles, wires);
+                    self.command_line.push_info(&new_cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+                }
             }
             cmd if cmd.starts_with("3DROTATE ") || cmd.starts_with("ROTATE3D ") => {
                 let parts: Vec<String> = cmd
@@ -2583,8 +2538,8 @@ impl OpenCADStudio {
                             matches!(
                                 scene.document.get_entity(*handle),
                                 Some(
-                                    acadrust::EntityType::Solid3D(_)
-                                        | acadrust::EntityType::Surface(_)
+                                    codec::EntityType::Solid3D(_)
+                                        | codec::EntityType::Surface(_)
                                 )
                             )
                         })
@@ -2641,7 +2596,7 @@ impl OpenCADStudio {
                             1 => ([0.0, v, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]),
                             _ => ([0.0, 0.0, v], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
                         };
-                        let plane = cadkernel::space::Plane::orthonormal(origin, x, normal)
+                        let plane = kernel::space::Plane::orthonormal(origin, x, normal)
                             .expect("fixed world axes define a plane");
                         let side = glam::DVec3::from_array(origin)
                             + glam::DVec3::from_array(normal) * if keep_low { -1.0 } else { 1.0 };
@@ -2680,7 +2635,7 @@ impl OpenCADStudio {
                 let editable = (sel.len() == 1).then(|| sel[0].0).filter(|h| {
                     self.tabs[i].scene.document.get_entity(*h).is_some_and(|e| {
                         super::super::text_inline::read_text_field(e).is_some()
-                            || matches!(e, acadrust::EntityType::Leader(_))
+                            || matches!(e, codec::EntityType::Leader(_))
                     })
                 });
                 if let Some(h) = editable {
@@ -2759,7 +2714,7 @@ mod region_tests {
                 .map(|entity| {
                     (
                         entity.common().handle,
-                        matches!(entity, acadrust::EntityType::Circle(_)),
+                        matches!(entity, codec::EntityType::Circle(_)),
                     )
                 })
                 .collect();
@@ -2780,7 +2735,7 @@ mod region_tests {
                 .scene
                 .document
                 .entities()
-                .filter(|entity| matches!(entity, acadrust::EntityType::Region(_)))
+                .filter(|entity| matches!(entity, codec::EntityType::Region(_)))
                 .count();
             assert_eq!(region_count, 1);
 

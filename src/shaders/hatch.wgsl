@@ -218,6 +218,11 @@ fn check_family(
 
 // ── Fragment shader ──────────────────────────────────────────────────────
 
+// Entity transparency shows only while transparency display is on.
+fn shown(color: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(color.rgb, select(1.0, color.a, u.transparency_enable > 0.5));
+}
+
 @fragment fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     // Taken here, in uniform control flow — see check_family.
     let ddx_xz = dpdx(v.xz);
@@ -227,7 +232,7 @@ fn check_family(
 
     // Mode dispatch.
     if inst.mode == 1u {
-        return inst.color;
+        return shown(inst.color);
     } else if inst.mode == 2u {
         let proj = v.xz.x * inst.grad_cos + v.xz.y * inst.grad_sin;
         var t = clamp((proj - inst.grad_min) / inst.grad_range, 0.0, 1.0);
@@ -241,7 +246,7 @@ fn check_family(
         if (inst.grad_kind & 16u) != 0u {
             t = 1.0 - t;
         }
-        return mix(inst.color, inst.color2, t);
+        return shown(mix(inst.color, inst.color2, t));
     } else if inst.mode == 3u {
         // Radial gradient: centre is (grad_cos, grad_sin), radius is grad_range.
         let d = length(v.xz - vec2<f32>(inst.grad_cos, inst.grad_sin));
@@ -255,7 +260,7 @@ fn check_family(
         }
         // Radial stops run OUTSIDE-IN: colour 1 at the rim, colour 2 at the
         // centre; the INV bit above swaps them back.
-        return mix(inst.color2, inst.color, t);
+        return shown(mix(inst.color2, inst.color, t));
     }
 
     // Pattern LOD. Keep every family visible until all family spacings
@@ -274,7 +279,7 @@ fn check_family(
         }
     }
     if all_families_subpixel {
-        return inst.color;
+        return shown(inst.color);
     }
 
     // Pattern evaluation.
@@ -283,7 +288,7 @@ fn check_family(
     for (var i = 0u; i < inst.family_count; i++) {
         let fam = families[inst.family_offset + i];
         if check_family(v.xz, ddx_xz, ddy_xz, fam, cos_off, sin_off, inst.scale) {
-            return inst.color;
+            return shown(inst.color);
         }
     }
     discard;

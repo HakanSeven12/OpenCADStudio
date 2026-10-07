@@ -1,6 +1,6 @@
-use acadrust::entities::{Dimension, DimensionRadius};
-use acadrust::types::{Handle, Vector3};
-use acadrust::EntityType;
+use codec::entities::{Dimension, DimensionRadius};
+use codec::types::{Handle, Vector3};
+use codec::EntityType;
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview, InputKind,
@@ -350,6 +350,7 @@ fn preview_wire(points: Vec<Vec3>) -> WireModel {
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
@@ -375,7 +376,9 @@ fn preview_wire(points: Vec<Vec3>) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+        ..Default::default()
+}
 }
 
 inventory::submit!(crate::command::CommandRegistration { names: &["DIMRADIUS"] });

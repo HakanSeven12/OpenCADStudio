@@ -3,7 +3,7 @@
 //
 // Cross-entity rendering helpers live here.
 
-use acadrust::types::Color as AcadColor;
+use codec::types::Color as AcadColor;
 use glam::Vec3;
 
 use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
@@ -28,11 +28,39 @@ pub type FallbackGeometry = (
 
 // ── Colour helper ──────────────────────────────────────────────────────────
 
-/// Convert an acadrust Color (ACI index or true-color) to a GPU RGBA value.
+/// Convert an opencadcodec Color (ACI index or true-color) to a GPU RGBA value.
 pub fn aci_to_rgba(color: &AcadColor) -> [f32; 4] {
     if let Some((r, g, b)) = color.rgb() {
-        [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
+        let rgb = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0];
+        // Only colour 7 swaps white/black with the background; any other
+        // colour — a true colour, or ACI 255 — is drawn as authored.
+        let [r, g, b] = if matches!(color, AcadColor::Index(7)) {
+            rgb
+        } else {
+            authored_rgb(rgb)
+        };
+        [r, g, b, 1.0]
     } else {
         WireModel::WHITE
     }
+}
+
+/// Pure white and pure black are what the background adaptation swaps, and
+/// only colour 7 may be swapped. A colour chosen as-is (255,255,255 used as a
+/// white mask on a light sheet, say) is kept a hair off them so it is drawn
+/// exactly as authored; the difference is below one display step.
+pub fn authored_rgb(rgb: [f32; 3]) -> [f32; 3] {
+    const OFF: f32 = 1.0 / 1024.0;
+    if rgb == [1.0; 3] {
+        [1.0 - OFF; 3]
+    } else if rgb == [0.0; 3] {
+        [OFF; 3]
+    } else {
+        rgb
+    }
+}
+
+/// True for a colour [`authored_rgb`] moved off pure white.
+pub fn is_authored_white(rgb: [f32; 3]) -> bool {
+    rgb == authored_rgb([1.0; 3])
 }

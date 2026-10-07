@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap as HashMap;
 use std::cell::RefCell;
 use std::time::Duration;
 
-use acadrust::types::{Color as AcadColor, LineWeight};
+use codec::types::{Color as AcadColor, LineWeight};
 use iced::advanced::{
     layout, mouse, overlay, renderer, text as advanced_text, widget, Layout, Shell, Widget,
 };
@@ -37,8 +37,10 @@ pub(super) struct ToggleState {
     pub show_viewcube: bool,
     pub show_ucs_icon: bool,
     pub show_properties: bool,
+    pub show_count_palette: bool,
     pub show_graphic_attributes: bool,
     pub show_block_palette: bool,
+    pub show_sheet_set: bool,
     pub show_file_tabs: bool,
     pub show_layout_tabs: bool,
 }
@@ -93,6 +95,11 @@ thread_local! {
     /// measured width per translated label so the automatic sizing stays cheap.
     static LARGE_WIDTH_CACHE: RefCell<HashMap<String, f32>> =
         RefCell::new(HashMap::default());
+}
+
+/// Dropdown items that report a state and cannot be picked.
+pub(super) fn is_disabled_item(cmd: &str) -> bool {
+    cmd == "FRAMES3"
 }
 
 fn ribbon_label_bounds(
@@ -304,7 +311,7 @@ pub(super) const TOP_HIST_GAP: f32 = 4.0;
 
 pub(crate) const UNDO_HISTORY_ID: &str = "UNDO_HISTORY";
 pub(crate) const REDO_HISTORY_ID: &str = "REDO_HISTORY";
-pub(super) const LAYER_COMBO_ID: &str = "LAYER_COMBO";
+pub(crate) const LAYER_COMBO_ID: &str = "LAYER_COMBO";
 /// Dropdown id for the tab-bar panel-density selector.
 pub(super) const COLLAPSE_MODE_ID: &str = "COLLAPSE_MODE";
 pub(super) const PROP_COLOR_ID: &str = "PROP_COLOR";
@@ -375,8 +382,10 @@ pub(super) fn is_active_tool(
         "NAVVCUBE" => state.show_viewcube,
         "UCSICON" => state.show_ucs_icon,
         "PROPERTIES" => state.show_properties,
+        "COUNTLIST" => state.show_count_palette,
         "GRAPHICATTRIBUTES" => state.show_graphic_attributes,
         "BLOCKPALETTE" => state.show_block_palette,
+        "SHEETSET" => state.show_sheet_set,
         "FILETAB" => state.show_file_tabs,
         "LAYOUTTAB" => state.show_layout_tabs,
         id => active_tool.as_deref() == Some(id),
@@ -443,7 +452,7 @@ pub(super) fn combo_btn_style(
     }
 }
 
-pub(super) fn popup_row_style(theme: &Theme, status: button::Status) -> button::Style {
+pub(crate) fn popup_row_style(theme: &Theme, status: button::Status) -> button::Style {
     let palette = theme.palette();
     let pair = if matches!(status, button::Status::Hovered | button::Status::Pressed) {
         palette.background.weak
@@ -457,7 +466,7 @@ pub(super) fn popup_row_style(theme: &Theme, status: button::Status) -> button::
     }
 }
 
-pub(super) fn popup_panel_style(theme: &Theme) -> container::Style {
+pub(crate) fn popup_panel_style(theme: &Theme) -> container::Style {
     let palette = theme.palette();
     container::Style {
         background: Some(Background::Color(palette.background.base.color)),
@@ -667,18 +676,31 @@ pub(super) fn render_small<'a>(
                 items.iter().find(|(candidate, _, _)| *candidate == cmd)
                     .map(|(_, _, item_icon)| *item_icon)
             }).or_else(|| items.first().map(|(_, _, item_icon)| *item_icon)).unwrap_or(*icon);
-            let localized_label = t!(*label).into_owned();
+            let localized_label = if label.is_empty() {
+                items
+                    .iter()
+                    .find(|(cmd, _, _)| *cmd == last)
+                    .map(|(_, item_label, _)| t!(*item_label).into_owned())
+                    .unwrap_or_default()
+            } else {
+                t!(*label).into_owned()
+            };
             let face = row![
                 container(make_icon(cur_icon, SMALL_ICON)).width(Length::Fixed(SMALL_W)),
                 text(localized_label.clone()).size(10).wrapping(advanced_text::Wrapping::None),
             ].spacing(3).align_y(iced::Center);
+            // A state that is only shown (not chosen) opens the list instead.
             let face_btn = button(face)
-                .on_press(Message::RibbonToolClick {
-                    tool_id: last.to_string(),
-                    event: ModuleEvent::Command(last.to_string()),
+                .on_press(if is_disabled_item(last) {
+                    Message::ToggleRibbonDropdown(id.to_string())
+                } else {
+                    Message::RibbonToolClick {
+                        tool_id: last.to_string(),
+                        event: ModuleEvent::Command(last.to_string()),
+                    }
                 })
                 .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
-                .width(Length::Fixed(LABELED_SMALL_W)).height(ROW_H).padding([3, 4]);
+                .width(Length::Shrink).height(ROW_H).padding([3, 4]);
             let arrow = button(container(icons::themed_arrow_down(8.0))
                 .width(Fill).height(Fill).align_x(iced::Center).align_y(iced::Center))
                 .on_press(Message::ToggleRibbonDropdown(id.to_string()))

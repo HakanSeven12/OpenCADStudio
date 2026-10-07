@@ -6,6 +6,7 @@
     "description": "REST surface over the OpenCAD Studio automation dispatcher. The server runs headless via `OpenCADStudio --http <port>`, binds 127.0.0.1 only, and keeps one drawing session alive across requests. All bodies are JSON; failure bodies carry a symbolic `code` (see the automation README for the catalogue)."
   },
   "servers": [{"url": "http://127.0.0.1:8090"}],
+  "security": [{"bearer": []}],
   "paths": {
     "/api/v1/ready": {
       "get": {
@@ -254,6 +255,11 @@
         "parameters": [{"name": "op", "in": "path", "required": true, "schema": {"type": "string"}}],
         "responses": {"200": {"description": "Operation response"}}
       }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": {"type": "http", "scheme": "bearer", "description": "OCS_API_TOKEN, or the token printed on stderr at startup."}
     }
   }
 }

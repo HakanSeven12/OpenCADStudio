@@ -213,6 +213,18 @@ pub(crate) fn pick_box_aperture_px(value: i32) -> f32 {
     aperture.max(1.0)
 }
 
+/// Which interactive navigation tool is armed. Each one owns the whole
+/// viewport and hides the CAD crosshair, but they do not share a cursor: the
+/// hand reads as "drag the sheet", which is wrong for a zoom or an orbit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum NavCursor {
+    #[default]
+    None,
+    Pan,
+    Orbit,
+    Zoom,
+}
+
 #[derive(Clone, Copy)]
 pub struct CrosshairOptions {
     pub size_percent: i32,
@@ -227,6 +239,12 @@ pub struct CrosshairOptions {
     /// the crosshair arms disappear and a blue pickbox remains — the
     /// screen-level "the client wants YOU to pick" signal.
     pub pick_pending: bool,
+    /// Draw only the pickbox: the active command previews a line that the
+    /// full-length arms would cover.
+    pub hide_arms: bool,
+    /// Explicit object-snap marker colour; `None` picks one that reads on
+    /// the canvas.
+    pub snap_color: Option<[u8; 3]>,
 }
 
 /// Rendering style for the viewport grid.
@@ -475,7 +493,7 @@ pub fn resolve_selection_base_color(
     // ACI 0 (BYBLOCK) and 256 (BYLAYER) are not explicit overrides;
     // the sysvar uses 0 as the unset sentinel; valid user picks are 1..=255.
     if custom > 0 {
-        if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(custom) {
+        if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(custom) {
             return Color::from_rgb8(r, g, b);
         }
     }
@@ -852,7 +870,7 @@ pub fn selection_overlay<'a>(
     dividers: Vec<iced::Rectangle>,
     pane_move_rect: Option<iced::Rectangle>,
     pane_drop_rect: Option<iced::Rectangle>,
-    pan_mode: bool,
+    nav: NavCursor,
     suppressed: bool,
     hover_locked: bool,
     crosshair_bg: [f32; 4],
@@ -882,7 +900,7 @@ pub fn selection_overlay<'a>(
         dividers,
         pane_move_rect,
         pane_drop_rect,
-        pan_mode,
+        nav,
         suppressed,
         hover_locked,
         crosshair_bg,
@@ -936,9 +954,10 @@ struct SelectionCanvas {
     pane_move_rect: Option<iced::Rectangle>,
     /// The pane under the cursor during a pane move (drop target), highlighted.
     pane_drop_rect: Option<iced::Rectangle>,
-    /// Interactive PAN mode: the crosshair is hidden and the cursor becomes a
-    /// hand so the viewport reads as a draggable surface.
-    pan_mode: bool,
+    /// Which interactive navigation tool is armed. Any of them hides the
+    /// crosshair — the viewport is being driven, not drawn on — and each
+    /// picks its own cursor in `mouse_interaction`.
+    nav: NavCursor,
     /// A ribbon dropdown (or similar overlay) is open over the viewport. The
     /// crosshair is not drawn and the OS cursor is shown normally so the panel
     /// is usable instead of the cursor vanishing over it. (#227)
@@ -964,6 +983,80 @@ struct SelectionCanvas {
     /// Symbol shown beside the cursor while it targets an entity that already
     /// participates in an enabled geometric constraint.
     constraint_cursor_badge: Option<String>,
+}
+
+/// The move gizmo: an arrow per axis (X red, Y green, Z blue) from the
+/// centre grip and a square per axis pair; the hovered or dragged part is
+/// yellow.
+fn draw_move_gizmo(frame: &mut canvas::Frame, grips: &[GripMarker]) {
+    use crate::scene::pick::grip::{gizmo_plane_axes, GIZMO_AXIS_PX};
+    const COLORS: [Color; 3] = [
+        Color::from_rgb(0.90, 0.22, 0.20),
+        Color::from_rgb(0.27, 0.70, 0.29),
+        Color::from_rgb(0.18, 0.52, 0.93),
+    ];
+    let active = Color::from_rgb(1.0, 0.84, 0.0);
+    // Unit screen direction (y down) and tip of each shown arrow.
+    let mut axes: [Option<(Point, iced::Vector)>; 3] = [None; 3];
+    for grip in grips {
+        if let (GripShape::GizmoAxis(k), Some([dx, dy])) = (grip.shape, grip.dir) {
+            axes[k as usize % 3] = Some((grip.pos, iced::Vector::new(dx, -dy)));
+        }
+    }
+    let Some(center) = axes
+        .iter()
+        .flatten()
+        .next()
+        .map(|(tip, d)| Point::new(tip.x - d.x * GIZMO_AXIS_PX, tip.y - d.y * GIZMO_AXIS_PX))
+    else {
+        return;
+    };
+    for grip in grips {
+        let GripShape::GizmoPlane(k) = grip.shape else {
+            continue;
+        };
+        let (a, b) = gizmo_plane_axes(k);
+        let (Some((_, a)), Some((_, b))) = (axes[a as usize], axes[b as usize]) else {
+            continue;
+        };
+        let corner = |u: f32, v: f32| {
+            Point::new(
+                center.x + (a.x * u + b.x * v) * GIZMO_AXIS_PX,
+                center.y + (a.y * u + b.y * v) * GIZMO_AXIS_PX,
+            )
+        };
+        let quad = canvas::Path::new(|p| {
+            p.move_to(corner(0.18, 0.18));
+            p.line_to(corner(0.42, 0.18));
+            p.line_to(corner(0.42, 0.42));
+            p.line_to(corner(0.18, 0.42));
+            p.close();
+        });
+        let lit = grip.is_hovered || grip.is_hot;
+        let color = if lit { active } else { Color::from_rgb(0.85, 0.85, 0.85) };
+        frame.fill(&quad, color.scale_alpha(if lit { 0.55 } else { 0.25 }));
+        frame.stroke(&quad, canvas::Stroke::default().with_width(1.0).with_color(color));
+    }
+    for grip in grips {
+        let (GripShape::GizmoAxis(k), Some((tip, d))) =
+            (grip.shape, grip.dir.map(|[dx, dy]| (grip.pos, iced::Vector::new(dx, -dy))))
+        else {
+            continue;
+        };
+        let color = if grip.is_hovered || grip.is_hot { active } else { COLORS[k as usize % 3] };
+        let base = Point::new(tip.x - d.x * 13.0, tip.y - d.y * 13.0);
+        frame.stroke(
+            &canvas::Path::line(center, base),
+            canvas::Stroke::default().with_width(2.5).with_color(color),
+        );
+        let head = canvas::Path::new(|p| {
+            p.move_to(tip);
+            p.line_to(Point::new(base.x - d.y * 6.0, base.y + d.x * 6.0));
+            p.line_to(Point::new(base.x + d.y * 6.0, base.y - d.x * 6.0));
+            p.close();
+        });
+        frame.fill(&head, color);
+    }
 }
 
 fn draw_grip_marker(
@@ -1019,6 +1112,7 @@ fn draw_grip_marker(
             b.close();
         }),
         GripShape::Circle => canvas::Path::circle(Point::new(sp.x, sp.y), h),
+        GripShape::GizmoAxis(_) | GripShape::GizmoPlane(_) => return,
         GripShape::Dropdown | GripShape::DropdownAdjacent => canvas::Path::new(|b| {
             b.move_to(Point::new(sp.x - h, sp.y - h * 0.5));
             b.line_to(Point::new(sp.x + h, sp.y - h * 0.5));
@@ -1029,7 +1123,7 @@ fn draw_grip_marker(
 
     if grip.is_hot {
         let hot_color = if visual.grip_hot > 0 {
-            if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(visual.grip_hot) {
+            if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(visual.grip_hot) {
                 Color::from_rgb8(r, g, b)
             } else {
                 theme.palette().danger.base.color
@@ -1041,7 +1135,7 @@ fn draw_grip_marker(
     } else if grip.is_hovered {
         let pair = theme.palette().primary.strong;
         let hover_color = if visual.grip_hover > 0 {
-            if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(visual.grip_hover) {
+            if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(visual.grip_hover) {
                 Color::from_rgb8(r, g, b)
             } else {
                 pair.color
@@ -1061,7 +1155,7 @@ fn draw_grip_marker(
     } else {
         let palette = theme.palette();
         let color = if visual.grip_color > 0 {
-            if let Some((r, g, b)) = acadrust::types::aci_table::aci_to_rgb(visual.grip_color) {
+            if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(visual.grip_color) {
                 Color::from_rgb8(r, g, b)
             } else {
                 palette.primary.base.color
@@ -1122,13 +1216,30 @@ impl canvas::Program<Message> for SelectionCanvas {
         if self.suppressed {
             return mouse::Interaction::default();
         }
-        // PAN mode owns the whole viewport: an open hand when hovering, a
-        // closed hand while dragging.
-        if self.pan_mode && cursor.is_over(bounds) {
-            return if self.selection.borrow().middle_down {
-                mouse::Interaction::Grabbing
-            } else {
-                mouse::Interaction::Grab
+        // An armed navigation tool owns the whole viewport, and the cursor
+        // says which one: a hand to drag the sheet, four-way arrows to swing
+        // the model, a magnifier that carries the sign of the zoom actually
+        // under way. Hovering before the drag starts shows the neutral "+"
+        // magnifier rather than guessing a direction.
+        if self.nav != NavCursor::None && cursor.is_over(bounds) {
+            let dragging = self.selection.borrow().input.middle_down;
+            return match self.nav {
+                NavCursor::Pan => {
+                    if dragging {
+                        mouse::Interaction::Grabbing
+                    } else {
+                        mouse::Interaction::Grab
+                    }
+                }
+                NavCursor::Orbit => mouse::Interaction::AllScroll,
+                NavCursor::Zoom => {
+                    if dragging && self.selection.borrow().input.zoom_dir_out {
+                        mouse::Interaction::ZoomOut
+                    } else {
+                        mouse::Interaction::ZoomIn
+                    }
+                }
+                NavCursor::None => unreachable!("guarded above"),
             };
         }
         if self.show_viewcube {
@@ -1227,7 +1338,7 @@ impl canvas::Program<Message> for SelectionCanvas {
             }
             // Ghost card dragged under the cursor — a 0.32× preview of the
             // source pane, centred on the cursor.
-            if let Some(c) = self.selection.borrow().last_move_pos {
+            if let Some(c) = self.selection.borrow().input.last_move_pos {
                 let gw = (src.width * 0.32).clamp(60.0, 280.0);
                 let gh = (src.height * 0.32).clamp(40.0, 200.0);
                 let g = canvas::Path::rectangle(
@@ -1292,26 +1403,32 @@ impl canvas::Program<Message> for SelectionCanvas {
             );
         }
 
-        if let (Some(a), Some(b)) = (self.selection.borrow().box_anchor, self.selection.borrow().box_current) {
-            draw_marquee(&mut frame, a, b, self.selection.borrow().box_crossing, theme, &self.selection_visual, self.crosshair_bg);
+        // ZOOM Dynamic reuses `box_anchor` to remember where the drag began,
+        // so the marquee would otherwise rubber-band across the screen while
+        // the view zooms. Suppress the drawing, not the state — the anchor is
+        // still re-projected as the camera moves.
+        if self.nav != NavCursor::Zoom {
+            if let (Some(a), Some(b)) = (self.selection.borrow().gesture.box_anchor, self.selection.borrow().gesture.box_current) {
+                draw_marquee(&mut frame, a, b, self.selection.borrow().gesture.box_crossing, theme, &self.selection_visual, self.crosshair_bg);
+            }
         }
         // Preview marquee for point-picked windows (STRETCH) — same look, no pick.
-        if let Some((a, b, crossing)) = self.selection.borrow().preview_box {
+        if let Some((a, b, crossing)) = self.selection.borrow().gesture.preview_box {
             draw_marquee(&mut frame, a, b, crossing, theme, &self.selection_visual, self.crosshair_bg);
         }
 
-        if self.selection.borrow().poly_active && self.selection.borrow().poly_points.len() > 1 {
-            let crossing = self.selection.borrow().poly_crossing;
+        if self.selection.borrow().gesture.poly_active && self.selection.borrow().gesture.poly_points.len() > 1 {
+            let crossing = self.selection.borrow().gesture.poly_crossing;
             let base = resolve_selection_base_color(crossing, theme, &self.selection_visual, self.crosshair_bg);
             let canvas_light = crate::ui::style::common::canvas_is_light(self.crosshair_bg);
             if self.selection_visual.area && self.selection_visual.opacity > 0 {
                 let alpha = selection_fill_alpha(self.selection_visual.opacity as f32, canvas_light);
                 let fill = base.scale_alpha(alpha);
-                if let Some(cur) = self.selection.borrow().last_move_pos {
-                    let start = self.selection.borrow().poly_points[0];
+                if let Some(cur) = self.selection.borrow().input.last_move_pos {
+                    let start = self.selection.borrow().gesture.poly_points[0];
                     let fill_path = canvas::Path::new(|p| {
                         p.move_to(start);
-                        for pt in &self.selection.borrow().poly_points[1..] {
+                        for pt in &self.selection.borrow().gesture.poly_points[1..] {
                             p.line_to(*pt);
                         }
                         p.line_to(cur);
@@ -1323,8 +1440,8 @@ impl canvas::Program<Message> for SelectionCanvas {
             let stroke_alpha = if canvas_light { 0.95 } else { 0.90 };
             let stroke = base.scale_alpha(stroke_alpha);
             let path = canvas::Path::new(|p| {
-                p.move_to(self.selection.borrow().poly_points[0]);
-                for pt in &self.selection.borrow().poly_points[1..] {
+                p.move_to(self.selection.borrow().gesture.poly_points[0]);
+                for pt in &self.selection.borrow().gesture.poly_points[1..] {
                     p.line_to(*pt);
                 }
             });
@@ -1342,9 +1459,9 @@ impl canvas::Program<Message> for SelectionCanvas {
                 ..Default::default()
             };
             frame.stroke(&path, stroke_style.clone());
-            if let Some(cur) = self.selection.borrow().last_move_pos {
-                let start = self.selection.borrow().poly_points[0];
-                let last = *self.selection.borrow().poly_points.last().unwrap();
+            if let Some(cur) = self.selection.borrow().input.last_move_pos {
+                let start = self.selection.borrow().gesture.poly_points[0];
+                let last = *self.selection.borrow().gesture.poly_points.last().unwrap();
                 let preview = canvas::Path::new(|p| {
                     p.move_to(last);
                     p.line_to(cur);
@@ -1393,8 +1510,11 @@ impl canvas::Program<Message> for SelectionCanvas {
                         );
                     }
                 }
+                draw_move_gizmo(frame, &self.grips);
                 for grip in &self.grips {
-                    draw_grip_marker(frame, grip, theme, &self.selection_visual);
+                    if !matches!(grip.shape, GripShape::GizmoAxis(_) | GripShape::GizmoPlane(_)) {
+                        draw_grip_marker(frame, grip, theme, &self.selection_visual);
+                    }
                 }
             });
         }
@@ -1403,6 +1523,10 @@ impl canvas::Program<Message> for SelectionCanvas {
         if let Some((sp, snap_type)) = self.snap {
             let (r, g, b) = if snap_type == SnapType::ObjectPick {
                 (0.95_f32, 0.50, 0.08) // orange object-snap marker
+            } else if let Some([r, g, b]) = self.crosshair.snap_color {
+                (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
+            } else if crate::ui::style::common::canvas_is_light(self.crosshair_bg) {
+                (0.80, 0.45, 0.0) // dark amber: yellow vanishes on a light canvas
             } else {
                 (1.0, 0.9, 0.1) // classic yellow OSNAP
             };
@@ -1454,6 +1578,25 @@ impl canvas::Program<Message> for SelectionCanvas {
                     let r = 5.5_f32;
                     let path = canvas::Path::circle(sp, r);
                     frame.stroke(&path, stroke);
+                }
+                SnapType::GeometricCenter => {
+                    // Pentagon around a centre dot: the area centroid.
+                    let r = 6.5_f32;
+                    let path = canvas::Path::new(|b| {
+                        for k in 0..5 {
+                            let a = -std::f32::consts::FRAC_PI_2
+                                + k as f32 * std::f32::consts::TAU / 5.0;
+                            let p = Point::new(sp.x + r * a.cos(), sp.y + r * a.sin());
+                            if k == 0 {
+                                b.move_to(p);
+                            } else {
+                                b.line_to(p);
+                            }
+                        }
+                        b.close();
+                    });
+                    frame.stroke(&path, stroke.clone());
+                    frame.fill(&canvas::Path::circle(sp, 1.6), marker);
                 }
                 SnapType::Node => {
                     // Circle with an inscribed X.
@@ -1748,14 +1891,17 @@ impl canvas::Program<Message> for SelectionCanvas {
         // arrow (see `mouse_interaction`); drawing the CAD crosshair on
         // top of it would double up the visual feedback.
         let over_divider = self.divider_under(cursor, bounds);
-        // PAN mode replaces the crosshair with a hand cursor.
+        // An armed navigation tool replaces the crosshair with its own cursor.
         if !over_viewcube
             && !over_divider
-            && !self.pan_mode
+            && self.nav == NavCursor::None
             && !self.suppressed
             && self.crosshair.cursor_type == CursorType::Crosshair
         {
-            if let Some(cp) = self.selection.borrow().last_move_pos {
+            // Over a grip the crosshair locks onto it, so the click lands on
+            // the grip exactly.
+            let hovered_grip = self.grips.iter().find(|grip| grip.is_hovered).map(|grip| grip.pos);
+            if let Some(cp) = hovered_grip.or(self.selection.borrow().input.last_move_pos) {
                 let [r, g, b, a] = self.crosshair.color.map_or_else(
                     || {
                         crate::scene::view::render::adapt_to_bg(
@@ -1801,7 +1947,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                 // The arms stay only for the normal (non-pending) cursor: a
                 // waiting pick shows the box alone, regardless of the UCS
                 // rotation, so the square is unmistakable.
-                if !pick_pending {
+                if !pick_pending && !self.crosshair.hide_arms {
                     for angle in base_angles {
                         let rad = (angle + self.crosshair.snap_angle_deg as f64).to_radians();
                         let dir = Point::new(rad.cos() as f32, -rad.sin() as f32);
@@ -3249,6 +3395,37 @@ impl DynInputCanvas {
         (Self::box_content(b).len() as f32 * DYN_CHAR_W) + DYN_PAD * 2.0
     }
 
+    /// Slide a box centred at `center` straight away from the crosshair until
+    /// it neither covers the aim point nor a box already placed (#1546).
+    fn clear_of(center: Point, w: f32, cursor: Point, placed: &[iced::Rectangle]) -> Point {
+        const KEEP: f32 = 18.0;
+        let hits = |c: Point| {
+            let r = iced::Rectangle {
+                x: c.x - w * 0.5,
+                y: c.y - DYN_BOX_H * 0.5,
+                width: w,
+                height: DYN_BOX_H,
+            };
+            r.expand(KEEP).contains(cursor) || placed.iter().any(|p| p.intersects(&r))
+        };
+        let (mut dx, mut dy) = (center.x - cursor.x, center.y - cursor.y);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 1.0 {
+            (dx, dy) = (0.0, 1.0);
+        } else {
+            (dx, dy) = (dx / len, dy / len);
+        }
+        let mut c = center;
+        for _ in 0..60 {
+            if !hits(c) {
+                break;
+            }
+            c.x += dx * 4.0;
+            c.y += dy * 4.0;
+        }
+        c
+    }
+
     /// Draw a value box centred at `center`, clamped inside `bounds`.
     fn draw_box(
         frame: &mut canvas::Frame,
@@ -3533,6 +3710,7 @@ impl DynInputCanvas {
         }
 
         // ── Box placement by role ──
+        let mut placed: Vec<iced::Rectangle> = Vec::with_capacity(self.boxes.len());
         for b in &self.boxes {
             let center = b.center.unwrap_or_else(|| match b.role {
                 DynRole::Angle => self.label_screen.unwrap_or_else(|| {
@@ -3575,6 +3753,14 @@ impl DynInputCanvas {
                     x: base.x + dx * len * 0.5 + nx * 16.0,
                     y: base.y + dy * len * 0.5 + ny * 16.0,
                 },
+            });
+            let w = Self::box_width(b);
+            let center = Self::clear_of(center, w, cursor, &placed);
+            placed.push(iced::Rectangle {
+                x: center.x - w * 0.5,
+                y: center.y - DYN_BOX_H * 0.5,
+                width: w,
+                height: DYN_BOX_H,
             });
             Self::draw_box(frame, b, center, bounds, theme);
         }

@@ -137,10 +137,11 @@ fn parse_iso8601_utc(s: &str) -> Option<u64> {
 fn is_newer(latest: &str, installed: &str) -> bool {
     let parse = |version: &str| {
         let version = version.trim_start_matches('v');
-        if let Some((year, week)) = version.split_once('.') {
-            if year.len() == 4 && year.starts_with("20") && !week.contains('.') {
-                return Some(semver::Version::new(year.parse().ok()?, week.parse().ok()?, 0));
-            }
+        // `2026.40` and its fix release `2026.40.1`; the week may be zero-padded.
+        let parts: Vec<&str> = version.split('.').collect();
+        if (2..=3).contains(&parts.len()) && parts[0].len() == 4 && parts[0].starts_with("20") {
+            let patch = parts.get(2).map_or(Some(0), |patch| patch.parse().ok())?;
+            return Some(semver::Version::new(parts[0].parse().ok()?, parts[1].parse().ok()?, patch));
         }
         semver::Version::parse(version).ok()
     };
@@ -157,6 +158,9 @@ mod tests {
         assert!(is_newer("2026.10", "2026.09"));
         assert!(is_newer("2027.01", "2026.53"));
         assert!(!is_newer("2026.35", "2026.35"));
+        assert!(is_newer("2026.40.1", "2026.40"));
+        assert!(is_newer("2026.05.2", "2026.05.1"));
+        assert!(is_newer("2026.41", "2026.40.1"));
         assert!(!is_newer("0.9.8", "2026.35"));
         assert!(!is_newer("invalid", "2026.35"));
     }

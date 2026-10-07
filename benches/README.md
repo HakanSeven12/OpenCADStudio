@@ -5,12 +5,12 @@ A standardized, statistical performance benchmarking suite measuring throughput,
 ## Quick Start
 
 Run the full benchmark suite with native `--release` optimizations:
-```powershell
+```bash
 cargo bench
 ```
 
 Run a fast validation smoke test (~2 seconds):
-```powershell
+```bash
 cargo bench --bench performance_benchmarks -- --quick
 ```
 
@@ -66,10 +66,23 @@ cargo bench --bench performance_benchmarks -- --quick
 
 ---
 
+## Command Benchmarks
+
+First benchmarked commands: **EXPLODE** (metrics `explode_geometry`,
+`explode_scene_apply`) and **FLATTEN** (metrics `flatten_plan`,
+`flatten_scene_apply`).
+
+```bash
+cargo bench --bench command_benchmarks -- --filter explode
+cargo bench --bench command_benchmarks -- --quick
+cargo bench --bench command_benchmarks -- --filter explode --output target/explode_metrics.json
+cargo bench --bench command_benchmarks -- --filter explode --baseline target/explode_before.json
+```
+
 ## Filtering Benchmarks
 
 Filter execution by subsystem or name pattern:
-```powershell
+```bash
 # Filter by UI
 cargo bench --bench performance_benchmarks -- ui
 
@@ -85,12 +98,12 @@ cargo bench --bench performance_benchmarks -- hit_test
 ## Baseline Tracking & Regression Detection
 
 ### 1. Save Current Metrics as Baseline
-```powershell
+```bash
 cargo bench --bench performance_benchmarks -- --output target/baseline_metrics.json
 ```
 
 ### 2. Compare PR / Branch Against Baseline
-```powershell
+```bash
 cargo bench --bench performance_benchmarks -- --baseline target/baseline_metrics.json
 ```
 

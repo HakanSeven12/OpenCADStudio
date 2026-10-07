@@ -1,7 +1,7 @@
 // DIMJOGLINE — add or remove a jog on a linear/aligned dimension.
 
-use acadrust::entities::Dimension;
-use acadrust::{EntityType, Handle};
+use codec::entities::Dimension;
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
@@ -77,7 +77,7 @@ impl DimJogLineCommand {
         } else {
             [f64::NAN; 3]
         };
-        cadkernel::space::default_dimension_jog_position(
+        kernel::space::default_dimension_jog_position(
             [first.x, first.y, first.z],
             [second.x, second.y, second.z],
             [definition.x, definition.y, definition.z],
@@ -204,7 +204,7 @@ impl CadCommand for DimJogLineCommand {
             ),
             _ => return None,
         };
-        let points = cadkernel::space::dimension_jog_points(
+        let points = kernel::space::dimension_jog_points(
             segment,
             point.to_array(),
             normal,

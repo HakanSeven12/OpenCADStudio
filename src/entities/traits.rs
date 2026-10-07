@@ -1,4 +1,4 @@
-use acadrust::{CadDocument, EntityType};
+use codec::{CadDocument, EntityType};
 
 use crate::command::EntityTransform;
 use crate::scene::convert::acad_to_render::RenderEntity;
@@ -81,6 +81,63 @@ pub trait Transformable {
     fn apply_transform(&mut self, t: &EntityTransform);
 }
 
+// The codec boxes its rare wide entity kinds (Surface, Table, MultiLeader,
+// Helix, Extended) so every other entity is stored narrow; the boxed ones
+// answer through their contents.
+impl<T: RenderConvertible + ?Sized> RenderConvertible for Box<T> {
+    fn to_render(&self, document: &CadDocument) -> Option<RenderEntity> {
+        (**self).to_render(document)
+    }
+}
+
+impl<T: Grippable + ?Sized> Grippable for Box<T> {
+    fn grips(&self) -> Vec<GripDef> {
+        (**self).grips()
+    }
+    fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
+        (**self).apply_grip(grip_id, apply)
+    }
+    fn grip_menu(&self, grip_id: usize) -> Vec<GripMenuItem> {
+        (**self).grip_menu(grip_id)
+    }
+    fn apply_grip_menu(&mut self, grip_id: usize, action: GripMenuAction) {
+        (**self).apply_grip_menu(grip_id, action)
+    }
+    fn apply_grip_menu_value(&mut self, grip_id: usize, action: GripMenuAction, value: f64) {
+        (**self).apply_grip_menu_value(grip_id, action, value)
+    }
+    fn grip_menu_value_prompt(
+        &self,
+        grip_id: usize,
+        action: GripMenuAction,
+    ) -> Option<&'static str> {
+        (**self).grip_menu_value_prompt(grip_id, action)
+    }
+    fn grip_menu_point_value(
+        &self,
+        grip_id: usize,
+        action: GripMenuAction,
+        point: glam::DVec3,
+    ) -> Option<f64> {
+        (**self).grip_menu_point_value(grip_id, action, point)
+    }
+}
+
+impl<T: PropertyEditable + ?Sized> PropertyEditable for Box<T> {
+    fn geometry_properties(&self, text_style_names: &[String]) -> Vec<PropSection> {
+        (**self).geometry_properties(text_style_names)
+    }
+    fn apply_geom_prop(&mut self, field: &str, value: &str) {
+        (**self).apply_geom_prop(field, value)
+    }
+}
+
+impl<T: Transformable + ?Sized> Transformable for Box<T> {
+    fn apply_transform(&mut self, t: &EntityTransform) {
+        (**self).apply_transform(t)
+    }
+}
+
 /// Inquiry-time mass / area / perimeter properties for entities whose
 /// 2D footprint has a meaningful area or perimeter (Circle, Arc, Line,
 /// LwPolyline, Ellipse). Entities outside this set get `None` via the
@@ -112,7 +169,7 @@ pub fn entity_type_name(et: &EntityType) -> &str {
     match et {
         EntityType::Point(_) => "Point",
         EntityType::Line(line)
-            if acadrust::entities::CenterMarkAssociation::read(
+            if codec::entities::CenterMarkAssociation::read(
                 &line.common.extended_data,
             )
             .is_some() =>
@@ -120,7 +177,7 @@ pub fn entity_type_name(et: &EntityType) -> &str {
             "CenterMark"
         }
         EntityType::Line(line)
-            if acadrust::entities::CenterLineAssociation::read(
+            if codec::entities::CenterLineAssociation::read(
                 &line.common.extended_data,
             )
             .is_some() =>

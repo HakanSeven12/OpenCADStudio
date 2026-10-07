@@ -2,7 +2,7 @@
 // selection's bounding box to a PDF (handled by the host). No dialog. (#325)
 
 use crate::command::{CadCommand, CmdResult};
-use acadrust::Handle;
+use codec::Handle;
 use glam::DVec3;
 use crate::t;
 

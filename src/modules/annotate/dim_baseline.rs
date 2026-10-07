@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 use std::f64::consts::PI;
 
-use acadrust::entities::{
+use codec::entities::{
     Dimension, DimensionAligned, DimensionAngular2Ln, DimensionAngular3Pt, DimensionBase,
     DimensionLinear, DimensionOrdinate,
 };
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
-use cadkernel::geom2d::{
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
+use kernel::geom2d::{
     arc_span, intersect, nearest_of, Arc, Curve, Line, Tolerance, Transform, Vec2, XLine,
 };
-use cadkernel::space::Plane;
+use kernel::space::Plane;
 use glam::DVec3;
 
 use crate::command::{
@@ -546,6 +546,7 @@ fn build_linear(
         result.base.definition_point = result.definition_point;
         result.base.text_middle_point = world(plane, first_line.lerp(second_line, 0.5));
         result.base.insertion_point = result.base.text_middle_point;
+        crate::entities::dimension::reset_automatic_text_position(&mut result.base);
         Some(Dimension::Aligned(result))
     } else {
         let mut result = DimensionLinear::new(world(plane, fixed), world(plane, point));
@@ -554,6 +555,7 @@ fn build_linear(
         result.base.definition_point = result.definition_point;
         result.base.text_middle_point = world(plane, first_line.lerp(second_line, 0.5));
         result.base.insertion_point = result.base.text_middle_point;
+        crate::entities::dimension::reset_automatic_text_position(&mut result.base);
         Some(Dimension::Linear(result))
     }
 }
@@ -727,6 +729,7 @@ fn preview_for_dimension(dimension: &Dimension) -> WireModel {
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
@@ -752,7 +755,9 @@ fn preview_for_dimension(dimension: &Dimension) -> WireModel {
         plinegen: true,
         fill_tris: Vec::new(),
         fill_tris_low: Vec::new(),
-    }
+    
+        ..Default::default()
+}
 }
 
 fn linear_preview(

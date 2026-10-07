@@ -5,9 +5,9 @@
 //  XLINE — infinite construction line: same two-click pattern, yields XLine.
 
 use crate::t;
-use acadrust::entities::{Ray as RayEnt, XLine as XLineEnt};
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::{Ray as RayEnt, XLine as XLineEnt};
+use codec::types::Vector3;
+use codec::EntityType;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::scene::model::wire_model::WireModel;
@@ -93,6 +93,7 @@ impl CadCommand for RayCommand {
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -118,7 +119,9 @@ impl CadCommand for RayCommand {
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        })
+        
+            ..Default::default()
+})
     }
 }
 
@@ -168,7 +171,7 @@ impl XLineCommand {
                 let base = self.base?;
                 let first = self.reference?.1;
                 let last = (pt - base).try_normalize()?;
-                let direction = cadkernel::space::curve::angle_bisector(
+                let direction = kernel::space::curve::angle_bisector(
                     first.to_array(), last.to_array(), self.plane.z.to_array())?;
                 (base, DVec3::from_array(direction))
             }
@@ -290,7 +293,7 @@ impl CadCommand for XLineCommand {
                 (delta.x.hypot(delta.y) > 1e-10).then(|| delta.y.atan2(delta.x).to_degrees())
             }
             XLineMode::OffsetDistance => {
-                let distance = cadkernel::space::Vec3::from(cursor.to_array()).distance(origin.to_array().into());
+                let distance = kernel::space::Vec3::from(cursor.to_array()).distance(origin.to_array().into());
                 (distance.is_finite() && distance > 0.0).then_some(distance)
             }
             _ => None,
@@ -302,7 +305,7 @@ impl CadCommand for XLineCommand {
     }
     fn inject_before_entity_pick(&self) -> bool { true }
     fn inject_picked_entity(&mut self, entity: EntityType) { self.picked = Some(entity); }
-    fn on_entity_pick(&mut self, _handle: acadrust::Handle, _pt: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, _handle: codec::Handle, _pt: DVec3) -> CmdResult {
         let xyz = |v: Vector3| DVec3::new(v.x, v.y, v.z);
         let reference = match self.picked.take() {
             Some(EntityType::Line(line)) => Some((xyz(line.start), xyz(line.end) - xyz(line.start))),
@@ -378,6 +381,7 @@ impl CadCommand for XLineCommand {
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -406,7 +410,9 @@ impl CadCommand for XLineCommand {
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        })
+        
+            ..Default::default()
+})
     }
 }
 
@@ -524,13 +530,13 @@ mod tests {
         assert!(matches!(command.on_point(DVec3::Y * 2.0), CmdResult::NeedPoint));
         assert!(command.needs_entity_pick());
 
-        let line = acadrust::entities::Line::from_points(
+        let line = codec::entities::Line::from_points(
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(1.0, 0.0, 0.0),
         );
         command.inject_picked_entity(EntityType::Line(line));
         assert!(matches!(
-            command.on_entity_pick(acadrust::Handle::new(1), DVec3::ZERO),
+            command.on_entity_pick(codec::Handle::new(1), DVec3::ZERO),
             CmdResult::NeedPoint
         ));
         let CmdResult::CommitEntity(EntityType::XLine(entity)) =

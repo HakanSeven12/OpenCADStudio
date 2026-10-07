@@ -1,8 +1,8 @@
 use crate::scene::Scene;
-use acadrust::entities::hatch::{BoundaryEdge, BoundaryPath, Hatch, PolylineEdge, SplineEdge};
-use acadrust::types::{Vector2, Vector3};
-use cadkernel::geom2d::{refine_spline_boundary, triangulate_rings, Curve, NurbsCurve};
-use cadkernel::tessellation::DEFAULT_ANGLE;
+use codec::entities::hatch::{BoundaryEdge, BoundaryPath, Hatch, PolylineEdge, SplineEdge};
+use codec::types::{Vector2, Vector3};
+use kernel::geom2d::{refine_spline_boundary, triangulate_rings, Curve, NurbsCurve};
+use kernel::tessellation::DEFAULT_ANGLE;
 
 #[test]
 fn gradient_stops_keep_entity_transparency() {
@@ -14,13 +14,13 @@ fn gradient_stops_keep_entity_transparency() {
     hatch.gradient_color.enabled = true;
     hatch.gradient_color.name = "LINEAR".into();
     hatch.gradient_color.colors = vec![
-        acadrust::entities::hatch::GradientColorEntry {
+        codec::entities::hatch::GradientColorEntry {
             value: 0.0,
-            color: acadrust::types::Color::Rgb { r: 255, g: 0, b: 0 },
+            color: codec::types::Color::Rgb { r: 255, g: 0, b: 0 },
         },
-        acadrust::entities::hatch::GradientColorEntry {
+        codec::entities::hatch::GradientColorEntry {
             value: 1.0,
-            color: acadrust::types::Color::Rgb { r: 0, g: 0, b: 255 },
+            color: codec::types::Color::Rgb { r: 0, g: 0, b: 255 },
         },
     ];
 

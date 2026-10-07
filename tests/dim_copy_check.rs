@@ -1,9 +1,9 @@
 // Regression for #161: COPY must duplicate a dimension's baked block so the
 // copy renders at the copy position, not on top of the original.
-use acadrust::entities::{Dimension, DimensionLinear, Line};
-use acadrust::tables::BlockRecord;
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
+use codec::entities::{Dimension, DimensionLinear, Line};
+use codec::tables::BlockRecord;
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
 use glam::DVec3;
 use OpenCADStudio::command::EntityTransform;
 use OpenCADStudio::scene::Scene;

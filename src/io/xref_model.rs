@@ -303,7 +303,10 @@ pub fn wildcard_match(name: &str, pattern: &str) -> bool {
 pub enum RefKind {
     DwgXref,
     Image,
-    Pdf,
+    /// A PDF, DWF or DGN underlay.
+    Underlay,
+    /// A point cloud scan (.rcs) or project (.rcp).
+    PointCloud,
 }
 
 /// Lifecycle state of a [`ReferenceEntry`].
@@ -750,9 +753,9 @@ mod tests {
     // every SPIKE1 cell survived the round trip.
     #[cfg(not(target_arch = "wasm32"))]
     fn roundtrip_probe(ext: &str) {
-        use acadrust::objects::{ImageDefinition, ObjectType, UnderlayDefinition};
-        use acadrust::tables::BlockRecord;
-        use acadrust::CadDocument;
+        use codec::objects::{ImageDefinition, ObjectType, UnderlayDefinition};
+        use codec::tables::BlockRecord;
+        use codec::CadDocument;
 
         let dir = std::env::temp_dir().join(format!(
             "ocs_xref_probe_{}_{}",

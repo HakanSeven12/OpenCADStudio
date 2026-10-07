@@ -1,4 +1,4 @@
-# Scripting ACIS bodies through cadkernel: findings and plan
+# Scripting ACIS bodies through opencadkernel: findings and plan
 
 Investigation of the blocker on **Solid3D, Body, Region and Surface**
 (`docs/plugin-host-model-coverage-ledger.md`). The blocker said a script can
@@ -7,7 +7,7 @@ forbids rewriting an opaque payload without a proven lossless path. This note
 records what OCS's own kernel path can already do, measured with two spike tests
 (`spike_kernel_body_round_trip`, `spike_kernel_timings` in
 `src/app/plugin_host.rs`, both `#[ignore]` because they are slow in a debug
-build). Measured on cadcodec `5b682ed` / cadkernel `6f046af`, debug build.
+build). Measured on opencadcodec `5b682ed` / opencadkernel `6f046af`, debug build.
 
 **Conclusion:** the blocker was overstated. OCS already owns a kernel-backed
 create/transform/boolean pipeline whose output is verified lossless before it is
@@ -63,7 +63,7 @@ Two things to understand about "lossless":
 
 ## Design
 
-The obstacle is the channel. The generic entity path moves an acadrust
+The obstacle is the channel. The generic entity path moves an opencadcodec
 `EntityType` from the plugin to the host; the plugin has no kernel and must never
 see or rewrite ACIS bytes. Three ways to give a script the operations:
 
@@ -141,11 +141,11 @@ Phase 1 alone would move Solid3D from blocked to complete-in-OCS.
 ## Boolean timings (release build)
 
 Measured 2026-09-20 in a scratch crate built with `--release` (opt-level 3)
-against the same cadkernel revision OCS pins (`6f046af`, features `acis` and
+against the same opencadkernel revision OCS pins (`6f046af`, features `acis` and
 `offset`), calling exactly what OCS's `solid_model::boolean_result` calls:
 `brep::operation_tolerance` then `brep::combine`. A debug build of OCS is about
 22 times slower, so booleans must never be exercised in a debug test run. The
-scratch program is not in the repository; to repeat it, depend on cadkernel at
+scratch program is not in the repository; to repeat it, depend on opencadkernel at
 that revision and time `brep::combine` on `brep::make::{cuboid, cylinder,
 sphere, torus}` operands.
 

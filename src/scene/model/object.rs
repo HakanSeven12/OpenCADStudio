@@ -1,6 +1,6 @@
 // Shared value types used by the dispatch and grip systems.
 
-use acadrust::types::{Color as AcadColor, Handle, LineWeight};
+use codec::types::{Color as AcadColor, Handle, LineWeight};
 use glam::DVec3;
 
 /// The kind of value held by a property row.
@@ -135,6 +135,11 @@ pub enum GripShape {
     Dropdown,
     /// Menu selector placed immediately beside its anchor grip.
     DropdownAdjacent,
+    /// Move-gizmo arrow along world X (0), Y (1) or Z (2); the grip's world
+    /// point is the gizmo centre, the marker sits at the arrow tip.
+    GizmoAxis(u8),
+    /// Move-gizmo square between two axes: XY (0), YZ (1) or ZX (2).
+    GizmoPlane(u8),
 }
 
 /// Describes one grip point for an entity.

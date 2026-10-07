@@ -1,6 +1,6 @@
-use acadrust::objects::ObjectType;
-use acadrust::tables::{DimStyle, TextStyle};
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::objects::ObjectType;
+use codec::tables::{DimStyle, TextStyle};
+use codec::{CadDocument, EntityType, Handle};
 
 #[derive(Debug, Clone)]
 pub struct TextCreationDefaults {
@@ -312,8 +312,8 @@ pub fn apply_current_creation_styles(doc: &CadDocument, entity: &mut EntityType)
     apply_object_defaults(doc, entity);
 }
 
-pub(crate) fn parse_current_transparency(value: &str) -> Option<acadrust::types::Transparency> {
-    use acadrust::types::Transparency;
+pub(crate) fn parse_current_transparency(value: &str) -> Option<codec::types::Transparency> {
+    use codec::types::Transparency;
     match value.trim().to_ascii_uppercase().as_str() {
         "BYLAYER" | "-1" => Some(Transparency::ByLayer),
         "BYBLOCK" | "-2" => Some(Transparency::ByBlock),
@@ -322,8 +322,8 @@ pub(crate) fn parse_current_transparency(value: &str) -> Option<acadrust::types:
     }
 }
 
-pub(crate) fn current_transparency_label(value: acadrust::types::Transparency) -> String {
-    use acadrust::types::Transparency;
+pub(crate) fn current_transparency_label(value: codec::types::Transparency) -> String {
+    use codec::types::Transparency;
     match value {
         Transparency::ByLayer => "ByLayer".into(),
         Transparency::ByBlock => "ByBlock".into(),
@@ -334,7 +334,7 @@ pub(crate) fn current_transparency_label(value: acadrust::types::Transparency) -
 #[cfg(test)]
 mod transparency_tests {
     use super::*;
-    use acadrust::types::Transparency;
+    use codec::types::Transparency;
 
     #[test]
     fn parses_supported_current_transparency_values() {

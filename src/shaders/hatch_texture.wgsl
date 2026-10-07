@@ -200,6 +200,11 @@ fn check_family(
 
 // ── Fragment shader ────────────────────────────────────────────────────────
 
+// Entity transparency shows only while transparency display is on.
+fn shown(color: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(color.rgb, select(1.0, color.a, u.transparency_enable > 0.5));
+}
+
 @fragment fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     // Taken here, in uniform control flow — see check_family.
     let ddx_xz = dpdx(v.xz);
@@ -209,7 +214,7 @@ fn check_family(
     let gk = (h.mode >> 8u) & 15u;
     let ginv = ((h.mode >> 8u) & 16u) != 0u;
     if base_mode == 1u {
-        return h.color;
+        return shown(h.color);
     } else if base_mode == 2u {
         let proj = v.xz.x * h.grad_cos + v.xz.y * h.grad_sin;
         var t    = clamp((proj - h.grad_min) / h.grad_range, 0.0, 1.0);
@@ -222,7 +227,7 @@ fn check_family(
         if ginv {
             t = 1.0 - t;
         }
-        return mix(h.color, h.color2, t);
+        return shown(mix(h.color, h.color2, t));
     } else if base_mode == 3u {
         // Radial gradient: centre is (grad_cos, grad_sin), radius is grad_range.
         let d = length(v.xz - vec2<f32>(h.grad_cos, h.grad_sin));
@@ -234,7 +239,7 @@ fn check_family(
             t = 1.0 - t;
         }
         // Radial stops run outside-in (colour 2 at the centre) — see hatch.wgsl.
-        return mix(h.color2, h.color, t);
+        return shown(mix(h.color2, h.color, t));
     }
 
     // Keep every family visible until all family spacings project below 2 px,
@@ -252,7 +257,7 @@ fn check_family(
         }
     }
     if all_families_subpixel {
-        return h.color;
+        return shown(h.color);
     }
 
     let cos_off = cos(h.angle_offset);
@@ -260,7 +265,7 @@ fn check_family(
     for (var i = 0u; i < h.n_families; i++) {
         let fam = load_family(i);
         if check_family(v.xz, ddx_xz, ddy_xz, fam, cos_off, sin_off, h.scale) {
-            return h.color;
+            return shown(h.color);
         }
     }
     discard;

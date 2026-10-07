@@ -1,4 +1,4 @@
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, CoincidentPick};
@@ -1432,8 +1432,8 @@ impl CadCommand for DimensionValueCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::Line;
-    use acadrust::types::Vector3;
+    use codec::entities::Line;
+    use codec::types::Vector3;
 
     #[test]
     fn object_pick_takes_the_line_ends_then_asks_for_the_location() {

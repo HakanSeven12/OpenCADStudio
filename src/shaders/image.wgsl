@@ -28,7 +28,7 @@ struct Uniforms {
 struct ImageParams {
     opacity:    f32,
     draw_depth: f32,   // signed (-1,1) draw-order bias; 0 = neutral
-    _pad1:      f32,
+    use_alpha:  f32,   // 1 = pixel alpha applies, 0 = pixels draw opaque
     _pad2:      f32,
 };
 @group(1) @binding(2) var<uniform> img_params: ImageParams;
@@ -63,5 +63,11 @@ fn vs_main(in: VertIn) -> VertOut {
 @fragment
 fn fs_main(in: VertOut) -> @location(0) vec4<f32> {
     let col = textureSample(img_texture, img_sampler, in.uv);
-    return vec4<f32>(col.rgb, col.a * img_params.opacity);
+    let alpha = select(1.0, col.a, img_params.use_alpha > 0.5);
+    // A fully transparent pixel leaves no depth behind, so what lies under
+    // the image (drawn before or after it) shows through.
+    if (alpha * img_params.opacity <= 0.0) {
+        discard;
+    }
+    return vec4<f32>(col.rgb, alpha * img_params.opacity);
 }

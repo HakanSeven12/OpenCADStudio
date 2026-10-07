@@ -15,6 +15,7 @@ pub mod leader;
 pub mod light;
 pub mod line;
 pub mod lwpolyline;
+pub mod match_props;
 pub mod mesh;
 pub mod mline;
 pub mod mtext;

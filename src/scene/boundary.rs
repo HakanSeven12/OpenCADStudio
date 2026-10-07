@@ -1,6 +1,6 @@
 use super::*;
 
-use cadkernel::geom2d::{
+use kernel::geom2d::{
     bounded_faces, closest_point, contains, distance_to, intersect, ring_nesting_depths,
     segment_crossing, signed_area, triangulate, Curve, Line, SegmentCrossing, Tolerance,
     Transform as CurveTransform,
@@ -166,7 +166,7 @@ fn live_segments_for_curves(
                     .into_iter()
                     .collect::<Vec<_>>(),
                 _ => curve
-                    .tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE)
+                    .tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
                     .windows(2)
                     .filter_map(|pair| {
                         let start = pair[0];
@@ -182,11 +182,11 @@ fn live_segments_for_curves(
         .collect()
 }
 
-fn hatch_path_seed(path: &acadrust::entities::BoundaryPath) -> Option<[f64; 2]> {
+fn hatch_path_seed(path: &codec::entities::BoundaryPath) -> Option<[f64; 2]> {
     let mut ring = Vec::new();
     for edge in &path.edges {
         let curve = crate::entities::hatch::edge_curve(edge)?;
-        let points = curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE);
+        let points = curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE);
         ring.extend(points.into_iter().skip(usize::from(!ring.is_empty())));
     }
     if ring.len() < 3 {
@@ -241,8 +241,8 @@ fn matching_face(faces: &[Vec<[f64; 2]>], seed: Option<[f64; 2]>) -> Option<&Vec
 
 pub(crate) fn ring_source_handles(
     ring: &[[f64; 2]],
-    sources: &rustc_hash::FxHashMap<acadrust::Handle, BoundarySource>,
-) -> Vec<acadrust::Handle> {
+    sources: &rustc_hash::FxHashMap<codec::Handle, BoundarySource>,
+) -> Vec<codec::Handle> {
     let mut handles = rustc_hash::FxHashSet::default();
     for (&start, &end) in ring
         .iter()
@@ -328,11 +328,11 @@ fn exact_boundary_edge(
     end: [f64; 2],
     next: [f64; 2],
     whole_curve: bool,
-) -> acadrust::entities::BoundaryEdge {
-    use acadrust::entities::{
+) -> codec::entities::BoundaryEdge {
+    use codec::entities::{
         BoundaryEdge, CircularArcEdge, EllipticArcEdge, LineEdge, SplineEdge,
     };
-    use acadrust::types::{Vector2, Vector3};
+    use codec::types::{Vector2, Vector3};
 
     let Some(curve) = curve else {
         return BoundaryEdge::Line(LineEdge {
@@ -436,8 +436,8 @@ pub(crate) fn exact_hatch_paths(
     exterior: &[bool],
     sources: &rustc_hash::FxHashMap<Handle, BoundarySource>,
     tolerance: f64,
-) -> Vec<acadrust::entities::BoundaryPath> {
-    use acadrust::entities::{BoundaryPath, BoundaryPathFlags};
+) -> Vec<codec::entities::BoundaryPath> {
+    use codec::entities::{BoundaryPath, BoundaryPathFlags};
 
     rings
         .iter()
@@ -508,7 +508,7 @@ pub(crate) fn exact_hatch_paths(
 pub(crate) fn boundary_entities(
     rings: &[Vec<[f64; 2]>],
     plane: WorkingPlane,
-) -> Vec<acadrust::EntityType> {
+) -> Vec<codec::EntityType> {
     rings
         .iter()
         .filter_map(|ring| {
@@ -526,15 +526,15 @@ pub(crate) fn boundary_entities(
             if points.len() < 3 {
                 return None;
             }
-            let mut polyline = acadrust::entities::LwPolyline::new();
+            let mut polyline = codec::entities::LwPolyline::new();
             polyline.is_closed = true;
             polyline.vertices = points
                 .into_iter()
                 .map(|[x, y]| {
-                    acadrust::entities::LwVertex::new(acadrust::types::Vector2::new(x, y))
+                    codec::entities::LwVertex::new(codec::types::Vector2::new(x, y))
                 })
                 .collect();
-            Some(plane.place_entity(acadrust::EntityType::LwPolyline(polyline)))
+            Some(plane.place_entity(codec::EntityType::LwPolyline(polyline)))
         })
         .collect()
 }
@@ -668,13 +668,13 @@ fn boundary_polyline(
     if points.len() < 3 {
         return None;
     }
-    let mut polyline = acadrust::entities::LwPolyline::new();
+    let mut polyline = codec::entities::LwPolyline::new();
     polyline.is_closed = true;
     polyline.vertices = points
         .iter()
         .enumerate()
         .map(|(index, point)| {
-            let mut vertex = acadrust::entities::LwVertex::new(acadrust::types::Vector2::new(
+            let mut vertex = codec::entities::LwVertex::new(codec::types::Vector2::new(
                 point[0], point[1],
             ));
             vertex.bulge = edge_curves
@@ -720,13 +720,56 @@ pub(crate) fn boundary_entities_from_sources(
         .collect()
 }
 
+/// A duplicated associative hatch must follow the duplicated boundary, not the
+/// source one — otherwise editing the source regenerates the duplicate onto
+/// the source's outline and it seems to vanish. A path whose boundary was not
+/// duplicated along loses its association. `handle_map` maps source handles
+/// to their duplicates (COPY and paste both build one). (#1370)
+pub(crate) fn remap_hatch_associations(
+    doc: &mut codec::CadDocument,
+    handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
+) -> bool {
+    let mut touched = false;
+    for &copy in handle_map.values() {
+        let Some(EntityType::Hatch(hatch)) = doc.get_entity_mut(copy) else {
+            continue;
+        };
+        if !hatch.is_associative {
+            continue;
+        }
+        for path in &mut hatch.paths {
+            if path.boundary_handles.iter().all(|source| handle_map.contains_key(source)) {
+                for source in &mut path.boundary_handles {
+                    *source = handle_map[source];
+                }
+            } else {
+                path.boundary_handles.clear();
+                path.flags.set_external(false);
+            }
+        }
+        hatch.is_associative = hatch.paths.iter().any(|path| !path.boundary_handles.is_empty());
+        touched = true;
+    }
+    touched
+}
+
 impl Scene {
-    pub(crate) fn replace_hatch_association(&mut self,handle:Handle,paths:Vec<acadrust::entities::BoundaryPath>) {
+    pub(crate) fn replace_hatch_association(&mut self,handle:Handle,paths:Vec<codec::entities::BoundaryPath>) {
         let Some(EntityType::Hatch(hatch))=self.document.get_entity_mut(handle) else{return;};
         hatch.paths=paths;
         hatch.is_associative=true;
         self.associative_hatch_source_cache.borrow_mut().take();
         self.refresh_fill_model(handle);
+    }
+
+    /// COPY's half of [`remap_hatch_associations`], plus the cache it feeds.
+    pub(crate) fn copy_hatch_associations(
+        &mut self,
+        handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
+    ) {
+        if remap_hatch_associations(&mut self.document, handle_map) {
+            self.associative_hatch_source_cache.borrow_mut().take();
+        }
     }
 
     pub(crate) fn edit_hatch_boundary_handles(
@@ -771,6 +814,48 @@ impl Scene {
             self.refresh_fill_model(hatch_handle);
         }
         true
+    }
+
+    /// A boundary source split into pieces (TRIM, BREAK): every associative
+    /// hatch bounded by `old` is bounded by all of `pieces` instead, so the
+    /// region survives `old` being erased.
+    pub(crate) fn split_hatch_source(&mut self, old: Handle, pieces: &[Handle]) {
+        if pieces.is_empty() {
+            return;
+        }
+        let dependents = self.associative_hatch_dependents(&std::iter::once(old).collect());
+        if dependents.is_empty() {
+            return;
+        }
+        for &hatch_handle in &dependents {
+            if self.is_recording_undo() {
+                let before = self.document.get_entity_arc(hatch_handle);
+                self.record_undo_before(hatch_handle, before);
+            }
+            let Some(EntityType::Hatch(hatch)) = self.document.get_entity_mut(hatch_handle) else {
+                continue;
+            };
+            for path in &mut hatch.paths {
+                if !path.boundary_handles.contains(&old) {
+                    continue;
+                }
+                path.boundary_handles.retain(|source| *source != old);
+                for &piece in pieces {
+                    if !path.boundary_handles.contains(&piece) {
+                        path.boundary_handles.push(piece);
+                    }
+                }
+            }
+        }
+        self.associative_hatch_source_cache.borrow_mut().take();
+        let changes: Vec<_> = pieces
+            .iter()
+            .map(|&piece| (piece, ChangeKind::Modified))
+            .collect();
+        let refreshed = self.refresh_associative_hatches(&changes);
+        if !refreshed.is_empty() {
+            self.bump_entities(&refreshed);
+        }
     }
 
     fn associative_hatch_dependents(
@@ -1060,33 +1145,33 @@ fn clip_unbounded_to_bounds(
 }
 
 fn hatch_path_geometry(
-    path: &acadrust::entities::BoundaryPath,
+    path: &codec::entities::BoundaryPath,
 ) -> (Vec<[f64; 2]>, Vec<f64>) {
     let edges: Vec<_> = path
         .edges
         .iter()
         .filter_map(crate::entities::hatch::edge_curve)
-        .map(|curve| curve.tessellate_angle(cadkernel::tessellation::DEFAULT_ANGLE))
+        .map(|curve| curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE))
         .collect();
     super::entity::chain_path_edges_with_directions(edges)
 }
 
-pub(crate) fn hatch_path_ring(path: &acadrust::entities::BoundaryPath) -> Option<Vec<[f64; 2]>> {
+pub(crate) fn hatch_path_ring(path: &codec::entities::BoundaryPath) -> Option<Vec<[f64; 2]>> {
     let (ring, _) = hatch_path_geometry(path);
     (ring.len() >= 3).then_some(ring)
 }
 
-pub(crate) fn hatch_path_directions(path: &acadrust::entities::BoundaryPath) -> Vec<f64> {
+pub(crate) fn hatch_path_directions(path: &codec::entities::BoundaryPath) -> Vec<f64> {
     hatch_path_geometry(path).1
 }
 
-pub(crate) fn hatch_boundary_rings(hatch: &acadrust::entities::Hatch) -> Vec<Vec<[f64; 2]>> {
+pub(crate) fn hatch_boundary_rings(hatch: &codec::entities::Hatch) -> Vec<Vec<[f64; 2]>> {
     hatch.paths.iter().filter_map(hatch_path_ring).collect()
 }
 
 pub(crate) fn separated_hatch_path_groups(
-    hatch: &acadrust::entities::Hatch,
-) -> Vec<Vec<acadrust::entities::BoundaryPath>> {
+    hatch: &codec::entities::Hatch,
+) -> Vec<Vec<codec::entities::BoundaryPath>> {
     let items: Vec<_> = hatch
         .paths
         .iter()
@@ -1154,11 +1239,11 @@ mod boundary_xline_tests {
         scene: &mut Scene,
         start: [f64; 3],
         end: [f64; 3],
-    ) -> acadrust::Handle {
+    ) -> codec::Handle {
         scene.add_entity(EntityType::Line(
-            acadrust::entities::Line::from_points(
-                acadrust::types::Vector3::new(start[0], start[1], start[2]),
-                acadrust::types::Vector3::new(end[0], end[1], end[2]),
+            codec::entities::Line::from_points(
+                codec::types::Vector3::new(start[0], start[1], start[2]),
+                codec::types::Vector3::new(end[0], end[1], end[2]),
             ),
         ))
     }
@@ -1171,9 +1256,9 @@ mod boundary_xline_tests {
         rect_edge(&mut scene, [10.0, 10.0, 0.0], [0.0, 10.0, 0.0]);
         rect_edge(&mut scene, [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]);
         // Infinite vertical construction line through x=5.
-        scene.add_entity(EntityType::XLine(acadrust::entities::XLine::new(
-            acadrust::types::Vector3::new(5.0, 0.0, 0.0),
-            acadrust::types::Vector3::new(0.0, 1.0, 0.0),
+        scene.add_entity(EntityType::XLine(codec::entities::XLine::new(
+            codec::types::Vector3::new(5.0, 0.0, 0.0),
+            codec::types::Vector3::new(0.0, 1.0, 0.0),
         )));
 
         let sources =
@@ -1194,9 +1279,9 @@ mod boundary_xline_tests {
         rect_edge(&mut scene, [10.0, 10.0, 0.0], [0.0, 10.0, 0.0]);
         rect_edge(&mut scene, [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]);
         // Ray starting below the rectangle, pointing up through x=5.
-        scene.add_entity(EntityType::Ray(acadrust::entities::Ray::new(
-            acadrust::types::Vector3::new(5.0, -5.0, 0.0),
-            acadrust::types::Vector3::new(0.0, 1.0, 0.0),
+        scene.add_entity(EntityType::Ray(codec::entities::Ray::new(
+            codec::types::Vector3::new(5.0, -5.0, 0.0),
+            codec::types::Vector3::new(0.0, 1.0, 0.0),
         )));
 
         let sources =
@@ -1211,9 +1296,9 @@ mod boundary_xline_tests {
 
     #[test]
     fn xline_source_clips_to_given_bounds() {
-        let xline = EntityType::XLine(acadrust::entities::XLine::new(
-            acadrust::types::Vector3::new(5.0, 0.0, 0.0),
-            acadrust::types::Vector3::new(0.0, 1.0, 0.0),
+        let xline = EntityType::XLine(codec::entities::XLine::new(
+            codec::types::Vector3::new(5.0, 0.0, 0.0),
+            codec::types::Vector3::new(0.0, 1.0, 0.0),
         ));
         let source = entity_boundary_source_on_plane(
             &xline,
@@ -1238,9 +1323,9 @@ mod boundary_xline_tests {
         rect_edge(&mut scene, [10.0, 10.0, 0.0], [0.0, 10.0, 0.0]);
         rect_edge(&mut scene, [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]);
         // Far-away vertical construction line: never touches the rectangle.
-        scene.add_entity(EntityType::XLine(acadrust::entities::XLine::new(
-            acadrust::types::Vector3::new(50.0, 0.0, 0.0),
-            acadrust::types::Vector3::new(0.0, 1.0, 0.0),
+        scene.add_entity(EntityType::XLine(codec::entities::XLine::new(
+            codec::types::Vector3::new(50.0, 0.0, 0.0),
+            codec::types::Vector3::new(0.0, 1.0, 0.0),
         )));
 
         let sources =

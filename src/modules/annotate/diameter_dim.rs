@@ -1,6 +1,6 @@
-use acadrust::entities::{Dimension, DimensionDiameter};
-use acadrust::types::{Handle, Vector3};
-use acadrust::EntityType;
+use codec::entities::{Dimension, DimensionDiameter};
+use codec::types::{Handle, Vector3};
+use codec::EntityType;
 use glam::{DVec3, Vec3};
 
 use crate::command::{
@@ -332,6 +332,7 @@ fn preview_line(far_chord: Vec3, chord: Vec3, text: Vec3) -> WireModel {
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
@@ -363,7 +364,9 @@ fn preview_line(far_chord: Vec3, chord: Vec3, text: Vec3) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+        ..Default::default()
+}
 }
 
 inventory::submit!(crate::command::CommandRegistration { names: &["DIMDIAMETER"] });

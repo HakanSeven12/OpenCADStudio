@@ -1,8 +1,8 @@
 // 3DPOLY creates open or closed non-planar paths.
 
-use acadrust::entities::Polyline3D;
-use acadrust::types::Vector3;
-use acadrust::EntityType;
+use codec::entities::Polyline3D;
+use codec::types::Vector3;
+use codec::EntityType;
 use crate::t;
 
 use crate::command::{CadCommand, CmdResult};

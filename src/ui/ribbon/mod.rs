@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use rustc_hash::FxHashMap as HashMap;
 
-use acadrust::types::{Color as AcadColor, LineWeight};
+use codec::types::{Color as AcadColor, LineWeight};
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text};
 use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 
@@ -20,13 +20,17 @@ use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem};
 use crate::plugin::all_ribbon_modules;
 use crate::ui::properties::{linetype_display_name, lw_options, LinetypeItem};
 
-mod widgets;
+pub(crate) mod widgets;
 mod draw_panel;
+pub(crate) use draw_panel::tools as panel_tools;
 mod modify_panel;
 mod color_dropdown;
+mod context_tools;
+pub use context_tools::{pdf_underlay_tools, point_cloud_tools, xref_tools, UnderlayContext};
 use widgets::{StyleContext, *};
 pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
 mod collapse;
+mod locate;
 use collapse::{CollapsePanels, Panel};
 pub use collapse::CollapseMode;
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
@@ -54,6 +58,10 @@ pub struct Ribbon {
     pub show_ucs_icon: bool,
     /// Properties panel (PROPERTIES) visibility — drives the Properties button highlight.
     pub show_properties: bool,
+    /// The Count palette is open (View › Palettes › Count).
+    pub show_count_palette: bool,
+    /// Sheet Set Manager palette shown (SSMSTATE).
+    pub show_sheet_set: bool,
     /// Graphic Attributes panel visibility — drives its ribbon button highlight.
     pub show_graphic_attributes: bool,
     /// File tabs (FILETAB) visibility — drives the File Tabs button highlight.
@@ -104,6 +112,14 @@ pub struct Ribbon {
     /// Set by `CollapsePanels` when the tool row is in its tight state; the mode
     /// selector hides itself then to give the cramped tab row its space back.
     collapse_tight: Arc<AtomicBool>,
+    /// The selected PDF underlay's switches while only underlays are selected.
+    underlay_ctx: Option<UnderlayContext>,
+    /// Only xrefs are selected.
+    xref_ctx: bool,
+    /// Only point clouds are selected: whether the first shows its crops.
+    point_cloud_ctx: Option<bool>,
+    /// XDWGFADECTL as the Reference slide-out shows it (negative = off).
+    pub xref_fade: i32,
 }
 
 /// Per-layer display data shown in the ribbon layer dropdown.
@@ -114,6 +130,8 @@ pub struct LayerInfo {
     pub visible: bool,
     pub frozen: bool,
     pub locked: bool,
+    /// Layout with an active viewport: (its Layer Manager column, frozen there).
+    pub vp_frozen: Option<(usize, bool)>,
 }
 
 /// Full-screen backdrop for an open ribbon dropdown: closes the dropdown when
@@ -164,6 +182,8 @@ impl Ribbon {
             show_viewcube: true,
             show_ucs_icon: true,
             show_properties: true,
+            show_count_palette: false,
+            show_sheet_set: false,
             show_graphic_attributes: false,
             show_file_tabs: true,
             show_layout_tabs: true,
@@ -198,6 +218,10 @@ impl Ribbon {
             tool_bar_h: Arc::new(AtomicU32::new(TOOL_BAR_H.to_bits())),
             collapse_mode: CollapseMode::default(),
             collapse_tight: Arc::new(AtomicBool::new(false)),
+            underlay_ctx: None,
+            xref_ctx: false,
+            point_cloud_ctx: None,
+            xref_fade: 50,
         }
     }
 
@@ -291,6 +315,10 @@ impl Ribbon {
     pub fn activate_tool(&mut self, id: &str) {
         self.active_tool = Some(id.to_string());
     }
+    #[cfg(test)]
+    pub(crate) fn active_tool(&self) -> Option<&str> {
+        self.active_tool.as_deref()
+    }
     pub fn deactivate_tool(&mut self) {
         self.active_tool = None;
     }
@@ -318,6 +346,12 @@ impl Ribbon {
     pub fn set_properties(&mut self, on: bool) {
         self.show_properties = on;
     }
+    pub fn set_count_palette(&mut self, on: bool) {
+        self.show_count_palette = on;
+    }
+    pub fn set_sheet_set(&mut self, on: bool) {
+        self.show_sheet_set = on;
+    }
     pub fn set_graphic_attributes(&mut self, on: bool) {
         self.show_graphic_attributes = on;
     }
@@ -338,10 +372,61 @@ impl Ribbon {
             show_viewcube: self.show_viewcube,
             show_ucs_icon: self.show_ucs_icon,
             show_properties: self.show_properties,
+            show_count_palette: self.show_count_palette,
             show_graphic_attributes: self.show_graphic_attributes,
             show_block_palette,
+            show_sheet_set: self.show_sheet_set,
             show_file_tabs: self.show_file_tabs,
             show_layout_tabs: self.show_layout_tabs,
+        }
+    }
+
+    /// One panel in its four densities; `lead` adds controls before the
+    /// group's own tools.
+    fn panel<'a>(
+        &'a self,
+        g: &'a RibbonGroup,
+        ts: widgets::ToggleState,
+        style_ctx: &StyleContext<'_>,
+        lead: &dyn Fn(bool) -> Vec<Element<'a, Message>>,
+    ) -> Panel<'a> {
+        let group = |compact: bool| {
+            render_group(
+                compact,
+                g,
+                lead(compact),
+                &self.active_tool,
+                &self.open_dropdown,
+                &self.last_cmd,
+                ts,
+                &self.layer_infos,
+                &self.active_layer,
+                self.active_color,
+                &self.active_linetype,
+                self.active_lineweight,
+                style_ctx,
+            )
+        };
+        let button = |tight: bool| {
+            collapse_button(
+                g,
+                self.last_panel_tool.get(g.title).copied(),
+                &self.active_tool,
+                &self.open_dropdown,
+                &self.last_cmd,
+                ts,
+                &self.layer_infos,
+                &self.active_layer,
+                self.active_color,
+                &self.active_linetype,
+                self.active_lineweight,
+                style_ctx,
+                tight,
+            )
+        };
+        Panel {
+            id: g.title.to_string(),
+            elements: [group(false), group(true), button(false), button(true)],
         }
     }
 
@@ -423,6 +508,14 @@ impl Ribbon {
         self.close_dropdown();
     }
 
+    /// Show `cmd` as the current item of a dropdown that mirrors a drawing
+    /// setting, without running it.
+    pub fn set_dropdown_current(&mut self, dropdown_id: &'static str, cmd: &'static str) {
+        if self.last_cmd.get(dropdown_id) != Some(&cmd) {
+            self.last_cmd.insert(dropdown_id, cmd);
+        }
+    }
+
     // ── View ──────────────────────────────────────────────────────────────
 
     pub fn view(
@@ -435,7 +528,7 @@ impl Ribbon {
     ) -> Element<'_, Message> {
         // ── Quick-access file commands + undo/redo, one merged flow ────────
         let lead = iced::widget::Row::with_children(vec![
-            quick_access_btn(crate::ui::icons::DOC_NEW, "New", "NEW").into(),
+            quick_access_btn(crate::ui::icons::DOC_NEW, "New", "QNEW").into(),
             quick_access_btn(crate::ui::icons::FOLDER_OPEN, "Open", "OPEN").into(),
             quick_access_btn(crate::ui::icons::SAVE, "Save", "SAVE").into(),
             quick_access_btn(crate::ui::icons::FILE_EXPORT, "Save As", "SAVEAS").into(),
@@ -451,6 +544,10 @@ impl Ribbon {
         // The quick-access flow and the tabs flow each flex-wrap; WrapBar stacks
         // them so a wrapped tab never shares a row with a quick-access button.
 
+        // A running command whose button is on another tab tints that tab's
+        // header with a faint wash of the button's blue, pointing at where the
+        // button lives without competing with the selected tab's outline.
+        let holding_tab = self.tab_holding_active_tool();
         let tab_items = self.modules.iter().enumerate().fold(
             Vec::<Element<'_, Message>>::new(),
             |mut acc, (i, module)| {
@@ -462,6 +559,7 @@ impl Ribbon {
 
                 let is_active = i == self.active;
                 let is_contextual = module.id() == "layout";
+                let holds_tool = holding_tab == Some(i);
                 let btn = container(
                     button(text(crate::i18n::ribbon_module_title(module.id(), module.title())).size(12))
                         .on_press(Message::RibbonSelectTab(i))
@@ -474,6 +572,7 @@ impl Ribbon {
                             };
                             let pair = match (is_active, status) {
                                 (true, _) => palette.background.weakest,
+                                (false, _) if holds_tool => palette.primary.weak,
                                 (false, button::Status::Hovered) => {
                                     if is_contextual {
                                         palette.warning.weak
@@ -485,10 +584,17 @@ impl Ribbon {
                             };
                             button::Style {
                             background: (is_active
+                                || holds_tool
                                 || matches!(status, button::Status::Hovered))
-                                .then_some(Background::Color(pair.color)),
+                                .then_some(Background::Color(if holds_tool && !is_active {
+                                    pair.color.scale_alpha(0.35)
+                                } else {
+                                    pair.color
+                                })),
                             text_color: if is_active {
                                 pair.text
+                            } else if holds_tool {
+                                palette.background.base.text
                             } else if is_contextual {
                                 accent.color
                             } else {
@@ -529,6 +635,7 @@ impl Ribbon {
                 acc
             },
         );
+
 
         // Tabs may squeeze their gaps to fit before wrapping: from the normal 6px
         // down to -12px on a narrow (e.g. phone) tab row, tucking neighbours into
@@ -609,73 +716,10 @@ impl Ribbon {
                 // fit they degrade from the right — a panel's large buttons first
                 // shrink to compact icon columns, then it collapses to a ▾ flyout
                 // button. See `CollapsePanels`.
+                let ts = self.toggle_state(show_block_palette);
                 let panels: Vec<Panel<'_>> = groups
                     .iter()
-                    .map(|g| {
-                        let ts = self.toggle_state(show_block_palette);
-                        Panel {
-                        id: g.title.to_string(),
-                        elements: [render_group(
-                            false,
-                            g,
-                            &self.active_tool,
-                            &self.open_dropdown,
-                            &self.last_cmd,
-                            ts,
-                            &self.layer_infos,
-                            &self.active_layer,
-                            self.active_color,
-                            &self.active_linetype,
-                            self.active_lineweight,
-                            &style_ctx,
-                        ),
-                        render_group(
-                            true,
-                            g,
-                            &self.active_tool,
-                            &self.open_dropdown,
-                            &self.last_cmd,
-                            ts,
-                            &self.layer_infos,
-                            &self.active_layer,
-                            self.active_color,
-                            &self.active_linetype,
-                            self.active_lineweight,
-                            &style_ctx,
-                        ),
-                        collapse_button(
-                            g,
-                            self.last_panel_tool.get(g.title).copied(),
-                            &self.active_tool,
-                            &self.open_dropdown,
-                            &self.last_cmd,
-                            ts,
-                            &self.layer_infos,
-                            &self.active_layer,
-                            self.active_color,
-                            &self.active_linetype,
-                            self.active_lineweight,
-                            &style_ctx,
-                            false,
-                        ),
-                        collapse_button(
-                            g,
-                            self.last_panel_tool.get(g.title).copied(),
-                            &self.active_tool,
-                            &self.open_dropdown,
-                            &self.last_cmd,
-                            ts,
-                            &self.layer_infos,
-                            &self.active_layer,
-                            self.active_color,
-                            &self.active_linetype,
-                            self.active_lineweight,
-                            &style_ctx,
-                            true,
-                        ),
-                        ],
-                    }
-                    })
+                    .map(|g| self.panel(g, ts, &style_ctx, &|_| Vec::new()))
                     .collect();
                 CollapsePanels::new(panels, self.collapsed_open.clone(), TOOL_BAR_H)
                     .report_height(self.tool_bar_h.clone())
@@ -741,6 +785,19 @@ impl Ribbon {
     }
 
     // ── Dropdown overlay ──────────────────────────────────────────────────
+
+    /// Place `panel` (`w` wide) under dropdown `id`, closing on a click
+    /// outside it.
+    pub fn place_dropdown<'a>(
+        &self,
+        id: &str,
+        panel: Element<'a, Message>,
+        w: f32,
+        win_w: f32,
+    ) -> Element<'a, Message> {
+        let (align_right, h_pad, top) = self.dd_anchor(id, w, win_w);
+        dropdown_backdrop(position_ribbon_dropdown(panel, align_right, h_pad, top))
+    }
 
     pub fn dropdown_overlay(
         &self,
@@ -881,6 +938,7 @@ impl Ribbon {
             .iter()
             .map(|(cmd, label, item_icon)| {
                 let is_current = *cmd == last_cmd;
+                let disabled = widgets::is_disabled_item(cmd);
                 let checkmark: Element<'_, Message> =
                     crate::ui::icons::themed_check_cell(is_current);
                 let icon_el: Element<Message> =
@@ -892,7 +950,7 @@ impl Ribbon {
                         .size(11)
                         .wrapping(iced::advanced::text::Wrapping::None)
                         .style(move |theme: &Theme| iced::widget::text::Style {
-                            color: (!is_current).then_some(
+                            color: (!is_current || disabled).then_some(
                                 theme
                                     .palette()
                                     .background
@@ -907,10 +965,10 @@ impl Ribbon {
                         .spacing(4)
                         .align_y(iced::Center),
                 )
-                .on_press(Message::DropdownSelectItem {
+                .on_press_maybe((!disabled).then_some(Message::DropdownSelectItem {
                     dropdown_id: dd_id,
                     cmd: *cmd,
-                })
+                }))
                 .style(popup_row_style)
                 .width(Fill)
                 .padding([4, 10])
@@ -957,11 +1015,10 @@ impl Ribbon {
         let rows: Vec<Element<Message>> = self
             .layer_infos
             .iter()
-            .enumerate()
-            .filter(|(_, info)| {
+            .filter(|info| {
                 filter.is_empty() || info.name.to_lowercase().contains(&filter)
             })
-            .map(|(index, info)| {
+            .map(|info| {
                 let is_active = info.name == self.active_layer;
                 let lc = info.color;
                 let lv = info.visible;
@@ -984,16 +1041,23 @@ impl Ribbon {
 
                 let vis = icon_btn(
                     crate::ui::icons::layer_visible(lv),
-                    Message::LayerToggleVisible(index),
+                    Message::LayerToggleVisible(info.name.clone()),
                 );
                 let freeze = icon_btn(
                     crate::ui::icons::layer_freeze(lf),
-                    Message::LayerToggleFreeze(index),
+                    Message::LayerToggleFreeze(info.name.clone()),
                 );
                 let lock = icon_btn(
                     crate::ui::icons::layer_lock(ll),
-                    Message::LayerToggleLock(index),
+                    Message::LayerToggleLock(info.name.clone()),
                 );
+                // Freeze in the current viewport only (#1466).
+                let vp_freeze = info.vp_frozen.map(|(column, frozen)| {
+                    icon_btn(
+                        crate::ui::icons::layer_vp_freeze(frozen),
+                        Message::LayerToggleVpFreeze(info.name.clone(), column),
+                    )
+                });
                 let checkmark: Element<'_, Message> =
                     crate::ui::icons::themed_check_cell(is_active);
                 let label =
@@ -1019,7 +1083,10 @@ impl Ribbon {
                     .padding([4, 4]);
 
                 container(
-                    row![checkmark, vis, freeze, lock, select]
+                    row![checkmark, vis, freeze]
+                        .push(vp_freeze)
+                        .push(lock)
+                        .push(select)
                         .spacing(5)
                         .align_y(iced::Center),
                 )
@@ -1328,6 +1395,7 @@ impl Ribbon {
 fn render_group<'a>(
     compact: bool,
     group: &RibbonGroup,
+    lead: Vec<Element<'a, Message>>,
     active_tool: &Option<String>,
     open_dd: &Option<String>,
     last_cmd: &HashMap<&'static str, &'static str>,
@@ -1339,7 +1407,7 @@ fn render_group<'a>(
     active_lineweight: LineWeight,
     style_ctx: &StyleContext<'_>,
 ) -> Element<'a, Message> {
-    let mut items_row: Vec<Element<Message>> = Vec::new();
+    let mut items_row: Vec<Element<Message>> = lead;
     let mut small_buf: Vec<Element<Message>> = Vec::new();
 
     let ctx = widgets::RenderCtx {
@@ -1392,7 +1460,12 @@ fn render_group<'a>(
 
     column![
         tools_el,
-        draw_panel::group_title(group.title, open_dd),
+        draw_panel::group_title(
+            group.title,
+            &group.tools.iter().filter_map(item_id).collect::<Vec<_>>(),
+            open_dd,
+            active_tool.as_deref(),
+        ),
     ]
     .align_x(iced::Center)
     .spacing(0)
@@ -1473,6 +1546,19 @@ fn collapse_button<'a>(
 ) -> Element<'a, Message> {
     let title = group.title;
     let localized_title = t!(title).into_owned();
+    // A collapsed panel lights its opener while one of its hidden tools runs,
+    // the way a dropdown lights while one of its items does.
+    let active = active_tool.as_deref();
+    let holds = active.is_some_and(|id| locate::group_holds(group, id));
+    let opener_style = move |lit: bool| {
+        move |theme: &Theme, status| {
+            if lit {
+                tool_btn_style(theme, true, status)
+            } else {
+                button::subtle(theme, status)
+            }
+        }
+    };
 
     // Tightest form: one button = the panel's FIRST tool icon + its title + ▾.
     // Clicking opens the flyout listing every tool; no tool runs directly at this
@@ -1490,7 +1576,7 @@ fn collapse_button<'a>(
                         .size(9)
                         .width(Fill)
                         .align_x(iced::Center)
-                        .wrapping(iced::advanced::text::Wrapping::WordOrGlyph)
+                        .wrapping(iced::advanced::text::Wrapping::Word)
                         .style(muted_text_style),
                     crate::ui::icons::themed_secondary_arrow_down(8.0),
                 ]
@@ -1503,7 +1589,7 @@ fn collapse_button<'a>(
             .width(Fill),
         )
         .on_press(Message::ToggleRibbonPanel(title.to_string()))
-        .style(button::subtle)
+        .style(opener_style(holds))
         .width(Fill)
         .padding([3, 5]);
         return automatic_large_button(localized_title, content.into());
@@ -1513,6 +1599,8 @@ fn collapse_button<'a>(
     // that runs the last-used tool — above a title + ▾ opener for the full flyout.
     // For a Properties panel the representative is its Match button.
     let rep = representative(group, last_used);
+    // The face lights itself when it is the running tool.
+    let face_lit = rep.zip(active).is_some_and(|(item, id)| locate::item_holds(item, id));
     let face: Element<'_, Message> = match rep {
         Some(RibbonItem::PropertiesGroup { match_prop }) => {
             render_large(
@@ -1559,7 +1647,7 @@ fn collapse_button<'a>(
                 .size(9)
                 .width(Fill)
                 .align_x(iced::Center)
-                .wrapping(iced::advanced::text::Wrapping::WordOrGlyph)
+                .wrapping(iced::advanced::text::Wrapping::Word)
                 .style(muted_text_style),
             crate::ui::icons::themed_secondary_arrow_down(8.0),
         ]
@@ -1568,7 +1656,7 @@ fn collapse_button<'a>(
         .align_y(iced::Center),
     )
     .on_press(Message::ToggleRibbonPanel(title.to_string()))
-    .style(button::subtle)
+    .style(opener_style(holds && !face_lit))
     .width(Fill)
     .padding([1, 4]);
     let opener = automatic_large_button(localized_title, opener.into());
@@ -1621,3 +1709,4 @@ mod tests {
         assert_eq!(ribbon.open_dropdown, None);
     }
 }
+

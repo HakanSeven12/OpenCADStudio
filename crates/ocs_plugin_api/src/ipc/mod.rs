@@ -1,6 +1,6 @@
 //! Inter-process communication layer for out-of-process plugins.
 //!
-//! Built only with the `host` feature because it needs `acadrust`-typed
+//! Built only with the `host` feature because it needs `opencadcodec`-typed
 //! messages and the plugin runner binary.
 //!
 //! Submodules:

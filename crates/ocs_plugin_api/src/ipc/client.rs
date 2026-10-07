@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 
-use acadrust::xdata::ExtendedDataRecord;
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::xdata::ExtendedDataRecord;
+use codec::{CadDocument, EntityType, Handle};
 use interprocess::local_socket::traits::Stream as StreamTrait;
 use interprocess::local_socket::{GenericNamespaced, Stream, ToNsName};
 
@@ -364,10 +364,11 @@ impl HostApi for PluginHostApi {
         &mut self,
         _plugin_id: &'static str,
         _init: &mut dyn FnMut() -> Box<dyn Any + Send + Sync>,
-    ) -> &mut (dyn Any + Send + Sync) {
+    ) -> Option<&mut (dyn Any + Send + Sync)> {
         // Same limitation as `plugin_state_any`. This would need a serializable
-        // state contract to work across processes.
-        panic!("ensure_plugin_state is not supported for out-of-process plugins; keep state in the plugin crate")
+        // state contract to work across processes. Degrade to `None` so plugins
+        // keep running with state unavailable instead of crashing the runner.
+        None
     }
 
     fn document_reader(&self) -> Box<dyn DocumentReader + '_> {
@@ -589,8 +590,8 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::thread;
 
-    use acadrust::entities::Point;
-    use acadrust::{EntityType, Handle};
+    use codec::entities::Point;
+    use codec::{EntityType, Handle};
     use interprocess::local_socket::{
         traits::{Listener, Stream as StreamTrait},
         GenericNamespaced, ListenerOptions, Stream, ToNsName,
@@ -631,6 +632,22 @@ mod tests {
             std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new())),
         );
         (api, client_stream)
+    }
+
+    #[test]
+    fn ensure_plugin_state_does_not_panic_for_out_of_process_hosts() {
+        let (mut api, _peer) = make_client();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = api.ensure_plugin_state_any("opencad.demo", &mut || Box::new(7u32));
+        }));
+        assert!(
+            outcome.is_ok(),
+            "out-of-process ensure_plugin_state must degrade, not panic: {:?}",
+            outcome.err()
+        );
+        assert!(api
+            .ensure_plugin_state_any("opencad.demo", &mut || Box::new(7u32))
+            .is_none());
     }
 
     #[test]

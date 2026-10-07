@@ -231,7 +231,7 @@ impl PlotStyleTable {
             "grayscale.ctb" => {
                 let mut table = Self::identity(GRAYSCALE_PLOT_STYLE);
                 for aci in 1..=255u8 {
-                    if let Some((r, g, b)) = acadrust::types::aci_to_rgb(aci) {
+                    if let Some((r, g, b)) = codec::types::aci_to_rgb(aci) {
                         let gray = if aci == 7 {
                             0
                         } else {
@@ -332,7 +332,7 @@ impl PlotStyleTable {
                 if aci == 7 {
                     Some([0.0; 3])
                 } else {
-                    acadrust::types::aci_to_rgb(aci).map(|(r, g, b)| {
+                    codec::types::aci_to_rgb(aci).map(|(r, g, b)| {
                         [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
                     })
                 }
@@ -454,7 +454,7 @@ impl PlotStyleTable {
 fn decompress_ctb(data: &[u8]) -> Result<(String, Vec<String>), String> {
     const PREFIX: &[u8] = b"PIAFILEVERSION_2.0,CTBVER1,compress\r\npmzlibcodec";
     let mut warnings = Vec::new();
-    let mut decoded = Vec::new();
+    let mut decoded;
     if data.starts_with(PREFIX) {
         if data.len() < 60 {
             return Err("CTB header is truncated".into());
@@ -504,9 +504,10 @@ fn decompress_ctb(data: &[u8]) -> Result<(String, Vec<String>), String> {
             decoded = inflate_lenient(payload, &mut warnings)?;
         } else {
             use flate2::read::DeflateDecoder;
-            DeflateDecoder::new(payload)
-                .read_to_end(&mut decoded)
-                .map_err(|e| format!("legacy CTB deflate decompress: {e}"))?;
+            decoded = inflate_capped(
+                DeflateDecoder::new(payload),
+                "legacy CTB deflate decompress",
+            )?;
         }
     }
     while decoded.last() == Some(&0) {
@@ -519,22 +520,46 @@ fn decompress_ctb(data: &[u8]) -> Result<(String, Vec<String>), String> {
     Ok((text, warnings))
 }
 
+/// Far above any real plot-style table (a CTB is a text config file), so a
+/// crafted few-hundred-KB payload cannot inflate until memory runs out —
+/// flate2's readers have no output budget of their own. Same idea as the
+/// `STREAM_LIMIT` in `dgn8.rs`.
+const MAX_INFLATED_BYTES: u64 = 64 * 1024 * 1024;
+
+/// One decompression with a hard output budget: `read_to_end` grows its
+/// `Vec` without bound, so the reader is capped and a payload that reaches
+/// past the cap is refused — an allocation failure is an *abort*, not a
+/// catchable panic. The reader is allowed one byte past the cap:
+/// `take(cap)` stops *at* the cap, which cannot distinguish "exactly cap"
+/// (within the contract — "exceeds means exceeds") from "at least cap",
+/// so `cap + 1` makes the boundary unambiguous.
+fn inflate_capped(reader: impl Read, what: &str) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    let read = reader
+        .take(MAX_INFLATED_BYTES + 1)
+        .read_to_end(&mut out)
+        .map_err(|e| format!("{what}: {e}"))?;
+    if read as u64 > MAX_INFLATED_BYTES {
+        return Err(format!(
+            "{what}: inflated data exceeds the {MAX_INFLATED_BYTES}-byte limit"
+        ));
+    }
+    Ok(out)
+}
+
 /// Inflate a zlib stream, falling back to the raw deflate data behind its
 /// two-byte header when the stream's own trailer is wrong.
 fn inflate_lenient(payload: &[u8], warnings: &mut Vec<String>) -> Result<Vec<u8>, String> {
     use flate2::read::{DeflateDecoder, ZlibDecoder};
-    let mut decoded = Vec::new();
-    match ZlibDecoder::new(payload).read_to_end(&mut decoded) {
-        Ok(_) => Ok(decoded),
+    match inflate_capped(ZlibDecoder::new(payload), "CTB zlib decompress") {
+        Ok(decoded) => Ok(decoded),
         Err(zlib_error) if payload.len() > 2 => {
-            let mut raw = Vec::new();
-            DeflateDecoder::new(&payload[2..])
-                .read_to_end(&mut raw)
-                .map_err(|_| format!("CTB zlib decompress: {zlib_error}"))?;
+            let raw = inflate_capped(DeflateDecoder::new(&payload[2..]), "CTB zlib decompress")
+                .map_err(|_| zlib_error)?;
             warnings.push("the zlib stream is damaged; its deflate data was read directly".into());
             Ok(raw)
         }
-        Err(zlib_error) => Err(format!("CTB zlib decompress: {zlib_error}")),
+        Err(zlib_error) => Err(zlib_error),
     }
 }
 
@@ -760,11 +785,19 @@ fn parse_plot_style_text(text: &str, name: String, is_stb: bool) -> Result<PlotS
                 _ => {}
             },
             Section::Lineweights => {
+                // The key is file-controlled: `18446744073709551615` made
+                // `index + 1` overflow (debug panic, release wrap to
+                // `resize(0)` then OOB), and `500000000` resized a 2 GB
+                // table. Entries past 255 are unreachable — the consumer
+                // indexes with `PlotStyleEntry.lineweight: u8` — so
+                // oversized keys are ignored like other malformed lines.
                 if let (Ok(index), Ok(weight)) = (key.parse::<usize>(), value.parse::<f32>()) {
-                    if lineweights.len() <= index {
-                        lineweights.resize(index + 1, 0.0);
+                    if index <= u8::MAX as usize {
+                        if lineweights.len() <= index {
+                            lineweights.resize(index + 1, 0.0);
+                        }
+                        lineweights[index] = weight;
                     }
-                    lineweights[index] = weight;
                 }
             }
             _ => {}
@@ -841,11 +874,17 @@ fn parse_legacy_plot_style_text(
             "screen" => entry.screening = value.parse::<u8>().unwrap_or(100).min(100),
             "lineweight" => entry.lineweight = value.parse().unwrap_or(0),
             "color1" if value.starts_with('#') && value.len() == 7 => {
-                entry.color = Some([
-                    u8::from_str_radix(&value[1..3], 16).unwrap_or(0),
-                    u8::from_str_radix(&value[3..5], 16).unwrap_or(0),
-                    u8::from_str_radix(&value[5..7], 16).unwrap_or(0),
-                ]);
+                // The guard is a BYTE length, so `#aébé` (also 7 bytes)
+                // reaches fixed-offset slices that split a character.
+                // `str::get` is None off a char boundary; the `unwrap_or(0)`
+                // path is the same one unparseable pairs always took.
+                let pair = |range: std::ops::Range<usize>| {
+                    value
+                        .get(range)
+                        .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+                        .unwrap_or(0)
+                };
+                entry.color = Some([pair(1..3), pair(3..5), pair(5..7)]);
             }
             "color1" => entry.color = value.parse::<i32>().ok().and_then(unpack_plot_color),
             _ => {}
@@ -982,5 +1021,140 @@ mod lenient_loading_tests {
         let error = PlotStyleTable::load_named("nowhere-to-be-found.ctb").unwrap_err();
         assert!(error.contains("nowhere-to-be-found.ctb"), "{error}");
         assert!(PlotStyleTable::load_named("../escape.ctb").is_err());
+    }
+}
+
+#[cfg(test)]
+mod inflate_limit_tests {
+    use super::{decompress_ctb, MAX_INFLATED_BYTES};
+    use std::io::Write;
+
+    /// A payload that lands exactly on the cap is within the contract
+    /// ("exceeds means exceeds"): it must load, not be refused. `take(cap)`
+    /// alone can't tell "exactly cap" from "at least cap" — the reader has
+    /// to be allowed one byte past the limit.
+    #[test]
+    fn an_inflate_of_exactly_the_cap_is_accepted() {
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder
+            .write_all(&vec![b' '; MAX_INFLATED_BYTES as usize])
+            .expect("compress");
+        let payload = encoder.finish().expect("finish");
+        let mut data = vec![b'\n'];
+        data.extend(payload);
+        let out = decompress_ctb(&data).expect("exactly the cap must be accepted");
+        assert_eq!(out.0.len() as u64, MAX_INFLATED_BYTES);
+    }
+
+    /// One byte over the cap is refused with the same limit error the
+    /// oversized bombs produce.
+    #[test]
+    fn an_inflate_one_byte_over_the_cap_is_refused() {
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder
+            .write_all(&vec![b' '; (MAX_INFLATED_BYTES + 1) as usize])
+            .expect("compress");
+        let payload = encoder.finish().expect("finish");
+        let mut data = vec![b'\n'];
+        data.extend(payload);
+        let error = decompress_ctb(&data).expect_err("one byte over must be refused");
+        assert!(error.contains("limit"), "{error}");
+    }
+
+    /// Twice the 64 MiB inflate cap the fix introduces — a payload that is
+    /// tiny compressed (spaces) but must not be inflated whole.
+    fn bomb_plaintext() -> Vec<u8> {
+        vec![b' '; 128 * 1024 * 1024]
+    }
+
+    /// A crafted CTB is a few hundred KB of zlib that expands to hundreds of
+    /// MB; `read_to_end` has no output budget, so the `Vec` grows until the
+    /// allocator fails and the process **aborts** (an abort is not a
+    /// catchable panic). Both the zlib path and the legacy raw-deflate path
+    /// must stop at the cap instead.
+    #[test]
+    fn a_zlib_bomb_is_refused_at_the_inflate_limit() {
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&bomb_plaintext()).expect("compress");
+        let payload = encoder.finish().expect("finish");
+        assert_eq!(payload[0], 0x78, "zlib header for the inflate_lenient path");
+
+        let mut data = vec![b'\n'];
+        data.extend(payload);
+        let error = decompress_ctb(&data).expect_err("zlib bomb must be refused");
+        assert!(error.contains("limit"), "{error}");
+    }
+
+    #[test]
+    fn a_legacy_deflate_bomb_is_refused_at_the_inflate_limit() {
+        let mut encoder =
+            flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&bomb_plaintext()).expect("compress");
+        let payload = encoder.finish().expect("finish");
+        assert_ne!(payload[0], 0x78, "raw deflate takes the legacy DeflateDecoder path");
+
+        let mut data = vec![b'\n'];
+        data.extend(payload);
+        let error = decompress_ctb(&data).expect_err("deflate bomb must be refused");
+        assert!(error.contains("limit"), "{error}");
+    }
+}
+
+#[cfg(test)]
+mod lineweight_table_tests {
+    use super::{parse_plot_style_text, LW_TABLE};
+
+    fn parse(text: &str) -> super::PlotStyleTable {
+        parse_plot_style_text(text, "crafted.ctb".into(), false).expect("parses")
+    }
+
+    /// The table key is file-controlled: `18446744073709551615` made
+    /// `index + 1` overflow — debug builds panic, release wraps to
+    /// `resize(0)` and then panics OOB at `lineweights[usize::MAX]` — and
+    /// `500000000` resized a 2 GB table (allocation abort). Entries past
+    /// 255 are unreachable anyway: `PlotStyleEntry.lineweight` is a `u8`.
+    #[test]
+    fn oversized_lineweight_table_keys_are_ignored() {
+        let table = parse("custom_lineweight_table{\n18446744073709551615=0.5\n}\n");
+        assert_eq!(table.lineweights, LW_TABLE.to_vec());
+    }
+
+    /// In-range keys still extend the table; 256 (beyond `u8`) is ignored.
+    #[test]
+    fn in_range_lineweight_table_keys_are_kept() {
+        let table = parse("custom_lineweight_table{\n30=0.7\n}\n");
+        assert_eq!(table.lineweights.len(), 31);
+        assert_eq!(table.lineweights[30], 0.7);
+
+        let table = parse("custom_lineweight_table{\n256=0.7\n}\n");
+        assert_eq!(table.lineweights, LW_TABLE.to_vec());
+    }
+}
+
+#[cfg(test)]
+mod legacy_color_tests {
+    use super::parse_legacy_plot_style_text;
+
+    /// `color1` guards on `starts_with('#') && len() == 7` — a BYTE length —
+    /// then slices fixed byte offsets. `#aébé` is also 7 bytes, and byte 3
+    /// splits the second `é`: loading a crafted legacy CTB panicked with
+    /// `byte index 3 is not a char boundary`.
+    #[test]
+    fn a_multibyte_color1_value_does_not_panic() {
+        let text = "begin_plot_style\ncolor1 = #aébé\nend_plot_style\n";
+        let table = parse_legacy_plot_style_text(text, "evil.ctb".into(), false).expect("parses");
+        // Non-hex pairs stay `unwrap_or(0)` — [0, 0, 0], never a panic.
+        assert_eq!(table.aci_entries[1].color, Some([0, 0, 0]));
+    }
+
+    /// Well-formed ASCII `#RRGGBB` keeps parsing byte-for-byte.
+    #[test]
+    fn a_hex_color1_value_still_parses() {
+        let text = "begin_plot_style\ncolor1 = #A1B2C3\nend_plot_style\n";
+        let table = parse_legacy_plot_style_text(text, "ok.ctb".into(), false).expect("parses");
+        assert_eq!(table.aci_entries[1].color, Some([0xa1, 0xb2, 0xc3]));
     }
 }

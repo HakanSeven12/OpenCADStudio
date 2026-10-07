@@ -1,6 +1,6 @@
 //! OpenCADStudio-style grip editing.
 
-use acadrust::Handle;
+use codec::Handle;
 use glam::{DVec3, Mat4, Vec2};
 use iced::{Point, Rectangle};
 
@@ -29,6 +29,71 @@ fn marker_screen_position(mut point: Point, shape: GripShape) -> Point {
     point
 }
 
+/// Screen length of a move-gizmo arrow.
+pub const GIZMO_AXIS_PX: f32 = 72.0;
+
+pub fn gizmo_axis(k: u8) -> DVec3 {
+    [DVec3::X, DVec3::Y, DVec3::Z][k as usize % 3]
+}
+
+pub fn gizmo_plane_axes(k: u8) -> (u8, u8) {
+    [(0, 1), (1, 2), (2, 0)][k as usize % 3]
+}
+
+/// Unit screen directions of the three gizmo axes from `center`; an axis
+/// seen nearly end-on is left out.
+pub fn gizmo_screen_axes(
+    center: Vec2,
+    world: DVec3,
+    project: impl Fn(DVec3) -> Option<Vec2>,
+) -> [Option<Vec2>; 3] {
+    let spans = [0, 1, 2].map(|k| project(world + gizmo_axis(k)).map(|p| p - center));
+    let longest = spans.iter().flatten().map(|v| v.length()).fold(0.0, f32::max);
+    spans.map(|span| span.filter(|v| longest > 0.0 && v.length() > 0.15 * longest).map(|v| v.normalize()))
+}
+
+/// Marker position (and direction) of a grip whose centre projects to
+/// `projected`: gizmo grips sit off their centre, others keep their offset.
+fn placed_marker(
+    g: &GripDef,
+    projected: Option<Vec2>,
+    project: impl Fn(DVec3) -> Option<Vec2>,
+) -> Option<(Vec2, Option<[f32; 2]>)> {
+    let p = projected?;
+    match g.shape {
+        GripShape::GizmoAxis(k) => {
+            let d = gizmo_screen_axes(p, g.world, project)[k as usize % 3]?;
+            Some((p + d * GIZMO_AXIS_PX, Some([d.x, -d.y])))
+        }
+        GripShape::GizmoPlane(k) => {
+            let axes = gizmo_screen_axes(p, g.world, project);
+            let (a, b) = gizmo_plane_axes(k);
+            let (a, b) = (axes[a as usize]?, axes[b as usize]?);
+            Some((p + (a + b) * 0.3 * GIZMO_AXIS_PX, None))
+        }
+        _ => {
+            let dir = g.dir.and_then(|dir| Some(marker_direction(p, project(g.world + dir)?)));
+            let s = marker_screen_position(Point::new(p.x, p.y), g.shape);
+            Some((Vec2::new(s.x, s.y), dir))
+        }
+    }
+}
+
+/// Pixel distance from `cursor` to a marker; a gizmo arrow counts along its
+/// whole shaft, not only at its tip.
+fn marker_distance(shape: GripShape, screen: Vec2, dir: Option<[f32; 2]>, cursor: Point) -> f32 {
+    let cursor = Vec2::new(cursor.x, cursor.y);
+    match (shape, dir) {
+        (GripShape::GizmoAxis(_), Some([dx, dy])) => {
+            let d = Vec2::new(dx, -dy);
+            let start = screen - d * (GIZMO_AXIS_PX - 14.0);
+            let t = (cursor - start).dot(d).clamp(0.0, GIZMO_AXIS_PX - 14.0);
+            cursor.distance(start + d * t)
+        }
+        _ => cursor.distance(screen),
+    }
+}
+
 // ── Active drag state ─────────────────────────────────────────────────────
 
 /// Stored on `OpenCADStudio` while a grip is being dragged.
@@ -50,6 +115,12 @@ pub struct GripEdit {
     pub targets: Vec<GripTarget>,
     /// Opposite corner and local width/height axes for rectangle corner resize.
     pub rectangle_frame: Option<(DVec3, DVec3, DVec3)>,
+    /// Normal of the plane a move-gizmo square drags in.
+    pub plane: Option<DVec3>,
+    /// Move gizmo: offset from the gizmo centre to where its part was
+    /// grabbed, taken on the first move so the drag does not jump.
+    pub grab: Option<DVec3>,
+    pub gizmo: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,6 +179,9 @@ impl GripEdit {
                 last_world: world,
             }],
             rectangle_frame: None,
+            plane: None,
+            grab: None,
+            gizmo: false,
         }
     }
 
@@ -181,18 +255,11 @@ pub fn grips_to_screen(
             // Project from the f64 grip position via the relative-to-eye path so
             // the grip stays glued to the wire at UTM-scale coordinates (an
             // `as_vec3` cast first would quantize it ~0.5 m off at high zoom).
-            let projected = camera.project(g.world, bounds);
-            let screen = match projected {
-                Some(p) => Point::new(bounds.x + p.x, bounds.y + p.y),
-                None => Point::new(f32::NAN, f32::NAN),
+            let project = |world: DVec3| camera.project(world, bounds);
+            let (screen, dir) = match placed_marker(g, project(g.world), project) {
+                Some((p, dir)) => (Point::new(bounds.x + p.x, bounds.y + p.y), dir),
+                None => (Point::new(f32::NAN, f32::NAN), None),
             };
-            let dir = g.dir.and_then(|dir| {
-                Some(marker_direction(
-                    projected?,
-                    camera.project(g.world + dir, bounds)?,
-                ))
-            });
-            let screen = marker_screen_position(screen, g.shape);
             (g.id, screen, g.is_midpoint, g.shape, dir)
         })
         .collect()
@@ -274,13 +341,11 @@ pub fn find_hit_grip(
     let mut best: Option<(usize, usize, bool, DVec3)> = None;
 
     for (index, g) in grips.iter().enumerate() {
-        let Some(screen) = camera.project(g.world, bounds) else {
+        let project = |world: DVec3| camera.project(world, bounds);
+        let Some((screen, dir)) = placed_marker(g, project(g.world), project) else {
             continue;
         };
-        let screen = marker_screen_position(Point::new(screen.x, screen.y), g.shape);
-        let dx = screen.x - cursor.x;
-        let dy = screen.y - cursor.y;
-        let d = (dx * dx + dy * dy).sqrt();
+        let d = marker_distance(g.shape, screen, dir, cursor);
         if d < best_dist {
             best_dist = d;
             best = Some((index, g.id, g.is_midpoint, g.world));
@@ -320,18 +385,11 @@ pub fn grips_to_screen_rte(
     grips
         .iter()
         .map(|g| {
-            let projected = project_rte(g.world, view_rot, eye, bounds);
-            let screen = match projected {
-                Some(p) => Point::new(bounds.x + p.x, bounds.y + p.y),
-                None => Point::new(f32::NAN, f32::NAN),
+            let project = |world: DVec3| project_rte(world, view_rot, eye, bounds);
+            let (screen, dir) = match placed_marker(g, project(g.world), project) {
+                Some((p, dir)) => (Point::new(bounds.x + p.x, bounds.y + p.y), dir),
+                None => (Point::new(f32::NAN, f32::NAN), None),
             };
-            let dir = g.dir.and_then(|dir| {
-                Some(marker_direction(
-                    projected?,
-                    project_rte(g.world + dir, view_rot, eye, bounds)?,
-                ))
-            });
-            let screen = marker_screen_position(screen, g.shape);
             (g.id, screen, g.is_midpoint, g.shape, dir)
         })
         .collect()
@@ -350,13 +408,11 @@ pub fn find_hit_grip_rte(
     let mut best: Option<(usize, usize, bool, DVec3)> = None;
 
     for (index, g) in grips.iter().enumerate() {
-        let Some(screen) = project_rte(g.world, view_rot, eye, bounds) else {
+        let project = |world: DVec3| project_rte(world, view_rot, eye, bounds);
+        let Some((screen, dir)) = placed_marker(g, project(g.world), project) else {
             continue;
         };
-        let screen = marker_screen_position(Point::new(screen.x, screen.y), g.shape);
-        let dx = screen.x - cursor.x;
-        let dy = screen.y - cursor.y;
-        let d = (dx * dx + dy * dy).sqrt();
+        let d = marker_distance(g.shape, screen, dir, cursor);
         if d < best_dist {
             best_dist = d;
             best = Some((index, g.id, g.is_midpoint, g.world));

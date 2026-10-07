@@ -1,7 +1,7 @@
-use acadrust::entities::{Dimension, DimensionAngular2Ln, DimensionAngular3Pt};
-use acadrust::types::{Handle, Vector3};
-use acadrust::EntityType;
-use cadkernel::geom2d::{
+use codec::entities::{Dimension, DimensionAngular2Ln, DimensionAngular3Pt};
+use codec::types::{Handle, Vector3};
+use codec::EntityType;
+use kernel::geom2d::{
     closest_point, line_line, Arc as KernelArc, BulgeArc, Curve as KernelCurve,
     Line as KernelLine,
 };
@@ -1172,13 +1172,13 @@ fn angular_preview_with_frame(
     let second_end = vertex + DVec3::new(end.cos(), end.sin(), 0.0) * radius;
     let mut points = vec![first, first_end, nan(), second, second_end, nan()];
     points.extend(
-        cadkernel::geom2d::tessellate::arc(
+        kernel::geom2d::tessellate::arc(
             [vertex.x, vertex.y],
             radius,
             start,
             end,
             vertex.z,
-            cadkernel::geom2d::tessellate::DEFAULT_SEGMENTS_PER_RADIAN,
+            kernel::geom2d::tessellate::DEFAULT_SEGMENTS_PER_RADIAN,
         )
         .into_iter()
         .map(DVec3::from_array),
@@ -1249,6 +1249,7 @@ fn preview_wire(points: Vec<DVec3>) -> WireModel {
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
@@ -1274,7 +1275,9 @@ fn preview_wire(points: Vec<DVec3>) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+        ..Default::default()
+}
 }
 
 inventory::submit!(crate::command::CommandRegistration { names: &["DIMANGULAR"] });

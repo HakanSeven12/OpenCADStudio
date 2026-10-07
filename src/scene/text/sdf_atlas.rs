@@ -164,6 +164,12 @@ pub struct GlyphExport {
     pub fill_tris: Vec<[f32; 2]>,
     /// Baked with the 1.7× bold pen; the exporter widens its own pen to match.
     pub bold: bool,
+    /// The character this tile draws (for the PDF text layer / ToUnicode).
+    pub ch: char,
+    /// The TrueType face the filled outline came from, when there is one: the
+    /// PDF exporter embeds that face and draws the glyph as text instead of
+    /// filling `fill_tris`. `None` for stroke glyphs and hollow (TEXTFILL 0) ones.
+    pub source: Option<crate::scene::text::ttf_glyph::GlyphSource>,
 }
 
 /// Pack a glyph quad's `uv_min` corner into a stable hash key for the export
@@ -309,6 +315,16 @@ impl GlyphAtlas {
                 .entry(family.as_str())
                 .or_insert_with(|| Face::resolve(family));
             let Some(g) = face.glyph(*ch) else { continue };
+            // Only a filled outline is drawn as embedded-font text; a hollow
+            // (TEXTFILL 0) glyph keeps its stroked outline.
+            #[cfg(not(target_arch = "wasm32"))]
+            let source = if fill_on && !g.fill_tris.is_empty() {
+                face.glyph_source(*ch)
+            } else {
+                None
+            };
+            #[cfg(target_arch = "wasm32")]
+            let source = None;
             out.insert(
                 uv_key(entry.uv_min),
                 GlyphExport {
@@ -328,6 +344,8 @@ impl GlyphAtlas {
                     // share the centrelines, so carry the flag and let the exporter
                     // widen its own pen by the same factor.
                     bold: *bold,
+                    ch: *ch,
+                    source,
                 },
             );
         }

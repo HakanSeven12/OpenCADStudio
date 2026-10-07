@@ -1,10 +1,10 @@
 // Interactive kernel primitives stored as ACIS Solid3D entities.
 
-use acadrust::entities::Solid3D;
-use acadrust::objects::SolidHistoryOperation;
-use acadrust::EntityType;
-use cadkernel::brep::Body;
-use cadkernel::geom2d::{
+use codec::entities::Solid3D;
+use codec::objects::SolidHistoryOperation;
+use codec::EntityType;
+use kernel::brep::Body;
+use kernel::geom2d::{
     fillets_between, Circle as KernelCircle, Curve as KernelCurve, Line as KernelLine,
     Tolerance,
 };
@@ -272,6 +272,17 @@ fn sphere_tangent_local(object: TangentObject, plane: WorkingPlane) -> TangentOb
             center: plane.to_local(center),
             radius,
         },
+        TangentObject::Ellipse {
+            center,
+            major_axis,
+            normal,
+            minor_axis_ratio,
+        } => TangentObject::Ellipse {
+            center: plane.to_local(center),
+            major_axis: plane.vector_to_local(major_axis),
+            normal: plane.vector_to_local(normal),
+            minor_axis_ratio,
+        },
     }
 }
 
@@ -285,6 +296,29 @@ fn sphere_tangent_curve(object: TangentObject) -> KernelCurve {
             centre: [center.x, center.y],
             radius,
         }),
+        TangentObject::Ellipse {
+            center,
+            major_axis,
+            minor_axis_ratio,
+            ..
+        } => {
+            let a = major_axis.length();
+            let major_axis_2d = if a > 1e-9 {
+                [major_axis.x / a, major_axis.y / a]
+            } else {
+                [1.0, 0.0]
+            };
+            KernelCurve::Ellipse(kernel::geom2d::EllipseArc {
+                ellipse: kernel::geom2d::Ellipse {
+                    centre: [center.x, center.y],
+                    major_radius: a,
+                    minor_radius: a * minor_axis_ratio,
+                    major_axis: major_axis_2d,
+                },
+                start_parameter: 0.0,
+                end_parameter: std::f64::consts::TAU,
+            })
+        }
     }
 }
 
@@ -318,7 +352,7 @@ fn sphere_through_three_points(
     second: DVec3,
     third: DVec3,
 ) -> Option<(DVec3, f64)> {
-    let circle = cadkernel::geom2d::arc_through_points(
+    let circle = kernel::geom2d::arc_through_points(
         [first.x, first.y],
         [second.x, second.y],
         [third.x, third.y],
@@ -640,7 +674,7 @@ impl PrimitiveCommand {
         let plane = WorkingPlane::new(a, first_axis, second_axis);
         let local_b = plane.to_local(b);
         let local_c = plane.to_local(c);
-        let circle = cadkernel::geom2d::arc_through_points(
+        let circle = kernel::geom2d::arc_through_points(
             [0.0, 0.0],
             [local_b.x, local_b.y],
             [local_c.x, local_c.y],
@@ -757,10 +791,13 @@ impl PrimitiveCommand {
         else {
             return None;
         };
-        let candidates = crate::modules::draw::draw::circle::ttr_candidates(first, second, radius);
-        let local = crate::modules::draw::draw::circle::best_of(
-            &candidates,
-            (first_hit + second_hit) * 0.5,
+        let local = crate::modules::draw::draw::circle::pick_best_ttr_candidate(
+            first,
+            second,
+            radius,
+            first_hit,
+            second_hit,
+            None,
         )?;
         Some(self.plane.to_world(local))
     }
@@ -1857,7 +1894,7 @@ impl PrimitiveCommand {
         Some((
             placed,
             solid_history::box_op(
-                self.history_transform_axes(origin, x_axis, y_axis),
+                self.history_transform_axes(box_centre(origin, x_axis, y_axis, length, width, height), x_axis, y_axis),
                 length,
                 width,
                 height,
@@ -1987,7 +2024,7 @@ impl PrimitiveCommand {
         Some((
             placed,
             solid_history::wedge_op(
-                self.history_transform_axes(origin, x_axis, y_axis),
+                self.history_transform_axes(box_centre(origin, x_axis, y_axis, length, width, height), x_axis, y_axis),
                 length,
                 width,
                 height,
@@ -2096,6 +2133,25 @@ impl PrimitiveCommand {
 impl CadCommand for PrimitiveCommand {
     fn set_working_plane(&mut self, plane: WorkingPlane) {
         self.plane = plane;
+    }
+
+    /// Base steps after the first base point read the cursor on the base
+    /// plane through that point, so a base started on a raised face follows
+    /// the mouse instead of the ray's hit on the working plane below.
+    fn cursor_plane(&self) -> Option<(DVec3, DVec3)> {
+        let origin = if self.shape == Shape::Cone {
+            matches!(self.cone_step, ConeStep::BaseRadius | ConeStep::BaseDiameter)
+                .then_some(self.cone_frame?.origin)
+        } else if self.shape == Shape::Pyramid {
+            (self.pyramid_step == PyramidStep::BaseRadius).then_some(self.pyramid_frame?.origin)
+        } else if self.shape.rectangular() {
+            matches!(self.box_step, BoxStep::OppositeCorner | BoxStep::CubeSize)
+                .then(|| self.pts.first().map(|&first| self.plane.to_world(first)))
+                .flatten()
+        } else {
+            None
+        }?;
+        Some((self.plane.z.normalize_or_zero(), origin))
     }
 
     fn cursor_axis(&self) -> Option<(DVec3, DVec3)> {
@@ -2810,8 +2866,6 @@ impl CadCommand for PrimitiveCommand {
                 ConeStep::BaseCenter
                     | ConeStep::BaseRadius
                     | ConeStep::EllipseFirst
-                    | ConeStep::Height
-                    | ConeStep::HeightAfterTopRadius
             );
         }
         if self.shape == Shape::Pyramid {
@@ -2819,15 +2873,32 @@ impl CadCommand for PrimitiveCommand {
                 self.pyramid_step,
                 PyramidStep::BaseCenter
                     | PyramidStep::BaseRadius
-                    | PyramidStep::Height
-                    | PyramidStep::HeightAfterTopRadius
             );
         }
         self.shape.rectangular()
             && matches!(
                 self.box_step,
-                BoxStep::FirstCorner | BoxStep::OppositeCorner | BoxStep::Height
+                BoxStep::FirstCorner | BoxStep::OppositeCorner
             )
+    }
+
+    fn dyn_commit_as_text(&self) -> bool {
+        if self.shape == Shape::Cone {
+            return matches!(
+                self.cone_step,
+                ConeStep::Height | ConeStep::HeightAfterTopRadius
+            );
+        }
+        if self.shape == Shape::Pyramid {
+            return matches!(
+                self.pyramid_step,
+                PyramidStep::Height | PyramidStep::HeightAfterTopRadius
+            );
+        }
+        if self.shape.rectangular() {
+            return matches!(self.box_step, BoxStep::Height);
+        }
+        self.height_step
     }
 
     fn on_text_input(&mut self, raw: &str) -> Option<CmdResult> {
@@ -3628,6 +3699,7 @@ fn wire(name: &str, points: Vec<[f32; 3]>) -> WireModel {
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
@@ -3653,5 +3725,13 @@ fn wire(name: &str, points: Vec<[f32; 3]>) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+        ..Default::default()
+}
+}
+
+/// Box and wedge histories are framed at the centre of their bounding box,
+/// as the reference stores them (lengths stay positive).
+fn box_centre(origin: DVec3, x_axis: DVec3, y_axis: DVec3, length: f64, width: f64, height: f64) -> DVec3 {
+    origin + x_axis * (length * 0.5) + y_axis * (width * 0.5) + DVec3::Z * (height * 0.5)
 }

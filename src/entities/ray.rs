@@ -1,4 +1,4 @@
-use acadrust::entities::{Ray, XLine};
+use codec::entities::{Ray, XLine};
 use crate::t;
 
 use crate::command::EntityTransform;
@@ -16,7 +16,7 @@ const DISPLAY_EXTENT: f64 = 1_000_000.0;
 // ── Ray (semi-infinite line) ──────────────────────────────────────────────────
 
 impl RenderConvertible for Ray {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         let bp = self.base_point;
         let dir = self.direction;
         // Normalize direction to avoid f32 overflow when DXF stores
@@ -158,7 +158,7 @@ impl Transformable for Ray {
 // ── XLine (construction line, infinite) ──────────────────────────────────────
 
 impl RenderConvertible for XLine {
-    fn to_render(&self, _document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &codec::CadDocument) -> Option<RenderEntity> {
         let bp = self.base_point;
         let dir = self.direction;
         let len = (dir.x * dir.x + dir.y * dir.y + dir.z * dir.z).sqrt();

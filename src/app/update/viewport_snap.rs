@@ -5,7 +5,7 @@
 
 use iced::Point;
 
-use acadrust::types::Handle;
+use codec::types::Handle;
 
 use crate::app::OpenCADStudio;
 use crate::scene::viewport_ref::{AcceptedSnap, ViewportFrame};
@@ -104,12 +104,12 @@ impl OpenCADStudio {
                     .scene
                     .document
                     .get_entity(source.source.handle),
-                Some(acadrust::EntityType::Insert(_))
+                Some(codec::EntityType::Insert(_))
             ) {
                 return true;
             }
             if source.snap_type == SnapType::Insertion {
-                let Some(acadrust::EntityType::Insert(insert)) = self.tabs[tab]
+                let Some(codec::EntityType::Insert(insert)) = self.tabs[tab]
                     .scene
                     .document
                     .get_entity(source.source.handle)
@@ -234,7 +234,7 @@ impl OpenCADStudio {
             let saved_from = self.snapper.from_point;
             self.snapper.grid_snap_on = false;
             self.snapper.from_point =
-                saved_from.map(|p| frame.paper_to_model(p.as_dvec3()).as_vec3());
+                saved_from.map(|p| frame.paper_to_model(p));
             let hit = self.snapper.snap(
                 model_cursor,
                 local,

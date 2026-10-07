@@ -95,6 +95,7 @@ impl CadCommand for DistCommand {
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -123,7 +124,9 @@ impl CadCommand for DistCommand {
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        })
+        
+            ..Default::default()
+})
     }
 }
 

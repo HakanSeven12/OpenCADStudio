@@ -142,7 +142,7 @@
         },
         "smooth_type": {
           "exclude": true,
-          "_comment": "acadrust defines two distinct SmoothSurfaceType enums with the same name (polyline.rs, used by Polyline2D's smooth_surface \u2014 and a separate one private to polyline3d.rs, used here); the type registry's tracer keys purely by name and collapses them, so the generically generated conversion resolves to the wrong one. Needs a hand-written override with the fully qualified acadrust::entities::polyline3d::SmoothSurfaceType path to support, not just a rename."
+          "_comment": "opencadcodec defines two distinct SmoothSurfaceType enums with the same name (polyline.rs, used by Polyline2D's smooth_surface \u2014 and a separate one private to polyline3d.rs, used here); the type registry's tracer keys purely by name and collapses them, so the generically generated conversion resolves to the wrong one. Needs a hand-written override with the fully qualified opencadcodec::entities::polyline3d::SmoothSurfaceType path to support, not just a rename."
         }
       }
     },
@@ -209,7 +209,7 @@
       }
     },
     "Solid": {
-      "rust_constructor": "acadrust::entities::Solid::new(acadrust::types::Vector3::ZERO, acadrust::types::Vector3::ZERO, acadrust::types::Vector3::ZERO, acadrust::types::Vector3::ZERO)",
+      "rust_constructor": "codec::entities::Solid::new(codec::types::Vector3::ZERO, codec::types::Vector3::ZERO, codec::types::Vector3::ZERO, codec::types::Vector3::ZERO)",
       "fields": {
         "first_corner": {
           "required": true
@@ -226,7 +226,7 @@
       }
     },
     "Face3D": {
-      "rust_constructor": "acadrust::entities::Face3D::new(acadrust::types::Vector3::ZERO, acadrust::types::Vector3::ZERO, acadrust::types::Vector3::ZERO, acadrust::types::Vector3::ZERO)",
+      "rust_constructor": "codec::entities::Face3D::new(codec::types::Vector3::ZERO, codec::types::Vector3::ZERO, codec::types::Vector3::ZERO, codec::types::Vector3::ZERO)",
       "fields": {
         "first_corner": {
           "required": true
@@ -275,7 +275,7 @@
           "required": true
         }
       },
-      "rust_constructor": "acadrust::entities::Insert::new(String::new(), acadrust::types::Vector3::ZERO)"
+      "rust_constructor": "codec::entities::Insert::new(String::new(), codec::types::Vector3::ZERO)"
     },
     "Tolerance": {
       "fields": {
@@ -391,7 +391,7 @@
         },
         "flags": {
           "rust_getter": "(VAR.flags.bits() as i64)",
-          "rust_setter": "if let Some(v) = dict.get_item_opt(\"flags\", vm)? { let bits = v.try_into_value::<i64>(vm)?; VAR.flags = i16::try_from(bits).ok().and_then(acadrust::entities::MLineFlags::from_bits).ok_or_else(|| vm.new_value_error(\"MLine.flags has unknown bits\".to_owned()))?; }"
+          "rust_setter": "if let Some(v) = dict.get_item_opt(\"flags\", vm)? { let bits = v.try_into_value::<i64>(vm)?; VAR.flags = i16::try_from(bits).ok().and_then(codec::entities::MLineFlags::from_bits).ok_or_else(|| vm.new_value_error(\"MLine.flags has unknown bits\".to_owned()))?; }"
         },
         "start_point": {
           "read_only": true
@@ -559,7 +559,7 @@
       }
     },
     "PolygonMesh": {
-      "rust_constructor": "acadrust::entities::PolygonMeshEntity::default()",
+      "rust_constructor": "codec::entities::PolygonMeshEntity::default()",
       "fields": {
         "vertices": {
           "required": true
@@ -951,7 +951,7 @@
         },
         "raw_flags_90": {
           "read_only": true,
-          "_comment": "Semantics unknown in cadcodec; preserved as read, 0 for a new symbol."
+          "_comment": "Semantics unknown in opencadcodec; preserved as read, 0 for a new symbol."
         },
         "raw_point_record_count": {
           "read_only": true

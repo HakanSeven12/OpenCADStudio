@@ -625,13 +625,17 @@ fn with_printer_devmode(
             return None;
         }
         let result = (|| {
+            // The size query is the one call that takes no mode flags at all:
+            // with DM_OUT_BUFFER and no output buffer to write into, the
+            // driver reports failure (-1) instead of the size, and every
+            // caller below silently lost the driver's DEVMODE.
             let needed = DocumentPropertiesW(
                 std::ptr::null_mut(),
                 handle,
                 device_wide.as_ptr(),
                 std::ptr::null_mut(),
                 std::ptr::null(),
-                DM_OUT_BUFFER,
+                0,
             );
             if needed <= 0 {
                 return None;
@@ -1518,6 +1522,96 @@ mod printer_properties_tests {
         );
     }
 
+    /// The driver's DEVMODE has to come back for a real printer. It stopped
+    /// coming back once the size query asked with `DM_OUT_BUFFER` and no
+    /// output buffer, which drivers answer with -1: `with_printer_devmode`
+    /// then returned `None` for every printer, so the plot's sheet and
+    /// orientation never reached the job's DEVMODE and the printer report
+    /// could never name a default sheet.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn printer_devmode_comes_back_for_a_real_printer() {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Graphics::Gdi::DEVMODEW;
+
+        let device: Vec<u16> = std::ffi::OsStr::new("Microsoft Print to PDF")
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        let devmode = super::with_printer_devmode(&device, |_, _| true)
+            .expect("the driver must report a DEVMODE for an installed printer");
+        assert!(
+            devmode.len() >= std::mem::size_of::<DEVMODEW>(),
+            "DEVMODE buffer is {} bytes, shorter than the public struct",
+            devmode.len()
+        );
+        // SAFETY: the buffer holds at least a public DEVMODEW, just checked.
+        let named = unsafe { (*(devmode.as_ptr() as *const DEVMODEW)).dmSize } as usize;
+        assert!(named > 0 && named <= devmode.len(), "dmSize {named} outside the buffer");
+
+        // And the symptom the lost DEVMODE produced: the driver's default
+        // sheet is one of the sheets it lists, so the report can name it.
+        let caps = crate::io::plot_device::printer_capabilities("Microsoft Print to PDF")
+            .expect("an installed printer reports sheets");
+        assert!(
+            caps.default_paper.is_some(),
+            "the driver's default sheet should resolve to one of its {} listed sheets",
+            caps.media.len()
+        );
+    }
+
+    /// The plot's orientation has to survive into the DEVMODE the print job
+    /// is spooled with. While the DEVMODE query was broken this silently
+    /// returned `None` for every printer and `CreateDC` fell back to the
+    /// driver's own default, so a landscape plot came out however the driver
+    /// happened to be set. The GDI ink tests cannot catch that: they accept
+    /// the raster-rotation fallback as an equally good outcome.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_plot_orientation_reaches_the_job_devmode() {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Graphics::Gdi::{
+            DEVMODEW, DMORIENT_LANDSCAPE, DMORIENT_PORTRAIT, DM_ORIENTATION,
+        };
+
+        let device: Vec<u16> = std::ffi::OsStr::new("Microsoft Print to PDF")
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        for (landscape, want) in [(false, DMORIENT_PORTRAIT), (true, DMORIENT_LANDSCAPE)] {
+            let buf = super::oriented_printer_devmode(&device, landscape, None)
+                .unwrap_or_else(|| panic!("landscape={landscape}: the driver reported no DEVMODE"));
+            // SAFETY: `with_printer_devmode` sizes the buffer from the driver.
+            let dm = unsafe { &*(buf.as_ptr() as *const DEVMODEW) };
+            assert!(
+                dm.dmFields & DM_ORIENTATION != 0,
+                "landscape={landscape}: DM_ORIENTATION not marked as set"
+            );
+            // SAFETY: the printer branch of the DEVMODE union.
+            let got = unsafe { dm.Anonymous1.Anonymous1.dmOrientation };
+            assert_eq!(got, want as i16, "landscape={landscape}: wrong dmOrientation");
+        }
+    }
+
+    /// `printui` parses the raw command line itself, so a name that reaches it
+    /// split over several arguments matches no printer and it exits 0 without
+    /// drawing anything — a failure with nothing to show the user. The name
+    /// has to stay a single argument, directly after `/n`. The verb matters
+    /// too: `/e` is printing preferences, `/p` the device's admin sheet.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_preferences_keep_the_printer_name_in_one_argument() {
+        for name in ["Office Printer", "Wide Format Plotter 1200", "Εκτυπωτής γραφείου"] {
+            let (program, args) = printer_properties_command(Some(name));
+            assert_eq!(program, "rundll32.exe");
+            assert!(args.contains(&"/e".to_string()), "{args:?} must ask for preferences");
+            assert!(!args.contains(&"/p".to_string()), "{args:?} must not ask for properties");
+            let flag = args.iter().position(|arg| arg == "/n").expect("/n introduces the name");
+            assert_eq!(args.get(flag + 1).map(String::as_str), Some(name), "{args:?}");
+            assert_eq!(args.iter().filter(|arg| arg.as_str() == name).count(), 1);
+        }
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_opens_print_settings() {
@@ -1720,89 +1814,6 @@ pub fn open_desktop_printer_settings(printer: Option<&str>) -> Result<(), String
         .spawn()
         .map(|_| ())
         .map_err(|error| format!("Could not open printer settings: {error}"))
-}
-
-/// Show the driver's own document-properties sheet for `printer`, owned by
-/// the window `owner` (an `HWND`, 0 for none), and on OK store the result as
-/// the user's printing preferences for that printer — which is what the
-/// print job then honours. Returns `Ok(false)` when the user cancelled.
-#[cfg(target_os = "windows")]
-pub fn edit_printer_preferences(printer: &str, owner: isize) -> Result<bool, String> {
-    use windows_sys::Win32::Graphics::Gdi::DEVMODEW;
-    use windows_sys::Win32::Graphics::Printing::{
-        ClosePrinter, DocumentPropertiesW, OpenPrinterW, SetPrinterW, PRINTER_HANDLE,
-        PRINTER_INFO_9W,
-    };
-    // winspool.h: DM_OUT_BUFFER = DM_COPY, DM_IN_PROMPT = DM_PROMPT,
-    // DM_IN_BUFFER = DM_MODIFY.
-    const DM_OUT_BUFFER: u32 = 2;
-    const DM_IN_PROMPT: u32 = 4;
-    const DM_IN_BUFFER: u32 = 8;
-    const IDOK: i32 = 1;
-
-    let name: Vec<u16> = printer.encode_utf16().chain(std::iter::once(0)).collect();
-    let mut handle = PRINTER_HANDLE {
-        Value: std::ptr::null_mut(),
-    };
-    // SAFETY: `name` is NUL-terminated and outlives the call; a null default
-    // asks for PRINTER_ACCESS_USE, enough for per-user preferences.
-    if unsafe { OpenPrinterW(name.as_ptr(), &mut handle, std::ptr::null()) } == 0 {
-        return Err(format!("Could not open printer \"{printer}\""));
-    }
-    let owner = owner as windows_sys::Win32::Foundation::HWND;
-    let outcome = (|| {
-        // SAFETY: with null buffers the call only reports the DEVMODE size.
-        let size = unsafe {
-            DocumentPropertiesW(owner, handle, name.as_ptr(), std::ptr::null_mut(), std::ptr::null(), 0)
-        };
-        if size <= 0 {
-            return Err(format!("Printer \"{printer}\" reports no document properties"));
-        }
-        // DEVMODEW is u16-aligned; a u16 buffer keeps the cast sound.
-        let words = (size as usize).div_ceil(2);
-        let mut current = vec![0u16; words];
-        let mut edited = vec![0u16; words];
-        // SAFETY: both buffers hold `size` bytes as the driver requested.
-        let fetched = unsafe {
-            DocumentPropertiesW(
-                owner,
-                handle,
-                name.as_ptr(),
-                current.as_mut_ptr().cast::<DEVMODEW>(),
-                std::ptr::null(),
-                DM_OUT_BUFFER,
-            )
-        };
-        if fetched < 0 {
-            return Err(format!("Could not read the preferences of \"{printer}\""));
-        }
-        edited.copy_from_slice(&current);
-        // SAFETY: as above; DM_IN_PROMPT runs the driver's modal sheet.
-        let response = unsafe {
-            DocumentPropertiesW(
-                owner,
-                handle,
-                name.as_ptr(),
-                edited.as_mut_ptr().cast::<DEVMODEW>(),
-                current.as_ptr().cast::<DEVMODEW>(),
-                DM_IN_BUFFER | DM_IN_PROMPT | DM_OUT_BUFFER,
-            )
-        };
-        if response != IDOK {
-            return Ok(false);
-        }
-        let info = PRINTER_INFO_9W {
-            pDevMode: edited.as_mut_ptr().cast::<DEVMODEW>(),
-        };
-        // SAFETY: level 9 takes a PRINTER_INFO_9W; the DEVMODE outlives the call.
-        if unsafe { SetPrinterW(handle, 9, (&info as *const PRINTER_INFO_9W).cast::<u8>(), 0) } == 0 {
-            return Err(format!("Could not save the preferences of \"{printer}\""));
-        }
-        Ok(true)
-    })();
-    // SAFETY: `handle` came from OpenPrinterW above.
-    unsafe { ClosePrinter(handle) };
-    outcome
 }
 
 #[cfg(test)]

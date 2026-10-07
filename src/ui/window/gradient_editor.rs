@@ -3,7 +3,7 @@
 use crate::app::Message;
 use crate::scene::model::hatch_model::GradientKind;
 use crate::ui::window::graphic_attributes::GraphicAttributesMsg;
-use acadrust::types::Color as AcadColor;
+use codec::types::Color as AcadColor;
 use iced::widget::{
     button, checkbox, column, container, image, mouse_area, row, slider, text, text_input, tooltip,
     Space,
@@ -18,7 +18,7 @@ pub enum GradientColorMode {
 
 #[derive(Debug, Clone)]
 pub struct GradientEditorState {
-    pub handles: Vec<acadrust::Handle>,
+    pub handles: Vec<codec::Handle>,
     pub color_mode: GradientColorMode,
     pub color_1: AcadColor,
     pub color_2: AcadColor,
@@ -55,8 +55,8 @@ fn msg(message: GradientMsg) -> Message {
 
 impl GradientEditorState {
     pub fn from_hatch(
-        handles: Vec<acadrust::Handle>,
-        hatch: &acadrust::entities::Hatch,
+        handles: Vec<codec::Handle>,
+        hatch: &codec::entities::Hatch,
     ) -> Self {
         let color = |index: usize| {
             hatch
@@ -125,7 +125,7 @@ fn rgb(color: &AcadColor) -> Color {
     let (r, g, b) = match color {
         AcadColor::Rgb { r, g, b } => (*r, *g, *b),
         AcadColor::Index(i) => {
-            acadrust::types::aci_table::aci_to_rgb(*i).unwrap_or((128, 128, 128))
+            codec::types::aci_table::aci_to_rgb(*i).unwrap_or((128, 128, 128))
         }
         _ => (255, 255, 255),
     };
@@ -155,11 +155,11 @@ fn preview_sized(
         rgb(&state.color_2)
     };
     let angle = state.angle_radians();
-    let frame = cadkernel::geom2d::gradient_frame(
+    let frame = kernel::geom2d::gradient_frame(
         &[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
         angle,
         if state.centered { 0.0 } else { 1.0 },
-        cadkernel::geom2d::Tolerance::default(),
+        kernel::geom2d::Tolerance::default(),
     )?;
     let (sin, cos) = angle.sin_cos();
     let radial = state.kind.radial();
@@ -214,7 +214,7 @@ fn preview(state: &GradientEditorState) -> Element<'static, Message> {
 }
 
 pub(crate) fn compact_preview(
-    hatch: &acadrust::entities::Hatch,
+    hatch: &codec::entities::Hatch,
 ) -> Option<iced::widget::image::Handle> {
     preview_sized(&GradientEditorState::from_hatch(Vec::new(), hatch), 256, 26)
 }

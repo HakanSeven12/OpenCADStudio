@@ -8,8 +8,10 @@
 //! through the same `rest::plan` table as the headless server; requests are
 //! forwarded into the GUI's automation queue (`Envelope`, exactly like the
 //! native bridge in `transport`) and the JSON response is written back over
-//! HTTP. The channel binds loopback only — anything that can reach the port
-//! can drive the session, exactly like the headless server.
+//! HTTP. The channel binds loopback only and, like the headless server,
+//! answers only requests carrying the session's bearer token
+//! ([`rest::api_token`]): loopback is shared by every process and user on
+//! the machine, so reaching the port proves nothing.
 
 use super::{Envelope, Reply};
 use crate::rest::{self, HttpRequest, Plan, RETRYABLE};
@@ -58,6 +60,7 @@ fn listen(
     let listener = TcpListener::bind(("127.0.0.1", port))?;
     bound_port.store(listener.local_addr()?.port(), Ordering::SeqCst);
     eprintln!("OpenCADStudio GUI REST listening on http://127.0.0.1:{port}/api/v1");
+    rest::announce_token();
     // One thread per connection: a `getpoint` or `user_select` request stays
     // open until the person answers, and must not block the other reads
     // (get_selection…).
@@ -79,8 +82,8 @@ fn listen(
             let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
             let _ = stream.set_write_timeout(Some(Duration::from_secs(15)));
             if let Ok(Some(request)) = rest::read_request(&mut stream) {
-                if request.method == "OPTIONS" {
-                    let _ = rest::write_response(&mut stream, 204, &Value::Null);
+                if !request.authorized() {
+                    let _ = rest::write_response(&mut stream, 401, &rest::unauthorized());
                 } else {
                     let (status, body) = forward(&request, &sender, &document_cache, &stream);
                     let _ = rest::write_response(&mut stream, status, &body);
@@ -353,7 +356,8 @@ mod tests {
     fn post(port: u16, target: &str, body: &str) -> std::net::TcpStream {
         let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
         let http = format!(
-            "POST {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\n\r\n{}",
+            "POST {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\n\r\n{}",
+            rest::api_token(),
             body.len(),
             body
         );
@@ -403,7 +407,7 @@ mod tests {
         let value = u64::from_str_radix(&handle, 16).unwrap();
         app.tabs[app.active_tab]
             .scene
-            .select_entity(acadrust::Handle::new(value), false);
+            .select_entity(codec::Handle::new(value), false);
 
         let (sender, mut receiver) = mpsc::channel::<Envelope>(8);
         let bound = Arc::new(AtomicU16::new(0));
@@ -447,7 +451,10 @@ mod tests {
     /// GET without a body — the read half of the REST surface.
     fn get(port: u16, target: &str) -> std::net::TcpStream {
         let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
-        let http = format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+        let http = format!(
+            "GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {}\r\n\r\n",
+            rest::api_token()
+        );
         stream.write_all(http.as_bytes()).unwrap();
         stream
     }
@@ -475,7 +482,7 @@ mod tests {
         let value = u64::from_str_radix(&handle, 16).unwrap();
         app.tabs[app.active_tab]
             .scene
-            .select_entity(acadrust::Handle::new(value), false);
+            .select_entity(codec::Handle::new(value), false);
 
         let (sender, mut receiver) = mpsc::channel::<Envelope>(8);
         let bound = Arc::new(AtomicU16::new(0));
@@ -642,7 +649,7 @@ mod tests {
                     envelope.reply.send(reply);
                     app.tabs[app.active_tab]
                         .scene
-                        .select_entity(acadrust::Handle::new(handle_value), false);
+                        .select_entity(codec::Handle::new(handle_value), false);
                     let _ = app.update(if confirm {
                         crate::app::Message::CommandFinalize
                     } else {

@@ -1,6 +1,7 @@
 //! Dimension Style Manager window — fills the entire OS window.
 
 use crate::app::{ColorPickTarget, DsField, Message};
+use crate::scene::convert::tessellate::{arrow_from_block_name, ArrowKind};
 use iced::widget::{
     button, canvas, checkbox, column, container, row, scrollable, text, text_input, Space,
 };
@@ -171,9 +172,30 @@ struct DimensionPreview {
     dim2: bool,
     tick: bool,
     arrow_size: f32,
+    arrow1: ArrowKind,
+    arrow2: ArrowKind,
     text_above: bool,
     basic: bool,
     text: String,
+}
+
+/// Resolve the staged arrowhead block names to per-end preview kinds: the
+/// shared `dimblk` when Dimsah is off, the per-end blocks when on — the same
+/// selection the renderer makes. `dimasz` is the preview arrow size so
+/// size-scaled kinds (SMALL, DOTSMALL) keep their proportions.
+fn preview_arrow_kinds(
+    dimsah: bool,
+    dimblk: &str,
+    dimblk1: &str,
+    dimblk2: &str,
+    dimasz: f32,
+) -> (ArrowKind, ArrowKind) {
+    let kind = |name: &str| arrow_from_block_name(Some(name), dimasz);
+    if dimsah {
+        (kind(dimblk1), kind(dimblk2))
+    } else {
+        (kind(dimblk), kind(dimblk))
+    }
 }
 
 impl canvas::Program<Message> for DimensionPreview {
@@ -218,23 +240,107 @@ impl canvas::Program<Message> for DimensionPreview {
         }
 
         let size = self.arrow_size.clamp(5.0, 14.0);
-        for (tip_x, sign) in [(x1, 1.0_f32), (x2, -1.0_f32)] {
+        // Per-end arrowheads: each end draws its own resolved kind so split
+        // (Dimsah) configurations read correctly. A global DIMTSZ tick still
+        // overrides both ends, matching AutoCAD precedence.
+        let tick_path = |tip_x: f32, tick_size: f32| {
+            canvas::Path::line(
+                Point::new(tip_x - tick_size * 0.55, y + tick_size * 0.75),
+                Point::new(tip_x + tick_size * 0.55, y - tick_size * 0.75),
+            )
+        };
+        for (kind, tip_x, sign) in [(&self.arrow1, x1, 1.0_f32), (&self.arrow2, x2, -1.0_f32)] {
             if self.tick {
                 frame.stroke(
-                    &line(
-                        Point::new(tip_x - size * 0.55, y + size * 0.75),
-                        Point::new(tip_x + size * 0.55, y - size * 0.75),
-                    ),
+                    &tick_path(tip_x, size),
                     canvas::Stroke::default().with_color(guide).with_width(1.6),
                 );
-            } else {
-                let arrow = canvas::Path::new(|path| {
-                    path.move_to(Point::new(tip_x, y));
-                    path.line_to(Point::new(tip_x + sign * size, y - size * 0.42));
-                    path.line_to(Point::new(tip_x + sign * size, y + size * 0.42));
-                    path.close();
-                });
-                frame.fill(&arrow, guide);
+                continue;
+            }
+            match kind {
+                ArrowKind::None => {}
+                ArrowKind::Triangle { size, filled, size_mul } => {
+                    let s = size * size_mul;
+                    let arrow = canvas::Path::new(|path| {
+                        path.move_to(Point::new(tip_x, y));
+                        path.line_to(Point::new(tip_x + sign * s, y - s * 0.42));
+                        path.line_to(Point::new(tip_x + sign * s, y + s * 0.42));
+                        path.close();
+                    });
+                    if *filled {
+                        frame.fill(&arrow, guide);
+                    } else {
+                        frame.stroke(&arrow, canvas::Stroke::default().with_color(guide).with_width(1.4));
+                    }
+                }
+                ArrowKind::Open { size, half_angle } => {
+                    let (sin, cos) = half_angle.sin_cos();
+                    for side in [-1.0_f32, 1.0_f32] {
+                        frame.stroke(
+                            &line(
+                                Point::new(tip_x, y),
+                                Point::new(tip_x + sign * size * cos, y + side * size * sin),
+                            ),
+                            canvas::Stroke::default().with_color(guide).with_width(1.4),
+                        );
+                    }
+                }
+                ArrowKind::Dot { size, filled } => {
+                    let dot = canvas::Path::circle(Point::new(tip_x + sign * size * 0.5, y), size * 0.5);
+                    if *filled {
+                        frame.fill(&dot, guide);
+                    } else {
+                        frame.stroke(&dot, canvas::Stroke::default().with_color(guide).with_width(1.4));
+                    }
+                }
+                ArrowKind::Tick { size } => {
+                    frame.stroke(
+                        &tick_path(tip_x, *size),
+                        canvas::Stroke::default().with_color(guide).with_width(1.6),
+                    );
+                }
+                ArrowKind::Box_ { size, filled } => {
+                    let half = size * 0.45;
+                    let square = canvas::Path::rectangle(
+                        Point::new(tip_x + sign * half - half, y - half),
+                        iced::Size::new(half * 2.0, half * 2.0),
+                    );
+                    if *filled {
+                        frame.fill(&square, guide);
+                    } else {
+                        frame.stroke(&square, canvas::Stroke::default().with_color(guide).with_width(1.4));
+                    }
+                }
+                // Datum/Origin have dedicated CAD geometry; the preview keeps
+                // the schematic triangle/dot respectively.
+                ArrowKind::Datum { size, filled } => {
+                    let arrow = canvas::Path::new(|path| {
+                        path.move_to(Point::new(tip_x, y));
+                        path.line_to(Point::new(tip_x + sign * size, y - size * 0.42));
+                        path.line_to(Point::new(tip_x + sign * size, y + size * 0.42));
+                        path.close();
+                    });
+                    if *filled {
+                        frame.fill(&arrow, guide);
+                    } else {
+                        frame.stroke(&arrow, canvas::Stroke::default().with_color(guide).with_width(1.4));
+                    }
+                }
+                ArrowKind::Origin { size } => {
+                    let dot = canvas::Path::circle(Point::new(tip_x + sign * size * 0.5, y), size * 0.4);
+                    frame.stroke(&dot, canvas::Stroke::default().with_color(guide).with_width(1.4));
+                }
+                // Custom DWG block geometry cannot render in the schematic
+                // preview; fall back to the standard filled triangle.
+                ArrowKind::Custom { .. } => {
+                    let arrow = canvas::Path::new(|path| {
+                        path.move_to(Point::new(tip_x, y));
+                        path.line_to(Point::new(tip_x + sign * size, y - size * 0.42));
+                        path.line_to(Point::new(tip_x + sign * size, y + size * 0.42));
+                        path.close();
+                    });
+                    frame.fill(&arrow, guide);
+                }
             }
         }
 
@@ -384,6 +490,29 @@ pub fn view_window<'a>(
     };
 
     // Linear unit formats shared by DIMLUNIT / DIMALTU.
+    // Precision reads as the number pattern it produces (#1426).
+    const OPT_PREC: &[(&str, &str)] = &[
+        ("0", "0"),
+        ("1", "0.0"),
+        ("2", "0.00"),
+        ("3", "0.000"),
+        ("4", "0.0000"),
+        ("5", "0.00000"),
+        ("6", "0.000000"),
+        ("7", "0.0000000"),
+        ("8", "0.00000000"),
+    ];
+    // A precision dropdown, or the read-only value while the option is off.
+    let prec_field = move |label: Cow<'static, str>, fld: DsField, val: &'a str, enabled: bool| -> Element<'a, Message> {
+        if enabled {
+            enum_field(label, fld, val, OPT_PREC)
+        } else {
+            row![lbl(label), mk_field_enabled(fld, val, false)]
+                .spacing(8)
+                .align_y(iced::Center)
+                .into()
+        }
+    };
     const OPT_LUNIT: &[(&str, &str)] = &[
         ("1", "Scientific"),
         ("2", "Decimal"),
@@ -900,8 +1029,7 @@ pub fn view_window<'a>(
         4 => column![
             text(t!("Linear dimensions")).size(11).style(primary_style),
             enum_field(t!("Unit format"), DsField::Dimlunit, vals.dimlunit, OPT_LUNIT),
-            row![lbl(t!("Precision")), mk_field(DsField::Dimdec, vals.dimdec)]
-                .spacing(8).align_y(iced::Center),
+            prec_field(t!("Precision"), DsField::Dimdec, vals.dimdec, true),
             if matches!(vals.dimlunit.trim(), "4" | "5") {
                 enum_field(
                     t!("Fraction format"),
@@ -946,8 +1074,7 @@ pub fn view_window<'a>(
                 vals.dimaunit,
                 &[("0", "Decimal degrees"), ("1", "Degrees, minutes, seconds"), ("2", "Gradians"), ("3", "Radians"), ("4", "Surveyor's units")],
             ),
-            row![lbl(t!("Precision")), mk_field(DsField::Dimadec, vals.dimadec)]
-                .spacing(8).align_y(iced::Center),
+            prec_field(t!("Precision"), DsField::Dimadec, vals.dimadec, true),
             enum_field(
                 t!("Zero suppression"),
                 DsField::Dimazin,
@@ -970,24 +1097,14 @@ pub fn view_window<'a>(
             ]
             .spacing(8)
             .align_y(iced::Center),
-            row![
-                lbl(t!("Precision")),
-                mk_field_enabled(DsField::Dimaltd, vals.dimaltd, vals.dimalt)
-            ]
-            .spacing(8)
-            .align_y(iced::Center),
+            prec_field(t!("Precision"), DsField::Dimaltd, vals.dimaltd, vals.dimalt),
             if vals.dimalt {
                 enum_field(t!("Unit format"), DsField::Dimaltu, vals.dimaltu, OPT_LUNIT)
             } else {
                 row![lbl(t!("Unit format")), container(text(alternate_unit_name).size(11).style(muted_style)).padding([4, 7]).width(150)]
                     .spacing(8).align_y(iced::Center).into()
             },
-            row![
-                lbl(t!("Tolerance precision")),
-                mk_field_enabled(DsField::Dimalttd, vals.dimalttd, vals.dimalt)
-            ]
-            .spacing(8)
-            .align_y(iced::Center),
+            prec_field(t!("Tolerance precision"), DsField::Dimalttd, vals.dimalttd, vals.dimalt),
             row![
                 lbl(t!("Round off")),
                 mk_field_enabled(DsField::Dimaltrnd, vals.dimaltrnd, vals.dimalt)
@@ -1042,12 +1159,7 @@ pub fn view_window<'a>(
             ]
             .spacing(8)
             .align_y(iced::Center),
-            row![
-                lbl(t!("Precision")),
-                mk_field_enabled(DsField::Dimtdec, vals.dimtdec, vals.dimtol || vals.dimlim)
-            ]
-            .spacing(8)
-            .align_y(iced::Center),
+            prec_field(t!("Precision"), DsField::Dimtdec, vals.dimtdec, vals.dimtol || vals.dimlim),
             row![
                 lbl(t!("Height scale")),
                 mk_field_enabled(DsField::Dimtfac, vals.dimtfac, vals.dimtol || vals.dimlim)
@@ -1121,13 +1233,23 @@ pub fn view_window<'a>(
             preview_text.push_str(&format!(" +{} −{}", vals.dimtp.trim(), vals.dimtm.trim()));
         }
     }
+    let arrow_size = vals.dimasz.trim().parse::<f32>().unwrap_or(1.0).abs() * 5.0 + 5.0;
+    let (arrow1, arrow2) = preview_arrow_kinds(
+        vals.dimsah,
+        &vals.dimblk_name,
+        &vals.dimblk1_name,
+        &vals.dimblk2_name,
+        arrow_size.clamp(5.0, 14.0),
+    );
     let preview = canvas(DimensionPreview {
         ext1: !vals.dimse1,
         ext2: !vals.dimse2,
         dim1: !vals.dimsd1,
         dim2: !vals.dimsd2,
         tick: vals.dimtsz.trim().parse::<f32>().unwrap_or(0.0) > 0.0,
-        arrow_size: vals.dimasz.trim().parse::<f32>().unwrap_or(1.0).abs() * 5.0 + 5.0,
+        arrow_size,
+        arrow1,
+        arrow2,
         text_above: vals.dimtad.trim() != "0",
         basic: vals.dimgap.trim().starts_with('-'),
         text: preview_text,
@@ -1224,4 +1346,26 @@ pub fn view_window<'a>(
         read_only: vals.read_only,
         editor: right_panel.into(),
     })
+}
+
+#[cfg(test)]
+mod preview_arrow_tests {
+    // Preview must resolve each end independently: shared block when Dimsah
+    // is off, per-end blocks when on.
+    use super::preview_arrow_kinds;
+    use crate::scene::convert::tessellate::ArrowKind;
+
+    #[test]
+    fn shared_block_feeds_both_ends_when_dimsah_off() {
+        let (first, second) = preview_arrow_kinds(false, "OPEN", "DOT", "NONE", 10.0);
+        assert!(matches!(first, ArrowKind::Open { .. }));
+        assert!(matches!(second, ArrowKind::Open { .. }));
+    }
+
+    #[test]
+    fn per_end_blocks_feed_each_end_when_dimsah_on() {
+        let (first, second) = preview_arrow_kinds(true, "OPEN", "DOT", "NONE", 10.0);
+        assert!(matches!(first, ArrowKind::Dot { .. }));
+        assert!(matches!(second, ArrowKind::None));
+    }
 }

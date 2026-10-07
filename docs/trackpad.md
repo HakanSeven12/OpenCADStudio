@@ -17,6 +17,20 @@ together with the middle button orbits, exactly as before.
 | Middle-button drag | Pan. Shift together with the middle button orbits the model view. |
 | `PAN` / `P` | Pan with the left button until Escape. |
 
+`ZOOMFACTOR` scales what one notch does. The system variable takes 3 to 100 —
+the range it has everywhere — and `SETVAR ZOOMFACTOR` accepts nothing outside
+it. Options → User Preferences reaches 500 for anyone who wants a faster wheel:
+the slider covers the variable's own range, the field beside it takes any value
+up to that ceiling, and both show what a notch does as a percentage. A value
+above 100 therefore lives only in this application's own configuration, and a
+bare `SETVAR ZOOMFACTOR` still reports it.
+
+A notch multiplies the camera distance by `0.9 ^ (ZOOMFACTOR / 60)`, so the
+default 60 brings the view a tenth closer, a notch in and a notch out cancel
+exactly, and no setting can drive the distance to zero or through it. A floating
+viewport in MSPACE zooms its own view the same way, from a base of 0.85 — the
+15% a notch has always moved a viewport.
+
 Panning covers the same ground whichever way it starts: the active model tile,
 a paper sheet, or the model view inside a floating viewport in MSPACE. A pan
 dragged out of a two-finger gesture and one dragged with the middle button move
@@ -46,8 +60,10 @@ from the split described below; it is not a separate setting.
   means. A wheel reports notches and zooms; a precise-scrolling device reports
   pixels and pans. There is no modifier and no setting in that decision.
   `pan_active_view` and `zoom_view_at_cursor` are the bodies shared by the mouse
-  and the gestures, and they apply a pinch as `1 - step / 10 = 1 / (1 + m)` so a
-  pinch of `m` leaves the view exactly `1 + m` times closer.
+  and the gestures. A pinch of `m` leaves the view exactly `1 + m` times closer:
+  `pinch_zoom_steps` asks the camera for the step that applies that ratio
+  (`Camera::zoom_steps_for_ratio`) instead of inverting the zoom law here, which
+  is what let the two drift apart when the law stopped being a subtraction.
 - `src/app/mod.rs` carries one `Message::TrackpadPinch(f32)` per gesture event.
 
 Pixel deltas pan only where they can only mean a trackpad. The web build
@@ -64,7 +80,9 @@ cargo test --locked --lib scroll_intent
 ```
 
 The tests cover the decision between a notch and a pixel, and the 1:1 mapping of
-a pinch onto the camera. The gestures themselves are checked by hand: macOS
+a pinch onto the camera — the mapping by zooming a real `Camera` and measuring
+the distance it ends at, so it is checked against the camera's own zoom law and
+not against a second copy of it. The gestures themselves are checked by hand: macOS
 offers no way to synthesize a magnify event, so a pinch cannot be driven by a
 test. Two-finger pan and pinch are exercised in model space, in a tiled view, on
 a paper sheet, and inside a floating viewport in MSPACE.

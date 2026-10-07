@@ -2,9 +2,9 @@
 //!
 //! Analytic surfaces remain analytic instead of becoming facets.
 
-use cadkernel::acis::append;
-use acadrust::entities::acis::{SabReader, SabWriter, SatDocument};
-use cadkernel::brep::Body;
+use kernel::acis::append;
+use codec::entities::acis::{SabReader, SabWriter, SatDocument};
+use kernel::brep::Body;
 
 /// Returns `None` when the body contains an unsupported record form.
 pub fn solid_to_sat(body: &Body) -> Option<SatDocument> {
@@ -12,7 +12,7 @@ pub fn solid_to_sat(body: &Body) -> Option<SatDocument> {
     append(body, &mut document).ok()?;
     let document = SatDocument::parse(&document.to_sat_string()).ok()?;
     let valid = |candidate: &SatDocument| {
-        let (restored, loss) = cadkernel::acis::lift(candidate);
+        let (restored, loss) = kernel::acis::lift(candidate);
         loss.is_empty() && restored.len() == 1 && restored[0].validate().is_empty()
     };
     if !valid(&document) {
@@ -25,8 +25,8 @@ pub fn solid_to_sat(body: &Body) -> Option<SatDocument> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cadkernel::geom2d::{Arc, Curve};
-    use cadkernel::space::Plane;
+    use kernel::geom2d::{Arc, Curve};
+    use kernel::space::Plane;
 
     fn circle_section(z: f64, radius: f64) -> (Plane, Vec<Curve>) {
         let curves = (0..4)
@@ -48,7 +48,7 @@ mod tests {
 
     #[test]
     fn a_curved_loft_round_trips_through_text_and_binary_acis() {
-        let body = cadkernel::brep::loft(&[
+        let body = kernel::brep::loft(&[
             circle_section(0.0, 5.0),
             circle_section(10.0, 2.0),
         ])
@@ -56,17 +56,17 @@ mod tests {
         assert!(body.validate().is_empty());
 
         let mut document = SatDocument::new();
-        cadkernel::acis::append(&body, &mut document).unwrap();
+        kernel::acis::append(&body, &mut document).unwrap();
         let text = document.to_sat_string();
         let parsed = SatDocument::parse(&text).unwrap();
-        let (restored, text_loss) = cadkernel::acis::lift(&parsed);
+        let (restored, text_loss) = kernel::acis::lift(&parsed);
         assert!(text_loss.is_empty(), "{text_loss:?}");
         assert_eq!(restored.len(), 1);
         assert!(restored[0].validate().is_empty());
 
         let binary = SabWriter::write(&parsed);
         let parsed_binary = SabReader::read(&binary).unwrap();
-        let (restored, binary_loss) = cadkernel::acis::lift(&parsed_binary);
+        let (restored, binary_loss) = kernel::acis::lift(&parsed_binary);
         assert!(binary_loss.is_empty(), "{binary_loss:?}");
         assert_eq!(restored.len(), 1);
         assert!(restored[0].validate().is_empty());

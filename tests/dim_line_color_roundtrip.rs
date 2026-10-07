@@ -4,11 +4,11 @@
 // is silently lost, which is exactly why the row was kept read-only before.
 // This is the regression guard for that persistence.
 
-use acadrust::entities::{Dimension, DimensionLinear, Leader, Line};
-use acadrust::tables::BlockRecord;
-use acadrust::types::{Color, Vector3};
-use acadrust::xdata::XDataValue;
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::entities::{Dimension, DimensionLinear, Leader, Line};
+use codec::tables::BlockRecord;
+use codec::types::{Color, Vector3};
+use codec::xdata::XDataValue;
+use codec::{CadDocument, EntityType, Handle};
 use OpenCADStudio::entities::dim_override as dov;
 use OpenCADStudio::scene::Scene;
 

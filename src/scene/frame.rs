@@ -1,22 +1,55 @@
-use acadrust::objects::{ObjectType, RasterVariables, WipeoutVariables};
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::objects::{ObjectType, RasterVariables, WipeoutVariables};
+use codec::{CadDocument, EntityType, Handle};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FrameKind {
     Image,
     Pdf,
+    Dwf,
+    Dgn,
     Wipeout,
     Xclip,
     PointCloudClip,
 }
 
-pub(crate) const ALL_KINDS: [FrameKind; 5] = [
+pub(crate) const ALL_KINDS: [FrameKind; 7] = [
     FrameKind::Image,
     FrameKind::Pdf,
+    FrameKind::Dwf,
+    FrameKind::Dgn,
     FrameKind::Wipeout,
     FrameKind::Xclip,
     FrameKind::PointCloudClip,
 ];
+
+/// IMAGEFRAME of the user profile: what a drawing without its own image
+/// variables shows, and what a new drawing starts with. Setting IMAGEFRAME
+/// updates it, so it carries over to new drawings and later sessions.
+static PROFILE_IMAGE_FRAME: std::sync::atomic::AtomicI16 = std::sync::atomic::AtomicI16::new(1);
+
+pub(crate) fn profile_image_mode() -> i16 {
+    PROFILE_IMAGE_FRAME.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub(crate) fn set_profile_image_mode(value: i16) {
+    PROFILE_IMAGE_FRAME.store(value.clamp(0, 2), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The image variables store the frame as bits: 1 shown, 2 not plotted, so
+/// "shown but not plotted" is 3. Any other value is not one the variable
+/// can hold, and the profile setting applies.
+fn image_mode_from_flags(flags: i16) -> Option<i16> {
+    match flags {
+        0 => Some(0),
+        1 => Some(1),
+        3 => Some(2),
+        _ => None,
+    }
+}
+
+fn image_flags_from_mode(mode: i16) -> i16 {
+    if mode == 2 { 3 } else { mode }
+}
 
 fn root_entry(document: &CadDocument, name: &str) -> Option<Handle> {
     let from_dictionary = |handle| match document.objects.get(&handle) {
@@ -58,12 +91,15 @@ pub(crate) fn mode(document: &CadDocument, kind: FrameKind) -> i16 {
     match kind {
         FrameKind::Image => raster_variables_handle(document)
             .and_then(|handle| match document.objects.get(&handle) {
-                Some(ObjectType::RasterVariables(value)) => Some(value.display_image_frame),
+                Some(ObjectType::RasterVariables(value)) => {
+                    image_mode_from_flags(value.display_image_frame)
+                }
                 _ => None,
             })
-            .unwrap_or(1)
-            .clamp(0, 2),
+            .unwrap_or_else(profile_image_mode),
         FrameKind::Pdf => drawing_mode(document, "PDFFRAME", 1),
+        FrameKind::Dwf => document.header.dwf_frame.clamp(0, 2),
+        FrameKind::Dgn => document.header.dgn_frame.clamp(0, 2),
         FrameKind::Wipeout => crate::io::drawing_variable(document, "WIPEOUTFRAME")
             .and_then(|value| value.parse::<i16>().ok())
             .or_else(|| {
@@ -115,8 +151,9 @@ fn set_image_mode(document: &mut CadDocument, value: i16) {
     });
     if let Some(ObjectType::RasterVariables(variables)) = document.objects.get_mut(&handle) {
         variables.owner = owner;
-        variables.display_image_frame = value;
+        variables.display_image_frame = image_flags_from_mode(value);
     }
+    set_profile_image_mode(value);
     attach_root_entry(document, "ACAD_IMAGE_VARS", handle);
 }
 
@@ -145,6 +182,8 @@ pub(crate) fn set_mode(document: &mut CadDocument, kind: FrameKind, value: i16) 
     match kind {
         FrameKind::Image => set_image_mode(document, value),
         FrameKind::Pdf => crate::io::set_drawing_variable(document, "PDFFRAME", &value.to_string()),
+        FrameKind::Dwf => document.header.dwf_frame = value,
+        FrameKind::Dgn => document.header.dgn_frame = value,
         FrameKind::Wipeout => set_wipeout_mode(document, value),
         FrameKind::Xclip => document.header.xclip_frame = value,
         FrameKind::PointCloudClip => crate::io::set_drawing_variable(
@@ -168,6 +207,8 @@ pub(crate) fn kind_for_name(name: &str) -> Option<FrameKind> {
     match name {
         "IMAGEFRAME" => Some(FrameKind::Image),
         "PDFFRAME" => Some(FrameKind::Pdf),
+        "DWFFRAME" => Some(FrameKind::Dwf),
+        "DGNFRAME" => Some(FrameKind::Dgn),
         "WIPEOUTFRAME" => Some(FrameKind::Wipeout),
         "XCLIPFRAME" => Some(FrameKind::Xclip),
         "POINTCLOUDCLIPFRAME" => Some(FrameKind::PointCloudClip),
@@ -178,23 +219,26 @@ pub(crate) fn kind_for_name(name: &str) -> Option<FrameKind> {
 pub(crate) fn entity_kind(entity: &EntityType) -> Option<FrameKind> {
     match entity {
         EntityType::RasterImage(_) => Some(FrameKind::Image),
-        EntityType::Underlay(underlay)
-            if matches!(underlay.underlay_type, acadrust::entities::UnderlayType::Pdf) =>
-        {
-            Some(FrameKind::Pdf)
-        }
+        EntityType::Underlay(underlay) => Some(underlay_kind(underlay)),
         EntityType::Wipeout(_) => Some(FrameKind::Wipeout),
         _ => None,
+    }
+}
+
+fn underlay_kind(underlay: &codec::entities::Underlay) -> FrameKind {
+    match underlay.underlay_type {
+        codec::entities::UnderlayType::Pdf => FrameKind::Pdf,
+        codec::entities::UnderlayType::Dwf => FrameKind::Dwf,
+        codec::entities::UnderlayType::Dgn => FrameKind::Dgn,
     }
 }
 
 pub(crate) fn affected(entity: &EntityType, kind: FrameKind) -> bool {
     match kind {
         FrameKind::Image => matches!(entity, EntityType::RasterImage(_)),
-        FrameKind::Pdf => matches!(
+        FrameKind::Pdf | FrameKind::Dwf | FrameKind::Dgn => matches!(
             entity,
-            EntityType::Underlay(underlay)
-                if matches!(underlay.underlay_type, acadrust::entities::UnderlayType::Pdf)
+            EntityType::Underlay(underlay) if underlay_kind(underlay) == kind
         ),
         FrameKind::Wipeout => matches!(entity, EntityType::Wipeout(_)),
         FrameKind::Xclip => matches!(entity, EntityType::Insert(_)),
@@ -203,8 +247,8 @@ pub(crate) fn affected(entity: &EntityType, kind: FrameKind) -> bool {
             EntityType::Extended(extended)
                 if matches!(
                     &extended.data,
-                    acadrust::entities::ExtendedEntityData::PointCloud(_)
-                        | acadrust::entities::ExtendedEntityData::PointCloudEx(_)
+                    codec::entities::ExtendedEntityData::PointCloud(_)
+                        | codec::entities::ExtendedEntityData::PointCloudEx(_)
                 )
         ),
     }

@@ -10,7 +10,7 @@
 //
 // Layer names are case-insensitive. Multiple space-separated names are accepted.
 
-use acadrust::Handle;
+use codec::Handle;
 use glam::DVec3;
 use crate::t;
 
@@ -75,7 +75,7 @@ impl CadCommand for VplayerCommand {
 
         // Handle::NULL signals "apply to all viewports" in cmd_result.rs
         let vp_handle = if all_viewports {
-            acadrust::Handle::NULL
+            codec::Handle::NULL
         } else {
             self.vp_handle
         };

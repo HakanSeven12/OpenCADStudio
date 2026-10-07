@@ -1,9 +1,10 @@
 [package]
 name = "OpenCADStudio"
-version = "2026.38.0"
+version = "2026.40.1"
 edition = "2021"
 build = "build.rs"
 default-run = "OpenCADStudio"
+autotests = false
 
 [workspace]
 members = [
@@ -33,13 +34,19 @@ rfd = "0.17"
 clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
-acadrust = { git = "https://github.com/HakanSeven12/cadcodec.git", rev = "dd1d7bf", features = ["serde"] }
-cadkernel = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "6eae7c9", features = ["acis", "offset"] }
-cadkernel-constraints = { git = "https://github.com/HakanSeven12/cadkernel.git", rev = "6eae7c9" }
+codec = { package = "opencadcodec", git = "https://github.com/HakanSeven12/opencadcodec.git", rev = "937745d", features = ["serde"] }
+kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "86497ae", features = ["acis", "offset"] }
+kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "86497ae" }
+graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "81bf45f" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
 hayro = "0.7.1"
+kurbo = "0.13"
+# DWF/DWFx packages, their XPS pages and DWF/DGN underlay rasters.
+zip = { version = "8", default-features = false, features = ["deflate"] }
+roxmltree = "0.20"
+tiny-skia = "0.11"
 # Rasterises assets/logo.svg into the window icon at startup, so the taskbar
 # icon comes from the same file every other build target does. Already in the
 # tree behind iced's svg feature; named here only to use it directly.
@@ -52,6 +59,9 @@ rustc-hash = "2"
 sha2 = "0.10"
 fontdb = "0.23"
 ttf-parser = "0.25"
+# TrueType interpreter for hint-reliant ("tricky") fonts such as DFKai-SB and
+# MingLiU, whose raw outlines are missing strokes. Already in the tree (hayro).
+skrifa = "0.42.1"
 cosmic-text = "0.15"
 unicode-bidi = "0.3"
 lyon_tessellation = "1.0.20"
@@ -64,7 +74,7 @@ naga = { version = "27", features = ["wgsl-in"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 libloading = "0.8"
-windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_Security", "Win32_System_Com", "Win32_System_Registry", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_Graphics_Printing", "Win32_Graphics_Gdi", "Win32_Storage_Xps"] }
+windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_Security", "Win32_System_Com", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_Graphics_Printing", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_Globalization", "Win32_Security_Authentication_Identity"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "wayland"] }
@@ -93,6 +103,11 @@ i18n-embed = { version = "0.16", features = ["desktop-requester"] }
 rayon = "1"
 open = "5"
 printpdf = { version = "0.9.1", default-features = false, features = ["images"] }
+# TrueType subsetting for searchable PDF text (same version printpdf itself
+# uses, so no new binary enters the lockfile). Same feature set as printpdf's
+# own allsorts use (pure-Rust flate backend) — the defaults would drag in the
+# libz-sys C dependency. Native-only like printpdf.
+allsorts = { version = "0.16", default-features = false, features = ["flate2_rust"] }
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "win-system-proxy"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -143,9 +158,26 @@ web-sys = { version = "=0.3.85", features = [
 ] }
 iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39", features = ["webgl", "fira-sans"] }
 
+[profile.dev]
+debug = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.test]
+debug = 1
+
 [profile.release]
 strip = true
 
 [[bench]]
 name = "performance_benchmarks"
 harness = false
+
+[[bench]]
+name = "command_benchmarks"
+harness = false
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"

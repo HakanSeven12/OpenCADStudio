@@ -14,6 +14,8 @@ sets, and a close-with-discard. Uses only the Python standard library.
 """
 
 import json
+import os
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -24,10 +26,13 @@ import urllib.request
 from pathlib import Path
 
 
+TOKEN = secrets.token_hex(32)
+
+
 def call(port: int, method: str, path: str, body=None):
     """One HTTP call; returns (status, parsed-json-or-None)."""
     data = None
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {TOKEN}"}
     if body is not None:
         data = json.dumps(body).encode()
     request = urllib.request.Request(
@@ -67,6 +72,7 @@ def main() -> None:
     out_dir = Path(tempfile.mkdtemp(prefix="ocs_rest_smoke_"))
     process = subprocess.Popen(
         [str(exe), "--http", str(port)],
+        env={**os.environ, "OCS_API_TOKEN": TOKEN},
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )

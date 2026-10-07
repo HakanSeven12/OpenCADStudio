@@ -8,7 +8,7 @@
 //        A <degrees>  — change angle
 //      Press Enter to apply changes.
 
-use acadrust::Handle;
+use codec::Handle;
 use glam::DVec3;
 use crate::t;
 
@@ -30,20 +30,20 @@ pub struct HatcheditCommand {
     disassociate: bool,
     store_origin: bool,
     current_origin: [f64; 2],
-    origin_plane: cadkernel::space::Plane,
+    origin_plane: kernel::space::Plane,
     origin_bounds: Option<([f64;2],[f64;2])>,
     origin_bounds_unavailable: bool,
-    style: Option<acadrust::entities::HatchStyleType>,
+    style: Option<codec::entities::HatchStyleType>,
     annotative: Option<bool>,
     annotative_current: bool,
-    style_current: acadrust::entities::HatchStyleType,
+    style_current: codec::entities::HatchStyleType,
     input: Option<&'static str>,
-    source_appearance: Option<(acadrust::types::Color,String,acadrust::types::Transparency)>,
-    current_color: acadrust::types::Color,
-    current_transparency: acadrust::types::Transparency,
+    source_appearance: Option<(codec::types::Color,String,codec::types::Transparency)>,
+    current_color: codec::types::Color,
+    current_transparency: codec::types::Transparency,
     boundary_region: bool,
     association_sources: Option<(crate::command::WorkingPlane,rustc_hash::FxHashMap<Handle,crate::scene::BoundarySource>)>,
-    association_paths: Vec<acadrust::entities::BoundaryPath>,
+    association_paths: Vec<codec::entities::BoundaryPath>,
     association_missed: bool,
 }
 
@@ -57,15 +57,15 @@ impl HatcheditCommand {
             origin_bounds: None,
             origin_bounds_unavailable: false,
             current_origin: [0.0, 0.0],
-            origin_plane: cadkernel::space::Plane::from_axes([0.0;3],[1.0,0.0,0.0],[0.0,1.0,0.0]),
+            origin_plane: kernel::space::Plane::from_axes([0.0;3],[1.0,0.0,0.0],[0.0,1.0,0.0]),
             style: None,
             annotative: None,
             annotative_current: false,
-            style_current: acadrust::entities::HatchStyleType::Normal,
+            style_current: codec::entities::HatchStyleType::Normal,
             input: None,
             source_appearance: None,
-            current_color: acadrust::types::Color::ByLayer,
-            current_transparency: acadrust::types::Transparency::ByLayer,
+            current_color: codec::types::Color::ByLayer,
+            current_transparency: codec::types::Transparency::ByLayer,
             boundary_region: false,
             association_sources: None,
             association_paths: Vec::new(),
@@ -93,15 +93,15 @@ impl HatcheditCommand {
             origin_bounds: None,
             origin_bounds_unavailable: false,
             current_origin: [0.0, 0.0],
-            origin_plane: cadkernel::space::Plane::from_axes([0.0;3],[1.0,0.0,0.0],[0.0,1.0,0.0]),
+            origin_plane: kernel::space::Plane::from_axes([0.0;3],[1.0,0.0,0.0],[0.0,1.0,0.0]),
             style: None,
             annotative: None,
             annotative_current: annotative,
-            style_current: acadrust::entities::HatchStyleType::Normal,
+            style_current: codec::entities::HatchStyleType::Normal,
             input: None,
             source_appearance: None,
-            current_color: acadrust::types::Color::ByLayer,
-            current_transparency: acadrust::types::Transparency::ByLayer,
+            current_color: codec::types::Color::ByLayer,
+            current_transparency: codec::types::Transparency::ByLayer,
             boundary_region: false,
             association_sources: None,
             association_paths: Vec::new(),
@@ -133,15 +133,15 @@ impl HatcheditCommand {
         command.input=Some("associate-point");command.association_sources=Some((plane,sources));command
     }
     fn add_association_rings(&mut self,rings:Vec<Vec<[f64;2]>>,sources:&rustc_hash::FxHashMap<Handle,crate::scene::BoundarySource>) {
-        let exterior=cadkernel::geom2d::ring_nesting_depths(&rings).into_iter().map(|depth|depth==0).collect::<Vec<_>>();
+        let exterior=kernel::geom2d::ring_nesting_depths(&rings).into_iter().map(|depth|depth==0).collect::<Vec<_>>();
         let paths=crate::scene::exact_hatch_paths(&rings,&exterior,sources,1e-6);
         self.association_missed=paths.is_empty()||paths.len()!=rings.len()||paths.iter().any(|path|path.boundary_handles.is_empty());
         if !self.association_missed {
             for path in paths {if !self.association_paths.contains(&path){self.association_paths.push(path);}}
         }
     }
-    pub fn with_appearance(mut self,entity:Option<&acadrust::EntityType>,current_color:acadrust::types::Color,current_transparency:acadrust::types::Transparency)->Self {
-        if let Some(acadrust::EntityType::Hatch(hatch)) = entity {
+    pub fn with_appearance(mut self,entity:Option<&codec::EntityType>,current_color:codec::types::Color,current_transparency:codec::types::Transparency)->Self {
+        if let Some(codec::EntityType::Hatch(hatch)) = entity {
             self.style_current = hatch.style;
             self.origin_plane = crate::entities::curve::ocs_plane(hatch.normal, hatch.elevation);
             self.origin_bounds = hatch.paths.iter().flat_map(|path| &path.edges)
@@ -153,20 +153,20 @@ impl HatcheditCommand {
                     let mut anchors = Vec::new();
                     for curve in curves {
                         match curve {
-                            cadkernel::geom2d::Curve::Ellipse(arc) => {
+                            kernel::geom2d::Curve::Ellipse(arc) => {
                                 if (arc.end_parameter - arc.start_parameter).abs() < std::f64::consts::TAU { return None; }
                                 for angle in [0.0, std::f64::consts::FRAC_PI_2] {
-                                    anchors.push(cadkernel::geom2d::Curve::Line(cadkernel::geom2d::Line {
+                                    anchors.push(kernel::geom2d::Curve::Line(kernel::geom2d::Line {
                                         start: arc.ellipse.point_at(angle),
                                         end: arc.ellipse.point_at(angle + std::f64::consts::PI),
                                     }));
                                 }
                             }
-                            cadkernel::geom2d::Curve::Nurbs(_) => return None,
+                            kernel::geom2d::Curve::Nurbs(_) => return None,
                             other => anchors.push(other),
                         }
                     }
-                    cadkernel::geom2d::analytic_curve_bounds(&anchors)
+                    kernel::geom2d::analytic_curve_bounds(&anchors)
                 });
         }
         self.source_appearance=entity.map(|e|{let c=e.common();(c.color,c.layer.clone(),c.transparency)});
@@ -195,9 +195,9 @@ impl CadCommand for HatcheditCommand {
         if let Some(input)=self.input {
             if input == "style" {
                 let current = match self.style_current {
-                    acadrust::entities::HatchStyleType::Normal => "Normal",
-                    acadrust::entities::HatchStyleType::Outer => "Outer",
-                    acadrust::entities::HatchStyleType::Ignore => "Ignore",
+                    codec::entities::HatchStyleType::Normal => "Normal",
+                    codec::entities::HatchStyleType::Outer => "Outer",
+                    codec::entities::HatchStyleType::Ignore => "Ignore",
                 };
                 return format!("Enter hatching style [Ignore/Outer/Normal] <{current}>:");
             }
@@ -206,8 +206,8 @@ impl CadCommand for HatcheditCommand {
                     "color"=>return format!("New color [Truecolor/. (for use current)] <{color:?}>:"),
                     "layer"=>return format!("Specify layer or [. (for use current)] <{layer}>:"),
                     "transparency"=>return format!("Specify transparency (0-90) or ByLayer/ByBlock <{}>:",match transparency {
-                        acadrust::types::Transparency::ByLayer=>"ByLayer".into(),
-                        acadrust::types::Transparency::ByBlock=>"ByBlock".into(),
+                        codec::types::Transparency::ByLayer=>"ByLayer".into(),
+                        codec::types::Transparency::ByBlock=>"ByBlock".into(),
                         value=>format!("{:.0}",value.as_percent()*100.0),
                     }),
                     _=>{},
@@ -334,7 +334,7 @@ impl CadCommand for HatcheditCommand {
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let keyword=text.trim().to_ascii_uppercase();
         if let Some(input)=self.input {
-            use acadrust::types::{Color,Transparency};
+            use codec::types::{Color,Transparency};
             let appearance=|color,layer,transparency|HatchEditOperation::Appearance{color,layer,transparency};
             match input {
                 "origin" => match keyword.as_str() {
@@ -372,9 +372,9 @@ impl CadCommand for HatcheditCommand {
                 }
                 "style" => {
                     self.style = match keyword.as_str() {
-                        "I" | "IGNORE" => Some(acadrust::entities::HatchStyleType::Ignore),
-                        "O" | "OUTER" => Some(acadrust::entities::HatchStyleType::Outer),
-                        "N" | "NORMAL" => Some(acadrust::entities::HatchStyleType::Normal),
+                        "I" | "IGNORE" => Some(codec::entities::HatchStyleType::Ignore),
+                        "O" | "OUTER" => Some(codec::entities::HatchStyleType::Outer),
+                        "N" | "NORMAL" => Some(codec::entities::HatchStyleType::Normal),
                         _ => return Some(CmdResult::NeedPoint),
                     };
                     return self.apply_result(self.update_operation());
@@ -509,9 +509,9 @@ impl CadCommand for HatcheditCommand {
         }
         if let Some(rest) = text.strip_prefix('Y') {
             self.style = match rest.trim() {
-                "NORMAL" | "N" => Some(acadrust::entities::HatchStyleType::Normal),
-                "OUTER" | "O" => Some(acadrust::entities::HatchStyleType::Outer),
-                "IGNORE" | "I" => Some(acadrust::entities::HatchStyleType::Ignore),
+                "NORMAL" | "N" => Some(codec::entities::HatchStyleType::Normal),
+                "OUTER" | "O" => Some(codec::entities::HatchStyleType::Outer),
+                "IGNORE" | "I" => Some(codec::entities::HatchStyleType::Ignore),
                 _ => self.style,
             };
             return Some(CmdResult::NeedPoint);
@@ -613,12 +613,12 @@ impl CadCommand for HatcheditCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::hatch::{
+    use codec::entities::hatch::{
         BoundaryEdge, BoundaryPath, EllipticArcEdge, LineEdge,
     };
-    use acadrust::entities::{Hatch, HatchStyleType};
-    use acadrust::types::{Color, Transparency, Vector2};
-    use acadrust::EntityType;
+    use codec::entities::{Hatch, HatchStyleType};
+    use codec::types::{Color, Transparency, Vector2};
+    use codec::EntityType;
 
     fn hatch_command() -> HatcheditCommand {
         let mut hatch = Hatch::new();

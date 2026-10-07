@@ -36,12 +36,6 @@ pub(in crate::app) use overlay::{MTEXT_TEXT_ID, TEXT_INLINE_ID};
 pub(in crate::app) const VIEWPORT_CAPTURE_BOUNDS_ID: &str = "viewport-capture-bounds";
 
 const VIEWCUBE_HIT_SIZE: f32 = VIEWCUBE_REGION_PX;
-static MOBILE_SPONSOR_IMAGE: std::sync::LazyLock<iced::widget::image::Handle> =
-    std::sync::LazyLock::new(|| {
-        iced::widget::image::Handle::from_bytes(
-            include_bytes!("../../../assets/sponsors/cad-editor-mobile-dwg-viewer.png").as_slice(),
-        )
-    });
 
 /// Background used by drafting overlays in model or paper space.
 fn crosshair_background(tab: &DocumentTab, is_paper: bool) -> [f32; 4] {
@@ -49,6 +43,23 @@ fn crosshair_background(tab: &DocumentTab, is_paper: bool) -> [f32; 4] {
         return tab.scene.bg_color;
     }
     tab.scene.paper_bg_color
+}
+
+/// Which navigation tool the viewport cursor should advertise. The three flags
+/// are mutually exclusive — every command entry point clears all of them before
+/// arming one (`crate::app::commands`) — so the order here only settles a state
+/// that cannot occur.
+pub(in crate::app) fn nav_cursor(tab: &DocumentTab) -> crate::ui::overlay::NavCursor {
+    use crate::ui::overlay::NavCursor;
+    if tab.pan_mode {
+        NavCursor::Pan
+    } else if tab.orbit_mode {
+        NavCursor::Orbit
+    } else if tab.zoom_dynamic_mode {
+        NavCursor::Zoom
+    } else {
+        NavCursor::None
+    }
 }
 
 /// Clear gap (px) kept between the render-mode bar (top-left) and the ViewCube
@@ -163,7 +174,7 @@ fn shortcut_key_name(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Opt
 /// `ViewportRenderMode` enum carries the raw DXF integers, not a label,
 /// so wrap it locally with a friendly name renderer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct RenderModeChoice(pub acadrust::entities::ViewportRenderMode);
+pub(super) struct RenderModeChoice(pub codec::entities::ViewportRenderMode);
 
 impl std::fmt::Display for RenderModeChoice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -252,13 +263,13 @@ impl OpenCADStudio {
             tab.scene
                 .active_viewport
                 .and_then(|h| {
-                    let (cw, ch) = tab.scene.selection.borrow().vp_size;
+                    let (cw, ch) = tab.scene.selection.borrow().view.vp_size;
                     tab.scene.viewport_screen_rect(h, (cw, ch))
                 })
                 .map(|r| r.width)
                 .unwrap_or(f32::INFINITY)
         } else {
-            let (vw, vh) = tab.scene.selection.borrow().vp_size;
+            let (vw, vh) = tab.scene.selection.borrow().view.vp_size;
             tab.scene.active_model_tile_bounds(vw, vh).width
         };
         let viewcube_visible = self.show_viewcube
@@ -340,7 +351,7 @@ impl OpenCADStudio {
             let size_probe: Element<'_, Message> = responsive(move |size| {
                 {
                     let mut sel = scene.selection.borrow_mut();
-                    sel.vp_size = (size.width, size.height);
+                    sel.view.vp_size = (size.width, size.height);
                 }
                 scene.sync_tiles_from_panes(size.width, size.height);
                 Space::new().width(Fill).height(Fill)
@@ -395,7 +406,7 @@ impl OpenCADStudio {
         let grid_overlay = if self.layout_settling || tab.is_start {
             Space::new().into()
         } else {
-            let (vw, vh) = tab.scene.selection.borrow().vp_size;
+            let (vw, vh) = tab.scene.selection.borrow().view.vp_size;
             let model_basis = {
                 let (o, ux, uy, uz) = tab.ucs_xform().axes();
                 let (ux, uy, uz) = super::helpers::drafting_axes(
@@ -516,7 +527,7 @@ bg={bg_ms:.1}ms n={view_count}"
             let grips: Vec<crate::ui::overlay::GripMarker> = if show_grips
                 && !tab.selected_grips.is_empty()
             {
-                let (vw, vh) = sel_ref.vp_size;
+                let (vw, vh) = sel_ref.view.vp_size;
                 // Overlays project through the active tile's camera, so
                 // they must use the active tile's screen rectangle (with
                 // its canvas offset) — not the whole canvas — or they
@@ -537,12 +548,12 @@ bg={bg_ms:.1}ms n={view_count}"
                     .flatten()
                     .and_then(|h| {
                         let indexed = match tab.scene.document.get_entity(h) {
-                            Some(acadrust::EntityType::LwPolyline(_))
-                            | Some(acadrust::EntityType::Polyline2D(_))
-                            | Some(acadrust::EntityType::Polyline3D(_))
-                            | Some(acadrust::EntityType::Spline(_))
-                            | Some(acadrust::EntityType::Face3D(_))
-                            | Some(acadrust::EntityType::PolygonMesh(_)) => true,
+                            Some(codec::EntityType::LwPolyline(_))
+                            | Some(codec::EntityType::Polyline2D(_))
+                            | Some(codec::EntityType::Polyline3D(_))
+                            | Some(codec::EntityType::Spline(_))
+                            | Some(codec::EntityType::Face3D(_))
+                            | Some(codec::EntityType::PolygonMesh(_)) => true,
                             _ => false,
                         };
                         indexed.then_some(tab.properties.prop_vertex)
@@ -612,7 +623,7 @@ bg={bg_ms:.1}ms n={view_count}"
             };
             let control_polygon = tab.selected_handle.and_then(|handle| {
                 let spline = match tab.scene.document.get_entity(handle) {
-                    Some(acadrust::EntityType::Spline(spline))
+                    Some(codec::EntityType::Spline(spline))
                         if crate::entities::spline::shows_control_vertices(spline) => spline,
                     _ => return None,
                 };
@@ -634,7 +645,7 @@ bg={bg_ms:.1}ms n={view_count}"
             let grip_clip = if grips.is_empty() {
                 None
             } else {
-                let (vw, vh) = sel_ref.vp_size;
+                let (vw, vh) = sel_ref.view.vp_size;
                 Some(
                     tab.scene
                         .viewport_edit_frame((vw, vh))
@@ -643,7 +654,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 )
             };
 
-            let (vw, vh) = sel_ref.vp_size;
+            let (vw, vh) = sel_ref.view.vp_size;
             // Active tile rectangle (canvas-offset included) so grid / UCS
             // icon / crosshair project through the active pane's camera at
             // the correct place and scale.
@@ -795,7 +806,7 @@ bg={bg_ms:.1}ms n={view_count}"
             let parallel_ref_marker: Option<iced::Point> =
                 match (otrack_proj, self.snapper.parallel_ref) {
                     (Some((view_rot, eye, ob)), Some((_, pt))) => {
-                        let s = ost_project(pt.as_dvec3(), view_rot, eye, ob);
+                        let s = ost_project(pt, view_rot, eye, ob);
                         (s.x.is_finite() && s.y.is_finite()).then_some(s)
                     }
                     _ => None,
@@ -803,7 +814,7 @@ bg={bg_ms:.1}ms n={view_count}"
 
             // Model-space pane dividers (none in paper / single-pane layouts).
             let dividers = if !is_paper {
-                let (vw, vh) = sel_ref.vp_size;
+                let (vw, vh) = sel_ref.view.vp_size;
                 tab.scene.model_pane_dividers(vw, vh)
             } else {
                 vec![]
@@ -813,8 +824,8 @@ bg={bg_ms:.1}ms n={view_count}"
             // target pane under the cursor.
             let (pane_move_rect, pane_drop_rect) = match self.pane_move_from {
                 Some(from) if !is_paper => {
-                    let (vw, vh) = sel_ref.vp_size;
-                    let cursor = sel_ref.last_move_pos;
+                    let (vw, vh) = sel_ref.view.vp_size;
+                    let cursor = sel_ref.input.last_move_pos;
                     let tiles = tab.scene.model_tiles.borrow();
                     let px = |t: &crate::scene::ModelTile| iced::Rectangle {
                         x: t.rect.x * vw,
@@ -871,7 +882,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 let scope = tab.current_parametric_scope();
                 tab.scene.cached_glyph_placements(
                     scope,
-                    sel_ref.vp_size,
+                    sel_ref.view.vp_size,
                     self.show_constraint_values,
                     self.constraint_bar_display,
                     self.constraint_bar_mode,
@@ -900,7 +911,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 dividers,
                 pane_move_rect,
                 pane_drop_rect,
-                tab.pan_mode || tab.orbit_mode || tab.zoom_dynamic_mode,
+                nav_cursor(tab),
                 self.ribbon.open_dropdown.is_some(),
                 hover_locked,
                 crosshair_background(tab, is_paper),
@@ -914,6 +925,13 @@ bg={bg_ms:.1}ms n={view_count}"
                     iso_plane: self.iso_plane,
                     snap_angle_deg: self.snap_angle_deg,
                     pick_pending: self.pending_pick_label().is_some(),
+                    // An infinite-line preview runs along the arms; drop them
+                    // so the preview stays visible (#1437).
+                    hide_arms: tab
+                        .active_cmd
+                        .as_ref()
+                        .is_some_and(|c| matches!(c.name(), "XLINE" | "RAY")),
+                    snap_color: self.snap_marker_color,
                 },
                 crate::ui::overlay::SelectionVisualOptions {
                     area: self.model_space.selection_area,
@@ -991,7 +1009,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 .as_ref()
                 .and_then(|command| command.dyn_label_point(w))
                 .and_then(|world| {
-                    let (vw, vh) = tab.scene.selection.borrow().vp_size;
+                    let (vw, vh) = tab.scene.selection.borrow().view.vp_size;
                     let (camera, bounds) =
                         tab.scene.viewport_edit_frame((vw, vh)).unwrap_or_else(|| {
                             (
@@ -1067,7 +1085,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         opposite + width_axis * width + height_axis * (height * 0.5);
                     let rectangle_center =
                         opposite + width_axis * (width * 0.5) + height_axis * (height * 0.5);
-                    let (vw, vh) = tab.scene.selection.borrow().vp_size;
+                    let (vw, vh) = tab.scene.selection.borrow().view.vp_size;
                     let (camera, bounds) =
                         tab.scene.viewport_edit_frame((vw, vh)).unwrap_or_else(|| {
                             (
@@ -1264,7 +1282,7 @@ bg={bg_ms:.1}ms n={view_count}"
             // viewport drawing / selection is unaffected. In a paper layout
             // the active viewport gets its own picker (below) instead.
             if !is_paper && !tab.is_start {
-                let (vw, vh) = tab.scene.selection.borrow().vp_size;
+                let (vw, vh) = tab.scene.selection.borrow().view.vp_size;
                 let rect = tab.scene.active_model_tile_bounds(vw, vh);
                 // Unified control chip: split buttons + render-mode picker +
                 // grid / grid-snap toggles, for the active Model tile.
@@ -1307,10 +1325,10 @@ bg={bg_ms:.1}ms n={view_count}"
             // clicks (the shader viewport sits below it). Positioned with
             // leading Spaces sized to the viewport's screen rectangle.
             mark("active_vp_rect");
-            let active_vp_rect: Option<(acadrust::Handle, iced::Rectangle)> =
+            let active_vp_rect: Option<(codec::Handle, iced::Rectangle)> =
                 if is_paper && !tab.is_start {
                     tab.scene.active_viewport.and_then(|h| {
-                        let (cw, ch) = tab.scene.selection.borrow().vp_size;
+                        let (cw, ch) = tab.scene.selection.borrow().view.vp_size;
                         tab.scene
                             .viewport_screen_rect(h, (cw, ch))
                             .map(|rect| (h, rect))
@@ -1324,7 +1342,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 // outline inward when the viewport ran off the top/left edge, so
                 // its drawn border no longer matched the real viewport — clicks
                 // that looked outside landed in (and activated) another viewport.
-                let (cw, ch) = tab.scene.selection.borrow().vp_size;
+                let (cw, ch) = tab.scene.selection.borrow().view.vp_size;
                 let x = rect.x.max(0.0);
                 let y = rect.y.max(0.0);
                 let vw = ((rect.x + rect.width).min(cw) - x).max(1.0);
@@ -1356,7 +1374,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 let vp_mode = tab
                     .scene
                     .active_viewport_render_mode()
-                    .unwrap_or(acadrust::entities::ViewportRenderMode::Wireframe2D);
+                    .unwrap_or(codec::entities::ViewportRenderMode::Wireframe2D);
                 // Adaptive (same as model): the picker measures its real width into
                 // `render_bar_w` and swaps to an empty spacer only when the viewport
                 // can't hold it; the ViewCube reads that width to decide overlap.
@@ -1398,14 +1416,9 @@ bg={bg_ms:.1}ms n={view_count}"
                         .as_ref()
                         .map(|u| u.name.clone())
                         .unwrap_or_default();
-                    let ucs_names: Vec<String> = tab
-                        .scene
-                        .document
-                        .ucss
-                        .iter()
-                        .map(|u| u.name.clone())
-                        .filter(|n| !n.is_empty())
-                        .collect();
+                    // Epoch-memoised (#34): Arc clone per frame, rebuilt only
+                    // after a UCS-table bump.
+                    let ucs_names = tab.scene.cached_ucs_names();
                     let picker = iced::widget::pin(iced::widget::opaque(viewcube_ucs_picker(
                         ucs_current,
                         ucs_names,
@@ -1422,7 +1435,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 // Place the ViewCube hit area in the active model tile's top-right
                 // corner so it tracks the active panel in a tiled layout. The hit
                 // test in update.rs already maps clicks through the active tile.
-                let (vw, vh) = tab.scene.selection.borrow().vp_size;
+                let (vw, vh) = tab.scene.selection.borrow().view.vp_size;
                 let rect = tab.scene.active_model_tile_bounds(vw, vh);
                 let cube_x = (rect.x + rect.width - VIEWCUBE_HIT_SIZE - VIEWCUBE_PAD).max(0.0);
                 let cube_y = (rect.y + VIEWCUBE_PAD).max(0.0);
@@ -1438,14 +1451,9 @@ bg={bg_ms:.1}ms n={view_count}"
                     .as_ref()
                     .map(|u| u.name.clone())
                     .unwrap_or_default();
-                let ucs_names: Vec<String> = tab
-                    .scene
-                    .document
-                    .ucss
-                    .iter()
-                    .map(|u| u.name.clone())
-                    .filter(|n| !n.is_empty())
-                    .collect();
+                // Epoch-memoised (#34): Arc clone per frame, rebuilt only
+                // after a UCS-table bump.
+                let ucs_names = tab.scene.cached_ucs_names();
                 let picker = iced::widget::pin(iced::widget::opaque(viewcube_ucs_picker(
                     ucs_current,
                     ucs_names,
@@ -1601,9 +1609,37 @@ bg={bg_ms:.1}ms n={view_count}"
                 }
             }
 
-            // Paper-space context actions: a right-edge vertical toolbar
-            // (viewport / page setup / plot) instead of a contextual ribbon tab.
-            if is_paper && !tab.is_start {
+            // Selection actions: with only PDF underlays or only xrefs
+            // selected, their tools take the right edge (over the paper-space
+            // tools, which come back when the selection changes).
+            // ponytail: one right-edge toolbar at a time; stack them if both
+            // are ever needed together.
+            let selection_tools = if tab.is_start {
+                None
+            } else if self.ribbon.xref_context() {
+                crate::ui::side_toolbar::view(&crate::ui::ribbon::xref_tools())
+            } else if let Some(shown) = self.ribbon.point_cloud_context() {
+                crate::ui::side_toolbar::view_with_active(
+                    &crate::ui::ribbon::point_cloud_tools(),
+                    &move |id| id == "_PCCROPSHOW" && shown,
+                )
+            } else if let Some(ctx) = self.ribbon.underlay_context() {
+                let ctx = ctx.clone();
+                crate::ui::side_toolbar::view_with_active(
+                    &crate::ui::ribbon::pdf_underlay_tools(ctx.kind),
+                    &move |id| match id {
+                        "_PDFULMONO" => ctx.monochrome,
+                        "_PDFULSHOW" => ctx.shown,
+                        "_PDFULSNAP" => ctx.snap,
+                        _ => false,
+                    },
+                )
+            } else {
+                None
+            };
+            if let Some(tb) = selection_tools {
+                viewport_stack = viewport_stack.push(tb);
+            } else if is_paper && !tab.is_start {
                 if let Some(tb) =
                     crate::ui::side_toolbar::view(&crate::modules::layout::paper_space_tools())
                 {
@@ -1628,6 +1664,13 @@ bg={bg_ms:.1}ms n={view_count}"
                 ) {
                     viewport_stack = viewport_stack.push(tb);
                 }
+            }
+
+            // Count mode: a blue frame round the drawing and the count toolbar.
+            if let (Some(mode), false) = (tab.count.as_ref(), tab.is_start) {
+                viewport_stack = viewport_stack.push(crate::ui::window::count_palette::border());
+                viewport_stack = viewport_stack
+                    .push(crate::ui::window::count_palette::toolbar(mode, &tab.scene.document));
             }
 
             // Reserve the overlaid command line when placing cursor-anchored panels.
@@ -1789,7 +1832,7 @@ bg={bg_ms:.1}ms n={view_count}"
             if !tab.is_start {
                 let (ctx_pos, highlighted) = {
                     let sel = tab.scene.selection.borrow();
-                    (sel.context_menu, sel.context_menu_ui.highlighted)
+                    (sel.menu.open_at, sel.menu.ui.highlighted)
                 };
                 if let Some(p) = ctx_pos {
                     let menu = self.current_context_menu();
@@ -1805,7 +1848,7 @@ bg={bg_ms:.1}ms n={view_count}"
             // In-place MText editor (toolbar + text area), anchored at the
             // insertion-point click.
             if !tab.is_start {
-                let canvas = tab.scene.selection.borrow().vp_size;
+                let canvas = tab.scene.selection.borrow().view.vp_size;
                 if let Some(ed) = &self.mtext_editor {
                     let styles: Vec<String> = tab
                         .scene
@@ -1828,6 +1871,11 @@ bg={bg_ms:.1}ms n={view_count}"
             }
         }
 
+        if self.show_node_graph && !tab.is_start {
+            let sections = self.graph_all_sections(self.active_tab);
+            viewport_stack = viewport_stack.push(tab.graph.view(sections));
+        }
+
         // Docked side panels (Properties, block palette, future palettes) live
         // in an ordered vertical stack on the left/right edge of the drawing
         // view. Auto-collapsing (pinned) panels that aren't being hovered
@@ -1843,6 +1891,10 @@ bg={bg_ms:.1}ms n={view_count}"
                 crate::ui::dock::PanelId::BlockPalette => self.show_block_palette,
                 crate::ui::dock::PanelId::ExternalReferences => self.show_external_references,
                 crate::ui::dock::PanelId::Browser => self.show_browser,
+                crate::ui::dock::PanelId::NodeGraph => self.show_node_graph,
+                crate::ui::dock::PanelId::PointCloudManager => self.pc_manager.show,
+                crate::ui::dock::PanelId::Count => self.count_palette.show,
+                crate::ui::dock::PanelId::SheetSetManager => self.sheet_set.show,
             }
         };
         let edge_stack = |side: crate::app::config::DockSide| -> Option<Element<'_, Message>> {
@@ -1959,7 +2011,7 @@ bg={bg_ms:.1}ms n={view_count}"
             } else {
                 visible + 1
             };
-            let edge_h = tab.scene.selection.borrow().vp_size.1;
+            let edge_h = tab.scene.selection.borrow().view.vp_size.1;
             let slot_h = edge_h / final_count as f32;
             let index = self.dock_drag_target.map(|(_, i)| i).unwrap_or(0);
             let slot = index.min(final_count.saturating_sub(1));
@@ -2064,6 +2116,7 @@ bg={bg_ms:.1}ms n={view_count}"
             self.control.enabled,
             self.control_busy(),
             self.pending_pick_label().is_some(),
+            self.show_node_graph,
         );
         let center_stack: Element<'_, Message> = if thumbnail_capture_clean {
             workspace
@@ -2287,7 +2340,17 @@ bg={bg_ms:.1}ms n={view_count}"
             } else {
                 Vec::new()
             };
-        let dropdown_layer: Element<'_, Message> = self
+        let gallery_open = open_dropdown == Some(crate::modules::insert::insert_block::GALLERY_ID)
+            && !self.tabs[self.active_tab].is_start;
+        let dropdown_layer: Element<'_, Message> = if gallery_open {
+            self.ribbon.place_dropdown(
+                crate::modules::insert::insert_block::GALLERY_ID,
+                crate::ui::window::block_palette::gallery(&self.block_palette),
+                crate::ui::window::block_palette::GALLERY_W,
+                self.win_size.0,
+            )
+        } else {
+            self
             .ribbon
             .dropdown_overlay(
                 &undo_labels,
@@ -2296,7 +2359,8 @@ bg={bg_ms:.1}ms n={view_count}"
                 self.tabs[self.active_tab].is_start,
                 &self.recent_colors,
             )
-            .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
+            .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into())
+        };
 
         let snap_override_layer: Element<'_, Message> = if let Some(pos) = self.snap_override_popup
         {
@@ -2477,11 +2541,10 @@ impl OpenCADStudio {
             Subscription::none()
         };
         // While the command-line overlay is still displaying any
-        // recently-pushed history entry, re-render every frame so the
+        // recently-pushed history entry that is expiring, re-render every frame so the
         // entry disappears at the moment its visible window expires.
-        // The subscription auto-stops once no entry is fresh enough
-        // (typically within a few seconds of the last command).
-        let history_tick = if self.command_line.has_visible_history() {
+        // The subscription auto-stops once no entry is expiring.
+        let history_tick = if self.command_line.has_expiring_history() {
             window::frames().map(Message::Tick)
         } else {
             Subscription::none()
@@ -2515,7 +2578,10 @@ impl OpenCADStudio {
         // driven by input events, but once the cursor stops no event would fire
         // the one full-quality frame that re-renders hatches — this tick does,
         // then the scene-render cache holds it and the subscription auto-stops.
-        let nav_settle = if self.tabs[self.active_tab].scene.is_settling() {
+        // Underlay rasters follow the zoom once it settles; tick until then.
+        let nav_settle = if self.tabs[self.active_tab].scene.is_settling()
+            || self.tabs[self.active_tab].scene.underlay_resolution_stale()
+        {
             window::frames().map(Message::Tick)
         } else {
             Subscription::none()
@@ -2583,6 +2649,17 @@ impl OpenCADStudio {
         };
         #[cfg(target_arch = "wasm32")]
         let plugin_drain = Subscription::none();
+        // While a sheet set is open: it reloads when its .dst changes on disk,
+        // and its sheets' .dwl lock files follow the open tabs.
+        #[cfg(not(target_arch = "wasm32"))]
+        let sheet_set_poll = if self.sheet_set.sets.is_empty() {
+            Subscription::none()
+        } else {
+            iced::time::every(std::time::Duration::from_secs(1))
+                .map(|_| Message::SheetSet(crate::ui::window::sheet_set::SheetSetMsg::Poll))
+        };
+        #[cfg(target_arch = "wasm32")]
+        let sheet_set_poll = Subscription::none();
         let hatch_pattern_keys = if self.tabs[self.active_tab]
             .properties
             .hatch_pattern_picker_open
@@ -2632,8 +2709,25 @@ impl OpenCADStudio {
                     }) => {
                         #[cfg(target_arch = "wasm32")]
                         let accel = modifiers.command();
-                        let shortcut_modifier =
-                            modifiers.control() || modifiers.alt() || modifiers.logo();
+                        // AltGr reaches Windows apps as Ctrl+Alt, and a macOS
+                        // layout types some characters with Option: when such a
+                        // chord produces a printable glyph (`@`, `<`, `{` on many
+                        // European layouts) it is typing, not a shortcut. (#1236)
+                        let types_glyph = text.as_deref().is_some_and(|value| {
+                            !value.is_empty()
+                                && value
+                                    .chars()
+                                    .all(|ch| !ch.is_control() && !ch.is_whitespace())
+                        });
+                        let altgr = modifiers.control() && modifiers.alt();
+                        let mac_option = cfg!(target_os = "macos")
+                            && modifiers.alt()
+                            && !modifiers.control()
+                            && !modifiers.logo();
+                        let shortcut_modifier = (modifiers.control()
+                            || modifiers.alt()
+                            || modifiers.logo())
+                            && !(types_glyph && (altgr || mac_option));
                         // Any key that produces a printable glyph types it,
                         // even when its logical key resolves to navigation
                         // (NumLock-on Numpad8 / Numpad2 arrive as
@@ -2767,6 +2861,7 @@ impl OpenCADStudio {
             web_fonts,
             autosave,
             plugin_drain,
+            sheet_set_poll,
             single_instance,
             hatch_pattern_keys,
             keyboard_events,
@@ -2959,6 +3054,26 @@ impl OpenCADStudio {
                 width,
                 auto_collapse,
             ),
+            crate::ui::dock::PanelId::NodeGraph => tab.graph.panel(width, auto_collapse),
+            crate::ui::dock::PanelId::Count => crate::ui::window::count_palette::view(
+                &self.count_palette,
+                tab.count.as_ref(),
+                &tab.scene.document,
+                tab.id,
+                tab.scene.geometry_epoch,
+                width,
+                auto_collapse,
+            ),
+            crate::ui::dock::PanelId::PointCloudManager => crate::ui::window::pc_manager::view(
+                &self.pc_manager,
+                &tab.scene.document,
+                &tab.scene.selected_handles_in_order(),
+                width,
+                auto_collapse,
+            ),
+            crate::ui::dock::PanelId::SheetSetManager => {
+                crate::ui::window::sheet_set::view(&self.sheet_set, width, auto_collapse)
+            }
         };
         let divider = dock_divider(id);
         match side {
@@ -3097,7 +3212,7 @@ pub(super) fn doc_tab_bar<'a>(
             row![title_btn].spacing(0).align_y(iced::Center)
         } else {
             let close_btn = button(text("×").size(12))
-                .on_press(Message::TabClose(idx))
+                .on_press(Message::TabClose(tab.id))
                 .height(Fill)
                 .padding([5, 9])
                 .style(move |theme: &Theme, status| {
@@ -3559,18 +3674,6 @@ fn start_page_content<'a>(
         )
         .interaction(iced::mouse::Interaction::Pointer)
         .on_press(Message::OpenUrl("https://open-aec.com/".to_string())),
-        mouse_area(
-            container(
-                iced::widget::image(MOBILE_SPONSOR_IMAGE.clone())
-                    .width(Fill)
-                    .content_fit(iced::ContentFit::Contain),
-            )
-            .width(Fill),
-        )
-        .interaction(iced::mouse::Interaction::Pointer)
-        .on_press(Message::OpenUrl(
-            "https://play.google.com/store/apps/details?id=net.cadeditor.app".to_string(),
-        )),
     ]
     .spacing(10)
     .align_x(iced::alignment::Horizontal::Center)
@@ -4239,7 +4342,7 @@ pub(super) fn recent_files_panel<'a>(
             .style(step_style),
         count_box,
         button(crate::ui::icons::themed(crate::ui::icons::PLUS, 11.0))
-            .on_press(Message::SetRecentLimit(shown + STEP))
+            .on_press(Message::SetRecentLimit(shown.saturating_add(STEP)))
             .padding([3, 6])
             .style(step_style),
         text(format!("/ {}", super::recent::RECENT_MAX))
@@ -4287,5 +4390,30 @@ mod tests {
         let bg = crosshair_background(&tab, true);
         assert_eq!(bg, tab.scene.paper_bg_color);
         assert!(crate::ui::style::common::canvas_is_light(bg));
+    }
+
+    /// The [+] step on the keep-recent-files box is built eagerly from an
+    /// uncapped user string (`RecentLimitInput` keeps every ASCII digit):
+    /// `18446744073709551615` parses to `usize::MAX`, and the plain
+    /// `shown + STEP` overflowed while the *widget was constructed* —
+    /// i.e. during `view()`, before any click. The [−] button next to it
+    /// already used `saturating_sub`.
+    #[test]
+    fn recent_limit_plus_step_survives_an_overflowing_input() {
+        let _ = start_page_content(
+            &[],
+            &[],
+            false,
+            &std::collections::HashMap::new(),
+            &[],
+            false,
+            &[],
+            &std::collections::HashMap::new(),
+            50,
+            "18446744073709551615",
+            800.0,
+            std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            super::super::StartSection::default(),
+        );
     }
 }

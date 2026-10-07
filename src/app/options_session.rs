@@ -140,7 +140,7 @@ impl OpenCADStudio {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::{Message, OpenCADStudio};
+    use crate::app::{settings, Message, OpenCADStudio};
 
     fn app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
@@ -221,5 +221,62 @@ mod tests {
         assert_eq!(h.isolines, isolines);
         assert_eq!(h.display_silhouette, silhouette);
         assert!(!app.tabs[i].dirty, "the drawing is as unmodified as it was");
+    }
+
+    /// The Options window is the surface that reaches past the range the
+    /// ZOOMFACTOR system variable has, and its field is what reaches: a
+    /// number above the variable's own ceiling is kept, one above what the
+    /// application can store is held there, and text that is not yet a
+    /// number leaves the setting alone so the field can be cleared and
+    /// retyped.
+    #[test]
+    fn the_zoom_factor_field_reaches_past_the_system_variable() {
+        let mut app = app();
+        let _ = app.update(Message::ZoomFactorInputChanged("250".into()));
+        assert_eq!(app.zoom_factor, 250);
+
+        let _ = app.update(Message::ZoomFactorInputChanged("600".into()));
+        assert_eq!(app.zoom_factor, settings::ZOOM_FACTOR_MAX);
+
+        let _ = app.update(Message::ZoomFactorInputChanged(String::new()));
+        assert_eq!(
+            app.zoom_factor,
+            settings::ZOOM_FACTOR_MAX,
+            "a cleared field keeps the value it set"
+        );
+        assert_eq!(app.zoom_factor_input, "", "while the field stays as typed");
+
+        let _ = app.update(Message::ZoomFactorInputChanged("nonsense".into()));
+        assert_eq!(app.zoom_factor, settings::ZOOM_FACTOR_MAX);
+
+        let _ = app.update(Message::ZoomFactorInputChanged("1".into()));
+        assert_eq!(app.zoom_factor, settings::ZOOM_FACTOR_MIN, "the floor holds");
+    }
+
+    /// The slider and the field are two views of one setting: dragging the
+    /// slider has to leave the number beside it reading what it just set, or
+    /// the window shows two different answers for what the wheel does.
+    #[test]
+    fn the_zoom_factor_slider_and_field_stay_in_step() {
+        let mut app = app();
+        let _ = app.update(Message::ZoomFactorInputChanged("250".into()));
+        let _ = app.update(Message::ZoomFactorChanged(40));
+        assert_eq!(app.zoom_factor, 40);
+        assert_eq!(app.zoom_factor_input, "40");
+    }
+
+    /// Close puts a zoom factor back like every other preference — the
+    /// field's text included, since it is edited in front of the value.
+    #[test]
+    fn closing_puts_the_zoom_factor_and_its_field_back() {
+        let mut app = app();
+        let _ = app.update(Message::OptionsOpen);
+        let before = app.zoom_factor;
+        let _ = app.update(Message::ZoomFactorInputChanged("250".into()));
+        assert!(app.options_dirty());
+        let _ = app.update(Message::OptionsClose);
+        let _ = app.update(Message::OptionsCloseDiscard);
+        assert_eq!(app.zoom_factor, before);
+        assert_eq!(app.zoom_factor_input, before.to_string());
     }
 }

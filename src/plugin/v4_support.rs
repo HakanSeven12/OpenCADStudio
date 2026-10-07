@@ -14,7 +14,7 @@ fn mgr() -> std::sync::MutexGuard<'static, HostV4SnapshotManager> {
 /// Open (or refresh) the V4 shared document view for `tab_id`.
 pub fn open_document_view_v4(
     tab_id: u64,
-    doc: &acadrust::CadDocument,
+    doc: &codec::CadDocument,
 ) -> Option<DocumentViewInfo> {
     mgr().open(tab_id, doc)
 }
@@ -26,7 +26,7 @@ pub fn close_document_view_v4(tab_id: u64) {
 
 /// Publish the latest document to the V4 shared view for `tab_id` and broadcast
 /// a change notification when successful.
-pub fn publish_document_view_v4(tab_id: u64, doc: &acadrust::CadDocument) {
+pub fn publish_document_view_v4(tab_id: u64, doc: &codec::CadDocument) {
     let info = mgr().publish(tab_id, doc);
     if let Some(info) = info {
         broadcast(HostNotification::DocumentChangedV4 {
@@ -47,7 +47,7 @@ pub fn on_tab_closed(tab_id: u64) {
 /// `HostNotification::SelectionChangedV4` carries the active tab id and the
 /// current selection set. The caller is responsible for only calling this when
 /// the selection actually changed; see `OpenCADStudio::notify_plugins_selection_changed`.
-pub fn publish_selection_changed_v4(tab_id: u64, handles: Vec<acadrust::Handle>) {
+pub fn publish_selection_changed_v4(tab_id: u64, handles: Vec<codec::Handle>) {
     broadcast(HostNotification::SelectionChangedV4 { tab_id, handles });
 }
 

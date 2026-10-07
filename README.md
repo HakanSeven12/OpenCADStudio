@@ -111,6 +111,19 @@ chmod +x OpenCADStudio-*-linux-x86_64.AppImage
 ./OpenCADStudio-*-linux-x86_64.AppImage
 ```
 
+Or install it as a Flatpak from [FlatPark](https://flatpark.org/apps/io.github.HakanSeven12.OpenCadStudio), which installs the official AppImage and follows new releases:
+
+```bash
+flatpak remote-add --if-not-exists flatpark https://dl.flatpark.org/flatpark.flatpakrepo
+flatpak install flatpark io.github.HakanSeven12.OpenCadStudio
+```
+
+The Flatpak opens and saves drawings through the file chooser. External references and underlays that point at other files need home access:
+
+```bash
+flatpak override --user --filesystem=home io.github.HakanSeven12.OpenCadStudio
+```
+
 ### macOS
 
 The published macOS package supports Apple Silicon:

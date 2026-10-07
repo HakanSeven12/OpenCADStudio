@@ -11,9 +11,9 @@
 
 use std::collections::HashSet;
 
-use acadrust::objects::BlockVisibilityParameter;
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
+use codec::objects::BlockVisibilityParameter;
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
 
 use crate::scene::model::object::{GripDef, GripShape};
 
@@ -57,7 +57,7 @@ impl OpenCADStudio {
     /// parallel member order, so a member visible in the definition maps to the
     /// same position in the anonymous block.
     fn state_mapping(
-        doc: &acadrust::CadDocument,
+        doc: &codec::CadDocument,
         def_block: Handle,
         anon_name: &str,
         state_idx: usize,
@@ -92,7 +92,7 @@ impl OpenCADStudio {
     /// Which state (if any) matches the anonymous block's current per-member
     /// invisibility flags.
     fn current_visibility_state(
-        doc: &acadrust::CadDocument,
+        doc: &codec::CadDocument,
         def_block: Handle,
         anon_name: &str,
         param: &BlockVisibilityParameter,

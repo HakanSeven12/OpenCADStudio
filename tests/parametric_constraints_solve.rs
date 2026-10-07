@@ -1,5 +1,5 @@
-use acadrust::entities::EntityType;
-use acadrust::types::{Handle, Vector3};
+use codec::entities::EntityType;
+use codec::types::{Handle, Vector3};
 use OpenCADStudio::scene::named_parameters::DrivingValue;
 use OpenCADStudio::scene::parametric_constraints::{
     ConstraintKind, ParametricRef, ParametricScope,
@@ -7,7 +7,7 @@ use OpenCADStudio::scene::parametric_constraints::{
 use OpenCADStudio::scene::{ChangeKind, Scene};
 
 fn add_line(scene: &mut Scene, x1: f64, y1: f64, x2: f64, y2: f64) -> Handle {
-    scene.add_entity(EntityType::Line(acadrust::entities::Line::from_points(
+    scene.add_entity(EntityType::Line(codec::entities::Line::from_points(
         Vector3::new(x1, y1, 0.0),
         Vector3::new(x2, y2, 0.0),
     )))
@@ -28,7 +28,7 @@ fn set_line_end(scene: &mut Scene, handle: Handle, end: Vector3) {
 
 fn add_circle(scene: &mut Scene, cx: f64, cy: f64, radius: f64) -> Handle {
     scene.add_entity(EntityType::Circle(
-        acadrust::entities::Circle::from_center_radius(Vector3::new(cx, cy, 0.0), radius),
+        codec::entities::Circle::from_center_radius(Vector3::new(cx, cy, 0.0), radius),
     ))
 }
 
@@ -48,7 +48,7 @@ fn add_arc(
     end_angle: f64,
 ) -> Handle {
     scene.add_entity(EntityType::Arc(
-        acadrust::entities::Arc::from_center_radius_angles(
+        codec::entities::Arc::from_center_radius_angles(
             Vector3::new(cx, cy, 0.0),
             radius,
             start_angle,
@@ -66,7 +66,7 @@ fn arc_geom(scene: &Scene, handle: Handle) -> (Vector3, f64) {
 
 fn add_ellipse(scene: &mut Scene, cx: f64, cy: f64, major_axis: (f64, f64), ratio: f64) -> Handle {
     scene.add_entity(EntityType::Ellipse(
-        acadrust::entities::Ellipse::from_center_axes(
+        codec::entities::Ellipse::from_center_axes(
             Vector3::new(cx, cy, 0.0),
             Vector3::new(major_axis.0, major_axis.1, 0.0),
             ratio,
@@ -126,10 +126,10 @@ fn horizontal_constraint_levels_the_line_when_an_endpoint_moves() {
 fn horizontal_constraint_levels_a_polyline_segment() {
     let mut scene = Scene::new();
     let polyline = scene.add_entity(EntityType::LwPolyline(
-        acadrust::entities::LwPolyline::from_points(vec![
-            acadrust::types::Vector2::new(0.0, 0.0),
-            acadrust::types::Vector2::new(5.0, 2.0),
-            acadrust::types::Vector2::new(10.0, 7.0),
+        codec::entities::LwPolyline::from_points(vec![
+            codec::types::Vector2::new(0.0, 0.0),
+            codec::types::Vector2::new(5.0, 2.0),
+            codec::types::Vector2::new(10.0, 7.0),
         ]),
     ));
     scene
@@ -152,9 +152,9 @@ fn horizontal_constraint_levels_a_polyline_segment() {
 
 #[test]
 fn horizontal_constraint_does_not_flatten_a_polyline_arc_segment() {
-    let mut source = acadrust::entities::LwPolyline::new();
-    source.add_point_with_bulge(acadrust::types::Vector2::new(0.0, 0.0), 0.5);
-    source.add_point(acadrust::types::Vector2::new(5.0, 2.0));
+    let mut source = codec::entities::LwPolyline::new();
+    source.add_point_with_bulge(codec::types::Vector2::new(0.0, 0.0), 0.5);
+    source.add_point(codec::types::Vector2::new(5.0, 2.0));
     let mut scene = Scene::new();
     let polyline = scene.add_entity(EntityType::LwPolyline(source));
     scene
@@ -539,7 +539,7 @@ fn copying_two_constrained_entities_carries_their_constraint_along() {
 fn a_duplicated_horizontal_constraint_is_reported_as_redundant() {
     // `solve_scope` resolves the redundant row back to the
     // `ConstraintId` a `ConflictResolverPanel` would name.
-    use cadkernel_constraints::diagnosis::RedundancyKind;
+    use kernel_constraints::diagnosis::RedundancyKind;
     use OpenCADStudio::scene::parametric_constraints::ConstraintKind;
 
     let mut scene = Scene::new();
@@ -576,7 +576,7 @@ fn a_duplicated_horizontal_constraint_is_reported_as_redundant() {
 
 #[test]
 fn two_conflicting_distance_targets_are_reported_as_conflicting() {
-    use cadkernel_constraints::diagnosis::RedundancyKind;
+    use kernel_constraints::diagnosis::RedundancyKind;
     use OpenCADStudio::scene::parametric_constraints::ConstraintKind;
 
     let mut scene = Scene::new();
@@ -737,7 +737,7 @@ fn midpoint_constraint_pulls_a_point_onto_a_lines_midpoint() {
 fn midpoint_constraint_supports_a_point_entity() {
     let mut scene = Scene::new();
     let base = add_line(&mut scene, 0.0, 0.0, 10.0, 6.0);
-    let point = scene.add_entity(EntityType::Point(acadrust::entities::Point::at(
+    let point = scene.add_entity(EntityType::Point(codec::entities::Point::at(
         Vector3::new(20.0, 20.0, 0.0),
     )));
     scene
@@ -761,7 +761,7 @@ fn midpoint_constraint_supports_a_point_entity() {
 fn coincident_constraint_supports_a_block_insertion_point() {
     let mut scene = Scene::new();
     let line = add_line(&mut scene, 0.0, 0.0, 10.0, 4.0);
-    let insert = scene.add_entity(EntityType::Insert(acadrust::entities::Insert::new(
+    let insert = scene.add_entity(EntityType::Insert(codec::entities::Insert::new(
         "fixture",
         Vector3::new(30.0, 20.0, 0.0),
     )));
@@ -1223,7 +1223,7 @@ fn point_on_curve_constraint_keeps_a_point_within_an_arcs_sweep() {
         "point should land exactly on the arc: dist={dist} radius={radius}"
     );
     assert!(
-        cadkernel::geom2d::angle_within_arc(
+        kernel::geom2d::angle_within_arc(
             (p.y - center.y).atan2(p.x - center.x),
             start_angle,
             end_angle,
@@ -1234,9 +1234,9 @@ fn point_on_curve_constraint_keeps_a_point_within_an_arcs_sweep() {
 
 #[test]
 fn point_on_curve_constraint_keeps_a_point_within_a_polyline_arc_segment() {
-    let mut source = acadrust::entities::LwPolyline::new();
-    source.add_point_with_bulge(acadrust::types::Vector2::new(0.0, 0.0), 1.0);
-    source.add_point(acadrust::types::Vector2::new(10.0, 0.0));
+    let mut source = codec::entities::LwPolyline::new();
+    source.add_point_with_bulge(codec::types::Vector2::new(0.0, 0.0), 1.0);
+    source.add_point(codec::types::Vector2::new(10.0, 0.0));
     let mut scene = Scene::new();
     let polyline = scene.add_entity(EntityType::LwPolyline(source));
     let marker = add_line(&mut scene, 5.0, 20.0, 6.0, 20.0);
@@ -1257,7 +1257,7 @@ fn point_on_curve_constraint_keeps_a_point_within_a_polyline_arc_segment() {
     let EntityType::LwPolyline(polyline) = scene.document.get_entity(polyline).unwrap() else {
         panic!("expected a lightweight polyline");
     };
-    let arc = cadkernel::geom2d::BulgeArc::from_bulge(
+    let arc = kernel::geom2d::BulgeArc::from_bulge(
         [
             polyline.vertices[0].location.x,
             polyline.vertices[0].location.y,
@@ -1272,7 +1272,7 @@ fn point_on_curve_constraint_keeps_a_point_within_a_polyline_arc_segment() {
     let distance = (point.x - arc.center[0]).hypot(point.y - arc.center[1]);
     assert!((distance - arc.radius).abs() < 1e-6);
     assert!(
-        cadkernel::geom2d::angle_within_arc(
+        kernel::geom2d::angle_within_arc(
             (point.y - arc.center[1]).atan2(point.x - arc.center[0]),
             arc.start_angle,
             arc.start_angle + arc.sweep,
@@ -1324,7 +1324,7 @@ fn radius_and_endpoint_coincident_constraints_coexist_on_the_same_arc() {
 }
 
 // Phase 2 of the same plan: `Diameter`/`DistanceX`/`DistanceY` reuse
-// existing `cadkernel_constraints` primitives (`Equal`'s `ratio`, `Difference`) with no
+// existing `opencadkernel_constraints` primitives (`Equal`'s `ratio`, `Difference`) with no
 // new solver-crate code.
 
 #[test]
@@ -1404,7 +1404,7 @@ fn normal_constraint_pulls_the_line_through_the_circles_center() {
 }
 
 // Phase 5 of the same plan: an `Ellipse` registers center/focus1/minor-
-// radius (converted from acadrust's center + major-axis-vector + ratio
+// radius (converted from opencadcodec's center + major-axis-vector + ratio
 // parametrization). Only center-based whole-entity constraints are wired
 // up so far — Concentric, CenterPoint, Fixed — mirroring how Arc started
 // at "center/radius only" in Phase 1. Axis-length constraints and
@@ -1475,8 +1475,8 @@ fn center_point_constraint_pulls_a_lines_endpoint_onto_an_ellipses_center() {
 
 #[test]
 fn a_tilted_ellipse_round_trips_through_the_solver_without_drifting() {
-    // The riskiest part of Ellipse support: converting acadrust's center +
-    // major-axis-*vector* + minor/major ratio into `cadkernel_constraints`'s center +
+    // The riskiest part of Ellipse support: converting opencadcodec's center +
+    // major-axis-*vector* + minor/major ratio into `opencadkernel_constraints`'s center +
     // focus + minor-radius, then back, for a major axis that ISN'T
     // axis-aligned (an axis-aligned one wouldn't exercise the direction
     // math at all). A solve with nothing actually pulling on it should
@@ -1519,7 +1519,7 @@ fn concentric_constraint_does_not_reshape_the_ellipse_when_its_center_actually_m
     // ALREADY concentric with the ellipse, so Concentric's equations start
     // out satisfied and the ellipse's center never actually has to move —
     // it doesn't exercise the bug at all. Here the circle starts elsewhere,
-    // forcing a real center move, which is exactly when `cadkernel_constraints::geo::
+    // forcing a real center move, which is exactly when `kernel_constraints::geo::
     // Ellipse`'s absolute `focus1` point used to get left behind: `center`
     // moved to meet the circle, `focus1` didn't (nothing else referenced
     // it), so the derived major-axis direction/length and minor/major

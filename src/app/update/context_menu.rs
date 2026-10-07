@@ -11,7 +11,7 @@ use crate::ui::popup::context_menu::{
     build_context_menu, ContextMenu, GripMenuCmd, GripMenuContext, MenuAction, MenuContext,
     SubmenuId,
 };
-use acadrust::Handle;
+use codec::Handle;
 use iced::Task;
 
 impl OpenCADStudio {
@@ -19,7 +19,7 @@ impl OpenCADStudio {
     pub(in crate::app) fn context_menu_open(&self) -> bool {
         self.tabs
             .get(self.active_tab)
-            .is_some_and(|tab| tab.scene.selection.borrow().context_menu.is_some())
+            .is_some_and(|tab| tab.scene.selection.borrow().menu.open_at.is_some())
     }
 
     /// Everything the menu builder needs, read from the active tab. Called by
@@ -71,7 +71,7 @@ impl OpenCADStudio {
             .scene
             .selection
             .borrow()
-            .context_menu_ui
+            .menu.ui
             .open_submenu;
         build_context_menu(&self.context_menu_context(), open)
     }
@@ -80,10 +80,10 @@ impl OpenCADStudio {
     pub(in crate::app) fn close_context_menu(&mut self) -> Task<Message> {
         let i = self.active_tab;
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
-        if sel.context_menu.is_none() {
+        if sel.menu.open_at.is_none() {
             return Task::none();
         }
-        sel.close_context_menu();
+        sel.menu.close();
         drop(sel);
         self.focus_cmd_input()
     }
@@ -91,7 +91,7 @@ impl OpenCADStudio {
     pub(in crate::app) fn on_context_menu_submenu_toggle(&mut self, id: SubmenuId) -> Task<Message> {
         let i = self.active_tab;
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
-        let ui = &mut sel.context_menu_ui;
+        let ui = &mut sel.menu.ui;
         ui.open_submenu = if ui.open_submenu == Some(id) { None } else { Some(id) };
         drop(sel);
         // Keep the keyboard highlight on the header that was toggled.
@@ -101,8 +101,8 @@ impl OpenCADStudio {
             .iter()
             .position(|s| s.header == Some(id));
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
-        if sel.context_menu_ui.highlighted.is_some() {
-            sel.context_menu_ui.highlighted = header;
+        if sel.menu.ui.highlighted.is_some() {
+            sel.menu.ui.highlighted = header;
         }
         Task::none()
     }
@@ -118,10 +118,10 @@ impl OpenCADStudio {
         let i = self.active_tab;
         {
             let mut sel = self.tabs[i].scene.selection.borrow_mut();
-            sel.close_context_menu();
+            sel.menu.close();
             // A pick counts as "another interaction" for the Enter-first
             // right-click cycle: the next right-click acts as Enter again.
-            sel.right_click_entered = false;
+            sel.input.right_click_entered = false;
         }
         let focus = self.focus_cmd_input();
         let task = match action {
@@ -174,7 +174,7 @@ impl OpenCADStudio {
         if rows.is_empty() {
             return Task::none();
         }
-        let current = self.tabs[i].scene.selection.borrow().context_menu_ui.highlighted;
+        let current = self.tabs[i].scene.selection.borrow().menu.ui.highlighted;
         let next_enabled = |from: usize, step: isize| -> usize {
             let n = rows.len() as isize;
             let mut idx = from as isize;
@@ -193,7 +193,7 @@ impl OpenCADStudio {
                     None => menu.default_index(),
                     Some(cur) => next_enabled(cur, 1),
                 };
-                self.tabs[i].scene.selection.borrow_mut().context_menu_ui.highlighted = Some(idx);
+                self.tabs[i].scene.selection.borrow_mut().menu.ui.highlighted = Some(idx);
                 Task::none()
             }
             ContextMenuNav::Up => {
@@ -201,7 +201,7 @@ impl OpenCADStudio {
                     None => menu.default_index(),
                     Some(cur) => next_enabled(cur, -1),
                 };
-                self.tabs[i].scene.selection.borrow_mut().context_menu_ui.highlighted = Some(idx);
+                self.tabs[i].scene.selection.borrow_mut().menu.ui.highlighted = Some(idx);
                 Task::none()
             }
             ContextMenuNav::Enter => {
@@ -220,7 +220,7 @@ impl OpenCADStudio {
                     if unique {
                         self.on_context_menu_pick(rows[idx].action.clone())
                     } else {
-                        self.tabs[i].scene.selection.borrow_mut().context_menu_ui.highlighted =
+                        self.tabs[i].scene.selection.borrow_mut().menu.ui.highlighted =
                             Some(idx);
                         Task::none()
                     }
@@ -244,7 +244,7 @@ impl OpenCADStudio {
                 ArrowKey::Left | ArrowKey::Right => {
                     // On a submenu header, Right expands and Left collapses.
                     let i = self.active_tab;
-                    let ui = self.tabs[i].scene.selection.borrow().context_menu_ui.clone();
+                    let ui = self.tabs[i].scene.selection.borrow().menu.ui.clone();
                     let menu = self.current_context_menu();
                     let rows = menu.selectable();
                     let header = ui.highlighted.and_then(|c| rows.get(c)).and_then(|r| r.header);
@@ -410,7 +410,7 @@ mod tests {
     fn app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
-        app.tabs[0].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[0].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         let _ = app.update(Message::ViewportMove(Point::new(200.0, 150.0)));
         app
     }
@@ -428,7 +428,7 @@ mod tests {
     }
 
     fn menu_open(app: &OpenCADStudio) -> bool {
-        app.tabs[0].scene.selection.borrow().context_menu.is_some()
+        app.tabs[0].scene.selection.borrow().menu.open_at.is_some()
     }
 
     fn active(app: &OpenCADStudio) -> Option<&'static str> {
@@ -491,7 +491,7 @@ mod tests {
             let _ = app.update(Message::ViewportRightPress);
             {
                 let mut sel = app.tabs[0].scene.selection.borrow_mut();
-                sel.right_press_time = iced::time::Instant::now()
+                sel.input.right_press_time = iced::time::Instant::now()
                     .checked_sub(std::time::Duration::from_millis(400));
             }
             let _ = app.update(Message::ViewportRightRelease);
@@ -522,7 +522,7 @@ mod tests {
                     .scene
                     .document
                     .entities()
-                    .filter(|e| matches!(e, acadrust::EntityType::Line(_)))
+                    .filter(|e| matches!(e, codec::EntityType::Line(_)))
                     .count();
                 assert_eq!(lines, 3, "{mode:?}");
             }
@@ -540,7 +540,7 @@ mod tests {
             assert!(!menu_open(&app));
             assert_eq!(active(&app), None);
             let closed = app.tabs[0].scene.document.entities().any(|e| {
-                matches!(e, acadrust::EntityType::LwPolyline(p) if p.is_closed && p.vertices.len() == 3)
+                matches!(e, codec::EntityType::LwPolyline(p) if p.is_closed && p.vertices.len() == 3)
             });
             assert!(closed, "PLINE should have been closed by the menu pick");
         });
@@ -558,7 +558,7 @@ mod tests {
             let _ = app.update(Message::ContextMenuPick(MenuAction::Command("LINE".into())));
             assert!(!menu_open(&app));
             assert_eq!(active(&app), Some("LINE"));
-            assert!(!app.tabs[0].scene.selection.borrow().right_click_entered);
+            assert!(!app.tabs[0].scene.selection.borrow().input.right_click_entered);
         });
     }
 
@@ -582,7 +582,7 @@ mod tests {
             right_click(&mut app);
             let _ = app.update(Message::ContextMenuNavigate(ContextMenuNav::Down)); // Enter row
             assert_eq!(
-                app.tabs[0].scene.selection.borrow().context_menu_ui.highlighted,
+                app.tabs[0].scene.selection.borrow().menu.ui.highlighted,
                 Some(0)
             );
             let _ = app.update(Message::ContextMenuNavigate(ContextMenuNav::Down)); // Cancel
@@ -602,7 +602,7 @@ mod tests {
             assert!(!menu_open(&app));
             assert_eq!(active(&app), None);
             let closed = app.tabs[0].scene.document.entities().any(
-                |e| matches!(e, acadrust::EntityType::LwPolyline(p) if p.is_closed),
+                |e| matches!(e, codec::EntityType::LwPolyline(p) if p.is_closed),
             );
             assert!(closed);
         });
@@ -641,7 +641,7 @@ mod tests {
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, acadrust::EntityType::Line(_)))
+                .filter(|e| matches!(e, codec::EntityType::Line(_)))
                 .count();
             assert_eq!(lines, 3);
         });
@@ -658,7 +658,7 @@ mod tests {
                 .document
                 .entities()
                 .find_map(|e| match e {
-                    acadrust::EntityType::Line(l) => Some(l.common.handle),
+                    codec::EntityType::Line(l) => Some(l.common.handle),
                     _ => None,
                 })
                 .expect("a line");
@@ -673,7 +673,7 @@ mod tests {
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, acadrust::EntityType::Line(_)))
+                .filter(|e| matches!(e, codec::EntityType::Line(_)))
                 .count();
             assert_eq!(lines, 0);
         });
@@ -683,7 +683,7 @@ mod tests {
 
     /// A drawing with one line, selected, its start grip hot at the origin.
     fn grip_app() -> (OpenCADStudio, Handle) {
-        use acadrust::{entities::Line, types::Vector3, EntityType};
+        use codec::{entities::Line, types::Vector3, EntityType};
         let mut app = app();
         app.snapper.snap_enabled = false;
         app.snapper.grid_snap_on = false;
@@ -717,7 +717,7 @@ mod tests {
 
     fn line_start(app: &OpenCADStudio, handle: Handle) -> (f64, f64) {
         match app.tabs[0].scene.document.get_entity(handle) {
-            Some(acadrust::EntityType::Line(l)) => (l.start.x, l.start.y),
+            Some(codec::EntityType::Line(l)) => (l.start.x, l.start.y),
             other => panic!("{other:?}"),
         }
     }
@@ -795,7 +795,7 @@ mod tests {
                 .document
                 .entities()
                 .filter_map(|e| match e {
-                    acadrust::EntityType::Line(l) => Some((l.start.x, l.start.y)),
+                    codec::EntityType::Line(l) => Some((l.start.x, l.start.y)),
                     _ => None,
                 })
                 .collect();
@@ -810,7 +810,7 @@ mod tests {
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, acadrust::EntityType::Line(_)))
+                .filter(|e| matches!(e, codec::EntityType::Line(_)))
                 .count();
             assert_eq!(count, 1);
         });
@@ -853,7 +853,7 @@ mod transparent_tests {
     fn line_app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
-        app.tabs[0].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[0].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         let _ = app.dispatch_command("LINE");
         let _ = app.feed_command(StepInput::Point(DVec3::ZERO));
         app
@@ -895,7 +895,7 @@ mod transparent_tests {
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, acadrust::EntityType::Line(_)))
+                .filter(|e| matches!(e, codec::EntityType::Line(_)))
                 .count();
             assert_eq!(lines, 1);
         });
@@ -961,7 +961,7 @@ mod transparent_tests {
                 .document
                 .entities()
                 .filter_map(|e| match e {
-                    acadrust::EntityType::Line(l) => Some(l.clone()),
+                    codec::EntityType::Line(l) => Some(l.clone()),
                     _ => None,
                 })
                 .collect();
@@ -984,7 +984,7 @@ mod transparent_tests {
                 .document
                 .entities()
                 .filter_map(|e| match e {
-                    acadrust::EntityType::Line(l) => Some(l.clone()),
+                    codec::EntityType::Line(l) => Some(l.clone()),
                     _ => None,
                 })
                 .collect();
@@ -1000,7 +1000,7 @@ mod transparent_tests {
                 .document
                 .entities()
                 .filter_map(|e| match e {
-                    acadrust::EntityType::Line(l) => Some(l.clone()),
+                    codec::EntityType::Line(l) => Some(l.clone()),
                     _ => None,
                 })
                 .collect();

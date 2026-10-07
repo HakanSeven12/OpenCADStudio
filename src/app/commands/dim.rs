@@ -1,6 +1,6 @@
 use super::*;
 
-fn selected_edge_body(app: &OpenCADStudio, tab: usize) -> Option<acadrust::Handle> {
+fn selected_edge_body(app: &OpenCADStudio, tab: usize) -> Option<codec::Handle> {
     let scene = &app.tabs.get(tab)?.scene;
     let selected = scene.selected_handles_in_order();
     let [handle] = selected.as_slice() else {
@@ -9,7 +9,7 @@ fn selected_edge_body(app: &OpenCADStudio, tab: usize) -> Option<acadrust::Handl
 
     if matches!(
         scene.document.get_entity(*handle),
-        Some(acadrust::EntityType::Solid3D(_) | acadrust::EntityType::Surface(_))
+        Some(codec::EntityType::Solid3D(_) | codec::EntityType::Surface(_))
     ) {
         Some(*handle)
     } else {
@@ -20,7 +20,7 @@ fn selected_edge_body(app: &OpenCADStudio, tab: usize) -> Option<acadrust::Handl
 fn solid_edge_sources(
     app: &mut OpenCADStudio,
     tab: usize,
-) -> Vec<(acadrust::Handle, cadkernel::brep::Body)> {
+) -> Vec<(codec::Handle, kernel::brep::Body)> {
     let handles = app.tabs[tab]
         .scene
         .document
@@ -28,7 +28,7 @@ fn solid_edge_sources(
         .filter_map(|entity| {
             matches!(
                 entity,
-                acadrust::EntityType::Solid3D(_) | acadrust::EntityType::Surface(_)
+                codec::EntityType::Solid3D(_) | codec::EntityType::Surface(_)
             )
                 .then_some(entity.common().handle)
         })
@@ -146,7 +146,7 @@ impl OpenCADStudio {
             }
             cmd if cmd.starts_with("JUSTIFYTEXT ") => {
                 let opt = cmd.split_whitespace().nth(1).unwrap_or("").to_uppercase();
-                let handles: Vec<acadrust::Handle> = self.tabs[i]
+                let handles: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
@@ -164,7 +164,7 @@ impl OpenCADStudio {
                     );
                     return Some(Task::none());
                 }
-                use acadrust::entities::{
+                use codec::entities::{
                     AttachmentPoint as AP, TextHorizontalAlignment as TH,
                     TextVerticalAlignment as TV,
                 };
@@ -213,7 +213,7 @@ impl OpenCADStudio {
                         .find(|e| e.common().handle == *h)
                     {
                         match e {
-                            acadrust::EntityType::Text(t) => {
+                            codec::EntityType::Text(t) => {
                                 let mut changed = false;
                                 if let Some(a) = text_align {
                                     t.horizontal_alignment = a;
@@ -228,7 +228,7 @@ impl OpenCADStudio {
                                     n += 1;
                                 }
                             }
-                            acadrust::EntityType::MText(m) => {
+                            codec::EntityType::MText(m) => {
                                 if let Some(a) = mtext_ap {
                                     m.attachment_point = a;
                                     n += 1;
@@ -269,7 +269,7 @@ impl OpenCADStudio {
             }
             cmd if cmd.starts_with("TCASE ") => {
                 let opt = cmd.split_whitespace().nth(1).unwrap_or("").to_uppercase();
-                let handles: Vec<acadrust::Handle> = self.tabs[i]
+                let handles: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
@@ -315,11 +315,11 @@ impl OpenCADStudio {
                         .find(|e| e.common().handle == *h)
                     {
                         match e {
-                            acadrust::EntityType::Text(t) => {
+                            codec::EntityType::Text(t) => {
                                 t.value = conv(&t.value);
                                 n += 1;
                             }
-                            acadrust::EntityType::MText(m) => {
+                            codec::EntityType::MText(m) => {
                                 m.value = conv(&m.value);
                                 n += 1;
                             }
@@ -353,14 +353,14 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
             cmd if cmd.starts_with("TEXTMASK ") => {
-                let handles: Vec<acadrust::Handle> = self.tabs[i]
+                let handles: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
                     .filter(|(_, e)| {
                         matches!(
                             e,
-                            acadrust::EntityType::Text(_) | acadrust::EntityType::MText(_)
+                            codec::EntityType::Text(_) | codec::EntityType::MText(_)
                         )
                     })
                     .map(|(h, _)| *h)
@@ -388,20 +388,20 @@ impl OpenCADStudio {
                         continue; // no geometry for this object
                     }
                     let pad = ((max[1] - min[1]) * 0.15).max(0.0);
-                    let c1 = acadrust::types::Vector3::new(
+                    let c1 = codec::types::Vector3::new(
                         (min[0] - pad) as f64,
                         (min[1] - pad) as f64,
                         min[2] as f64,
                     );
-                    let c2 = acadrust::types::Vector3::new(
+                    let c2 = codec::types::Vector3::new(
                         (max[0] + pad) as f64,
                         (max[1] + pad) as f64,
                         min[2] as f64,
                     );
                     self.tabs[i]
                         .scene
-                        .add_entity_clone(acadrust::EntityType::Wipeout(
-                            acadrust::entities::Wipeout::from_corners(c1, c2),
+                        .add_entity_clone(codec::EntityType::Wipeout(
+                            codec::entities::Wipeout::from_corners(c1, c2),
                         ));
                     n += 1;
                 }
@@ -436,11 +436,11 @@ impl OpenCADStudio {
                         return Some(Task::none());
                     }
                 };
-                let handles: Vec<acadrust::Handle> = self.tabs[i]
+                let handles: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
-                    .filter(|(_, e)| matches!(e, acadrust::EntityType::Text(_)))
+                    .filter(|(_, e)| matches!(e, codec::EntityType::Text(_)))
                     .map(|(h, _)| *h)
                     .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
                     .collect();
@@ -464,7 +464,7 @@ impl OpenCADStudio {
                     if cur_w <= 1e-9 {
                         continue;
                     }
-                    if let Some(acadrust::EntityType::Text(t)) = self.tabs[i]
+                    if let Some(codec::EntityType::Text(t)) = self.tabs[i]
                         .scene
                         .document
                         .entities_mut()
@@ -533,12 +533,12 @@ impl OpenCADStudio {
                     }
                 };
 
-                let mut texts: Vec<(acadrust::Handle, f64, f64)> = self.tabs[i]
+                let mut texts: Vec<(codec::Handle, f64, f64)> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
                     .filter_map(|(h, e)| match e {
-                        acadrust::EntityType::Text(t)
+                        codec::EntityType::Text(t)
                             if !self.tabs[i].scene.is_layer_locked(*h) =>
                         {
                             Some((*h, t.insertion_point.x, t.insertion_point.y))
@@ -569,7 +569,7 @@ impl OpenCADStudio {
                 let mut num = start;
 
                 for (h, _, _) in &texts {
-                    if let Some(acadrust::EntityType::Text(t)) = self.tabs[i]
+                    if let Some(codec::EntityType::Text(t)) = self.tabs[i]
                         .scene
                         .document
                         .entities_mut()
@@ -624,7 +624,7 @@ impl OpenCADStudio {
                     .objects
                     .iter()
                     .find_map(|(handle, object)| match object {
-                        acadrust::objects::ObjectType::MultiLeaderStyle(style)
+                        codec::objects::ObjectType::MultiLeaderStyle(style)
                             if style.name.eq_ignore_ascii_case(&name) =>
                         {
                             let mut style = style.clone();
@@ -911,13 +911,29 @@ impl OpenCADStudio {
                     .or_else(|| cmd.strip_prefix("ZOOM S "))
                     .or_else(|| cmd.strip_prefix("ZS "))
                     .unwrap_or("1");
-                if let Ok(factor) = rest.trim().parse::<f32>() {
-                    if factor > 0.0 {
-                        self.tabs[i].scene.remember_current_view();
-                        self.tabs[i].scene.zoom_camera(1.0 / factor);
+                // nXP scales the active viewport against paper space, nX (or
+                // a bare n) the current view (#1465). n may be an expression
+                // such as 1/50.
+                let rest = rest.trim().to_ascii_uppercase();
+                let (number, xp) = match rest.strip_suffix("XP") {
+                    Some(n) => (n, true),
+                    None => (rest.strip_suffix('X').unwrap_or(&rest), false),
+                };
+                let factor = crate::app::expr_eval::eval_number(number.trim())
+                    .filter(|f| f.is_finite() && *f > 0.0);
+                match factor {
+                    Some(factor) if xp && self.tabs[i].scene.set_viewport_scale_factor(factor) => {
+                        self.tabs[i].dirty = true;
                         self.command_line
                             .push_output(crate::tf!("Zoom Scale ×{factor:.3}").as_ref());
                     }
+                    Some(factor) => {
+                        self.tabs[i].scene.remember_current_view();
+                        self.tabs[i].scene.zoom_camera(1.0 / factor as f32);
+                        self.command_line
+                            .push_output(crate::tf!("Zoom Scale ×{factor:.3}").as_ref());
+                    }
+                    None => {}
                 }
             }
 
@@ -960,7 +976,29 @@ impl OpenCADStudio {
                 } else {
                     self.tabs[i].scene.wire_models_for(&handles)
                 };
-                let new_cmd = StretchCommand::new(handles, wires);
+                // Selected by a crossing window just before: stretch through
+                // that window, no second one asked for (#1068). Every picked
+                // object must touch it, or the selection was changed since.
+                let window = self.tabs[i].last_crossing_window.and_then(|(lo, hi)| {
+                    let touches = |wire: &crate::scene::WireModel| {
+                        let [x0, y0, x1, y1] = wire.aabb.map(f64::from);
+                        x0 <= hi[0] && x1 >= lo[0] && y0 <= hi[1] && y1 >= lo[1]
+                    };
+                    (!handles.is_empty()
+                        && handles.iter().all(|h| {
+                            self.tabs[i].scene.wire_models_for(&[*h]).iter().any(touches)
+                        }))
+                    .then(|| {
+                        (
+                            glam::DVec3::new(lo[0], lo[1], f64::NEG_INFINITY),
+                            glam::DVec3::new(hi[0], hi[1], f64::INFINITY),
+                        )
+                    })
+                });
+                let new_cmd = match window {
+                    Some(window) => StretchCommand::preselected(handles, wires, window),
+                    None => StretchCommand::new(handles, wires),
+                };
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
@@ -1202,40 +1240,48 @@ impl OpenCADStudio {
             }
 
             "EXPLODE" => {
-                use crate::modules::draw::modify::explode::explode_entity;
-                let entities: Vec<_> = self.tabs[i]
+                use crate::modules::draw::modify::explode::{
+                    apply_explode_replacements, plan_explode,
+                };
+                let selected: Vec<_> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .into_iter()
                     .filter(|(handle, _)| !self.tabs[i].scene.is_layer_locked(*handle))
                     .collect();
-                if entities.is_empty() {
+                if selected.is_empty() {
                     use crate::modules::draw::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("EXPLODE");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
-                    let replacements: Vec<(acadrust::Handle, Vec<acadrust::EntityType>)> = entities
-                        .iter()
-                        .filter_map(|(h, e)| {
-                            let pieces = explode_entity(e, &self.tabs[i].scene.document);
-                            if pieces.is_empty() {
-                                None
-                            } else {
-                                Some((*h, pieces))
-                            }
-                        })
-                        .collect();
+                    // EXPLMODE 0 keeps references that are not uniformly and
+                    // positively scaled whole.
+                    let selected: Vec<_> = if super::blockvars::explmode(&self.tabs[i].scene.document) == 0 {
+                        selected
+                            .into_iter()
+                            .filter(|(_, entity)| match entity {
+                                codec::EntityType::Insert(ins) => {
+                                    let (x, y, z) = (ins.x_scale(), ins.y_scale(), ins.z_scale());
+                                    let uniform = x > 0.0 && (x - y).abs() <= 1e-10 && (x - z).abs() <= 1e-10;
+                                    if !uniform {
+                                        self.command_line
+                                            .push_output("The object is not uniformly and positively scaled.");
+                                    }
+                                    uniform
+                                }
+                                _ => true,
+                            })
+                            .collect()
+                    } else {
+                        selected
+                    };
+                    let replacements = plan_explode(&selected, &self.tabs[i].scene.document);
                     let exploded = replacements.len();
                     if exploded > 0 {
                         self.push_undo_snapshot(i, "EXPLODE");
                     }
-                    for (handle, pieces) in replacements {
-                        self.tabs[i].scene.erase_entities(&[handle]);
-                        for piece in pieces {
-                            self.tabs[i].scene.add_entity(piece);
-                        }
-                    }
+                    apply_explode_replacements(&mut self.tabs[i].scene, replacements);
                     if exploded > 0 {
                         self.tabs[i].dirty = true;
                         self.refresh_properties();
@@ -1260,7 +1306,8 @@ impl OpenCADStudio {
                     })
                     .collect();
                 // Pick-first (#422): with offsettable objects already selected,
-                // skip the pick step and go straight to distance / side.
+                // skip the distance and pick steps and open on the live side
+                // preview.
                 let preselected: Vec<_> = self.tabs[i]
                     .scene
                     .selected_entities()
@@ -1293,7 +1340,7 @@ impl OpenCADStudio {
                             .map(|e| (h, e))
                     })
                     .collect();
-                let initial_edges: Vec<acadrust::Handle> = self.tabs[i]
+                let initial_edges: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .into_iter()
@@ -1361,8 +1408,8 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
             cmd if cmd.starts_with("ARCTEXT ") => {
-                use acadrust::entities::Text;
-                use acadrust::types::Vector3;
+                use codec::entities::Text;
+                use codec::types::Vector3;
                 let text = cmd.strip_prefix("ARCTEXT").unwrap_or("").trim().to_string();
                 if text.is_empty() {
                     self.command_line.push_info(
@@ -1376,7 +1423,7 @@ impl OpenCADStudio {
                         .selected_entities()
                         .iter()
                         .find_map(|(_, e)| match e {
-                            acadrust::EntityType::Arc(a) => Some(a.clone()),
+                            codec::EntityType::Arc(a) => Some(a.clone()),
                             _ => None,
                         });
                 let Some(arc) = arc else {
@@ -1406,7 +1453,7 @@ impl OpenCADStudio {
                     let t = Text::with_value(ch.to_string(), pos)
                         .with_height(height)
                         .with_rotation(ang + std::f64::consts::FRAC_PI_2);
-                    self.tabs[i].scene.add_entity(acadrust::EntityType::Text(t));
+                    self.tabs[i].scene.add_entity(codec::EntityType::Text(t));
                 }
                 self.tabs[i].dirty = true;
                 self.command_line

@@ -33,20 +33,15 @@
 
 #![allow(clippy::field_reassign_with_default, clippy::manual_is_multiple_of)]
 
-use std::collections::HashMap;
-use std::env;
 use std::f64::consts::{PI, TAU};
 use std::hint::black_box;
 use std::io::Cursor;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use serde::{Deserialize, Serialize};
-
-use acadrust::entities::{Arc as AcadArc, Circle, Ellipse, Line, LwPolyline, LwVertex};
-use acadrust::types::{Vector2, Vector3};
-use acadrust::{CadDocument, DxfReader, DxfWriter, EntityType};
+use codec::entities::{Arc as AcadArc, Circle, Ellipse, Line, LwPolyline, LwVertex};
+use codec::types::{Vector2, Vector3};
+use codec::{CadDocument, DxfReader, DxfWriter, EntityType};
 use glam::{DVec3, Mat4, Vec3};
 use iced::{Color, Point, Rectangle};
 
@@ -55,7 +50,9 @@ use OpenCADStudio::scene::parametric_constraints::{
 };
 use OpenCADStudio::scene::pick::hit_test::{box_hit, click_hit};
 use OpenCADStudio::scene::pick::interaction_index::InteractionIndex;
-use OpenCADStudio::scene::pick::selection_state::SelectionState;
+use OpenCADStudio::scene::pick::selection_state::{
+    SelectionGesture, SelectionState, SelectionView,
+};
 use OpenCADStudio::scene::pipeline::wire_arena::partition_wires;
 use OpenCADStudio::scene::view::camera::Camera;
 use OpenCADStudio::scene::{ChangeKind, Scene};
@@ -63,303 +60,16 @@ use OpenCADStudio::snap::Snapper;
 use OpenCADStudio::ui::icons::{self, CHECK};
 use OpenCADStudio::ui::overlay::{
     grid_segments, selection_overlay, should_reuse, CrosshairOptions, GridCanvasState,
-    GridKey, GridParams, GridStyle, GripMarker, OstTrackPoint, SelectionVisualOptions,
+    GridKey, GridParams, GridStyle, GripMarker, NavCursor, OstTrackPoint, SelectionVisualOptions,
     UcsIconParams,
 };
 use OpenCADStudio::ui::properties::LinetypeItem;
 use OpenCADStudio::ui::ribbon::{LayerInfo, Ribbon};
 use OpenCADStudio::ui::style::plotstyle::build_layer_usage;
+#[path = "support/harness.rs"]
+mod harness;
 
-// ── Metric Structures ───────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BenchmarkMetric {
-    pub name: String,
-    pub description: String,
-    pub unit: String,
-    pub samples: usize,
-    pub min: f64,
-    pub max: f64,
-    pub mean: f64,
-    pub median: f64,
-    pub p95: f64,
-    pub p99: f64,
-    pub std_dev: f64,
-    pub throughput: Option<f64>,
-    pub throughput_unit: Option<String>,
-    pub target_threshold: Option<f64>,
-    pub passed_target: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BenchmarkSuiteReport {
-    pub timestamp: String,
-    pub os: String,
-    pub arch: String,
-    pub profile: String,
-    pub is_quick_mode: bool,
-    pub metrics: Vec<BenchmarkMetric>,
-}
-
-pub struct BenchmarkRunner {
-    pub quick_mode: bool,
-    pub filter: Option<String>,
-    pub baseline_path: Option<PathBuf>,
-    pub output_path: PathBuf,
-    pub results: Vec<BenchmarkMetric>,
-}
-
-impl Default for BenchmarkRunner {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl BenchmarkRunner {
-    pub fn new() -> Self {
-        let args: Vec<String> = env::args().collect();
-        let quick_mode =
-            args.iter().any(|a| a == "--quick" || a == "-q") || env::var("CAD_BENCH_QUICK").is_ok();
-
-        let filter = args
-            .windows(2)
-            .find(|w| w[0] == "--filter")
-            .map(|w| w[1].clone())
-            .or_else(|| env::var("CAD_BENCH_FILTER").ok());
-
-        let baseline_path = args
-            .windows(2)
-            .find(|w| w[0] == "--baseline")
-            .map(|w| PathBuf::from(&w[1]))
-            .or_else(|| env::var("CAD_BENCH_BASELINE").ok().map(PathBuf::from));
-
-        let output_path = args
-            .windows(2)
-            .find(|w| w[0] == "--output")
-            .map(|w| PathBuf::from(&w[1]))
-            .or_else(|| env::var("CAD_BENCH_OUTPUT").ok().map(PathBuf::from))
-            .unwrap_or_else(|| {
-                let target_dir = Path::new("target");
-                if !target_dir.exists() {
-                    let _ = std::fs::create_dir_all(target_dir);
-                }
-                target_dir.join("cad_performance_metrics.json")
-            });
-
-        Self {
-            quick_mode,
-            filter,
-            baseline_path,
-            output_path,
-            results: Vec::new(),
-        }
-    }
-
-    pub fn should_run(&self, name: &str) -> bool {
-        if let Some(ref filter) = self.filter {
-            name.to_lowercase().contains(&filter.to_lowercase())
-        } else {
-            true
-        }
-    }
-
-    /// Record a measured benchmark with multiple timing samples.
-    pub fn record(
-        &mut self,
-        name: &str,
-        description: &str,
-        unit: &str,
-        mut samples: Vec<f64>,
-        throughput: Option<(f64, &str)>,
-        target_threshold: Option<f64>,
-    ) {
-        if samples.is_empty() {
-            return;
-        }
-        samples.sort_by(|a, b| a.total_cmp(b));
-
-        let n = samples.len();
-        let min = samples[0];
-        let max = samples[n - 1];
-        let sum: f64 = samples.iter().sum();
-        let mean = sum / (n as f64);
-        let median = if n % 2 == 0 {
-            (samples[n / 2 - 1] + samples[n / 2]) * 0.5
-        } else {
-            samples[n / 2]
-        };
-
-        let p95_idx = ((n as f64) * 0.95).floor() as usize;
-        let p95 = samples[p95_idx.min(n - 1)];
-
-        let p99_idx = ((n as f64) * 0.99).floor() as usize;
-        let p99 = samples[p99_idx.min(n - 1)];
-
-        let variance: f64 = samples.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / (n as f64);
-        let std_dev = variance.sqrt();
-
-        let passed_target = match target_threshold {
-            Some(thresh) => median <= thresh,
-            None => true,
-        };
-
-        let (thru_val, thru_unit) = match throughput {
-            Some((val, u)) => (Some(val), Some(u.to_string())),
-            None => (None, None),
-        };
-
-        self.results.push(BenchmarkMetric {
-            name: name.to_string(),
-            description: description.to_string(),
-            unit: unit.to_string(),
-            samples: n,
-            min,
-            max,
-            mean,
-            median,
-            p95,
-            p99,
-            std_dev,
-            throughput: thru_val,
-            throughput_unit: thru_unit,
-            target_threshold,
-            passed_target,
-        });
-    }
-
-    /// Print summary table to stdout and persist JSON report.
-    pub fn finish(&self) {
-        let baseline_map: HashMap<String, BenchmarkMetric> =
-            if let Some(ref path) = self.baseline_path {
-                if let Ok(content) = std::fs::read_to_string(path) {
-                    if let Ok(report) = serde_json::from_str::<BenchmarkSuiteReport>(&content) {
-                        println!(
-                            "\nLoaded baseline from '{}' ({} metrics)",
-                            path.display(),
-                            report.metrics.len()
-                        );
-                        report
-                            .metrics
-                            .into_iter()
-                            .map(|m| (m.name.clone(), m))
-                            .collect()
-                    } else {
-                        eprintln!(
-                            "Warning: Failed to parse baseline JSON at '{}'",
-                            path.display()
-                        );
-                        HashMap::new()
-                    }
-                } else {
-                    eprintln!(
-                        "Warning: Could not read baseline file at '{}'",
-                        path.display()
-                    );
-                    HashMap::new()
-                }
-            } else {
-                HashMap::new()
-            };
-
-        println!("\n========================================================================================================================");
-        println!("                                      OPENCADSTUDIO PERFORMANCE BENCHMARK REPORT                                        ");
-        println!("========================================================================================================================");
-        println!(
-            "{:<38} | {:>8} | {:>8} | {:>8} | {:>8} | {:>16} | {:>10} | {:^6}",
-            "Benchmark Name", "Median", "Mean", "P95", "Min", "Throughput", "Baseline", "Status"
-        );
-        println!("------------------------------------------------------------------------------------------------------------------------");
-
-        for m in &self.results {
-            let throughput_str = match (&m.throughput, &m.throughput_unit) {
-                (Some(val), Some(unit)) => {
-                    if *val >= 1_000_000.0 {
-                        format!("{:.2}M {}", val / 1_000_000.0, unit)
-                    } else if *val >= 1_000.0 {
-                        format!("{:.1}k {}", val / 1_000.0, unit)
-                    } else {
-                        format!("{:.1} {}", val, unit)
-                    }
-                }
-                _ => "-".to_string(),
-            };
-
-            let baseline_col = if let Some(base) = baseline_map.get(&m.name) {
-                if base.median > 0.0 {
-                    let delta_pct = ((m.median - base.median) / base.median) * 100.0;
-                    if delta_pct < -1.0 {
-                        format!("{:+.1}% (fast)", delta_pct)
-                    } else if delta_pct > 1.0 {
-                        format!("{:+.1}% (slow)", delta_pct)
-                    } else {
-                        "~0.0%".to_string()
-                    }
-                } else {
-                    "-".to_string()
-                }
-            } else {
-                "-".to_string()
-            };
-
-            let status = if m.passed_target { "PASS" } else { "FAIL" };
-
-            println!(
-                "{:<38} | {:>6.2} {:<1} | {:>6.2} {:<1} | {:>6.2} {:<1} | {:>6.2} {:<1} | {:>16} | {:>10} | {:^6}",
-                m.name,
-                m.median,
-                m.unit,
-                m.mean,
-                m.unit,
-                m.p95,
-                m.unit,
-                m.min,
-                m.unit,
-                throughput_str,
-                baseline_col,
-                status,
-            );
-        }
-        println!("========================================================================================================================\n");
-
-        let report = BenchmarkSuiteReport {
-            timestamp: chrono_now(),
-            os: env::consts::OS.to_string(),
-            arch: env::consts::ARCH.to_string(),
-            profile: if cfg!(debug_assertions) {
-                "debug".to_string()
-            } else {
-                "release".to_string()
-            },
-            is_quick_mode: self.quick_mode,
-            metrics: self.results.clone(),
-        };
-
-        if let Ok(json) = serde_json::to_string_pretty(&report) {
-            if let Some(parent) = self.output_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            if let Err(e) = std::fs::write(&self.output_path, json) {
-                eprintln!(
-                    "Error saving metrics to '{}': {}",
-                    self.output_path.display(),
-                    e
-                );
-            } else {
-                println!(
-                    "Saved complete performance metrics JSON to: {}\n",
-                    self.output_path.display()
-                );
-            }
-        }
-    }
-}
-
-fn chrono_now() -> String {
-    let d = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("unix_{}", d.as_secs())
-}
+use harness::BenchmarkRunner;
 
 // ── 1. Scene Entity Ingestion & Batch Creation ───────────────────────────────
 
@@ -685,6 +395,7 @@ fn bench_hit_test_picking(runner: &mut BenchmarkRunner) {
     let n_queries = if runner.quick_mode { 200 } else { 1_000 };
     let mut click_samples = Vec::with_capacity(5);
 
+    let draw_depth = rustc_hash::FxHashMap::default();
     for _ in 0..5 {
         let t0 = Instant::now();
         for q in 0..n_queries {
@@ -698,6 +409,7 @@ fn bench_hit_test_picking(runner: &mut BenchmarkRunner) {
                 bounds,
                 false,
                 8.0,
+                &draw_depth,
             );
             black_box(hit);
         }
@@ -1003,12 +715,17 @@ fn bench_selection_cloning(runner: &mut BenchmarkRunner) {
     }
 
     let mut state = SelectionState {
-        vp_size: (1920.0, 1080.0),
-        poly_points: vec![Point::new(10.0, 10.0); 64],
+        view: SelectionView {
+            vp_size: (1920.0, 1080.0),
+        },
+        gesture: SelectionGesture {
+            box_anchor: Some(Point::new(0.0, 0.0)),
+            box_current: Some(Point::new(100.0, 100.0)),
+            poly_points: vec![Point::new(10.0, 10.0); 64],
+            ..Default::default()
+        },
         ..Default::default()
     };
-    state.box_anchor = Some(Point::new(0.0, 0.0));
-    state.box_current = Some(Point::new(100.0, 100.0));
 
     let n = if runner.quick_mode { 1_000 } else { 5_000 };
     let runs = 5;
@@ -1083,6 +800,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
                 visible: true,
                 frozen: false,
                 locked: false,
+                vp_frozen: None,
             },
             LayerInfo {
                 name: "DRAWING".to_string(),
@@ -1090,6 +808,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
                 visible: true,
                 frozen: false,
                 locked: false,
+                vp_frozen: None,
             },
             LayerInfo {
                 name: "DIMENSIONS".to_string(),
@@ -1097,6 +816,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
                 visible: true,
                 frozen: false,
                 locked: false,
+                vp_frozen: None,
             },
             LayerInfo {
                 name: "ANNOTATIONS".to_string(),
@@ -1104,6 +824,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
                 visible: true,
                 frozen: false,
                 locked: false,
+                vp_frozen: None,
             },
         ],
         "0",
@@ -1375,9 +1096,9 @@ fn bench_ui_plotstyle_layer_usage(runner: &mut BenchmarkRunner) {
 
     let mut doc = CadDocument::new();
     for i in 0..200 {
-        let mut layer = acadrust::tables::Layer::new(&format!("LAYER_{i:03}"));
+        let mut layer = codec::tables::Layer::new(&format!("LAYER_{i:03}"));
         layer.handle = doc.allocate_handle();
-        layer.color = acadrust::types::Color::Index((i % 8 + 1) as u8);
+        layer.color = codec::types::Color::Index((i % 8 + 1) as u8);
         let _ = doc.layers.add(layer);
     }
 
@@ -1531,8 +1252,8 @@ fn bench_ui_grip_budget(runner: &mut BenchmarkRunner) {
             axis: None,
         });
     }
-    let all_handles: Vec<acadrust::Handle> = (0..all_grips.len() as u64)
-        .map(|k| acadrust::Handle::new(k + 1))
+    let all_handles: Vec<codec::Handle> = (0..all_grips.len() as u64)
+        .map(|k| codec::Handle::new(k + 1))
         .collect();
     let n_fixture_grips = all_grips.len();
 
@@ -1661,7 +1382,7 @@ fn bench_ui_constraint_glyphs(runner: &mut BenchmarkRunner) {
             );
         scene.note_parametric_constraint_applied(ParametricScope::ModelSpace, id, 3);
     }
-    scene.selection.borrow_mut().vp_size = (1920.0, 1080.0);
+    scene.selection.borrow_mut().view.vp_size = (1920.0, 1080.0);
     let vp = (1920.0_f32, 1080.0_f32);
 
     // Prime the cache so every timed call below is a hit (same key, same Arc).
@@ -1802,7 +1523,7 @@ fn build_selection_overlay_element(
         vec![],
         None,
         None,
-        false,
+        NavCursor::None,
         false,
         false,
         [0.1, 0.1, 0.1, 1.0],
@@ -1816,6 +1537,8 @@ fn build_selection_overlay_element(
             snap_angle_deg: 0.0,
             point_mode: false,
             pick_pending: false,
+            hide_arms: false,
+            snap_color: None,
         },
         SelectionVisualOptions::default(),
         empty_glyphs,
@@ -2213,10 +1936,10 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
 
     // Populate scene with non-graphical document objects
     for i in 0..obj_count {
-        let handle = acadrust::Handle::new(0x2000 + i as u64);
+        let handle = codec::Handle::new(0x2000 + i as u64);
         scene.document.objects.insert(
             handle,
-            acadrust::objects::ObjectType::Dictionary(acadrust::objects::Dictionary::default()),
+            codec::objects::ObjectType::Dictionary(codec::objects::Dictionary::default()),
         );
     }
     // Add lines to model space
@@ -2244,7 +1967,7 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
         let t0 = Instant::now();
         let primitive = scene.build_viewports(
             bounds,
-            acadrust::entities::ViewportRenderMode::Wireframe2D,
+            codec::entities::ViewportRenderMode::Wireframe2D,
             None,
             false,
             false,
@@ -2268,7 +1991,7 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
     // 2. Cached / After: Memoized document render environment + O(1) fast paths
     let _ = scene.build_viewports(
         bounds,
-        acadrust::entities::ViewportRenderMode::Wireframe2D,
+        codec::entities::ViewportRenderMode::Wireframe2D,
         None,
         false,
         false,
@@ -2280,7 +2003,7 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
         let t0 = Instant::now();
         let primitive = scene.build_viewports(
             bounds,
-            acadrust::entities::ViewportRenderMode::Wireframe2D,
+            codec::entities::ViewportRenderMode::Wireframe2D,
             None,
             false,
             false,
@@ -2306,7 +2029,10 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
 
 fn main() {
     println!("\nInitializing OpenCADStudio Performance Benchmarks...");
-    let mut runner = BenchmarkRunner::new();
+    let mut runner = BenchmarkRunner::new(
+        "                                      OPENCADSTUDIO PERFORMANCE BENCHMARK REPORT                                        ",
+        "cad_performance_metrics.json",
+    );
 
     if runner.quick_mode {
         println!("Mode: QUICK (reduced iteration/entity counts for fast validation)");

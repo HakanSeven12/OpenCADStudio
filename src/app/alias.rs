@@ -80,7 +80,7 @@ const WEB_ALIAS_KEY: &str = "opencadstudio.aliases";
 /// migrated forward (see `introduced_at` / `migrate_aliases`). Version 1 shipped
 /// the pre-REDRAW table; version 2 introduced the REDRAW-family aliases; version 3
 /// introduced HB (HATCHTOBACK); version 4 introduced ER (EXTERNALREFERENCES).
-const DEFAULT_ALIASES_VERSION: u32 = 4;
+const DEFAULT_ALIASES_VERSION: u32 = 5;
 
 #[cfg(target_arch = "wasm32")]
 const WEB_ALIAS_VERSION_KEY: &str = "opencadstudio.aliases.version";
@@ -99,6 +99,7 @@ fn introduced_at(version: u32) -> &'static [(&'static str, &'static str)] {
         ],
         3 => &[("HB", "HATCHTOBACK")],
         4 => &[("ER", "EXTERNALREFERENCES")],
+        5 => &[("-ATT", "-ATTDEF")],
         _ => &[],
     }
 }

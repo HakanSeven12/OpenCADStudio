@@ -1,8 +1,8 @@
 // DONUT creates a ring as a closed, constant-width LwPolyline.
 
-use acadrust::entities::{LwPolyline, LwVertex};
-use acadrust::EntityType;
-use cadkernel::geom2d::{
+use codec::entities::{LwPolyline, LwVertex};
+use codec::EntityType;
+use kernel::geom2d::{
     Circle as KernelCircle, Curve as KernelCurve, Vec2 as KernelVec2,
 };
 use glam::DVec3;
@@ -254,7 +254,7 @@ fn donut_wire(
 }
 
 pub(crate) fn make_donut(cx: f64, cy: f64, elevation: f64, inner_r: f64, outer_r: f64) -> EntityType {
-    use acadrust::types::Vector2;
+    use codec::types::Vector2;
     let r_avg = (inner_r + outer_r) / 2.0;
     let width = outer_r - inner_r;
 

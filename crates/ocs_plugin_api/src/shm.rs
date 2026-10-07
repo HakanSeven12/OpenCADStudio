@@ -29,7 +29,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::{CadDocument, EntityType, Handle};
 use memmap2::{Mmap, MmapMut, MmapOptions};
 use rkyv::{check_archived_root, to_bytes, Archive, Deserialize, Serialize};
 
@@ -444,8 +444,8 @@ pub struct LayerView {
     pub name: String,
 }
 
-impl From<&acadrust::tables::Layer> for LayerView {
-    fn from(layer: &acadrust::tables::Layer) -> Self {
+impl From<&codec::tables::Layer> for LayerView {
+    fn from(layer: &codec::tables::Layer) -> Self {
         Self {
             handle: layer.handle.value(),
             name: layer.name.clone(),
@@ -460,8 +460,8 @@ pub struct AppIdView {
     pub name: String,
 }
 
-impl From<&acadrust::tables::AppId> for AppIdView {
-    fn from(app_id: &acadrust::tables::AppId) -> Self {
+impl From<&codec::tables::AppId> for AppIdView {
+    fn from(app_id: &codec::tables::AppId) -> Self {
         Self {
             handle: app_id.handle.value(),
             name: app_id.name.clone(),
@@ -539,8 +539,8 @@ impl ReaderEntityKind {
 // ── V4 full-entity document view ────────────────────────────────────────────
 
 /// Serializable V4 document view. The outer structure is rkyv; each entity's
-/// `data` is a bincode-encoded `acadrust::EntityType` so that the plugin can
-/// reconstruct the full typed entity without relying on acadrust's own rkyv
+/// `data` is a bincode-encoded `codec::EntityType` so that the plugin can
+/// reconstruct the full typed entity without relying on opencadcodec's own rkyv
 /// support.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone)]
 #[archive(check_bytes)]
@@ -605,9 +605,9 @@ impl From<&EntityType> for EntityViewV4 {
 mod tests {
     use super::*;
     use crate::host::{DocumentReader, ReaderEntityKind};
-    use acadrust::entities::Point;
-    use acadrust::tables::Layer;
-    use acadrust::{CadDocument, EntityType};
+    use codec::entities::Point;
+    use codec::tables::Layer;
+    use codec::{CadDocument, EntityType};
 
     fn unique_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(

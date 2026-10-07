@@ -16,7 +16,7 @@ use glam::DVec3;
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::parametric_constraints::ConstraintKind;
-use acadrust::types::Handle;
+use codec::types::Handle;
 
 pub mod center_point_tool {
     use super::*;

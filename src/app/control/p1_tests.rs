@@ -321,7 +321,7 @@ fn group_create_and_selection_sets() {
     let objects = &app.tabs[app.active_tab].scene.document.objects;
     assert!(objects.values().any(|o| matches!(
         o,
-        acadrust::objects::ObjectType::Group(group) if group.name == "FRAME"
+        codec::objects::ObjectType::Group(group) if group.name == "FRAME"
     )));
 
     let r = app.automation_op(&format!(
@@ -405,7 +405,7 @@ fn diagnostic_layer_survives_plain_io_round_trip() {
 
     // Direct io round trip on a clone of the document.
     let doc = app.tabs[app.active_tab].scene.document.clone();
-    let bytes = crate::io::save_to_bytes(&doc, "dxf", acadrust::DxfVersion::AC1032)
+    let bytes = crate::io::save_to_bytes(&doc, "dxf", codec::DxfVersion::AC1032)
         .expect("save to bytes");
     let path = std::env::temp_dir().join(format!("ocs_diag_{}.dxf", std::process::id()));
     std::fs::write(&path, &bytes).unwrap();
@@ -566,3 +566,286 @@ fn state_reports_the_hand_seed() {
     let after = u64::from_str_radix(state["hand_seed"].as_str().unwrap(), 16).unwrap();
     assert!(after > before, "issuing a handle advances the seed");
 }
+
+#[test]
+fn text_search_op_queries_text_and_attributes() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let r = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"entities_create","request_id":"ts_c1","document_id":{doc},"entities":[
+            {"type":"Text","position":[0,0,0],"value":"CIRTUITS 28-09-2026","layer":"0"},
+            {"type":"MText","position":[10,0,0],"value":"{\\fCentury Gothic;POMPE A EAU}","layer":"0"},
+            {"type":"Text","position":[20,0,0],"value":"BAROMETRE","layer":"0"},
+            {"type":"Text","position":[30,0,0],"value":"10 BAR","layer":"0"}
+        ]}"#,
+    );
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+
+    // Case-insensitive search finds CIRTUITS
+    let res = app.automation_op(r#"{"op":"text_search","find":"cirtuits"}"#);
+    assert_eq!(res["ok"], true);
+    assert_eq!(res["count"], 1);
+    assert_eq!(res["matches"][0]["match_text"], "cirtuits");
+    assert_eq!(res["matches"][0]["plain_text"], "CIRTUITS 28-09-2026");
+
+    // Case-sensitive search with wrong case finds nothing
+    let res_cs = app.automation_op(r#"{"op":"text_search","find":"cirtuits","match_case":true}"#);
+    assert_eq!(res_cs["ok"], true);
+    assert_eq!(res_cs["count"], 0);
+
+    // Whole-word search: "bar" matches "10 BAR" but not "BAROMETRE"
+    let res_ww = app.automation_op(r#"{"op":"text_search","find":"bar","whole_word":true}"#);
+    assert_eq!(res_ww["ok"], true);
+    assert_eq!(res_ww["count"], 1);
+    assert_eq!(res_ww["matches"][0]["plain_text"], "10 BAR");
+
+    // Non-whole-word search finds both "BAROMETRE" and "10 BAR"
+    let res_all = app.automation_op(r#"{"op":"text_search","find":"bar","whole_word":false}"#);
+    assert_eq!(res_all["ok"], true);
+    assert_eq!(res_all["count"], 2);
+}
+
+#[test]
+fn text_replace_op_batch_replaces_preserves_formatting_and_undoes() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let r = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"entities_create","request_id":"tr_c1","document_id":{doc},"entities":[
+            {"type":"Text","position":[0,0,0],"value":"VANNE A ARRET","layer":"0"},
+            {"type":"MText","position":[10,0,0],"value":"{\\fCentury Gothic|b0|i0;V15-CUVE EAU NON TRAITE}","layer":"0"}
+        ]}"#,
+    );
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+
+    // Execute batch replace with 2 pairs in one atomic step
+    let rep = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"text_replace","request_id":"tr_r1","document_id":{doc},"pairs":[
+            {"find":"NON TRAITE","replace":"NON TRAITÉE"},
+            {"find":"VANNE A ARRET","replace":"VANNE D'ARRÊT"}
+        ]}"#,
+    );
+    assert_eq!(rep["ok"], true, "{}", rep["error"]);
+    assert_eq!(rep["result"]["replaced"], 2);
+    assert_eq!(rep["result"]["entities_changed"], 2);
+
+    // Verify MText formatting codes were preserved
+    let q = app.automation_op(r#"{"op":"text_search","find":"NON TRAITÉE"}"#);
+    assert_eq!(q["ok"], true);
+    assert_eq!(q["count"], 1);
+    let raw = q["matches"][0]["raw_value"].as_str().unwrap();
+    assert!(raw.contains("Century Gothic"), "raw MText should keep font format code: {raw}");
+    assert!(raw.contains("NON TRAITÉE"), "raw MText should contain replaced text: {raw}");
+
+    // Verify Text was replaced
+    let q2 = app.automation_op(r#"{"op":"text_search","find":"VANNE D'ARRÊT"}"#);
+    assert_eq!(q2["ok"], true);
+    assert_eq!(q2["count"], 1);
+
+    // Undo restores the original text in one step
+    app.automation_op(r#"{"op":"undo"}"#);
+    let q_orig = app.automation_op(r#"{"op":"text_search","find":"NON TRAITE"}"#);
+    assert_eq!(q_orig["ok"], true);
+    assert_eq!(q_orig["count"], 1);
+
+    let q_orig2 = app.automation_op(r#"{"op":"text_search","find":"VANNE A ARRET"}"#);
+    assert_eq!(q_orig2["ok"], true);
+    assert_eq!(q_orig2["count"], 1);
+}
+
+#[test]
+fn text_audit_op_simulates_dry_run_checks_terms_and_dictionary() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let r = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"entities_create","request_id":"ta_c1","document_id":{doc},"entities":[
+            {"type":"Text","position":[0,0,0],"value":"CIRTUITS 28-09-2026","layer":"0"},
+            {"type":"MText","position":[10,0,0],"value":"{\\fCentury Gothic;CUVE EAU NON TRAITE}","layer":"0"},
+            {"type":"Text","position":[20,0,0],"value":"POMPE A EAU","layer":"0"}
+        ]}"#,
+    );
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+
+    // Test text_audit with pairs, check_terms, and dictionary
+    let audit_res = app.automation_op(
+        r#"{
+            "op":"text_audit",
+            "pairs":[
+                {"find":"CIRTUITS","replace":"CIRCUITS"},
+                {"find":"NON TRAITE","replace":"NON TRAITÉE"},
+                {"find":"INEXISTANT_PAIR","replace":"REPLACEMENT"}
+            ],
+            "check_terms":["CIRTUITS", "NON TRAITE", "INEXISTANT_TERM"],
+            "dictionary":["EAU", "POMPE", "28-09-2026"]
+        }"#,
+    );
+    assert_eq!(audit_res["ok"], true, "{}", audit_res["error"]);
+
+    // Check summary
+    assert_eq!(audit_res["summary"]["pairs_total"], 3);
+    assert_eq!(audit_res["summary"]["pairs_unmatched"], 1);
+    assert_eq!(audit_res["summary"]["check_terms_total"], 3);
+    assert_eq!(audit_res["summary"]["check_terms_found"], 2);
+
+    // Unmatched reporting
+    assert_eq!(audit_res["unmatched_pairs"], json!(["INEXISTANT_PAIR"]));
+    assert_eq!(audit_res["unmatched_check_terms"], json!(["INEXISTANT_TERM"]));
+
+    // Simulated changes has 2 entries (Text and MText)
+    let changes = audit_res["simulated_changes"].as_array().unwrap();
+    assert_eq!(changes.len(), 2);
+    assert_eq!(changes[0]["find"], "CIRTUITS");
+    assert_eq!(changes[0]["replace"], "CIRCUITS");
+    assert_eq!(changes[0]["replaced"], 1);
+    assert!(changes[1]["after"].as_str().unwrap().contains("NON TRAITÉE"));
+
+    // Suspect matches
+    let suspects = audit_res["suspect_matches"].as_array().unwrap();
+    assert_eq!(suspects.len(), 2);
+
+    // Verify document was NOT mutated (pure read op)
+    let q = app.automation_op(r#"{"op":"text_search","find":"CIRTUITS"}"#);
+    assert_eq!(q["ok"], true);
+    assert_eq!(q["count"], 1);
+}
+
+#[test]
+fn text_replace_op_supports_dry_run_without_mutating_or_undo() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let r = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"entities_create","request_id":"tr_dry1","document_id":{doc},"entities":[
+            {"type":"Text","position":[0,0,0],"value":"TEST BEFORE REPLACE","layer":"0"}
+        ]}"#,
+    );
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+
+    // Run text_replace with dry_run = true
+    let dry_res = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"text_replace","request_id":"tr_sim1","document_id":{doc},"find":"BEFORE","replace":"AFTER","dry_run":true}"#,
+    );
+    assert_eq!(dry_res["ok"], true, "{}", dry_res["error"]);
+    assert_eq!(dry_res["result"]["dry_run"], true);
+    assert_eq!(dry_res["result"]["replaced"], 1);
+    assert_eq!(dry_res["result"]["entities_changed"], 1);
+
+    // Verify the document was NOT modified
+    let q_before = app.automation_op(r#"{"op":"text_search","find":"TEST BEFORE REPLACE"}"#);
+    assert_eq!(q_before["ok"], true);
+    assert_eq!(q_before["count"], 1);
+
+    let q_after = app.automation_op(r#"{"op":"text_search","find":"TEST AFTER REPLACE"}"#);
+    assert_eq!(q_after["ok"], true);
+    assert_eq!(q_after["count"], 0);
+
+    // Now run with dry_run = false
+    let real_res = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"text_replace","request_id":"tr_real1","document_id":{doc},"find":"BEFORE","replace":"AFTER","dry_run":false}"#,
+    );
+    assert_eq!(real_res["ok"], true, "{}", real_res["error"]);
+    assert_eq!(real_res["result"]["replaced"], 1);
+
+    // Now it was modified
+    let q_after2 = app.automation_op(r#"{"op":"text_search","find":"TEST AFTER REPLACE"}"#);
+    assert_eq!(q_after2["ok"], true);
+    assert_eq!(q_after2["count"], 1);
+
+    // Undo restores it
+    app.automation_op(r#"{"op":"undo"}"#);
+    let q_undone = app.automation_op(r#"{"op":"text_search","find":"TEST BEFORE REPLACE"}"#);
+    assert_eq!(q_undone["ok"], true);
+    assert_eq!(q_undone["count"], 1);
+}
+
+#[test]
+fn text_audit_system_spellcheck_flags_misspelled_words() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let r = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"entities_create","request_id":"sp_c1","document_id":{doc},"entities":[
+            {"type":"Text","position":[0,0,0],"value":"The cirtuit breaker is conected","layer":"0"},
+            {"type":"Text","position":[10,0,0],"value":"correct english text here","layer":"0"}
+        ]}"#,
+    );
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+
+    // Run text_audit with system_spellcheck enabled, English language,
+    // and an agent dictionary that whitelists "breaker"
+    let audit = app.automation_op(
+        r#"{
+            "op":"text_audit",
+            "system_spellcheck": true,
+            "language": "en-US",
+            "suggest": true,
+            "dictionary": ["breaker", "the"]
+        }"#,
+    );
+    assert_eq!(audit["ok"], true, "{}", audit["error"]);
+
+    // system_speller metadata should be present regardless of availability
+    let sp = &audit["system_speller"];
+    assert_eq!(sp["enabled"], true);
+
+    if sp["available"].as_bool() == Some(true) {
+        // Backend should be reported (e.g. "windows" on Windows)
+        assert!(sp["backend"].as_str().unwrap().len() > 0);
+        assert!(sp["language"].as_str().is_some());
+
+        // "cirtuit" and "conected" should be flagged as unrecognized
+        let words = audit["unrecognized_words"].as_array().unwrap();
+        let flagged: Vec<&str> = words.iter().filter_map(|w| w["word"].as_str()).collect();
+        assert!(
+            flagged.iter().any(|w| w.eq_ignore_ascii_case("cirtuit")),
+            "expected 'cirtuit' to be flagged, got: {:?}",
+            flagged
+        );
+        assert!(
+            flagged.iter().any(|w| w.eq_ignore_ascii_case("conected")),
+            "expected 'conected' to be flagged, got: {:?}",
+            flagged
+        );
+
+        // "breaker" should NOT be flagged (it's in the agent dictionary)
+        assert!(
+            !flagged.iter().any(|w| w.eq_ignore_ascii_case("breaker")),
+            "expected 'breaker' to be whitelisted by agent dict, got: {:?}",
+            flagged
+        );
+
+        // At least one flagged word should have suggestions — except from a
+        // bare Linux wordlist, which can tell a word is unknown but has no
+        // way to suggest one without the hunspell CLI.
+        let has_suggestions = words.iter().any(|w| {
+            w["suggestions"]
+                .as_array()
+                .map(|a| !a.is_empty())
+                .unwrap_or(false)
+        });
+        assert!(
+            has_suggestions || sp["backend"] == "linux_system",
+            "expected at least one word to have suggestions"
+        );
+
+        // Summary should reflect unrecognized words
+        assert!(
+            audit["summary"]["unrecognized_words_count"].as_u64().unwrap() >= 2,
+            "expected at least 2 unrecognized words in summary"
+        );
+    } else {
+        // System speller not available (e.g. CI without spell-check service)
+        // Just verify the response structure is well-formed
+        assert!(audit["unrecognized_words"].is_array());
+        eprintln!(
+            "System spellcheck not available (backend: {}), skipping content assertions",
+            sp["backend"]
+        );
+    }
+}
+

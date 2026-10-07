@@ -1,7 +1,7 @@
-use acadrust::entities::{Dimension, DimensionLinear};
-use acadrust::types::Vector3;
-use acadrust::EntityType;
-use cadkernel::geom2d::{
+use codec::entities::{Dimension, DimensionLinear};
+use codec::types::Vector3;
+use codec::EntityType;
+use kernel::geom2d::{
     closest_point, Circle as KernelCircle, Curve, Line as KernelLine,
 };
 
@@ -87,7 +87,7 @@ pub struct LinearDimensionCommand {
     axis_mode: AxisMode,
     selecting_object: bool,
     picked_entity: Option<EntityType>,
-    source_handle: Option<acadrust::Handle>,
+    source_handle: Option<codec::Handle>,
     mtext_override: bool,
 }
 
@@ -140,6 +140,7 @@ pub(crate) fn linear_dimension_entity(
     dim.base.definition_point = dim.definition_point;
     dim.base.text_middle_point = v3(linear_text_pos(first, second, point, axis));
     dim.base.insertion_point = dim.base.text_middle_point;
+    crate::entities::dimension::reset_automatic_text_position(&mut dim.base);
     dim.base.actual_measurement = dim.measurement();
     crate::entities::dimension::set_dimension_text_override(&mut dim.base, text_override);
     EntityType::Dimension(Dimension::Linear(dim))
@@ -368,7 +369,7 @@ impl CadCommand for LinearDimensionCommand {
         self.picked_entity = Some(entity);
     }
 
-    fn on_entity_pick(&mut self, handle: acadrust::Handle, point: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: codec::Handle, point: DVec3) -> CmdResult {
         let Some(entity) = self.picked_entity.take() else {
             return CmdResult::NeedPoint;
         };
@@ -560,6 +561,7 @@ fn preview_wire(points: Vec<DVec3>) -> WireModel {
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
@@ -588,7 +590,9 @@ fn preview_wire(points: Vec<DVec3>) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+            ..Default::default()
+}
 }
 
 /// Project the two extension origins onto the dimension line, which passes

@@ -334,7 +334,7 @@ impl Camera {
                 (origin, forward)
             }
         };
-        cadkernel::space::plane::intersect_line_plane(
+        kernel::space::plane::intersect_line_plane(
             (ray_origin - (plane_point - eye)).to_array(),
             ray_dir.to_array(),
             [0.0; 3],
@@ -396,8 +396,8 @@ impl Camera {
     /// Carry the camera through a rigid model-space transform. BEDIT uses this
     /// when a transient UCS is baked into block-local geometry: the contents
     /// retain their on-screen framing while their canonical coordinates change.
-    pub fn apply_rigid_transform(&mut self, transform: &acadrust::types::Transform) {
-        let point = acadrust::types::Vector3::new(
+    pub fn apply_rigid_transform(&mut self, transform: &codec::types::Transform) {
+        let point = codec::types::Vector3::new(
             self.target.x,
             self.target.y,
             self.target.z,
@@ -428,7 +428,7 @@ impl Camera {
             let mut new_min = DVec3::splat(f64::INFINITY);
             let mut new_max = DVec3::splat(f64::NEG_INFINITY);
             for corner in corners {
-                let transformed = transform.apply(acadrust::types::Vector3::new(
+                let transformed = transform.apply(codec::types::Vector3::new(
                     corner.x,
                     corner.y,
                     corner.z,
@@ -491,8 +491,51 @@ impl Camera {
         self.sync_yaw_pitch();
     }
 
+    /// The ratio one zoom step applies to `distance`. A wheel notch is one
+    /// step at the default `ZOOMFACTOR` of 60, so the default notch still
+    /// moves the view a tenth closer, exactly as it always has.
+    pub const ZOOM_STEP: f32 = 0.9;
+
+    /// How near and how far `zoom` may take the eye. The floor has always
+    /// been here; the ceiling matters because the perspective far plane is
+    /// `distance * 1000` ([`Camera::view_proj_rte`]), so a distance past
+    /// ~3.4e35 renders an infinite matrix and the viewport goes black.
+    /// Zooming out multiplies, so with a fast wheel that ceiling is only a
+    /// couple of seconds of scrolling away.
+    const DISTANCE_MIN: f32 = 0.001;
+    const DISTANCE_MAX: f32 = 1e15;
+
+    /// Zoom by `delta` steps: a notch of the wheel, a pinch, a drag of ZOOM
+    /// Dynamic. Positive moves the eye in.
+    ///
+    /// Each step multiplies `distance` by [`Camera::ZOOM_STEP`], which is
+    /// strictly positive for every real `delta` and exactly reciprocal
+    /// between in and out — a notch in and a notch out land back where they
+    /// started, where the subtraction this replaced (`1 - delta * 0.1`) lost
+    /// a percent of the view each round trip. That subtraction agreed with
+    /// this only at one notch of the default `ZOOMFACTOR`: it reached zero at
+    /// `delta` 10 and went negative past it, inverting the view through its
+    /// target — reachable from a high `ZOOMFACTOR` and from a fast ZOOM
+    /// Dynamic drag alike.
     pub fn zoom(&mut self, delta: f32) {
-        self.distance = (self.distance * (1.0 - delta * 0.1)).max(0.001);
+        self.distance = (self.distance * Self::ZOOM_STEP.powf(delta))
+            .clamp(Self::DISTANCE_MIN, Self::DISTANCE_MAX);
+    }
+
+    /// The `delta` `zoom` needs in order to scale `distance` by `ratio`:
+    /// `zoom(zoom_steps_for_ratio(r))` multiplies the distance by exactly
+    /// `r`.
+    ///
+    /// A caller that owes the user a particular ratio — a trackpad pinch
+    /// tracks the fingers 1:1 — asks for its step here rather than inverting
+    /// the zoom law on its own, so the two cannot drift apart. A ratio that
+    /// is not a positive, finite number means nothing to invert, and stands
+    /// for no zoom at all.
+    pub fn zoom_steps_for_ratio(ratio: f32) -> f32 {
+        if !(ratio.is_finite() && ratio > 0.0) {
+            return 0.0;
+        }
+        ratio.ln() / Self::ZOOM_STEP.ln()
     }
 
     /// World-space offset from `target` to the point under `screen` on the
@@ -773,6 +816,125 @@ pub fn yaw_pitch_to_quat(yaw: f32, pitch: f32, roll: f32) -> Quat {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One wheel notch, at each ZOOMFACTOR the application can hold (the
+    /// step is the factor over the default 60). Every one has to bring the
+    /// eye nearer, a higher setting has to bring it nearer still, and none
+    /// may reach zero or cross it — the subtraction this replaced hit zero at
+    /// ten steps and inverted the view beyond that.
+    #[test]
+    fn a_notch_zooms_in_at_every_zoom_factor_without_collapsing() {
+        let mut previous = f32::INFINITY;
+        for factor in [3.0_f32, 60.0, 100.0, 250.0, 500.0] {
+            let mut camera = Camera::default();
+            let before = camera.distance;
+            camera.zoom(factor / 60.0);
+            assert!(
+                camera.distance > 0.0 && camera.distance < before,
+                "ZOOMFACTOR {factor} left distance at {}",
+                camera.distance
+            );
+            assert!(
+                camera.distance < previous,
+                "ZOOMFACTOR {factor} did not reach further than the one below it"
+            );
+            previous = camera.distance;
+        }
+    }
+
+    /// The default notch is still a tenth of the distance, which is what the
+    /// subtraction gave at `ZOOMFACTOR = 60` and the reason the base is 0.9.
+    #[test]
+    fn the_default_notch_is_what_it_always_was() {
+        let mut camera = Camera::default();
+        let before = camera.distance;
+        camera.zoom(1.0);
+        assert!((camera.distance - before * 0.9).abs() < 1e-4);
+        // And a scroll that resolves to nothing moves nothing at all.
+        let held = camera.distance;
+        camera.zoom(0.0);
+        assert_eq!(camera.distance, held);
+    }
+
+    /// A notch in and a notch out land back where they started. The
+    /// subtraction lost a percent of the view on every round trip (0.9 × 1.1
+    /// = 0.99), which is the drift people felt as the view creeping closer
+    /// while they scrolled back and forth.
+    #[test]
+    fn a_notch_in_and_a_notch_out_cancel() {
+        for factor in [3.0_f32, 60.0, 100.0, 500.0] {
+            let mut camera = Camera::default();
+            let before = camera.distance;
+            camera.zoom(factor / 60.0);
+            camera.zoom(-factor / 60.0);
+            assert!(
+                (camera.distance - before).abs() < 1e-3,
+                "ZOOMFACTOR {factor}: {} not {before}",
+                camera.distance
+            );
+        }
+    }
+
+    /// Zooming out multiplies, so a held wheel at the top of the range used
+    /// to run the distance past what an f32 far plane (`distance * 1000`) can
+    /// hold in about ninety notches, and the viewport went black on an
+    /// infinite projection. The ceiling has to keep the matrix finite however
+    /// long the wheel is turned.
+    #[test]
+    fn a_long_scroll_out_keeps_the_projection_finite() {
+        let bounds = Rectangle::with_size(iced::Size::new(800., 600.));
+        for projection in [Projection::Orthographic, Projection::Perspective] {
+            let mut camera = Camera {
+                projection,
+                rotation: Quat::IDENTITY,
+                ..Camera::default()
+            };
+            for _ in 0..500 {
+                camera.zoom(-500.0 / 60.0);
+            }
+            assert!(
+                camera.distance.is_finite() && camera.distance > 0.0,
+                "{projection:?} ran to {}",
+                camera.distance
+            );
+            assert!(
+                (camera.distance * 1000.0).is_finite(),
+                "{projection:?} far plane is not finite"
+            );
+            assert!(
+                camera.view_proj_rte(bounds).is_finite(),
+                "{projection:?} projection is not finite"
+            );
+        }
+        // The floor is still a floor, however long the wheel turns inward.
+        let mut camera = Camera::default();
+        for _ in 0..500 {
+            camera.zoom(500.0 / 60.0);
+        }
+        assert!(camera.distance > 0.0, "the eye reached the target");
+    }
+
+    /// The published inverse has to be exactly that: ask for a ratio, get the
+    /// step that applies it. Every caller that owes the user an exact ratio
+    /// depends on this, so that none of them inverts the zoom law itself.
+    #[test]
+    fn zoom_steps_for_ratio_inverts_zoom() {
+        for ratio in [0.1_f32, 0.5, 0.95, 1.0, 1.05, 2.0, 10.0] {
+            let mut camera = Camera::default();
+            let before = camera.distance;
+            camera.zoom(Camera::zoom_steps_for_ratio(ratio));
+            let want = before * ratio;
+            assert!(
+                (camera.distance - want).abs() < 1e-4 * want,
+                "ratio {ratio}: {} not {want}",
+                camera.distance
+            );
+        }
+        // Nothing to invert means no zoom, rather than a step into infinity.
+        for ratio in [0.0_f32, -1.0, f32::NAN, f32::INFINITY] {
+            assert_eq!(Camera::zoom_steps_for_ratio(ratio), 0.0, "ratio {ratio}");
+        }
+    }
 
     #[test]
     fn projection_uses_the_webgpu_depth_range_once() {

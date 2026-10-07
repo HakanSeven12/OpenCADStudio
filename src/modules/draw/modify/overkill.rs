@@ -1,4 +1,4 @@
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 use crate::command::{CadCommand, CmdOption, CmdResult};
 
@@ -104,7 +104,7 @@ impl CadCommand for OverkillCommand {
 pub fn normalized(entity:&EntityType, ignore:u16) -> EntityType {
     let mut e=entity.clone();
     let common=e.common_mut();
-    let default=acadrust::entities::EntityCommon::new();
+    let default=codec::entities::EntityCommon::new();
     common.handle=Handle::NULL;
     if ignore&1!=0 {common.color=default.color;common.color_name=None;common.color_book_handle=None;}
     if ignore&2!=0 {common.layer.clear();}
@@ -125,7 +125,7 @@ pub fn optimize(entity:&mut EntityType, tolerance:f64) {
         // Width changes and bulged spans carry geometry that must be retained.
         if p.vertices.iter().any(|v|v.bulge!=0.0||v.start_width!=0.0||v.end_width!=0.0) {return;}
         let points:Vec<_>=p.vertices.iter().map(|v|[v.location.x,v.location.y,p.elevation]).collect();
-        let indices=cadkernel::space::simplify_linear_chain(&points,tolerance);
+        let indices=kernel::space::simplify_linear_chain(&points,tolerance);
         if indices.len()>=if p.is_closed{3}else{2} {
             p.vertices=indices.into_iter().map(|i|p.vertices[i].clone()).collect();
         }
@@ -135,8 +135,8 @@ pub fn optimize(entity:&mut EntityType, tolerance:f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acadrust::entities::{Line, LwPolyline};
-    use acadrust::types::{Color, Vector2};
+    use codec::entities::{Line, LwPolyline};
+    use codec::types::{Color, Vector2};
 
     #[test]
     fn normalization_ignores_only_the_requested_properties() {

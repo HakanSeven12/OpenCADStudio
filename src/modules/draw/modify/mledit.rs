@@ -1,8 +1,8 @@
-use acadrust::entities::MLine;
-use acadrust::objects::MLineStyle;
-use acadrust::{EntityType, Handle};
-use cadkernel::geom2d::{Curve, Line};
-use cadkernel::space::{PlanarCurve, Plane, Vec3 as KernelVec3};
+use codec::entities::MLine;
+use codec::objects::MLineStyle;
+use codec::{EntityType, Handle};
+use kernel::geom2d::{Curve, Line};
+use kernel::space::{PlanarCurve, Plane, Vec3 as KernelVec3};
 use glam::DVec3;
 use rustc_hash::FxHashMap as HashMap;
 
@@ -95,7 +95,7 @@ impl MlineEditCommand {
                 }
                 let insert = segment + 1;
                 let mut vertex = mline.vertices[segment].clone();
-                vertex.position = acadrust::types::Vector3::new(
+                vertex.position = codec::types::Vector3::new(
                     projected.x,
                     projected.y,
                     projected.z,
@@ -710,7 +710,7 @@ fn snapshot_segment_data(
     mline: &MLine,
     segment: usize,
     normal: DVec3,
-) -> Option<Vec<(acadrust::entities::MLineSegment, f64)>> {
+) -> Option<Vec<(codec::entities::MLineSegment, f64)>> {
     (0..mline.style_element_count)
         .map(|element| {
             let endpoints = element_segment(mline, segment, element)?;
@@ -726,7 +726,7 @@ fn restore_shifted_segment_data(
     mline: &mut MLine,
     segment: usize,
     normal: DVec3,
-    source: Vec<(acadrust::entities::MLineSegment, f64)>,
+    source: Vec<(codec::entities::MLineSegment, f64)>,
     moved_start: bool,
 ) {
     for (element, (source, source_length)) in source.into_iter().enumerate() {
@@ -1057,7 +1057,7 @@ fn move_closest_end(
     };
     let peripheral = peripheral_segment
         .and_then(|segment| snapshot_segment_data(mline, segment, normal).map(|data| (segment, data)));
-    mline.vertices[index].position = acadrust::types::Vector3::new(
+    mline.vertices[index].position = codec::types::Vector3::new(
         intersection.x,
         intersection.y,
         intersection.z,
@@ -1096,11 +1096,11 @@ fn segment_intersection(
     second: (DVec3, DVec3),
     normal: DVec3,
 ) -> Option<(DVec3, f64, f64, f64)> {
-    let axis = (cadkernel::space::Vec3::from(first.1.to_array())
-        - cadkernel::space::Vec3::from(first.0.to_array()))
+    let axis = (kernel::space::Vec3::from(first.1.to_array())
+        - kernel::space::Vec3::from(first.0.to_array()))
     .normalize()?
     .to_array();
-    let plane = cadkernel::space::Plane::orthonormal(
+    let plane = kernel::space::Plane::orthonormal(
         first.0.to_array(),
         axis,
         normal.to_array(),
@@ -1111,15 +1111,15 @@ fn segment_intersection(
         second.0.to_array(),
         second.1.to_array(),
     ];
-    let tolerance = cadkernel::space::coplanarity_tolerance(&points);
+    let tolerance = kernel::space::coplanarity_tolerance(&points);
     if !plane.contains(points[2], tolerance) || !plane.contains(points[3], tolerance) {
         return None;
     }
-    let p = cadkernel::geom2d::Vec2::from(plane.project(points[0])?);
-    let q = cadkernel::geom2d::Vec2::from(plane.project(points[2])?);
-    let r = cadkernel::geom2d::Vec2::from(plane.project(points[1])?) - p;
-    let s = cadkernel::geom2d::Vec2::from(plane.project(points[3])?) - q;
-    let (t, u) = cadkernel::geom2d::intersect::line_line(
+    let p = kernel::geom2d::Vec2::from(plane.project(points[0])?);
+    let q = kernel::geom2d::Vec2::from(plane.project(points[2])?);
+    let r = kernel::geom2d::Vec2::from(plane.project(points[1])?) - p;
+    let s = kernel::geom2d::Vec2::from(plane.project(points[3])?) - q;
+    let (t, u) = kernel::geom2d::intersect::line_line(
         p.to_array(),
         r.to_array(),
         q.to_array(),

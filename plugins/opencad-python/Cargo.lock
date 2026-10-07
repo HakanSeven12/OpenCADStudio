@@ -3,29 +3,6 @@
 version = 4
 
 [[package]]
-name = "acadrust"
-version = "0.5.5"
-source = "git+https://github.com/HakanSeven12/cadcodec.git?rev=dd1d7bf#dd1d7bfe03f4e733d351c0396e2cf82ae9df957d"
-dependencies = [
- "ahash 0.8.12",
- "anyhow",
- "bitflags",
- "byteorder",
- "encoding_rs",
- "flate2",
- "indexmap",
- "itoa",
- "memmap2",
- "nom",
- "once_cell",
- "rayon",
- "ryu",
- "serde",
- "thiserror 1.0.69",
- "web-time",
-]
-
-[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -51,7 +28,6 @@ dependencies = [
  "cfg-if",
  "getrandom 0.3.4",
  "once_cell",
- "serde",
  "version_check",
  "zerocopy",
 ]
@@ -1254,13 +1230,13 @@ dependencies = [
 name = "ocs_plugin_api"
 version = "0.2.1"
 dependencies = [
- "acadrust",
  "bincode",
  "cargo-lock",
  "getrandom 0.2.17",
  "interprocess",
  "libloading 0.8.9",
  "memmap2",
+ "opencadcodec",
  "rkyv",
  "serde",
  "serde-reflection",
@@ -1283,6 +1259,29 @@ dependencies = [
  "rustpython-vm",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "opencadcodec"
+version = "0.6.0"
+source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=937745d#937745d9ec1a62d252074ff41b140b92303d0dc0"
+dependencies = [
+ "anyhow",
+ "bitflags",
+ "byteorder",
+ "encoding_rs",
+ "flate2",
+ "foldhash",
+ "indexmap",
+ "itoa",
+ "memmap2",
+ "nom",
+ "once_cell",
+ "rayon",
+ "ryu",
+ "serde",
+ "thiserror 2.0.20",
+ "web-time",
 ]
 
 [[package]]

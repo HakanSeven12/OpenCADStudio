@@ -37,7 +37,7 @@ impl OpenCADStudio {
                             dl.turn_off();
                         }
                     }
-                    self.tabs[i].scene.invalidate_layer_dependencies(&names);
+                    self.tabs[i].scene.invalidate_layer_visibility(&names);
                     self.tabs[i].dirty = true;
                     self.commit_layer_undo(i, undo);
                     self.refresh_layer_panel();
@@ -74,7 +74,7 @@ impl OpenCADStudio {
                             dl.freeze();
                         }
                     }
-                    self.tabs[i].scene.invalidate_layer_dependencies(&names);
+                    self.tabs[i].scene.invalidate_layer_visibility(&names);
                     self.tabs[i].dirty = true;
                     self.commit_layer_undo(i, undo);
                     self.refresh_layer_panel();
@@ -154,7 +154,7 @@ impl OpenCADStudio {
                     );
                     return Some(Task::none());
                 }
-                let handles: Vec<acadrust::Handle> = self.tabs[i]
+                let handles: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .document
                     .entities()
@@ -417,7 +417,7 @@ impl OpenCADStudio {
                         .layers
                         .get(&layer)
                         .map(|l| l.handle)
-                        .unwrap_or(acadrust::types::Handle::NULL);
+                        .unwrap_or(codec::types::Handle::NULL);
                     self.tabs[i].scene.document.header.current_layer_name = layer.clone();
                     self.tabs[i].scene.document.header.current_layer_handle = handle;
                     self.tabs[i].active_layer = layer.clone();
@@ -444,7 +444,7 @@ impl OpenCADStudio {
                         dl.turn_on();
                     }
                 }
-                self.tabs[i].scene.invalidate_layer_dependencies(&names);
+                self.tabs[i].scene.invalidate_layer_visibility(&names);
                 self.tabs[i].dirty = true;
                 self.commit_layer_undo(i, undo);
                 self.refresh_layer_panel();
@@ -465,7 +465,7 @@ impl OpenCADStudio {
                         dl.thaw();
                     }
                 }
-                self.tabs[i].scene.invalidate_layer_dependencies(&names);
+                self.tabs[i].scene.invalidate_layer_visibility(&names);
                 self.tabs[i].dirty = true;
                 self.commit_layer_undo(i, undo);
                 self.refresh_layer_panel();
@@ -534,7 +534,7 @@ impl OpenCADStudio {
                             }
                         }
                     }
-                    self.tabs[i].scene.invalidate_layer_dependencies(&names);
+                    self.tabs[i].scene.invalidate_layer_visibility(&names);
                     self.tabs[i].dirty = true;
                     self.commit_layer_undo(i, undo);
                     self.refresh_layer_panel();
@@ -624,7 +624,7 @@ impl OpenCADStudio {
                         dl.turn_on();
                     }
                 }
-                self.tabs[i].scene.invalidate_layer_dependencies(&names);
+                self.tabs[i].scene.invalidate_layer_visibility(&names);
                 self.tabs[i].dirty = true;
                 self.commit_layer_undo(i, undo);
                 self.refresh_layer_panel();
@@ -822,11 +822,11 @@ impl OpenCADStudio {
 
         // Model framing follows model units; sheet framing stays in paper units.
         let sheets = self.tabs[i].scene.sheet_viewport_handles();
-        let scaled: std::collections::HashSet<acadrust::Handle> = handles.iter().copied().collect();
+        let scaled: std::collections::HashSet<codec::Handle> = handles.iter().copied().collect();
         let mut reframed = 0usize;
         for entity in self.tabs[i].scene.document.entities_mut() {
             let handle = entity.common().handle;
-            let acadrust::entities::EntityType::Viewport(vp) = entity else {
+            let codec::entities::EntityType::Viewport(vp) = entity else {
                 continue;
             };
             let is_sheet = !scaled.contains(&handle) && sheets.contains(&handle);

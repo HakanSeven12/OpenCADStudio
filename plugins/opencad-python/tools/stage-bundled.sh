@@ -55,12 +55,12 @@ def acadrust_source(path):
     packages = re.findall(r"(?ms)^\[\[package\]\]\n(.*?)(?=^\[\[package\]\]|\Z)", Path(path).read_text())
     sources = []
     for package in packages:
-        if re.search(r'^name = "acadrust"$', package, re.M):
+        if re.search(r'^name = "opencadcodec"$', package, re.M):
             match = re.search(r'^source = "([^"]+)"$', package, re.M)
             if match:
                 sources.append(match.group(1))
     if len(sources) != 1:
-        raise SystemExit(f"expected one acadrust source in {path}, found {len(sources)}")
+        raise SystemExit(f"expected one opencadcodec source in {path}, found {len(sources)}")
     return sources[0]
 
 manifest = Path("plugin.toml").read_text()

@@ -17,6 +17,9 @@ const ICON_SIZE: f32 = 22.0;
 const BTN_SIZE: f32 = 38.0;
 /// Gap between the toolbar and the right edge of the canvas.
 const EDGE_MARGIN: f32 = 8.0;
+/// Room kept free at the top right for the view cube and the UCS list; the
+/// toolbar is centred in the height below it.
+const TOP_RESERVE: f32 = 200.0;
 
 fn icon_el(icon: IconKind) -> Element<'static, Message> {
     match icon {
@@ -26,6 +29,8 @@ fn icon_el(icon: IconKind) -> Element<'static, Message> {
 }
 
 fn tip_panel(label: &'static str) -> Element<'static, Message> {
+    // Ribbon labels break over two lines; a tooltip reads them on one.
+    let label = crate::t!(label).replace('\n', " ");
     container(text(label).size(11))
         .padding([2, 6])
         .style(|theme: &Theme| {
@@ -48,12 +53,21 @@ fn tip_panel(label: &'static str) -> Element<'static, Message> {
 /// centred over the canvas. Returns `None` when `tools` is empty so the caller
 /// can skip pushing an overlay.
 pub fn view(tools: &[ToolDef]) -> Option<Element<'static, Message>> {
+    view_with_active(tools, &|_| false)
+}
+
+/// As [`view`], with the tools `active` names drawn as switched on.
+pub fn view_with_active(
+    tools: &[ToolDef],
+    active: &dyn Fn(&str) -> bool,
+) -> Option<Element<'static, Message>> {
     if tools.is_empty() {
         return None;
     }
 
     let mut col = column![].spacing(4).align_x(iced::Center);
     for t in tools {
+        let on = active(t.id);
         let btn = button(icon_el(t.icon))
             .on_press(Message::RibbonToolClick {
                 tool_id: t.id.to_string(),
@@ -61,18 +75,22 @@ pub fn view(tools: &[ToolDef]) -> Option<Element<'static, Message>> {
             })
             .width(Length::Fixed(BTN_SIZE))
             .height(Length::Fixed(BTN_SIZE))
-            .style(|theme: &Theme, status| {
+            .style(move |theme: &Theme, status| {
                 let palette = theme.palette();
                 let hovered = matches!(
                     status,
                     button::Status::Hovered | button::Status::Pressed
                 );
                 button::Style {
-                background: hovered
-                    .then_some(Background::Color(palette.background.strong.color)),
+                background: if on {
+                    Some(Background::Color(palette.primary.weak.color))
+                } else {
+                    hovered.then_some(Background::Color(palette.background.strong.color))
+                },
                 border: Border {
                     radius: 3.0.into(),
-                    ..Default::default()
+                    color: palette.primary.base.color,
+                    width: if on { 1.0 } else { 0.0 },
                 },
                 text_color: palette.background.base.text,
                 ..Default::default()
@@ -107,6 +125,7 @@ pub fn view(tools: &[ToolDef]) -> Option<Element<'static, Message>> {
             .align_y(iced::Center)
             .padding(iced::Padding {
                 right: EDGE_MARGIN,
+                top: TOP_RESERVE,
                 ..iced::Padding::ZERO
             })
             .into(),

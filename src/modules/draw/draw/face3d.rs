@@ -1,8 +1,8 @@
-use acadrust::entities::{face3d::InvisibleEdgeFlags, Face3D};
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
-use cadkernel::geom2d::Tolerance;
-use cadkernel::space::{curve::segments_overlap_collinearly, Vec3 as KernelVec3};
+use codec::entities::{face3d::InvisibleEdgeFlags, Face3D};
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
+use kernel::geom2d::Tolerance;
+use kernel::space::{curve::segments_overlap_collinearly, Vec3 as KernelVec3};
 use glam::DVec3;
 use std::collections::{HashMap, HashSet};
 

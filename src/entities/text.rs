@@ -1,4 +1,4 @@
-use acadrust::entities::{Text, TextHorizontalAlignment as HA, TextVerticalAlignment as VA};
+use codec::entities::{Text, TextHorizontalAlignment as HA, TextVerticalAlignment as VA};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
@@ -52,7 +52,7 @@ pub(crate) fn sync_text_alignment_point(t: &mut Text) {
                     * t.width_factor.abs().max(0.01)
                     * t.value.chars().count().max(1) as f64
                     * 0.6;
-                t.alignment_point = Some(acadrust::types::Vector3::new(
+                t.alignment_point = Some(codec::types::Vector3::new(
                     t.insertion_point.x + t.rotation.cos() * span,
                     t.insertion_point.y + t.rotation.sin() * span,
                     t.insertion_point.z,
@@ -100,13 +100,13 @@ pub struct TextPlacement {
     pub wcs_insertion: [f64; 3],
 }
 
-/// Parse a TEXT value's `%%` control codes through acadrust's `parse_plain_text`
+/// Parse a TEXT value's `%%` control codes through opencadcodec's `parse_plain_text`
 /// (the same parser MTEXT uses), then re-encode into the stroke tessellator's
 /// inline grammar: specials arrive resolved to Unicode, and `%%u`/`%%o`
 /// underline/overline become `\L…\l` / `\O…\o` decoration markers. This keeps
-/// TEXT parsing in acadrust rather than OCS's own tokenizer.
+/// TEXT parsing in opencadcodec rather than OCS's own tokenizer.
 pub(crate) fn acad_text_encode(value: &str) -> String {
-    use acadrust::entities::mtext_format::parse_plain_text;
+    use codec::entities::mtext_format::parse_plain_text;
     let doc = parse_plain_text(value);
     let mut out = String::new();
     for para in &doc.paragraphs {
@@ -132,12 +132,12 @@ pub(crate) fn acad_text_encode(value: &str) -> String {
 
 pub(crate) fn to_render_at_scale(
     t: &Text,
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     annotation_scale: f32,
 ) -> RenderEntity {
     let p = text_run_placement_at_scale(t, document, annotation_scale);
     let snap_pt = glam::DVec3::new(p.wcs_insertion[0], p.wcs_insertion[1], p.wcs_insertion[2]);
-    // Parse `%%` codes via acadrust, re-encoded for the stroke tessellator.
+    // Parse `%%` codes via opencadcodec, re-encoded for the stroke tessellator.
     let value = acad_text_encode(&p.value);
     // Strokes are in glyph-local space (origin = [0,0]).
     let (strokes, fill_tris) = lff::tessellate_text_ex(
@@ -179,7 +179,7 @@ pub(crate) fn to_render_at_scale(
 /// from `to_render` verbatim so the stroke and SDF-quad paths agree exactly.
 pub fn text_run_placement_at_scale(
     t: &Text,
-    document: &acadrust::CadDocument,
+    document: &codec::CadDocument,
     annotation_scale: f32,
 ) -> TextPlacement {
     let annotation_scale = if annotation_scale.is_finite() && annotation_scale > 1.0e-9 {
@@ -281,42 +281,20 @@ pub fn text_run_placement_at_scale(
         // box one way while the strokes run the other (the bounds advance is
         // always positive — it uses |width_factor|). Left keeps its 0 reference.
         let sign = width_factor.signum();
-        let is_rtl = {
-            let mut strong_rtl = false;
-            for ch in value_for_bounds.chars() {
-                match unicode_bidi::bidi_class(ch) {
-                    unicode_bidi::BidiClass::R | unicode_bidi::BidiClass::AL => {
-                        strong_rtl = true;
-                        break;
-                    }
-                    unicode_bidi::BidiClass::L => {
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-            strong_rtl
-        };
+        // Left / right alignment do not depend on the text's script: the
+        // reference lays a line that starts with Hebrew or Arabic out from its
+        // left end like any other.
         let ax = match t.horizontal_alignment {
-            HA::Left => {
-                if is_rtl {
-                    b.advance * sign
-                } else {
-                    0.0
-                }
-            }
+            HA::Left => 0.0,
             HA::Center | HA::Middle => b.advance * 0.5 * sign,
-            HA::Right => {
-                if is_rtl {
-                    0.0
-                } else {
-                    b.advance * sign
-                }
-            }
+            HA::Right => b.advance * sign,
             HA::Aligned | HA::Fit => 0.0,
         };
         // Vertical anchor uses the inked extent (cap / baseline geometry).
+        // `Middle` (72 = 4) centres on half the text height whatever its
+        // vertical code says; its baseline sits h/2 below the point. (#767)
         let ay = match t.vertical_alignment {
+            _ if matches!(t.horizontal_alignment, HA::Middle) => height * 0.5,
             VA::Baseline => 0.0,
             VA::Bottom => b.ink_min[1],
             VA::Middle => (b.ink_min[1] + b.ink_max[1]) * 0.5,
@@ -647,7 +625,7 @@ fn apply_transform(t: &mut Text, tr: &EntityTransform) {
 }
 
 impl RenderConvertible for Text {
-    fn to_render(&self, document: &acadrust::CadDocument) -> Option<RenderEntity> {
+    fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
         Some(to_render_at_scale(self, document, 1.0))
     }
 }
@@ -721,15 +699,19 @@ mod tests {
         let mut t = Text::default();
         t.value = "بسم الله".to_string();
         t.height = 2.5;
-        t.insertion_point = acadrust::types::Vector3::new(10.0, 20.0, 0.0);
+        t.insertion_point = codec::types::Vector3::new(10.0, 20.0, 0.0);
         t.horizontal_alignment = HA::Left;
 
-        let doc = acadrust::CadDocument::default();
+        let doc = codec::CadDocument::default();
         let placement = text_run_placement_at_scale(&t, &doc, 1.0);
 
-        // For Arabic text with default HA::Left, origin should be shifted left
-        // so the right edge of the text sits at the insertion point (X = 10.0).
-        assert!(placement.origin[0] < 10.0, "Arabic text origin must be to the left of insertion point: origin_x={}", placement.origin[0]);
+        // Left alignment does not depend on the script: Arabic text starts
+        // at the insertion point like any other.
+        assert!(
+            (placement.origin[0] - 10.0).abs() < 1e-9,
+            "Left-aligned Arabic text starts at the insertion point: origin_x={}",
+            placement.origin[0]
+        );
     }
 }
 
@@ -749,7 +731,7 @@ impl Transformable for Text {
     }
 }
 
-impl crate::entities::traits::TextContent for acadrust::entities::Text {
+impl crate::entities::traits::TextContent for codec::entities::Text {
     fn text_content(&self) -> Option<String> {
         Some(self.value.clone())
     }

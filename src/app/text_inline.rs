@@ -8,8 +8,8 @@
 // text-bearing entity, plus the field read/write helpers both editors use to
 // commit back to the correct entity slot.
 
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle, Text};
+use codec::types::Vector3;
+use codec::{EntityType, Handle, Text};
 use glam::DVec3;
 
 /// Which text slot of which entity an editor session reads from and writes to.
@@ -101,10 +101,10 @@ pub struct TextInlineState {
     /// Canvas-space anchor where the field is drawn (the insertion-point click).
     pub screen_anchor: iced::Point,
 }
-pub(super) fn can_edit_text(mut handle: Handle, document: &acadrust::CadDocument) -> bool {
+pub(super) fn can_edit_text(mut handle: Handle, document: &codec::CadDocument) -> bool {
     for _ in 0..8 {
         match document.get_entity(handle) {
-            Some(acadrust::EntityType::Leader(l)) => {
+            Some(codec::EntityType::Leader(l)) => {
                 let ann = l.annotation_handle;
                 if ann.is_null() || ann == handle {
                     return false;
@@ -153,6 +153,13 @@ impl super::OpenCADStudio {
             Some(EntityType::Tolerance(_))
         ) {
             self.open_tolerance_dialog(Some(target));
+            return iced::Task::none();
+        }
+        if matches!(
+            self.tabs[i].scene.document.get_entity(target),
+            Some(EntityType::AttributeDefinition(_))
+        ) {
+            self.open_attdef_edit(target);
             return iced::Task::none();
         }
         // Snapshot what we need before borrowing `self` mutably to open.
@@ -207,7 +214,7 @@ impl super::OpenCADStudio {
             creation,
             screen_anchor: iced::Point::new(60.0, 90.0),
         };
-        if let Some(p) = self.tabs[self.active_tab].scene.selection.borrow().last_move_pos {
+        if let Some(p) = self.tabs[self.active_tab].scene.selection.borrow().input.last_move_pos {
             state.screen_anchor = p;
         }
         self.text_inline = Some(state);
@@ -298,7 +305,7 @@ impl super::OpenCADStudio {
             if variable_height
                 && !matches!(
                     t.horizontal_alignment,
-                    acadrust::entities::TextHorizontalAlignment::Aligned
+                    codec::entities::TextHorizontalAlignment::Aligned
                 )
             {
                 self.tabs[i].scene.document.header.text_height = t.height;

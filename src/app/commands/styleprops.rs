@@ -3,6 +3,65 @@ use super::*;
 impl OpenCADStudio {
     pub(super) fn dispatch_styleprops(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
+            // View / grid variables held by the app rather than the header,
+            // typed bare or through SETVAR (#1524, #1618).
+            cmd if matches!(
+                cmd.strip_prefix("SETVAR ").unwrap_or(cmd).split_whitespace().next(),
+                Some("PERSPECTIVE" | "GRIDMODE" | "GRIDUNIT")
+            ) =>
+            {
+                let mut words = cmd.strip_prefix("SETVAR ").unwrap_or(cmd).splitn(2, ' ');
+                let name = words.next().unwrap_or_default().to_string();
+                let value = words.next().map(str::trim).filter(|v| !v.is_empty());
+                let current = match name.as_str() {
+                    "PERSPECTIVE" => {
+                        let persp = self.tabs[i].scene.camera.borrow().projection
+                            == crate::scene::Projection::Perspective;
+                        (persp as i32).to_string()
+                    }
+                    "GRIDMODE" => (self.show_grid as i32).to_string(),
+                    _ => format!("{},{}", self.grid_spacing_x, self.grid_spacing_y),
+                };
+                let Some(value) = value else {
+                    self.command_line
+                        .push_output(&crate::tf!("Enter new value for {name} <{current}>:"));
+                    self.pending_setvar = Some(name);
+                    return Some(Task::none());
+                };
+                match (name.as_str(), value) {
+                    ("PERSPECTIVE", "0" | "1") => {
+                        return Some(Task::done(Message::SetProjection(value == "0")));
+                    }
+                    ("GRIDMODE", "0" | "1") => {
+                        if (value == "1") != self.show_grid {
+                            return Some(Task::done(Message::ToggleGrid));
+                        }
+                    }
+                    ("GRIDUNIT", _) => {
+                        let mut parts = value.split(',').map(|p| p.trim().parse::<f32>());
+                        let x = parts.next().and_then(Result::ok).filter(|v| *v > 0.0);
+                        let y = match parts.next() {
+                            Some(p) => p.ok().filter(|v| *v > 0.0),
+                            None => x,
+                        };
+                        let (Some(x), Some(y)) = (x, y) else {
+                            self.command_line.push_error(
+                                crate::t!("Requires two positive values (x,y) or one for both.")
+                                    .as_ref(),
+                            );
+                            return Some(Task::none());
+                        };
+                        self.grid_spacing_x = x;
+                        self.grid_spacing_y = y;
+                        self.sync_vport_display(i);
+                        self.persist_settings_if_changed();
+                    }
+                    _ => self
+                        .command_line
+                        .push_error(crate::t!("Requires 0 or 1").as_ref()),
+                }
+                return Some(Task::none());
+            }
             "CETRANSPARENCY" => return self.dispatch_styleprops("SETVAR CETRANSPARENCY", i),
             cmd if cmd.starts_with("CETRANSPARENCY ") => {
                 return self.dispatch_styleprops(&format!("SETVAR {cmd}"), i);
@@ -10,6 +69,10 @@ impl OpenCADStudio {
             "FRAMES0" => return self.dispatch_styleprops("SETVAR FRAME 0", i),
             "FRAMES1" => return self.dispatch_styleprops("SETVAR FRAME 1", i),
             "FRAMES2" => return self.dispatch_styleprops("SETVAR FRAME 2", i),
+            // The mixed state is shown, never chosen.
+            "FRAMES3" => return Some(Task::none()),
+            "UOSNAP0" => return self.dispatch_styleprops("SETVAR UOSNAP 0", i),
+            "UOSNAP1" => return self.dispatch_styleprops("SETVAR UOSNAP 1", i),
             // COLOR <ByLayer|ByBlock|1-255|name> — the colour applied to new
             // objects (CECOLOR). Bare COLOR reports the current value.
             "COLOR" | "COLOUR" | "CECOLOR" | "DDCOLOR" => {
@@ -29,7 +92,7 @@ impl OpenCADStudio {
                 || cmd.starts_with("CECOLOR ")
                 || cmd.starts_with("DDCOLOR ") =>
             {
-                use acadrust::types::Color;
+                use codec::types::Color;
                 let describe = |c: &Color| match c {
                     Color::ByLayer => "ByLayer".to_string(),
                     Color::ByBlock => "ByBlock".to_string(),
@@ -80,9 +143,10 @@ impl OpenCADStudio {
                 use crate::command::KeywordCommand;
                 let c = KeywordCommand::new(
                     "LINETYPE",
-                    "LINETYPE  [List / Set]:",
+                    "LINETYPE  [List / Set / Load]:",
                     vec![
                         ("List", "LIST", None),
+                        ("Load", "LOAD", None),
                         ("Set", "SET", Some("LINETYPE SET  linetype name (ByLayer / ByBlock / …):")),
                     ],
                 );
@@ -94,6 +158,13 @@ impl OpenCADStudio {
                 let parts: Vec<&str> = raw_rest.split_whitespace().collect();
                 let sub = parts.get(0).map(|s| s.to_uppercase()).unwrap_or_default();
                 match sub.as_str() {
+                    // Load the definitions of a `.lin` file (#1588).
+                    "LOAD" | "L" => {
+                        return Some(Task::perform(
+                            crate::io::pick_linetype_file(),
+                            Message::LinetypeLoaded,
+                        ));
+                    }
                     "" | "LIST" | "?" => {
                         let ltypes: Vec<String> = self.tabs[i]
                             .scene
@@ -117,9 +188,9 @@ impl OpenCADStudio {
                                 .push_info(crate::t!("Usage: LINETYPE SET <name | ByLayer | ByBlock>").as_ref());
                         } else {
                             let canon = if name.eq_ignore_ascii_case("BYLAYER") {
-                                Some(("ByLayer".to_string(), acadrust::types::Handle::NULL))
+                                Some(("ByLayer".to_string(), codec::types::Handle::NULL))
                             } else if name.eq_ignore_ascii_case("BYBLOCK") {
-                                Some(("ByBlock".to_string(), acadrust::types::Handle::NULL))
+                                Some(("ByBlock".to_string(), codec::types::Handle::NULL))
                             } else {
                                 self.tabs[i]
                                     .scene
@@ -220,12 +291,12 @@ impl OpenCADStudio {
                         .document
                         .entities()
                         .filter_map(|e| match e {
-                            acadrust::EntityType::Text(t) => Some(t.style.clone()),
-                            acadrust::EntityType::MText(t) => Some(t.style.clone()),
-                            acadrust::EntityType::AttributeDefinition(a) => {
+                            codec::EntityType::Text(t) => Some(t.style.clone()),
+                            codec::EntityType::MText(t) => Some(t.style.clone()),
+                            codec::EntityType::AttributeDefinition(a) => {
                                 Some(a.text_style.clone())
                             }
-                            acadrust::EntityType::AttributeEntity(a) => {
+                            codec::EntityType::AttributeEntity(a) => {
                                 Some(a.text_style.clone())
                             }
                             _ => None,
@@ -269,13 +340,13 @@ impl OpenCADStudio {
                     // through the shared graph. Dangling layouts do not count.
                     let live_blocks: rustc_hash::FxHashSet<String> = {
                         let doc = &self.tabs[i].scene.document;
-                        let is_real_layout = |br: &acadrust::BlockRecord| -> bool {
+                        let is_real_layout = |br: &codec::BlockRecord| -> bool {
                             let up = br.name.to_ascii_uppercase();
                             up.starts_with("*MODEL_SPACE")
                                 || up.starts_with("*PAPER_SPACE")
                                 || matches!(
                                     doc.objects.get(&br.layout),
-                                    Some(acadrust::objects::ObjectType::Layout(_))
+                                    Some(codec::objects::ObjectType::Layout(_))
                                 )
                         };
                         let children = |name: &str| -> Vec<String> {
@@ -446,20 +517,20 @@ impl OpenCADStudio {
                 // Remove draw-order tables whose owning blocks are gone.
                 let mut n_sortents = 0usize;
                 if do_blocks {
-                    let live_blocks: rustc_hash::FxHashSet<acadrust::Handle> = self.tabs[i]
+                    let live_blocks: rustc_hash::FxHashSet<codec::Handle> = self.tabs[i]
                         .scene
                         .document
                         .block_records
                         .iter()
                         .map(|br| br.handle)
                         .collect();
-                    let orphans: Vec<acadrust::Handle> = self.tabs[i]
+                    let orphans: Vec<codec::Handle> = self.tabs[i]
                         .scene
                         .document
                         .objects
                         .iter()
                         .filter_map(|(h, o)| match o {
-                            acadrust::objects::ObjectType::SortEntitiesTable(s)
+                            codec::objects::ObjectType::SortEntitiesTable(s)
                                 if !live_blocks.contains(&s.block_owner_handle) =>
                             {
                                 Some(*h)
@@ -558,11 +629,11 @@ impl OpenCADStudio {
                             .push_error(crate::t!("CHPROP: no entities selected.").as_ref());
                     } else {
                         // Validate value early to give clear errors
-                        let color_val: Option<acadrust::types::Color> = if prop == "COLOR" {
+                        let color_val: Option<codec::types::Color> = if prop == "COLOR" {
                             value
                                 .parse::<i16>()
                                 .ok()
-                                .map(acadrust::types::Color::from_index)
+                                .map(codec::types::Color::from_index)
                         } else {
                             None
                         };
@@ -571,12 +642,12 @@ impl OpenCADStudio {
                         } else {
                             None
                         };
-                        let transparency_val: Option<acadrust::types::Transparency> =
+                        let transparency_val: Option<codec::types::Transparency> =
                             if prop == "TRANSPARENCY" {
                                 value
                                     .parse::<f64>()
                                     .ok()
-                                    .map(acadrust::types::Transparency::from_percent)
+                                    .map(codec::types::Transparency::from_percent)
                             } else {
                                 None
                             };
@@ -686,7 +757,7 @@ impl OpenCADStudio {
                     let mut index = 0;
                     while index < handles.len() {
                         let children = match self.tabs[i].scene.document.get_entity(handles[index]) {
-                            Some(acadrust::EntityType::Insert(insert)) => self.tabs[i].scene.document
+                            Some(codec::EntityType::Insert(insert)) => self.tabs[i].scene.document
                                 .block_records.get(&insert.block_name)
                                 .map(|block| block.entity_handles.clone()).unwrap_or_default(),
                             _ => Vec::new(),
@@ -783,60 +854,60 @@ impl OpenCADStudio {
                                 removed.insert(candidates[b].0);progress=true;continue;
                             }
                             if overlap {
-                                let contained = |circle: &acadrust::entities::Circle, arc: &acadrust::entities::Arc| {
+                                let contained = |circle: &codec::entities::Circle, arc: &codec::entities::Arc| {
                                     circle.common == arc.common && circle.thickness == arc.thickness
-                                        && cadkernel::space::arc_union::circle_contains_arc(
+                                        && kernel::space::arc_union::circle_contains_arc(
                                             [circle.center.x,circle.center.y,circle.center.z],
                                             [circle.normal.x,circle.normal.y,circle.normal.z],circle.radius,
-                                            cadkernel::space::arc_union::CircularArc { center:[arc.center.x,arc.center.y,arc.center.z],
+                                            kernel::space::arc_union::CircularArc { center:[arc.center.x,arc.center.y,arc.center.z],
                                                 normal:[arc.normal.x,arc.normal.y,arc.normal.z],radius:arc.radius,start:arc.start_angle,end:arc.end_angle })
                                 };
                                 match (&left,&right) {
-                                    (acadrust::EntityType::Circle(circle),acadrust::EntityType::Arc(arc)) if contained(circle,arc) => {
+                                    (codec::EntityType::Circle(circle),codec::EntityType::Arc(arc)) if contained(circle,arc) => {
                                         removed.insert(candidates[b].0);progress=true;continue;
                                     }
-                                    (acadrust::EntityType::Arc(arc),acadrust::EntityType::Circle(circle)) if contained(circle,arc) => {
+                                    (codec::EntityType::Arc(arc),codec::EntityType::Circle(circle)) if contained(circle,arc) => {
                                         removed.insert(candidates[a].0);progress=true;break;
                                     }
                                     _ => {},
                                 }
                             }
-                            if let (acadrust::EntityType::Arc(l),acadrust::EntityType::Arc(r))=(&left,&right) {
-                                use cadkernel::space::arc_union::{CircularArc,ArcUnionKind,circular_arc_union};
+                            if let (codec::EntityType::Arc(l),codec::EntityType::Arc(r))=(&left,&right) {
+                                use kernel::space::arc_union::{CircularArc,ArcUnionKind,circular_arc_union};
                                 if l.common!=r.common || l.thickness!=r.thickness {continue;}
-                                let arc=|v:&acadrust::entities::Arc|CircularArc{center:[v.center.x,v.center.y,v.center.z],normal:[v.normal.x,v.normal.y,v.normal.z],radius:v.radius,start:v.start_angle,end:v.end_angle};
+                                let arc=|v:&codec::entities::Arc|CircularArc{center:[v.center.x,v.center.y,v.center.z],normal:[v.normal.x,v.normal.y,v.normal.z],radius:v.radius,start:v.start_angle,end:v.end_angle};
                                 let Some(union)=circular_arc_union(arc(l),arc(r),tolerance) else {continue;};
                                 let allowed=match union.kind {ArcUnionKind::Duplicate=>true,ArcUnionKind::Overlap=>overlap,ArcUnionKind::EndToEnd=>end_to_end};
                                 if !allowed {continue;}
-                                if let acadrust::EntityType::Arc(source)=&candidates[a].1 {
+                                if let codec::EntityType::Arc(source)=&candidates[a].1 {
                                     let replacement=if union.full_circle {
-                                        let mut circle=acadrust::entities::Circle::new();
+                                        let mut circle=codec::entities::Circle::new();
                                         circle.common=source.common.clone();circle.center=source.center.clone();circle.normal=source.normal.clone();circle.radius=source.radius;circle.thickness=source.thickness;
-                                        acadrust::EntityType::Circle(circle)
+                                        codec::EntityType::Circle(circle)
                                     } else {
-                                        let mut arc=source.clone();arc.start_angle=union.start;arc.end_angle=union.end;acadrust::EntityType::Arc(arc)
+                                        let mut arc=source.clone();arc.start_angle=union.start;arc.end_angle=union.end;codec::EntityType::Arc(arc)
                                     };
                                     candidates[a].1=replacement;
                                 }
                                 changed.insert(candidates[a].0);removed.insert(candidates[b].0);progress=true;
                                 continue;
                             }
-                            let (acadrust::EntityType::Line(l),acadrust::EntityType::Line(r))=(&left,&right)
+                            let (codec::EntityType::Line(l),codec::EntityType::Line(r))=(&left,&right)
                                 else {continue;};
                             if l.common!=r.common||l.thickness!=r.thickness||l.normal!=r.normal {continue;}
-                            let point=|p:acadrust::types::Vector3|[p.x,p.y,p.z];
-                            let Some(union)=cadkernel::space::line_union(
+                            let point=|p:codec::types::Vector3|[p.x,p.y,p.z];
+                            let Some(union)=kernel::space::line_union(
                                 [point(l.start),point(l.end)],[point(r.start),point(r.end)],tolerance)
                                 else {continue;};
                             let allowed=match union.kind {
-                                cadkernel::space::LineUnionKind::Duplicate=>true,
-                                cadkernel::space::LineUnionKind::Overlap=>overlap,
-                                cadkernel::space::LineUnionKind::EndToEnd=>end_to_end,
+                                kernel::space::LineUnionKind::Duplicate=>true,
+                                kernel::space::LineUnionKind::Overlap=>overlap,
+                                kernel::space::LineUnionKind::EndToEnd=>end_to_end,
                             };
                             if !allowed {continue;}
-                            if let acadrust::EntityType::Line(line)=&mut candidates[a].1 {
-                                line.start=acadrust::types::Vector3::new(union.start[0],union.start[1],union.start[2]);
-                                line.end=acadrust::types::Vector3::new(union.end[0],union.end[1],union.end[2]);
+                            if let codec::EntityType::Line(line)=&mut candidates[a].1 {
+                                line.start=codec::types::Vector3::new(union.start[0],union.start[1],union.start[2]);
+                                line.end=codec::types::Vector3::new(union.end[0],union.end[1],union.end[2]);
                             }
                             changed.insert(candidates[a].0);removed.insert(candidates[b].0);progress=true;
                         }
@@ -1015,7 +1086,34 @@ impl OpenCADStudio {
                     | "FRAME"
                     | "IMAGEFRAME"
                     | "PDFFRAME"
+                    | "DWFFRAME"
+                    | "DGNFRAME"
+                    | "PDFOSNAP"
+                    | "DWFOSNAP"
+                    | "DGNOSNAP"
+                    | "UOSNAP"
+                    | "FIELDDISPLAY"
+                    | "PDFIMPORTMODE"
+                    | "PDFIMPORTFILTER"
+                    | "PDFIMPORTLAYERS"
+                    | "PDFIMPORTIMAGEPATH"
+                    | "XDWGFADECTL"
                     | "POINTCLOUDCLIPFRAME"
+                    | "POINTCLOUDDENSITY"
+                    | "POINTCLOUDPOINTSIZE"
+                    | "POINTCLOUDLOCK"
+                    | "POINTCLOUDAUTOUPDATE"
+                    | "POINTCLOUDBOUNDARY"
+                    | "POINTCLOUDRTDENSITY"
+                    | "POINTCLOUDLOD"
+                    | "POINTCLOUDPOINTMAX"
+                    | "POINTCLOUDVISRETAIN"
+                    | "POINTCLOUDSHADING"
+                    | "POINTCLOUDCACHESIZE"
+                    | "POINTCLOUD2DVSDISPLAY"
+                    | "POINTCLOUDLIGHTING"
+                    | "POINTCLOUDLIGHTSOURCE"
+                    | "POINTCLOUDPOINTMAXLEGACY"
                     | "XCLIPFRAME"
                     | "WIPEOUTFRAME"
                     | "HALOGAP"
@@ -1055,6 +1153,7 @@ impl OpenCADStudio {
                     | "CONSTRAINTNAMEFORMAT"
                     | "DYNCONSTRAINTDISPLAY"
                     | "CCONSTRAINTFORM"
+                    | "DYNMODE"
             ) =>
             {
                 return self.dispatch_styleprops(&format!("SETVAR {cmd}"), i);
@@ -1077,10 +1176,57 @@ impl OpenCADStudio {
                 let value = it.next().map(|s| s.trim().to_string());
                 if name.is_empty() || name == "?" {
                     self.command_line.push_info(&super::plotvars::setvar_listing());
+                    self.command_line.push_info(&super::blockvars::setvar_listing());
                     self.command_line.push_info(
-                        crate::t!("SETVAR: CETRANSPARENCY LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR SHORTCUTMENU SHORTCUTMENUDURATION CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES COMMANDLINEFADETIME ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE CONSTRAINTSOLVEMODE CONSTRAINTINFER CONSTRAINTBARDISPLAY CONSTRAINTBARMODE CONSTRAINTNAMEFORMAT DYNCONSTRAINTDISPLAY ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER GRIPOBJLIMIT | CLAYER CELTYPE TEXTSTYLE (read-only)").as_ref(),
+                        crate::t!("SETVAR: CETRANSPARENCY LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR SHORTCUTMENU SHORTCUTMENUDURATION CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES COMMANDLINEFADETIME ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE CONSTRAINTSOLVEMODE CONSTRAINTINFER CONSTRAINTBARDISPLAY CONSTRAINTBARMODE CONSTRAINTNAMEFORMAT DYNCONSTRAINTDISPLAY DYNMODE ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER GRIPOBJLIMIT | CLAYER CELTYPE TEXTSTYLE (read-only)").as_ref(),
                     );
                 } else {
+                    // Point cloud settings, kept with the drawing.
+                    if let Some(setting) = crate::scene::model::point_cloud::setting(&name) {
+                        let document = &self.tabs[i].scene.document;
+                        let current = crate::scene::model::point_cloud::setting_value(document, setting);
+                        match value.as_deref().map(|value| setting.check(value)) {
+                            Some(Ok(new)) => {
+                                if new != current {
+                                    crate::io::set_drawing_variable(
+                                        &mut self.tabs[i].scene.document,
+                                        setting.name,
+                                        &new.to_string(),
+                                    );
+                                    self.tabs[i].scene.bump_geometry();
+                                    self.tabs[i].dirty = true;
+                                }
+                            }
+                            // Refused: say why, and ask again unless the value ends it.
+                            Some(Err(refusal)) => {
+                                for line in &refusal.lines {
+                                    self.command_line.push_error(line);
+                                }
+                                if refusal.ask_again {
+                                    self.command_line.push_output(&format!("Enter new value for {name} <{current}>:"));
+                                    self.pending_setvar = Some(name.clone());
+                                }
+                            }
+                            None => {
+                                self.command_line.push_output(&format!("Enter new value for {name} <{current}>:"));
+                                self.pending_setvar = Some(name.clone());
+                            }
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    if name == "XDWGFADECTL" {
+                        let current = crate::scene::cache::block_cache::xref_fade_ctl();
+                        if let Some(value) = &value {
+                            match value.parse::<i32>().ok().filter(|v| (-90..=90).contains(v)) {
+                                Some(fade) => self.set_xref_fade(fade),
+                                None => self.command_line.push_error("Requires an integer between -90 and 90."),
+                            }
+                        } else {
+                            self.command_line.push_output(&format!("Enter new value for XDWGFADECTL <{current}>:"));
+                            self.pending_setvar = Some(name.clone());
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
                     if name == "CETRANSPARENCY" {
                         let current = self.tabs[i].scene.document.current_entity_transparency();
                         if let Some(value) = &value {
@@ -1102,6 +1248,120 @@ impl OpenCADStudio {
                             }
                         } else {
                             self.command_line.push_output(&format!("Enter new value for CETRANSPARENCY <{}>:", crate::scene::creation_style::current_transparency_label(current)));
+                            self.pending_setvar = Some(name.clone());
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    // Snapping to the geometry inside underlays (one switch for
+                    // PDF underlays and underlays in general).
+                    // The PDF Import Settings' options as bits.
+                    if matches!(name.as_str(), "PDFIMPORTMODE" | "PDFIMPORTFILTER" | "PDFIMPORTLAYERS") {
+                        use crate::modules::insert::pdf_import::{import_settings, set_import_settings, ImportLayers};
+                        let mut settings = import_settings();
+                        let (current, max) = match name.as_str() {
+                            "PDFIMPORTMODE" => (settings.mode(), 31),
+                            "PDFIMPORTFILTER" => (settings.filter(), 15),
+                            _ => (settings.layers_value(), 2),
+                        };
+                        if let Some(value) = &value {
+                            match value.parse::<i16>().ok().filter(|v| (0..=max).contains(v)) {
+                                Some(v) => {
+                                    match name.as_str() {
+                                        "PDFIMPORTMODE" => settings.set_mode(v),
+                                        "PDFIMPORTFILTER" => settings.set_filter(v),
+                                        _ => {
+                                            settings.layers = [ImportLayers::Pdf, ImportLayers::Object, ImportLayers::Current][v as usize]
+                                        }
+                                    }
+                                    set_import_settings(settings);
+                                }
+                                None => self.command_line.push_error(&format!("Requires an integer between 0 and {max}.")),
+                            }
+                        } else {
+                            self.command_line.push_output(&format!("Enter new value for {name} <{current}>:"));
+                            self.pending_setvar = Some(name.clone());
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    // A folder name; "." clears it.
+                    if name == "PDFIMPORTIMAGEPATH" {
+                        use crate::modules::insert::pdf_import::{image_path, set_image_path};
+                        match &value {
+                            Some(value) => {
+                                let value = value.trim().trim_matches('"');
+                                set_image_path(if value == "." { String::new() } else { value.to_string() });
+                            }
+                            None => {
+                                self.command_line.push_output(&format!(
+                                    "Enter new value for PDFIMPORTIMAGEPATH, or . for none <\"{}\">:",
+                                    image_path()
+                                ));
+                                self.pending_setvar = Some(name.clone());
+                            }
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    if name == "FIELDDISPLAY" {
+                        let current = i16::from(crate::entities::field::display());
+                        match value.as_deref().map(|v| v.trim().parse::<i16>().ok().filter(|v| (0..=1).contains(v))) {
+                            Some(Some(mode)) => {
+                                if current != mode {
+                                    crate::entities::field::set_display(mode == 1);
+                                    // A profile setting: redraw the fields of every open drawing.
+                                    for tab in &mut self.tabs {
+                                        let changes: Vec<_> = tab
+                                            .scene
+                                            .document
+                                            .entities()
+                                            .filter(|e| crate::entities::field::hosts_field(&tab.scene.document, e))
+                                            .map(|e| (e.common().handle, crate::scene::ChangeKind::Modified))
+                                            .collect();
+                                        if !changes.is_empty() {
+                                            tab.scene.bump_entities(&changes);
+                                        }
+                                    }
+                                    self.save_config();
+                                }
+                            }
+                            Some(None) => {
+                                self.command_line.push_error(crate::t!("Requires 0 or 1 only.").as_ref());
+                                self.command_line.push_output(&format!("Enter new value for FIELDDISPLAY <{current}>:"));
+                                self.pending_setvar = Some(name.clone());
+                            }
+                            None => {
+                                self.command_line.push_output(&format!("Enter new value for FIELDDISPLAY <{current}>:"));
+                                self.pending_setvar = Some(name.clone());
+                            }
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    if matches!(name.as_str(), "PDFOSNAP" | "DWFOSNAP" | "DGNOSNAP" | "UOSNAP") {
+                        use crate::scene::model::pdf_vector as pv;
+                        use codec::entities::UnderlayType;
+                        // UOSNAP sets every kind and reads 2 while they differ.
+                        let kind = match name.as_str() {
+                            "PDFOSNAP" => Some(UnderlayType::Pdf),
+                            "DWFOSNAP" => Some(UnderlayType::Dwf),
+                            "DGNOSNAP" => Some(UnderlayType::Dgn),
+                            _ => None,
+                        };
+                        let current = kind.map_or_else(pv::uosnap, |kind| i16::from(pv::underlay_osnap(kind)));
+                        if let Some(value) = &value {
+                            match value.parse::<i16>().ok().filter(|value| (0..=1).contains(value)) {
+                                Some(mode) => {
+                                    if current != mode {
+                                        match kind {
+                                            Some(kind) => pv::set_underlay_osnap(kind, mode == 1),
+                                            None => pv::set_uosnap(mode == 1),
+                                        }
+                                        self.tabs[i].scene.reseed_underlays();
+                                        self.sync_underlay_tab();
+                                    }
+                                }
+                                None => self.command_line.push_error("Requires 0 or 1 only"),
+                            }
+                        } else {
+                            self.command_line.push_output(&format!("Enter new value for {name} <{current}>:"));
                             self.pending_setvar = Some(name.clone());
                         }
                         return Some(self.finish_dispatch(cmd));
@@ -1194,13 +1454,23 @@ impl OpenCADStudio {
                                             self.tabs[i].scene.bump_entities(&changes);
                                         }
                                         self.tabs[i].dirty = true;
+                                        // IMAGEFRAME also lands in the profile.
+                                        self.save_config();
                                     }
                                     self.command_line
-                                        .push_output(&crate::tf!("{name} = {mode}"));
+                                        .push_output(crate::t!("Regenerating model.").as_ref());
                                 }
-                                _ => self.command_line.push_error(
-                                    crate::tf!("SETVAR: {name} requires 0, 1, or 2.").as_ref(),
-                                ),
+                                // Out of range: say so and ask again.
+                                _ => {
+                                    self.command_line.push_error(
+                                        crate::t!("Requires an integer between 0 and 2.").as_ref(),
+                                    );
+                                    self.command_line.push_output(
+                                        crate::tf!("Enter new value for {name} <{current}>:")
+                                            .as_ref(),
+                                    );
+                                    self.pending_setvar = Some(name.clone());
+                                }
                             },
                             None => {
                                 self.command_line.push_output(crate::tf!(
@@ -1501,6 +1771,17 @@ impl OpenCADStudio {
                                     .ok_or_else(|| "SETVAR: 0 or 1 required.".into()),
                                 None => Ok((format!("MIRRTEXT = {}", h.mirror_text as i32), false)),
                             },
+                            "DYNMODE" => match &value {
+                                Some(v) => match v.parse::<i16>() {
+                                    Ok(mode) if (-3..=3).contains(&mode) => {
+                                        self.dyn_mode = mode;
+                                        self.dyn_input = mode > 0;
+                                        Ok((format!("DYNMODE = {mode}"), true))
+                                    }
+                                    _ => Err("SETVAR: integer from -3 to 3 required.".into()),
+                                },
+                                None => Ok((format!("DYNMODE = {}", self.dyn_mode), false)),
+                            },
                             "ZOOMWHEEL" => match &value {
                                 Some(v) => match parse_bool(v) {
                                     Some(reversed) => {
@@ -1520,13 +1801,23 @@ impl OpenCADStudio {
                                     false,
                                 )),
                             },
+                            // The system variable keeps its own range. The
+                            // Options window reaches further
+                            // (`settings::ZOOM_FACTOR_MAX`) and may have
+                            // stored a value above this, which a bare
+                            // `SETVAR ZOOMFACTOR` still reports; only setting
+                            // one is held to the range of the variable.
                             "ZOOMFACTOR" => match &value {
                                 Some(v) => match v.parse::<i32>() {
-                                    Ok(factor) if (3..=100).contains(&factor) => {
+                                    Ok(factor)
+                                        if (crate::app::settings::ZOOM_FACTOR_MIN
+                                            ..=crate::app::settings::ZOOM_FACTOR_MAX)
+                                            .contains(&factor) =>
+                                    {
                                         self.zoom_factor = factor;
                                         Ok((format!("ZOOMFACTOR = {factor}"), true))
                                     }
-                                    _ => Err("SETVAR: integer from 3 to 100 required.".into()),
+                                    _ => Err("SETVAR: integer from 3 to 500 required.".into()),
                                 },
                                 None => {
                                     Ok((format!("ZOOMFACTOR = {}", self.zoom_factor), false))
@@ -2031,6 +2322,7 @@ impl OpenCADStudio {
                                 Some(v) => v
                                     .parse::<i16>()
                                     .map(|x| {
+                                        let x = x.clamp(0, 8);
                                         h.linear_unit_precision = x;
                                         (format!("LUPREC = {x}"), true)
                                     })
@@ -2053,6 +2345,7 @@ impl OpenCADStudio {
                                 Some(v) => v
                                     .parse::<i16>()
                                     .map(|x| {
+                                        let x = x.clamp(0, 8);
                                         h.angular_unit_precision = x;
                                         (format!("AUPREC = {x}"), true)
                                     })
@@ -2105,6 +2398,14 @@ impl OpenCADStudio {
                                 Some(v) => v
                                     .parse::<i16>()
                                     .map(|x| {
+                                        // Stored values stay inside the range
+                                        // the Options slider can ask for; the
+                                        // consumption sites clamp again for
+                                        // file-sourced headers.
+                                        let x = x.clamp(
+                                            0,
+                                            crate::entities::solid3d::MAX_HEADER_ISOLINES,
+                                        );
                                         h.isolines = x;
                                         (format!("ISOLINES = {x}"), true)
                                     })
@@ -2463,6 +2764,7 @@ impl OpenCADStudio {
                                         // Without this it marked the drawing
                                         // modified instead of persisting.
                                         | "TEXTFILL"
+                                        | "DYNMODE"
                                 ) {
                                     self.persist_settings_if_changed();
                                 } else {
@@ -2555,13 +2857,13 @@ impl OpenCADStudio {
                             linetypes.insert(lt.clone());
                         }
                         match e {
-                            acadrust::EntityType::Text(t) if !t.style.is_empty() => {
+                            codec::EntityType::Text(t) if !t.style.is_empty() => {
                                 styles.insert(t.style.clone());
                             }
-                            acadrust::EntityType::MText(t) if !t.style.is_empty() => {
+                            codec::EntityType::MText(t) if !t.style.is_empty() => {
                                 styles.insert(t.style.clone());
                             }
-                            acadrust::EntityType::Insert(ins) => {
+                            codec::EntityType::Insert(ins) => {
                                 blocks.insert(ins.block_name.clone());
                             }
                             _ => {}
@@ -2606,7 +2908,7 @@ impl OpenCADStudio {
                         if !layer.is_empty() && doc.layers.get(layer).is_none() {
                             undefined_layers.insert(layer.clone());
                         }
-                        if let acadrust::EntityType::Insert(ins) = e {
+                        if let codec::EntityType::Insert(ins) = e {
                             if doc.block_records.get(&ins.block_name).is_none() {
                                 undefined_blocks.insert(ins.block_name.clone());
                             }
@@ -2695,6 +2997,7 @@ impl OpenCADStudio {
                             self.tabs[i].scene.bump_geometry_no_blocks();
                         }
                         if type_str == "UCS" {
+                            self.tabs[i].scene.bump_ucs_epoch();
                             if let Some(active) = self.tabs[i].active_ucs.as_mut() {
                                 if active.name.eq_ignore_ascii_case(&old_name) {
                                     active.name = new_name.clone();
@@ -3012,7 +3315,7 @@ impl OpenCADStudio {
                     );
                 }
             }
-            cmd if cmd == "DDPTYPE" => {
+            cmd if cmd == "DDPTYPE" || cmd == "PTYPE" => {
                 // The dialog shows the magnitude; the sign (relative/absolute)
                 // is driven by the radio buttons. A positive PDSIZE is absolute;
                 // zero or negative is relative.
@@ -3108,7 +3411,7 @@ impl OpenCADStudio {
             cmd if cmd.starts_with("SCALETEXT ") => {
                 let rest = cmd.trim_start_matches("SCALETEXT").trim();
                 let parts: Vec<&str> = rest.split_whitespace().collect();
-                let selected_handles: Vec<acadrust::Handle> = self.tabs[i]
+                let selected_handles: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
@@ -3140,12 +3443,12 @@ impl OpenCADStudio {
                                         continue;
                                     }
                                     match entity {
-                                        acadrust::EntityType::Text(t) => {
+                                        codec::EntityType::Text(t) => {
                                             t.height =
                                                 if use_absolute { val } else { t.height * val };
                                             count += 1;
                                         }
-                                        acadrust::EntityType::MText(t) => {
+                                        codec::EntityType::MText(t) => {
                                             t.height =
                                                 if use_absolute { val } else { t.height * val };
                                             count += 1;
@@ -3179,8 +3482,8 @@ impl OpenCADStudio {
 }
 
 /// RENAME for the remaining name-keyed symbol tables.
-fn rename_symbol(doc: &mut acadrust::CadDocument, ty: &str, old: &str, new: &str) -> bool {
-    use acadrust::{EntityType, Table, TableEntry};
+fn rename_symbol(doc: &mut codec::CadDocument, ty: &str, old: &str, new: &str) -> bool {
+    use codec::{EntityType, Table, TableEntry};
 
     fn rekey<T: TableEntry>(table: &mut Table<T>, old: &str, new: &str) -> bool {
         if !crate::scene::valid_block_name(new) {
@@ -3296,6 +3599,73 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app
+    }
+
+    /// `SETVAR ZOOMFACTOR` is the system variable, so it keeps the range
+    /// the variable has — the Options window is where a wheel faster than
+    /// that is set, and a value set there is still what the variable
+    /// reports.
+    #[test]
+    fn setvar_zoomfactor_keeps_the_range_of_the_system_variable() {
+        let mut app = fresh_app();
+
+        let _ = app.run_command_line("SETVAR ZOOMFACTOR 500");
+        assert_eq!(app.zoom_factor, 500);
+
+        let _ = app.run_command_line("SETVAR ZOOMFACTOR 501");
+        assert_eq!(app.zoom_factor, 500, "501 is not a value the variable takes");
+
+        let _ = app.run_command_line("SETVAR ZOOMFACTOR 2");
+        assert_eq!(app.zoom_factor, 500, "and neither is 2");
+
+        // What the Options field reached is still reported here.
+        let _ = app.update(crate::app::Message::ZoomFactorInputChanged("250".into()));
+        assert_eq!(app.zoom_factor, 250);
+        let _ = app.run_command_line("SETVAR ZOOMFACTOR 60");
+        assert_eq!(app.zoom_factor, 60);
+    }
+
+    /// `SETVAR ISOLINES` stored any parseable `i16` verbatim. The header
+    /// value is the per-face isolate count handed to the tessellation
+    /// kernel (which loops `0..count`), so `ISOLINES 32767` made every
+    /// rebuild and per-cursor preview allocate without bound. The stored
+    /// value must stay inside the range the app's own UI can ask for
+    /// (the Options slider is 0..=64).
+    #[test]
+    fn setvar_isolines_stays_within_the_renderable_range() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+
+        let _ = app.run_command_line("SETVAR ISOLINES 32767");
+        assert_eq!(app.tabs[i].scene.document.header.isolines, 64);
+
+        let _ = app.run_command_line("SETVAR ISOLINES 8");
+        assert_eq!(app.tabs[i].scene.document.header.isolines, 8);
+
+        let _ = app.run_command_line("SETVAR ISOLINES -3");
+        assert_eq!(app.tabs[i].scene.document.header.isolines, 0);
+    }
+
+    /// `SETVAR LUPREC` / `AUPREC` stored any parseable `i16` verbatim. The
+    /// units dialog only ever offers 0-8 places, and the formatters read the
+    /// header on every properties/annotation call, so an unclamped value
+    /// (positive or negative) fed unbounded strings into those hot paths.
+    #[test]
+    fn setvar_precision_stays_within_the_range_the_units_dialog_offers() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+
+        let _ = app.run_command_line("SETVAR LUPREC 30000");
+        assert_eq!(app.tabs[i].scene.document.header.linear_unit_precision, 8);
+
+        let _ = app.run_command_line("SETVAR AUPREC 30000");
+        assert_eq!(app.tabs[i].scene.document.header.angular_unit_precision, 8);
+
+        let _ = app.run_command_line("SETVAR LUPREC -3");
+        assert_eq!(app.tabs[i].scene.document.header.linear_unit_precision, 0);
+
+        let _ = app.run_command_line("SETVAR LUPREC 5");
+        assert_eq!(app.tabs[i].scene.document.header.linear_unit_precision, 5);
     }
 
     #[test]
@@ -3492,6 +3862,51 @@ mod tests {
         let _ = app.run_command_line("SETVAR DELOBJ 4");
         assert_eq!(app.delete_objects, 3);
     }
+
+    #[test]
+    fn dynmode_direct_and_setvar_toggles_dynamic_input() {
+        let mut app = fresh_app();
+        assert!(app.dyn_input);
+        assert_eq!(app.dyn_mode, 3);
+
+        // Turn off via direct command: DYNMODE 0
+        let _ = app.run_command_line("DYNMODE 0");
+        assert!(!app.dyn_input);
+        assert_eq!(app.dyn_mode, 0);
+
+        // Turn on via direct command: DYNMODE 3
+        let _ = app.run_command_line("DYNMODE 3");
+        assert!(app.dyn_input);
+        assert_eq!(app.dyn_mode, 3);
+
+        // Turn off via SETVAR: SETVAR DYNMODE 0
+        let _ = app.run_command_line("SETVAR DYNMODE 0");
+        assert!(!app.dyn_input);
+        assert_eq!(app.dyn_mode, 0);
+
+        // Turn on via SETVAR: SETVAR DYNMODE 1 (pointer input only)
+        let _ = app.run_command_line("SETVAR DYNMODE 1");
+        assert!(app.dyn_input);
+        assert_eq!(app.dyn_mode, 1);
+
+        // Out of range rejected
+        let _ = app.run_command_line("DYNMODE 5");
+        assert_eq!(app.dyn_mode, 1);
+        assert!(app.dyn_input);
+
+        let _ = app.run_command_line("DYNMODE -5");
+        assert_eq!(app.dyn_mode, 1);
+        assert!(app.dyn_input);
+
+        // F12 turns it off temporarily (negative) and restores the mode.
+        let _ = app.update(crate::app::Message::ToggleDynInput);
+        assert!(!app.dyn_input);
+        assert_eq!(app.dyn_mode, -1);
+
+        let _ = app.update(crate::app::Message::ToggleDynInput);
+        assert!(app.dyn_input);
+        assert_eq!(app.dyn_mode, 1);
+    }
 }
 
 #[cfg(test)]
@@ -3521,6 +3936,21 @@ mod scale_validation_tests {
                     app.tabs[i].scene.document.header.current_entity_linetype_scale
                 };
                 assert_eq!(before, after, "{entry} must be refused");
+            }
+        }
+    }
+}
+
+impl OpenCADStudio {
+    /// XDWGFADECTL: store it, show it on the ribbon and redraw every tab's
+    /// referenced drawings.
+    pub(in crate::app) fn set_xref_fade(&mut self, fade: i32) {
+        crate::scene::cache::block_cache::set_xref_fade_ctl(fade);
+        self.ribbon.xref_fade = crate::scene::cache::block_cache::xref_fade_ctl();
+        for tab in &mut self.tabs {
+            if !tab.is_start {
+                tab.scene.recolor_meshes();
+                tab.scene.bump_geometry();
             }
         }
     }

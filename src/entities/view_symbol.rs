@@ -1,4 +1,4 @@
-use acadrust::entities::{SectionSymbol, ViewBorder};
+use codec::entities::{SectionSymbol, ViewBorder};
 use crate::t;
 
 use crate::command::EntityTransform;
@@ -6,7 +6,7 @@ use crate::entities::common::{edit_angle_prop, edit_prop, parse_f64, ro_prop, sq
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 
-fn handle_text(handle: acadrust::Handle) -> String {
+fn handle_text(handle: codec::Handle) -> String {
     if handle.is_null() {
         "None".to_string()
     } else {
@@ -14,11 +14,11 @@ fn handle_text(handle: acadrust::Handle) -> String {
     }
 }
 
-fn vector_text(vector: &acadrust::types::Vector3) -> String {
+fn vector_text(vector: &codec::types::Vector3) -> String {
     format!("{:.6}, {:.6}, {:.6}", vector.x, vector.y, vector.z)
 }
 
-fn apply_entity_transform<T: acadrust::Entity>(entity: &mut T, transform: &EntityTransform) {
+fn apply_entity_transform<T: codec::Entity>(entity: &mut T, transform: &EntityTransform) {
     crate::scene::view::transform::apply_standard_entity_transform(
         entity,
         transform,
@@ -56,7 +56,7 @@ impl Grippable for SectionSymbol {
             }
             GripApply::Absolute(position) => {
                 point.point =
-                    acadrust::types::Vector3::new(position.x, position.y, position.z);
+                    codec::types::Vector3::new(position.x, position.y, position.z);
             }
         }
         self.sync_display_fields();

@@ -1,5 +1,5 @@
-use cadkernel::space::polygon;
-use acadrust::{EntityType, Handle};
+use kernel::space::polygon;
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{
@@ -375,6 +375,7 @@ impl CadCommand for AreaCommand {
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -400,7 +401,9 @@ impl CadCommand for AreaCommand {
             plinegen: true,
             fill_tris: Vec::new(),
             fill_tris_low: Vec::new(),
-        })
+        
+            ..Default::default()
+})
     }
 
     fn area_preview_regions(&self) -> Option<Vec<AreaPreviewRegion>> {

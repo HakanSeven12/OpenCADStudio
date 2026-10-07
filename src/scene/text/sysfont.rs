@@ -139,10 +139,18 @@ fn canonical_family_name_uncached(family: &str) -> Option<String> {
 
 /// Resolve a family name to a concrete face id (regular weight/style).
 fn face_id(family: &str) -> Option<fontdb::ID> {
+    face_id_weighted(family, fontdb::Weight::NORMAL)
+}
+
+/// Resolve a family name to a concrete face id at the requested weight
+/// (e.g. bold runs). Falls back through fontdb's fuzzy matching, so a
+/// family without a bold face still resolves — to its regular face.
+fn face_id_weighted(family: &str, weight: fontdb::Weight) -> Option<fontdb::ID> {
     let db = &fonts().db;
     let canonical = canonical_family_name(family)?;
     let query = fontdb::Query {
         families: &[fontdb::Family::Name(&canonical)],
+        weight,
         ..Default::default()
     };
     db.query(&query)
@@ -154,6 +162,18 @@ fn face_id(family: &str) -> Option<fontdb::ID> {
 /// within a TrueType collection. Returns `None` if the family is unknown.
 pub fn with_face_data<T>(family: &str, f: impl FnOnce(&[u8], u32) -> T) -> Option<T> {
     let id = face_id(family)?;
+    fonts().db.with_face_data(id, f)
+}
+
+/// Borrow the raw face bytes for `family` at `weight` (see
+/// [`face_id_weighted`]). The PDF exporter uses this to embed the bold face
+/// for bold runs instead of faux-stroking the regular one.
+pub fn with_face_data_weighted<T>(
+    family: &str,
+    weight: fontdb::Weight,
+    f: impl FnOnce(&[u8], u32) -> T,
+) -> Option<T> {
+    let id = face_id_weighted(family, weight)?;
     fonts().db.with_face_data(id, f)
 }
 

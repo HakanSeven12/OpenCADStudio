@@ -1,6 +1,6 @@
 //! Runtime host surface (`host` feature).
 //!
-//! [`HostApi`] is the `acadrust`-typed adapter a plugin uses at *dispatch* time
+//! [`HostApi`] is the `opencadcodec`-typed adapter a plugin uses at *dispatch* time
 //! — document access, entity creation, XDATA, undo, and the command line. It is
 //! the stable counterpart to the dependency-free manifest/ribbon contract: a
 //! plugin's `dispatch` receives `&mut dyn HostApi` rather than the host's
@@ -19,16 +19,16 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::manifest::PluginManifest;
 use crate::ribbon::CadModule;
 
-// Re-export the acadrust crate and the types that appear in the HostApi trait
-// so out-of-tree plugins can use them without adding their own acadrust
+// Re-export the opencadcodec crate and the types that appear in the HostApi trait
+// so out-of-tree plugins can use them without adding their own opencadcodec
 // dependency (which would risk an ABI-mismatching version).
-pub use acadrust;
-pub use acadrust::objects::{
+pub use codec;
+pub use codec::objects::{
     DictionaryCloningFlags, KnownXRecordKind, ProxyObjectReference, ProxyReferenceKind, XRecord,
     XRecordEntry, XRecordSection, XRecordValue, XRecordValueType,
 };
-pub use acadrust::xdata::{ExtendedDataRecord, XDataValue};
-pub use acadrust::{CadDocument, EntityType, Handle};
+pub use codec::xdata::{ExtendedDataRecord, XDataValue};
+pub use codec::{CadDocument, EntityType, Handle};
 
 use crate::ipc::protocol::{PluginRequest, PluginResponse};
 
@@ -833,11 +833,12 @@ pub trait HostApi {
     fn plugin_state_any(&self, plugin_id: &str) -> Option<&(dyn Any + Send + Sync)>;
     fn plugin_state_any_mut(&mut self, plugin_id: &str) -> Option<&mut (dyn Any + Send + Sync)>;
     /// Get the state for `plugin_id`, inserting `init()`'s result if absent.
+    /// Returns `None` when this host cannot store state (e.g. out-of-process).
     fn ensure_plugin_state_any(
         &mut self,
         plugin_id: &'static str,
         init: &mut dyn FnMut() -> Box<dyn Any + Send + Sync>,
-    ) -> &mut (dyn Any + Send + Sync);
+    ) -> Option<&mut (dyn Any + Send + Sync)>;
 
     // ── DocumentReader (added in API v3; appended at the end to keep vtable
     // indices stable for API v2 plugins) ─────────────────────────────────────
@@ -1016,14 +1017,14 @@ pub trait HostApi {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct LayerConfig {
     pub name: String,
-    pub color: Option<acadrust::types::Color>,
+    pub color: Option<codec::types::Color>,
     pub linetype: Option<String>,
-    pub lineweight: Option<acadrust::types::LineWeight>,
+    pub lineweight: Option<codec::types::LineWeight>,
     pub off: Option<bool>,
     pub frozen: Option<bool>,
     pub locked: Option<bool>,
     pub plottable: Option<bool>,
-    pub transparency: Option<acadrust::types::Transparency>,
+    pub transparency: Option<codec::types::Transparency>,
     pub description: Option<String>,
 }
 
@@ -1159,17 +1160,20 @@ pub fn plugin_state_mut<'a, T: Any + Send + Sync>(
 }
 
 /// Typed get-or-insert of per-tab plugin state stored under `plugin_id`.
+///
+/// Returns `None` when this host cannot hold state (out-of-process plugins)
+/// or when existing state under `plugin_id` has a different type.
 pub fn ensure_plugin_state<'a, T: Any + Send + Sync>(
     host: &'a mut dyn HostApi,
     plugin_id: &'static str,
     init: impl FnOnce() -> T,
-) -> &'a mut T {
+) -> Option<&'a mut T> {
     let mut init = Some(init);
-    let any = host.ensure_plugin_state_any(plugin_id, &mut || {
-        Box::new((init.take().expect("init called once"))())
+    let any = host.ensure_plugin_state_any(plugin_id, &mut || match init.take() {
+        Some(make) => Box::new(make()),
+        None => Box::new(()),
     });
-    any.downcast_mut::<T>()
-        .expect("plugin state type mismatch for plugin_id")
+    any?.downcast_mut::<T>()
 }
 
 #[cfg(feature = "host")]

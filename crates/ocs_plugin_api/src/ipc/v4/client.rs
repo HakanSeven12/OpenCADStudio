@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use acadrust::xdata::ExtendedDataRecord;
-use acadrust::{CadDocument, EntityType, Handle};
+use codec::xdata::ExtendedDataRecord;
+use codec::{CadDocument, EntityType, Handle};
 use interprocess::local_socket::traits::Stream as StreamTrait;
 use interprocess::local_socket::{GenericNamespaced, Stream, ToNsName};
 use interprocess::TryClone;
@@ -607,8 +607,10 @@ impl HostApi for V4PluginHostApi {
         &mut self,
         _plugin_id: &'static str,
         _init: &mut dyn FnMut() -> Box<dyn Any + Send + Sync>,
-    ) -> &mut (dyn Any + Send + Sync) {
-        panic!("ensure_plugin_state is not supported for out-of-process plugins; keep state in the plugin crate")
+    ) -> Option<&mut (dyn Any + Send + Sync)> {
+        // Same limitation as `plugin_state_any`; degrade to `None` so the
+        // plugin keeps running instead of dying on its own helper call.
+        None
     }
 
     fn document_reader(&self) -> Box<dyn DocumentReader + '_> {
@@ -937,7 +939,7 @@ mod tests {
     use crate::ipc::transport::recv;
     use crate::ipc::v4::protocol::{HostToPluginV4, PluginToHostV4};
     use crate::test_lock::ENV_LOCK;
-    use acadrust::entities::Point;
+    use codec::entities::Point;
 
     fn unique_socket_name() -> String {
         static COUNTER: AtomicU64 = AtomicU64::new(0);

@@ -45,6 +45,13 @@ pub fn decode_packed(dibdata: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
         let bpp = u16::from_le_bytes(dibdata[10..12].try_into().ok()?) as usize;
         (bpp, 0usize, 0usize)
     } else {
+        // The fixed fields below reach byte 36 (biClrUsed), but `bi_size`
+        // may be any value in 12..=len — a short malformed header (e.g.
+        // len = bi_size = 13) used to panic slicing [14..16]/[16..20]/
+        // [32..36]. Anything under 36 bytes cannot hold them.
+        if dibdata.len() < 36 {
+            return None;
+        }
         let bpp = u16::from_le_bytes(dibdata[14..16].try_into().ok()?) as usize;
         let comp = u32::from_le_bytes(dibdata[16..20].try_into().ok()?) as usize;
         let used = u32::from_le_bytes(dibdata[32..36].try_into().ok()?) as usize;
@@ -86,4 +93,46 @@ pub fn ranges<'a>(
     let bmi = record.get(off_bmi..off_bmi.checked_add(cb_bmi)?)?;
     let bits = record.get(off_bits..off_bits.checked_add(cb_bits)?)?;
     Some((bmi, bits))
+}
+
+#[cfg(test)]
+mod decode_packed_guard_tests {
+    use super::decode_packed;
+
+    /// `len`-byte buffer whose `biSize` claims the whole buffer (so the
+    /// `12 <= bi_size <= len` guard passes) — but the non-core branch then
+    /// reads fixed offsets up to byte 36.
+    fn malformed(len: usize) -> Vec<u8> {
+        let mut d = vec![0u8; len];
+        d[0..4].copy_from_slice(&(len as u32).to_le_bytes());
+        d
+    }
+
+    /// The report's three panic windows: `[14..16]` (len 13..15),
+    /// `[16..20]` (len 16..19), `[32..36]` (len 20..35).
+    #[test]
+    fn short_noncore_headers_are_rejected_not_oob() {
+        for len in 13..=35 {
+            assert!(
+                decode_packed(&malformed(len)).is_none(),
+                "len {len} must be rejected without panicking"
+            );
+        }
+    }
+
+    /// A well-formed 1×1 32-bpp DIB still decodes through the same path.
+    #[test]
+    fn a_valid_info_header_dib_still_decodes() {
+        let mut d = vec![0u8; 44];
+        d[0..4].copy_from_slice(&40u32.to_le_bytes()); // biSize
+        d[4..8].copy_from_slice(&1i32.to_le_bytes()); // width
+        d[8..12].copy_from_slice(&1i32.to_le_bytes()); // height
+        d[12..14].copy_from_slice(&1u16.to_le_bytes()); // planes
+        d[14..16].copy_from_slice(&32u16.to_le_bytes()); // bitCount
+        d[20..24].copy_from_slice(&4u32.to_le_bytes()); // biSizeImage
+        d[40..44].copy_from_slice(&[0, 0, 255, 255]); // one BGRA pixel
+        let (rgba, w, h) = decode_packed(&d).expect("valid DIB decodes");
+        assert_eq!((w, h), (1, 1));
+        assert_eq!(rgba, vec![255, 0, 0, 255]);
+    }
 }

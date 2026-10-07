@@ -241,7 +241,7 @@ pub fn view_window<'a>(
         .on_press(Message::ShortcutEditorApply)
         .padding([4, 16])
         .style(button::primary);
-    let apply_exit = button(text(t!("Apply && Exit")).size(12))
+    let apply_exit = button(text(t!("Apply & Exit")).size(12))
         .on_press(Message::ShortcutEditorApplyExit)
         .padding([4, 16])
         .style(button::primary);
@@ -330,7 +330,7 @@ pub fn view_window<'a>(
             text(t!("Unsaved changes will be discarded.")).size(14),
             Space::new().height(10),
             row![
-                button(text(t!("Discard && close")).size(12))
+                button(text(t!("Discard & close")).size(12))
                     .on_press(Message::ShortcutEditorCloseDiscard)
                     .padding([4, 12])
                     .style(button::danger),

@@ -41,5 +41,5 @@ fn vs_main(v: VertexIn) -> VertexOut {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    return in.color;
+    return vec4<f32>(in.color.rgb, select(1.0, in.color.a, u.transparency_enable > 0.5));
 }

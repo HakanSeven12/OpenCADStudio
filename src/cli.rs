@@ -80,6 +80,11 @@ pub struct Cli {
     #[arg(help = crate::t!("Connect AI clients to the running editor over MCP stdio.").into_owned(), long_help = None)]
     pub mcp: bool,
 
+    /// Export and synchronize AI agent MCP tool schemas to ~/.gemini/antigravity/mcp/opencadstudio/ and exit.
+    #[arg(long = "sync-mcp-schemas")]
+    #[arg(help = crate::t!("Export and synchronize AI agent MCP tool schemas to ~/.gemini/antigravity/mcp/opencadstudio/ and exit.").into_owned(), long_help = None)]
+    pub sync_mcp_schemas: bool,
+
     /// TCP port for --serve (defaults to stdin/stdout).
     #[arg(long, value_name = "PORT")]
     #[arg(help = crate::t!("TCP port for --serve (defaults to stdin/stdout).").into_owned(), long_help = None)]

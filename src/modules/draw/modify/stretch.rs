@@ -15,7 +15,7 @@
 //     Insert      : move the whole entity if its insertion point is inside.
 //     All others  : move the whole entity if any point is inside.
 
-use acadrust::Handle;
+use codec::Handle;
 use glam::DVec3;
 use crate::t;
 
@@ -64,6 +64,21 @@ impl StretchCommand {
             wire_models,
             windows: Vec::new(),
             step: Step::WindowCorner1,
+        }
+    }
+
+    /// A selection made by a crossing window before the command: that window
+    /// marks what moves, so the command goes straight to the base point.
+    pub fn preselected(
+        handles: Vec<Handle>,
+        wire_models: Vec<WireModel>,
+        window: (DVec3, DVec3),
+    ) -> Self {
+        Self {
+            handles,
+            wire_models,
+            windows: vec![window],
+            step: Step::Base,
         }
     }
 
@@ -221,6 +236,12 @@ impl CadCommand for StretchCommand {
         // The two crossing-window corners are free points; Ortho/Polar must not
         // pin the opposite corner to an axis or the window becomes a line (#291).
         matches!(self.step, Step::WindowCorner1 | Step::WindowCorner2(_))
+    }
+
+    fn selects_by_window(&self) -> bool {
+        // Crossing windows select what stretches; dynamic input has nothing
+        // to enter there (#657).
+        self.window_corner_pick()
     }
 
     fn window_first_corner(&self) -> Option<DVec3> {

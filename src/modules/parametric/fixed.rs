@@ -4,7 +4,7 @@
 //! click, the driver maps it to a `ParametricRef` and re-prompts on a miss,
 //! the way the reference does.
 
-use acadrust::{EntityType, Handle};
+use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, CoincidentPick};

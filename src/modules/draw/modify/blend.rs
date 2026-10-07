@@ -5,13 +5,13 @@
 //! first and second derivatives reproduce the source curves' tangent and
 //! geometric curvature (G2).
 
-use acadrust::entities::{EntityCommon, Spline};
-use cadkernel::space::curve as space_curve;
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Handle};
+use codec::entities::{EntityCommon, Spline};
+use kernel::space::curve as space_curve;
+use codec::types::Vector3;
+use codec::{EntityType, Handle};
 use glam::DVec3;
 use crate::t;
-use cadkernel::space::NurbsCurve3;
+use kernel::space::NurbsCurve3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult};
 use crate::entities::common::BulgeArc;
@@ -447,7 +447,7 @@ fn polyline_endpoint(points: &[DVec3], click: DVec3) -> Option<EndpointFrame> {
     }
 }
 
-fn arc_endpoint(arc: &acadrust::entities::Arc, click: DVec3) -> Option<EndpointFrame> {
+fn arc_endpoint(arc: &codec::entities::Arc, click: DVec3) -> Option<EndpointFrame> {
     if arc.radius <= EPS {
         return None;
     }
@@ -479,7 +479,7 @@ fn arc_endpoint(arc: &acadrust::entities::Arc, click: DVec3) -> Option<EndpointF
     })
 }
 
-fn lw_point(poly: &acadrust::entities::LwPolyline, index: usize) -> DVec3 {
+fn lw_point(poly: &codec::entities::LwPolyline, index: usize) -> DVec3 {
     let normal = to_dvec(poly.normal).normalize_or_zero();
     let p = poly.vertices[index].location;
     ocs_to_dvec(p.x, p.y, poly.elevation, normal)

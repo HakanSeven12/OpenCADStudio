@@ -4161,7 +4161,9 @@ impl OpenCADStudio {
             Message::ToggleGraphicAttributes => {
                 self.show_graphic_attributes ^= true;
                 self.ribbon.set_graphic_attributes(self.show_graphic_attributes);
-                if !self.show_graphic_attributes {
+                if self.show_graphic_attributes {
+                    self.dock.dock_below_properties(crate::ui::dock::PanelId::GraphicAttributes);
+                } else {
                     self.graphic_attributes.close_popups();
                 }
                 self.save_config();

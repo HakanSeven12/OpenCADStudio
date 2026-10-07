@@ -6,15 +6,16 @@ use crate::app::{ColorPickTarget, Message};
 use crate::scene::Scene;
 use crate::ui::dock::{DockMsg, PanelId};
 use crate::ui::window::gradient_editor::{GradientEditorState, GradientMsg};
-use acadrust::entities::{EntityCommon, Hatch};
+use acadrust::entities::{EntityCommon, Hatch, HatchGradientPattern};
 use acadrust::types::{Color as AcadColor, LineWeight, Transparency};
 use acadrust::{CadDocument, EntityType, Handle};
 use iced::widget::{
-    button, column, combo_box, container, mouse_area, row, slider, text, text_input, tooltip,
+    button, image, column, combo_box, container, mouse_area, row, slider, text, text_input, tooltip,
     Space,
 };
 use iced::{Background, Border, Element, Fill, Length, Padding, Theme};
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::cell::RefCell;
 
 type DrawDepth = FxHashMap<u64, [f32; 2]>;
 
@@ -101,6 +102,8 @@ pub enum GraphicAttributesMsg {
     SetAllByBlock,
     RemoveReferences,
     CreateLayer,
+    /// Put new fills on the current layer instead of their object's layer.
+    ToggleFillOnCurrentLayer,
     Fill(GraphicAttribute),
     LineColor(AcadColor),
     LineLinetype(String),
@@ -145,6 +148,12 @@ pub struct GraphicAttributesState {
     pub hatch_editor: Option<HatchEditorState>,
     pub gradient_editor: Option<GradientEditorState>,
     pub pending_fill_close: Option<PendingFillClose>,
+    /// New fills go to the current layer instead of their object's layer.
+    pub fill_on_current_layer: bool,
+    /// View-side caches; `view` runs after every message, so neither the
+    /// fill lookup nor the gradient preview is rebuilt unless its input changed.
+    fill_index: RefCell<Option<((usize, u64), FillIndex)>>,
+    gradient_preview: RefCell<Option<(HatchGradientPattern, Option<image::Handle>)>>,
 }
 
 impl GraphicAttributesState {
@@ -152,6 +161,36 @@ impl GraphicAttributesState {
         self.open_menu = None;
         self.hatch_editor = None;
         self.gradient_editor = None;
+    }
+
+    /// The fills and fill kind of `selected`, from an index of associative
+    /// fills that is rebuilt only when the scene's geometry changes.
+    pub(crate) fn fills(&self, scene: &Scene, selected: &[Handle]) -> (Vec<Handle>, GraphicAttribute) {
+        let key = (std::ptr::from_ref(scene) as usize, scene.geometry_epoch);
+        let mut cache = self.fill_index.borrow_mut();
+        if cache.as_ref().is_none_or(|(cached, _)| *cached != key) {
+            *cache = Some((key, FillIndex::build(&scene.document)));
+        }
+        let index = &cache.as_ref().expect("fill index was just built").1;
+        (
+            index.fill_handles(&scene.document, selected),
+            index.current(&scene.document, selected),
+        )
+    }
+
+    fn gradient_preview(&self, hatch: &Hatch) -> Element<'static, Message> {
+        let mut cache = self.gradient_preview.borrow_mut();
+        if cache
+            .as_ref()
+            .is_none_or(|(gradient, _)| *gradient != hatch.gradient_color)
+        {
+            *cache = Some((
+                hatch.gradient_color.clone(),
+                crate::ui::window::gradient_editor::compact_preview(hatch),
+            ));
+        }
+        let handle = cache.as_ref().and_then(|(_, handle)| handle.clone());
+        crate::ui::window::gradient_editor::preview_image(handle)
     }
 
     /// Whether a flyout or question is bound to the selection it was opened for.
@@ -190,62 +229,91 @@ impl GraphicAttributesState {
     }
 }
 
-/// The fill kind of each selected object: its own kind for a selected HATCH,
-/// otherwise the kind of the associative HATCH it bounds.
-pub(crate) fn current(document: &CadDocument, selected: &[Handle]) -> GraphicAttribute {
-    // Scan the document once, rather than once per selected object on every frame.
-    let mut fills: FxHashMap<Handle, Option<GraphicAttribute>> =
-        selected.iter().map(|handle| (*handle, None)).collect();
-    for entity in document.entities() {
-        let EntityType::Hatch(hatch) = entity else {
-            continue;
-        };
-        let value = GraphicAttribute::of(hatch);
-        if let Some(fill) = fills.get_mut(&entity.common().handle) {
-            fill.get_or_insert(value);
-        }
-        if !hatch.is_associative {
-            continue;
-        }
-        for handle in hatch.paths.iter().flat_map(|path| &path.boundary_handles) {
-            if let Some(fill) = fills.get_mut(handle) {
-                fill.get_or_insert(value);
+/// Associative HATCH entities per boundary object, in document order.
+#[derive(Debug, Default)]
+pub(crate) struct FillIndex {
+    by_boundary: FxHashMap<Handle, Vec<Handle>>,
+}
+
+impl FillIndex {
+    pub(crate) fn build(document: &CadDocument) -> Self {
+        let mut by_boundary: FxHashMap<Handle, Vec<Handle>> = FxHashMap::default();
+        for entity in document.entities() {
+            let EntityType::Hatch(hatch) = entity else {
+                continue;
+            };
+            if !hatch.is_associative {
+                continue;
+            }
+            for boundary in hatch.paths.iter().flat_map(|path| &path.boundary_handles) {
+                let fills = by_boundary.entry(*boundary).or_default();
+                if !fills.contains(&hatch.common.handle) {
+                    fills.push(hatch.common.handle);
+                }
             }
         }
+        Self { by_boundary }
     }
-    let Some((&first, rest)) = selected.split_first() else {
-        return GraphicAttribute::None;
-    };
-    let first = fills[&first].unwrap_or(GraphicAttribute::None);
-    if rest
-        .iter()
-        .any(|handle| fills[handle].unwrap_or(GraphicAttribute::None) != first)
-    {
-        GraphicAttribute::Varies
-    } else {
-        first
+
+    /// The fill kind of each selected object: its own kind for a selected
+    /// HATCH, otherwise the kind of the first associative HATCH it bounds.
+    pub(crate) fn current(&self, document: &CadDocument, selected: &[Handle]) -> GraphicAttribute {
+        let fill_of = |handle: &Handle| {
+            let own = match document.get_entity(*handle) {
+                Some(EntityType::Hatch(hatch)) => return GraphicAttribute::of(hatch),
+                _ => None,
+            };
+            own.or_else(|| {
+                self.by_boundary.get(handle)?.iter().find_map(|fill| {
+                    match document.get_entity(*fill)? {
+                        EntityType::Hatch(hatch) => Some(GraphicAttribute::of(hatch)),
+                        _ => None,
+                    }
+                })
+            })
+            .unwrap_or(GraphicAttribute::None)
+        };
+        let Some((first, rest)) = selected.split_first() else {
+            return GraphicAttribute::None;
+        };
+        let first = fill_of(first);
+        if rest.iter().any(|handle| fill_of(handle) != first) {
+            GraphicAttribute::Varies
+        } else {
+            first
+        }
+    }
+
+    /// HATCH entities that are selected or associated with a selected boundary.
+    pub(crate) fn fill_handles(&self, document: &CadDocument, selected: &[Handle]) -> Vec<Handle> {
+        let mut seen = FxHashSet::default();
+        let mut fills = Vec::new();
+        for handle in selected {
+            if matches!(document.get_entity(*handle), Some(EntityType::Hatch(_)))
+                && seen.insert(*handle)
+            {
+                fills.push(*handle);
+            }
+            for fill in self.by_boundary.get(handle).into_iter().flatten() {
+                if document.get_entity(*fill).is_some() && seen.insert(*fill) {
+                    fills.push(*fill);
+                }
+            }
+        }
+        fills
     }
 }
 
+/// The fill kind of the selection; see [`FillIndex::current`].
+#[cfg(test)]
+pub(crate) fn current(document: &CadDocument, selected: &[Handle]) -> GraphicAttribute {
+    FillIndex::build(document).current(document, selected)
+}
+
 /// HATCH entities that are selected or associated with a selected boundary.
+/// Scans the whole drawing; the palette view uses its cached [`FillIndex`].
 pub(crate) fn fill_handles(document: &CadDocument, selected: &[Handle]) -> Vec<Handle> {
-    let selected: FxHashSet<_> = selected.iter().copied().collect();
-    document
-        .entities()
-        .filter_map(|entity| {
-            let EntityType::Hatch(hatch) = entity else {
-                return None;
-            };
-            let directly_selected = selected.contains(&entity.common().handle);
-            let selected_boundary = hatch.is_associative
-                && hatch
-                    .paths
-                    .iter()
-                    .flat_map(|path| &path.boundary_handles)
-                    .any(|handle| selected.contains(handle));
-            (directly_selected || selected_boundary).then_some(entity.common().handle)
-        })
-        .collect()
+    FillIndex::build(document).fill_handles(document, selected)
 }
 
 /// Selected non-HATCH objects plus the boundaries of selected associative
@@ -717,7 +785,7 @@ fn transparency_control<'a>(
     row![control, more].spacing(4).align_y(iced::Center).into()
 }
 
-fn header_menu(side: DockSide, open: bool) -> Element<'static, Message> {
+fn header_menu(side: DockSide, open: bool, fill_on_current_layer: bool) -> Element<'static, Message> {
     let menu_button = button(crate::ui::icons::themed_secondary(
         crate::ui::icons::MENU,
         12.0,
@@ -747,6 +815,14 @@ fn header_menu(side: DockSide, open: bool) -> Element<'static, Message> {
         item("Set all attributes ByBlock", GraphicAttributesMsg::SetAllByBlock),
         item("Remove ByLayer / ByBlock", GraphicAttributesMsg::RemoveReferences),
         item("Create Layer with active settings", GraphicAttributesMsg::CreateLayer),
+        container(
+            iced::widget::checkbox(fill_on_current_layer)
+                .label("Create fills on the current layer")
+                .on_toggle(|_| msg(GraphicAttributesMsg::ToggleFillOnCurrentLayer))
+                .size(12)
+                .text_size(11),
+        )
+        .padding([4, 8]),
     ])
     .style(crate::ui::color_select::popup_panel_style)
     .padding(2);
@@ -759,7 +835,12 @@ fn header_menu(side: DockSide, open: bool) -> Element<'static, Message> {
         .into()
 }
 
-fn header<'a>(side: DockSide, auto_collapse: bool, menu_open: bool) -> Element<'a, Message> {
+fn header<'a>(
+    side: DockSide,
+    auto_collapse: bool,
+    menu_open: bool,
+    fill_on_current_layer: bool,
+) -> Element<'a, Message> {
     let pin_icon = if auto_collapse {
         crate::ui::icons::themed_primary_weak_text(crate::ui::icons::PIN, 12.0)
     } else {
@@ -785,7 +866,7 @@ fn header<'a>(side: DockSide, auto_collapse: bool, menu_open: bool) -> Element<'
             row![
                 text(crate::t!("Graphic Attributes")).size(12),
                 Space::new().width(Fill),
-                header_menu(side, menu_open),
+                header_menu(side, menu_open, fill_on_current_layer),
                 pin,
                 close
             ]
@@ -1202,7 +1283,7 @@ pub fn view<'a>(
     let draw_depth = draw_depth.as_ref();
     let open_menu = state.open_menu;
     let line_handles = line_handles(document, &selected);
-    let fill_handles = fill_handles(document, &selected);
+    let (fill_handles, current) = state.fills(scene, &selected);
 
     let mut body = column![text(crate::t!("Line")).size(11)].spacing(6);
     body = body.extend(line_section(
@@ -1215,7 +1296,6 @@ pub fn view<'a>(
         open_menu,
     ));
 
-    let current = current(document, &selected);
     body = body
         .push(Space::new().height(2))
         .push(text(crate::t!("Fill")).size(11))
@@ -1279,7 +1359,7 @@ pub fn view<'a>(
         }
         GraphicAttribute::Gradient => {
             if let Some(hatch) = top_fill_hatch(document, &fill_handles, draw_depth, current) {
-                let preview = crate::ui::window::gradient_editor::compact_preview(hatch);
+                let preview = state.gradient_preview(hatch);
                 let preview = if gradients_vary(document, &fill_handles) {
                     iced::widget::stack![
                         preview,
@@ -1331,7 +1411,12 @@ pub fn view<'a>(
     }
 
     container(column![
-        header(side, auto_collapse, open_menu == Some(Menu::Header)),
+        header(
+            side,
+            auto_collapse,
+            open_menu == Some(Menu::Header),
+            state.fill_on_current_layer
+        ),
         body.padding(8)
     ])
     .width(Length::Fixed(width))

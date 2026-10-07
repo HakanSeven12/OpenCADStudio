@@ -233,6 +233,11 @@ impl OpenCADStudio {
             M::SetAllByLayer => self.on_graphic_attributes_set_all(true),
             M::SetAllByBlock => self.on_graphic_attributes_set_all(false),
             M::RemoveReferences => self.on_graphic_attributes_remove_references(),
+            M::ToggleFillOnCurrentLayer => {
+                self.graphic_attributes.fill_on_current_layer ^= true;
+                self.save_config();
+                Task::none()
+            }
             M::CreateLayer => {
                 use crate::command::CadCommand;
                 let command = crate::command::FreeTextValuePromptCommand::new(
@@ -668,11 +673,12 @@ impl OpenCADStudio {
                 .iter()
                 .copied()
                 .filter(|handle| {
-                    self.tabs[i]
-                        .scene
-                        .document
-                        .get_entity(*handle)
-                        .is_some_and(is_open_fill_boundary)
+                    !self.tabs[i].scene.is_layer_locked(*handle)
+                        && self.tabs[i]
+                            .scene
+                            .document
+                            .get_entity(*handle)
+                            .is_some_and(is_open_fill_boundary)
                 })
                 .collect();
             if !open_boundaries.is_empty() {
@@ -712,6 +718,19 @@ impl OpenCADStudio {
         selected: &[Handle],
         to_close: &[Handle],
     ) -> Task<Message> {
+        let (selected, locked): (Vec<Handle>, Vec<Handle>) = selected
+            .iter()
+            .partition(|handle| !self.tabs[i].scene.is_layer_locked(**handle));
+        if !locked.is_empty() {
+            self.command_line.push_info(
+                crate::tf!(
+                    "Graphic Attributes: {} object(s) on a locked layer were not changed.",
+                    locked.len()
+                )
+                .as_ref(),
+            );
+        }
+        let selected = selected.as_slice();
         let pending = self.begin_undo(i, "Graphic Attributes", selected.len(), true);
         let mut changed = false;
         for handle in to_close {
@@ -809,7 +828,12 @@ impl OpenCADStudio {
                 .with_origin(origin)
                 .with_pattern(name.clone(), pattern.clone());
                 if let crate::command::CmdResult::CommitHatch(hatch) = command.finish_selected() {
-                    new_hatches.push(hatch);
+                    let layer = if self.graphic_attributes.fill_on_current_layer {
+                        self.tabs[i].active_layer.clone()
+                    } else {
+                        entity.common().layer.clone()
+                    };
+                    new_hatches.push((hatch, layer));
                     changed_boundaries.insert(*handle);
                 } else if !is_open_fill_boundary(entity) {
                     // Open boundaries the user chose not to close are expected
@@ -861,8 +885,7 @@ impl OpenCADStudio {
         for entity in updated_hatches {
             self.tabs[i].scene.update_entity(entity);
         }
-        let layer = self.tabs[i].active_layer.clone();
-        for hatch in new_hatches {
+        for (hatch, layer) in new_hatches {
             self.tabs[i].scene.add_hatch(hatch, Some(&layer), None);
         }
         true
@@ -1689,5 +1712,108 @@ mod tests {
         assert!(!app.show_graphic_attributes);
         assert!(!app.ribbon.show_graphic_attributes);
         assert!(!app.current_config().show_graphic_attributes);
+    }
+
+    fn closed_square_on(app: &mut OpenCADStudio, layer: &str) -> Handle {
+        let i = app.active_tab;
+        if app.tabs[i].scene.document.layers.get(layer).is_none() {
+            let mut new_layer = acadrust::tables::Layer::new(layer);
+            new_layer.handle = app.tabs[i].scene.document.allocate_handle();
+            let _ = app.tabs[i].scene.document.layers.add(new_layer);
+        }
+        let handle = open_square(app);
+        if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+            if let EntityType::LwPolyline(polyline) = entity {
+                polyline.is_closed = true;
+            }
+            entity.common_mut().layer = layer.to_string();
+        }
+        handle
+    }
+
+    fn fill_layers(app: &OpenCADStudio) -> Vec<String> {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                EntityType::Hatch(hatch) => Some(hatch.common.layer.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn new_fills_follow_the_object_layer_unless_the_menu_option_is_set() {
+        let mut app = fresh();
+        closed_square_on(&mut app, "Walls");
+        let _ = app.update(ga(GraphicAttributesMsg::Fill(GraphicAttribute::Solid)));
+        assert_eq!(fill_layers(&app), vec!["Walls".to_string()]);
+
+        let mut app = fresh();
+        let current = app.tabs[app.active_tab].active_layer.clone();
+        closed_square_on(&mut app, "Walls");
+        let _ = app.update(ga(GraphicAttributesMsg::ToggleFillOnCurrentLayer));
+        assert!(app.current_config().graphic_fills_on_current_layer);
+        let _ = app.update(ga(GraphicAttributesMsg::Fill(GraphicAttribute::Solid)));
+        assert_eq!(fill_layers(&app), vec![current]);
+    }
+
+    #[test]
+    fn objects_on_locked_layers_get_no_fill() {
+        let mut app = fresh();
+        let i = app.active_tab;
+        closed_square_on(&mut app, "Locked");
+        closed_square_on(&mut app, "Open");
+        app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get_mut("Locked")
+            .expect("locked layer")
+            .lock();
+        let _ = app.update(ga(GraphicAttributesMsg::Fill(GraphicAttribute::Solid)));
+        assert_eq!(fill_layers(&app), vec!["Open".to_string()]);
+    }
+
+    #[test]
+    fn palette_fill_lookup_follows_document_changes() {
+        let mut app = fresh();
+        let i = app.active_tab;
+        let boundary = closed_square_on(&mut app, "0");
+        let selected = vec![boundary];
+        let (fills, kind) = app.graphic_attributes.fills(&app.tabs[i].scene, &selected);
+        assert!(fills.is_empty());
+        assert_eq!(kind, GraphicAttribute::None);
+
+        let _ = app.update(ga(GraphicAttributesMsg::Fill(GraphicAttribute::Solid)));
+        let (fills, kind) = app.graphic_attributes.fills(&app.tabs[i].scene, &selected);
+        assert_eq!(fills.len(), 1);
+        assert_eq!(kind, GraphicAttribute::Solid);
+    }
+
+    #[test]
+    fn showing_the_palette_docks_it_below_properties_once() {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::PanelId;
+        let mut app = OpenCADStudio::new_for_test();
+        app.apply_config(crate::app::config::AppConfig::default());
+        assert_eq!(app.dock.location(PanelId::GraphicAttributes), None);
+
+        let _ = app.update(Message::ToggleGraphicAttributes);
+        let properties = app.dock.location(PanelId::Properties).expect("properties docked");
+        assert_eq!(
+            app.dock.location(PanelId::GraphicAttributes),
+            Some((properties.0, properties.1 + 1))
+        );
+
+        // A place the user chose is kept when the palette is shown again.
+        app.dock.dock(PanelId::GraphicAttributes, DockSide::Right, 0);
+        let _ = app.update(Message::ToggleGraphicAttributes);
+        let _ = app.update(Message::ToggleGraphicAttributes);
+        assert_eq!(
+            app.dock.location(PanelId::GraphicAttributes),
+            Some((DockSide::Right, 0))
+        );
     }
 }

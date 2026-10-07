@@ -123,7 +123,7 @@ pub struct DockState {
 impl Default for DockState {
     fn default() -> Self {
         Self {
-            left: vec![PanelId::Properties, PanelId::GraphicAttributes],
+            left: vec![PanelId::Properties],
             right: vec![PanelId::BlockPalette],
             panels: BTreeMap::new(),
         }
@@ -159,13 +159,18 @@ impl DockState {
         ] {
             self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
         }
-        if self.location(PanelId::GraphicAttributes).is_none() {
-            if let Some((side, index)) = self.location(PanelId::Properties) {
-                self.stack_mut(side).insert(index + 1, PanelId::GraphicAttributes);
-            } else {
-                self.left.push(PanelId::GraphicAttributes);
-            }
+    }
+
+    /// Dock `id` directly below Properties (or at the end of the left edge)
+    /// unless it already has a place, which is then kept.
+    pub fn dock_below_properties(&mut self, id: PanelId) {
+        if self.location(id).is_some() {
+            return;
         }
+        let (side, index) = self
+            .location(PanelId::Properties)
+            .map_or((DockSide::Left, usize::MAX), |(side, index)| (side, index + 1));
+        self.dock(id, side, index);
     }
 
     /// Where (if anywhere) a panel is currently docked.
@@ -274,10 +279,6 @@ mod tests {
         let state = DockState::default();
         assert_eq!(state.location(PanelId::Properties), Some((DockSide::Left, 0)));
         assert_eq!(
-            state.location(PanelId::GraphicAttributes),
-            Some((DockSide::Left, 1))
-        );
-        assert_eq!(
             state.location(PanelId::BlockPalette),
             Some((DockSide::Right, 0))
         );
@@ -302,7 +303,7 @@ mod tests {
             Some((DockSide::Right, 0))
         );
         // It no longer occupies the left edge.
-        assert_eq!(state.left, vec![PanelId::GraphicAttributes]);
+        assert!(state.left.is_empty());
         assert_eq!(state.right.len(), 2);
     }
 

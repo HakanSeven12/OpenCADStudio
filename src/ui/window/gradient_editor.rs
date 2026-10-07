@@ -27,7 +27,11 @@ pub struct GradientEditorState {
     pub inverted: bool,
     pub angle: String,
     pub centered: bool,
+    /// Large preview, rebuilt only when a setting it depends on changes.
+    preview: std::cell::RefCell<Option<(PreviewKey, Option<iced::widget::image::Handle>)>>,
 }
+
+type PreviewKey = (GradientColorMode, AcadColor, AcadColor, u32, GradientKind, bool, String, bool);
 
 #[derive(Debug, Clone)]
 pub enum GradientMsg {
@@ -77,6 +81,7 @@ impl GradientEditorState {
             inverted,
             angle: format!("{:.1}°", hatch.gradient_color.angle.to_degrees()),
             centered: hatch.gradient_color.shift.abs() < 1e-9,
+            preview: Default::default(),
         }
     }
 
@@ -191,18 +196,30 @@ fn preview_sized(
 }
 
 fn preview(state: &GradientEditorState) -> Element<'static, Message> {
-    preview_image(preview_sized(state, 370, 80))
+    let key: PreviewKey = (
+        state.color_mode,
+        state.color_1,
+        state.color_2,
+        state.shade_tint.to_bits(),
+        state.kind,
+        state.inverted,
+        state.angle.clone(),
+        state.centered,
+    );
+    let mut cache = state.preview.borrow_mut();
+    if cache.as_ref().is_none_or(|(cached, _)| *cached != key) {
+        *cache = Some((key, preview_sized(state, 370, 80)));
+    }
+    preview_image(cache.as_ref().and_then(|(_, handle)| handle.clone()))
 }
 
-pub(crate) fn compact_preview(hatch: &acadrust::entities::Hatch) -> Element<'static, Message> {
-    preview_image(preview_sized(
-        &GradientEditorState::from_hatch(Vec::new(), hatch),
-        256,
-        26,
-    ))
+pub(crate) fn compact_preview(
+    hatch: &acadrust::entities::Hatch,
+) -> Option<iced::widget::image::Handle> {
+    preview_sized(&GradientEditorState::from_hatch(Vec::new(), hatch), 256, 26)
 }
 
-fn preview_image(handle: Option<iced::widget::image::Handle>) -> Element<'static, Message> {
+pub(crate) fn preview_image(handle: Option<iced::widget::image::Handle>) -> Element<'static, Message> {
     match handle {
         Some(handle) => image(handle)
             .width(Fill)

@@ -6477,31 +6477,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::RibbonLinetypeChanged(lt) => self.on_ribbon_linetype_changed(lt),
-            Message::RibbonLineweightChanged(lw) => {
-                let i = self.active_tab;
-                self.ribbon.close_dropdown();
-                let handles = self.property_target_handles(i);
-                if handles.is_empty() {
-                    if self.has_property_selection(i) {
-                        return Task::none();
-                    }
-                    // Persist into the tab's header (CELWEIGHT). #21.
-                    self.tabs[i].scene.document.header.current_line_weight = lw.value();
-                    self.tabs[i].dirty = true;
-                    self.ribbon.active_lineweight = lw;
-                } else {
-                    // Lineweight is baked into the cached wire geometry —
-                    // re-tessellate so the change shows immediately (issue #231
-                    // class).
-                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                        if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::view::dispatch::apply_line_weight(entity, lw);
-                        }
-                    });
-                    self.ribbon.active_lineweight = lw;
-                }
-                Task::none()
-            }
+            Message::RibbonLineweightChanged(lw) => self.on_ribbon_lineweight_changed(lw),
 
             Message::RibbonStyleChanged { key, name } => self.on_ribbon_style_changed(key, name),
 

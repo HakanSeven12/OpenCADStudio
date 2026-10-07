@@ -71,12 +71,12 @@ impl GraphicAttribute {
 
 impl std::fmt::Display for GraphicAttribute {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Varies => "*VARIES*",
-            Self::None => "None",
-            Self::Solid => "Solid",
-            Self::Hatch => "Hatch",
-            Self::Gradient => "Gradient",
+        f.write_str(&match self {
+            Self::Varies => "*VARIES*".into(),
+            Self::None => crate::t!("None"),
+            Self::Solid => crate::t!("Solid"),
+            Self::Hatch => crate::t!("Hatch"),
+            Self::Gradient => crate::t!("Gradient"),
         })
     }
 }
@@ -152,7 +152,7 @@ pub struct GraphicAttributesState {
     pub fill_on_current_layer: bool,
     /// View-side caches; `view` runs after every message, so neither the
     /// fill lookup nor the gradient preview is rebuilt unless its input changed.
-    fill_index: RefCell<Option<((usize, u64), FillIndex)>>,
+    fill_index: RefCell<Option<(u64, FillIndex)>>,
     gradient_preview: RefCell<Option<(HatchGradientPattern, Option<image::Handle>)>>,
 }
 
@@ -166,7 +166,9 @@ impl GraphicAttributesState {
     /// The fills and fill kind of `selected`, from an index of associative
     /// fills that is rebuilt only when the scene's geometry changes.
     pub(crate) fn fills(&self, scene: &Scene, selected: &[Handle]) -> (Vec<Handle>, GraphicAttribute) {
-        let key = (std::ptr::from_ref(scene) as usize, scene.geometry_epoch);
+        // Geometry epochs are unique across all scenes, so the epoch alone
+        // identifies both the tab and the state of its drawing.
+        let key = scene.geometry_epoch;
         let mut cache = self.fill_index.borrow_mut();
         if cache.as_ref().is_none_or(|(cached, _)| *cached != key) {
             *cache = Some((key, FillIndex::build(&scene.document)));
@@ -219,12 +221,13 @@ impl GraphicAttributesState {
     pub fn fill_close_prompt(&self) -> Option<String> {
         let count = self.pending_fill_close.as_ref()?.open_boundaries.len();
         Some(if count == 1 {
-            "The selected object is open. Close it before creating the fill? [Yes / No] <Yes>"
-                .to_string()
+            crate::t!("The selected object is open. Close it before creating the fill? [Yes / No] <Yes>")
+                .into_owned()
         } else {
-            format!(
+            crate::tf!(
                 "{count} selected objects are open. Close them before creating the fill? [Yes / No] <Yes>"
             )
+            .into_owned()
         })
     }
 }
@@ -634,7 +637,7 @@ fn compact_button_content(label: &'static str) -> Element<'static, Message> {
         .into()
 }
 
-fn popup_item<'a>(label: &'a str, message: Message) -> Element<'a, Message> {
+fn popup_item<'a>(label: std::borrow::Cow<'a, str>, message: Message) -> Element<'a, Message> {
     button(text(label).size(11))
         .on_press(message)
         .style(crate::ui::color_select::list_row_style)
@@ -650,7 +653,7 @@ fn mode_menu<'a>(
     menu: Menu,
     open_menu: Option<Menu>,
     height: f32,
-    items: Vec<(&'a str, Message)>,
+    items: Vec<(std::borrow::Cow<'a, str>, Message)>,
 ) -> Element<'a, Message> {
     let open = open_menu == Some(menu);
     let more = button(compact_button_content(mode.button_label()))
@@ -738,9 +741,9 @@ fn color_control<'a>(
         open_menu,
         COMPACT_BUTTON_HEIGHT,
         vec![
-            ("ByLayer", msg(changed(AcadColor::ByLayer))),
-            ("ByBlock", msg(changed(AcadColor::ByBlock))),
-            ("Custom...", Message::OpenColorWindow(target, info.color)),
+            ("ByLayer".into(), msg(changed(AcadColor::ByLayer))),
+            ("ByBlock".into(), msg(changed(AcadColor::ByBlock))),
+            (crate::t!("Custom…"), Message::OpenColorWindow(target, info.color)),
         ],
     );
     row![swatch, more].spacing(4).align_y(iced::Center).into()
@@ -777,9 +780,9 @@ fn transparency_control<'a>(
         open_menu,
         crate::ui::ROW_H,
         vec![
-            ("ByLayer", msg(changed(Transparency::BY_LAYER))),
-            ("ByBlock", msg(changed(Transparency::BY_BLOCK))),
-            ("Custom", msg(changed(percent(info.value)))),
+            ("ByLayer".into(), msg(changed(Transparency::BY_LAYER))),
+            ("ByBlock".into(), msg(changed(Transparency::BY_BLOCK))),
+            (crate::t!("Custom"), msg(changed(percent(info.value)))),
         ],
     );
     row![control, more].spacing(4).align_y(iced::Center).into()
@@ -804,7 +807,7 @@ fn header_menu(side: DockSide, open: bool, fill_on_current_layer: bool) -> Eleme
     }
 
     let item = |label: &'static str, message| {
-        button(text(label).size(11))
+        button(text(crate::t!(label)).size(11))
             .on_press(msg(message))
             .style(crate::ui::color_select::list_row_style)
             .width(Fill)
@@ -817,7 +820,7 @@ fn header_menu(side: DockSide, open: bool, fill_on_current_layer: bool) -> Eleme
         item("Create Layer with active settings", GraphicAttributesMsg::CreateLayer),
         container(
             iced::widget::checkbox(fill_on_current_layer)
-                .label("Create fills on the current layer")
+                .label(crate::t!("Create fills on the current layer"))
                 .on_toggle(|_| msg(GraphicAttributesMsg::ToggleFillOnCurrentLayer))
                 .size(12)
                 .text_size(11),
@@ -952,7 +955,7 @@ fn preview_row<'a>(
     preview: Element<'a, Message>,
     editor_open: bool,
     toggle: GraphicAttributesMsg,
-    tooltip_label: &'static str,
+    tooltip_label: std::borrow::Cow<'static, str>,
     flyout: Option<(Element<'a, Message>, f32, Option<f32>)>,
     side: DockSide,
 ) -> Element<'a, Message> {
@@ -1054,8 +1057,8 @@ fn linetype_row<'a>(
         open_menu,
         COMPACT_BUTTON_HEIGHT,
         vec![
-            ("ByLayer", msg(GraphicAttributesMsg::LineLinetype("ByLayer".into()))),
-            ("ByBlock", msg(GraphicAttributesMsg::LineLinetype("ByBlock".into()))),
+            ("ByLayer".into(), msg(GraphicAttributesMsg::LineLinetype("ByLayer".into()))),
+            ("ByBlock".into(), msg(GraphicAttributesMsg::LineLinetype("ByBlock".into()))),
         ],
     );
     row![crate::ui::wide_menu::wide_menu(combo, 220.0), more]
@@ -1166,8 +1169,8 @@ fn lineweight_field<'a>(
         open_menu,
         COMPACT_BUTTON_HEIGHT,
         vec![
-            ("ByLayer", msg(GraphicAttributesMsg::LineLineweight(LineWeight::ByLayer))),
-            ("ByBlock", msg(GraphicAttributesMsg::LineLineweight(LineWeight::ByBlock))),
+            ("ByLayer".into(), msg(GraphicAttributesMsg::LineLineweight(LineWeight::ByLayer))),
+            ("ByBlock".into(), msg(GraphicAttributesMsg::LineLineweight(LineWeight::ByBlock))),
         ],
     );
     row![
@@ -1324,11 +1327,13 @@ pub fn view<'a>(
                     &editor.search,
                     editor.focus,
                     hatch.map_or("", |hatch| hatch.pattern.name.as_str()),
-                    "graphic-hatch-pattern-search",
-                    |search| msg(GraphicAttributesMsg::HatchPatternSearch(search)),
-                    msg(GraphicAttributesMsg::HatchPatternConfirm),
-                    |index| msg(GraphicAttributesMsg::HatchPatternFocus(index)),
-                    |name| msg(GraphicAttributesMsg::HatchPattern(name)),
+                    crate::ui::properties::PatternPickerMessages {
+                        search_id: "graphic-hatch-pattern-search",
+                        on_search: |search| msg(GraphicAttributesMsg::HatchPatternSearch(search)),
+                        on_confirm: msg(GraphicAttributesMsg::HatchPatternConfirm),
+                        on_focus: |index| msg(GraphicAttributesMsg::HatchPatternFocus(index)),
+                        on_changed: |name| msg(GraphicAttributesMsg::HatchPattern(name)),
+                    },
                 );
                 let popup = container(picker)
                     .padding(1)
@@ -1352,7 +1357,7 @@ pub fn view<'a>(
                 } else {
                     GraphicAttributesMsg::HatchEditorOpen
                 },
-                "Edit hatch",
+                crate::t!("Edit hatch"),
                 flyout,
                 side,
             ));
@@ -1390,7 +1395,7 @@ pub fn view<'a>(
                     } else {
                         GradientMsg::Open
                     }),
-                    "Edit gradient",
+                    crate::t!("Edit gradient"),
                     flyout,
                     side,
                 ));

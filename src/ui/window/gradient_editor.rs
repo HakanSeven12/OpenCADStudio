@@ -276,7 +276,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
                 }
             })
     };
-    let color_field = |label: &'static str, index, color: AcadColor| {
+    let color_field = |label: std::borrow::Cow<'static, str>, index, color: AcadColor| {
         let (background, _) = crate::ui::properties::acad_color_display(color);
         let value = crate::ui::color_select::color_display_name(color);
         let picker = button(
@@ -320,11 +320,11 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
             .width(Fill)
     };
     let kinds = [
-        (GradientKind::Linear, "Linear"),
-        (GradientKind::Cylinder, "Cyl."),
-        (GradientKind::Spherical, "Spher."),
-        (GradientKind::Hemispherical, "Hemi."),
-        (GradientKind::Curved, "Curved"),
+        (GradientKind::Linear, crate::t!("Linear")),
+        (GradientKind::Cylinder, crate::t!("Cyl.")),
+        (GradientKind::Spherical, crate::t!("Spher.")),
+        (GradientKind::Hemispherical, crate::t!("Hemi.")),
+        (GradientKind::Curved, crate::t!("Curved")),
     ];
     let mut type_row = row![].spacing(3);
     for (kind, label) in kinds {
@@ -357,7 +357,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
         ));
     }
     let invert_selected = state.inverted && state.kind != GradientKind::Linear;
-    let invert = button(column![text("⇄").size(18), text("Invert").size(9)].align_x(iced::Center))
+    let invert = button(column![text("⇄").size(18), text(crate::t!("Invert")).size(9)].align_x(iced::Center))
         .on_press_maybe(
             (state.kind != GradientKind::Linear).then(|| msg(GradientMsg::InvertToggled)),
         )
@@ -378,21 +378,21 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
         });
     type_row = type_row.push(separator).push(tooltip(
         invert,
-        text("Invert gradient").size(10),
+        text(crate::t!("Invert gradient")).size(10),
         tooltip::Position::Bottom,
     ));
     let colors: Element<'_, Message> = if state.color_mode == GradientColorMode::Two {
         row![
-            color_field("Color 1", 1, state.color_1),
-            color_field("Color 2", 2, state.color_2)
+            color_field(crate::t!("Color 1"), 1, state.color_1),
+            color_field(crate::t!("Color 2"), 2, state.color_2)
         ]
         .spacing(6)
         .into()
     } else {
         row![
-            color_field("Color 1", 1, state.color_1),
+            color_field(crate::t!("Color 1"), 1, state.color_1),
             row![
-                text("Tone").size(11).width(43),
+                text(crate::t!("Tone")).size(11).width(43),
                 slider(0..=100, (state.shade_tint * 100.0) as i32, |v| {
                     msg(GradientMsg::ShadeTint(v as f32 / 100.0))
                 })
@@ -408,7 +408,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
         .into()
     };
     let angle = row![
-        text("Angle").size(11).width(43),
+        text(crate::t!("Angle")).size(11).width(43),
         text_input("0.0°", &state.angle)
             .on_input(|value| msg(GradientMsg::Angle(value)))
             .size(11)
@@ -420,19 +420,19 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
                 .padding(3)
                 .width(24)
                 .height(crate::ui::ROW_H),
-            text("Reset angle").size(10),
+            text(crate::t!("Reset angle")).size(10),
             tooltip::Position::Bottom,
         ),
         Space::new().width(Fill),
         checkbox(state.centered)
-            .label("Centered")
+            .label(crate::t!("Centered"))
             .on_toggle(|value| msg(GradientMsg::Centered(value)))
             .size(14)
             .text_size(11)
     ]
     .spacing(6)
     .align_y(iced::Center);
-    let types = row![text("Type").size(11).width(43), type_row]
+    let types = row![text(crate::t!("Type")).size(11).width(43), type_row]
         .spacing(4)
         .align_y(iced::Center);
     let actions = container(
@@ -453,8 +453,8 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
     let content = column![
         container(preview(state)).width(Fill).height(80),
         row![
-            segment("One Color", GradientColorMode::One),
-            segment("Two Colors", GradientColorMode::Two)
+            segment(crate::t!("One Color"), GradientColorMode::One),
+            segment(crate::t!("Two Colors"), GradientColorMode::Two)
         ]
         .spacing(2),
         colors,

@@ -249,16 +249,29 @@ pub(crate) fn filtered_hatch_patterns(
         .collect()
 }
 
+/// Messages of a hatch pattern picker; the Properties panel and the Graphic
+/// Attributes palette each route them to their own state.
+pub(crate) struct PatternPickerMessages {
+    pub search_id: &'static str,
+    pub on_search: fn(String) -> Message,
+    pub on_confirm: Message,
+    pub on_focus: fn(usize) -> Message,
+    pub on_changed: fn(String) -> Message,
+}
+
 pub(crate) fn hatch_pattern_picker_content<'a>(
     search_value: &'a str,
     focus: usize,
     current: &'a str,
-    search_id: &'static str,
-    on_search: fn(String) -> Message,
-    on_confirm: Message,
-    on_focus: fn(usize) -> Message,
-    on_changed: fn(String) -> Message,
+    messages: PatternPickerMessages,
 ) -> Element<'a, Message> {
+    let PatternPickerMessages {
+        search_id,
+        on_search,
+        on_confirm,
+        on_focus,
+        on_changed,
+    } = messages;
     let search = text_input(t!("Search patterns…").as_ref(), search_value)
         .id(iced::widget::Id::new(search_id))
         .on_input(on_search)
@@ -1663,11 +1676,13 @@ impl PropertiesPanel {
             &self.hatch_pattern_search,
             self.hatch_pattern_focus,
             current,
-            "hatch-pattern-search",
-            Message::PropHatchPatternSearchChanged,
-            Message::PropHatchPatternConfirm,
-            Message::PropHatchPatternFocus,
-            Message::PropHatchPatternChanged,
+            PatternPickerMessages {
+                search_id: "hatch-pattern-search",
+                on_search: Message::PropHatchPatternSearchChanged,
+                on_confirm: Message::PropHatchPatternConfirm,
+                on_focus: Message::PropHatchPatternFocus,
+                on_changed: Message::PropHatchPatternChanged,
+            },
         );
 
         prop_row_widget(

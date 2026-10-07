@@ -362,8 +362,9 @@ impl HatchModel {
         self.pattern_segments_with_dot_length(Some(0.0))
     }
 
-    fn pattern_segments_with_dot_length(&self,
-        plot_dot_length: Option<f64>
+    fn pattern_segments_with_dot_length(
+        &self,
+        plot_dot_length: Option<f64>,
     ) -> Vec<[[f64; 2]; 2]> {
         let HatchPattern::Pattern(families) = &self.pattern else {
             return Vec::new();

@@ -2,7 +2,8 @@
 use super::*;
 
 impl Scene {
-    pub(super) fn paper_viewport_handles(&self
+    pub(super) fn paper_viewport_handles(
+        &self,
     ) -> (Handle, Handle, Arc<Vec<Handle>>) {
         {
             let cache = self.paper_viewport_cache.borrow();
@@ -11,7 +12,7 @@ impl Scene {
                     return (
                         cache.layout_block,
                         cache.sheet,
-                        Arc::clone(&cache.content)
+                        Arc::clone(&cache.content),
                     );
                 }
             }
@@ -122,8 +123,7 @@ impl Scene {
     ) -> Vec<ViewportInstance> {
         if self.current_layout == "Model" {
             let tiles = self.model_tiles.borrow();
-            let active = self.active_model_tile.get()
-                .min(tiles.len().saturating_sub(1));
+            let active = self.active_model_tile.get().min(tiles.len().saturating_sub(1));
             return tiles
                 .iter()
                 .enumerate()
@@ -298,7 +298,9 @@ impl Scene {
             hatches.push(sheet);
         }
         hatches.extend(
-            self.paper_canvas_hatches(tint_selected).iter().cloned()
+            self.paper_canvas_hatches(tint_selected)
+                .iter()
+                .cloned(),
         );
         let hatches = Arc::new(hatches);
         let wipeouts = self.paper_canvas_wipeouts();
@@ -375,8 +377,9 @@ impl Scene {
 
     /// Physical sheet bounds in canvas pixels. Uses the same forced top-down
     /// paper transform as the GPU sheet viewport, ignoring stored camera twist.
-    pub fn paper_sheet_screen_rect(&self,
-        canvas_px: (f32, f32)
+    pub fn paper_sheet_screen_rect(
+        &self,
+        canvas_px: (f32, f32),
     ) -> Option<iced::Rectangle> {
         let ((x0, y0), (x1, y1)) = self.paper_limits()?;
         let (canvas_w, canvas_h) = canvas_px;
@@ -474,13 +477,13 @@ impl Scene {
                     )
                     .is_some() =>
                 {
-                    Self::hatch_model_from_dxf(dxf, model.color).unwrap_or_else(|| model.clone())
+                    Self::hatch_model_from_dxf(dxf, model.color)
+                        .unwrap_or_else(|| model.clone())
                 }
                 _ => model.clone(),
             };
             let style = self.render_style(entity);
-            if matches!(
-            m.pattern, model::hatch_model::HatchPattern::Gradient { .. }) {
+            if matches!(m.pattern, model::hatch_model::HatchPattern::Gradient { .. }) {
                 m.set_alpha(style.0[3]);
             } else {
                 m.color = style.0;
@@ -601,15 +604,13 @@ impl Scene {
                     )
                     .is_some() =>
                 {
-                    Self::hatch_model_from_dxf(dxf, model.color).unwrap_or_else(|| model.clone())
+                    Self::hatch_model_from_dxf(dxf, model.color)
+                        .unwrap_or_else(|| model.clone())
                 }
                 _ => model.clone(),
             };
             let style = self.render_style(entity);
-            if matches!(
-            hatch.pattern,
-                model::hatch_model::HatchPattern::Gradient { .. }
-            ) {
+            if matches!(hatch.pattern, model::hatch_model::HatchPattern::Gradient { .. }) {
                 hatch.set_alpha(style.0[3]);
             } else {
                 hatch.color = style.0;
@@ -722,9 +723,9 @@ impl Scene {
         // from a big symbol library) has viewports legitimately aimed at that
         // second cluster; testing only the dense one wrongly auto-fits them onto
         // the library. Fall back to the cluster box when no extents are known.
-        let full_bounds = self.model_space_extents()
-            .map(|(mn, mx)|
-            (mn.x as f64, mn.y as f64, mx.x as f64, mx.y as f64));
+        let full_bounds = self.model_space_extents().map(|(mn, mx)| {
+            (mn.x as f64, mn.y as f64, mx.x as f64, mx.y as f64)
+        });
         // Absolute drawing centre. Geometry now reaches the scene at absolute
         // (UTM) coordinates — the old code centred the overlap test and the
         // auto-fit on the origin, which was right only while world_offset
@@ -741,8 +742,9 @@ impl Scene {
             (self.local_center[0], self.local_center[1])
         } else {
             self.model_space_extents()
-                .map(|(mn, mx)|
-                    (((mn.x + mx.x) * 0.5) as f64, ((mn.y + mx.y) * 0.5) as f64))
+                .map(|(mn, mx)| {
+                    (((mn.x + mx.x) * 0.5) as f64, ((mn.y + mx.y) * 0.5) as f64)
+                })
                 .unwrap_or((0.0, 0.0))
         };
 

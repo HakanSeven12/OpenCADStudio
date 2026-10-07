@@ -95,6 +95,7 @@ mod context_menu;
 mod dialog;
 mod dynamic;
 mod file;
+mod graphic_attributes;
 mod page_setup_import;
 mod style;
 pub(in crate::app) mod util;
@@ -331,7 +332,8 @@ impl OpenCADStudio {
             {
                 // Esc backs out of a pending ALIASEDIT draft first, mirroring
                 // the shortcut editor's capture cancel; the next Esc closes.
-                if self.active_modal == Some(super::ModalKind::Aliases) && self.alias_pending_add {
+                if self.active_modal == Some(super::ModalKind::Aliases) && self.alias_pending_add
+                {
                     return self.update(Message::AliasEditorDraftCancel);
                 }
                 if self.active_modal == Some(super::ModalKind::BlockDefinition) {
@@ -393,12 +395,9 @@ impl OpenCADStudio {
         // a mouse move included — without allocating.
         #[cfg(not(target_arch = "wasm32"))]
         let active_command = |app: &Self| -> Option<(u64, Option<&'static str>)> {
-            app.tabs.get(app.active_tab).map(|tab| {
-                (
-                    tab.id,
-                    tab.active_cmd.as_ref().map(|command| command.name()),
-                )
-            })
+            app.tabs
+                .get(app.active_tab)
+                .map(|tab| (tab.id, tab.active_cmd.as_ref().map(|command| command.name())))
         };
         #[cfg(not(target_arch = "wasm32"))]
         let command_before = active_command(self);
@@ -416,33 +415,9 @@ impl OpenCADStudio {
             }
         }
         self.refresh_gpu_status();
-        if self.gradient_editor.as_ref().is_some_and(|editor| {
+        if self.graphic_attributes.tracks_selection() {
             let selected = self.tabs[self.active_tab].scene.selected_handles_in_order();
-            selected.len() != editor.handles.len()
-                || selected
-                    .iter()
-                    .any(|handle| !editor.handles.contains(handle))
-        }) {
-            self.gradient_editor = None;
-        }
-        if self.hatch_editor_handles.as_ref().is_some_and(|handles| {
-            let selected = self.tabs[self.active_tab].scene.selected_handles_in_order();
-            selected.len() != handles.len()
-                || selected.iter().any(|handle| !handles.contains(handle))
-        }) {
-            self.hatch_editor_handles = None;
-        }
-        if self
-            .pending_graphic_fill_close
-            .as_ref()
-            .is_some_and(|(_, _, handles)| {
-                let selected =
-                    self.tabs[self.active_tab].scene.selected_handles_in_order();
-                selected.len() != handles.len()
-                    || selected.iter().any(|handle| !handles.contains(handle))
-            })
-        {
-            self.pending_graphic_fill_close = None;
+            self.graphic_attributes.retain_selection(&selected);
         }
         self.show_next_startup_modal();
         self.sync_open_command_history();
@@ -457,19 +432,7 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .map(|c| c.prompt())
-            .or_else(|| {
-                self.pending_graphic_fill_close.as_ref().map(|(_, handles, _)| {
-                    if handles.len() == 1 {
-                        "The selected object is open. Close it before creating the fill? [Yes / No]"
-                            .to_string()
-                    } else {
-                        format!(
-                            "{} selected objects are open. Close them before creating the fill? [Yes / No]",
-                            handles.len()
-                        )
-                    }
-                })
-            })
+            .or_else(|| self.graphic_attributes.fill_close_prompt())
             .or_else(|| self.pending_pick_label());
         self.command_line.set_step_prompt(prompt);
         // Mirror the step's clickable options so they render as buttons (#304).
@@ -478,7 +441,7 @@ impl OpenCADStudio {
             .as_ref()
             .map(|c| c.options())
             .or_else(|| {
-                self.pending_graphic_fill_close.as_ref().map(|_| {
+                self.graphic_attributes.pending_fill_close.as_ref().map(|_| {
                     vec![
                         crate::command::CmdOption::new("Yes", "Y"),
                         crate::command::CmdOption::new("No", "N"),
@@ -558,8 +521,9 @@ impl OpenCADStudio {
             Message::SpaceMouseWake => self.on_spacemouse_wake(),
             Message::TrackpadPinch(magnification) => self.on_pinch_zoom(magnification),
             Message::SpaceMouseFrame(time) => {
-                self.spacemouse
-                    .frame(time.saturating_duration_since(self.start).as_secs_f64() * 1000.);
+                self.spacemouse.frame(
+                    time.saturating_duration_since(self.start).as_secs_f64() * 1000.,
+                );
                 Task::none()
             }
             Message::SpaceMouseFocus(id, focused) => {
@@ -611,8 +575,9 @@ impl OpenCADStudio {
                     if response["ok"] == false {
                         let code = response["code"].as_str().unwrap_or("failed");
                         let detail = response["error"].as_str().unwrap_or("");
-                        self.command_line
-                            .push_error(&format!("automation {op}: {code} — {detail}"));
+                        self.command_line.push_error(&format!(
+                            "automation {op}: {code} — {detail}"
+                        ));
                     } else if matches!(
                         response["status"].as_str(),
                         Some("completed" | "cancelled" | "waiting_input")
@@ -1213,23 +1178,19 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::ImageEmbedPick => Task::perform(
-                crate::io::pick_embedded_image_file(),
-                Message::ImageEmbedPickResult,
-            ),
+            Message::ImageEmbedPick => {
+                Task::perform(crate::io::pick_embedded_image_file(), Message::ImageEmbedPickResult)
+            }
 
             Message::ImageEmbedPickResult(Ok(image)) => {
                 use crate::command::CadCommand;
                 use crate::modules::draw::draw::raster_image::ImageCommand;
-                self.command_line.push_output(
-                    crate::tf!(
+                self.command_line.push_output(crate::tf!(
                     "IMAGEEMBED  \"{name}\": {w}×{h} px (embedded)",
                     name = image.name.as_str(),
                     w = image.pixel_width,
                     h = image.pixel_height,
-                    )
-                    .as_ref(),
-                );
+                ).as_ref());
                 let cmd = ImageCommand::new_embedded(image);
                 let i = self.active_tab;
                 self.command_line.push_info(&cmd.prompt());
@@ -1316,13 +1277,10 @@ impl OpenCADStudio {
                                 .insert(crate::io::font_repo::font_key(name));
                         }
                         for (name, path) in &pairs {
-                            self.command_line.push_output(
-                                crate::tf!(
+                            self.command_line.push_output(crate::tf!(
                                 "FONT  Downloaded {name} → {path}",
                                 path = path.display()
-                                )
-                                .as_ref(),
-                            );
+                            ).as_ref());
                         }
                         if !unavailable.is_empty() {
                             self.command_line.push_info(crate::tf!(
@@ -1338,16 +1296,14 @@ impl OpenCADStudio {
                         if let Some(path) = path {
                             return Task::done(Message::OpenExternal(path));
                         }
-                        self.command_line.push_info(
-                            crate::t!("Save and reopen the drawing to apply the new fonts.")
-                                .as_ref(),
-                        );
+                        self.command_line.push_info(crate::t!(
+                            "Save and reopen the drawing to apply the new fonts."
+                        ).as_ref());
                     }
                     Err(e) => {
                         // Keep the prompt open: the user can correct a custom
                         // source or retry a transient network failure.
-                        self.command_line
-                            .push_error(crate::tf!("Font download failed: {e}").as_ref());
+                        self.command_line.push_error(crate::tf!("Font download failed: {e}").as_ref());
                     }
                 }
                 Task::none()
@@ -2439,13 +2395,8 @@ impl OpenCADStudio {
                 // finishes the step like Enter. (#304)
                 self.command_line.input.clear();
                 self.command_line.close_history();
-                if self.pending_graphic_fill_close.is_some() {
-                    if kw.eq_ignore_ascii_case("Y") || kw.eq_ignore_ascii_case("YES") {
-                        return self.on_graphic_fill_close_response(true);
-                    }
-                    if kw.eq_ignore_ascii_case("N") || kw.eq_ignore_ascii_case("NO") {
-                        return self.on_graphic_fill_close_response(false);
-                    }
+                if self.awaiting_fill_close_answer() {
+                    return self.on_graphic_fill_close_input(&kw);
                 }
                 if kw.is_empty() {
                     return self.feed_command(crate::command::StepInput::Enter);
@@ -2543,8 +2494,7 @@ impl OpenCADStudio {
                     use crate::app::config::DockSide;
                     use crate::ui::dock::PanelId;
                     if self.dock.location(PanelId::ExternalReferences).is_none() {
-                        self.dock
-                            .dock(PanelId::ExternalReferences, DockSide::Right, usize::MAX);
+                        self.dock.dock(PanelId::ExternalReferences, DockSide::Right, usize::MAX);
                     }
                     self.dock_expanded = Some(PanelId::ExternalReferences);
                     self.refresh_xref_manager();
@@ -2682,13 +2632,16 @@ impl OpenCADStudio {
                 };
                 let new_raw = path.to_string_lossy().into_owned();
                 self.push_undo_snapshot(i, "XREF-PATH");
-                match crate::io::xref::set_ref_path(&mut self.tabs[i].scene.document, key, &new_raw)
-                {
+                match crate::io::xref::set_ref_path(
+                    &mut self.tabs[i].scene.document,
+                    key,
+                    &new_raw,
+                ) {
                     Ok(name) => {
-                        self.command_line.push_output(
-                            crate::tf!("XREF: Path set for \"{}\" — Reload to apply.", name)
-                                .as_ref(),
-                        );
+                        self.command_line.push_output(crate::tf!(
+                            "XREF: Path set for \"{}\" — Reload to apply.",
+                            name
+                        ).as_ref());
                         self.post_ref_op(i);
                     }
                     Err(msg) => self.command_line.push_error(msg.as_str()),
@@ -2698,8 +2651,7 @@ impl OpenCADStudio {
             }
             Message::XrefPathPickResult(Err(e)) => {
                 if e != "Cancelled" {
-                    self.command_line
-                        .push_error(crate::tf!("XREF: {e}").as_ref());
+                    self.command_line.push_error(crate::tf!("XREF: {e}").as_ref());
                 }
                 Task::none()
             }
@@ -2724,11 +2676,9 @@ impl OpenCADStudio {
                         if let Some(found) = entry.found_at.clone() {
                             let is_dwg = found.to_ascii_lowercase().ends_with(".dwg")
                                 || found.to_ascii_lowercase().ends_with(".dxf");
-                            self.command_line
-                                .push_output(crate::tf!("XOPEN: opening \"{}\".", found).as_ref());
+                            self.command_line.push_output(crate::tf!("XOPEN: opening \"{}\".", found).as_ref());
                             if is_dwg {
-                                return self
-                                    .update(Message::OpenRecent(std::path::PathBuf::from(found)));
+                                return self.update(Message::OpenRecent(std::path::PathBuf::from(found)));
                             } else {
                                 #[cfg(not(target_arch = "wasm32"))]
                                 let _ = open::that_detached(&found);
@@ -2764,10 +2714,7 @@ impl OpenCADStudio {
                 self.xref_manager.row_change_path_open = false;
                 let prefill = if let Some(entry) = self.xref_manager.entries.get(index) {
                     let saved = &entry.saved_path;
-                    if let Some(parent) = std::path::Path::new(saved)
-                        .parent()
-                        .and_then(|p| p.to_str())
-                    {
+                    if let Some(parent) = std::path::Path::new(saved).parent().and_then(|p| p.to_str()) {
                         if !parent.is_empty() {
                             format!("XREF Path Find \"{}\" ", parent)
                         } else {
@@ -3767,13 +3714,7 @@ impl OpenCADStudio {
             }
 
             Message::ViewportLeftPress => {
-                self.graphic_attribute_menu_open = false;
-                self.line_color_menu_open = false;
-                self.line_linetype_menu_open = false;
-                self.line_lineweight_menu_open = false;
-                self.line_transparency_menu_open = false;
-                self.solid_fill_color_menu_open = false;
-                self.fill_transparency_menu_open = false;
+                self.graphic_attributes.open_menu = None;
                 let sweep = self.sync_active_field_if_any();
                 Task::batch(vec![sweep, self.on_viewport_left_press()])
             }
@@ -3781,13 +3722,7 @@ impl OpenCADStudio {
             Message::ViewportLeftRelease => self.on_viewport_left_release(),
 
             Message::ViewportRightPress => {
-                self.graphic_attribute_menu_open = false;
-                self.line_color_menu_open = false;
-                self.line_linetype_menu_open = false;
-                self.line_lineweight_menu_open = false;
-                self.line_transparency_menu_open = false;
-                self.solid_fill_color_menu_open = false;
-                self.fill_transparency_menu_open = false;
+                self.graphic_attributes.open_menu = None;
                 let i = self.active_tab;
                 self.ribbon.close_dropdown();
                 // Shift+RMB: the one-shot snap override menu at the cursor —
@@ -3890,13 +3825,7 @@ impl OpenCADStudio {
             }
 
             Message::ViewportMiddlePress => {
-                self.graphic_attribute_menu_open = false;
-                self.line_color_menu_open = false;
-                self.line_linetype_menu_open = false;
-                self.line_lineweight_menu_open = false;
-                self.line_transparency_menu_open = false;
-                self.solid_fill_color_menu_open = false;
-                self.fill_transparency_menu_open = false;
+                self.graphic_attributes.open_menu = None;
                 self.on_viewport_middle_press()
             }
 
@@ -4231,13 +4160,9 @@ impl OpenCADStudio {
             }
             Message::ToggleGraphicAttributes => {
                 self.show_graphic_attributes ^= true;
-                self.ribbon
-                    .set_graphic_attributes(self.show_graphic_attributes);
+                self.ribbon.set_graphic_attributes(self.show_graphic_attributes);
                 if !self.show_graphic_attributes {
-                    self.graphic_attributes_header_menu_open = false;
-                    self.graphic_attribute_menu_open = false;
-                    self.gradient_editor = None;
-                    self.hatch_editor_handles = None;
+                    self.graphic_attributes.close_popups();
                 }
                 self.save_config();
                 Task::none()
@@ -4433,9 +4358,7 @@ impl OpenCADStudio {
                         continue;
                     };
                     let current = (
-                        crate::scene::pe_url_of(entity)
-                            .unwrap_or_default()
-                            .to_owned(),
+                        crate::scene::pe_url_of(entity).unwrap_or_default().to_owned(),
                         crate::scene::pe_url_description_of(entity)
                             .unwrap_or_default()
                             .to_owned(),
@@ -4887,9 +4810,7 @@ impl OpenCADStudio {
                 self.tabs[i].scene.bump_geometry();
                 self.refresh_properties();
                 crate::entities::common::set_unit_context(
-                    crate::entities::common::UnitContext::from_header(
-                        &self.tabs[i].scene.document.header,
-                    ),
+                    crate::entities::common::UnitContext::from_header(&self.tabs[i].scene.document.header),
                 );
                 Task::none()
             }
@@ -5048,14 +4969,12 @@ impl OpenCADStudio {
                 };
                 let name = state.name.trim().to_string();
                 if name.is_empty() {
-                    state.error_message =
-                        Some(crate::t!("Block name cannot be empty.").into_owned());
+                    state.error_message = Some(crate::t!("Block name cannot be empty.").into_owned());
                     return Task::none();
                 }
                 if let Some(_ch) = state.invalid_name_char() {
                     state.error_message = Some(
-                        crate::t!("Block name cannot contain: \\ / : * ? \" < > | = `")
-                            .into_owned(),
+                        crate::t!("Block name cannot contain: \\ / : * ? \" < > | = `").into_owned(),
                     );
                     return Task::none();
                 }
@@ -5066,21 +4985,13 @@ impl OpenCADStudio {
                 }
                 if !state.objects_specify_onscreen && state.selected_handles.is_empty() {
                     state.error_message = Some(
-                        crate::t!(
-                            "No objects selected. You must select objects to define a block."
-                        )
+                        crate::t!("No objects selected. You must select objects to define a block.")
                             .into_owned(),
                     );
                     return Task::none();
                 }
                 let i = self.active_tab;
-                if self.tabs[i]
-                    .scene
-                    .document
-                    .block_records
-                    .get(&name)
-                    .is_some()
-                {
+                if self.tabs[i].scene.document.block_records.get(&name).is_some() {
                     state.confirm_redefine = Some(name);
                     return Task::none();
                 }
@@ -5106,16 +5017,12 @@ impl OpenCADStudio {
                         let current_path = std::path::Path::new(&state.file_path);
                         let file_stem = current_path.file_stem().and_then(|s| s.to_str());
                         let is_default_or_block = file_stem == Some("new_block")
-                            || state
-                                .existing_blocks
-                                .iter()
-                                .any(|b| Some(b.as_str()) == file_stem);
+                            || state.existing_blocks.iter().any(|b| Some(b.as_str()) == file_stem);
                         if is_default_or_block {
                             let new_file_name = format!("{}.dwg", trimmed);
                             if let Some(parent) = current_path.parent() {
                                 if !parent.as_os_str().is_empty() {
-                                    state.file_path =
-                                        parent.join(new_file_name).to_string_lossy().to_string();
+                                    state.file_path = parent.join(new_file_name).to_string_lossy().to_string();
                                 } else {
                                     state.file_path = new_file_name;
                                 }
@@ -5236,19 +5143,12 @@ impl OpenCADStudio {
                     WblockSourceMode::Block => {
                         let name = state.block_name.trim();
                         if name.is_empty() {
-                            state.error_message = Some(
-                                crate::t!("Please select or enter a block name.").into_owned(),
-                            );
+                            state.error_message =
+                                Some(crate::t!("Please select or enter a block name.").into_owned());
                             return Task::none();
                         }
                         let i = self.active_tab;
-                        if self.tabs[i]
-                            .scene
-                            .document
-                            .block_records
-                            .get(name)
-                            .is_none()
-                        {
+                        if self.tabs[i].scene.document.block_records.get(name).is_none() {
                             state.error_message = Some(
                                 crate::tf!("Block \"{}\" does not exist in drawing.", name)
                                     .into_owned(),
@@ -5372,7 +5272,10 @@ impl OpenCADStudio {
                             }
                             WblockSourceMode::Objects => {
                                 crate::modules::insert::wblock::extract_entities_to_doc_with_base(
-                                    &document, &handles, base_point, unit,
+                                    &document,
+                                    &handles,
+                                    base_point,
+                                    unit,
                                 )
                                 .map_err(|e| e.to_string())?
                             }
@@ -5431,9 +5334,7 @@ impl OpenCADStudio {
                 self.tabs[i].scene.bump_geometry();
                 self.refresh_properties();
                 crate::entities::common::set_unit_context(
-                    crate::entities::common::UnitContext::from_header(
-                        &self.tabs[i].scene.document.header,
-                    ),
+                    crate::entities::common::UnitContext::from_header(&self.tabs[i].scene.document.header),
                 );
                 let label = crate::modules::draw::units::linear_format_label(code);
                 self.command_line
@@ -5763,7 +5664,8 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::AutoConstrainReset => {
-                self.auto_constrain_settings = super::settings::AutoConstrainSettings::default();
+                self.auto_constrain_settings =
+                    super::settings::AutoConstrainSettings::default();
                 self.auto_constrain_selected_row = 0;
                 self.auto_constrain_distance_input =
                     format!("{}", self.auto_constrain_settings.distance_tolerance);
@@ -5802,7 +5704,8 @@ impl OpenCADStudio {
                         self.auto_constrain_settings.distance_tolerance = distance;
                         self.auto_constrain_settings.angle_tolerance_deg = angle;
                         self.auto_constrain_settings.sanitize();
-                        self.auto_constrain_saved = Some(self.auto_constrain_settings.clone());
+                        self.auto_constrain_saved =
+                            Some(self.auto_constrain_settings.clone());
                         self.persist_settings_if_changed();
                         if matches!(action, Message::AutoConstrainOk) {
                             self.close_active_modal();
@@ -9590,312 +9493,7 @@ impl OpenCADStudio {
             Message::PlotDialogOpen => self.on_plot_dialog_open(),
             Message::PlotDlg(m) => self.on_plot_dlg(m),
             Message::BlockPalette(m) => self.on_block_palette(m),
-            Message::ToggleGraphicAttributesHeaderMenu => {
-                self.graphic_attributes_header_menu_open ^= true;
-                Task::none()
-            }
-            Message::CloseGraphicAttributesHeaderMenu => {
-                self.graphic_attributes_header_menu_open = false;
-                Task::none()
-            }
-            Message::GraphicAttributesSetAllByLayer => self.on_graphic_attributes_set_all(true),
-            Message::GraphicAttributesSetAllByBlock => self.on_graphic_attributes_set_all(false),
-            Message::GraphicAttributesRemoveReferences => {
-                self.on_graphic_attributes_remove_references()
-            }
-            Message::GraphicAttributesCreateLayer => {
-                self.graphic_attributes_header_menu_open = false;
-                let command = crate::command::FreeTextValuePromptCommand::new(
-                    "GRAPHICATTRIBUTELAYER",
-                    "Enter a name for the new layer:",
-                );
-                self.command_line.push_info(&command.prompt());
-                self.tabs[self.active_tab].active_cmd = Some(Box::new(command));
-                self.focus_cmd_input()
-            }
-            Message::ToggleGraphicAttributeDropdown => {
-                self.graphic_attribute_menu_open ^= true;
-                self.line_color_menu_open = false;
-                self.line_linetype_menu_open = false;
-                self.line_lineweight_menu_open = false;
-                self.line_transparency_menu_open = false;
-                self.solid_fill_color_menu_open = false;
-                self.fill_transparency_menu_open = false;
-                Task::none()
-            }
-            Message::CloseGraphicAttributeDropdown => {
-                self.graphic_attribute_menu_open = false;
-                Task::none()
-            }
-            Message::GraphicAttributeChanged(value) => self.on_graphic_attribute(value),
-            Message::ToggleLineColorDropdown => {
-                self.line_color_menu_open ^= true;
-                self.line_linetype_menu_open = false;
-                self.line_lineweight_menu_open = false;
-                self.line_transparency_menu_open = false;
-                self.graphic_attribute_menu_open = false;
-                self.solid_fill_color_menu_open = false;
-                self.fill_transparency_menu_open = false;
-                Task::none()
-            }
-            Message::CloseLineColorDropdown => {
-                self.line_color_menu_open = false;
-                Task::none()
-            }
-            Message::LineColorChanged(color) => self.on_line_color(color),
-            Message::ToggleLineLinetypeMenu => {
-                self.line_linetype_menu_open ^= true;
-                self.line_color_menu_open = false;
-                self.line_lineweight_menu_open = false;
-                self.line_transparency_menu_open = false;
-                self.graphic_attribute_menu_open = false;
-                self.solid_fill_color_menu_open = false;
-                self.fill_transparency_menu_open = false;
-                Task::none()
-            }
-            Message::CloseLineLinetypeMenu => {
-                self.line_linetype_menu_open = false;
-                Task::none()
-            }
-            Message::LineLinetypeChanged(value) => self.on_line_linetype(value),
-            Message::ToggleLineLineweightMenu => {
-                self.line_lineweight_menu_open ^= true;
-                self.line_color_menu_open = false;
-                self.line_linetype_menu_open = false;
-                self.line_transparency_menu_open = false;
-                self.graphic_attribute_menu_open = false;
-                self.solid_fill_color_menu_open = false;
-                self.fill_transparency_menu_open = false;
-                Task::none()
-            }
-            Message::CloseLineLineweightMenu => {
-                self.line_lineweight_menu_open = false;
-                Task::none()
-            }
-            Message::LineLineweightChanged(value) => self.on_line_lineweight(value),
-            Message::LineLinetypeScaleChanged(value) => self.on_line_linetype_scale(value),
-            Message::LineLinetypeScaleInput(value) => {
-                let value = value.trim().replace(',', ".");
-                match value.parse::<f64>() {
-                    Ok(value) if value.is_finite() && value > 0.0 => {
-                        self.on_line_linetype_scale(value)
-                    }
-                    _ => Task::none(),
-                }
-            }
-            Message::ToggleLineTransparencyDropdown => {
-                self.line_transparency_menu_open ^= true;
-                self.line_color_menu_open = false;
-                self.line_linetype_menu_open = false;
-                self.line_lineweight_menu_open = false;
-                self.graphic_attribute_menu_open = false;
-                self.solid_fill_color_menu_open = false;
-                self.fill_transparency_menu_open = false;
-                Task::none()
-            }
-            Message::CloseLineTransparencyDropdown => {
-                self.line_transparency_menu_open = false;
-                Task::none()
-            }
-            Message::LineTransparencyChanged(value) => self.on_line_transparency(
-                acadrust::types::Transparency::from_percent(f64::from(value) / 100.0),
-            ),
-            Message::LineTransparencyByLayer => {
-                self.on_line_transparency(acadrust::types::Transparency::BY_LAYER)
-            }
-            Message::LineTransparencyByBlock => {
-                self.on_line_transparency(acadrust::types::Transparency::BY_BLOCK)
-            }
-            Message::ToggleSolidFillColorDropdown => {
-                self.solid_fill_color_menu_open ^= true;
-                self.line_color_menu_open = false;
-                self.line_linetype_menu_open = false;
-                self.line_lineweight_menu_open = false;
-                self.line_transparency_menu_open = false;
-                self.graphic_attribute_menu_open = false;
-                self.fill_transparency_menu_open = false;
-                Task::none()
-            }
-            Message::CloseSolidFillColorDropdown => {
-                self.solid_fill_color_menu_open = false;
-                Task::none()
-            }
-            Message::SolidFillColorChanged(color) => self.on_solid_fill_color(color),
-            Message::ToggleFillTransparencyDropdown => {
-                self.fill_transparency_menu_open ^= true;
-                self.line_color_menu_open = false;
-                self.line_linetype_menu_open = false;
-                self.line_lineweight_menu_open = false;
-                self.line_transparency_menu_open = false;
-                self.graphic_attribute_menu_open = false;
-                self.solid_fill_color_menu_open = false;
-                Task::none()
-            }
-            Message::CloseFillTransparencyDropdown => {
-                self.fill_transparency_menu_open = false;
-                Task::none()
-            }
-            Message::FillTransparencyChanged(value) => self.on_fill_transparency(
-                acadrust::types::Transparency::from_percent(f64::from(value) / 100.0),
-            ),
-            Message::FillTransparencyByLayer => {
-                self.on_fill_transparency(acadrust::types::Transparency::BY_LAYER)
-            }
-            Message::FillTransparencyByBlock => {
-                self.on_fill_transparency(acadrust::types::Transparency::BY_BLOCK)
-            }
-            Message::HatchEditorOpen => {
-                self.gradient_editor = None;
-                let i = self.active_tab;
-                let selected = self.tabs[i].scene.selected_handles_in_order();
-                let handles = crate::ui::window::graphic_attributes::fill_handles(
-                    &self.tabs[i].scene.document,
-                    &selected,
-                );
-                let current = handles.iter().find_map(|handle| {
-                    let acadrust::EntityType::Hatch(hatch) =
-                        self.tabs[i].scene.document.get_entity(*handle)?
-                    else {
-                        return None;
-                    };
-                    Some(hatch.pattern.name.as_str())
-                });
-                self.graphic_hatch_pattern_search.clear();
-                self.graphic_hatch_pattern_focus = current
-                    .and_then(|current| {
-                        crate::ui::properties::filtered_hatch_patterns("")
-                            .iter()
-                            .position(|entry| entry.name.eq_ignore_ascii_case(current))
-                    })
-                    .unwrap_or(0);
-                self.hatch_editor_handles = Some(selected);
-                iced::widget::operation::focus(iced::widget::Id::new(
-                    "graphic-hatch-pattern-search",
-                ))
-            }
-            Message::HatchEditorClose => {
-                self.hatch_editor_handles = None;
-                self.graphic_hatch_pattern_search.clear();
-                self.graphic_hatch_pattern_focus = 0;
-                Task::none()
-            }
-            Message::GraphicHatchPatternSearchChanged(search) => {
-                self.graphic_hatch_pattern_search = search;
-                self.graphic_hatch_pattern_focus = 0;
-                Task::none()
-            }
-            Message::GraphicHatchPatternFocus(index) => {
-                let len = crate::ui::properties::filtered_hatch_patterns(
-                    &self.graphic_hatch_pattern_search,
-                )
-                .len();
-                if index < len {
-                    self.graphic_hatch_pattern_focus = index;
-                }
-                Task::none()
-            }
-            Message::GraphicHatchPatternChanged(name) => {
-                let i = self.active_tab;
-                let selected = self.tabs[i].scene.selected_handles_in_order();
-                let handles = crate::ui::window::graphic_attributes::fill_handles(
-                    &self.tabs[i].scene.document,
-                    &selected,
-                );
-                self.hatch_editor_handles = None;
-                self.graphic_hatch_pattern_search.clear();
-                self.graphic_hatch_pattern_focus = 0;
-                self.apply_hatch_pattern(i, &handles, name)
-            }
-            Message::GraphicHatchPatternConfirm => {
-                let name = crate::ui::properties::filtered_hatch_patterns(
-                    &self.graphic_hatch_pattern_search,
-                )
-                .get(self.graphic_hatch_pattern_focus)
-                .map(|entry| entry.name.clone());
-                if let Some(name) = name {
-                    self.update(Message::GraphicHatchPatternChanged(name))
-                } else {
-                    Task::none()
-                }
-            }
-            Message::GradientEditorOpen => {
-                self.hatch_editor_handles = None;
-                self.open_gradient_editor();
-                Task::none()
-            }
-            Message::GradientColorModeChanged(mode) => {
-                if let Some(s) = &mut self.gradient_editor {
-                    s.color_mode = mode;
-                }
-                Task::none()
-            }
-            Message::GradientColorToggle(index) => {
-                if let Some(s) = &mut self.gradient_editor {
-                    s.color_open = if s.color_open == Some(index) {
-                        None
-                    } else {
-                        Some(index)
-                    };
-                }
-                Task::none()
-            }
-            Message::GradientColorChanged(index, color) => {
-                if let Some(s) = &mut self.gradient_editor {
-                    if index == 1 {
-                        s.color_1 = color
-                    } else {
-                        s.color_2 = color
-                    };
-                    s.color_open = None;
-                }
-                Task::none()
-            }
-            Message::GradientShadeTintChanged(value) => {
-                if let Some(s) = &mut self.gradient_editor {
-                    s.shade_tint = value.clamp(0.0, 1.0);
-                }
-                Task::none()
-            }
-            Message::GradientTypeChanged(kind) => {
-                if let Some(s) = &mut self.gradient_editor {
-                    s.kind = kind;
-                    if kind == crate::scene::model::hatch_model::GradientKind::Linear {
-                        s.inverted = false;
-                    }
-                }
-                Task::none()
-            }
-            Message::GradientInvertToggled => {
-                if let Some(s) = &mut self.gradient_editor {
-                    if s.kind != crate::scene::model::hatch_model::GradientKind::Linear {
-                        s.inverted ^= true;
-                    }
-                }
-                Task::none()
-            }
-            Message::GradientAngleChanged(value) => {
-                if let Some(s) = &mut self.gradient_editor {
-                    s.angle = value;
-                }
-                Task::none()
-            }
-            Message::GradientAngleReset => {
-                if let Some(s) = &mut self.gradient_editor {
-                    s.angle = "0.0°".into();
-                }
-                Task::none()
-            }
-            Message::GradientCenteredChanged(value) => {
-                if let Some(s) = &mut self.gradient_editor {
-                    s.centered = value;
-                }
-                Task::none()
-            }
-            Message::GradientApply => self.apply_gradient_editor(),
-            Message::GradientCancel => {
-                self.gradient_editor = None;
-                Task::none()
-            }
+            Message::GraphicAttributes(m) => self.on_graphic_attributes(m),
             Message::Dock(m) => self.on_dock(m),
             Message::PrintAllOpen => self.on_print_all_open(),
             Message::PrintAllToggle(name) => {
@@ -11032,14 +10630,12 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::OpenColorWindow(target, color) => {
-                match target {
-                    crate::app::ColorPickTarget::GraphicAttributesLine => {
-                        self.line_color_menu_open = false;
-                    }
-                    crate::app::ColorPickTarget::GraphicAttributesSolid => {
-                    self.solid_fill_color_menu_open = false;
-                }
-                    _ => {}
+                if matches!(
+                    target,
+                    crate::app::ColorPickTarget::GraphicAttributesLine
+                        | crate::app::ColorPickTarget::GraphicAttributesSolid
+                ) {
+                    self.graphic_attributes.open_menu = None;
                 }
                 self.color_pick_target = Some((target, color));
 
@@ -11230,30 +10826,6 @@ mod prop_pointer_tests {
 
         let task = app.update(Message::PropPointerPressed);
         assert!(task.units() > 0);
-    }
-}
-
-#[cfg(test)]
-mod graphic_attributes_visibility_tests {
-    use super::Message;
-    use crate::app::OpenCADStudio;
-
-    #[test]
-    fn graphic_attributes_starts_hidden_and_toggle_is_persisted() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.apply_config(crate::app::config::AppConfig::default());
-        assert!(!app.show_graphic_attributes);
-        assert!(!app.ribbon.show_graphic_attributes);
-
-        let _ = app.update(Message::ToggleGraphicAttributes);
-        assert!(app.show_graphic_attributes);
-        assert!(app.ribbon.show_graphic_attributes);
-        assert!(app.current_config().show_graphic_attributes);
-
-        let _ = app.update(Message::ToggleGraphicAttributes);
-        assert!(!app.show_graphic_attributes);
-        assert!(!app.ribbon.show_graphic_attributes);
-        assert!(!app.current_config().show_graphic_attributes);
     }
 }
 

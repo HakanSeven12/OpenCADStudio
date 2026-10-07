@@ -273,7 +273,10 @@ mod tests {
     fn default_docks_each_known_panel_on_an_edge() {
         let state = DockState::default();
         assert_eq!(state.location(PanelId::Properties), Some((DockSide::Left, 0)));
-        assert_eq!(state.location(PanelId::GraphicAttributes), Some((DockSide::Left, 1)));
+        assert_eq!(
+            state.location(PanelId::GraphicAttributes),
+            Some((DockSide::Left, 1))
+        );
         assert_eq!(
             state.location(PanelId::BlockPalette),
             Some((DockSide::Right, 0))

@@ -12,18 +12,20 @@ mod command_driver;
 pub(crate) mod commands;
 pub(crate) mod dim_viewport;
 #[cfg(test)]
+mod viewport_dimension_tests;
+#[cfg(test)]
 mod dimension_preview_tests;
 mod document;
 mod drafting_settings;
 pub(crate) mod expr_eval;
+mod options_session;
 mod find_replace;
 pub(crate) mod helpers;
 mod history;
 mod layers;
 mod model_ops;
-mod mtext_editor;
 mod navigation;
-mod options_session;
+mod mtext_editor;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin_host;
 mod presspull_ops;
@@ -38,8 +40,6 @@ mod text_inline;
 mod tolerance_dialog;
 mod update;
 mod view;
-#[cfg(test)]
-mod viewport_dimension_tests;
 mod visibility;
 
 pub use style_ops::StyleKind;
@@ -768,24 +768,9 @@ pub(super) struct OpenCADStudio {
     render_mode_preview: Option<acadrust::entities::ViewportRenderMode>,
     /// Whether the Properties panel is shown on the left (PROPERTIES).
     show_properties: bool,
+    /// Whether the Graphic Attributes palette is shown (GRAPHICATTRIBUTES).
     show_graphic_attributes: bool,
-    graphic_attributes_header_menu_open: bool,
-    graphic_attribute_menu_open: bool,
-    line_color_menu_open: bool,
-    line_linetype_menu_open: bool,
-    line_lineweight_menu_open: bool,
-    line_transparency_menu_open: bool,
-    graphic_hatch_pattern_search: String,
-    graphic_hatch_pattern_focus: usize,
-    solid_fill_color_menu_open: bool,
-    fill_transparency_menu_open: bool,
-    gradient_editor: Option<crate::ui::window::gradient_editor::GradientEditorState>,
-    hatch_editor_handles: Option<Vec<acadrust::Handle>>,
-    pending_graphic_fill_close: Option<(
-        crate::ui::window::graphic_attributes::GraphicAttribute,
-        Vec<acadrust::Handle>,
-        Vec<acadrust::Handle>,
-    )>,
+    graphic_attributes: crate::ui::window::graphic_attributes::GraphicAttributesState,
     /// Docked Insert Block panel visibility.
     pub(crate) show_block_palette: bool,
     /// Docked External References panel visibility (EXTERNALREFERENCES).
@@ -2067,57 +2052,7 @@ pub enum ArrowKey {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    ToggleGraphicAttributesHeaderMenu,
-    CloseGraphicAttributesHeaderMenu,
-    GraphicAttributesSetAllByLayer,
-    GraphicAttributesSetAllByBlock,
-    GraphicAttributesRemoveReferences,
-    GraphicAttributesCreateLayer,
-    ToggleGraphicAttributeDropdown,
-    CloseGraphicAttributeDropdown,
-    GraphicAttributeChanged(crate::ui::window::graphic_attributes::GraphicAttribute),
-    ToggleLineColorDropdown,
-    CloseLineColorDropdown,
-    LineColorChanged(AcadColor),
-    ToggleLineLinetypeMenu,
-    CloseLineLinetypeMenu,
-    LineLinetypeChanged(String),
-    ToggleLineLineweightMenu,
-    CloseLineLineweightMenu,
-    LineLineweightChanged(LineWeight),
-    LineLinetypeScaleChanged(f64),
-    LineLinetypeScaleInput(String),
-    ToggleLineTransparencyDropdown,
-    CloseLineTransparencyDropdown,
-    LineTransparencyChanged(u8),
-    LineTransparencyByLayer,
-    LineTransparencyByBlock,
-    ToggleSolidFillColorDropdown,
-    CloseSolidFillColorDropdown,
-    SolidFillColorChanged(AcadColor),
-    ToggleFillTransparencyDropdown,
-    CloseFillTransparencyDropdown,
-    FillTransparencyChanged(u8),
-    FillTransparencyByLayer,
-    FillTransparencyByBlock,
-    HatchEditorOpen,
-    HatchEditorClose,
-    GraphicHatchPatternSearchChanged(String),
-    GraphicHatchPatternFocus(usize),
-    GraphicHatchPatternChanged(String),
-    GraphicHatchPatternConfirm,
-    GradientEditorOpen,
-    GradientColorModeChanged(crate::ui::window::gradient_editor::GradientColorMode),
-    GradientColorToggle(u8),
-    GradientColorChanged(u8, AcadColor),
-    GradientShadeTintChanged(f32),
-    GradientTypeChanged(crate::scene::model::hatch_model::GradientKind),
-    GradientInvertToggled,
-    GradientAngleChanged(String),
-    GradientAngleReset,
-    GradientCenteredChanged(bool),
-    GradientApply,
-    GradientCancel,
+    GraphicAttributes(crate::ui::window::graphic_attributes::GraphicAttributesMsg),
     SpaceMouseWake,
     SpaceMouseFrame(iced::time::Instant),
     SpaceMouseFocus(iced::window::Id, bool),
@@ -4170,19 +4105,7 @@ impl OpenCADStudio {
             render_mode_preview: None,
             show_properties: true,
             show_graphic_attributes: false,
-            graphic_attributes_header_menu_open: false,
-            graphic_attribute_menu_open: false,
-            line_color_menu_open: false,
-            line_linetype_menu_open: false,
-            line_lineweight_menu_open: false,
-            line_transparency_menu_open: false,
-            graphic_hatch_pattern_search: String::new(),
-            graphic_hatch_pattern_focus: 0,
-            solid_fill_color_menu_open: false,
-            fill_transparency_menu_open: false,
-            gradient_editor: None,
-            hatch_editor_handles: None,
-            pending_graphic_fill_close: None,
+            graphic_attributes: Default::default(),
             show_block_palette: false,
             show_external_references: false,
             show_browser: false,

@@ -308,10 +308,6 @@ pub struct ValuePromptCommand {
     prompt: &'static str,
 }
 
-fn dispatch_prompt_value(name: &str, text: &str) -> CmdResult {
-    CmdResult::Dispatch(format!("{name} {}", text.trim()))
-}
-
 impl ValuePromptCommand {
     pub fn new(name: &'static str, prompt: &'static str) -> Self {
         Self { name, prompt }
@@ -332,7 +328,12 @@ impl CadCommand for ValuePromptCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        Some(dispatch_prompt_value(self.name, text))
+        let t = text.trim();
+        if t.is_empty() {
+            Some(CmdResult::Dispatch(format!("{} ", self.name)))
+        } else {
+            Some(CmdResult::Dispatch(format!("{} {t}", self.name)))
+        }
     }
 
     fn on_point(&mut self, _pt: DVec3) -> CmdResult {
@@ -342,7 +343,7 @@ impl CadCommand for ValuePromptCommand {
 
     fn on_enter(&mut self) -> CmdResult {
         // Bare Enter → report the current value via the inline handler.
-        dispatch_prompt_value(self.name, "")
+        CmdResult::Dispatch(format!("{} ", self.name))
     }
 }
 
@@ -374,7 +375,7 @@ impl CadCommand for FreeTextValuePromptCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        Some(dispatch_prompt_value(self.name, text))
+        Some(CmdResult::Dispatch(format!("{} {}", self.name, text.trim())))
     }
 
     fn on_point(&mut self, _pt: DVec3) -> CmdResult {
@@ -382,7 +383,7 @@ impl CadCommand for FreeTextValuePromptCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        dispatch_prompt_value(self.name, "")
+        CmdResult::Dispatch(format!("{} ", self.name))
     }
 }
 
@@ -3077,20 +3078,6 @@ mod constraint_registry_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn prompt_dispatch_trims_values_and_preserves_empty_argument() {
-        let CmdResult::Dispatch(value) = dispatch_prompt_value("TEST", "  value with spaces  ")
-        else {
-            panic!("prompt input should dispatch a command");
-        };
-        assert_eq!(value, "TEST value with spaces");
-
-        let CmdResult::Dispatch(value) = dispatch_prompt_value("TEST", "  ") else {
-            panic!("empty prompt input should dispatch a command");
-        };
-        assert_eq!(value, "TEST ");
-    }
 
     #[test]
     fn test_mid2point_command() {

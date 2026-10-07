@@ -1,5 +1,8 @@
+//! Gradient flyout of the Graphic Attributes palette.
+
 use crate::app::Message;
 use crate::scene::model::hatch_model::GradientKind;
+use crate::ui::window::graphic_attributes::GraphicAttributesMsg;
 use acadrust::types::Color as AcadColor;
 use iced::widget::{
     button, checkbox, column, container, image, mouse_area, row, slider, text, text_input, tooltip,
@@ -24,7 +27,26 @@ pub struct GradientEditorState {
     pub inverted: bool,
     pub angle: String,
     pub centered: bool,
-    pub color_open: Option<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub enum GradientMsg {
+    Open,
+    Cancel,
+    Apply,
+    ColorMode(GradientColorMode),
+    /// Stop colour 1 or 2.
+    Color(u8, AcadColor),
+    ShadeTint(f32),
+    Kind(GradientKind),
+    InvertToggled,
+    Angle(String),
+    AngleReset,
+    Centered(bool),
+}
+
+fn msg(message: GradientMsg) -> Message {
+    Message::GraphicAttributes(GraphicAttributesMsg::Gradient(message))
 }
 
 impl GradientEditorState {
@@ -37,7 +59,7 @@ impl GradientEditorState {
                 .gradient_color
                 .colors
                 .get(index)
-                .map(|entry| entry.color.clone())
+                .map(|entry| entry.color)
                 .unwrap_or(AcadColor::Index(7))
         };
         let (kind, inverted) = GradientKind::from_name(&hatch.gradient_color.name);
@@ -55,7 +77,30 @@ impl GradientEditorState {
             inverted,
             angle: format!("{:.1}°", hatch.gradient_color.angle.to_degrees()),
             centered: hatch.gradient_color.shift.abs() < 1e-9,
-            color_open: None,
+        }
+    }
+
+    pub fn update(&mut self, message: GradientMsg) {
+        match message {
+            GradientMsg::ColorMode(mode) => self.color_mode = mode,
+            GradientMsg::Color(1, color) => self.color_1 = color,
+            GradientMsg::Color(_, color) => self.color_2 = color,
+            GradientMsg::ShadeTint(value) => self.shade_tint = value.clamp(0.0, 1.0),
+            GradientMsg::Kind(kind) => {
+                self.kind = kind;
+                if kind == GradientKind::Linear {
+                    self.inverted = false;
+                }
+            }
+            GradientMsg::InvertToggled => {
+                if self.kind != GradientKind::Linear {
+                    self.inverted ^= true;
+                }
+            }
+            GradientMsg::Angle(value) => self.angle = value,
+            GradientMsg::AngleReset => self.angle = "0.0°".into(),
+            GradientMsg::Centered(value) => self.centered = value,
+            GradientMsg::Open | GradientMsg::Cancel | GradientMsg::Apply => {}
         }
     }
 
@@ -96,7 +141,7 @@ fn preview_sized(
     state: &GradientEditorState,
     width: u32,
     height: u32,
-) -> iced::widget::image::Handle {
+) -> Option<iced::widget::image::Handle> {
     let c1 = rgb(&state.color_1);
     let c2 = if state.color_mode == GradientColorMode::One {
         let c = crate::scene::gradient_tint_color(rgb_array(&state.color_1), state.shade_tint);
@@ -110,8 +155,7 @@ fn preview_sized(
         angle,
         if state.centered { 0.0 } else { 1.0 },
         cadkernel::geom2d::Tolerance::default(),
-    )
-    .expect("the preview rectangle always defines a gradient frame");
+    )?;
     let (sin, cos) = angle.sin_cos();
     let radial = state.kind.radial();
     let mut pixels = Vec::with_capacity((width * height * 4) as usize);
@@ -143,17 +187,30 @@ fn preview_sized(
             });
         }
     }
-    iced::widget::image::Handle::from_rgba(width, height, pixels)
+    Some(iced::widget::image::Handle::from_rgba(width, height, pixels))
 }
 
-fn preview(state: &GradientEditorState) -> iced::widget::image::Handle {
-    preview_sized(state, 370, 80)
+fn preview(state: &GradientEditorState) -> Element<'static, Message> {
+    preview_image(preview_sized(state, 370, 80))
 }
 
-pub(crate) fn compact_preview(
-    hatch: &acadrust::entities::Hatch,
-) -> iced::widget::image::Handle {
-    preview_sized(&GradientEditorState::from_hatch(Vec::new(), hatch), 256, 26)
+pub(crate) fn compact_preview(hatch: &acadrust::entities::Hatch) -> Element<'static, Message> {
+    preview_image(preview_sized(
+        &GradientEditorState::from_hatch(Vec::new(), hatch),
+        256,
+        26,
+    ))
+}
+
+fn preview_image(handle: Option<iced::widget::image::Handle>) -> Element<'static, Message> {
+    match handle {
+        Some(handle) => image(handle)
+            .width(Fill)
+            .height(Fill)
+            .content_fit(iced::ContentFit::Fill)
+            .into(),
+        None => Space::new().width(Fill).height(Fill).into(),
+    }
 }
 
 fn icon(kind: GradientKind, inverted: bool) -> &'static [u8] {
@@ -192,7 +249,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
     let segment = |label, mode| {
         let selected = state.color_mode == mode;
         button(text(label).size(11))
-            .on_press(Message::GradientColorModeChanged(mode))
+            .on_press(msg(GradientMsg::ColorMode(mode)))
             .width(Fill)
             .style(move |theme: &Theme, status| {
                 if selected {
@@ -203,8 +260,8 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
             })
     };
     let color_field = |label: &'static str, index, color: AcadColor| {
-        let (background, _) = crate::ui::properties::acad_color_display(color.clone());
-        let value = crate::ui::color_select::color_display_name(color.clone());
+        let (background, _) = crate::ui::properties::acad_color_display(color);
+        let value = crate::ui::color_select::color_display_name(color);
         let picker = button(
             row![
                 crate::ui::color_select::swatch(background),
@@ -265,7 +322,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
             ]
             .align_x(iced::Center),
         )
-        .on_press(Message::GradientTypeChanged(kind))
+        .on_press(msg(GradientMsg::Kind(kind)))
         .width(48)
         .height(48)
         .style(move |theme: &Theme, status| {
@@ -285,7 +342,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
     let invert_selected = state.inverted && state.kind != GradientKind::Linear;
     let invert = button(column![text("⇄").size(18), text("Invert").size(9)].align_x(iced::Center))
         .on_press_maybe(
-            (state.kind != GradientKind::Linear).then_some(Message::GradientInvertToggled),
+            (state.kind != GradientKind::Linear).then(|| msg(GradientMsg::InvertToggled)),
         )
         .width(42)
         .height(48)
@@ -309,18 +366,18 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
     ));
     let colors: Element<'_, Message> = if state.color_mode == GradientColorMode::Two {
         row![
-            color_field("Color 1", 1, state.color_1.clone()),
-            color_field("Color 2", 2, state.color_2.clone())
+            color_field("Color 1", 1, state.color_1),
+            color_field("Color 2", 2, state.color_2)
         ]
         .spacing(6)
         .into()
     } else {
         row![
-            color_field("Color 1", 1, state.color_1.clone()),
+            color_field("Color 1", 1, state.color_1),
             row![
                 text("Tone").size(11).width(43),
                 slider(0..=100, (state.shade_tint * 100.0) as i32, |v| {
-                    Message::GradientShadeTintChanged(v as f32 / 100.0)
+                    msg(GradientMsg::ShadeTint(v as f32 / 100.0))
                 })
                 .width(Fill)
             ]
@@ -336,12 +393,12 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
     let angle = row![
         text("Angle").size(11).width(43),
         text_input("0.0°", &state.angle)
-            .on_input(Message::GradientAngleChanged)
+            .on_input(|value| msg(GradientMsg::Angle(value)))
             .size(11)
             .width(Length::Fixed(92.0)),
         tooltip(
             button(crate::ui::icons::themed_undo(11.0, true))
-                .on_press(Message::GradientAngleReset)
+                .on_press(msg(GradientMsg::AngleReset))
                 .style(button::subtle)
                 .padding(3)
                 .width(24)
@@ -352,7 +409,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
         Space::new().width(Fill),
         checkbox(state.centered)
             .label("Centered")
-            .on_toggle(Message::GradientCenteredChanged)
+            .on_toggle(|value| msg(GradientMsg::Centered(value)))
             .size(14)
             .text_size(11)
     ]
@@ -364,11 +421,11 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
     let actions = container(
         row![
             button(text(crate::t!("Cancel")).size(11))
-                .on_press(Message::GradientCancel)
+                .on_press(msg(GradientMsg::Cancel))
                 .style(button::secondary)
                 .padding([5, 14]),
             button(text(crate::t!("OK")).size(11))
-                .on_press(Message::GradientApply)
+                .on_press(msg(GradientMsg::Apply))
                 .style(button::primary)
                 .padding([5, 18]),
         ]
@@ -377,7 +434,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
     .width(Fill)
     .align_x(iced::alignment::Horizontal::Right);
     let content = column![
-        image(preview(state)).width(Fill).height(80),
+        container(preview(state)).width(Fill).height(80),
         row![
             segment("One Color", GradientColorMode::One),
             segment("Two Colors", GradientColorMode::Two)

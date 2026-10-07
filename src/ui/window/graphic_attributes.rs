@@ -700,16 +700,32 @@ fn color_control<'a>(
     target: ColorPickTarget,
     changed: fn(AcadColor) -> GraphicAttributesMsg,
 ) -> Element<'a, Message> {
-    // The L / B / C / V button already shows ByLayer, ByBlock and *VARIES*,
-    // so the swatch carries no text.
+    // ByLayer / ByBlock show only on the L / B button; differing colours are
+    // also spelled out on the swatch.
+    let label: Element<'a, Message> = if info.varies {
+        container(text("*VARIES*").size(10))
+            .width(Fill)
+            .height(Fill)
+            .align_x(iced::Left)
+            .align_y(iced::Center)
+            .padding([0, 6])
+            .into()
+    } else {
+        Space::new().width(Fill).height(Fill).into()
+    };
     let display = info.display;
-    let swatch = button(Space::new().width(Fill).height(Fill))
+    let swatch = button(label)
         .on_press(Message::OpenColorWindow(target.clone(), info.color))
         .width(Fill)
         .height(COMPACT_BUTTON_HEIGHT)
         .padding(0)
         .style(move |theme: &Theme, status| button::Style {
             background: Some(Background::Color(display)),
+            text_color: if display.r * 0.299 + display.g * 0.587 + display.b * 0.114 > 0.55 {
+                iced::Color::BLACK
+            } else {
+                iced::Color::WHITE
+            },
             border: Border {
                 color: if matches!(status, button::Status::Hovered) {
                     theme.palette().primary.base.color

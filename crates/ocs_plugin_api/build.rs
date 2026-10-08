@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+﻿use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -53,9 +53,9 @@ fn main() {
     println!("cargo:rerun-if-changed=src/entity_coverage_types.rs");
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // Type registry
-// ════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 fn generate_type_registry(out_dir: &Path) {
     let mut tracer = Tracer::new(TracerConfig::default());
@@ -172,11 +172,11 @@ fn generate_type_registry(out_dir: &Path) {
         ),
         (
             "AssocCompositeSegment",
-            trace_simple::<acadrust::objects::AssocCompositeSegment>,
+            trace_simple::<codec::objects::AssocCompositeSegment>,
         ),
         (
             "AssocSubcurve",
-            trace_simple::<acadrust::objects::AssocSubcurve>,
+            trace_simple::<codec::objects::AssocSubcurve>,
         ),
         (
             "AssocSubcurveKind",
@@ -278,7 +278,7 @@ fn generate_type_registry(out_dir: &Path) {
         ),
         (
             "DxfVersion",
-            trace_simple::<acadrust::DxfVersion>,
+            trace_simple::<codec::DxfVersion>,
         ),
         (
             "DynamicBlockData",
@@ -1247,9 +1247,9 @@ fn map_variant(discriminant: u32, named: &Named<VariantFormat>) -> EnumVariantIn
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // Version info
-// ════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 fn generate_version_info(out_dir: &Path) {
     let lock_path = workspace_cargo_lock_path();

@@ -444,6 +444,7 @@ fn block_value_text(value: &BlockEvalValue) -> String {
 fn dynamic_data_text(data: &DynamicBlockData) -> String {
     match data {
         DynamicBlockData::Unknown => "Unknown".to_string(),
+        DynamicBlockData::PropertiesTable => "Properties Table".to_string(),
         DynamicBlockData::Representation(value) => {
             format!("block {}; flags {}", handle_text(value.block), value.flags)
         }

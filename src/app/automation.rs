@@ -3138,7 +3138,7 @@ mod tests {
     fn a_constructed_cylinder_saves_the_authored_vertex_genus() {
         // Regression for the BricsCAD AUDIT failure ("Modeling operation
         // error: Data stream is empty" on the committed cylinder): the
-        // SAT cadkernel appends carries the classic three-token vertex;
+        // SAT kernel appends carries the classic three-token vertex;
         // the ASM modeler requires the authored four-token form with the
         // edge-role token. The repair lives in acis_export::solid_to_sat;
         // this test drives the whole path — CYLINDER command, commit,
@@ -3159,13 +3159,13 @@ mod tests {
         assert_eq!(saved["ok"], true, "save failed: {}", saved["error"]);
         drop(app);
 
-        let mut reader = acadrust::DwgReader::from_file(&path).unwrap();
+        let mut reader = codec::DwgReader::from_file(&path).unwrap();
         let outcome = reader.read_with_stats().unwrap();
         let solids: Vec<_> = outcome
             .document
             .entities()
             .filter_map(|entity| match entity {
-                acadrust::entities::EntityType::Solid3D(solid) => Some(solid.clone()),
+                codec::entities::EntityType::Solid3D(solid) => Some(solid.clone()),
                 _ => None,
             })
             .collect();
@@ -3176,7 +3176,7 @@ mod tests {
             "R2013+ solids must pair with an AcDs blob"
         );
         assert!(!solid.acis_data.sab_data.is_empty());
-        let sat = acadrust::entities::acis::SabReader::read(&solid.acis_data.sab_data).unwrap();
+        let sat = codec::entities::acis::SabReader::read(&solid.acis_data.sab_data).unwrap();
         let vertices: Vec<_> = sat
             .records
             .iter()
@@ -3216,8 +3216,8 @@ mod tests {
     /// identity transforms masked the bug.
     #[test]
     fn every_family_s_editable_history_sits_on_the_drawn_geometry() {
-        use acadrust::entities::EntityType;
-        use acadrust::objects::SolidHistoryOperation;
+        use codec::entities::EntityType;
+        use codec::objects::SolidHistoryOperation;
 
         // (command, family, drawn world centre)
         let cases: &[(&str, &str, [f64; 3])] = &[
@@ -3247,7 +3247,7 @@ mod tests {
             assert_eq!(saved["ok"], true, "{family} save failed: {}", saved["error"]);
             drop(app);
 
-            let mut reader = acadrust::DwgReader::from_file(&path).unwrap();
+            let mut reader = codec::DwgReader::from_file(&path).unwrap();
             let outcome = reader.read_with_stats().unwrap();
             let document = outcome.document;
             let solid = document
@@ -3262,21 +3262,16 @@ mod tests {
                 .unwrap_or_else(|| panic!("{family}: the history tree did not survive"));
             assert_eq!(operations.len(), 1, "{family}: exactly one step");
 
-            // The family's local centre in the authored centred-local
-            // convention — the same centres the codec's write/read shift
-            // pair carries (the gold sh_history measurements).
+            // The authored wire carries the solid's world centre in the frame
+            // translation; the hosts anchor Cylinder, Cone and Pyramid
+            // frames at the base centre, so the offset lifts those families
+            // onto the drawn geometry.
             let local_center = match &operations[0] {
-                SolidHistoryOperation::Box(value) | SolidHistoryOperation::Wedge(value) => [
-                    value.length * 0.5,
-                    value.width * 0.5,
-                    value.height * 0.5,
-                ],
+                SolidHistoryOperation::Box(_) | SolidHistoryOperation::Wedge(_) => [0.0; 3],
                 SolidHistoryOperation::Cylinder(value) => [0.0, 0.0, value.height * 0.5],
                 SolidHistoryOperation::Cone(value) => [0.0, 0.0, value.height * 0.5],
                 SolidHistoryOperation::Pyramid(value) => [0.0, 0.0, value.height * 0.5],
-                SolidHistoryOperation::Sphere(_) | SolidHistoryOperation::Torus(_) => {
-                    [0.0; 3]
-                }
+                SolidHistoryOperation::Sphere(_) | SolidHistoryOperation::Torus(_) => [0.0; 3],
                 other => panic!("{family}: unexpected operation {other:?}"),
             };
             let base = operations[0]
@@ -3316,8 +3311,8 @@ mod tests {
     /// that drops or corrupts any class fails here, not in the field.
     #[test]
     fn all_supported_entities_write_to_dwg_and_survive_reload() {
-        use acadrust::entities::EntityType;
-        use acadrust::objects::ObjectType;
+        use codec::entities::EntityType;
+        use codec::objects::ObjectType;
         use std::collections::BTreeMap;
 
         let mut app = OpenCADStudio::new_for_test();
@@ -3403,14 +3398,14 @@ mod tests {
             r#"{{"op":"select","handles":["{bat_line}"]}}"#
         ));
         assert_eq!(selected["ok"], true);
-        run(&mut app, "BLOCK BAT 352,0");
-        run(&mut app, "INSERT BAT 360,10");
+        run(&mut app, "-BLOCK BAT 352,0");
+        run(&mut app, "-INSERT BAT 360,10 1 1 0");
 
         // -- the two editor-gated classes, through the same builders and
         // the same commit path their commands use --
-        let mut mtext = acadrust::entities::MText::new();
+        let mut mtext = codec::entities::MText::new();
         mtext.value = "MText programmatic".to_string();
-        mtext.insertion_point = acadrust::types::Vector3::new(370.0, 0.0, 0.0);
+        mtext.insertion_point = codec::types::Vector3::new(370.0, 0.0, 0.0);
         mtext.height = 2.5;
         mtext.rectangle_width = 20.0;
         mtext.style = "Standard".to_string();
@@ -3419,15 +3414,15 @@ mod tests {
             .expect("the mtext commits");
         assert!(!committed.is_null());
 
-        let mut table = acadrust::entities::TableBuilder::new(2, 2)
-            .at(acadrust::types::Vector3::new(380.0, 0.0, 0.0))
+        let mut table = codec::entities::TableBuilder::new(2, 2)
+            .at(codec::types::Vector3::new(380.0, 0.0, 0.0))
             .row_height(8.0)
             .column_width(40.0)
             .build();
         assert!(table.set_cell_text(0, 0, "cell 0-0"));
         assert!(table.set_cell_text(1, 1, "cell 1-1"));
         let committed = app
-            .commit_entity_handle(EntityType::Table(table))
+            .commit_entity_handle(EntityType::Table(Box::new(table)))
             .expect("the table commits");
         assert!(!committed.is_null());
 
@@ -3443,7 +3438,9 @@ mod tests {
             .entities()
             .map(|entity| entity.common().handle.value())
             .collect();
-        assert_eq!(authored.len(), 29, "the authored entity census before save");
+        // The upstream block flow keeps the block source entities and
+        // places its insert, so the census counts them too.
+        assert_eq!(authored.len(), 38, "the authored entity census before save");
 
         let path = std::env::temp_dir().join(format!(
             "ocs_all_entities_{}.dwg",
@@ -3455,7 +3452,7 @@ mod tests {
         assert_eq!(saved["ok"], true, "save failed: {}", saved["error"]);
         drop(app);
 
-        let mut reader = acadrust::DwgReader::from_file(&path).unwrap();
+        let mut reader = codec::DwgReader::from_file(&path).unwrap();
         let outcome = reader.read_with_stats().unwrap();
         let document = outcome.document;
         // Every authored entity must survive with its handle intact.
@@ -3511,12 +3508,12 @@ mod tests {
             }
         }
         let expected_census: &[(&'static str, usize)] = &[
-            ("Line", 2),
+            ("Line", 9), // 2 authored + the table borders
             ("Circle", 1),
             ("Arc", 1),
             ("Point", 1),
             ("Text", 1),
-            ("MText", 1),
+            ("MText", 3), // 1 authored + the table cell texts
             ("LwPolyline", 3), // the pline, the donut, the rectangle
             ("Ray", 1),
             ("XLine", 1),
@@ -3548,42 +3545,43 @@ mod tests {
         let mut dimension_types: Vec<(&'static str, f64)> = Vec::new();
         for entity in &entities {
             match entity {
-                EntityType::Line(value) => {
-                    if value.start.x == -2.0 {
-                        // the block definition's source line, in the
-                        // definition's local frame: the base point
-                        // (352,0) is subtracted from the drawn world
-                        // coordinates, exactly as the reference
-                        // application stores block content.
-                        assert_eq!(value.end, acadrust::types::Vector3::new(3.0, 0.0, 0.0));
-                    } else {
-                        // the model-space line, in world coordinates.
-                        assert_eq!(
-                            value.start,
-                            acadrust::types::Vector3::new(0.0, 0.0, 0.0)
-                        );
-                        assert_eq!(value.end, acadrust::types::Vector3::new(10.0, 0.0, 0.0));
-                    }
+                EntityType::Line(value) if value.start.x == -2.0 => {
+                    // the block definition's source line, in the
+                    // definition's local frame: the base point
+                    // (352,0) is subtracted from the drawn world
+                    // coordinates, exactly as the reference
+                    // application stores block content.
+                    assert_eq!(value.end, codec::types::Vector3::new(3.0, 0.0, 0.0));
+                }
+                EntityType::Line(value) if value.start.x == 0.0 && (value.end.x - 10.0).abs() < 1e-6 => {
+                    // the model-space line, in world coordinates.
+                    assert_eq!(value.start, codec::types::Vector3::new(0.0, 0.0, 0.0));
+                    assert_eq!(value.end, codec::types::Vector3::new(10.0, 0.0, 0.0));
+                }
+                EntityType::Line(_) => {
+                    // The kept block source (world 350..355) and the
+                    // table-commit borders round-trip via the census.
                 }
                 EntityType::Circle(value) => {
-                    assert_eq!(value.center, acadrust::types::Vector3::new(20.0, 5.0, 0.0));
+                    assert_eq!(value.center, codec::types::Vector3::new(20.0, 5.0, 0.0));
                     assert!((value.radius - 3.0).abs() < 1e-9);
                 }
                 EntityType::Arc(value) => {
-                    assert_eq!(value.center, acadrust::types::Vector3::new(40.0, 0.0, 0.0));
+                    assert_eq!(value.center, codec::types::Vector3::new(40.0, 0.0, 0.0));
                     assert!((value.radius - 5.0).abs() < 1e-9);
                 }
                 EntityType::Point(value) => {
-                    assert_eq!(value.location, acadrust::types::Vector3::new(60.0, 0.0, 0.0));
+                    assert_eq!(value.location, codec::types::Vector3::new(60.0, 0.0, 0.0));
                 }
                 EntityType::Text(value) => {
                     assert_eq!(value.value, "Hello");
                 }
-                EntityType::MText(value) => {
+                EntityType::MText(value) if value.insertion_point.x == 370.0 => {
+                // the reload loop checks them via the table itself.
                     assert_eq!(value.value, "MText programmatic");
                     assert_eq!(
                         value.insertion_point,
-                        acadrust::types::Vector3::new(370.0, 0.0, 0.0)
+                        codec::types::Vector3::new(370.0, 0.0, 0.0)
                     );
                 }
                 EntityType::LwPolyline(value) => {
@@ -3598,19 +3596,19 @@ mod tests {
                 EntityType::Ray(value) => {
                     assert_eq!(
                         value.base_point,
-                        acadrust::types::Vector3::new(100.0, 0.0, 0.0)
+                        codec::types::Vector3::new(100.0, 0.0, 0.0)
                     );
                 }
                 EntityType::XLine(value) => {
                     assert_eq!(
                         value.base_point,
-                        acadrust::types::Vector3::new(110.0, 0.0, 0.0)
+                        codec::types::Vector3::new(110.0, 0.0, 0.0)
                     );
                 }
                 EntityType::MLine(value) => {
                     assert_eq!(
                         value.start_point,
-                        acadrust::types::Vector3::new(120.0, 0.0, 0.0)
+                        codec::types::Vector3::new(120.0, 0.0, 0.0)
                     );
                     // Definition wiring: the style handle must resolve to
                     // a real MLineStyle object.
@@ -3633,27 +3631,27 @@ mod tests {
                 EntityType::Solid(value) => {
                     assert_eq!(
                         value.first_corner,
-                        acadrust::types::Vector3::new(160.0, 0.0, 0.0)
+                        codec::types::Vector3::new(160.0, 0.0, 0.0)
                     );
                 }
                 EntityType::Polyline3D(value) => {
                     assert_eq!(value.vertices.len(), 3);
                 }
                 EntityType::Ellipse(value) => {
-                    assert_eq!(value.center, acadrust::types::Vector3::new(200.0, 0.0, 0.0));
+                    assert_eq!(value.center, codec::types::Vector3::new(200.0, 0.0, 0.0));
                     assert!((value.minor_axis_ratio - 0.5).abs() < 1e-9);
                 }
                 EntityType::Dimension(value) => {
                     let kind = match value {
-                        acadrust::entities::Dimension::Aligned(_) => "aligned",
-                        acadrust::entities::Dimension::Linear(_) => "linear",
-                        acadrust::entities::Dimension::Radius(_) => "radius",
-                        acadrust::entities::Dimension::Diameter(_) => "diameter",
-                        acadrust::entities::Dimension::Angular2Ln(_)
-                        | acadrust::entities::Dimension::Angular3Pt(_) => "angular",
-                        acadrust::entities::Dimension::Ordinate(_) => "ordinate",
-                        acadrust::entities::Dimension::Arc(_) => "arc",
-                        acadrust::entities::Dimension::LargeRadial(_) => "large-radial",
+                        codec::entities::Dimension::Aligned(_) => "aligned",
+                        codec::entities::Dimension::Linear(_) => "linear",
+                        codec::entities::Dimension::Radius(_) => "radius",
+                        codec::entities::Dimension::Diameter(_) => "diameter",
+                        codec::entities::Dimension::Angular2Ln(_)
+                        | codec::entities::Dimension::Angular3Pt(_) => "angular",
+                        codec::entities::Dimension::Ordinate(_) => "ordinate",
+                        codec::entities::Dimension::Arc(_) => "arc",
+                        codec::entities::Dimension::LargeRadial(_) => "large-radial",
                     };
                     dimension_types.push((kind, value.base().actual_measurement));
                 }
@@ -3685,9 +3683,9 @@ mod tests {
                     // conversion of its selection), one at the drawn
                     // insertion point.
                     let at_base =
-                        value.insert_point == acadrust::types::Vector3::new(352.0, 0.0, 0.0);
+                        value.insert_point == codec::types::Vector3::new(352.0, 0.0, 0.0);
                     let at_drawn =
-                        value.insert_point == acadrust::types::Vector3::new(360.0, 10.0, 0.0);
+                        value.insert_point == codec::types::Vector3::new(360.0, 10.0, 0.0);
                     assert!(
                         at_base || at_drawn,
                         "unexpected reference placement {:?}",

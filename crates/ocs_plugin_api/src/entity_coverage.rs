@@ -1,4 +1,4 @@
-//! Host-owned coverage generated from the traced entity registry and an
+﻿//! Host-owned coverage generated from the traced entity registry and an
 //! explicit policy. `unmapped` fields remain accessible through the typed
 //! `CadDocument` snapshot but are not promised by the Python document model.
 
@@ -2876,7 +2876,7 @@ mod tests {
                 "Mesh.vertices".to_owned(),
                 "Mesh.faces".to_owned(),
                 "Mesh.edges".to_owned(),
-                "Mesh.override_option".to_owned(),
+                "Mesh.unknown_b1".to_owned(),
                 "Helix.axis_base_point".to_owned(),
                 "Helix.start_point".to_owned(),
                 "Helix.axis_vector".to_owned(),

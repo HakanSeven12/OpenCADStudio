@@ -1,4 +1,4 @@
-//! OpenCADStudio linetype catalog — loaded from `assets/linetypes/OpenCADStudio.lin`.
+﻿//! OpenCADStudio linetype catalog â€” loaded from `assets/linetypes/OpenCADStudio.lin`.
 //!
 //! Call [`populate_document`] to add all standard linetypes to a new document.
 //! Linetypes that already exist in the document are skipped.
@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 use codec::tables::linetype::{LineType, LineTypeComplexContent, LineTypeElement};
 use codec::{CadDocument, TableEntry};
 
-// ── Complex linetype types ────────────────────────────────────────────────
+// â”€â”€ Complex linetype types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// One element in a complex linetype pattern.
 #[derive(Clone, Debug)]
@@ -26,7 +26,7 @@ pub enum LtSegment {
     Shape {
         /// Shape name (`.lin` catalog reference; empty for document shapes).
         name: String,
-        /// Resolved .SHX shape-file path ("" when none resolved — the LFF
+        /// Resolved .SHX shape-file path ("" when none resolved â€” the LFF
         /// substitute set is the fallback for catalog names).
         shx_file: String,
         /// Shape number inside the file (0 = look up by name).
@@ -57,7 +57,7 @@ pub enum LtSegment {
     },
 }
 
-/// A complex linetype — ordered elements for one pattern repeat.
+/// A complex linetype â€” ordered elements for one pattern repeat.
 #[derive(Clone, Debug)]
 pub struct ComplexLt {
     pub segments: Vec<LtSegment>,
@@ -73,8 +73,8 @@ pub fn complex_lt(name: &str) -> Option<&'static ComplexLt> {
         .get(&name.to_ascii_uppercase())
 }
 
-/// Build the full segment list — dashes, spaces, dots **and** embedded
-/// text / shape — for a linetype defined in the loaded **document**, whether it
+/// Build the full segment list â€” dashes, spaces, dots **and** embedded
+/// text / shape â€” for a linetype defined in the loaded **document**, whether it
 /// is simple or complex.
 ///
 /// Returns `None` when the linetype is missing or continuous (no pattern). Used
@@ -92,9 +92,9 @@ pub fn document_lt_segments(document: &CadDocument, name: &str) -> Option<Comple
     let mut has_length = false;
     for e in &lt.elements {
         // Emit the dash / space for this element FIRST, then any embedded
-        // text / shape — the pen advances across the element's length before the
+        // text / shape â€” the pen advances across the element's length before the
         // glyph is placed, so the text lands at the element's *end* (inside the
-        // gap), matching the `.lin` token order (`dash, -space, ["TEXT"], …`) and
+        // gap), matching the `.lin` token order (`dash, -space, ["TEXT"], â€¦`) and
         // AutoCAD's placement. Putting the text first drops it onto the preceding
         // dash, so the dash strikes through the glyphs.
         let len = e.length as f32;
@@ -160,7 +160,7 @@ pub fn document_lt_segments(document: &CadDocument, name: &str) -> Option<Comple
                     // The standard ltypeshp.shx numbers (and the bundled
                     // catalog's own) map to the LFF substitute shapes, so the
                     // glyph still draws when the shape file isn't on disk
-                    // (the usual case — traded drawings rarely ship their .shx).
+                    // (the usual case â€” traded drawings rarely ship their .shx).
                     let sub_name = bundled_shape_name(&font, *shape_number).unwrap_or("");
                     if resolved.is_none() && sub_name.is_empty() {
                         continue;
@@ -180,7 +180,7 @@ pub fn document_lt_segments(document: &CadDocument, name: &str) -> Option<Comple
         }
     }
 
-    // No dash/space/dot means "continuous" — let the caller draw a solid line.
+    // No dash/space/dot means "continuous" â€” let the caller draw a solid line.
     if !has_length {
         return None;
     }
@@ -188,7 +188,7 @@ pub fn document_lt_segments(document: &CadDocument, name: &str) -> Option<Comple
 }
 
 /// Complex (embedded text/shape) segments for a **document** linetype, or `None`
-/// when it is simple (dash-only) — simple dashes are handled by the ordinary
+/// when it is simple (dash-only) â€” simple dashes are handled by the ordinary
 /// `resolve_pattern` shader path, so ordinary entities don't pay the CPU-dash
 /// cost. This is the gate used by [`resolve_complex_lt`].
 pub fn document_complex_lt(document: &CadDocument, name: &str) -> Option<ComplexLt> {
@@ -197,11 +197,11 @@ pub fn document_complex_lt(document: &CadDocument, name: &str) -> Option<Complex
         .iter()
         .find(|l| l.name.eq_ignore_ascii_case(name))?;
     // Treat the linetype as complex only when an element carries *renderable*
-    // embedded content — a non-empty text string, or a shape backed by a shape
+    // embedded content â€” a non-empty text string, or a shape backed by a shape
     // file. Some DWGs store dash elements with a placeholder `complex` (shape
     // #0, null style handle, zero scale) that draws nothing; routing those
     // through the CPU complex-linetype path needlessly skips the normal dash
-    // shader — and with it the "A"-type endpoint alignment. Fall through to the
+    // shader â€” and with it the "A"-type endpoint alignment. Fall through to the
     // ordinary `resolve_pattern` path for them.
     let has_real_complex = lt.elements.iter().any(|e| {
         e.complex.as_ref().is_some_and(|cx| match &cx.content {
@@ -233,7 +233,7 @@ pub fn resolve_complex_lt(document: &CadDocument, name: &str) -> Option<ComplexL
 
 const LIN_SOURCE: &str = include_str!("../../assets/linetypes/OpenCADStudio.lin");
 
-// ── Pattern art extraction ────────────────────────────────────────────────
+// â”€â”€ Pattern art extraction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Extract the ASCII-art portion of a LIN description.
 ///
@@ -254,7 +254,7 @@ pub fn extract_pattern(desc: &str) -> String {
     desc.trim().to_string()
 }
 
-// ── Public API ────────────────────────────────────────────────────────────
+// â”€â”€ Public API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Add all standard OpenCADStudio linetypes to `doc`, skipping existing ones.
 pub fn populate_document(doc: &mut CadDocument) {
@@ -303,7 +303,7 @@ pub fn populate_document_from_source(doc: &mut CadDocument, source: &str) -> usi
 }
 
 /// Shape numbers for the shape files the bundled catalog references,
-/// keyed by file stem and shape name. The `ltypeshp` 130–134 are the
+/// keyed by file stem and shape name. The `ltypeshp` 130â€“134 are the
 /// standard ones; the rest exist only in the bundled LFF substitutes, so
 /// their numbers are this application's own.
 const BUNDLED_SHAPES: &[(&str, &str, i16)] = &[
@@ -324,7 +324,7 @@ const BUNDLED_SHAPES: &[(&str, &str, i16)] = &[
 ];
 
 /// A catalog value as the decimal it was written as: 2.54 stays 2.54, not
-/// the 2.5399999618… an `f32` widens to.
+/// the 2.5399999618â€¦ an `f32` widens to.
 fn decimal(value: f32) -> f64 {
     value.to_string().parse().unwrap_or(value as f64)
 }
@@ -376,8 +376,8 @@ fn shape_file_style(doc: &mut CadDocument, file: &str) -> codec::Handle {
 /// cannot be stored (an unknown shape or text style), so the caller keeps
 /// the plain dashes rather than a half-built pattern.
 ///
-/// The lengths come from `plain` — the same pattern parsed at full
-/// precision — rather than the catalog's `f32` segments.
+/// The lengths come from `plain` â€” the same pattern parsed at full
+/// precision â€” rather than the catalog's `f32` segments.
 fn complex_elements(
     doc: &mut CadDocument,
     lt: &ComplexLt,
@@ -405,6 +405,8 @@ fn complex_elements(
                     rotation: decimal(*rot_deg).to_radians(),
                     absolute_rotation: false,
                     offset: [decimal(*x), decimal(*y)],
+                    dwg_shape_flag: None,
+                    dwg_shape_number: None,
                 }
             }
             LtSegment::Text { text, style, x, y, scale, rot_deg } => LineTypeComplexData {
@@ -418,6 +420,8 @@ fn complex_elements(
                 rotation: decimal(*rot_deg).to_radians(),
                 absolute_rotation: false,
                 offset: [decimal(*x), decimal(*y)],
+                dwg_shape_flag: None,
+                dwg_shape_number: None,
             },
         };
         out.last_mut()?.complex = Some(complex);
@@ -426,7 +430,7 @@ fn complex_elements(
 }
 
 
-// ── Parser ────────────────────────────────────────────────────────────────
+// â”€â”€ Parser â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Parse a `.lin` file and return all simple linetypes found.
 fn parse(src: &str) -> Vec<LineType> {
@@ -532,7 +536,7 @@ fn push_element(token: &str, out: &mut Vec<LineTypeElement>) {
     }
 }
 
-// ── Complex linetype parser ───────────────────────────────────────────────
+// â”€â”€ Complex linetype parser â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Parse the LIN source and return a catalog of complex linetypes.
 /// A linetype is "complex" when its A-line contains at least one `[SHAPE,...]`
@@ -579,7 +583,7 @@ fn parse_complex(src: &str) -> HashMap<String, ComplexLt> {
 
 /// Parse complex A-line elements into `LtSegment`s.
 /// Shape elements: `[SHAPENAME,fontfile,x=v,y=v,s=v,r=v]`
-/// Text elements:  `["TEXT",font,...]` — skipped (returns no segment).
+/// Text elements:  `["TEXT",font,...]` â€” skipped (returns no segment).
 fn parse_complex_elements(s: &str) -> Vec<LtSegment> {
     let mut segs = Vec::new();
     let mut chars = s.chars().peekable();
@@ -667,7 +671,7 @@ fn parse_shape_element(inner: &str) -> Option<LtSegment> {
         {
             rot_deg = v.parse().unwrap_or(0.0);
         } else if p.to_ascii_lowercase().ends_with(".shx") {
-            // `[NAME,ltypeshp.shx,…]` — the shape file reference.
+            // `[NAME,ltypeshp.shx,â€¦]` â€” the shape file reference.
             shx_file = p.to_string();
         }
     }

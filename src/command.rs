@@ -642,12 +642,21 @@ pub struct KeywordCommand {
     /// Keyword a bare Enter dispatches at the verb step (`<Default>` prompts,
     /// e.g. PLAN's `<Current>`). `None` = Enter cancels, as before.
     default: Option<&'static str>,
+    /// Keywords taken at the verb step without being offered in the prompt
+    /// (-VIEW's view presets).
+    hidden: &'static [&'static str],
 }
 
 impl KeywordCommand {
     /// Set the verb a bare Enter dispatches (shown as `<Default>` in prompts).
     pub fn with_default(mut self, kw: &'static str) -> Self {
         self.default = Some(kw);
+        self
+    }
+
+    /// Keywords accepted at the verb step but not listed in the prompt.
+    pub fn with_hidden(mut self, keywords: &'static [&'static str]) -> Self {
+        self.hidden = keywords;
         self
     }
 
@@ -662,6 +671,7 @@ impl KeywordCommand {
             options,
             pending: None,
             default: None,
+            hidden: &[],
         }
     }
 }
@@ -734,6 +744,11 @@ impl CadCommand for KeywordCommand {
             // Consumed inputs that keep prompting return `Some(NeedPoint)` —
             // `None` would hand the same text to the command a second time.
             None => {
+                // A leading underscore marks the English keyword, as in scripts.
+                let t = t.strip_prefix('_').unwrap_or(t);
+                if let Some(keyword) = self.hidden.iter().find(|keyword| keyword.eq_ignore_ascii_case(t)) {
+                    return Some(CmdResult::Dispatch(format!("{} {keyword}", self.name)));
+                }
                 let Some((_, keyword, value_prompt)) = match_cmd_option(&self.options, t) else {
                     // Unknown verb — keep prompting rather than dispatch garbage.
                     return Some(CmdResult::NeedPoint);

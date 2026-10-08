@@ -915,6 +915,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "USERI",
         "USERR",
         "VIEW",
+        "-VIEW",
         "VPORTS",
         "VS",
         "VW",

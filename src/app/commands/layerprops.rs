@@ -760,6 +760,84 @@ impl OpenCADStudio {
                 }
             }
 
+            // -VIEW: the command-line form. Its presets set the standard
+            // orthographic and isometric views; the rest are VIEW's verbs.
+            "-VIEW" => {
+                use crate::command::KeywordCommand;
+                let c = KeywordCommand::new(
+                    "-VIEW",
+                    "Enter an option [?/Delete/Orthographic/Restore/Save/sEttings/Window]:",
+                    vec![
+                        ("?", "?", None),
+                        ("Delete", "DELETE", Some("Enter view name(s) to delete:")),
+                        ("Orthographic", "ORTHOGRAPHIC", None),
+                        ("Restore", "RESTORE", Some("Enter view name to restore:")),
+                        ("Save", "SAVE", Some("Enter view name to save:")),
+                    ],
+                )
+                .with_hidden(&["TOP", "BOTTOM", "FRONT", "BACK", "LEFT", "RIGHT", "SWISO", "SEISO", "NEISO", "NWISO"]);
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+            }
+            cmd if cmd.starts_with("-VIEW ") => {
+                let words: Vec<String> = cmd["-VIEW ".len()..]
+                    .split_whitespace()
+                    .map(|word| word.trim_start_matches('_').to_ascii_uppercase())
+                    .collect();
+                let first = words.first().map(String::as_str).unwrap_or("");
+                let preset = |word: &str| -> Option<&'static str> {
+                    ["TOP", "BOTTOM", "FRONT", "BACK", "LEFT", "RIGHT", "SWISO", "SEISO", "NEISO", "NWISO"]
+                        .into_iter()
+                        .find(|name| name.eq_ignore_ascii_case(word))
+                };
+                // The Orthographic face: Top/Bottom/Front/BAck/Left/Right.
+                let face = |word: &str| -> Option<&'static str> {
+                    match word {
+                        "BA" | "BAC" | "BACK" => Some("BACK"),
+                        _ => ["TOP", "BOTTOM", "FRONT", "LEFT", "RIGHT"]
+                            .into_iter()
+                            .find(|name| !word.is_empty() && name.starts_with(word)),
+                    }
+                };
+                let orthographic = !first.is_empty() && "ORTHOGRAPHIC".starts_with(first);
+                let view = if orthographic {
+                    match words.get(1) {
+                        Some(word) => face(word),
+                        None => {
+                            use crate::command::KeywordCommand;
+                            let c = KeywordCommand::new(
+                                "-VIEW ORTHOGRAPHIC",
+                                "Enter an option [Top/Bottom/Front/BAck/Left/Right]<Top>:",
+                                vec![
+                                    ("Top", "TOP", None),
+                                    ("Bottom", "BOTTOM", None),
+                                    ("Front", "FRONT", None),
+                                    ("BAck", "BACK", None),
+                                    ("Left", "LEFT", None),
+                                    ("Right", "RIGHT", None),
+                                ],
+                            )
+                            .with_default("TOP");
+                            self.command_line.push_info(&c.prompt());
+                            self.tabs[i].active_cmd = Some(Box::new(c));
+                            return Some(self.finish_dispatch(cmd));
+                        }
+                    }
+                } else {
+                    preset(first)
+                };
+                if let Some(view) = view {
+                    self.command_line.push_output(crate::t!("Regenerating model.").as_ref());
+                    return self.dispatch_layerprops(&format!("VIEW {view}"), i);
+                }
+                if orthographic {
+                    self.command_line.push_error(crate::t!("Invalid option keyword.").as_ref());
+                    return Some(self.finish_dispatch(cmd));
+                }
+                // View names keep their case.
+                let rest = cmd["-VIEW ".len()..].split_whitespace().skip(1).collect::<Vec<_>>().join(" ");
+                return self.dispatch_layerprops(format!("VIEW {first} {rest}").trim_end(), i);
+            }
             "VIEW" => {
                 use crate::command::KeywordCommand;
                 let c = KeywordCommand::new(

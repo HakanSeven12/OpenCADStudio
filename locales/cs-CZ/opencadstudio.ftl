@@ -5158,6 +5158,7 @@ properties =
     .override-center-x = Přepsat střed X
     .override-center-y = Přepsat střed Y
     .override-center-z = Přepsat střed Z
+    .override-option = Možnost přepsání
     .partial = Částečná
     .pattern = Vzor
     .pattern-name = Název vzoru

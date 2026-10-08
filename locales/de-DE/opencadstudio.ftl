@@ -5159,6 +5159,7 @@ properties =
     .override-center-x = Überschriebener Mittelpunkt X
     .override-center-y = Überschriebener Mittelpunkt Y
     .override-center-z = Überschriebener Mittelpunkt Z
+    .override-option = Option überschreiben
     .partial = Teilweise
     .pattern = Muster
     .pattern-name = Musterbezeichnung

@@ -5161,6 +5161,7 @@ properties =
     .override-center-x = Замести център X
     .override-center-y = Замести център Y
     .override-center-z = Замести център Z
+    .override-option = Опция за заместване
     .partial = Частично
     .pattern = Шаблон
     .pattern-name = Име на шаблон

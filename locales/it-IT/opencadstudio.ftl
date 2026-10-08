@@ -5160,6 +5160,7 @@ properties =
     .override-center-x = Ignora centro X
     .override-center-y = Ignora centro Y
     .override-center-z = Ignora centro Z
+    .override-option = Opzione di sostituzione
     .partial = Parziale
     .pattern = Modello
     .pattern-name = Nome del modello

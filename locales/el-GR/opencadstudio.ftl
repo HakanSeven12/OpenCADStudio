@@ -5164,6 +5164,7 @@ properties =
     .override-center-x = Παράκαμψη κέντρου X
     .override-center-y = Παράκαμψη κέντρου Y
     .override-center-z = Παράκαμψη κέντρου Z
+    .override-option = Επιλογή παράκαμψης
     .partial = Μερικό
     .pattern = Μοτίβο
     .pattern-name = Όνομα μοτίβου

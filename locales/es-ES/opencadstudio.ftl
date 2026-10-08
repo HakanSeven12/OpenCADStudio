@@ -5161,6 +5161,7 @@ properties =
     .override-center-x = Reemplazar centro X
     .override-center-y = Reemplazar centro Y
     .override-center-z = Reemplazar centro Z
+    .override-option = Opción de reemplazo
     .partial = Parcial
     .pattern = Patrón
     .pattern-name = Nombre del patrón

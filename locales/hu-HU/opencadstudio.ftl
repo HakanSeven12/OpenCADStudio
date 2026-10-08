@@ -5160,6 +5160,7 @@ properties =
     .override-center-x = X központ felülírása
     .override-center-y = Y központ felülírása
     .override-center-z = Z központ felülírása
+    .override-option = Felülbírálási opció
     .partial = Részleges
     .pattern = Minta
     .pattern-name = Minta neve

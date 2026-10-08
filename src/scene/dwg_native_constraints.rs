@@ -2826,6 +2826,7 @@ fn materialize_swept_surface_actions(
             action_type: kind,
             subcurve_kind: subcurve,
             curve,
+            ..Default::default()
         });
         let path_parameter = |name: &str, child: Handle| AssociativeData::PathActionParam(AssocPathActionParam {
             compound: AssocCompoundActionParam {

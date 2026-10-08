@@ -5149,6 +5149,7 @@ properties =
     .override-center-x = 中心 X を上書き
     .override-center-y = 中心 Y を上書き
     .override-center-z = 中心 Z を上書き
+    .override-option = 上書きオプション
     .partial = 部分
     .pattern = パターン
     .pattern-name = パターン名

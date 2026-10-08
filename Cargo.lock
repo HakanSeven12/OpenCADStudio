@@ -128,6 +128,7 @@ dependencies = [
  "cfg-if",
  "getrandom 0.3.4",
  "once_cell",
+ "serde",
  "version_check",
  "zerocopy",
 ]
@@ -4205,14 +4206,14 @@ dependencies = [
 [[package]]
 name = "opencadcodec"
 version = "0.6.0"
-source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=c9ffcac#c9ffcac5ecdc7a504cc4a7e3ecb52ac9d587c8bf"
+source = "git+https://github.com/schoeller/cadcodec.git?branch=gold-vs-silver-clean#04738fbf8028bae821c6ab85566642d7931c9a1b"
 dependencies = [
+ "ahash 0.8.12",
  "anyhow",
  "bitflags 2.13.1",
  "byteorder",
  "encoding_rs",
  "flate2",
- "foldhash 0.2.0",
  "indexmap",
  "itoa",
  "memmap2",
@@ -4221,7 +4222,8 @@ dependencies = [
  "rayon",
  "ryu",
  "serde",
- "thiserror 2.0.18",
+ "serde_json",
+ "thiserror 1.0.69",
  "web-time",
 ]
 
@@ -4237,7 +4239,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=99b6b48#99b6b4890704d300596ba502b5a1c8ec1eefa954"
+source = "git+https://github.com/schoeller/cadkernel.git?branch=gold-vs-silver#076e9eea7560f792a8bd4760e24ed9501ff06711"
 dependencies = [
  "cavalier_contours",
  "opencadcodec",
@@ -4248,7 +4250,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel-constraints"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=99b6b48#99b6b4890704d300596ba502b5a1c8ec1eefa954"
+source = "git+https://github.com/schoeller/cadkernel.git?branch=gold-vs-silver#076e9eea7560f792a8bd4760e24ed9501ff06711"
 dependencies = [
  "nalgebra",
 ]

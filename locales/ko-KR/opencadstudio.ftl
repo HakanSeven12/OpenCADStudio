@@ -5160,6 +5160,7 @@ properties =
     .override-center-x = 재정의 센터 X
     .override-center-y = 재정의 센터 Y
     .override-center-z = 재정의 센터 Z
+    .override-option = 재정의 옵션
     .partial = 부분
     .pattern = 패턴
     .pattern-name = 패턴 이름

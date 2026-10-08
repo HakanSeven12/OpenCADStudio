@@ -5149,6 +5149,7 @@ properties =
     .override-center-x = ओवरराइड सेंटर एक्स
     .override-center-y = ओवरराइड सेंटर वाई
     .override-center-z = ओवरराइड सेंटर जेड
+    .override-option = ओवरराइड विकल्प
     .partial = आंशिक
     .pattern = पैटर्न
     .pattern-name = पैटर्न का नाम

@@ -577,7 +577,7 @@ impl OpenCADStudio {
         self.sheet_set.show = on;
         self.ribbon.set_sheet_set(on);
         if on {
-            if self.dock.location(id).is_none() {
+            if !self.dock.is_placed(id) {
                 self.dock.dock(id, crate::app::config::DockSide::Right, usize::MAX);
             }
             self.dock_expanded = Some(id);

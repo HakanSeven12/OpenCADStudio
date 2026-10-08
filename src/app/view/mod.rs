@@ -1877,40 +1877,12 @@ bg={bg_ms:.1}ms n={view_count}"
         }
 
         // Docked side panels (Properties, block palette, future palettes) live
-        // in an ordered vertical stack on the left/right edge of the drawing
-        // view. Auto-collapsing (pinned) panels that aren't being hovered
-        // reduce to a rail sharing 1/N of the edge column's height; the
-        // hovered or unpinned panel expands to the full column height on top.
-        let visible_panel = |id: crate::ui::dock::PanelId| -> bool {
-            if tab.is_start || self.clean_screen {
-                return false;
-            }
-            match id {
-                crate::ui::dock::PanelId::Properties => self.show_properties,
-                crate::ui::dock::PanelId::BlockPalette => self.show_block_palette,
-                crate::ui::dock::PanelId::ExternalReferences => self.show_external_references,
-                crate::ui::dock::PanelId::Browser => self.show_browser,
-                crate::ui::dock::PanelId::NodeGraph => self.show_node_graph,
-                crate::ui::dock::PanelId::PointCloudManager => self.pc_manager.show,
-                crate::ui::dock::PanelId::Count => self.count_palette.show,
-                crate::ui::dock::PanelId::SheetSetManager => self.sheet_set.show,
-            }
-        };
-        let edge_stack = |side: crate::app::config::DockSide| -> Option<Element<'_, Message>> {
-            let ids: Vec<crate::ui::dock::PanelId> = match side {
-                crate::app::config::DockSide::Left => self.dock.left.clone(),
-                crate::app::config::DockSide::Right => self.dock.right.clone(),
-            }
-            .into_iter()
-            .filter(|id| visible_panel(*id))
-            .collect();
-            if ids.is_empty() {
-                return None;
-            }
-            Some(self.build_edge_stack(side, &ids, tab))
-        };
-        let left_edge = edge_stack(crate::app::config::DockSide::Left);
-        let right_edge = edge_stack(crate::app::config::DockSide::Right);
+        // in an ordered vertical stack of slots on the left/right edge of the
+        // drawing view; a slot may hold several panels as tabs. Auto-collapsing
+        // (pinned) slots that aren't being hovered reduce to a rail; the rest
+        // share the column height by their adjustable weights.
+        let left_edge = self.build_edge_stack(crate::app::config::DockSide::Left, tab);
+        let right_edge = self.build_edge_stack(crate::app::config::DockSide::Right, tab);
 
         // Command-line sits as a bottom-centre overlay on top of the
         // viewport stack rather than as a separate row in the main
@@ -1955,151 +1927,41 @@ bg={bg_ms:.1}ms n={view_count}"
         }
         let workspace: Element<'_, Message> = row(parts).width(Fill).height(Fill).into();
 
-        let any_dragging = self.dock_dragging.is_some();
-        let any_resizing =
-            self.dock_resizing.is_some() || self.xref_col_drag.is_some() || self.xref_split_drag;
-        let workspace = if any_dragging {
-            let id = self.dock_dragging.expect("guarded by any_dragging");
-            let side = self.dock_drag_target.map(|(s, _)| s).unwrap_or(
-                self.dock
-                    .location(id)
-                    .map(|(s, _)| s)
-                    .unwrap_or(crate::app::config::DockSide::Right),
-            );
-            // Dropping onto an edge joins that edge's stack, whose column is as
-            // wide as its widest currently-shown panel (the dragged panel
-            // included). Hidden (closed) panels don't render, so they can't
-            // widen the column being previewed.
-            let preview_width = {
-                let mut widths: Vec<f32> = match side {
-                    crate::app::config::DockSide::Left => &self.dock.left,
-                    crate::app::config::DockSide::Right => &self.dock.right,
-                }
-                .iter()
-                .copied()
-                .filter(|&pid| self.dock_panel_visible(pid))
-                .map(|pid| self.dock.width(pid, self.win_size.0))
-                .collect();
-                widths.push(self.dock.width(id, self.win_size.0));
-                widths.into_iter().fold(0.0, f32::max)
-            };
-            // Faint tint over the whole edge column so the target edge reads
-            // even before the panel-sized ghost snaps to a slot.
-            let edge_tint = container(Space::new())
-                .width(Length::Fixed(preview_width))
-                .height(Fill)
-                .style(|theme: &Theme| {
-                    let palette = theme.palette();
-                    container::Style {
-                        background: Some(Background::Color(
-                            palette.primary.weak.color.scale_alpha(0.35),
-                        )),
-                        ..Default::default()
-                    }
-                });
-            // The ghost is the dragged panel at its real size: its own saved
-            // width and its 1/N share of the edge (N = number of panels shown
-            // on the edge after the drop), with a header naming which panel is
-            // being moved. Only visibly-docked panels share the column height:
-            // a hidden (closed) panel keeps its stack slot but no screen space,
-            // so it must not split the preview.
-            let was_here = self.dock.location(id).map(|(s, _)| s) == Some(side);
-            let visible = self.dock_visible_len(side);
-            let final_count = if was_here {
-                std::cmp::max(visible, 1)
-            } else {
-                visible + 1
-            };
-            let edge_h = tab.scene.selection.borrow().view.vp_size.1;
-            let slot_h = edge_h / final_count as f32;
-            let index = self.dock_drag_target.map(|(_, i)| i).unwrap_or(0);
-            let slot = index.min(final_count.saturating_sub(1));
-            let ghost_top = slot as f32 * slot_h;
-            let ghost_header = container(text(id.title()).size(12))
-                .width(Fill)
-                .padding(iced::Padding {
-                    top: 5.0,
-                    right: 8.0,
-                    bottom: 5.0,
-                    left: 8.0,
-                })
-                .style(|theme: &Theme| {
-                    let palette = theme.palette();
-                    container::Style {
-                        background: Some(Background::Color(palette.primary.base.color)),
-                        text_color: Some(palette.primary.base.text),
-                        ..Default::default()
-                    }
-                });
-            let ghost_panel = container(column![ghost_header, Space::new()])
-                .width(Length::Fixed(self.dock.width(id, self.win_size.0)))
-                .height(Length::Fixed(slot_h))
-                .style(|theme: &Theme| {
-                    let palette = theme.palette();
-                    container::Style {
-                        background: Some(Background::Color(palette.background.base.color)),
-                        border: Border {
-                            color: palette.primary.base.color,
-                            width: 2.0,
-                            radius: 0.0.into(),
-                        },
-                        ..Default::default()
-                    }
-                });
-            // Position the ghost at its drop slot, flush against the edge.
-            let ghost = container(ghost_panel)
-                .width(Fill)
-                .height(Fill)
-                .align_x(match side {
-                    crate::app::config::DockSide::Left => iced::alignment::Horizontal::Left,
-                    crate::app::config::DockSide::Right => iced::alignment::Horizontal::Right,
-                })
-                .align_y(iced::alignment::Vertical::Top)
-                .padding(iced::Padding {
-                    top: ghost_top,
-                    right: 0.0,
-                    bottom: 0.0,
-                    left: 0.0,
-                });
-            // Thin line across the column at the drop slot's top boundary.
-            let drop_line = container(
-                container(Space::new())
-                    .width(Fill)
-                    .height(Length::Fixed(3.0))
-                    .style(|theme: &Theme| container::Style {
-                        background: Some(Background::Color(theme.palette().primary.base.color)),
-                        ..Default::default()
-                    }),
-            )
-            .width(Fill)
-            .height(Fill)
-            .align_y(iced::alignment::Vertical::Top)
-            .padding(iced::Padding {
-                top: ghost_top,
-                right: 0.0,
-                bottom: 0.0,
-                left: 0.0,
-            });
-            let preview = iced::widget::stack![edge_tint, ghost, drop_line]
-                .width(Length::Fixed(preview_width))
-                .height(Fill);
-            let preview = container(preview)
-                .width(Fill)
-                .height(Fill)
-                .align_x(match side {
-                    crate::app::config::DockSide::Left => iced::alignment::Horizontal::Left,
-                    crate::app::config::DockSide::Right => iced::alignment::Horizontal::Right,
-                });
-            stack![workspace, preview].width(Fill).height(Fill).into()
+        // Floating panels sit over the workspace, back to front.
+        let mut layers: Vec<Element<'_, Message>> = vec![workspace];
+        for f in &self.dock.floating {
+            if self.dock_panel_visible(f.id) {
+                layers.push(self.floating_panel(*f, tab));
+            }
+        }
+        // While a panel is dragged, preview where it lands.
+        if let (Some(id), Some(target)) = (self.dock_dragging, self.dock_drag_target) {
+            layers.push(self.dock_drop_preview(id, target));
+        }
+        let workspace: Element<'_, Message> = if layers.len() == 1 {
+            layers.pop().expect("workspace layer")
         } else {
-            workspace
+            iced::widget::Stack::with_children(layers)
+                .width(Fill)
+                .height(Fill)
+                .into()
         };
-        let workspace: Element<'_, Message> = if any_dragging || any_resizing {
+        let any_dragging = self.dock_dragging.is_some();
+        let any_splitting = self.dock_split_drag.is_some();
+        let any_resizing = self.dock_resizing.is_some()
+            || self.dock_float_resizing.is_some()
+            || self.xref_col_drag.is_some()
+            || self.xref_split_drag;
+        let workspace: Element<'_, Message> = if any_dragging || any_resizing || any_splitting {
             mouse_area(workspace)
                 .on_move(move |p| Message::Dock(crate::ui::dock::DockMsg::DragMove(p)))
                 .on_release(Message::Dock(crate::ui::dock::DockMsg::DragRelease))
-                .interaction(if any_resizing {
+                .interaction(if self.dock_float_resizing.is_some() {
+                    iced::mouse::Interaction::ResizingDiagonallyDown
+                } else if any_resizing {
                     iced::mouse::Interaction::ResizingHorizontally
+                } else if any_splitting {
+                    iced::mouse::Interaction::ResizingVertically
                 } else {
                     iced::mouse::Interaction::Grabbing
                 })
@@ -2876,65 +2738,69 @@ impl OpenCADStudio {
     }
 
     /// Build one edge: a narrow tab strip at the very edge plus the expanded
-    /// panels sliding out beside it. Auto-collapsing (pinned) panels are always
-    /// visible as equal-height 1/N tabs in the strip (via `Fill` distribution);
-    /// hovering a tab raises its panel to full column height beside the strip,
-    /// so switching between stacked panels is a direct tab-to-tab hover with no
-    /// width-jumping collapse dance. Unpinned panels are always expanded. The
-    /// whole edge is one hover region: leaving it collapses any auto-collapsing
-    /// panel, but moving between the tabs and the expanded panel does not.
+    /// slots sliding out beside it. Auto-collapsing (pinned) slots are always
+    /// visible as equal-height tabs in the strip (via `Fill` distribution);
+    /// hovering a tab raises its slot beside the strip, so switching between
+    /// stacked panels is a direct tab-to-tab hover with no width-jumping
+    /// collapse dance. Unpinned slots are always expanded and split the column
+    /// height by their weights, with a draggable splitter between neighbours.
+    /// The whole edge is one hover region: leaving it collapses any
+    /// auto-collapsing slot, but moving between the tabs and the expanded slot
+    /// does not. `None` when nothing on the edge is shown.
     fn build_edge_stack<'a>(
         &'a self,
         side: crate::app::config::DockSide,
-        ids: &[crate::ui::dock::PanelId],
         tab: &'a DocumentTab,
-    ) -> Element<'a, Message> {
-        let pinned: Vec<crate::ui::dock::PanelId> = ids
-            .iter()
-            .copied()
-            .filter(|id| self.dock.auto_collapse(*id))
-            .collect();
-        // Expanded = unpinned panels (always open) in stack order, then the
-        // hovered auto-collapsing one last so it floats on top.
-        let mut expanded: Vec<crate::ui::dock::PanelId> = ids
-            .iter()
-            .copied()
-            .filter(|id| !self.dock.auto_collapse(*id))
-            .collect();
-        if let Some(id) = self.dock_expanded {
-            if ids.contains(&id) && self.dock.auto_collapse(id) {
-                expanded.push(id);
-            }
+    ) -> Option<Element<'a, Message>> {
+        let visible = self.dock_visible_groups(side);
+        if visible.is_empty() {
+            return None;
         }
-        // Each expanded panel renders at its own saved width; the column is as
-        // wide as the widest one currently showing.
+        let shown = |gi: usize| self.dock_group_shown(side, gi).expect("visible group");
+        let pinned: Vec<usize> = visible
+            .iter()
+            .copied()
+            .filter(|gi| self.dock.auto_collapse(shown(*gi)))
+            .collect();
+        let expanded = self.dock_expanded_groups(side);
+        // Each expanded slot renders at its shown panel's saved width; the
+        // column is as wide as the widest one currently showing.
         let col_w = expanded
             .iter()
-            .map(|id| self.dock.width(*id, self.win_size.0))
+            .map(|gi| self.dock.width(shown(*gi), self.win_size.0))
             .fold(0.0, f32::max);
 
         let tab_strip = (!pinned.is_empty()).then(|| {
             let tabs: Vec<Element<'_, Message>> = pinned
                 .iter()
-                .map(|id| {
+                .map(|gi| {
+                    let tabs = self.dock_group_visible_tabs(side, *gi);
                     self.rail_slice(
-                        *id,
+                        shown(*gi),
+                        &tabs,
                         side,
-                        self.dock_expanded == Some(*id),
-                        self.dock_dragging == Some(*id),
+                        self.dock_expanded.is_some_and(|e| tabs.contains(&e)),
+                        self.dock_dragging.is_some_and(|d| tabs.contains(&d)),
                     )
                 })
                 .collect();
             column(tabs).width(DOCK_RAIL_W).height(Fill).into()
         });
         let expanded_stack = (!expanded.is_empty()).then(|| {
-            // Multiple simultaneously-expanded panels (e.g. two unpinned panels
-            // on the same edge) stack one below the other, each taking 1/N of
-            // the column height via equal `Fill` shares — never overlapping.
-            let layers: Vec<Element<'_, Message>> = expanded
-                .iter()
-                .map(|id| self.expanded_panel(*id, side, col_w, tab))
-                .collect();
+            // Expanded slots stack one below the other, each taking its
+            // weighted share of the column height — never overlapping.
+            let mut layers: Vec<Element<'_, Message>> = Vec::new();
+            for (n, gi) in expanded.iter().enumerate() {
+                if n > 0 {
+                    layers.push(dock_splitter(side, expanded[n - 1], *gi));
+                }
+                let weight = self.dock.groups(side)[*gi].weight;
+                layers.push(
+                    container(self.expanded_group(side, *gi, col_w, tab))
+                        .height(Length::FillPortion(crate::ui::dock::portion(weight)))
+                        .into(),
+                );
+            }
             column(layers).height(Fill).into()
         });
 
@@ -2957,22 +2823,30 @@ impl OpenCADStudio {
                 }
             }
         }
-        mouse_area(row(children).height(Fill))
-            .on_exit(Message::Dock(crate::ui::dock::DockMsg::HoverExit))
-            .into()
+        Some(
+            mouse_area(row(children).height(Fill))
+                .on_exit(Message::Dock(crate::ui::dock::DockMsg::HoverExit))
+                .into(),
+        )
     }
 
-    /// One narrow tab in the edge strip. Equal `Fill` heights across the tabs
-    /// give each 1/N of the strip; hovering or clicking it raises its panel.
+    /// One narrow tab in the edge strip, naming every panel of its slot.
+    /// Equal `Fill` heights across the tabs give each 1/N of the strip;
+    /// hovering or clicking it raises its slot.
     fn rail_slice(
         &self,
         id: crate::ui::dock::PanelId,
+        tabs: &[crate::ui::dock::PanelId],
         side: crate::app::config::DockSide,
         is_active: bool,
         is_dragging: bool,
     ) -> Element<'_, Message> {
         let label = canvas(VBarLabel {
-            text: id.title().to_string(),
+            text: tabs
+                .iter()
+                .map(|t| t.title())
+                .collect::<Vec<_>>()
+                .join(" · "),
             clockwise: side == crate::app::config::DockSide::Left,
         })
         .width(Fill)
@@ -3010,19 +2884,15 @@ impl OpenCADStudio {
             .into()
     }
 
-    /// A panel expanded to the full edge column: the panel body plus a
-    /// grabbable divider against the viewport. Hovering is handled by the
-    /// enclosing edge region (see `build_edge_stack`), so the body stays fully
-    /// interactive without fighting the region's hover tracking.
-    fn expanded_panel<'a>(
+    /// The content of panel `id` at `width`.
+    fn panel_body<'a>(
         &'a self,
         id: crate::ui::dock::PanelId,
-        side: crate::app::config::DockSide,
         width: f32,
         tab: &'a DocumentTab,
     ) -> Element<'a, Message> {
         let auto_collapse = self.dock.auto_collapse(id);
-        let panel: Element<'_, Message> = match id {
+        match id {
             crate::ui::dock::PanelId::Properties => tab.properties.view(width, auto_collapse),
             crate::ui::dock::PanelId::BlockPalette => {
                 crate::ui::window::block_palette::view(&self.block_palette, width, auto_collapse)
@@ -3059,12 +2929,211 @@ impl OpenCADStudio {
             crate::ui::dock::PanelId::SheetSetManager => {
                 crate::ui::window::sheet_set::view(&self.sheet_set, width, auto_collapse)
             }
+        }
+    }
+
+    /// An expanded slot: its tab strip (when it holds more than one shown
+    /// panel), the shown panel, and a grabbable divider against the viewport.
+    /// Hovering is handled by the enclosing edge region (see
+    /// `build_edge_stack`), so the body stays fully interactive without
+    /// fighting the region's hover tracking.
+    fn expanded_group<'a>(
+        &'a self,
+        side: crate::app::config::DockSide,
+        gi: usize,
+        width: f32,
+        tab: &'a DocumentTab,
+    ) -> Element<'a, Message> {
+        let tabs = self.dock_group_visible_tabs(side, gi);
+        let id = self.dock_group_shown(side, gi).expect("visible group");
+        let body = self.panel_body(id, width, tab);
+        let panel: Element<'_, Message> = if tabs.len() > 1 {
+            column![dock_tab_strip(&tabs, id, width), body]
+                .height(Fill)
+                .into()
+        } else {
+            body
         };
         let divider = dock_divider(id);
         match side {
             crate::app::config::DockSide::Left => row![panel, divider].height(Fill).into(),
             crate::app::config::DockSide::Right => row![divider, panel].height(Fill).into(),
         }
+    }
+
+    /// A floating panel at its saved place, with a corner grip to resize it.
+    fn floating_panel<'a>(
+        &'a self,
+        f: crate::ui::dock::FloatPanel,
+        tab: &'a DocumentTab,
+    ) -> Element<'a, Message> {
+        use crate::ui::dock::DockMsg;
+        let (ww, wh) = self.dock_workspace_size();
+        let grip = mouse_area(
+            container(crate::ui::icons::themed_secondary(crate::ui::icons::RESIZE, 12.0))
+                .width(Length::Fixed(14.0))
+                .height(Length::Fixed(14.0))
+                .center_x(Length::Fixed(14.0))
+                .center_y(Length::Fixed(14.0)),
+        )
+        .on_press(Message::Dock(DockMsg::FloatResizeGrab(f.id)))
+        .interaction(iced::mouse::Interaction::ResizingDiagonallyDown);
+        let body = stack![
+            self.panel_body(f.id, f.w, tab),
+            container(grip)
+                .width(Fill)
+                .height(Fill)
+                .align_x(iced::alignment::Horizontal::Right)
+                .align_y(iced::alignment::Vertical::Bottom),
+        ]
+        .width(Length::Fixed(f.w))
+        .height(Length::Fixed(f.h));
+        let framed = container(body).style(|theme: &Theme| container::Style {
+            border: Border {
+                color: theme.palette().background.strong.color,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            shadow: iced::Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                offset: iced::Vector::new(0.0, 4.0),
+                blur_radius: 14.0,
+            },
+            ..Default::default()
+        });
+        // The idle cursor marks the panel as opaque to the pointer, so clicks
+        // on its empty areas don't fall through to the drawing below.
+        let panel = mouse_area(framed)
+            .on_press(Message::Dock(DockMsg::FloatRaise(f.id)))
+            .interaction(iced::mouse::Interaction::Idle);
+        // Keep the panel on screen when the window shrank since it was placed.
+        let x = f.x.min(ww - f.w).max(0.0);
+        let y = f.y.min(wh - f.h).max(0.0);
+        place_at(panel.into(), x, y)
+    }
+
+    /// The live drop preview for dragged panel `id`: a tint over the target
+    /// edge plus a panel-sized ghost where it lands — a new slot above or
+    /// below, a new tab over a whole slot, or a floating window.
+    fn dock_drop_preview(
+        &self,
+        id: crate::ui::dock::PanelId,
+        target: crate::ui::dock::DropTarget,
+    ) -> Element<'_, Message> {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::DropTarget;
+        let (ww, _) = self.dock_workspace_size();
+        let id_w = self.dock.width(id, self.win_size.0);
+        let edge_w = |side: DockSide| self.dock_column_width(side).max(id_w);
+        let tint = |side: DockSide| -> Element<'_, Message> {
+            let w = edge_w(side);
+            let band = container(Space::new())
+                .width(Length::Fixed(w))
+                .height(Fill)
+                .style(|theme: &Theme| container::Style {
+                    background: Some(Background::Color(
+                        theme.palette().primary.weak.color.scale_alpha(0.35),
+                    )),
+                    ..Default::default()
+                });
+            container(band)
+                .width(Fill)
+                .height(Fill)
+                .align_x(match side {
+                    DockSide::Left => iced::alignment::Horizontal::Left,
+                    DockSide::Right => iced::alignment::Horizontal::Right,
+                })
+                .into()
+        };
+        let edge_x = |side: DockSide, w: f32| match side {
+            DockSide::Left => 0.0,
+            DockSide::Right => (ww - w).max(0.0),
+        };
+        let mut layers: Vec<Element<'_, Message>> = Vec::new();
+        match target {
+            DropTarget::Edge { side, index } => {
+                let (top, bottom) = self.dock_edge_preview_span(id, side, index);
+                let w = edge_w(side);
+                layers.push(tint(side));
+                layers.push(place_at(
+                    dock_ghost(&[id], id, w, bottom - top),
+                    edge_x(side, w),
+                    top,
+                ));
+            }
+            DropTarget::Tab { side, group } => {
+                let (top, bottom) = self
+                    .dock_slot_spans(side)
+                    .into_iter()
+                    .find(|(gi, _, _)| *gi == group)
+                    .map(|(_, t, b)| (t, b))
+                    .unwrap_or((0.0, 0.0));
+                let mut tabs = self.dock_group_visible_tabs(side, group);
+                tabs.retain(|t| *t != id);
+                tabs.push(id);
+                let w = edge_w(side);
+                layers.push(tint(side));
+                layers.push(place_at(
+                    dock_ghost(&tabs, id, w, bottom - top),
+                    edge_x(side, w),
+                    top,
+                ));
+            }
+            DropTarget::Float { x, y } => {
+                let (w, h) = self.dock_float_size(id);
+                layers.push(place_at(dock_ghost(&[id], id, w, h), x, y));
+            }
+        }
+        iced::widget::Stack::with_children(layers)
+            .width(Fill)
+            .height(Fill)
+            .into()
+    }
+
+    /// Vertical span the dragged panel `id` would take as a new slot at
+    /// insertion `index` on `side`, after it leaves its current place.
+    fn dock_edge_preview_span(
+        &self,
+        id: crate::ui::dock::PanelId,
+        side: crate::app::config::DockSide,
+        index: usize,
+    ) -> (f32, f32) {
+        let (_, avail) = self.dock_workspace_size();
+        let groups = self.dock.groups(side);
+        let lone_here = |gi: usize| self.dock_group_visible_tabs(side, gi) == [id];
+        let mut own_weight = None;
+        // (weight, is_new) for each visible slot after the move.
+        let mut slots: Vec<(f32, bool)> = Vec::new();
+        let mut inserted = false;
+        for gi in self.dock_visible_groups(side) {
+            if !inserted && gi >= index {
+                slots.push((0.0, true));
+                inserted = true;
+            }
+            if lone_here(gi) {
+                own_weight = Some(groups[gi].weight);
+                continue;
+            }
+            slots.push((groups[gi].weight, false));
+        }
+        if !inserted {
+            slots.push((0.0, true));
+        }
+        let others: Vec<f32> = slots.iter().filter(|s| !s.1).map(|s| s.0).collect();
+        let new_weight = own_weight.unwrap_or(if others.is_empty() {
+            1.0
+        } else {
+            others.iter().sum::<f32>() / others.len() as f32
+        });
+        let weights: Vec<f32> = slots
+            .iter()
+            .map(|(w, is_new)| if *is_new { new_weight } else { *w })
+            .collect();
+        let at = slots.iter().position(|s| s.1).expect("new slot");
+        crate::ui::dock::slot_spans(&weights, avail)
+            .get(at)
+            .copied()
+            .unwrap_or((0.0, avail))
     }
 }
 
@@ -3453,6 +3522,176 @@ fn dock_divider(id: crate::ui::dock::PanelId) -> Element<'static, Message> {
         .on_press(grab)
         .on_double_click(reset)
         .interaction(iced::mouse::Interaction::ResizingHorizontally)
+        .into()
+}
+
+/// Height of a docked slot's tab strip.
+const DOCK_TAB_H: f32 = 24.0;
+
+/// The tab row above a slot holding several panels. Pressing a tab shows its
+/// panel; dragging it pulls the panel out of the slot.
+fn dock_tab_strip(
+    tabs: &[crate::ui::dock::PanelId],
+    active: crate::ui::dock::PanelId,
+    width: f32,
+) -> Element<'static, Message> {
+    let cells: Vec<Element<'static, Message>> = tabs
+        .iter()
+        .map(|id| {
+            let id = *id;
+            let is_active = id == active;
+            let label = text(id.title())
+                .size(11)
+                .wrapping(iced::widget::text::Wrapping::None)
+                .ellipsis(iced::advanced::text::Ellipsis::End);
+            let cell = container(label)
+                .width(Fill)
+                .height(Fill)
+                .padding([0, 8])
+                .center_y(Fill)
+                .clip(true)
+                .style(move |theme: &Theme| {
+                    let palette = theme.palette();
+                    container::Style {
+                        background: Some(Background::Color(if is_active {
+                            palette.background.base.color
+                        } else {
+                            palette.background.weak.color
+                        })),
+                        text_color: Some(if is_active {
+                            palette.background.base.text
+                        } else {
+                            palette.background.weak.text.scale_alpha(0.75)
+                        }),
+                        border: Border {
+                            color: if is_active {
+                                palette.primary.base.color
+                            } else {
+                                palette.background.neutral.color
+                            },
+                            width: if is_active { 1.0 } else { 0.5 },
+                            radius: iced::border::Radius::default().top(4.0),
+                        },
+                        ..Default::default()
+                    }
+                });
+            mouse_area(cell)
+                .on_press(Message::Dock(crate::ui::dock::DockMsg::SelectTab(id)))
+                .interaction(iced::mouse::Interaction::Pointer)
+                .into()
+        })
+        .collect();
+    container(row(cells).spacing(2).height(Fill))
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(DOCK_TAB_H))
+        .padding(iced::Padding {
+            top: 3.0,
+            right: 4.0,
+            bottom: 0.0,
+            left: 4.0,
+        })
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(theme.palette().background.strong.color)),
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Draggable bar between two expanded slots on an edge; double-click gives
+/// every slot on the edge the same height again.
+fn dock_splitter(
+    side: crate::app::config::DockSide,
+    upper: usize,
+    lower: usize,
+) -> Element<'static, Message> {
+    let line = container(Space::new())
+        .width(Fill)
+        .height(Length::Fixed(5.0))
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(theme.palette().background.neutral.color)),
+            ..Default::default()
+        });
+    mouse_area(line)
+        .on_press(Message::Dock(crate::ui::dock::DockMsg::SplitGrab(side, upper, lower)))
+        .on_double_click(Message::Dock(crate::ui::dock::DockMsg::SplitReset(side)))
+        .interaction(iced::mouse::Interaction::ResizingVertically)
+        .into()
+}
+
+/// The blue drop ghost: a `w`×`h` panel outline whose header shows the tabs
+/// the slot will hold, with the dragged panel's tab highlighted.
+fn dock_ghost(
+    tabs: &[crate::ui::dock::PanelId],
+    dragged: crate::ui::dock::PanelId,
+    w: f32,
+    h: f32,
+) -> Element<'static, Message> {
+    let cells: Vec<Element<'static, Message>> = tabs
+        .iter()
+        .map(|id| {
+            let is_dragged = *id == dragged;
+            container(
+                text(id.title())
+                    .size(12)
+                    .wrapping(iced::widget::text::Wrapping::None)
+                    .ellipsis(iced::advanced::text::Ellipsis::End),
+            )
+            .width(Fill)
+            .padding([5, 8])
+            .clip(true)
+            .style(move |theme: &Theme| {
+                let palette = theme.palette();
+                container::Style {
+                    background: Some(Background::Color(if is_dragged {
+                        palette.primary.base.color
+                    } else {
+                        palette.primary.weak.color
+                    })),
+                    text_color: Some(if is_dragged {
+                        palette.primary.base.text
+                    } else {
+                        palette.primary.weak.text
+                    }),
+                    ..Default::default()
+                }
+            })
+            .into()
+        })
+        .collect();
+    container(column![row(cells).spacing(2), Space::new()])
+        .width(Length::Fixed(w.max(1.0)))
+        .height(Length::Fixed(h.max(1.0)))
+        .clip(true)
+        .style(|theme: &Theme| {
+            let palette = theme.palette();
+            container::Style {
+                background: Some(Background::Color(
+                    palette.background.base.color.scale_alpha(0.85),
+                )),
+                border: Border {
+                    color: palette.primary.base.color,
+                    width: 2.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+        .into()
+}
+
+/// Position `content` with its top-left corner at workspace point (`x`, `y`).
+fn place_at(content: Element<'_, Message>, x: f32, y: f32) -> Element<'_, Message> {
+    container(content)
+        .width(Fill)
+        .height(Fill)
+        .align_x(iced::alignment::Horizontal::Left)
+        .align_y(iced::alignment::Vertical::Top)
+        .padding(iced::Padding {
+            top: y.max(0.0),
+            right: 0.0,
+            bottom: 0.0,
+            left: x.max(0.0),
+        })
         .into()
 }
 

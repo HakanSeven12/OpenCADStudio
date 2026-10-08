@@ -852,8 +852,19 @@ pub(super) struct OpenCADStudio {
     pub(crate) dock_resizing: Option<crate::ui::dock::PanelId>,
     /// Last pointer position during a drag / resize.
     pub(crate) dock_drag_last: Option<iced::Point>,
-    /// Live drag target (side + index), shown as a highlight while dragging.
-    pub(crate) dock_drag_target: Option<(crate::app::config::DockSide, usize)>,
+    /// Live drop target, shown as a preview while dragging. `None` until the
+    /// pointer has moved far enough to count as a drag, so a click on a title
+    /// bar or tab never moves the panel.
+    pub(crate) dock_drag_target: Option<crate::ui::dock::DropTarget>,
+    /// First pointer position of the current panel drag.
+    pub(crate) dock_drag_origin: Option<iced::Point>,
+    /// Pointer offset from a dragged panel's top-left corner, so a floated
+    /// panel lands where it is held rather than jumping to the pointer.
+    pub(crate) dock_grab_offset: iced::Vector,
+    /// Splitter being dragged between two slots on a side (upper, lower).
+    pub(crate) dock_split_drag: Option<(crate::app::config::DockSide, usize, usize)>,
+    /// Floating panel being resized from its corner grip.
+    pub(crate) dock_float_resizing: Option<crate::ui::dock::PanelId>,
     /// Reference-table column currently being width-resized (column index),
     /// with the last pointer position. Mirrors the Layers Name-column drag.
     pub(crate) xref_col_drag: Option<usize>,
@@ -4289,6 +4300,10 @@ impl OpenCADStudio {
             dock_resizing: None,
             dock_drag_last: None,
             dock_drag_target: None,
+            dock_drag_origin: None,
+            dock_grab_offset: iced::Vector::new(0.0, 0.0),
+            dock_split_drag: None,
+            dock_float_resizing: None,
             xref_col_drag: None,
             xref_col_last: None,
             xref_split_drag: false,

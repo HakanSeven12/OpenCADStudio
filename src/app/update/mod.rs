@@ -2568,7 +2568,7 @@ impl OpenCADStudio {
                 if self.show_external_references {
                     use crate::app::config::DockSide;
                     use crate::ui::dock::PanelId;
-                    if self.dock.location(PanelId::ExternalReferences).is_none() {
+                    if !self.dock.is_placed(PanelId::ExternalReferences) {
                         self.dock.dock(PanelId::ExternalReferences, DockSide::Right, usize::MAX);
                     }
                     self.dock_expanded = Some(PanelId::ExternalReferences);

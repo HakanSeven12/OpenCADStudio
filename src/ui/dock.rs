@@ -1,11 +1,12 @@
 //! General edge-stack docking for side panels.
 //!
 //! Any number of dockable panels (Properties, the block palette, future
-//! palettes) live in an ordered vertical stack on the left or right edge of
-//! the drawing view. This module owns the persisted layout (which panels are
-//! docked, on which side, in what vertical order, at what width, and whether
-//! each auto-collapses) plus the pure geometry used to render and hover an
-//! edge's stacked panels.
+//! palettes) live in an ordered vertical stack of slots on the left or right
+//! edge of the drawing view, or float over it. A slot holds one panel or
+//! several sharing it as tabs, and owns an adjustable share of the edge
+//! height. This module owns the persisted layout (which panels are docked or
+//! floating, where, at what size, and whether each auto-collapses) plus the
+//! pure geometry used to render and hover an edge's stacked slots.
 
 use crate::app::config::DockSide;
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,16 @@ pub enum DockMsg {
     DragMove(iced::Point),
     /// Pointer released after a drag / resize.
     DragRelease,
+    /// Show `panel`'s tab in its tab group.
+    SelectTab(PanelId),
+    /// Begin dragging the splitter between slots `upper` and `lower` on a side.
+    SplitGrab(DockSide, usize, usize),
+    /// Give every slot on a side the same height again.
+    SplitReset(DockSide),
+    /// Begin resizing floating `panel` from its corner grip.
+    FloatResizeGrab(PanelId),
+    /// Bring floating `panel` to the front.
+    FloatRaise(PanelId),
     /// The pointer left the edge column; collapse any auto-collapsing panel.
     HoverExit,
 }
@@ -119,16 +130,111 @@ impl DockPanel {
     }
 }
 
-/// The whole dock layout: two ordered per-side stacks plus per-panel settings.
-/// Only the persisted layout lives here; transient drag/hover state is app
-/// state (see `update::mod`) so it is skipped by serialization.
+/// One slot of an edge stack: one or more panels sharing the slot as tabs.
+/// A single-panel group renders without a tab strip, exactly like the old
+/// one-panel-per-slot stack. `weight` is the slot's share of the edge height
+/// relative to the other slots on the same edge (equal weights = equal split).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(from = "GroupRepr")]
+pub struct DockGroup {
+    /// Panels in tab order.
+    pub tabs: Vec<PanelId>,
+    /// The tab currently shown. Always one of `tabs`.
+    pub active: PanelId,
+    /// Relative share of the edge height.
+    pub weight: f32,
+}
+
+/// On-disk forms of a [`DockGroup`]: configs written before tab groups stored
+/// each slot as a bare panel id.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum GroupRepr {
+    Single(PanelId),
+    Group {
+        tabs: Vec<PanelId>,
+        #[serde(default)]
+        active: Option<PanelId>,
+        #[serde(default = "default_weight")]
+        weight: f32,
+    },
+}
+
+fn default_weight() -> f32 {
+    1.0
+}
+
+impl From<GroupRepr> for DockGroup {
+    fn from(repr: GroupRepr) -> Self {
+        match repr {
+            GroupRepr::Single(id) => DockGroup::single(id, 1.0),
+            GroupRepr::Group {
+                tabs,
+                active,
+                weight,
+            } => {
+                // A hand-edited or corrupt group still yields a usable slot.
+                let tabs = if tabs.is_empty() {
+                    vec![PanelId::Properties]
+                } else {
+                    tabs
+                };
+                let active = active.filter(|a| tabs.contains(a)).unwrap_or(tabs[0]);
+                let weight = if weight.is_finite() && weight > 0.0 {
+                    weight.clamp(MIN_WEIGHT, MAX_WEIGHT)
+                } else {
+                    1.0
+                };
+                DockGroup {
+                    tabs,
+                    active,
+                    weight,
+                }
+            }
+        }
+    }
+}
+
+impl DockGroup {
+    pub fn single(id: PanelId, weight: f32) -> Self {
+        Self {
+            tabs: vec![id],
+            active: id,
+            weight,
+        }
+    }
+}
+
+/// A panel floating over the workspace, in workspace-local pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct FloatPanel {
+    pub id: PanelId,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+/// Smallest floating panel height.
+pub const FLOAT_MIN_H: f32 = 160.0;
+/// Smallest on-screen height of a docked slot while dragging a splitter.
+pub const GROUP_MIN_H: f32 = 80.0;
+const MIN_WEIGHT: f32 = 0.05;
+const MAX_WEIGHT: f32 = 20.0;
+
+/// The whole dock layout: two ordered per-side stacks of tab groups, the
+/// floating panels, plus per-panel settings. Only the persisted layout lives
+/// here; transient drag/hover state is app state (see `update::mod`) so it is
+/// skipped by serialization.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DockState {
-    /// Panels anchored to the left edge, top → bottom.
-    pub left: Vec<PanelId>,
-    /// Panels anchored to the right edge, top → bottom.
-    pub right: Vec<PanelId>,
+    /// Slots anchored to the left edge, top → bottom.
+    pub left: Vec<DockGroup>,
+    /// Slots anchored to the right edge, top → bottom.
+    pub right: Vec<DockGroup>,
+    /// Floating panels, back → front.
+    pub floating: Vec<FloatPanel>,
     /// Per-panel width / auto-collapse settings, keyed by `PanelId`.
     pub panels: BTreeMap<PanelId, DockPanel>,
 }
@@ -136,23 +242,24 @@ pub struct DockState {
 impl Default for DockState {
     fn default() -> Self {
         Self {
-            left: vec![PanelId::Properties],
-            right: vec![PanelId::BlockPalette],
+            left: vec![DockGroup::single(PanelId::Properties, 1.0)],
+            right: vec![DockGroup::single(PanelId::BlockPalette, 1.0)],
+            floating: Vec::new(),
             panels: BTreeMap::new(),
         }
     }
 }
 
 impl DockState {
-    /// Edge-collection of the panels ordered for rendering on `side`.
-    fn stack(&self, side: DockSide) -> &[PanelId] {
+    /// The slots stacked on `side`, top → bottom.
+    pub fn groups(&self, side: DockSide) -> &[DockGroup] {
         match side {
             DockSide::Left => &self.left,
             DockSide::Right => &self.right,
         }
     }
 
-    fn stack_mut(&mut self, side: DockSide) -> &mut Vec<PanelId> {
+    fn groups_mut(&mut self, side: DockSide) -> &mut Vec<DockGroup> {
         match side {
             DockSide::Left => &mut self.left,
             DockSide::Right => &mut self.right,
@@ -161,7 +268,8 @@ impl DockState {
 
     /// Guarantee every known `PanelId` has a settings entry, so rendering and
     /// resize never hit a missing configuration. Also a cheap heal for configs
-    /// written by an older version.
+    /// written by an older version (or edited by hand): a panel placed twice
+    /// keeps only its first placement.
     pub fn ensure_settings(&mut self) {
         for id in [
             PanelId::Properties,
@@ -175,16 +283,41 @@ impl DockState {
         ] {
             self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
         }
+        let mut seen = std::collections::BTreeSet::new();
+        for side in [DockSide::Left, DockSide::Right] {
+            let groups = self.groups_mut(side);
+            for g in groups.iter_mut() {
+                g.tabs.retain(|id| seen.insert(*id));
+                if !g.tabs.contains(&g.active) {
+                    if let Some(first) = g.tabs.first() {
+                        g.active = *first;
+                    }
+                }
+            }
+            groups.retain(|g| !g.tabs.is_empty());
+        }
+        self.floating.retain(|f| seen.insert(f.id));
     }
 
-    /// Where (if anywhere) a panel is currently docked.
+    /// Where (if anywhere) a panel is docked: its side and slot index.
     pub fn location(&self, id: PanelId) -> Option<(DockSide, usize)> {
         for side in [DockSide::Left, DockSide::Right] {
-            if let Some(i) = self.stack(side).iter().position(|p| *p == id) {
+            if let Some(i) = self.groups(side).iter().position(|g| g.tabs.contains(&id)) {
                 return Some((side, i));
             }
         }
         None
+    }
+
+    /// The floating placement of `id`, if it floats.
+    pub fn float_rect(&self, id: PanelId) -> Option<FloatPanel> {
+        self.floating.iter().find(|f| f.id == id).copied()
+    }
+
+    /// Whether `id` has a place in the layout (docked or floating). A panel
+    /// without one is docked on the right when it is opened.
+    pub fn is_placed(&self, id: PanelId) -> bool {
+        self.location(id).is_some() || self.float_rect(id).is_some()
     }
 
     pub fn settings(&self, id: PanelId) -> DockPanel {
@@ -222,43 +355,203 @@ impl DockState {
         entry.auto_collapse = on;
     }
 
-    /// Dock `id` to `side` at `index` (clamped), removing it from any other
-    /// stack first. Returns whether the layout actually changed.
-    pub fn dock(&mut self, id: PanelId, side: DockSide, index: usize) -> bool {
-        if let Some((old_side, old_i)) = self.location(id) {
-            if old_side == side && old_i == index {
-                return false;
-            }
-            self.stack_mut(old_side).remove(old_i);
+    /// Take `id` out of the layout. Returns the docked slot it left and
+    /// whether that slot disappeared (it held no other tab).
+    fn detach(&mut self, id: PanelId) -> Option<(DockSide, usize, bool)> {
+        self.floating.retain(|f| f.id != id);
+        let (side, gi) = self.location(id)?;
+        let groups = self.groups_mut(side);
+        let g = &mut groups[gi];
+        g.tabs.retain(|t| *t != id);
+        if g.tabs.is_empty() {
+            groups.remove(gi);
+            return Some((side, gi, true));
         }
-        let stack = self.stack_mut(side);
-        let index = index.min(stack.len());
-        stack.insert(index, id);
+        if g.active == id {
+            g.active = g.tabs[0];
+        }
+        Some((side, gi, false))
+    }
+
+    /// Dock `id` as its own slot on `side` at insertion `index` (0 = top,
+    /// `len` = bottom), counted in the stack as it is *before* the move.
+    /// Returns whether the layout actually changed.
+    pub fn dock(&mut self, id: PanelId, side: DockSide, index: usize) -> bool {
+        let before = self.clone();
+        let weight = {
+            let groups = self.groups(side);
+            if groups.is_empty() {
+                1.0
+            } else {
+                groups.iter().map(|g| g.weight).sum::<f32>() / groups.len() as f32
+            }
+        };
+        let mut index = index;
+        let mut weight = weight;
+        if let Some((old_side, old_i, removed)) = self.detach(id) {
+            if old_side == side && removed {
+                // Moving within an edge keeps the slot's own height share.
+                weight = before.groups(side)[old_i].weight;
+                if old_i < index {
+                    index -= 1;
+                }
+            }
+        }
+        let groups = self.groups_mut(side);
+        let index = index.min(groups.len());
+        groups.insert(index, DockGroup::single(id, weight));
+        *self != before
+    }
+
+    /// Add `id` as a tab of slot `group` on `side` (index counted before the
+    /// move) and show it. Returns whether the layout changed.
+    pub fn add_tab(&mut self, id: PanelId, side: DockSide, group: usize) -> bool {
+        if group >= self.groups(side).len() {
+            return false;
+        }
+        if self.groups(side)[group].tabs.contains(&id) {
+            return self.select_tab(id);
+        }
+        let mut group = group;
+        if let Some((old_side, old_i, removed)) = self.detach(id) {
+            if old_side == side && removed && old_i < group {
+                group -= 1;
+            }
+        }
+        let g = &mut self.groups_mut(side)[group];
+        g.tabs.push(id);
+        g.active = id;
         true
+    }
+
+    /// Float `id` at `rect`, on top of the other floating panels.
+    pub fn float(&mut self, rect: FloatPanel) -> bool {
+        let before = self.clone();
+        self.detach(rect.id);
+        self.floating.push(rect);
+        *self != before
+    }
+
+    /// Bring a floating panel to the front.
+    pub fn raise_float(&mut self, id: PanelId) {
+        if let Some(i) = self.floating.iter().position(|f| f.id == id) {
+            let f = self.floating.remove(i);
+            self.floating.push(f);
+        }
+    }
+
+    /// Resize a floating panel, keeping it at least a usable size.
+    pub fn resize_float(&mut self, id: PanelId, w: f32, h: f32) {
+        if let Some(f) = self.floating.iter_mut().find(|f| f.id == id) {
+            f.w = w.clamp(DOCK_MIN_W, id.max_width());
+            f.h = h.max(FLOAT_MIN_H);
+        }
+    }
+
+    /// Show `id` in its tab group. Returns whether the active tab changed.
+    pub fn select_tab(&mut self, id: PanelId) -> bool {
+        let Some((side, gi)) = self.location(id) else {
+            return false;
+        };
+        let g = &mut self.groups_mut(side)[gi];
+        let changed = g.active != id;
+        g.active = id;
+        changed
+    }
+
+    /// Move the boundary between slots `upper` and `lower` on `side` by
+    /// `delta` weight units, keeping their combined share and each above
+    /// `min_weight`.
+    pub fn shift_split(
+        &mut self,
+        side: DockSide,
+        upper: usize,
+        lower: usize,
+        delta: f32,
+        min_weight: f32,
+    ) {
+        let groups = self.groups_mut(side);
+        if upper >= groups.len() || lower >= groups.len() || upper == lower {
+            return;
+        }
+        let total = groups[upper].weight + groups[lower].weight;
+        let min = min_weight.clamp(MIN_WEIGHT, total * 0.5);
+        let up = (groups[upper].weight + delta).clamp(min, total - min);
+        groups[upper].weight = up;
+        groups[lower].weight = total - up;
+    }
+
+    /// Give every slot on `side` the same height again.
+    pub fn reset_splits(&mut self, side: DockSide) {
+        for g in self.groups_mut(side) {
+            g.weight = 1.0;
+        }
     }
 }
 
-/// Insertion index (0..=total) for dropping a panel whose pointer is at
-/// screen-local `y` within an edge column of `avail` height holding `total`
-/// slots. Used to compute the live drag target index while reordering.
-pub fn drop_index(y: f32, total: usize, avail: f32) -> usize {
-    if total == 0 || avail <= 0.0 {
-        return 0;
+/// Where a dragged panel lands on release.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DropTarget {
+    /// A new slot on `side` at insertion `index` (0 = top, len = bottom).
+    Edge { side: DockSide, index: usize },
+    /// A new tab in slot `group` on `side`.
+    Tab { side: DockSide, group: usize },
+    /// Floating with its top-left corner at (`x`, `y`).
+    Float { x: f32, y: f32 },
+}
+
+/// Which part of a docked slot the pointer is over while dragging: the top
+/// and bottom quarters split the slot (dock above / below), the middle joins
+/// it as a tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotZone {
+    Above,
+    Middle,
+    Below,
+}
+
+/// Classify a pointer at `y` within a slot spanning `top..bottom`.
+pub fn slot_zone(y: f32, top: f32, bottom: f32) -> SlotZone {
+    let h = (bottom - top).max(1.0);
+    let band = (h * 0.25).min(80.0);
+    if y < top + band {
+        SlotZone::Above
+    } else if y > bottom - band {
+        SlotZone::Below
+    } else {
+        SlotZone::Middle
     }
-    let h = avail / total as f32;
-    let idx = (y / h).round() as usize;
-    // A single full-height panel must not offer a top/bottom split: any drop
-    // lands in the one available slot.
-    if total <= 1 {
-        return 0;
+}
+
+/// Split `avail` pixels of height between slots of `weights`, returning each
+/// slot's `(top, bottom)`.
+pub fn slot_spans(weights: &[f32], avail: f32) -> Vec<(f32, f32)> {
+    let total: f32 = weights.iter().sum();
+    if total <= 0.0 {
+        return Vec::new();
     }
-    idx.min(total)
+    let mut y = 0.0;
+    weights
+        .iter()
+        .map(|w| {
+            let top = y;
+            y += avail * w / total;
+            (top, y)
+        })
+        .collect()
+}
+
+/// Integer share for iced's `FillPortion` from a slot weight.
+pub fn portion(weight: f32) -> u16 {
+    (weight * 1000.0).round().clamp(1.0, u16::MAX as f32) as u16
 }
 
 /// Smallest docked width a panel may be dragged or sized to.
 pub const DOCK_MIN_W: f32 = 200.0;
 /// Largest docked width a panel may be dragged or sized to.
 pub const DOCK_MAX_W: f32 = 600.0;
+/// Width of the band along an empty edge that docks a dragged panel there.
+pub const DOCK_EDGE_ZONE: f32 = 48.0;
 
 // ── Shared panel chrome ─────────────────────────────────────────────────
 
@@ -460,29 +753,178 @@ mod tests {
     }
 
     #[test]
-    fn drop_index_maps_between_zero_and_total() {
-        assert_eq!(drop_index(0.0, 3, 300.0), 0);
-        assert_eq!(drop_index(100.0, 3, 300.0), 1);
-        assert_eq!(drop_index(299.0, 3, 300.0), 3);
-        assert_eq!(drop_index(300.0, 3, 300.0), 3);
-        assert_eq!(drop_index(50.0, 0, 300.0), 0);
+    fn legacy_config_with_bare_panel_ids_loads_as_single_slots() {
+        let json = r#"{"left":["properties","block_palette"],"right":[]}"#;
+        let state: DockState = serde_json::from_str(json).unwrap();
+        assert_eq!(state.left.len(), 2);
+        assert_eq!(state.left[0], DockGroup::single(PanelId::Properties, 1.0));
+        assert_eq!(state.location(PanelId::BlockPalette), Some((DockSide::Left, 1)));
+        assert!(state.floating.is_empty());
     }
 
     #[test]
-    fn drop_index_single_slot_is_always_zero() {
-        // One panel sharing the full edge height: any pointer y lands in the
-        // single slot, so the insertion index must be 0 (no top/bottom split).
-        assert_eq!(drop_index(5.0, 1, 900.0), 0);
-        assert_eq!(drop_index(450.0, 1, 900.0), 0);
-        assert_eq!(drop_index(895.0, 1, 900.0), 0);
+    fn layout_round_trips_through_serde() {
+        let mut state = DockState::default();
+        state.add_tab(PanelId::Browser, DockSide::Left, 0);
+        state.float(FloatPanel {
+            id: PanelId::Count,
+            x: 10.0,
+            y: 20.0,
+            w: 300.0,
+            h: 400.0,
+        });
+        let json = serde_json::to_string(&state).unwrap();
+        let back: DockState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, state);
     }
 
     #[test]
-    fn drop_index_multi_slot_maps_position() {
-        // Two panels on an edge produce insertion positions 0..=total: pointer
-        // near the top lands before the first slot (0); pointer near the bottom
-        // of the last slot lands after the last (== total, append).
-        assert_eq!(drop_index(10.0, 2, 900.0), 0);
-        assert_eq!(drop_index(890.0, 2, 900.0), 2);
+    fn add_tab_joins_a_slot_and_shows_the_new_tab() {
+        let mut state = DockState::default();
+        assert!(state.add_tab(PanelId::BlockPalette, DockSide::Left, 0));
+        assert!(state.right.is_empty(), "its old slot disappears");
+        assert_eq!(state.left.len(), 1);
+        assert_eq!(
+            state.left[0].tabs,
+            vec![PanelId::Properties, PanelId::BlockPalette]
+        );
+        assert_eq!(state.left[0].active, PanelId::BlockPalette);
+        assert!(state.select_tab(PanelId::Properties));
+        assert_eq!(state.left[0].active, PanelId::Properties);
+    }
+
+    #[test]
+    fn docking_a_tab_out_keeps_the_rest_of_the_group() {
+        let mut state = DockState::default();
+        state.add_tab(PanelId::BlockPalette, DockSide::Left, 0);
+        // Pull the shown tab out below the group.
+        assert!(state.dock(PanelId::BlockPalette, DockSide::Left, 1));
+        assert_eq!(state.left.len(), 2);
+        assert_eq!(state.left[0].tabs, vec![PanelId::Properties]);
+        assert_eq!(state.left[0].active, PanelId::Properties);
+        assert_eq!(state.location(PanelId::BlockPalette), Some((DockSide::Left, 1)));
+    }
+
+    #[test]
+    fn add_tab_index_counts_slots_before_the_move() {
+        let mut state = DockState::default();
+        state.left = vec![
+            DockGroup::single(PanelId::BlockPalette, 1.0),
+            DockGroup::single(PanelId::Properties, 1.0),
+        ];
+        state.right.clear();
+        // Slot 1 (Properties) is slot 0 once the palette's slot is gone.
+        assert!(state.add_tab(PanelId::BlockPalette, DockSide::Left, 1));
+        assert_eq!(state.left.len(), 1);
+        assert_eq!(
+            state.left[0].tabs,
+            vec![PanelId::Properties, PanelId::BlockPalette]
+        );
+    }
+
+    #[test]
+    fn moving_a_slot_down_keeps_its_height_share() {
+        let mut state = DockState::default();
+        state.left = vec![
+            DockGroup::single(PanelId::BlockPalette, 0.5),
+            DockGroup::single(PanelId::Properties, 1.5),
+        ];
+        assert!(state.dock(PanelId::BlockPalette, DockSide::Left, 2));
+        assert_eq!(state.left[0].tabs, vec![PanelId::Properties]);
+        assert_eq!(state.left[1], DockGroup::single(PanelId::BlockPalette, 0.5));
+    }
+
+    #[test]
+    fn float_detaches_and_dock_brings_it_back() {
+        let mut state = DockState::default();
+        let rect = FloatPanel {
+            id: PanelId::Properties,
+            x: 100.0,
+            y: 50.0,
+            w: 250.0,
+            h: 300.0,
+        };
+        assert!(state.float(rect));
+        assert!(state.left.is_empty());
+        assert_eq!(state.location(PanelId::Properties), None);
+        assert_eq!(state.float_rect(PanelId::Properties), Some(rect));
+        assert!(state.is_placed(PanelId::Properties));
+        assert!(state.dock(PanelId::Properties, DockSide::Right, 0));
+        assert!(state.floating.is_empty());
+        assert_eq!(state.location(PanelId::Properties), Some((DockSide::Right, 0)));
+    }
+
+    #[test]
+    fn float_resize_respects_minimums() {
+        let mut state = DockState::default();
+        state.float(FloatPanel {
+            id: PanelId::Count,
+            x: 0.0,
+            y: 0.0,
+            w: 300.0,
+            h: 300.0,
+        });
+        state.resize_float(PanelId::Count, 10.0, 10.0);
+        let f = state.float_rect(PanelId::Count).unwrap();
+        assert_eq!((f.w, f.h), (DOCK_MIN_W, FLOAT_MIN_H));
+    }
+
+    #[test]
+    fn raise_float_moves_it_to_the_front() {
+        let mut state = DockState::default();
+        for id in [PanelId::Count, PanelId::Browser] {
+            state.float(FloatPanel {
+                id,
+                x: 0.0,
+                y: 0.0,
+                w: 300.0,
+                h: 300.0,
+            });
+        }
+        state.raise_float(PanelId::Count);
+        assert_eq!(state.floating.last().map(|f| f.id), Some(PanelId::Count));
+    }
+
+    #[test]
+    fn shift_split_keeps_combined_share_and_minimum() {
+        let mut state = DockState::default();
+        state.left = vec![
+            DockGroup::single(PanelId::BlockPalette, 1.0),
+            DockGroup::single(PanelId::Properties, 1.0),
+        ];
+        state.shift_split(DockSide::Left, 0, 1, 0.5, 0.1);
+        assert_eq!((state.left[0].weight, state.left[1].weight), (1.5, 0.5));
+        state.shift_split(DockSide::Left, 0, 1, 10.0, 0.1);
+        assert!((state.left[1].weight - 0.1).abs() < 1e-6);
+        assert!((state.left[0].weight + state.left[1].weight - 2.0).abs() < 1e-6);
+        state.reset_splits(DockSide::Left);
+        assert_eq!((state.left[0].weight, state.left[1].weight), (1.0, 1.0));
+    }
+
+    #[test]
+    fn ensure_settings_drops_duplicate_placements() {
+        let mut state = DockState::default();
+        state.right.push(DockGroup::single(PanelId::Properties, 1.0));
+        state.ensure_settings();
+        assert_eq!(state.location(PanelId::Properties), Some((DockSide::Left, 0)));
+        assert_eq!(state.right.len(), 1);
+    }
+
+    #[test]
+    fn slot_zone_splits_quarters() {
+        assert_eq!(slot_zone(10.0, 0.0, 400.0), SlotZone::Above);
+        assert_eq!(slot_zone(200.0, 0.0, 400.0), SlotZone::Middle);
+        assert_eq!(slot_zone(390.0, 0.0, 400.0), SlotZone::Below);
+        // Tall slots cap the split bands so the tab zone stays generous.
+        assert_eq!(slot_zone(100.0, 0.0, 1000.0), SlotZone::Middle);
+    }
+
+    #[test]
+    fn slot_spans_follow_weights() {
+        assert_eq!(
+            slot_spans(&[1.0, 3.0], 400.0),
+            vec![(0.0, 100.0), (100.0, 400.0)]
+        );
+        assert!(slot_spans(&[], 400.0).is_empty());
     }
 }

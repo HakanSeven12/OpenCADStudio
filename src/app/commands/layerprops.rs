@@ -679,7 +679,7 @@ impl OpenCADStudio {
                     // rearrange themselves on upgrade for a panel they have
                     // not asked for.
                     let id = crate::ui::dock::PanelId::Browser;
-                    if self.dock.location(id).is_none() {
+                    if !self.dock.is_placed(id) {
                         // dock() clamps an out-of-range index to the end of
                         // the edge, so this appends below whatever is there.
                         self.dock

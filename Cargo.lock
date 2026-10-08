@@ -4206,7 +4206,7 @@ dependencies = [
 [[package]]
 name = "opencadcodec"
 version = "0.6.0"
-source = "git+https://github.com/schoeller/cadcodec.git?branch=gold-vs-silver-clean#dc7db5d82d76781795b5928b82ee678d313d153f"
+source = "git+https://github.com/schoeller/cadcodec.git?branch=gold-vs-silver-clean#ddb445f676c362ddb5a87ae580c600d7a106448b"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",

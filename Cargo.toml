@@ -181,3 +181,7 @@ harness = false
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
+
+[patch."https://github.com/HakanSeven12/opencadkernel.git"]
+opencadkernel = { git = "https://github.com/ramox81/cadkernel.git", rev = "3d0f631" }
+opencadkernel-constraints = { git = "https://github.com/ramox81/cadkernel.git", rev = "3d0f631" }

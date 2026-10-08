@@ -509,13 +509,16 @@ pub fn themed_secondary<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'
         .into()
 }
 
-/// Render disabled chrome with the active Iced theme's text color.
+/// Render disabled chrome with the active Iced theme's text color, faded
+/// like disabled text. The fade goes through the widget's opacity: an SVG
+/// tint only replaces RGB, so alpha on the style colour would be ignored.
 pub fn themed_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     svg(themed_handle(bytes))
         .width(size)
         .height(size)
+        .opacity(0.42_f32)
         .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().background.base.text.scale_alpha(0.42)),
+            color: Some(theme.palette().background.base.text),
         })
         .into()
 }

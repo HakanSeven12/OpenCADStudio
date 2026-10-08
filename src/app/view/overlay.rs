@@ -1127,6 +1127,8 @@ const MENU_CURSOR_INSET_X: f32 = 24.0;
 /// not the row carries a glyph (object snaps, command icons).
 const MENU_GUTTER_W: f32 = 18.0;
 const MENU_ICON_SIZE: f32 = 14.0;
+/// Trailing check mark of checked rows; sits in the submenu caret column.
+const MENU_CHECK_SIZE: f32 = 10.0;
 
 /// The gutter cell: the row's glyph, faded with a disabled row, or empty
 /// space of the same width.
@@ -1264,16 +1266,13 @@ pub(super) fn viewport_context_menu_overlay(
     position_canvas_overlay_clamped(pos, bottom_inset, offset, panel.into())
 }
 
-/// One menu row: label (bold for the default row, "✓ "-prefixed when
-/// checked), and the keyword hint right-aligned and dimmed. Disabled rows
-/// render without a press handler and with faded text.
+/// One menu row: label (bold for the default row), the keyword hint
+/// right-aligned and dimmed, and a check mark in the trailing column (where
+/// submenu headers draw their caret) when checked, so checked labels stay
+/// aligned with the others. Disabled rows render without a press handler and
+/// with faded text and icons.
 fn context_menu_row(item: &MenuItem, indent: f32, highlighted: bool) -> Element<'static, Message> {
-    let label = if item.checked {
-        format!("✓ {}", item.label)
-    } else {
-        item.label.clone()
-    };
-    let mut label_text = text(label).size(12);
+    let mut label_text = text(item.label.clone()).size(12);
     if item.default {
         label_text = label_text.font(iced::Font {
             weight: iced::font::Weight::Bold,
@@ -1302,6 +1301,16 @@ fn context_menu_row(item: &MenuItem, indent: f32, highlighted: bool) -> Element<
                         }
                     }),
             );
+    }
+    if item.checked {
+        if item.hint.is_none() {
+            content = content.push(iced::widget::Space::new().width(Fill));
+        }
+        content = content.push(if enabled {
+            crate::ui::icons::themed(crate::ui::icons::CHECK, MENU_CHECK_SIZE)
+        } else {
+            crate::ui::icons::themed_disabled(crate::ui::icons::CHECK, MENU_CHECK_SIZE)
+        });
     }
     let mut btn = button(content)
         .padding(iced::Padding {
